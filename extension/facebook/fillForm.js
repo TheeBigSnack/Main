@@ -53,12 +53,35 @@ export async function fillFormInPage(map, data) {
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
-    typeahead: TEXT_INPUTS + ', [role="textbox"]',
+    // a typeahead may be a text box or a searchable dropdown; the fill code decides by the control it finds
+    typeahead: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
     choice: CHOICES,
-    // a field that is a text box on some forms and a dropdown on others (Make)
+    // a field that is a text box on some forms and a dropdown on others
     either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
     checkbox: CHECKBOXES,
   };
+  const ANY_CONTROL = TEXT_INPUTS + ', textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded], [role="checkbox"]';
+
+  // For a field that can't be found: the page's controls that look related,
+  // so the report shows what is really there.
+  function similarControls(spec) {
+    const word = new RegExp('\\b' + escapeRe(spec.label.split(' ')[0]) + '\\b', 'i');
+    const out = [];
+    for (const el of [...document.querySelectorAll(ANY_CONTROL)].filter(visible)) {
+      let near = '';
+      let node = el;
+      for (let up = 0; node && up < 3; up += 1, node = node.parentElement) {
+        const t = text(node);
+        if (t.length > 200) break;
+        near = t;
+      }
+      const name = accessibleName(el);
+      if (!word.test(name) && !word.test(near)) continue;
+      out.push({ tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', type: el.getAttribute('type') || '', haspopup: el.getAttribute('aria-haspopup') || '', editable: el.isContentEditable ? 'yes' : '', name: name.slice(0, 60), near: near.slice(0, 60) });
+      if (out.length >= 5) break;
+    }
+    return out;
+  }
   const POPUPS = '[role="listbox"], [role="menu"]';
   const OPTIONS = '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
 
@@ -153,12 +176,12 @@ export async function fillFormInPage(map, data) {
     option.click();
   }
 
-  // Leave no menu open behind us: Escape, then a press outside, then the
-  // control itself (which toggles its own popup).
+  // Leave no menu open behind us: Escape sent to the page (never to a focused
+  // box, which the live form's location field treats as "clear me"), then a
+  // press outside, then the control itself (which toggles its own popup).
   async function closePopups(control) {
     for (let attempt = 0; attempt < 3 && visiblePopups().length; attempt += 1) {
       if (attempt === 0) {
-        key(document.activeElement || document.body, 'Escape');
         key(document.body, 'Escape');
       } else if (attempt === 1) {
         mouse(document.body, 'mousedown');
@@ -253,17 +276,42 @@ export async function fillFormInPage(map, data) {
       await closePopups(control);
       return { ok: false, reason: "the dropdown didn't open (waited 6 seconds)" };
     }
-    for (const wanted of wantedList) {
-      const option = pickOption(options, wanted);
-      if (option) {
-        chooseOption(option);
-        await sleep(200);
-        await closePopups(control);
-        return { ok: true, chosen: text(option) };
+    const find = () => {
+      for (const wanted of wantedList) {
+        const option = pickOption(options, wanted);
+        if (option) return option;
+      }
+      return null;
+    };
+    let option = find();
+    // A long list (makes) may have a search box, and only draws the first
+    // screen: search for the value, then scroll until it appears.
+    const search = popup && [...popup.querySelectorAll('input, [role="searchbox"], [contenteditable="true"]')].find(visible);
+    if (!option && search) {
+      await typeText(search, wantedList[0]);
+      await sleep(400);
+      options = visibleOptions(popup);
+      option = find();
+    }
+    if (!option && popup) {
+      const scroller = [popup, ...popup.querySelectorAll('*')].find((n) => n.scrollHeight > n.clientHeight + 10) || popup;
+      let last = -1;
+      for (let i = 0; i < 40 && !option && scroller.scrollTop !== last; i += 1) {
+        last = scroller.scrollTop;
+        scroller.scrollTop += Math.max(scroller.clientHeight - 20, 40);
+        await sleep(120);
+        options = visibleOptions(popup);
+        option = find();
       }
     }
+    if (option) {
+      chooseOption(option);
+      await sleep(200);
+      await closePopups(control);
+      return { ok: true, chosen: text(option) };
+    }
     await closePopups(control);
-    return { ok: false, reason: 'none of the options matched (' + options.slice(0, 8).map(text).join(', ') + ')' };
+    return { ok: false, reason: 'none of the options matched (' + options.slice(0, 8).map(text).join(', ') + (search ? '; searched too' : '') + ')' };
   }
 
   // Types like a person, one character at a time with key events, so a
@@ -298,6 +346,17 @@ export async function fillFormInPage(map, data) {
     return isInput ? accepted(el.value, value) : norm(text(el)) === norm(value);
   }
   const readBack = (el) => (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? String(el.value) : text(el));
+  // After a suggestion is picked some forms empty the box and show the choice
+  // beside it; look a few levels up for the words.
+  function readNear(el, words) {
+    let node = el.parentElement;
+    for (let up = 0; node && up < 4; up += 1, node = node.parentElement) {
+      const t = text(node);
+      if (t.length > 300) break;
+      if (words.every((w) => new RegExp('\\b' + escapeRe(w) + '\\b', 'i').test(t))) return t;
+    }
+    return '';
+  }
 
   // Types the value, waits for suggestions, and picks one only if it contains
   // what we typed (or, for the location, the city and state from `expect`).
@@ -337,11 +396,18 @@ export async function fillFormInPage(map, data) {
     }
     const option = matching[0];
     chooseOption(option);
-    await sleep(200);
-    await closePopups(null);
-    const shown = readBack(el);
+    await sleep(250);
+    // Nothing is sent to the box after a pick: the list closes by itself, and
+    // an Escape here made the live form clear the location.
+    if (visiblePopups().length) await closePopups(null);
+    const wordsChosen = alternatives.find((words) => words.every((w) => has(text(option), w))) || [value];
+    let shown = readBack(el);
+    if (!shown || !(fits(shown) || norm(shown).includes(norm(text(option)).slice(0, 20)))) {
+      const near = readNear(el, wordsChosen);
+      if (near) shown = near;
+    }
     const good = fits(shown) || norm(shown).includes(norm(text(option)).slice(0, 20));
-    return good ? { ok: true, shown, note: 'picked ' + text(option) } : { ok: false, reason: `picked "${text(option)}" but the box shows "${shown.slice(0, 40)}"` };
+    return good ? { ok: true, shown: shown.slice(0, 80), note: 'picked ' + text(option).slice(0, 60) } : { ok: false, reason: `picked "${text(option).slice(0, 60)}" but the box shows "${shown.slice(0, 40)}"` };
   }
 
   function readPhotoLimit() {
@@ -386,7 +452,7 @@ export async function fillFormInPage(map, data) {
     const el = await findField(spec, spec.optional ? 1000 : 3000);
     if (!el) {
       if (spec.optional) result.skipped.push({ ...entry, reason: 'not on this form' });
-      else result.blocked.push({ ...entry, reason: "couldn't find this field on the page (waited 3 seconds)" });
+      else result.blocked.push({ ...entry, reason: "couldn't find this field on the page (waited 3 seconds)", candidates: similarControls(spec) });
       continue;
     }
     try {
@@ -436,9 +502,10 @@ export async function fillFormInPage(map, data) {
     const shown = displayed(el, spec);
     if (!shown) continue;
     const expectWords = data && data.match && data.match[spec.key] && data.match[spec.key].alternatives;
+    const wordsOk = (t) => Array.isArray(expectWords) && expectWords.some((words) => words.every((w) => has(t, w)));
     const ok = isDropdown(el) || spec.kind === 'choice'
       ? norm(shown).includes(norm(entry.shown || entry.value))
-      : accepted(shown, entry.value) || (Array.isArray(expectWords) && expectWords.some((words) => words.every((w) => has(shown, w)))) || (entry.shown && norm(shown) === norm(entry.shown));
+      : accepted(shown, entry.value) || wordsOk(shown) || (entry.shown && norm(shown) === norm(entry.shown)) || (spec.kind === 'typeahead' && (norm(shown).includes(norm(entry.value)) || Boolean(readNear(el, expectWords && expectWords[0] ? expectWords[0] : [entry.value]))));
     if (!ok) {
       result.filled.splice(result.filled.indexOf(entry), 1);
       result.blocked.push({ ...entry, reason: `the form shows "${shown.slice(0, 40)}" instead` });

@@ -146,6 +146,8 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
     loc.value = o.firstChild.textContent;
     closeOpen();
   });
+  // Like the real form: Escape pressed in the location box clears it.
+  loc.addEventListener('keydown', (e) => { if (e.key === 'Escape') { loc.value = ''; closeOpen(); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOpen(); });
   document.addEventListener('mousedown', (e) => { if (openList && !e.target.closest('[role=listbox],[role=combobox]')) closeOpen(); });
   // A restored draft: the page opens with another car already in the form
