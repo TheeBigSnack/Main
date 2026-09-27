@@ -22,8 +22,10 @@
 
 export const FORM_MAP = Object.freeze({
   version: '2026-09-27',
-  // Two live, unpublished runs on 2026-09-27 filled 12 of 13 fields (Make pending).
-  verifiedAgainstFacebook: 'partly',
+  // Live runs on 2026-09-27: single cars and a queue filled every field with
+  // nothing under "Couldn't fill". Facebook can change its page at any time,
+  // so this is a record of a date, not a guarantee.
+  verifiedAgainstFacebook: 'live runs 2026-09-27, all fields',
   createUrl: 'https://www.facebook.com/marketplace/create/vehicle',
   // Where the tab ends up after the salesperson publishes.
   listingUrlPattern: '^https://www\\.facebook\\.com/marketplace/item/(\\d+)',

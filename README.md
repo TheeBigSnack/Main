@@ -44,7 +44,7 @@ Facebook sometimes opens the create-listing page with a saved draft or an unfini
 5. When the fields are found, click **Fill it in now** and watch the form fill. Compare the panel's "Filled in" list with the form; note anything under "Couldn't fill" or "Needs a click".
 6. **Close the Facebook tab without clicking Publish.** In the panel click **It didn't post**, then **Back**. Nothing was posted or recorded.
 
-Two unpublished live runs on Sept 27, 2026 filled 12 of 13 fields on the real form (Make pending a check). They showed that Facebook draws dropdown lists slowly and one at a time, reformats the price, and suggests same-named towns in other states first; the fill code and the mock form now handle all of that. If a field still fails, the "Couldn't fill" reason says why, and the dry run's report shows what the page calls its controls. Please also note the exact wording next to the photo upload (e.g. "Add up to N photos") so the photo limit can be read from the page.
+Six live runs on Sept 27, 2026 shaped the fill code: Facebook draws dropdown lists slowly and one at a time, reformats the price, suggests same-named towns in other states first, restores a saved draft over the form a few seconds after it opens, and its Make and Model boxes commit their first suggestion on blur. The fill code and the mock form now handle all of that, and single cars and a queue ran on the real form with nothing under "Couldn't fill". If a field ever fails again, the "Couldn't fill" reason says what the form showed, and the dry run's report lists what the page calls its controls.
 
 ## Settings
 

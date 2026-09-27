@@ -6,8 +6,8 @@ Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a 
 
 | Milestone | Weeks | State |
 |---|---|---|
-| M1 One-click post | Sep 28 – Oct 11 | Built on Sep 26, unit and e2e tests green; awaiting the first live (unpublished) check on the real form |
-| M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | Batch queue built Sep 27 (pulled forward); upkeep, wizard, rescans, adapters not started |
+| M1 One-click post | Sep 28 – Oct 11 | **Done Sep 27**: single posts run clean on the live form (six live runs drove the fixes) |
+| M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | Batch queue built and verified live Sep 27 (pulled forward); upkeep, wizard, rescans, adapters not started |
 | M3 Pilot | Oct 26 – Nov 8 | Needs the Waynesburg manager's sign-off |
 | M4 Accounts and manager view | Nov 9 – Nov 22 | Not started |
 | M5 Billing, site, Web Store | Nov 23 – Dec 6 | Not started |
@@ -31,7 +31,7 @@ Acceptance criteria
 2. The salesperson clicks Publish (or, during development, closes the tab without publishing); the panel records the post, which appears under My listings with the listing link when it was detectable.
 3. No code path can click Publish, Update, Delete or Mark as sold (`test/posting.test.js`).
 4. `npm test` passes (85 tests) and the two Playwright end-to-end tests pass against the mock dealer site and the mock Marketplace form. (Both green on 2026-09-26.)
-5. The first live run against the real form is done with the owner present, without publishing, and any field-finding fixes are made in `formMap.js` only.
+5. The first live run against the real form is done with the owner present, without publishing, and any field-finding fixes are made in `formMap.js` only. (Done: six live runs on Sep 27 found slow one-at-a-time dropdowns, price reformatting, same-named towns, a late-restored draft and typeahead boxes that commit on blur; single cars and a queue now run with nothing under "Couldn't fill".)
 
 Demo: scan the Waynesburg site, click Post on a ready car, watch the form fill, review the description, close the tab without publishing, show the recorded flow and the test run.
 
