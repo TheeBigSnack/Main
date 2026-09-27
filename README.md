@@ -1,29 +1,65 @@
-# Lot Sync (v0.1)
+# Lot Sync (v0.2)
 
-A Chrome extension that reads your dealership website's used inventory, checks every car is really pre-owned, and on each rescan tells the salesperson what to take down, what to reprice and what's new.
+A Chrome extension for dealership salespeople. It reads your dealership website's used inventory, checks every car is really pre-owned, pre-fills a Facebook Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
-**It doesn't touch Facebook yet.** This version only reads your own dealership website. Posting to Marketplace comes next and will plug into this.
+**You click Publish. Lot Sync never does.** It fills in the form and opens pages; a person publishes every post and every edit, and nothing happens in the background or while you're away. Lot Sync is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used here only as the names of the places you post.
 
 ## Install (each tester, about 2 minutes)
 
 1. Unzip this folder somewhere it'll stay, like Documents.
-2. In Chrome, go to `chrome://extensions`.
+2. In Chrome (version 116 or newer), go to `chrome://extensions`.
 3. Turn on **Developer mode** (top right).
 4. Click **Load unpacked** and choose the `extension` folder inside this folder.
 5. Click the puzzle-piece icon in Chrome's toolbar and pin **Lot Sync**.
 
+Chrome will say the extension can read and change data on `www.facebook.com/marketplace` and on the dealer photo host. That is what filling the form and attaching the car's photos needs; it does not read your Facebook password, cookies or messages.
+
 ## Use
 
 1. Open the dealership website's used inventory page, e.g. `ronlewischryslerdodgejeepramwaynesburg.com/used-vehicles/`.
-2. Click the Lot Sync icon, then **Scan website**. The first scan is the starting point.
-3. **Ready to post** lists pre-owned cars at your store that have photos and a price. After you list one on Marketplace, click **Mark posted**.
-4. Click **Rescan website** any time (once a day is plenty). The **To do** tab shows:
-   - **Take down:** cars gone from the website (sold or removed), and posted cars that went sale-pending.
-   - **Update price:** website price went up or down. Your listings show the price on Marketplace next to the new website price. Click **Updated** or **Taken down** once you've done it.
-   - **New arrivals** and **Just became ready**, e.g. a car that got its photos.
-5. **Settings:** pick your store, and whether Marketplace gets the website's main price (includes the $490 doc fee on this site) or the price before fees.
+2. Click the Lot Sync icon, then **Settings**: your name and role, your store, the dealership's city and ZIP, and the price to post. Save.
+3. Click **Scan website**. The first scan is the starting point.
+4. **Ready to post** lists pre-owned cars at your store that have photos and a price. Click **Post** on one. The side panel opens and:
+   - re-checks the car on the website (still pre-owned, still on the lot, still priced),
+   - writes a description from the website's facts, which you can edit,
+   - shows what it will fill in and the two fields only you can answer: **Vehicle condition** and **Title status**.
+5. Click **Open the Marketplace form**. A new tab opens on Facebook's create-vehicle-listing page and the fields fill in, photos included. Anything it couldn't fill is listed in the panel with a copy button.
+6. On Facebook: check every field, choose the condition and title status, then click **Publish** yourself. The panel notices the listing page and asks you to confirm; paste the listing link if it didn't notice. The car moves to **My listings**.
+7. Click **Rescan website** any time (once a day is plenty). **To do** shows what to take down (sold, or gone sale-pending), what to reprice (with your listing price next to the website's), and what's new. Click **Updated** or **Taken down** once you've done it on Facebook.
 
-Each salesperson's scans and posted list are kept only in their own browser.
+Already listed a car by hand? Use **Mark posted** so rescans watch it too.
+
+### Try it on one real car without publishing
+
+1. Load the extension (above) and open the Waynesburg used inventory page.
+2. Settings: enter your name, tick Waynesburg, enter the city (Waynesburg), state (PA) and ZIP, keep "the website's main price", save. Scan.
+3. On **Ready to post**, click **Post** on any car. Read the description in the side panel; edit a line if you like.
+4. Click **Open the form and check fields only**. Sign in to Facebook if it asks (Lot Sync never sees that). The panel reports which of the 13 fields it can find on the page and which it can't, without filling anything. If any are missing, click **Copy report** and paste it into a Claude Code session, or fix the name pattern yourself in `extension/facebook/formMap.js`; each fix is one line.
+5. When the fields are found, click **Fill it in now** and watch the form fill. Compare the panel's "Filled in" list with the form; note anything under "Couldn't fill" or "Needs a click".
+6. **Close the Facebook tab without clicking Publish.** In the panel click **It didn't post**, then **Back**. Nothing was posted or recorded.
+
+The form map was written from public knowledge of the form and has been tested only against a mock page with the same field names, so the first live run may show a few fields to adjust. Each is a one-line pattern in `formMap.js`.
+
+## Settings
+
+- **You**: name and role, used in every description's sign-off ("I'm Roger, sales consultant at Ron Lewis CDJR Waynesburg"). Posing as a private seller isn't allowed.
+- **Your store**: only cars at ticked stores count as ready.
+- **Dealership**: name, city, state, ZIP. The ZIP goes into Marketplace's location box.
+- **Price to post**: the website's main price (on this site it includes the $490 doc fee) or the price before fees. The price note explains it in every description; a note is suggested from what the website's prices show.
+- **Safety**: posts per day per salesperson (default 10). Meta doesn't publish its limits; this is a safety setting, not a guarantee.
+- **Description writer**: off by default. With the rewrite service running (see `backend/README.md`), first drafts come from Claude. Either way every draft is checked: every number must be on the website, no banned claims ("no accidents", "best price in town"), the dealership must be named, 60 to 120 words.
+
+Each salesperson's scans, settings and posted list are kept only in their own browser, separately per website.
+
+## What Lot Sync won't do
+
+- Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it and a test that fails if any appears.
+- Post new, demo or loaner cars, or anything the pre-owned check can't confirm.
+- Invent prices or price drops. The listed price is the website price, and price changes only mirror the website.
+- Make claims the website's data doesn't support, or hide that the car is at a dealership.
+- Ask for, read or store your Facebook password, cookies or tokens; use fake delays, proxies or spoofing; or run more than your one account.
+
+Meta's Terms prohibit accessing its products "using automated means" without permission. Having a person click Publish is the safest design available, but it is not guaranteed safe. See `legal/posting-rules.md`.
 
 ## How the pre-owned check works
 
@@ -33,38 +69,50 @@ Three separate signs on the dealer website have to agree the car is pre-owned:
 2. the condition word in the car's web address (`/inventory/used-2019-...` vs `/inventory/new-2027-...`)
 3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
 
-A demo or loaner flag always means "sold as new". A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look** instead of being posted.
-
-After that, a pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store.
+A demo or loaner flag always means "sold as new". A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
 
 ## What the first live test found (Ron Lewis CDJR Waynesburg, Sept 26, 2026)
 
-- 124 used and certified cars on the used page, read in one request (about a third of a second)
-- only 28 are at Waynesburg; 55 are at Cranberry and 41 at Pleasant Hills (the used page shows the whole group)
-- 20 ready to post at Waynesburg
-- 2 need a look: a 2023 Honda Pilot and a 2023 Jeep Renegade both show 0 miles on the website
-- 7 pre-owned cars have no Carfax link, so a Carfax-only rule would have skipped them
-- across all 617 vehicles, all 493 new ones were skipped, including 18 "new" units with 1,000 to 29,000 miles (demos/loaners the system doesn't flag)
-- the website's own paging repeats some cars and skips others, so the scan checks its count against the total, and a car is only called gone after a direct VIN lookup can't find it
+- 124 used and certified cars on the used page, read in one request (about a third of a second); 617 vehicles in all, all 493 new ones skipped.
+- 28 at Waynesburg (55 Cranberry, 41 Pleasant Hills); 20 ready to post; 2 need a look (0 miles shown); 7 pre-owned cars have no Carfax link.
+- The website's `description` field mixes a pricing disclaimer that repeats on almost every car, raw equipment dumps on cars nobody has written up, and a real paragraph on the rest (6 of 8 sampled). `features` is a clean list. The description writer uses only the paragraph and the features.
+- No motorcycle was on the lot, so vehicle-type detection for bikes is a best-effort guess (body type, then bike-only makes).
 
 ## Limits
 
-- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page). Other website platforms need their own `normalize.js` and `scan.js`.
-- It reads the same inventory search the website itself uses. If Dealer Inspire changes it, the scan stops with an error rather than guessing.
-- If more than half the cars vanish between scans, nothing is marked gone and the tool shows a warning. That pattern is almost always a website problem, not a sales day.
+- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page). Other platforms come later (`extension/adapters/` in Milestone 2).
+- If more than half the cars vanish between scans, nothing is marked gone and a warning shows.
+- The Facebook form map needs a live check (above). Photos go in through the form's file input; if that fails, **Download photos** saves them to your Downloads folder to add by hand.
 
 ## For development
 
 ```
-npm test          # 40 unit tests on real records from the site (Node 20+)
-npm run test:e2e  # loads the extension in Chromium against a mock dealer site (needs Playwright)
+npm test              # 84 unit tests on real records from the site (Node 20+, no dependencies)
+npm install           # Playwright, for the end-to-end tests
+npx playwright install chromium
+npm run test:e2e      # both e2e tests: the popup/rescan flow and the post flow, against mock sites
 ```
+
+Never run tests against the real facebook.com. The post e2e uses `test/e2e/mock-marketplace.mjs`, a stand-in form with the same field names, and the test itself clicks Publish in place of the salesperson.
+
+Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan: `PLAN.md`.
 
 | File | What it does |
 |---|---|
-| `extension/src/scan.js` | Runs in the dealer tab; reads the used inventory and double-checks missing VINs |
-| `extension/src/normalize.js` | Turns a website record into a flat vehicle (price, location, photos...) |
+| `extension/src/scan.js` | Runs in the dealer tab; reads the used inventory (plus description and features) and double-checks missing VINs |
+| `extension/src/normalize.js` | Turns a website record into a flat vehicle |
 | `extension/src/classify.js` | The pre-owned check and the ready-to-post check |
-| `extension/src/rescan.js` | Compares scans: sold, price changes, new arrivals |
-| `extension/popup.*` | The window you see when you click the icon |
+| `extension/src/rescan.js` | Compares scans: sold, price changes, new arrivals; the posted registry |
+| `extension/src/description.js` | Strips boilerplate, bullets and equipment dumps from the website's description |
+| `extension/src/rewriteTemplate.js` | Template description + the guardrails every draft passes through |
+| `extension/src/rewriter.js` | Template by default; optional Claude draft via the backend, checked, with fallback |
+| `extension/src/listingData.js` | Vehicle to form values (body style, colors, fuel, transmission, location) |
+| `extension/src/vehicleDetails.js` | Post-time fetch of one car and the second check |
+| `extension/src/cap.js`, `settings.js` | Daily cap; settings defaults |
+| `extension/facebook/formMap.js` | The only place Facebook's fields are described |
+| `extension/facebook/fillForm.js` | Injected: fills the form, attaches photos, reports everything |
+| `extension/facebook/detectPost.js` | Watches the tab address for the listing page |
+| `extension/sidepanel.*` | The guided post flow |
+| `extension/background.js` | Downloads photos from the dealer's image host |
+| `backend/` | The rewrite service (Anthropic API key lives here, never in the extension) |
 | `test/fixtures/records.json` | Real records from the Waynesburg site, one per edge case |
