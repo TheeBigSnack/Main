@@ -351,9 +351,9 @@ export async function fillFormInPage(map, data) {
   function readNear(el, words) {
     let node = el.parentElement;
     for (let up = 0; node && up < 4; up += 1, node = node.parentElement) {
-      const t = text(node);
+      const t = String(node.innerText || '').replace(/\s+/g, ' ').trim(); // visible text only: hidden option lists don't count
       if (t.length > 300) break;
-      if (words.every((w) => new RegExp('\\b' + escapeRe(w) + '\\b', 'i').test(t))) return t;
+      if (t && words.every((w) => new RegExp('\\b' + escapeRe(w) + '\\b', 'i').test(t))) return t;
     }
     return '';
   }
@@ -436,16 +436,22 @@ export async function fillFormInPage(map, data) {
     }
     if (spec.kind === 'choice' || (spec.kind !== 'textarea' && isDropdown(el))) {
       const wantedList = (spec.options && spec.options[entry.value]) || [entry.value];
-      const before = displayed(el, spec);
-      const r = await choose(el, wantedList);
-      if (!r.ok) return { status: 'blocked', reason: r.reason };
-      // Verify by reading the control back. A control that never shows its
-      // value can't be verified; say so instead of assuming.
-      await sleep(100);
-      const after = displayed(el, spec);
-      if (after && norm(after).includes(norm(r.chosen))) return { status: 'filled', shown: after };
-      if (after && after !== before) return { status: 'blocked', reason: `chose "${r.chosen}" but the form shows "${after.slice(0, 40)}"` };
-      return { status: 'filled', shown: r.chosen, note: "couldn't read it back; check it on the form" };
+      // Verify by reading the control back; if the form shows something else
+      // (a draft landing at that moment), choose once more. A control that
+      // never shows its value can't be verified; say so instead of assuming.
+      let last = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const before = displayed(el, spec);
+        const r = await choose(el, wantedList);
+        if (!r.ok) return { status: 'blocked', reason: r.reason };
+        await sleep(150);
+        const after = displayed(el, spec);
+        if (after && norm(after).includes(norm(r.chosen))) return { status: 'filled', shown: after };
+        if (!after || after === before) return { status: 'filled', shown: r.chosen, note: "couldn't read it back; check it on the form" };
+        last = { chosen: r.chosen, after };
+        await sleep(400);
+      }
+      return { status: 'blocked', reason: `chose "${last.chosen}" but the form shows "${last.after.slice(0, 40)}" (twice)` };
     }
     if (spec.kind === 'typeahead') {
       const r = await typeahead(el, entry.value, match[spec.key]);
@@ -457,19 +463,44 @@ export async function fillFormInPage(map, data) {
     return { status: 'blocked', reason: `the page didn't accept the text (it shows "${String(shows).slice(0, 40)}")` };
   }
 
+  // The live form keeps changing for a few seconds after it opens (a saved
+  // draft being restored). Don't start until the identity fields have been
+  // still for two seconds, or six seconds have passed.
+  const IDENTITY = ['vehicleType', 'year', 'make', 'model', 'vin', 'mileage', 'price', 'description'];
+  async function waitForStableForm() {
+    const snapshot = () => IDENTITY.map((k) => { const spec = map.fields.find((f) => f.key === k); const el = spec && findFieldNow(spec); return el ? displayed(el, spec) : ''; }).join('|');
+    const started = Date.now();
+    let last = snapshot();
+    let still = 0;
+    while (still < 2 && Date.now() - started < 6000) {
+      await sleep(1000);
+      const now = snapshot();
+      still = now === last ? still + 1 : 0;
+      last = now;
+    }
+    return Date.now() - started;
+  }
+
   // Does the form still show what we filled? { ok, shown }
   const hasWord = (t, word) => new RegExp('\\b' + escapeRe(word) + '\\b', 'i').test(t);
   function verifyEntry(spec, entry, el) {
     const shown = displayed(el, spec);
     const dropdown = isDropdown(el) || spec.kind === 'choice';
-    if (!shown) return { ok: dropdown, shown: '' }; // a dropdown control may simply not show its value
     const expectWords = match[spec.key] && match[spec.key].alternatives;
-    const wordsOk = (t) => Array.isArray(expectWords) && expectWords.some((words) => words.every((w) => hasWord(t, w)));
+    const words = Array.isArray(expectWords) && expectWords[0] ? expectWords[0] : [entry.value];
+    if (!shown) {
+      if (dropdown) return { ok: true, shown: '' }; // a dropdown control may simply not show its value
+      if (spec.kind === 'typeahead') { const near = readNear(el, words); return { ok: Boolean(near), shown: near }; } // a box that empties itself after a pick
+      return { ok: false, shown: '' };
+    }
+    const wordsOk = (t) => Array.isArray(expectWords) && expectWords.some((ws) => ws.every((w) => hasWord(t, w)));
     const ok = dropdown
       ? norm(shown).includes(norm(entry.shown || entry.value))
-      : accepted(shown, entry.value) || wordsOk(shown) || (entry.shown && norm(shown) === norm(entry.shown)) || (spec.kind === 'typeahead' && (norm(shown).includes(norm(entry.value)) || Boolean(readNear(el, expectWords && expectWords[0] ? expectWords[0] : [entry.value]))));
+      : accepted(shown, entry.value) || wordsOk(shown) || (entry.shown && norm(shown) === norm(entry.shown)) || (spec.kind === 'typeahead' && norm(shown).includes(norm(entry.value)));
     return { ok, shown };
   }
+
+  result.settledAfterMs = await waitForStableForm();
 
   // Anything already in the form that is not ours: another car, most likely
   // a draft Facebook restored. Reported so nothing of it is published by
@@ -517,25 +548,36 @@ export async function fillFormInPage(map, data) {
   // (a saved draft being restored). Wait, read everything back, set any
   // field that changed underneath us again, and report what changed.
   await sleep(map.recheckMs === undefined ? 3000 : map.recheckMs);
-  for (const entry of [...result.filled]) {
+  // ...including fields whose first attempt lost to such a change.
+  const retryBlocked = result.blocked.filter((b) => /^chose |^the form shows|^the page didn't accept/.test(b.reason || ''));
+  for (const entry of [...result.filled, ...retryBlocked]) {
+    const wasBlocked = retryBlocked.includes(entry);
     const spec = map.fields.find((f) => f.key === entry.key);
-    if (!spec || spec.kind === 'checkbox' || (entry.note && /read it back/.test(entry.note))) continue;
+    if (!spec || spec.kind === 'checkbox' || (!wasBlocked && entry.note && /read it back/.test(entry.note))) continue;
     const el = findFieldNow(spec);
     if (!el) continue;
     const v = verifyEntry(spec, entry, el);
-    if (v.ok) continue;
-    const was = v.shown || '(empty)';
+    if (v.ok && !wasBlocked) continue;
+    const was = wasBlocked ? (v.shown || '(empty)') : (v.shown || '(empty)');
     let again = { status: 'blocked' };
     try { again = await applyField(spec, entry, el); } catch (e) { again = { status: 'blocked', reason: String((e && e.message) || e) }; }
     await sleep(300);
     const v2 = verifyEntry(spec, entry, findFieldNow(spec) || el);
-    result.changedAfterFill.push({ key: spec.key, label: spec.label, was, held: again.status === 'filled' && v2.ok });
-    if (again.status === 'filled' && v2.ok) {
+    const held = again.status === 'filled' && v2.ok;
+    result.changedAfterFill.push({ key: spec.key, label: spec.label, was, held });
+    if (held) {
+      if (wasBlocked) {
+        result.blocked.splice(result.blocked.indexOf(entry), 1);
+        entry.reason = '';
+        result.filled.push(entry);
+      }
       entry.shown = v2.shown || again.shown || entry.shown;
       entry.note = `the form changed it to "${was.slice(0, 30)}" after filling; set again`;
-    } else {
+    } else if (!wasBlocked) {
       result.filled.splice(result.filled.indexOf(entry), 1);
       result.blocked.push({ ...entry, reason: `the form changed it to "${was.slice(0, 40)}" after filling and would not hold "${entry.value.slice(0, 30)}"` });
+    } else {
+      entry.reason = `${entry.reason}; tried again later, the form still shows "${(v2.shown || '').slice(0, 30)}"`;
     }
   }
   await closePopups(null);

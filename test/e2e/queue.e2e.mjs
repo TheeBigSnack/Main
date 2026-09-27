@@ -137,8 +137,9 @@ try {
   await panel.screenshot({ path: join(shots, 'queue-2-car1-filled.png'), fullPage: true });
 
   // ---- 3. The person clicks Publish on car 1; the panel records it and loads car 2 ----
-  // Car 2's draft lands late: 2.5 s after the page opens, over the fields already filled.
-  await dealer.request.get(`${marketOrigin}/prefill?name=honda&late=2500`);
+  // Car 2's draft lands late: 9 s after the page opens, over fields already filled
+  // (the fill waits for a still form first, then takes several seconds).
+  await dealer.request.get(`${marketOrigin}/prefill?name=honda&late=9000`);
   const fb2Promise = context.waitForEvent('page', { timeout: 40000 });
   await fb1.click('#publish');
   const fb2 = watch(await fb2Promise);
