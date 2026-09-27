@@ -143,7 +143,7 @@ try {
   watch(fb);
   await panel.waitForSelector('#fillNow', { timeout: 30000 });
   const probe = await panel.textContent('#probeResults');
-  assert.match(probe, /Found\s*15/);
+  assert.match(probe, /Found\s*16/);
   assert.match(probe, /Not found\s*1[\s\S]*Make/); // Make only appears after a year is chosen
   assert.match(probe, /1 file input\(s\) on the page · limit 20/);
   assert.equal(await fb.inputValue('#model'), '', 'the dry run fills nothing');
@@ -166,6 +166,7 @@ try {
       bodyStyle: v('bodyStyle'), exteriorColor: chosen('exteriorColor'), interiorColor: v('interiorColor'),
       fuelType: v('fuelType'), transmission: v('transmission'), location: v('location'),
       condition: v('condition'), titleStatus: v('titleStatus'),
+      cleanTitle: document.getElementById('cleanTitle').checked,
       photos: document.getElementById('photoCount').textContent,
       popupsOpen: [...document.querySelectorAll('[role=listbox]')].filter((l) => !l.hidden).length,
     };
@@ -176,12 +177,13 @@ try {
     bodyStyle: 'Truck', exteriorColor: 'Blue', interiorColor: 'Grey', fuelType: 'Gasoline', transmission: 'Automatic transmission',
     location: 'Waynesburg, Pennsylvania', // not the Ohio one the page suggests first
     condition: 'Very good', titleStatus: 'Clean', // the dealership's defaults
+    cleanTitle: true, // the live form's checkbox, labelled only by nearby text
     photos: '3 photos',
     popupsOpen: 0, // the slow Year list was waited for, used, and closed
   });
   assert.equal(await fb.inputValue('#description'), edited);
   const results = await panel.textContent('#fillResults');
-  assert.match(results, /Filled in\s*16/);
+  assert.match(results, /Filled in\s*17/);
   assert.doesNotMatch(results, /Needs a click/);
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   assert.match(await panel.textContent('#photos'), /3 of 3 attached/);

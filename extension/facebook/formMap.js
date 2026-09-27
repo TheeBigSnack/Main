@@ -73,8 +73,14 @@ export const FORM_MAP = Object.freeze({
       key: 'condition', label: 'Vehicle condition', kind: 'choice', name: ['^vehicle condition\\b', '^condition\\b'],
       options: { Excellent: ['Excellent'], 'Very good': ['Very good', 'Very Good'], Good: ['Good'], Fair: ['Fair'], Poor: ['Poor'] },
     },
+    // On the live form (seen 2026-09-27) the title is a checkbox, "This vehicle
+    // has a clean title." It is ticked when the dealership's title default is
+    // Clean, left alone when there is no default, and unticked when the
+    // website's own text mentions a branded title.
+    { key: 'cleanTitle', label: 'Clean title (checkbox)', kind: 'checkbox', name: ['\\bclean title\\b'] },
+    // Some forms use a dropdown instead; optional, so its absence is not a failure.
     {
-      key: 'titleStatus', label: 'Title status', kind: 'choice', name: ['^title status\\b', '^title\\b'],
+      key: 'titleStatus', label: 'Title status', kind: 'choice', optional: true, name: ['^title status\\b'],
       options: { Clean: ['Clean', 'Clean title'], Rebuilt: ['Rebuilt', 'Rebuilt title'], Salvage: ['Salvage', 'Salvage title'], Lien: ['Lien'], Missing: ['Missing', 'Missing title'] },
     },
   ],

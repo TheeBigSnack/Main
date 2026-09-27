@@ -171,6 +171,8 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
     description: String(description || ''),
     condition: conditionDefault,
     titleStatus: branded ? '' : titleDefault,
+    // the live form's "This vehicle has a clean title" box: yes = tick, no = untick, '' = leave as is
+    cleanTitle: branded ? 'no' : titleDefault === 'Clean' ? 'yes' : '',
   };
   // what the panel highlights: filled from a default (assumed) or left for the person
   const assumed = [];

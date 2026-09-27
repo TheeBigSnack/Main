@@ -49,6 +49,7 @@ export async function fillFormInPage(map, data) {
 
   const TEXT_INPUTS = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"])';
   const CHOICES = 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]';
+  const CHECKBOXES = 'input[type="checkbox"], [role="checkbox"], [role="switch"]';
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
@@ -56,12 +57,27 @@ export async function fillFormInPage(map, data) {
     choice: CHOICES,
     // a field that is a text box on some forms and a dropdown on others (Make)
     either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
+    checkbox: CHECKBOXES,
   };
   const POPUPS = '[role="listbox"], [role="menu"]';
   const OPTIONS = '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
 
   const neverNames = (map.neverFill || []).flatMap((f) => f.name).map((p) => new RegExp(p, 'i'));
   const offLimits = (name) => neverNames.some((re) => re.test(name));
+
+  // A checkbox is often labelled only by nearby text; the smallest container
+  // (up to four levels up) whose text matches names it.
+  function checkboxByNearbyText(candidates, patterns) {
+    for (const el of candidates) {
+      let node = el.parentElement;
+      for (let up = 0; node && up < 4; up += 1, node = node.parentElement) {
+        const t = norm(text(node));
+        if (t.length > 400) break;
+        if (t && patterns.some((re) => re.test(t))) return el;
+      }
+    }
+    return null;
+  }
 
   function findFieldNow(spec) {
     const candidates = [...document.querySelectorAll(KIND_SELECTORS[spec.kind] || KIND_SELECTORS.text)].filter(visible);
@@ -73,8 +89,28 @@ export async function fillFormInPage(map, data) {
       matches.sort((a, b) => text(a).length - text(b).length); // the smallest matching element wins
       return matches[0] || null;
     };
+    const patterns = spec.name.map((p) => new RegExp(p, 'i'));
     // The map's patterns first; the field's label anywhere in the name as a second chance.
-    return pick(spec.name.map((p) => new RegExp(p, 'i'))) || pick([new RegExp('\\b' + escapeRe(spec.label) + '\\b', 'i')]);
+    const found = pick(patterns) || pick([new RegExp('\\b' + escapeRe(spec.label) + '\\b', 'i')]);
+    if (found || spec.kind !== 'checkbox') return found;
+    return checkboxByNearbyText(candidates, patterns);
+  }
+
+  const isChecked = (el) => (el.tagName === 'INPUT' ? el.checked : el.getAttribute('aria-checked') === 'true');
+  async function setCheckbox(control, wantChecked) {
+    if (isChecked(control) === wantChecked) return { ok: true, shown: wantChecked ? 'already checked' : 'already unchecked' };
+    pointer(control, 'pointerdown');
+    mouse(control, 'mousedown');
+    control.focus();
+    pointer(control, 'pointerup');
+    mouse(control, 'mouseup');
+    control.click();
+    await sleep(150);
+    if (isChecked(control) !== wantChecked) {
+      key(control, ' '); // some custom checkboxes only toggle from the keyboard
+      await sleep(150);
+    }
+    return isChecked(control) === wantChecked ? { ok: true, shown: wantChecked ? 'checked' : 'unchecked' } : { ok: false, reason: "the checkbox didn't change" };
   }
 
   // Some fields only appear after an earlier one is chosen (Make after Year on
@@ -255,22 +291,31 @@ export async function fillFormInPage(map, data) {
     return { value: map.photoLimitDefault, verified: false };
   }
 
-  const result = { url: location.href, filled: [], partial: [], blocked: [], photoLimit: readPhotoLimit() };
+  // skipped: things that are not failures (a checkbox left as it is, an
+  // optional field this form doesn't have)
+  const result = { url: location.href, filled: [], partial: [], blocked: [], skipped: [], photoLimit: readPhotoLimit() };
   const fields = (data && data.fields) || {};
   for (const spec of map.fields) {
     const raw = fields[spec.key];
     const entry = { key: spec.key, label: spec.label, value: raw === null || raw === undefined ? '' : String(raw) };
     if (!entry.value) {
-      result.blocked.push({ ...entry, reason: 'the website has no usable value for this' });
+      if (spec.kind === 'checkbox') result.skipped.push({ ...entry, reason: 'left as it is (no default for it)' });
+      else if (spec.optional) result.skipped.push({ ...entry, reason: 'nothing to put in it' });
+      else result.blocked.push({ ...entry, reason: 'the website has no usable value for this' });
       continue;
     }
-    const el = await findField(spec);
+    const el = await findField(spec, spec.optional ? 1000 : 3000);
     if (!el) {
-      result.blocked.push({ ...entry, reason: "couldn't find this field on the page (waited 3 seconds)" });
+      if (spec.optional) result.skipped.push({ ...entry, reason: 'not on this form' });
+      else result.blocked.push({ ...entry, reason: "couldn't find this field on the page (waited 3 seconds)" });
       continue;
     }
     try {
-      if (spec.kind === 'choice' || (spec.kind === 'either' && isDropdown(el))) {
+      if (spec.kind === 'checkbox') {
+        const r = await setCheckbox(el, entry.value === 'yes');
+        if (r.ok) result.filled.push({ ...entry, shown: r.shown });
+        else result.blocked.push({ ...entry, reason: r.reason });
+      } else if (spec.kind === 'choice' || (spec.kind === 'either' && isDropdown(el))) {
         const wantedList = (spec.options && spec.options[entry.value]) || [entry.value];
         const r = await choose(el, wantedList);
         if (r.ok) result.filled.push({ ...entry, shown: r.chosen });
@@ -335,6 +380,7 @@ export function probeFormInPage(map) {
     typeahead: TEXT_INPUTS + ', [role="textbox"]',
     choice: CHOICES,
     either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
+    checkbox: 'input[type="checkbox"], [role="checkbox"], [role="switch"]',
   };
   const neverNames = (map.neverFill || []).flatMap((f) => f.name).map((p) => new RegExp(p, 'i'));
   const offLimits = (name) => neverNames.some((re) => re.test(name));
@@ -348,7 +394,19 @@ export function probeFormInPage(map) {
       matches.sort((a, b) => text(a).length - text(b).length);
       return matches[0] || null;
     };
-    return pick(spec.name.map((p) => new RegExp(p, 'i'))) || pick([new RegExp('\\b' + escapeRe(spec.label) + '\\b', 'i')]);
+    const patterns = spec.name.map((p) => new RegExp(p, 'i'));
+    const found = pick(patterns) || pick([new RegExp('\\b' + escapeRe(spec.label) + '\\b', 'i')]);
+    if (found || spec.kind !== 'checkbox') return found;
+    // a checkbox labelled only by nearby text
+    for (const el of candidates) {
+      let node = el.parentElement;
+      for (let up = 0; node && up < 4; up += 1, node = node.parentElement) {
+        const t = norm(text(node));
+        if (t.length > 400) break;
+        if (t && patterns.some((re) => re.test(t))) return el;
+      }
+    }
+    return null;
   }
 
   const found = [];
@@ -356,9 +414,10 @@ export function probeFormInPage(map) {
   for (const spec of map.fields) {
     const el = findField(spec);
     if (el) found.push({ key: spec.key, label: spec.label, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: accessibleName(el).slice(0, 80) });
+    else if (spec.optional) found.push({ key: spec.key, label: spec.label, tag: '', role: '', name: '(optional, not on this form)' });
     else missing.push({ key: spec.key, label: spec.label, patterns: spec.name, note: 'not on the page right now; some fields only appear after an earlier one is chosen' });
   }
-  const controls = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded]')]
+  const controls = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded], [role="checkbox"], [role="switch"]')]
     .filter(visible)
     .map((el) => ({ tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || '', role: el.getAttribute('role') || '', name: accessibleName(el).slice(0, 80) }))
     .filter((c) => c.name)

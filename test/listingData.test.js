@@ -25,6 +25,7 @@ test('the Ram maps to the form fields', () => {
     description: 'Hello.',
     condition: 'Very good',
     titleStatus: 'Clean',
+    cleanTitle: 'yes',
   });
   assert.deepEqual(d.missing, []);
   assert.equal(d.photos.length, 1);
@@ -43,7 +44,9 @@ test('title and condition come from the dealership defaults, never from a guess'
   // "leave blank" and unknown values both leave the field for the person
   const blank = buildListingData(v, { defaults: { titleStatus: '', condition: 'Spotless' } });
   assert.equal(blank.fields.titleStatus, '');
+  assert.equal(blank.fields.cleanTitle, '', 'the checkbox is left as it is when there is no default');
   assert.equal(blank.fields.condition, '');
+  assert.equal(buildListingData(v, { defaults: { titleStatus: 'Rebuilt', condition: 'Good' } }).fields.cleanTitle, '', 'a non-clean default never ticks the clean box');
   assert.deepEqual(blank.leftBlank.map((b) => b.key), ['condition', 'titleStatus']);
   assert.deepEqual(blank.assumed, []);
 });
@@ -71,6 +74,7 @@ test('a branded title in the website text switches the clean-title default off',
   const v = vehicle('usedNormal', { description: 'Previously a rebuilt title vehicle.' });
   const d = buildListingData(v);
   assert.equal(d.fields.titleStatus, '');
+  assert.equal(d.fields.cleanTitle, 'no', 'the clean-title box is unticked for a branded title');
   assert.equal(d.fields.condition, 'Very good');
   assert.equal(d.branded, 'rebuilt');
   assert.match(d.leftBlank.find((b) => b.key === 'titleStatus').why, /mentions "rebuilt"/);

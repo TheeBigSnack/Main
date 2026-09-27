@@ -23,4 +23,6 @@ test('the form map only ever points at the create page and reads addresses; it h
   const byKey = Object.fromEntries(FORM_MAP.fields.map((f) => [f.key, f]));
   assert.deepEqual(Object.keys(byKey.condition.options), ['Excellent', 'Very good', 'Good', 'Fair', 'Poor']);
   assert.deepEqual(Object.keys(byKey.titleStatus.options), ['Clean', 'Rebuilt', 'Salvage', 'Lien', 'Missing']);
+  assert.equal(byKey.titleStatus.optional, true);
+  assert.equal(byKey.cleanTitle.kind, 'checkbox');
 });

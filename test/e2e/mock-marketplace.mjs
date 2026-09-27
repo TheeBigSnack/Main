@@ -54,6 +54,9 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   <label>Fuel type <select id="fuelType">${opts(['Diesel', 'Electric', 'Gasoline', 'Flex', 'Hybrid', 'Petrol', 'Plug-in hybrid', 'Other'])}</select></label>
   <label>Transmission <select id="transmission">${opts(['Automatic transmission', 'Manual transmission'])}</select></label>
   <label>Title status <select id="titleStatus">${opts(['Clean', 'Rebuilt', 'Salvage', 'Lien', 'Missing'])}</select></label>
+  <div><b>Vehicle details</b><div>Include more details to help connect interested buyers to your vehicle.</div>
+    <div><div><b>This vehicle has a clean title.</b><div>This vehicle has no significant damage or persistent problems.</div></div><input type="checkbox" id="cleanTitle"></div>
+  </div>
   <label>Location <input id="location" role="combobox" aria-autocomplete="list" aria-controls="locationList" autocomplete="off"></label>
   <div id="locationList" role="listbox" hidden></div>
   <label>Description <textarea id="description" rows="10" cols="60"></textarea></label>

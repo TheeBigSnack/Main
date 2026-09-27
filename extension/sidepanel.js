@@ -429,8 +429,11 @@ function fieldsTable() {
     .map((f) => {
       const v = l.fields[f.key];
       const src = l.source && l.source[f.key];
-      const shown = v ? esc(v === 'car_truck' ? 'Car/Truck' : v === 'motorcycle' ? 'Motorcycle' : v) : `— (website says "${esc(src || 'nothing')}")`;
-      return `<tr class="${v ? '' : 'missing'}"><td>${esc(labels[f.key])}</td><td>${shown}</td></tr>`;
+      let shown;
+      if (f.kind === 'checkbox') shown = v === 'yes' ? 'ticked' : v === 'no' ? 'unticked' : 'left as it is';
+      else if (f.optional && !v) shown = '— (only if this form has it)';
+      else shown = v ? esc(v === 'car_truck' ? 'Car/Truck' : v === 'motorcycle' ? 'Motorcycle' : v) : `— (website says "${esc(src || 'nothing')}")`;
+      return `<tr class="${v || f.optional ? '' : 'missing'}"><td>${esc(labels[f.key])}</td><td>${shown}</td></tr>`;
     })
     .join('');
   const d = state.settings.dealer || {};
@@ -569,7 +572,8 @@ function photosHtml() {
 }
 
 function viewPublish() {
-  const f = state.fill || { filled: [], partial: [], blocked: [] };
+  const f = state.fill || { filled: [], partial: [], blocked: [], skipped: [] };
+  const skipped = f.skipped || [];
   const d = state.detected;
   let detect = '';
   if (d && (d.status === 'listing' || d.status === 'probably')) {
@@ -585,6 +589,7 @@ function viewPublish() {
     <h3>Filled in <span class="pill good">${f.filled.length}</span></h3>
     ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}
     ${f.partial.length ? `<h3>Needs a click <span class="pill warn">${f.partial.length}</span></h3><ul class="list">${f.partial.map((x) => `<li>${esc(x.label)}: ${esc(x.value)} <span class="why">${esc(x.note || '')}</span></li>`).join('')}</ul>` : ''}
+    ${skipped.length ? `<p class="hint">Left alone: ${skipped.map((x) => `${esc(x.label)} (${esc(x.reason)})`).join('; ')}.</p>` : ''}
   </section>
   ${f.blocked.length ? `<section class="highlight"><h3>Couldn't fill <span class="pill bad">${f.blocked.length}</span></h3><ul class="list">${f.blocked.map((x) => `<li><b>${esc(x.label)}</b>${x.value ? ': ' + esc(x.value).slice(0, 80) + copyBtn(x.value) : ''} <span class="why">${esc(x.reason)}</span></li>`).join('')}</ul></section>` : ''}
   <section><h3>Photos</h3>${photosHtml()}
