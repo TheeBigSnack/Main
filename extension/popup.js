@@ -6,6 +6,7 @@ import { findBoilerplate } from './src/description.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
+import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -24,7 +25,9 @@ const state = {
   posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }
   settings: null, // see src/settings.js
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
-  boilerplate: [], // description text that repeats across the lot (disclaimers), stripped by the description writer
+  boilerplate: [],
+  queue: null, // the batch queue (src/queue.js), shared with the side panel
+  drafts: {}, // cars saved as drafts on Facebook during a queue: { vin: { name, savedAt } } // description text that repeats across the lot (disclaimers), stripped by the description writer
   view: 'todo',
 };
 
@@ -36,6 +39,8 @@ const storageKeys = (origin) => ({
   posted: `posted:${origin}`,
   settings: `settings:${origin}`,
   boilerplate: `boilerplate:${origin}`,
+  queue: `postQueue:${origin}`,
+  drafts: `drafts:${origin}`,
 });
 
 async function loadSaved() {
@@ -44,7 +49,7 @@ async function loadSaved() {
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
-  const site = { name: state.snapshot?.site?.name };
+  const site = state.snapshot?.site || {};
   if (data[k.settings]) {
     state.settings = withDefaults(data[k.settings], site);
     state.settingsFromProfile = false;
@@ -54,6 +59,8 @@ async function loadSaved() {
     state.settingsFromProfile = Boolean(state.settings);
   }
   state.boilerplate = data[k.boilerplate] || [];
+  state.queue = data[k.queue] || null;
+  state.drafts = data[k.drafts] || {};
 }
 
 async function save(...names) {
@@ -196,11 +203,12 @@ function facts(e) {
   return bits.join(' · ');
 }
 
-function row(e, { sub = '', right = '', action = '', muted = false } = {}) {
+function row(e, { sub = '', right = '', action = '', muted = false, pick = false } = {}) {
   const name = /^https?:\/\//i.test(e.url || '')
     ? `<a class="name" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.name)}</a>`
     : `<span class="name">${esc(e.name)}</span>`;
-  return `<li class="row${muted ? ' muted' : ''}"><div class="main">${name}<div class="sub">${sub}</div></div>${
+  const box = pick ? `<input type="checkbox" class="pick" data-vin="${esc(e.vin)}" aria-label="Queue ${esc(e.name)}" />` : '';
+  return `<li class="row${muted ? ' muted' : ''}">${box}<div class="main">${name}<div class="sub">${sub}</div></div>${
     right ? `<div class="price">${right}</div>` : ''
   }${action}</li>`;
 }
@@ -221,6 +229,9 @@ function empty(text) {
 // posted" is for a listing the salesperson made by hand.
 function postButton(vin, { canPost = true } = {}) {
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark">Posted ✓</button>`;
+  if (state.drafts[vin]) {
+    return `<span class="actions"><span class="pill warn" title="Saved as a draft on Facebook; publish it there, then mark it posted">Draft on Facebook</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
+  }
   const post = canPost
     ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" title="Pre-fill the Marketplace form in the side panel. You click Publish.">Post</button>`
     : '';
@@ -274,6 +285,10 @@ function viewTodo(l) {
   }
   const arrivals = d?.newArrivals || [];
   if (arrivals.length) {
+    const readyArrivals = arrivals.filter((n) => n.decision === DECISION.READY && !state.posted[n.vin]);
+    const queueAll = readyArrivals.length > 1
+      ? `<div class="toolbar"><button type="button" class="small go" data-action="queueArrivals">Queue all ${readyArrivals.length} ready arrivals</button><span class="hint">Pre-fills them one at a time in the side panel; you click Publish on each.</span></div>`
+      : '';
     parts.push(
       section('New arrivals', 'good', arrivals.map((n) =>
         row(n, {
@@ -281,7 +296,7 @@ function viewTodo(l) {
           right: money(n.price),
           action: n.decision === DECISION.READY ? postButton(n.vin) : '',
         })
-      ))
+      )) + queueAll
     );
   }
   const nowReady = d?.nowReady || [];
@@ -292,10 +307,35 @@ function viewTodo(l) {
   return html + parts.join('');
 }
 
+// The batch queue's state line, shown on the Ready tab while a queue exists.
+function queueStatusHtml() {
+  const q = state.queue;
+  if (!q) return '';
+  const next = currentVin(q);
+  const name = next && state.snapshot?.vehicles?.[next] ? state.snapshot.vehicles[next].name : next;
+  const buttons = q.status === 'done'
+    ? `<button type="button" class="small" data-action="clearQueue">Clear</button>`
+    : `<button type="button" class="small go" data-action="continueQueue">Continue in the side panel</button><button type="button" class="small" data-action="clearQueue">Stop the queue</button>`;
+  return `<div class="banner info queue" id="queueStatus"><b>${esc(describeQueue(q))}</b>${next ? ` · next: ${esc(name)}` : ''}<div class="toolbar">${buttons}</div></div>`;
+}
+
 function viewReady(l) {
-  const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. After you list one on Marketplace, click <b>Mark posted</b> and the next scan will tell you if it sells or its price changes.</p>`;
-  if (!l.ready.length) return lead + empty('No cars are ready right now.');
-  return lead + rows(l.ready.map((e) => row(e, { sub: facts(e), right: money(price(e)), action: postButton(e.vin) })));
+  const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. Click <b>Post</b> on one car, or tick several and <b>Post</b> them as a queue: the side panel pre-fills each form and you click Publish on each. Listed one by hand? Click <b>Mark posted</b>.</p>`;
+  if (!l.ready.length) return lead + queueStatusHtml() + empty('No cars are ready right now.');
+  const cap = capStatus(state.posted, state.settings?.dailyCap);
+  const pickable = l.ready.filter((e) => !state.posted[e.vin]);
+  const toolbar = pickable.length > 1
+    ? `<div class="toolbar"><label><input type="checkbox" id="pickAll" /> <span>Select all</span></label><button type="button" class="small go" data-action="queue" id="queueBtn" disabled>Post selected</button><span class="hint" id="pickHint">${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.</span></div>`
+    : '';
+  return lead + queueStatusHtml() + toolbar + rows(l.ready.map((e) => row(e, { sub: facts(e), right: money(price(e)), action: postButton(e.vin), pick: !state.posted[e.vin] })));
+}
+
+function updateQueueButton() {
+  const btn = $('queueBtn');
+  if (!btn) return;
+  const n = document.querySelectorAll('.pick:checked').length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Post ${n} car${n === 1 ? '' : 's'}` : 'Post selected';
 }
 
 function viewNotReady(l) {
@@ -466,6 +506,51 @@ async function onPanelClick(ev) {
       setStatus(opened ? `Continue in the side panel: ${entry.name}` : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue posting this car.');
       return;
     }
+    case 'queue':
+    case 'queueArrivals':
+    case 'continueQueue': {
+      // Build (or pick up) the queue, then hand it to the side panel. The
+      // panel must be opened straight from the click (a user gesture).
+      if (!state.tab) return;
+      let queue = state.queue;
+      if (btn.dataset.action !== 'continueQueue') {
+        const vins = btn.dataset.action === 'queue'
+          ? [...document.querySelectorAll('.pick:checked')].map((i) => i.dataset.vin)
+          : (state.diff?.newArrivals || []).filter((n) => n.decision === DECISION.READY && !state.posted[n.vin]).map((n) => n.vin);
+        const cap = capStatus(state.posted, state.settings?.dailyCap);
+        const made = createQueue(vins, { remaining: cap.remaining, dealerTabId: state.tab.id, windowId: state.tab.windowId });
+        if (!made.ok) {
+          setStatus(made.error, 'error');
+          return;
+        }
+        queue = made.queue;
+        if (made.dropped) setStatus(`${made.dropped} car${made.dropped === 1 ? '' : 's'} left out: only ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.`);
+      }
+      const first = currentVin(queue);
+      if (!first) {
+        setStatus('The queue is finished. Clear it to start another.');
+        return;
+      }
+      let opened = true;
+      try {
+        await chrome.sidePanel.open({ windowId: state.tab.windowId });
+      } catch (e) {
+        opened = false;
+      }
+      state.queue = queue;
+      await chrome.storage.local.set({
+        [storageKeys(state.origin).queue]: queue,
+        postRequest: { origin: state.origin, vin: first, dealerTabId: state.tab.id, windowId: state.tab.windowId, queue: true, at: Date.now() },
+      });
+      if (!opened) setStatus('Open the Lot Sync side panel (Chrome menu → Side panel) to work through the queue.');
+      else setStatus(`Queue of ${queue.vins.length}: continue in the side panel.`);
+      render();
+      return;
+    }
+    case 'clearQueue':
+      state.queue = null;
+      await chrome.storage.local.remove(storageKeys(state.origin).queue);
+      break;
     case 'unpost':
       state.posted = markTakenDown(state.posted, vin);
       await save('posted');
@@ -538,6 +623,20 @@ async function init() {
   });
   $('panel').addEventListener('click', onPanelClick);
   $('panel').addEventListener('submit', onSettingsSubmit);
+  $('panel').addEventListener('change', (ev) => {
+    if (ev.target.id === 'pickAll') for (const box of document.querySelectorAll('.pick')) box.checked = ev.target.checked;
+    if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) updateQueueButton();
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    // the side panel moves the queue and the posted list along; keep up
+    if (area !== 'local' || !state.origin) return;
+    const k = storageKeys(state.origin);
+    let touched = false;
+    if (changes[k.queue]) { state.queue = changes[k.queue].newValue || null; touched = true; }
+    if (changes[k.posted]) { state.posted = changes[k.posted].newValue || {}; touched = true; }
+    if (changes[k.drafts]) { state.drafts = changes[k.drafts].newValue || {}; touched = true; }
+    if (touched && state.view !== 'settings') render();
+  });
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab || null;

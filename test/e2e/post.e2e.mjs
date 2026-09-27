@@ -28,6 +28,10 @@ rmSync(extDir, { recursive: true, force: true });
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
+// No real side panel in tests: the test opens sidepanel.html as a tab and
+// must be the only instance driving the flow.
+manifest.permissions = manifest.permissions.filter((p) => p !== 'sidePanel');
+delete manifest.side_panel;
 writeFileSync(join(extDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
 const site = await startMockSite();
@@ -128,7 +132,8 @@ try {
   assert.match(await panel.textContent('#checks'), /All checks passed/);
   assert.match(await panel.textContent('#assumed'), /Vehicle condition[\s\S]*Very good[\s\S]*Title status[\s\S]*Clean[\s\S]*default/);
   assert.equal(await panel.$('#leftBlank'), null, 'nothing is left blank when defaults are set');
-  assert.match(await panel.textContent('#locationHint'), /ZIP/);
+  assert.equal(await panel.$('#locationHint'), null, "the ZIP came from the website's own address, so no nudge");
+  assert.match(await panel.textContent('#panel'), /Location[\s\S]*15370/);
   assert.match(await panel.textContent('#vinCheck'), /2019, website agrees[\s\S]*Stellantis/);
   assert.match(await panel.textContent('#cap'), /0 of 10 posts today/);
   await panel.screenshot({ path: join(shots, 'post-2-review.png'), fullPage: true });

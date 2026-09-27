@@ -16,6 +16,7 @@ import { runGuardrails } from './src/rewriteTemplate.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
+import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
@@ -37,6 +38,10 @@ const state = {
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
   vinCheck: null, // { local, online } from src/vin.js
   colorGuess: null, // { exterior, interior, confidence } from the photos, or { error }
+  queue: null, // the batch queue (src/queue.js), shared with the popup
+  queueMode: false, // this car is being posted as part of the queue
+  drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
+  snapshotVehicles: {}, // names for the queue bar
   step: 'idle', message: '', doneAt: null,
   map: FORM_MAP,
 };
@@ -48,21 +53,28 @@ const keys = (origin) => ({
   posted: `posted:${origin}`,
   boilerplate: `boilerplate:${origin}`,
   flow: `postFlow:${origin}`,
+  queue: `postQueue:${origin}`,
+  drafts: `drafts:${origin}`,
 });
 
 // ---------- saved data ----------
 
 async function loadSaved() {
   const k = keys(state.origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts]);
   state.siteName = data[k.snapshot]?.site?.name || state.origin;
-  const site = { name: state.siteName };
+  const site = data[k.snapshot]?.site || { name: state.siteName };
   state.settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), site) || withDefaults({}, site);
   state.posted = data[k.posted] || {};
   state.boilerplate = data[k.boilerplate] || [];
+  state.queue = data[k.queue] || null;
+  state.drafts = data[k.drafts] || {};
+  state.snapshotVehicles = data[k.snapshot]?.vehicles || {};
 }
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'step', 'message', 'doneAt', 'map'];
+const saveQueue = () => (state.queue ? chrome.storage.local.set({ [keys(state.origin).queue]: state.queue }) : chrome.storage.local.remove(keys(state.origin).queue));
+
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'queueMode', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -77,7 +89,7 @@ async function clearFlow() {
   if (state.origin) await chrome.storage.local.remove(keys(state.origin).flow);
   Object.assign(state, {
     vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, queueMode: false, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
 
@@ -98,6 +110,7 @@ async function startFlow(req) {
   state.vin = String(req.vin || '').toUpperCase();
   state.dealerTabId = req.dealerTabId;
   state.windowId = req.windowId || null;
+  state.queueMode = Boolean(req.queue);
   await loadSaved();
   state.step = 'checking';
   setStatus('');
@@ -120,6 +133,77 @@ async function startFlow(req) {
   state.message = '';
   render();
   await saveFlow();
+  // In a queue, a car that passes every check goes straight to the form;
+  // one with a warning waits here so the person sees it.
+  if (state.queueMode && canAutoOpen()) await openForm();
+}
+
+function canAutoOpen() {
+  if (!state.guardrails || !state.guardrails.ok) return false;
+  if (state.vinCheck && state.vinCheck.local && !state.vinCheck.local.ok) return false;
+  const blockers = currentListing().missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
+  if (blockers.length) return false;
+  return !capStatus(state.posted, state.settings.dailyCap).reached;
+}
+
+// ---------- the queue ----------
+
+const nameOf = (vin) => (state.snapshotVehicles[vin] && state.snapshotVehicles[vin].name) || vin;
+
+async function startNextInQueue() {
+  const q = state.queue;
+  const vin = currentVin(q);
+  if (!vin) return;
+  const cap = capStatus(state.posted, state.settings.dailyCap);
+  if (cap.reached) {
+    state.queue = pauseQueue(q);
+    await saveQueue();
+    await clearFlow();
+    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap}). The queue is paused until tomorrow; the dealer can change the cap in Settings.`, 'error');
+    render();
+    return;
+  }
+  await startFlow({ origin: state.origin, vin, dealerTabId: q.dealerTabId || state.dealerTabId, windowId: q.windowId || state.windowId, queue: true });
+}
+
+// Records how this car ended and moves on: the next car, a pause, or the end.
+async function afterQueueStep(outcome) {
+  if (watcher) watcher.cancel();
+  state.queue = advance(state.queue, outcome);
+  await saveQueue();
+  const next = currentVin(state.queue);
+  if (next && state.queue.status === 'running') return startNextInQueue();
+  await clearFlow();
+  state.step = state.queue && state.queue.status === 'done' ? 'queueDone' : 'idle';
+  setStatus('');
+  render();
+}
+
+async function savedDraft() {
+  state.drafts = { ...state.drafts, [state.vin]: { name: state.vehicle.name, savedAt: new Date().toISOString() } };
+  await chrome.storage.local.set({ [keys(state.origin).drafts]: state.drafts });
+  return afterQueueStep('draft');
+}
+
+function queueBar() {
+  const q = state.queue;
+  if (!q) return '';
+  const next = currentVin(q);
+  const active = state.queueMode && state.vin && state.step !== 'idle' && state.step !== 'queueDone';
+  let buttons = '';
+  if (q.status === 'done') {
+    buttons = `<button type="button" class="plain" id="queueClear">Clear queue</button>`;
+  } else {
+    if (!active && next && q.status === 'running') buttons += `<button type="button" class="primary" id="queueNext">Post next car</button>`;
+    buttons += q.status === 'running' ? `<button type="button" class="plain" id="queuePause">Pause</button>` : `<button type="button" class="plain" id="queueResume">Resume</button>`;
+    if (next) buttons += `<button type="button" class="plain" id="queueSkip">Skip this car</button>`;
+    buttons += `<button type="button" class="plain" id="queueStop">Stop queue</button>`;
+  }
+  return `<div class="banner info queuebar" id="queueBar"><b>${esc(describeQueue(q))}</b>${next && !active ? ` · next: ${esc(nameOf(next))}` : ''}<div class="actions">${buttons}</div></div>`;
+}
+
+function viewQueueDone() {
+  return `<div class="banner good" id="queueDone">${esc(describeQueue(state.queue))}. Posted cars are under <b>My listings</b> in the popup; drafts are on Facebook under your listings, and show as "Draft on Facebook" on the Ready tab until you mark them posted.</div>`;
 }
 
 async function block(message) {
@@ -318,6 +402,8 @@ function startWatcher() {
     if (state.step !== 'publish') return;
     if (r.status === 'listing' || r.status === 'probably' || r.status === 'closed') {
       state.detected = r;
+      // In a queue, a listing address means the person clicked Publish: record it and load the next car.
+      if (state.queueMode && r.status === 'listing') return confirmPosted();
       render();
       saveFlow();
     }
@@ -333,6 +419,7 @@ async function confirmPosted() {
   state.posted = markPosted(state.posted, state.vehicle, state.settings.basis, now, extra);
   await chrome.storage.local.set({ [keys(state.origin).posted]: state.posted });
   if (watcher) watcher.cancel();
+  if (state.queueMode) return afterQueueStep('posted');
   state.step = 'done';
   state.doneAt = now;
   render();
@@ -416,7 +503,10 @@ function viewChecking() {
 }
 
 function viewBlocked() {
-  return `<div class="banner bad">${esc(state.message)}</div><button type="button" class="plain" id="back">Back</button>`;
+  const buttons = state.queueMode
+    ? `<button type="button" class="primary" id="skipBlocked">Skip this car, next</button><button type="button" class="plain" id="queueStop">Stop queue</button>`
+    : `<button type="button" class="plain" id="back">Back</button>`;
+  return `<div class="banner bad">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
 const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: state.vehicle.photos });
@@ -583,8 +673,11 @@ function viewPublish() {
   } else {
     detect = `<div class="banner info">Waiting for you to click <b>Publish</b> on Facebook…</div>`;
   }
+  const outcome = state.queueMode
+    ? `<button type="button" class="primary" id="confirmPosted">It's posted, next car</button><button type="button" class="plain" id="savedDraft">Saved as draft, next car</button><button type="button" class="plain" id="skipCar">Skip, next car</button>`
+    : `<button type="button" class="primary" id="confirmPosted">It's posted, record it</button><button type="button" class="plain" id="notPosted">It didn't post</button>`;
   return `${carCard()}
-  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b> on Facebook yourself.</div>
+  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When it posts, the next car loads by itself.' : ''}</div>
   <section id="fillResults">
     <h3>Filled in <span class="pill good">${f.filled.length}</span></h3>
     ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}
@@ -597,7 +690,7 @@ function viewPublish() {
   </section>
   <section>${detect}
     <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && d.url) || '')}" placeholder="paste the listing's address if you have it" /></label>
-    <div class="actions"><button type="button" class="primary" id="confirmPosted">It's posted, record it</button><button type="button" class="plain" id="notPosted">It didn't post</button></div>
+    <div class="actions">${outcome}</div>
   </section>`;
 }
 
@@ -610,8 +703,8 @@ function viewDone() {
 
 function render() {
   $('site').textContent = state.siteName || '';
-  const views = { idle: viewIdle, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone };
-  $('panel').innerHTML = (views[state.step] || viewIdle)();
+  const views = { idle: viewIdle, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone };
+  $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
 }
 
 // ---------- events ----------
@@ -682,6 +775,33 @@ async function onClick(ev) {
     case 'downloadPhotos': return downloadPhotos();
     case 'confirmPosted': return confirmPosted();
     case 'notPosted': return notPosted();
+    case 'savedDraft': return savedDraft();
+    case 'skipCar':
+    case 'skipBlocked': return afterQueueStep(btn.id === 'skipBlocked' ? 'blocked' : 'skipped');
+    case 'queueNext': return startNextInQueue();
+    case 'queuePause':
+      state.queue = pauseQueue(state.queue);
+      await saveQueue();
+      return render();
+    case 'queueResume':
+      state.queue = resumeQueue(state.queue);
+      await saveQueue();
+      if (!state.vin || state.step === 'idle' || state.step === 'queueDone') return startNextInQueue();
+      return render();
+    case 'queueSkip':
+      if (state.queueMode && state.vin && state.step !== 'idle') return afterQueueStep('skipped');
+      state.queue = advance(state.queue, 'skipped');
+      await saveQueue();
+      if (state.queue.status === 'done') state.step = 'queueDone';
+      return render();
+    case 'queueStop':
+    case 'queueClear':
+      if (watcher) watcher.cancel();
+      state.queue = null;
+      await saveQueue();
+      await clearFlow();
+      setStatus(btn.id === 'queueStop' ? 'Queue stopped. Posted cars stay recorded.' : '');
+      return render();
     case 'back':
     case 'postAnother':
       await clearFlow();

@@ -73,6 +73,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <title>Used Vehicles for Sale Near Washington | Ron Lewis Chrysler Dodge Jeep Ram Waynesburg</title>
 <meta property="og:site_name" content="Ron Lewis Chrysler Dodge Jeep Ram Waynesburg">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"AutoDealer","name":"Ron Lewis Chrysler Dodge Jeep Ram Waynesburg","telephone":"(555) 555-0100","address":{"@type":"PostalAddress","streetAddress":"1 Example Way","addressLocality":"Waynesburg","addressRegion":"PA","postalCode":"15370","addressCountry":"US"}}</script>
 </head><body><h1>124 USED AND CERTIFIED USED FOR SALE (test page)</h1>
 <script>
 window.SEARCH_SERVICE = { apiKey: 'test-key', search: '/api/v1/listings/153146', visibleStatusValues: ['publish', 'modified', 'pend-sale'] };

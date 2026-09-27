@@ -29,6 +29,10 @@ Chrome will say the extension can read and change data on `www.facebook.com/mark
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
+### Several cars at once (the queue)
+
+On **Ready to post**, tick the cars (or **Select all**) and click **Post N cars**; on **To do**, **Queue all ready arrivals** does the same for new arrivals. The side panel then takes them one at a time: it re-checks the car, writes the description and, when every check passes, opens and fills the Marketplace form straight away (a car with a warning stops at the review screen so you see it). You check the form and click **Publish**; the panel notices the listing, records it and loads the next car. Prefer drafts? Click Facebook's **Save draft** instead, then **Saved as draft, next car** in the panel; the car shows as "Draft on Facebook" on the Ready tab until you publish it there and mark it posted. **Skip**, **Pause** and **Stop** are always in the panel's queue bar, the queue survives closing the panel, and it can't be longer than the day's remaining cap.
+
 ### Try it on one real car without publishing
 
 1. Load the extension (above) and open the Waynesburg used inventory page.
@@ -44,7 +48,7 @@ Two unpublished live runs on Sept 27, 2026 filled 12 of 13 fields on the real fo
 
 - **You**: name and role, used in every description's sign-off ("I'm Roger, sales consultant at Ron Lewis CDJR Waynesburg"). Posing as a private seller isn't allowed.
 - **Your store**: only cars at ticked stores count as ready.
-- **Dealership**: name, city, state, ZIP. Enter the ZIP: Marketplace's location box suggests every town with that name (there are Waynesburgs in Ohio and Kentucky too), and Lot Sync only accepts a suggestion in your state.
+- **Dealership**: name, city, state, ZIP. The scan fills these from the store's address on the website itself (its structured data), so normally there is nothing to type; what you type wins. Marketplace's location box suggests every town with the same name (there are Waynesburgs in Ohio and Kentucky too), and Lot Sync only accepts a suggestion in your state.
 - **Your profile follows you.** Name, role, dealership, price basis, note and cap are also kept in Chrome's synced storage, so they come back after clearing a website's data or reloading the extension, and appear on any computer where you're signed in to Chrome. A Lot Sync account shared with your manager is Milestone 4.
 - **VIN check.** The side panel checks each car's VIN before posting: format and check digit, the model year and the manufacturer encoded in it, against what the website says. "Check with NHTSA" fetches the full free government decode (make, model, body, fuel, engine, drive) and lists every difference. Chrome asks for permission to reach vpic.nhtsa.dot.gov the first time. The VIN never changes what gets posted by itself; it flags what to look at.
 - **Price to post**: the website's main price (on this site it includes the $490 doc fee) or the price before fees. The price note explains it in every description; a note is suggested from what the website's prices show.

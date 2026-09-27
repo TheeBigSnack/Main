@@ -23,6 +23,8 @@ rmSync(extDir, { recursive: true, force: true });
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
+manifest.permissions = manifest.permissions.filter((p) => p !== 'sidePanel'); // no real side panel in tests
+delete manifest.side_panel;
 writeFileSync(join(extDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
 const server = await startMockSite();
@@ -118,6 +120,10 @@ try {
 
   await popup.click('#settingsBtn');
   assert.match(await popup.textContent('.settings'), /usually \$490 higher than the price before fees/);
+  // the store's city, state and ZIP came from the website's structured data
+  assert.equal(await popup.inputValue('input[name="dealerCity"]'), 'Waynesburg');
+  assert.equal(await popup.inputValue('input[name="dealerState"]'), 'PA');
+  assert.equal(await popup.inputValue('input[name="dealerZip"]'), '15370');
   await popup.screenshot({ path: join(shots, '6-settings.png') });
   await popup.close();
 

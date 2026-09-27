@@ -108,3 +108,9 @@ h3 .pill { font-weight: 600; }
 .settings label.field .k { min-width: 190px; color: var(--muted); }
 .settings input[type="text"], .settings input[type="number"], .settings input[type="url"], .settings input[type="password"], .settings select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); flex: 1; min-width: 0; }
 .row .actions { display: inline-flex; gap: 6px; }
+.row .pick { margin: 0; }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0 8px; }
+.toolbar label { display: inline-flex; gap: 6px; align-items: center; }
+.toolbar button.small { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 9px; font-size: 12px; }
+.toolbar button.small.go { border-color: var(--accent); color: var(--accent); }
+.banner.queue .toolbar { margin: 6px 0 0; }

@@ -38,11 +38,12 @@ export function withDefaults(settings, site = {}) {
     myStores,
     basis: s.basis === 'beforeFees' ? 'beforeFees' : 'website',
     salesperson: { name: String(sp.name || ''), title: String(sp.title || 'sales consultant') },
+    // blanks are filled from the website's own address (site.address, read by the scan)
     dealer: {
       name: String(d.name || site.name || ''),
-      city: String(d.city || (myStores[0] ? shortLocation(myStores[0]) : '')),
-      state: String(d.state || ''),
-      zip: String(d.zip || ''),
+      city: String(d.city || (site.address && site.address.city) || (myStores[0] ? shortLocation(myStores[0]) : '')),
+      state: String(d.state || (site.address && site.address.state) || ''),
+      zip: String(d.zip || (site.address && site.address.zip) || ''),
     },
     priceNote: typeof s.priceNote === 'string' ? s.priceNote : '',
     dailyCap: Number.isFinite(s.dailyCap) && s.dailyCap > 0 ? Math.floor(s.dailyCap) : DEFAULT_DAILY_CAP,

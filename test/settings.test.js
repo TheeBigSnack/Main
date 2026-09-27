@@ -19,6 +19,17 @@ test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () =>
   assert.deepEqual(withDefaults({ defaults: { titleStatus: 'Spotless', condition: 42 } }).defaults, { titleStatus: 'Clean', condition: 'Very good' });
 });
 
+test("the website's own address fills blank city, state and ZIP but never overrides what was typed", () => {
+  const site = { name: WAYNESBURG, address: { street: '1 Example Way', city: 'Waynesburg', state: 'PA', zip: '15370', source: 'structured data' } };
+  const fresh = withDefaults({ myStores: [WAYNESBURG] }, site);
+  assert.deepEqual(fresh.dealer, { name: WAYNESBURG, city: 'Waynesburg', state: 'PA', zip: '15370' });
+  const typed = withDefaults({ dealer: { name: 'Ron Lewis CDJR', city: 'Waynesburg', state: 'PA', zip: '15370' } }, { name: 'x', address: { city: 'Elsewhere', state: 'OH', zip: '43000' } });
+  assert.deepEqual(typed.dealer, { name: 'Ron Lewis CDJR', city: 'Waynesburg', state: 'PA', zip: '15370' });
+  const partial = withDefaults({ dealer: { city: 'Waynesburg' } }, site);
+  assert.deepEqual(partial.dealer, { name: WAYNESBURG, city: 'Waynesburg', state: 'PA', zip: '15370' });
+  assert.equal(defaultSettings(site, []).dealer.zip, '15370');
+});
+
 test('bad input becomes safe defaults', () => {
   const s = withDefaults(null);
   assert.equal(s.basis, 'website');
