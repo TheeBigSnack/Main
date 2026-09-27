@@ -6,7 +6,7 @@ Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a 
 
 | Milestone | Weeks | State |
 |---|---|---|
-| M1 One-click post | Sep 28 – Oct 11 | Built ahead of schedule on Sep 26; awaiting the first live (unpublished) prefill check on the real form |
+| M1 One-click post | Sep 28 – Oct 11 | Built on Sep 26, unit and e2e tests green; awaiting the first live (unpublished) check on the real form |
 | M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | Not started |
 | M3 Pilot | Oct 26 – Nov 8 | Needs the Waynesburg manager's sign-off |
 | M4 Accounts and manager view | Nov 9 – Nov 22 | Not started |
@@ -30,7 +30,7 @@ Acceptance criteria
 1. On a real ready car at Waynesburg, one click on Post opens the Marketplace form filled in within about 10 seconds, with everything except title status and condition, and the panel lists anything it couldn't fill with a copy button.
 2. The salesperson clicks Publish (or, during development, closes the tab without publishing); the panel records the post, which appears under My listings with the listing link when it was detectable.
 3. No code path can click Publish, Update, Delete or Mark as sold (`test/posting.test.js`).
-4. `npm test` passes (84 tests) and the two Playwright end-to-end tests pass against the mock dealer site and the mock Marketplace form.
+4. `npm test` passes (85 tests) and the two Playwright end-to-end tests pass against the mock dealer site and the mock Marketplace form. (Both green on 2026-09-26.)
 5. The first live run against the real form is done with the owner present, without publishing, and any field-finding fixes are made in `formMap.js` only.
 
 Demo: scan the Waynesburg site, click Post on a ready car, watch the form fill, review the description, close the tab without publishing, show the recorded flow and the test run.

@@ -70,6 +70,7 @@ function friendlyError(e) {
 }
 
 async function scan() {
+  await initDone; // a click during start-up must not race the saved-data load
   if (!state.tab || !state.origin) {
     setStatus("Open your dealership's website in this tab first, then click Scan.", 'error');
     return;
@@ -390,6 +391,7 @@ function viewSettings() {
 function render() {
   $('site').textContent = state.origin ? state.siteName || state.origin : "Open your dealership's website, then scan.";
   $('scan').textContent = state.snapshot ? 'Rescan website' : 'Scan website';
+  $('scan').disabled = false; // stays disabled (popup.html) until the first render after start-up
   $('settingsBtn').setAttribute('aria-pressed', String(state.view === 'settings'));
   const l = lists();
   renderTabs(l);
@@ -524,4 +526,4 @@ async function init() {
   render();
 }
 
-init();
+const initDone = init();

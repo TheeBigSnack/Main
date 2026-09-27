@@ -18,11 +18,14 @@ Added
 - **Tests**: 44 new unit tests (84 total); a mock Marketplace form and a second Playwright test that drives the whole post flow, with the test standing in for the person's Publish click.
 - CLAUDE.md, PLAN.md, `legal/` drafts (8 files), backend README, `.gitignore`.
 
+Fixed
+- Popup: a click on Scan during the popup's own start-up could finish, render, and then be wiped by the start-up's saved-data load, leaving "No scan yet" on screen. The button now stays disabled until start-up finishes and the scan waits for it. Found by the end-to-end test.
+
 Changed
 - `manifest.json`: version 0.2.0; new permission `sidePanel`; new host permissions `https://www.facebook.com/marketplace/*` (to fill the form and see the listing address) and `https://vehicle-images.carscommerce.inc/*` (to download the car's photos); background service worker; side panel; minimum Chrome 116.
 - `normalize.js`: `photos` now keeps every URL it is given (the bulk scan still passes 3); new `descriptionRaw` and `features`.
 - `rescan.js`: `markPosted` accepts an extra object (listing URL, salesperson) without changing existing callers.
-- `test/e2e/popup.e2e.mjs`: repo path fixed for Windows.
+- `test/e2e/popup.e2e.mjs`: repo path fixed for Windows; prints the popup's status and console errors on failure; `LOTSYNC_E2E_CHANNEL` can point both e2e tests at another Chromium build.
 
 ## 0.1.0 (2026-09-26)
 
