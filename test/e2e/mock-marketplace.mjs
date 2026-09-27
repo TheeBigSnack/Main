@@ -42,7 +42,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   <input id="photos" type="file" multiple accept="image/*"> <span id="photoCount">0 photos</span>
   ${combo('vehicleType', 'Vehicle type', ['Car/Truck', 'Motorcycle', 'Powersport', 'RV/Camper', 'Trailer', 'Boat', 'Commercial/Industrial', 'Other'], 0)}
   ${combo('year', 'Year', YEARS, 2500)}
-  <label>Make <input id="make"></label>
+  <div id="makeWrap" hidden>${combo('make', 'Make', ['Chevrolet', 'Dodge', 'Ford', 'Honda', 'Jeep', 'Ram', 'Toyota'], 300)}</div>
   <label>Model <input id="model"></label>
   <label>Mileage <input id="mileage"></label>
   <label>Price <input id="price"></label>
@@ -53,7 +53,8 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   <label>Fuel type <select id="fuelType">${opts(['Diesel', 'Electric', 'Gasoline', 'Flex', 'Hybrid', 'Petrol', 'Plug-in hybrid', 'Other'])}</select></label>
   <label>Transmission <select id="transmission">${opts(['Automatic transmission', 'Manual transmission'])}</select></label>
   <label>Title status <select id="titleStatus">${opts(['Clean', 'Rebuilt', 'Salvage', 'Lien', 'Missing'])}</select></label>
-  <label>Location <input id="location"></label>
+  <label>Location <input id="location" role="combobox" aria-autocomplete="list" aria-controls="locationList" autocomplete="off"></label>
+  <div id="locationList" role="listbox" hidden></div>
   <label>Description <textarea id="description" rows="10" cols="60"></textarea></label>
   <button type="button" id="publish">Publish</button>
 </form>
@@ -62,7 +63,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   // list is open only closes that list.
   let openList = null;
   const closeOpen = () => { if (!openList) return; openList.hidden = true; document.getElementById(openList.id.replace(/List$/, '')).setAttribute('aria-expanded', 'false'); openList = null; };
-  for (const cb of document.querySelectorAll('[role=combobox]')) {
+  for (const cb of document.querySelectorAll('div[role=combobox]')) {
     const list = document.getElementById(cb.id + 'List');
     cb.addEventListener('click', () => {
       if (openList) { const wasMine = openList === list; closeOpen(); if (wasMine) return; return; }
@@ -80,8 +81,31 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
       cb.textContent = o.textContent;
       cb.dataset.value = o.textContent;
       closeOpen();
+      // Like the real form: the Make control only appears a moment after a year is chosen.
+      if (cb.id === 'year') setTimeout(() => { document.getElementById('makeWrap').hidden = false; }, 1000);
     });
   }
+  // Location typeahead. Several towns share the name; the wrong state comes first.
+  const loc = document.getElementById('location');
+  const locList = document.getElementById('locationList');
+  let locTimer = null;
+  loc.addEventListener('input', () => {
+    clearTimeout(locTimer);
+    locTimer = setTimeout(() => {
+      const q = loc.value.trim().toLowerCase();
+      const names = /^\\d/.test(q) ? ['Waynesburg, Pennsylvania'] : q.startsWith('wayne') ? ['Waynesburg, Ohio', 'Waynesburg, Pennsylvania', 'Waynesburg, Kentucky'] : [];
+      if (openList && openList !== locList) closeOpen();
+      locList.innerHTML = names.map((n) => '<div role="option">' + n + '<span> City</span></div>').join('');
+      locList.hidden = !names.length;
+      openList = names.length ? locList : null;
+    }, 200);
+  });
+  locList.addEventListener('click', (e) => {
+    const o = e.target.closest('[role=option]');
+    if (!o) return;
+    loc.value = o.firstChild.textContent;
+    closeOpen();
+  });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOpen(); });
   document.addEventListener('mousedown', (e) => { if (openList && !e.target.closest('[role=listbox],[role=combobox]')) closeOpen(); });
   // The price box reformats digits with thousands separators, like the real one.

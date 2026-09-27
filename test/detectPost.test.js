@@ -16,7 +16,7 @@ test('a listing address means it posted; the "your listings" page probably does;
 
 test('the form map only ever points at the create page and reads addresses; it has no verified claim', () => {
   assert.equal(FORM_MAP.createUrl, 'https://www.facebook.com/marketplace/create/vehicle');
-  assert.equal(FORM_MAP.verifiedAgainstFacebook, false);
+  assert.notEqual(FORM_MAP.verifiedAgainstFacebook, true, 'never claim the live form is fully verified');
   assert.ok(FORM_MAP.fields.every((f) => Array.isArray(f.name) && f.name.length && f.key && f.label && f.kind));
   assert.deepEqual(FORM_MAP.neverFill.map((f) => f.key), ['condition', 'titleStatus']);
 });

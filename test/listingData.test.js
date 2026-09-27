@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildListingData, vehicleKind, normalizeColor, normalizeBodyStyle, normalizeTransmission, normalizeFuelType, locationQuery, LEFT_BLANK } from '../extension/src/listingData.js';
+import { buildListingData, vehicleKind, normalizeColor, normalizeBodyStyle, normalizeTransmission, normalizeFuelType, locationQuery, locationExpect, STATE_NAMES, LEFT_BLANK } from '../extension/src/listingData.js';
 import { vehicle } from './helpers.js';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', state: 'PA', zip: '15370' };
@@ -87,6 +87,18 @@ test('body styles, transmissions and fuel types', () => {
 test('location: ZIP first, then city and state', () => {
   assert.equal(locationQuery(DEALER), '15370');
   assert.equal(locationQuery({ city: 'Waynesburg', state: 'PA' }), 'Waynesburg, PA');
+  assert.equal(locationQuery({ city: 'Waynesburg', state: 'Pennsylvania' }), 'Waynesburg, PA');
   assert.equal(locationQuery({ zip: '15370-1234' }), '15370');
   assert.equal(locationQuery({}), '');
+});
+
+test('location: only a suggestion in the right state may be picked (there are several Waynesburgs)', () => {
+  assert.deepEqual(locationExpect({ city: 'Waynesburg', state: 'PA' }), { alternatives: [['Waynesburg', 'Pennsylvania'], ['Waynesburg', 'PA']], strict: true });
+  assert.deepEqual(locationExpect({ city: 'Waynesburg', state: 'pennsylvania', zip: '15370' }), { alternatives: [['Waynesburg', 'Pennsylvania'], ['Waynesburg', 'PA']], strict: true });
+  assert.deepEqual(locationExpect({ city: 'Waynesburg' }), { alternatives: [['Waynesburg']], strict: false });
+  assert.deepEqual(locationExpect({ zip: '15370' }), { alternatives: [], strict: true });
+  assert.deepEqual(locationExpect({}), { alternatives: [], strict: false });
+  assert.equal(STATE_NAMES.PA, 'Pennsylvania');
+  assert.equal(Object.keys(STATE_NAMES).length, 51);
+  assert.equal(buildListingData(vehicle('usedNormal'), { dealer: DEALER }).match.location.strict, true);
 });

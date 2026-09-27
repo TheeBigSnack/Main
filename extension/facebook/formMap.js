@@ -21,18 +21,25 @@
 //   options  for 'choice': canonical value -> Facebook wordings to try, in order
 
 export const FORM_MAP = Object.freeze({
-  version: '2026-09-26',
-  verifiedAgainstFacebook: false,
+  version: '2026-09-27',
+  // Two live, unpublished runs on 2026-09-27 filled 12 of 13 fields (Make pending).
+  verifiedAgainstFacebook: 'partly',
   createUrl: 'https://www.facebook.com/marketplace/create/vehicle',
   // Where the tab ends up after the salesperson publishes.
   listingUrlPattern: '^https://www\\.facebook\\.com/marketplace/item/(\\d+)',
   afterPublishPatterns: ['^https://www\\.facebook\\.com/marketplace/(you|selling)(/|$|\\?)'],
   // Give the page this long to draw its form after it reports loaded.
   settleMs: 1500,
-  // Photos. The page's own "up to N photos" text is read first.
+  // Photos. The page's own limit wording is read first (several spellings);
+  // the live form's exact wording is still to be captured (see README).
   fileInput: 'input[type="file"]',
   photoLimitDefault: 20, // NOT VERIFIED; used only if the page text has no limit
-  photoLimitTextPattern: 'up to (\\d+) photos',
+  photoLimitTextPatterns: [
+    'up to (\\d+) photos',
+    '(\\d+) photos? (?:max|maximum|limit)',
+    'max(?:imum)?(?: of)? (\\d+) photos',
+    'photos?\\D{0,20}?\\d+\\s*(?:/|of)\\s*(\\d+)',
+  ],
 
   fields: [
     {
@@ -40,7 +47,9 @@ export const FORM_MAP = Object.freeze({
       options: { car_truck: ['Car/Truck', 'Car/truck', 'Car or truck', 'Car'], motorcycle: ['Motorcycle', 'Motorcycle/Scooter'] },
     },
     { key: 'year', label: 'Year', kind: 'choice', name: ['^year\\b'] },
-    { key: 'make', label: 'Make', kind: 'text', name: ['^make\\b'] },
+    // 'either': a text box on some forms, a dropdown of makes on others; it may
+    // only appear once a year is chosen, so the fill code waits for it.
+    { key: 'make', label: 'Make', kind: 'either', name: ['^make\\b', '^brand\\b', '^manufacturer\\b'] },
     { key: 'model', label: 'Model', kind: 'text', name: ['^model\\b'] },
     { key: 'mileage', label: 'Mileage', kind: 'text', name: ['^mileage\\b'] },
     { key: 'price', label: 'Price', kind: 'text', name: ['^price\\b'] },

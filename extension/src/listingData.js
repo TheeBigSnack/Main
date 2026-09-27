@@ -84,11 +84,43 @@ export function normalizeFuelType(text) {
   return '';
 }
 
+export const STATE_NAMES = Object.freeze({
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware',
+  DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota',
+  MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon',
+  PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah',
+  VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+});
+
+const stateAbbr = (s) => {
+  const t = String(s || '').trim();
+  if (!t) return '';
+  if (STATE_NAMES[t.toUpperCase()]) return t.toUpperCase();
+  const hit = Object.entries(STATE_NAMES).find(([, name]) => name.toLowerCase() === t.toLowerCase());
+  return hit ? hit[0] : '';
+};
+
 // What to type into Facebook's location box: a ZIP is the least ambiguous.
 export function locationQuery(dealer = {}) {
   const zip = String(dealer.zip || '').trim();
   if (/^\d{5}(-\d{4})?$/.test(zip)) return zip.slice(0, 5);
-  return [dealer.city, dealer.state].map((s) => String(s || '').trim()).filter(Boolean).join(', ');
+  const abbr = stateAbbr(dealer.state);
+  return [String(dealer.city || '').trim(), abbr || String(dealer.state || '').trim()].filter(Boolean).join(', ');
+}
+
+// Which of Facebook's location suggestions may be picked: one that names the
+// city together with the state (either spelling). There are several
+// Waynesburgs; the first live run picked the one in Ohio. `strict` means the
+// state (or ZIP) is known, so the first matching suggestion is safe to take.
+export function locationExpect(dealer = {}) {
+  const city = String(dealer.city || '').trim();
+  const abbr = stateAbbr(dealer.state);
+  const zip = String(dealer.zip || '').trim();
+  if (!city) return { alternatives: [], strict: Boolean(zip) };
+  const alternatives = abbr ? [[city, STATE_NAMES[abbr]], [city, abbr]] : [[city]];
+  return { alternatives, strict: Boolean(abbr || /^\d{5}/.test(zip)) };
 }
 
 /**
@@ -116,6 +148,8 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
   const list = Array.isArray(photos) ? photos : Array.isArray(v.photos) ? v.photos : [];
   return {
     fields,
+    // extra rules the fill code needs for a field, by key
+    match: { location: locationExpect(dealer) },
     photos: list.filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u)),
     leftBlank: LEFT_BLANK,
     missing: Object.keys(fields).filter((k) => !fields[k]),

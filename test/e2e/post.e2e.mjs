@@ -67,7 +67,8 @@ try {
         myStores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg'],
         basis: 'website',
         salesperson: { name: 'Roger', title: 'sales consultant' },
-        dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', state: 'PA', zip: '15370' },
+        // No ZIP on purpose: the location must still land in the right state.
+        dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', state: 'PA', zip: '' },
         priceNote: 'Price includes the $490 doc fee; tax and tags extra.',
         dailyCap: 10,
         rewrite: { enabled: false, endpoint: '', key: '' },
@@ -125,6 +126,8 @@ try {
   assert.match(draft, /I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\./);
   assert.match(await panel.textContent('#checks'), /All checks passed/);
   assert.match(await panel.textContent('#leftBlank'), /Vehicle condition[\s\S]*Title status/);
+  assert.match(await panel.textContent('#locationHint'), /ZIP/);
+  assert.match(await panel.textContent('#vinCheck'), /2019, website agrees[\s\S]*Stellantis/);
   assert.match(await panel.textContent('#cap'), /0 of 10 posts today/);
   await panel.screenshot({ path: join(shots, 'post-2-review.png'), fullPage: true });
 
@@ -138,10 +141,11 @@ try {
   watch(fb);
   await panel.waitForSelector('#fillNow', { timeout: 30000 });
   const probe = await panel.textContent('#probeResults');
-  assert.match(probe, /Found\s*13/);
-  assert.doesNotMatch(probe, /Not found/);
-  assert.match(probe, /1 file input\(s\) on the page · limit 20$/m);
-  assert.equal(await fb.inputValue('#make'), '', 'the dry run fills nothing');
+  assert.match(probe, /Found\s*12/);
+  assert.match(probe, /Not found\s*1[\s\S]*Make/); // Make only appears after a year is chosen
+  assert.match(probe, /1 file input\(s\) on the page · limit 20/);
+  assert.equal(await fb.inputValue('#model'), '', 'the dry run fills nothing');
+  assert.equal(await fb.evaluate(() => document.getElementById('makeWrap').hidden), true, 'Make is not on the page until a year is chosen');
   await panel.screenshot({ path: join(shots, 'post-3a-check-fields.png'), fullPage: true });
 
   // ---- 4b. Fill it in: the same tab gets filled and the photos attached ----
@@ -156,7 +160,7 @@ try {
     const chosen = (id) => document.getElementById(id).dataset.value;
     return {
       vehicleType: chosen('vehicleType'),
-      year: chosen('year'), make: v('make'), model: v('model'), mileage: v('mileage'), price: v('price'),
+      year: chosen('year'), make: chosen('make'), model: v('model'), mileage: v('mileage'), price: v('price'),
       bodyStyle: v('bodyStyle'), exteriorColor: chosen('exteriorColor'), interiorColor: v('interiorColor'),
       fuelType: v('fuelType'), transmission: v('transmission'), location: v('location'),
       condition: v('condition'), titleStatus: v('titleStatus'),
@@ -168,15 +172,15 @@ try {
     vehicleType: 'Car/Truck', year: '2019', make: 'Ram', model: '1500 Classic Express', mileage: '20986',
     price: '27,163', // the page reformats it; the fill code accepts that
     bodyStyle: 'Truck', exteriorColor: 'Blue', interiorColor: 'Grey', fuelType: 'Gasoline', transmission: 'Automatic transmission',
-    location: '15370',
+    location: 'Waynesburg, Pennsylvania', // not the Ohio one the page suggests first
     condition: '', titleStatus: '', // never filled by Lot Sync
     photos: '3 photos',
     popupsOpen: 0, // the slow Year list was waited for, used, and closed
   });
   assert.equal(await fb.inputValue('#description'), edited);
   const results = await panel.textContent('#fillResults');
-  assert.match(results, /Filled in\s*12/);
-  assert.match(results, /Needs a click\s*1/); // location: typed, no suggestion list in the mock
+  assert.match(results, /Filled in\s*13/);
+  assert.doesNotMatch(results, /Needs a click/);
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   assert.match(await panel.textContent('#photos'), /3 of 3 attached/);
   assert.equal(await publishCount(dealer), '0', 'the extension must not publish');

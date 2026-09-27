@@ -48,11 +48,14 @@ export async function fillFormInPage(map, data) {
   }
 
   const TEXT_INPUTS = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"])';
+  const CHOICES = 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]';
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
     typeahead: TEXT_INPUTS + ', [role="textbox"]',
-    choice: 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]',
+    choice: CHOICES,
+    // a field that is a text box on some forms and a dropdown on others (Make)
+    either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
   };
   const POPUPS = '[role="listbox"], [role="menu"]';
   const OPTIONS = '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
@@ -60,7 +63,7 @@ export async function fillFormInPage(map, data) {
   const neverNames = (map.neverFill || []).flatMap((f) => f.name).map((p) => new RegExp(p, 'i'));
   const offLimits = (name) => neverNames.some((re) => re.test(name));
 
-  function findField(spec) {
+  function findFieldNow(spec) {
     const candidates = [...document.querySelectorAll(KIND_SELECTORS[spec.kind] || KIND_SELECTORS.text)].filter(visible);
     const pick = (patterns) => {
       const matches = candidates.filter((el) => {
@@ -73,6 +76,19 @@ export async function fillFormInPage(map, data) {
     // The map's patterns first; the field's label anywhere in the name as a second chance.
     return pick(spec.name.map((p) => new RegExp(p, 'i'))) || pick([new RegExp('\\b' + escapeRe(spec.label) + '\\b', 'i')]);
   }
+
+  // Some fields only appear after an earlier one is chosen (Make after Year on
+  // the real form), so give a missing field a few seconds to show up.
+  async function findField(spec, waitMs = 3000) {
+    const until = Date.now() + waitMs;
+    let el = findFieldNow(spec);
+    while (!el && Date.now() < until) {
+      await sleep(250);
+      el = findFieldNow(spec);
+    }
+    return el;
+  }
+  const isDropdown = (el) => el.tagName === 'SELECT' || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && el.matches(CHOICES));
 
   const visiblePopups = () => [...document.querySelectorAll(POPUPS)].filter(visible);
   const visibleOptions = (root) => [...(root || document).querySelectorAll(OPTIONS)].filter(visible);
@@ -194,29 +210,48 @@ export async function fillFormInPage(map, data) {
     return { ok: false, reason: 'none of the options matched (' + options.slice(0, 8).map(text).join(', ') + ')' };
   }
 
-  async function typeahead(el, value) {
+  // Types the value and picks a suggestion, but only one that matches what we
+  // know about the place (`expect`: alternatives, each a list of words that
+  // must all appear). The first live run picked Waynesburg, Ohio for a store
+  // in Waynesburg, Pennsylvania; never again.
+  async function typeahead(el, value, expect) {
     await closePopups(null);
     const optionsBefore = new Set(visibleOptions());
     setText(el, value);
     let options = [];
-    for (let i = 0; i < 15 && !options.length; i += 1) {
+    for (let i = 0; i < 20 && !options.length; i += 1) {
       await sleep(100);
       options = visibleOptions().filter((o) => !optionsBefore.has(o));
     }
-    if (options.length) {
-      const option = options[0];
-      chooseOption(option);
-      await sleep(150);
-      return { ok: true, chosen: text(option), note: 'picked the first suggestion: ' + text(option) };
+    if (!options.length) return { ok: true, partial: true, note: 'typed it; pick the suggestion Facebook shows' };
+    const has = (t, word) => new RegExp('\\b' + escapeRe(word) + '\\b', 'i').test(t);
+    const alternatives = (expect && expect.alternatives) || [];
+    const matching = alternatives.length ? options.filter((o) => alternatives.some((words) => words.every((w) => has(text(o), w)))) : options;
+    const shown = options.slice(0, 5).map(text).join('; ');
+    if (!matching.length) {
+      await closePopups(null);
+      return { ok: true, partial: true, note: `none of the suggestions matched (${shown}); pick the right one yourself` };
     }
-    return { ok: true, partial: true, note: 'typed it; pick the suggestion Facebook shows' };
+    if (matching.length > 1 && !(expect && expect.strict)) {
+      await closePopups(null);
+      return { ok: true, partial: true, note: `several places match (${matching.slice(0, 4).map(text).join('; ')}); add the state or ZIP in Settings, or pick one yourself` };
+    }
+    const option = matching[0];
+    chooseOption(option);
+    await sleep(200);
+    await closePopups(null);
+    return { ok: true, chosen: text(option), note: 'picked ' + text(option) };
   }
 
   function readPhotoLimit() {
-    try {
-      const m = new RegExp(map.photoLimitTextPattern, 'i').exec(document.body.innerText || '');
-      if (m) return { value: Number(m[1]), verified: true };
-    } catch (e) { /* fall through */ }
+    const patterns = Array.isArray(map.photoLimitTextPatterns) ? map.photoLimitTextPatterns : [map.photoLimitTextPattern].filter(Boolean);
+    const body = document.body.innerText || '';
+    for (const p of patterns) {
+      try {
+        const m = new RegExp(p, 'i').exec(body);
+        if (m && Number(m[1]) > 0) return { value: Number(m[1]), verified: true };
+      } catch (e) { /* next pattern */ }
+    }
     return { value: map.photoLimitDefault, verified: false };
   }
 
@@ -229,19 +264,19 @@ export async function fillFormInPage(map, data) {
       result.blocked.push({ ...entry, reason: 'the website has no usable value for this' });
       continue;
     }
-    const el = findField(spec);
+    const el = await findField(spec);
     if (!el) {
-      result.blocked.push({ ...entry, reason: "couldn't find this field on the page" });
+      result.blocked.push({ ...entry, reason: "couldn't find this field on the page (waited 3 seconds)" });
       continue;
     }
     try {
-      if (spec.kind === 'choice') {
+      if (spec.kind === 'choice' || (spec.kind === 'either' && isDropdown(el))) {
         const wantedList = (spec.options && spec.options[entry.value]) || [entry.value];
         const r = await choose(el, wantedList);
         if (r.ok) result.filled.push({ ...entry, shown: r.chosen });
         else result.blocked.push({ ...entry, reason: r.reason });
       } else if (spec.kind === 'typeahead') {
-        const r = await typeahead(el, entry.value);
+        const r = await typeahead(el, entry.value, data && data.match && data.match[spec.key]);
         (r.partial ? result.partial : result.filled).push({ ...entry, note: r.note, shown: r.chosen });
       } else if (setText(el, entry.value)) {
         result.filled.push({ ...entry, shown: el.value !== undefined ? el.value : undefined });
@@ -293,11 +328,13 @@ export function probeFormInPage(map) {
     return norm(parts.join(' '));
   }
   const TEXT_INPUTS = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"])';
+  const CHOICES = 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]';
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
     typeahead: TEXT_INPUTS + ', [role="textbox"]',
-    choice: 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]',
+    choice: CHOICES,
+    either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
   };
   const neverNames = (map.neverFill || []).flatMap((f) => f.name).map((p) => new RegExp(p, 'i'));
   const offLimits = (name) => neverNames.some((re) => re.test(name));
@@ -319,7 +356,7 @@ export function probeFormInPage(map) {
   for (const spec of map.fields) {
     const el = findField(spec);
     if (el) found.push({ key: spec.key, label: spec.label, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: accessibleName(el).slice(0, 80) });
-    else missing.push({ key: spec.key, label: spec.label, patterns: spec.name });
+    else missing.push({ key: spec.key, label: spec.label, patterns: spec.name, note: 'not on the page right now; some fields only appear after an earlier one is chosen' });
   }
   const controls = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded]')]
     .filter(visible)
@@ -327,11 +364,20 @@ export function probeFormInPage(map) {
     .filter((c) => c.name)
     .slice(0, 100);
   let photoLimit = { value: map.photoLimitDefault, verified: false };
-  try {
-    const m = new RegExp(map.photoLimitTextPattern, 'i').exec(document.body.innerText || '');
-    if (m) photoLimit = { value: Number(m[1]), verified: true };
-  } catch (e) { /* keep the default */ }
-  return { url: location.href, title: document.title, found, missing, controls, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, mapVersion: map.version };
+  const patterns = Array.isArray(map.photoLimitTextPatterns) ? map.photoLimitTextPatterns : [map.photoLimitTextPattern].filter(Boolean);
+  for (const p of patterns) {
+    try {
+      const m = new RegExp(p, 'i').exec(document.body.innerText || '');
+      if (m && Number(m[1]) > 0) { photoLimit = { value: Number(m[1]), verified: true }; break; }
+    } catch (e) { /* next pattern */ }
+  }
+  // the words near the photo control, so the limit wording can be added to the map
+  const photoText = (() => {
+    const input = document.querySelector(map.fileInput);
+    const around = input && (input.closest('section, form, div') || input.parentElement);
+    return around ? (around.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+  })();
+  return { url: location.href, title: document.title, found, missing, controls, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
 }
 
 // Attaches already-downloaded photos ({ name, type, dataUrl }) to the form's
