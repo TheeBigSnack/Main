@@ -5,12 +5,21 @@
 
 export const VEHICLE_KIND = Object.freeze({ CAR_TRUCK: 'car_truck', MOTORCYCLE: 'motorcycle' });
 
-// Fields LotSync can't know from the website. They are never filled and the
-// side panel highlights them for the salesperson.
-export const LEFT_BLANK = Object.freeze([
-  { key: 'condition', label: 'Vehicle condition', why: "Only you can judge the condition. Pick it on the form." },
-  { key: 'titleStatus', label: 'Title status', why: "The website doesn't say. Check the title and pick it on the form." },
-]);
+// Facebook's wording for the two fields the website can't tell us. They are
+// filled from the dealership's defaults (Settings) and shown in the panel as
+// assumptions, so the salesperson can change them on the form.
+export const TITLE_STATUSES = Object.freeze(['Clean', 'Rebuilt', 'Salvage', 'Lien', 'Missing']);
+export const CONDITIONS = Object.freeze(['Excellent', 'Very good', 'Good', 'Fair', 'Poor']);
+export const DEFAULT_LISTING_DEFAULTS = Object.freeze({ titleStatus: 'Clean', condition: 'Very good' });
+
+// Words in the website's own text that mean the title is not clean. When one
+// shows up, the title default is NOT applied and the panel says why.
+const BRANDED = /\b(salvage|rebuilt|reconstructed|branded title|lien|flood (?:damage|title|vehicle)|lemon (?:law|buyback)|buy.?back|theft recover(?:y|ed)|hail damage|junk title)\b/i;
+export function brandedTitleSignal(v = {}) {
+  const hay = [v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), v.name, v.trim, v.siteTitle].filter(Boolean).join(' ');
+  const m = BRANDED.exec(hay);
+  return m ? m[1] : '';
+}
 
 // UNVERIFIED: the live inventory had no motorcycle to check against on
 // 2026-09-26. Body type wins; otherwise a short list of makes that only
@@ -125,11 +134,16 @@ export function locationExpect(dealer = {}) {
 
 /**
  * @param {object} vehicle   normalised vehicle
- * @param {object} options   { dealer: {city, state, zip}, description, photos, price }
- *   price is the number to post (the caller applies the dealer's price basis)
+ * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition} }
+ *   price is the number to post (the caller applies the dealer's price basis);
+ *   defaults are the dealership's answers for the fields the website can't give
  */
-export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null } = {}) {
+export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS } = {}) {
   const v = vehicle || {};
+  const d = defaults || {};
+  const branded = brandedTitleSignal(v);
+  const conditionDefault = CONDITIONS.includes(d.condition) ? d.condition : '';
+  const titleDefault = TITLE_STATUSES.includes(d.titleStatus) ? d.titleStatus : '';
   const fields = {
     vehicleType: vehicleKind(v),
     year: v.year ? String(v.year) : '',
@@ -144,14 +158,26 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
     transmission: normalizeTransmission(v.transmission),
     location: locationQuery(dealer),
     description: String(description || ''),
+    condition: conditionDefault,
+    titleStatus: branded ? '' : titleDefault,
   };
+  // what the panel highlights: filled from a default (assumed) or left for the person
+  const assumed = [];
+  const leftBlank = [];
+  if (fields.condition) assumed.push({ key: 'condition', label: 'Vehicle condition', value: fields.condition, why: "your dealership's default; change it on the form if this car is different" });
+  else leftBlank.push({ key: 'condition', label: 'Vehicle condition', why: 'no default set in Settings; pick it on the form' });
+  if (fields.titleStatus) assumed.push({ key: 'titleStatus', label: 'Title status', value: fields.titleStatus, why: "your dealership's default; change it on the form if this car's title is branded" });
+  else if (branded) leftBlank.push({ key: 'titleStatus', label: 'Title status', why: `the website mentions "${branded}" for this car, so no default was applied; check the title and pick it on the form` });
+  else leftBlank.push({ key: 'titleStatus', label: 'Title status', why: 'no default set in Settings; check the title and pick it on the form' });
   const list = Array.isArray(photos) ? photos : Array.isArray(v.photos) ? v.photos : [];
   return {
     fields,
     // extra rules the fill code needs for a field, by key
     match: { location: locationExpect(dealer) },
     photos: list.filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u)),
-    leftBlank: LEFT_BLANK,
+    assumed,
+    leftBlank,
+    branded,
     missing: Object.keys(fields).filter((k) => !fields[k]),
     // what the website said, for the side panel to show next to a blank field
     source: { bodyType: v.bodyType || '', exteriorColor: v.exteriorColor || '', interiorColor: v.interiorColor || '', fuelType: v.fuelType || '', transmission: v.transmission || '' },

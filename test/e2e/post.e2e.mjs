@@ -125,7 +125,8 @@ try {
   assert.match(draft, /Price includes the \$490 doc fee; tax and tags extra\./);
   assert.match(draft, /I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\./);
   assert.match(await panel.textContent('#checks'), /All checks passed/);
-  assert.match(await panel.textContent('#leftBlank'), /Vehicle condition[\s\S]*Title status/);
+  assert.match(await panel.textContent('#assumed'), /Vehicle condition[\s\S]*Very good[\s\S]*Title status[\s\S]*Clean[\s\S]*default/);
+  assert.equal(await panel.$('#leftBlank'), null, 'nothing is left blank when defaults are set');
   assert.match(await panel.textContent('#locationHint'), /ZIP/);
   assert.match(await panel.textContent('#vinCheck'), /2019, website agrees[\s\S]*Stellantis/);
   assert.match(await panel.textContent('#cap'), /0 of 10 posts today/);
@@ -141,7 +142,7 @@ try {
   watch(fb);
   await panel.waitForSelector('#fillNow', { timeout: 30000 });
   const probe = await panel.textContent('#probeResults');
-  assert.match(probe, /Found\s*12/);
+  assert.match(probe, /Found\s*14/);
   assert.match(probe, /Not found\s*1[\s\S]*Make/); // Make only appears after a year is chosen
   assert.match(probe, /1 file input\(s\) on the page · limit 20/);
   assert.equal(await fb.inputValue('#model'), '', 'the dry run fills nothing');
@@ -173,13 +174,13 @@ try {
     price: '27,163', // the page reformats it; the fill code accepts that
     bodyStyle: 'Truck', exteriorColor: 'Blue', interiorColor: 'Grey', fuelType: 'Gasoline', transmission: 'Automatic transmission',
     location: 'Waynesburg, Pennsylvania', // not the Ohio one the page suggests first
-    condition: '', titleStatus: '', // never filled by Lot Sync
+    condition: 'Very good', titleStatus: 'Clean', // the dealership's defaults
     photos: '3 photos',
     popupsOpen: 0, // the slow Year list was waited for, used, and closed
   });
   assert.equal(await fb.inputValue('#description'), edited);
   const results = await panel.textContent('#fillResults');
-  assert.match(results, /Filled in\s*13/);
+  assert.match(results, /Filled in\s*15/);
   assert.doesNotMatch(results, /Needs a click/);
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   assert.match(await panel.textContent('#photos'), /3 of 3 attached/);

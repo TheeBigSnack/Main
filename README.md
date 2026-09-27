@@ -22,9 +22,9 @@ Chrome will say the extension can read and change data on `www.facebook.com/mark
 4. **Ready to post** lists pre-owned cars at your store that have photos and a price. Click **Post** on one. The side panel opens and:
    - re-checks the car on the website (still pre-owned, still on the lot, still priced),
    - writes a description from the website's facts, which you can edit,
-   - shows what it will fill in and the two fields only you can answer: **Vehicle condition** and **Title status**.
+   - shows what it will fill in, including **Vehicle condition** and **Title status** from your dealership's defaults (Settings), which you can change on the form.
 5. Click **Open the Marketplace form**. A new tab opens on Facebook's create-vehicle-listing page and the fields fill in, photos included. Anything it couldn't fill is listed in the panel with a copy button.
-6. On Facebook: check every field, choose the condition and title status, then click **Publish** yourself. The panel notices the listing page and asks you to confirm; paste the listing link if it didn't notice. The car moves to **My listings**.
+6. On Facebook: check every field, including condition and title, then click **Publish** yourself. The panel notices the listing page and asks you to confirm; paste the listing link if it didn't notice. The car moves to **My listings**.
 7. Click **Rescan website** any time (once a day is plenty). **To do** shows what to take down (sold, or gone sale-pending), what to reprice (with your listing price next to the website's), and what's new. Click **Updated** or **Taken down** once you've done it on Facebook.
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
@@ -48,6 +48,7 @@ Two unpublished live runs on Sept 27, 2026 filled 12 of 13 fields on the real fo
 - **Your profile follows you.** Name, role, dealership, price basis, note and cap are also kept in Chrome's synced storage, so they come back after clearing a website's data or reloading the extension, and appear on any computer where you're signed in to Chrome. A Lot Sync account shared with your manager is Milestone 4.
 - **VIN check.** The side panel checks each car's VIN before posting: format and check digit, the model year and the manufacturer encoded in it, against what the website says. "Check with NHTSA" fetches the full free government decode (make, model, body, fuel, engine, drive) and lists every difference. Chrome asks for permission to reach vpic.nhtsa.dot.gov the first time. The VIN never changes what gets posted by itself; it flags what to look at.
 - **Price to post**: the website's main price (on this site it includes the $490 doc fee) or the price before fees. The price note explains it in every description; a note is suggested from what the website's prices show.
+- **Listing defaults**: title status (Clean by default) and vehicle condition (Very good by default) are filled in on every listing. A car whose website text mentions rebuilt, salvage or a lien gets no title default and a warning instead. These are statements about each car that your dealership stands behind; choose "Leave blank" to answer them per car.
 - **Safety**: posts per day per salesperson (default 10). Meta doesn't publish its limits; this is a safety setting, not a guarantee.
 - **Description writer**: off by default. With the rewrite service running (see `backend/README.md`), first drafts come from Claude. Either way every draft is checked: every number must be on the website, no banned claims ("no accidents", "best price in town"), the dealership must be named, 60 to 120 words.
 

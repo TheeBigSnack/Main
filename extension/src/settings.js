@@ -3,6 +3,7 @@
 
 import { shortLocation } from './normalize.js';
 import { DEFAULT_DAILY_CAP } from './cap.js';
+import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 
 export const SETTINGS_VERSION = 2;
 
@@ -29,6 +30,9 @@ export function withDefaults(settings, site = {}) {
   const sp = s.salesperson || {};
   const d = s.dealer || {};
   const rw = s.rewrite || {};
+  const ld = s.defaults || {};
+  // '' means "leave blank on the form"; anything unknown falls back to the default
+  const pickDefault = (value, allowed, fallback) => (value === '' ? '' : allowed.includes(value) ? value : fallback);
   return {
     version: SETTINGS_VERSION,
     myStores,
@@ -43,6 +47,11 @@ export function withDefaults(settings, site = {}) {
     priceNote: typeof s.priceNote === 'string' ? s.priceNote : '',
     dailyCap: Number.isFinite(s.dailyCap) && s.dailyCap > 0 ? Math.floor(s.dailyCap) : DEFAULT_DAILY_CAP,
     rewrite: { enabled: Boolean(rw.enabled), endpoint: String(rw.endpoint || ''), key: String(rw.key || '') },
+    // the dealership's answers for the two form fields the website can't give
+    defaults: {
+      titleStatus: pickDefault(ld.titleStatus, TITLE_STATUSES, DEFAULT_LISTING_DEFAULTS.titleStatus),
+      condition: pickDefault(ld.condition, CONDITIONS, DEFAULT_LISTING_DEFAULTS.condition),
+    },
   };
 }
 
@@ -62,6 +71,7 @@ export function profileFrom(settings) {
     basis: s.basis,
     priceNote: s.priceNote,
     dailyCap: s.dailyCap,
+    defaults: s.defaults,
     rewrite: { enabled: s.rewrite.enabled, endpoint: s.rewrite.endpoint },
     savedAt: new Date().toISOString(),
   };

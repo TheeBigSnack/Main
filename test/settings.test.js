@@ -13,6 +13,10 @@ test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () =>
   assert.equal(s.priceNote, '');
   assert.equal(s.dailyCap, 10);
   assert.deepEqual(s.rewrite, { enabled: false, endpoint: '', key: '' });
+  assert.deepEqual(s.defaults, { titleStatus: 'Clean', condition: 'Very good' });
+  // "leave blank" is kept; nonsense falls back
+  assert.deepEqual(withDefaults({ defaults: { titleStatus: '', condition: 'Excellent' } }).defaults, { titleStatus: '', condition: 'Excellent' });
+  assert.deepEqual(withDefaults({ defaults: { titleStatus: 'Spotless', condition: 42 } }).defaults, { titleStatus: 'Clean', condition: 'Very good' });
 });
 
 test('bad input becomes safe defaults', () => {

@@ -5,6 +5,7 @@ import { scanInventoryInPage } from './src/scan.js';
 import { findBoilerplate } from './src/description.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -348,6 +349,8 @@ function viewMine(l) {
 
 const field = (label, name, value, attrs = 'type="text"') =>
   `<label class="field"><span class="k">${esc(label)}</span><input name="${name}" value="${esc(value)}" ${attrs} /></label>`;
+const choices = (list, current) =>
+  `<option value="" ${current === '' ? 'selected' : ''}>Leave blank</option>` + list.map((o) => `<option value="${esc(o)}" ${o === current ? 'selected' : ''}>${esc(o)}</option>`).join('');
 
 function viewSettings() {
   const entries = Object.values(state.snapshot?.vehicles || {});
@@ -387,6 +390,11 @@ function viewSettings() {
       ${feeNote}
       ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}
       <p class="hint">Honest prices: the listed price always equals the website price. This note explains what it includes.${suggested ? ` Suggested: "${esc(suggested)}"` : ''}</p>
+    </fieldset>
+    <fieldset><legend>Listing defaults</legend>
+      <label class="field"><span class="k">Title status</span><select name="defaultTitleStatus">${choices(TITLE_STATUSES, s.defaults.titleStatus)}</select></label>
+      <label class="field"><span class="k">Vehicle condition</span><select name="defaultCondition">${choices(CONDITIONS, s.defaults.condition)}</select></label>
+      <p class="hint">Filled in on every listing, unless the website's own text says otherwise (a car described as rebuilt or salvage gets no title default). These are statements about each car that your dealership stands behind; the side panel shows them so you can change them on the form.</p>
     </fieldset>
     <fieldset><legend>Safety</legend>
       ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="100"')}
@@ -507,6 +515,7 @@ async function onSettingsSubmit(ev) {
       priceNote: str('priceNote'),
       dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),
       rewrite: { enabled: form.get('rewriteEnabled') === 'on', endpoint: str('rewriteEndpoint'), key: str('rewriteKey') },
+      defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },
     },
     { name: state.siteName }
   );

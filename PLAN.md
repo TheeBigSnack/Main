@@ -17,7 +17,7 @@ Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a 
 
 Scope
 - Chrome side panel with the guided post flow (`extension/sidepanel.*`).
-- One-click post: opens Facebook's create-vehicle-listing page and pre-fills vehicle type, year, make, model, mileage, price, body style, colors, fuel type, transmission, location, description and photos. Title status and condition stay blank and are highlighted.
+- One-click post: opens Facebook's create-vehicle-listing page and pre-fills vehicle type, year, make, model, mileage, price, body style, colors, fuel type, transmission, location, description and photos. Title status and condition are filled from the dealership's defaults in Settings (Clean / Very good; added Sep 27 at the owner's request), shown in the panel as assumptions, and left blank with a warning when the website's own text mentions a branded title.
 - Fresh single-VIN fetch at post time (all photos, description, features) and a second pass through the pre-owned and ready checks before anything is filled.
 - Description source verified on the live site (done Sep 26: the search service's `description` field mixes a lot-wide disclaimer, raw equipment dumps and, on some cars, a real write-up; `features` is a clean list). `description.js` strips text found on 30%+ of the lot, bullets, award lines and equipment dumps.
 - Description rewriter: the template version (`rewriteTemplate.js`) with guardrails (every number in the source, banned phrases, dealer name present, 60–120 words, no shouting, "one owner" only with the Carfax flag); the Claude version through `backend/` once an Anthropic API key exists. The extension only calls the backend when it is switched on in Settings.

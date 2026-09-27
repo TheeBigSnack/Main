@@ -172,7 +172,7 @@ async function openForm({ probeOnly = false } = {}) {
   const box = $('description');
   if (box) state.description = box.value;
   state.guardrails = runGuardrails(state.description, ctx());
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, description: state.description, price: state.price, photos: state.vehicle.photos });
+  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, description: state.description, price: state.price, photos: state.vehicle.photos });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
@@ -382,8 +382,10 @@ function viewBlocked() {
   return `<div class="banner bad">${esc(state.message)}</div><button type="button" class="plain" id="back">Back</button>`;
 }
 
+const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, description: state.description, price: state.price, photos: state.vehicle.photos });
+
 function fieldsTable() {
-  const l = state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, description: state.description, price: state.price, photos: state.vehicle.photos });
+  const l = currentListing();
   const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
   const rows = state.map.fields
     .filter((f) => f.key !== 'description')
@@ -423,9 +425,19 @@ function vinCheckHtml() {
   return html;
 }
 
-function leftBlankHtml() {
-  const l = state.listing || { leftBlank: buildListingData(state.vehicle).leftBlank };
-  return `<section class="highlight" id="leftBlank"><h3>You fill in yourself</h3><ul class="list">${l.leftBlank.map((b) => `<li><b>${esc(b.label)}</b> <span class="why">${esc(b.why)}</span></li>`).join('')}</ul></section>`;
+// The two fields the website can't give: filled from the dealership's
+// defaults (and said so), or left for the person when there is no default or
+// the website's own text says the title is branded.
+function assumptionsHtml() {
+  const l = currentListing();
+  let html = '';
+  if (l.assumed.length) {
+    html += `<section class="highlight" id="assumed"><h3>Filled from your dealership's defaults</h3><ul class="list">${l.assumed.map((b) => `<li><b>${esc(b.label)}</b>: ${esc(b.value)} <span class="why">${esc(b.why)}</span></li>`).join('')}</ul></section>`;
+  }
+  if (l.leftBlank.length) {
+    html += `<section class="highlight" id="leftBlank"><h3>You fill in yourself</h3><ul class="list">${l.leftBlank.map((b) => `<li><b>${esc(b.label)}</b> <span class="why">${esc(b.why)}</span></li>`).join('')}</ul></section>`;
+  }
+  return html;
 }
 
 function carCard() {
@@ -456,11 +468,11 @@ function viewReview() {
   </section>
   <section><h3>What Lot Sync will fill in</h3>${fieldsTable()}</section>
   ${vinCheckHtml()}
-  ${leftBlankHtml()}
+  ${assumptionsHtml()}
   <section>
     <div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>
     <button type="button" class="primary wide" id="openForm" ${cap.reached ? 'disabled' : ''}>Open the Marketplace form</button>
-    <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, choose the two fields above, and click Publish yourself.</p>
+    <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
     <button type="button" class="plain wide" id="checkForm" ${cap.reached ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
     <p class="hint">For the first run: the panel reports which fields it can find on the page, without filling anything. You can fill it in from there.</p>
   </section>`;
@@ -520,7 +532,7 @@ function viewPublish() {
     detect = `<div class="banner info">Waiting for you to click <b>Publish</b> on Facebook…</div>`;
   }
   return `${carCard()}
-  <div class="banner info">The form is filled in. Check every field, choose <b>Vehicle condition</b> and <b>Title status</b>, then click <b>Publish</b> on Facebook yourself.</div>
+  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b> on Facebook yourself.</div>
   <section id="fillResults">
     <h3>Filled in <span class="pill good">${f.filled.length}</span></h3>
     ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildListingData, vehicleKind, normalizeColor, normalizeBodyStyle, normalizeTransmission, normalizeFuelType, locationQuery, locationExpect, STATE_NAMES, LEFT_BLANK } from '../extension/src/listingData.js';
+import { buildListingData, vehicleKind, normalizeColor, normalizeBodyStyle, normalizeTransmission, normalizeFuelType, locationQuery, locationExpect, brandedTitleSignal, STATE_NAMES, TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from '../extension/src/listingData.js';
 import { vehicle } from './helpers.js';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', state: 'PA', zip: '15370' };
@@ -22,11 +22,42 @@ test('the Ram maps to the form fields', () => {
     transmission: 'Automatic',
     location: '15370',
     description: 'Hello.',
+    condition: 'Very good',
+    titleStatus: 'Clean',
   });
   assert.deepEqual(d.missing, []);
   assert.equal(d.photos.length, 1);
-  assert.deepEqual(d.leftBlank.map((b) => b.key), ['condition', 'titleStatus']);
-  assert.equal(LEFT_BLANK.length, 2);
+  assert.deepEqual(d.assumed.map((b) => `${b.key}=${b.value}`), ['condition=Very good', 'titleStatus=Clean']);
+  assert.deepEqual(d.leftBlank, []);
+  assert.deepEqual(DEFAULT_LISTING_DEFAULTS, { titleStatus: 'Clean', condition: 'Very good' });
+  assert.equal(TITLE_STATUSES.length, 5);
+  assert.equal(CONDITIONS.length, 5);
+});
+
+test('title and condition come from the dealership defaults, never from a guess', () => {
+  const v = vehicle('usedNormal');
+  // dealer chose other defaults
+  const d = buildListingData(v, { defaults: { titleStatus: 'Clean', condition: 'Excellent' } });
+  assert.equal(d.fields.condition, 'Excellent');
+  // "leave blank" and unknown values both leave the field for the person
+  const blank = buildListingData(v, { defaults: { titleStatus: '', condition: 'Spotless' } });
+  assert.equal(blank.fields.titleStatus, '');
+  assert.equal(blank.fields.condition, '');
+  assert.deepEqual(blank.leftBlank.map((b) => b.key), ['condition', 'titleStatus']);
+  assert.deepEqual(blank.assumed, []);
+});
+
+test('a branded title in the website text switches the clean-title default off', () => {
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuilt title, runs and drives great.<br>Disclaimer.' }), 'Rebuilt');
+  assert.equal(brandedTitleSignal({ features: ['Salvage Title'] }), 'Salvage');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Fog lights, flood lights on the rack, one owner.' }), '');
+  assert.equal(brandedTitleSignal({}), '');
+  const v = vehicle('usedNormal', { description: 'Previously a rebuilt title vehicle.' });
+  const d = buildListingData(v);
+  assert.equal(d.fields.titleStatus, '');
+  assert.equal(d.fields.condition, 'Very good');
+  assert.equal(d.branded, 'rebuilt');
+  assert.match(d.leftBlank.find((b) => b.key === 'titleStatus').why, /mentions "rebuilt"/);
 });
 
 test('blank values are reported, never guessed', () => {

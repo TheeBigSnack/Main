@@ -18,5 +18,9 @@ test('the form map only ever points at the create page and reads addresses; it h
   assert.equal(FORM_MAP.createUrl, 'https://www.facebook.com/marketplace/create/vehicle');
   assert.notEqual(FORM_MAP.verifiedAgainstFacebook, true, 'never claim the live form is fully verified');
   assert.ok(FORM_MAP.fields.every((f) => Array.isArray(f.name) && f.name.length && f.key && f.label && f.kind));
-  assert.deepEqual(FORM_MAP.neverFill.map((f) => f.key), ['condition', 'titleStatus']);
+  assert.deepEqual(FORM_MAP.neverFill, []);
+  // condition and title are choice fields with Facebook's own wordings
+  const byKey = Object.fromEntries(FORM_MAP.fields.map((f) => [f.key, f]));
+  assert.deepEqual(Object.keys(byKey.condition.options), ['Excellent', 'Very good', 'Good', 'Fair', 'Poor']);
+  assert.deepEqual(Object.keys(byKey.titleStatus.options), ['Clean', 'Rebuilt', 'Salvage', 'Lien', 'Missing']);
 });

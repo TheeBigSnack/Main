@@ -26,6 +26,7 @@ Context: Lot Sync is a Chrome extension that reads a car dealership's own websit
 
 - Federal (FTC Act Section 5, and the FTC's used-car and advertising guidance) and Pennsylvania rules (Automotive Industry Trade Practices, 37 Pa. Code Chapter 301) for price display, documentation-fee disclosure and dealer identification in a Marketplace post. The dealership's website headline price includes a $490 doc fee; the software posts that price with a note "Price includes the $490 doc fee; tax and tags extra." Is that wording right, and what must appear in every listing (dealer name? licence number? "dealer" designation?).
 - Who is liable if a salesperson posts a wrong price or fee statement: the dealer, the salesperson, the software provider? How should the Dealer Subscription Agreement allocate it?
+- The dealership sets a default title status ("Clean") and condition ("Very good") that the software fills in on every listing unless the website's own text mentions a branded title; the salesperson can change it on the form before publishing. Is a dealer-wide default acceptable, and what process should back it (a title check per car, a written dealer policy, a record of who published)?
 
 ## 5. AI-written descriptions
 

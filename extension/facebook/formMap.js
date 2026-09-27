@@ -66,12 +66,20 @@ export const FORM_MAP = Object.freeze({
     { key: 'transmission', label: 'Transmission', kind: 'choice', name: ['^transmission\\b'], options: { Automatic: ['Automatic transmission', 'Automatic'], Manual: ['Manual transmission', 'Manual'] } },
     { key: 'location', label: 'Location', kind: 'typeahead', name: ['^location\\b'] },
     { key: 'description', label: 'Description', kind: 'textarea', name: ['^description\\b'] },
+    // The website can't tell us these two. They come from the dealership's
+    // defaults in Settings (listingData.js), and the panel shows them as such.
+    {
+      key: 'condition', label: 'Vehicle condition', kind: 'choice', name: ['^vehicle condition\\b', '^condition\\b'],
+      options: { Excellent: ['Excellent'], 'Very good': ['Very good', 'Very Good'], Good: ['Good'], Fair: ['Fair'], Poor: ['Poor'] },
+    },
+    {
+      key: 'titleStatus', label: 'Title status', kind: 'choice', name: ['^title status\\b', '^title\\b'],
+      options: { Clean: ['Clean', 'Clean title'], Rebuilt: ['Rebuilt', 'Rebuilt title'], Salvage: ['Salvage', 'Salvage title'], Lien: ['Lien'], Missing: ['Missing', 'Missing title'] },
+    },
   ],
 
-  // Fields Lot Sync must never fill (it can't know them). Any control whose
-  // accessible name matches one of these is off limits to the finder.
-  neverFill: [
-    { key: 'condition', label: 'Vehicle condition', name: ['\\bcondition\\b'] },
-    { key: 'titleStatus', label: 'Title status', name: ['\\btitle status\\b', '\\btitle\\b'] },
-  ],
+  // Controls whose accessible name matches one of these are off limits to the
+  // finder. Empty since the dealership defaults for condition and title were
+  // added; kept so a field can be fenced off again in one line.
+  neverFill: [],
 });
