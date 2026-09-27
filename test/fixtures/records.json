@@ -1,0 +1,174 @@
+{
+  "_about": "Real inventory records captured from ronlewischryslerdodgejeepramwaynesburg.com on 2026-09-26 via the site's own search service. Trimmed to the fields the scanner reads; Carfax links and photo lists shortened.",
+  "usedNormal": {
+    "vin": "1C6RR7FT0KS643289", "stock": "AW132", "type": "Used", "year": 2019, "make": "Ram", "model": "1500 Classic", "trim": "Express",
+    "mileage": 20986,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/used-2019-ram-1500-classic-express-4wd-4d-quad-cab-1c6rr7ft0ks643289/",
+    "status": "publish", "in_transit": "unknown", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-09-21T00:00:00.000Z",
+    "history_report": { "carfax_url": "https://www.carfax.com/vehiclehistory/ar20/jy935L9G5yXWnGxhOKW", "carfax_icon_url": "https://partnerstatic.carfax.com/img/valuebadge/1own.svg", "carfax_oneowner": true },
+    "pricing": { "price": 26673, "our_price": 27163, "internet_price": 26673, "original_price": 26673, "msrp": 0, "original_price_label": "Was" },
+    "media": { "image_count": 3, "images": ["https://vehicle-images.carscommerce.inc/1b31-110011139/1C6RR7FT0KS643289/a0b5fc71cfe5dada0cbaedf3e69883b0.jpg"] },
+    "styles": { "exterior_color": "Blue", "interior_color": "Diesel Gray/Black" },
+    "body_details": { "type": "Trucks" },
+    "mechanical": { "drivetrain": "4WD", "engine": "HEMI 5.7L V8 Multi Displacement VVT", "transmission": "8-Speed Automatic", "fuel_type": "Gasoline Fuel" },
+    "extra_fields": {
+      "readable_type": "Pre-Owned", "title": "Pre-Owned 2019 Ram 1500 Classic Express",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Waynesburg", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Waynesburg",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "Used", "vdp_title": "Pre-Owned 2019 Ram 1500 Classic Express", "status": "", "statusLabel": "",
+        "pricing": { "low": { "label": "Ron Lewis Real Price", "value": "27163" }, "high": { "label": "Was", "value": "26673" }, "savings": { "value": 0 } } }
+    }
+  },
+  "certified": {
+    "vin": "1C4SJVDT7NS142834", "stock": "S6194A", "type": "Certified Used", "year": 2022, "make": "Jeep", "model": "Wagoneer", "trim": "Series III",
+    "mileage": 52402,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/certified-used-2022-jeep-wagoneer-series-iii-4wd-4d-sport-utility-1c4sjvdt7ns142834/",
+    "status": "publish", "in_transit": "unknown", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-06-22T00:00:00.000Z",
+    "history_report": { "carfax_url": "https://www.carfax.com/vehiclehistory/ar20/Yt108lBr4C4u6sPgnBJ", "carfax_icon_url": "https://partnerstatic.carfax.com/img/valuebadge/1own.svg", "carfax_oneowner": true },
+    "pricing": { "price": 37893, "our_price": 38383, "internet_price": 37893, "original_price": 37893, "msrp": 0, "original_price_label": "Was" },
+    "media": { "image_count": 26, "images": ["https://vehicle-images.carscommerce.inc/ee50-110011139/1C4SJVDT7NS142834/01e148596fe1efc8b408f406347141b7.jpg"] },
+    "styles": { "exterior_color": "White", "interior_color": "Black" },
+    "body_details": { "type": "SUVs" },
+    "mechanical": { "drivetrain": "4WD", "engine": "5.7L V8", "transmission": "8-Speed Automatic", "fuel_type": "Gasoline/Mild Electric Hybrid" },
+    "extra_fields": {
+      "readable_type": "Certified Pre-Owned", "title": "Certified Pre-Owned 2022 Jeep Wagoneer Series III",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "Certified Used", "vdp_title": "Certified Pre-Owned 2022 Jeep Wagoneer Series III", "status": "", "statusLabel": "",
+        "pricing": { "low": { "label": "Ron Lewis Real Price", "value": "38383" }, "high": { "label": "Was", "value": "37893" }, "savings": { "value": 0 } } }
+    }
+  },
+  "usedNoCarfax": {
+    "vin": "2C3CDZC96GH308445", "stock": "G6444A", "type": "Used", "year": 2016, "make": "Dodge", "model": "Challenger", "trim": "SRT Hellcat",
+    "mileage": 26319,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/used-2016-dodge-challenger-srt-hellcat-rwd-2d-coupe-2c3cdzc96gh308445/",
+    "status": "publish", "in_transit": "unknown", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-09-25T00:00:00.000Z",
+    "history_report": { "carfax_url": null, "carfax_icon_url": null, "carfax_oneowner": null },
+    "pricing": { "price": 52995, "our_price": 53485, "internet_price": 52995, "original_price": 52995, "msrp": 0, "original_price_label": "Was" },
+    "media": { "image_count": 0, "images": [] },
+    "styles": { "exterior_color": "Black", "interior_color": "Sepia" },
+    "body_details": { "type": "Coupe" },
+    "mechanical": { "drivetrain": "RWD", "engine": "6.2L V8 Supercharged", "transmission": "8-Speed Automatic", "fuel_type": "Gasoline Fuel" },
+    "extra_fields": {
+      "readable_type": "Pre-Owned", "title": "Pre-Owned 2016 Dodge Challenger SRT Hellcat",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Pleasant Hills", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Pleasant Hills",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "Used", "vdp_title": "Pre-Owned 2016 Dodge Challenger SRT Hellcat", "status": "", "statusLabel": "",
+        "pricing": { "low": { "label": "Ron Lewis Real Price", "value": "53485" }, "high": { "label": "Was", "value": "52995" }, "savings": { "value": 0 } } }
+    }
+  },
+  "usedZeroMiles": {
+    "vin": "5FNYG1H78PB014309", "stock": "R1394", "type": "Used", "year": 2023, "make": "Honda", "model": "Pilot", "trim": "Touring",
+    "mileage": 0,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/used-2023-honda-pilot-touring-awd-4d-sport-utility-5fnyg1h78pb014309/",
+    "status": "publish", "in_transit": "unknown", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-09-11T00:00:00.000Z",
+    "history_report": { "carfax_url": "https://www.carfax.com/vehiclehistory/ar20/4AlXhQlAJ-RD69uuhRk", "carfax_icon_url": "https://partnerstatic.carfax.com/img/valuebadge/1own.svg", "carfax_oneowner": true },
+    "pricing": { "price": 41854, "our_price": 42344, "internet_price": 41854, "original_price": 41854, "msrp": 0, "original_price_label": "Was" },
+    "media": { "image_count": 10, "images": ["https://vehicle-images.carscommerce.inc/815e-110011139/5FNYG1H78PB014309/e3052a8b942e19155bce0e85a26cada6.jpg"] },
+    "styles": { "exterior_color": "", "interior_color": "Black" },
+    "body_details": { "type": "SUVs" },
+    "mechanical": { "drivetrain": "AWD", "engine": "3.5L V6 DOHC 24V", "transmission": "10-Speed Automatic", "fuel_type": "Gasoline Fuel" },
+    "extra_fields": {
+      "readable_type": "Pre-Owned", "title": "Pre-Owned 2023 Honda Pilot Touring",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "Used", "vdp_title": "Pre-Owned 2023 Honda Pilot Touring", "status": "", "statusLabel": "",
+        "pricing": { "low": { "label": "Ron Lewis Real Price", "value": "42344" }, "high": { "label": "Was", "value": "41854" }, "savings": { "value": 0 } } }
+    }
+  },
+  "usedNoPhotos": {
+    "vin": "1C6RRFGG7SN698641", "stock": "G6439A", "type": "Used", "year": 2025, "make": "Ram", "model": "1500", "trim": "Tradesman",
+    "mileage": 46874,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/used-2025-ram-1500-tradesman-4wd-4d-crew-cab-1c6rrfgg7sn698641/",
+    "status": "publish", "in_transit": "unknown", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-09-25T00:00:00.000Z",
+    "history_report": { "carfax_url": null, "carfax_icon_url": null, "carfax_oneowner": null },
+    "pricing": { "price": 32995, "our_price": 33485, "internet_price": 32995, "original_price": 32995, "msrp": 0, "original_price_label": "Was" },
+    "media": { "image_count": 0, "images": [] },
+    "styles": { "exterior_color": "White", "interior_color": "Black" },
+    "body_details": { "type": "Trucks" },
+    "mechanical": { "drivetrain": "4WD", "engine": "3.6L V6 24V VVT", "transmission": "8-Speed Automatic", "fuel_type": "Gasoline/Mild Electric Hybrid" },
+    "extra_fields": {
+      "readable_type": "Pre-Owned", "title": "Pre-Owned 2025 Ram 1500 Tradesman",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Pleasant Hills", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Pleasant Hills",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "Used", "vdp_title": "Pre-Owned 2025 Ram 1500 Tradesman", "status": "", "statusLabel": "",
+        "pricing": { "low": { "label": "Ron Lewis Real Price", "value": "33485" }, "high": { "label": "Was", "value": "32995" }, "savings": { "value": 0 } } }
+    }
+  },
+  "usedNoPrice": {
+    "vin": "1C6RR7LG5HS660850", "stock": "TC133A", "type": "Used", "year": 2017, "make": "Ram", "model": "1500", "trim": "Big Horn",
+    "mileage": 94800,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/used-2017-ram-1500-big-horn-4wd-4d-crew-cab-1c6rr7lg5hs660850/",
+    "status": "publish", "in_transit": "unknown", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-09-24T00:00:00.000Z",
+    "history_report": { "carfax_url": "https://www.carfax.com/vehiclehistory/ar20/SqP-fpKoJK67ChUFZXB", "carfax_icon_url": "https://partnerstatic.carfax.com/img/valuebadge/showme.svg", "carfax_oneowner": null },
+    "pricing": { "price": 0, "our_price": 0, "internet_price": 0, "original_price": 0, "msrp": 0, "original_price_label": "Ron Lewis Real Price" },
+    "media": { "image_count": 0, "images": [] },
+    "styles": { "exterior_color": "Gray", "interior_color": "Diesel Gray/Black" },
+    "body_details": { "type": "Trucks" },
+    "mechanical": { "drivetrain": "4WD", "engine": "3.6L V6 24V VVT", "transmission": "8-Speed Automatic", "fuel_type": "Flex Fuel Capability" },
+    "extra_fields": {
+      "readable_type": "Pre-Owned", "title": "Pre-Owned 2017 Ram 1500 Big Horn",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Waynesburg", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Waynesburg",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "Used", "vdp_title": "Pre-Owned 2017 Ram 1500 Big Horn", "status": "", "statusLabel": "",
+        "pricing": { "low": false, "high": { "label": "Ron Lewis Real Price", "value": "Please call for price" }, "savings": { "value": 0 } } }
+    }
+  },
+  "newNormal": {
+    "vin": "1C4RJHBR3V8166889", "stock": "S7044", "type": "New", "year": 2027, "make": "Jeep", "model": "Grand Cherokee", "trim": "Limited",
+    "mileage": 0,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/new-2027-jeep-grand-cherokee-limited-4x4-sport-utility-1c4rjhbr3v8166889/",
+    "status": "publish", "in_transit": "no", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-09-22T00:00:00.000Z",
+    "history_report": { "carfax_url": null, "carfax_icon_url": null, "carfax_oneowner": null },
+    "pricing": { "price": 52595, "our_price": 53085, "internet_price": 52595, "original_price": 52595, "msrp": 52595, "original_price_label": "MSRP" },
+    "media": { "image_count": 15, "images": ["https://vehicle-images.carscommerce.inc/6447-110011139/1C4RJHBR3V8166889/987e02c0c64c3a8d8b214b707e7d1483.jpg"] },
+    "styles": { "exterior_color": "Steel Blue", "interior_color": "Global Black w/Capri Leatherette Seats or Capri Leatherette" },
+    "body_details": { "type": "SUVs" },
+    "mechanical": { "drivetrain": "4x4", "engine": "2.0L Hurricane 4 Turbo with ESS", "transmission": "Automatic", "fuel_type": "Gasoline Fuel" },
+    "extra_fields": {
+      "readable_type": "New", "title": "New 2027 Jeep Grand Cherokee Limited",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "New", "vdp_title": "New 2027 Jeep Grand Cherokee Limited", "status": "", "statusLabel": "",
+        "pricing": { "low": { "label": "Ron Lewis Real Price", "value": "53085" }, "high": { "label": "MSRP", "value": "52595" }, "savings": { "value": 0 } } }
+    }
+  },
+  "newHighMiles": {
+    "vin": "1C4RJKAGXR8536609", "stock": "Q4269", "type": "New", "year": 2024, "make": "Jeep", "model": "Grand Cherokee L", "trim": "Laredo",
+    "mileage": 29296,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/new-2024-jeep-grand-cherokee-l-laredo-4wd-4d-sport-utility-1c4rjkagxr8536609/",
+    "status": "publish", "in_transit": "unknown", "is_demo": false, "is_loaner": false, "date_in_stock": "2024-11-15T00:00:00.000Z",
+    "history_report": { "carfax_url": null, "carfax_icon_url": null, "carfax_oneowner": null },
+    "pricing": { "price": 33295, "our_price": 0, "internet_price": 33295, "original_price": 0, "msrp": 0, "original_price_label": "MSRP" },
+    "media": { "image_count": 26, "images": ["https://vehicle-images.carscommerce.inc/7ffe-110011139/1C4RJKAGXR8536609/fb2130d733cef40a32672a9df5b3f251.jpg"] },
+    "styles": { "exterior_color": "Gray", "interior_color": "Black" },
+    "body_details": { "type": "SUVs" },
+    "mechanical": { "drivetrain": "4WD", "engine": "3.6L V6 24V VVT", "transmission": "8-Speed Automatic", "fuel_type": "Gasoline Fuel" },
+    "extra_fields": {
+      "readable_type": "New", "title": "New 2024 Jeep Grand Cherokee L Laredo",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Cranberry",
+      "availability_rt": "In-Stock", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "New", "vdp_title": "New 2024 Jeep Grand Cherokee L Laredo", "status": "", "statusLabel": "",
+        "pricing": { "low": false, "high": { "label": "MSRP", "value": "Please call for price" }, "savings": { "value": 0 } } }
+    }
+  },
+  "newInTransit": {
+    "vin": "1C4RJKAR9V8157967", "stock": "", "type": "New", "year": 2027, "make": "Jeep", "model": "Grand Cherokee L", "trim": "Laredo",
+    "mileage": 0,
+    "vdp_url": "https://www.ronlewischryslerdodgejeepramwaynesburg.com/inventory/new-2027-jeep-grand-cherokee-l-laredo-4x4-sport-utility-1c4rjkar9v8157967/",
+    "status": "publish", "in_transit": "yes", "is_demo": false, "is_loaner": false, "date_in_stock": "2026-09-26T00:00:00.000Z",
+    "history_report": { "carfax_url": null, "carfax_icon_url": null, "carfax_oneowner": null },
+    "pricing": { "price": 0, "our_price": 54620, "internet_price": 0, "original_price": 54130, "msrp": 54130, "original_price_label": "MSRP" },
+    "media": { "image_count": 14, "images": ["https://vehicle-images.carscommerce.inc/a734-110011139/1C4RJKAR9V8157967/b562b4b20dc3712626eb4064a1c01283.jpg"] },
+    "styles": { "exterior_color": "Sting-Gray Clearcoat", "interior_color": "Global Black" },
+    "body_details": { "type": "SUVs" },
+    "mechanical": { "drivetrain": "4x4", "engine": "Hurricane 2L I-4 port/direct injection, DOHC, intercooled turbo, regular gasoline, engine with 324HP", "transmission": "Automatic", "fuel_type": "Gasoline" },
+    "extra_fields": {
+      "readable_type": "New", "title": "New 2027 Jeep Grand Cherokee L Laredo",
+      "meta_location": "Ron Lewis Chrysler Dodge Jeep Ram Waynesburg", "location_rt": "Ron Lewis Chrysler Dodge Jeep Ram Waynesburg",
+      "availability_rt": "In-Transit", "our_price_label": "Ron Lewis Real Price",
+      "lightning": { "inventoryType": "New", "vdp_title": "New 2027 Jeep Grand Cherokee L Laredo", "status": "", "statusLabel": "",
+        "pricing": { "low": { "label": "Ron Lewis Real Price", "value": "54620" }, "high": { "label": "MSRP", "value": "54130" }, "savings": { "value": 0 } } }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Lot Sync</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <div class="title">Lot Sync</div>
+        <div class="site" id="site">Open your dealership's website, then scan.</div>
+      </div>
+      <div class="top-actions">
+        <button id="settingsBtn" class="ghost" type="button" aria-pressed="false">Settings</button>
+        <button id="scan" class="primary" type="button">Scan website</button>
+      </div>
+    </header>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Views"></nav>
+    <main id="panel" class="panel"></main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
