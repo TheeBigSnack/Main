@@ -18,6 +18,13 @@
 import http from 'node:http';
 
 let publishClicks = 0;
+// Like Facebook restoring a saved draft: after GET /prefill?name=honda the
+// create page opens already holding another car.
+const PREFILLS = {
+  none: null,
+  honda: { year: '2020', make: 'Honda', model: 'Accord EX-L', vin: '1HGCV1F30LA000000', mileage: '31200', description: 'Low miles, garage kept. Serious buyers only.' },
+};
+let prefill = null;
 
 const opts = (list) => '<option value=""></option>' + list.map((o) => `<option>${o}</option>`).join('');
 const COLORS = ['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Grey', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white', 'Other'];
@@ -112,6 +119,17 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOpen(); });
   document.addEventListener('mousedown', (e) => { if (openList && !e.target.closest('[role=listbox],[role=combobox]')) closeOpen(); });
+  // A restored draft: the page opens with another car already in the form
+  // (applied at load, before anything else can touch the form).
+  (function applyPrefill(p) {
+    if (!p) return;
+    const setCombo = (id, value) => { const c = document.getElementById(id); c.textContent = value; c.dataset.value = value; };
+    setCombo('year', p.year);
+    document.getElementById('makeWrap').hidden = false;
+    setCombo('make', p.make);
+    for (const id of ['model', 'vin', 'mileage', 'description']) document.getElementById(id).value = p[id] || '';
+    document.body.dataset.prefilled = '1';
+  })(__PREFILL__);
   // The price box reformats digits with thousands separators, like the real one.
   document.getElementById('price').addEventListener('input', (e) => {
     const digits = e.target.value.replace(/\\D/g, '');
@@ -141,12 +159,21 @@ export function startMockMarketplace(port = 0) {
       res.writeHead(200, { 'content-type': 'text/plain' });
       return res.end(String(publishClicks));
     }
+    if (url.pathname === '/prefill') {
+      prefill = PREFILLS[url.searchParams.get('name')] || null;
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      return res.end(prefill ? 'prefill on' : 'prefill off');
+    }
+    if (url.pathname === '/prefill.json') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(prefill));
+    }
     if (/^\/marketplace\/item\/\d+\/?$/.test(url.pathname)) {
       res.writeHead(200, { 'content-type': 'text/html' });
       return res.end('<!doctype html><html><head><meta charset="utf-8"><title>Your listing (mock)</title></head><body><h1>Listing 424242 is live (mock)</h1></body></html>');
     }
     res.writeHead(200, { 'content-type': 'text/html' });
-    res.end(PAGE);
+    res.end(PAGE.replace('__PREFILL__', JSON.stringify(prefill)));
   });
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
 }

@@ -232,8 +232,9 @@ function postButton(vin, { canPost = true } = {}) {
   if (state.drafts[vin]) {
     return `<span class="actions"><span class="pill warn" title="Saved as a draft on Facebook; publish it there, then mark it posted">Draft on Facebook</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
+  const capReached = capStatus(state.posted, state.settings?.dailyCap).reached;
   const post = canPost
-    ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" title="Pre-fill the Marketplace form in the side panel. You click Publish.">Post</button>`
+    ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${capReached ? 'disabled' : ''} title="${capReached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
     : '';
   return `<span class="actions">${post}<button type="button" class="small" data-action="post" data-vin="${esc(vin)}" title="Already listed it yourself? Mark it posted so rescans watch it.">Mark posted</button></span>`;
 }
@@ -319,15 +320,36 @@ function queueStatusHtml() {
   return `<div class="banner info queue" id="queueStatus"><b>${esc(describeQueue(q))}</b>${next ? ` · next: ${esc(name)}` : ''}<div class="toolbar">${buttons}</div></div>`;
 }
 
+const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
+
 function viewReady(l) {
   const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. Click <b>Post</b> on one car, or tick several and <b>Post</b> them as a queue: the side panel pre-fills each form and you click Publish on each. Listed one by hand? Click <b>Mark posted</b>.</p>`;
   if (!l.ready.length) return lead + queueStatusHtml() + empty('No cars are ready right now.');
   const cap = capStatus(state.posted, state.settings?.dailyCap);
   const pickable = l.ready.filter((e) => !state.posted[e.vin]);
-  const toolbar = pickable.length > 1
-    ? `<div class="toolbar"><label><input type="checkbox" id="pickAll" /> <span>Select all</span></label><button type="button" class="small go" data-action="queue" id="queueBtn" disabled>Post selected</button><span class="hint" id="pickHint">${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.</span></div>`
+  const capBanner = cap.reached ? `<div class="banner warn" id="capReached">${esc(capText(cap))}</div>` : '';
+  const toolbar = pickable.length > 1 && !cap.reached
+    ? `<div class="toolbar"><label><input type="checkbox" id="pickAll" /> <span>Select the next ${Math.min(cap.remaining, pickable.length)}</span></label><button type="button" class="small go" data-action="queue" id="queueBtn" disabled>Post selected</button><span class="hint" id="pickHint">${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.</span></div>`
     : '';
-  return lead + queueStatusHtml() + toolbar + rows(l.ready.map((e) => row(e, { sub: facts(e), right: money(price(e)), action: postButton(e.vin), pick: !state.posted[e.vin] })));
+  return lead + queueStatusHtml() + capBanner + toolbar + rows(l.ready.map((e) => row(e, { sub: facts(e), right: money(price(e)), action: postButton(e.vin), pick: !state.posted[e.vin] && !cap.reached })));
+}
+
+// Ticking: never more than the day's remaining posts. "Select all" takes the
+// first N cars from the top, where N is what's left today.
+function onPickChange(target) {
+  const cap = capStatus(state.posted, state.settings?.dailyCap);
+  const boxes = [...document.querySelectorAll('.pick')];
+  if (target.id === 'pickAll') {
+    boxes.forEach((box, i) => { box.checked = target.checked && i < cap.remaining; });
+    if (target.checked && boxes.length > cap.remaining) setStatus(`Selected the first ${cap.remaining}: that's all that's allowed today.`);
+  } else if (target.checked && boxes.filter((b) => b.checked).length > cap.remaining) {
+    target.checked = false;
+    setStatus(`Only ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.`, 'error');
+  }
+  const picked = boxes.filter((b) => b.checked).length;
+  const all = $('pickAll');
+  if (all) all.checked = picked > 0 && picked === Math.min(cap.remaining, boxes.length);
+  updateQueueButton();
 }
 
 function updateQueueButton() {
@@ -492,7 +514,7 @@ async function onPanelClick(ev) {
       if (!entry || entry.decision !== DECISION.READY || !state.tab) return;
       const cap = capStatus(state.posted, state.settings?.dailyCap);
       if (cap.reached) {
-        setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+        setStatus(capText(cap), 'error');
         return;
       }
       // Must run straight from the click (a user gesture) or Chrome won't open the panel.
@@ -624,8 +646,7 @@ async function init() {
   $('panel').addEventListener('click', onPanelClick);
   $('panel').addEventListener('submit', onSettingsSubmit);
   $('panel').addEventListener('change', (ev) => {
-    if (ev.target.id === 'pickAll') for (const box of document.querySelectorAll('.pick')) box.checked = ev.target.checked;
-    if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) updateQueueButton();
+    if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) onPickChange(ev.target);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     // the side panel moves the queue and the posted list along; keep up

@@ -129,6 +129,8 @@ try {
   await panel.screenshot({ path: join(shots, 'queue-2-car1-filled.png'), fullPage: true });
 
   // ---- 3. The person clicks Publish on car 1; the panel records it and loads car 2 ----
+  // Car 2's form opens already holding another car, like Facebook restoring a draft.
+  await dealer.request.get(`${marketOrigin}/prefill?name=honda`);
   const fb2Promise = context.waitForEvent('page', { timeout: 40000 });
   await fb1.click('#publish');
   const fb2 = watch(await fb2Promise);
@@ -136,9 +138,24 @@ try {
   await panel.waitForSelector('#confirmPosted', { timeout: 40000 });
   await panel.waitForSelector('#photos.done', { timeout: 30000 });
   assert.match(await panel.textContent('#queueBar'), /1 posted/);
-  assert.equal(await fb2.inputValue('#vin'), WAGONEER);
-  assert.equal(await fb2.evaluate(() => document.getElementById('year').dataset.value), '2022');
-  assert.equal(await fb2.evaluate(() => document.getElementById('make').dataset.value), 'Jeep');
+  // every field shows the Wagoneer, not the restored Honda
+  const car2 = await fb2.evaluate(() => ({
+    prefilled: document.body.dataset.prefilled,
+    year: document.getElementById('year').dataset.value,
+    make: document.getElementById('make').dataset.value,
+    model: document.getElementById('model').value,
+    vin: document.getElementById('vin').value,
+    mileage: document.getElementById('mileage').value,
+    description: document.getElementById('description').value.slice(0, 40),
+  }));
+  assert.deepEqual(car2, { prefilled: '1', year: '2022', make: 'Jeep', model: 'Wagoneer Series III', vin: WAGONEER, mileage: '52402', description: '2022 Jeep Wagoneer Series III with 52,40' });
+  // and the panel says the form had another car in it
+  const warning = await panel.textContent('#preexisting');
+  assert.match(warning, /already held another vehicle/);
+  assert.match(warning, /Year "2020"[\s\S]*Make "Honda"[\s\S]*Model "Accord EX-L"[\s\S]*VIN "1HGCV1F30LA000000"/);
+  assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
+  await panel.screenshot({ path: join(shots, 'queue-2b-restored-draft-warning.png'), fullPage: true });
+  await dealer.request.get(`${marketOrigin}/prefill?name=none`);
 
   // pause and resume keep the place
   await panel.click('#queuePause');
@@ -165,6 +182,22 @@ try {
   await popup.click('button[data-action="clearQueue"]');
   assert.doesNotMatch(await popup.textContent('.panel'), /Queue finished/);
   await popup.screenshot({ path: join(shots, 'queue-4-popup.png') });
+
+  // ---- 6. At the daily cap nothing more can be selected or posted ----
+  await popup.evaluate(async (o) => {
+    const k = `settings:${o}`;
+    const s = (await chrome.storage.local.get(k))[k];
+    s.dailyCap = 1; // one post was made today
+    await chrome.storage.local.set({ [k]: s });
+  }, origin);
+  await popup.close();
+  popup = await openPopup();
+  await tab(popup, 'ready').click();
+  assert.match(await popup.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/);
+  assert.equal(await popup.locator('.pick').count(), 0, 'no boxes to tick');
+  assert.equal(await popup.locator('#queueBtn').count(), 0);
+  assert.equal(await popup.locator('button[data-action="openPost"]:not([disabled])').count(), 0, 'Post buttons are disabled');
+  await popup.screenshot({ path: join(shots, 'queue-5-cap-reached.png') });
   await popup.close();
   await panel.close();
 
@@ -175,7 +208,7 @@ try {
     console.error('Panel status:', await panelRef.textContent('#status').catch(() => '(none)'));
     console.error('Panel text:', (await panelRef.textContent('#panel').catch(() => '')).replace(/\s+/g, ' ').slice(0, 700));
     await panelRef.screenshot({ path: join(shots, 'queue-failure.png'), fullPage: true }).catch(() => {});
-    console.error('Pages:', context.pages().map((p) => p.url()));
+    console.error('Pages:', context.pages().map((p) => p.url()).join(' | '));
     console.error('Saved flow:', await panelRef.evaluate(async (o) => {
       const all = await chrome.storage.local.get(null);
       const flow = all[`postFlow:${o}`] || {};

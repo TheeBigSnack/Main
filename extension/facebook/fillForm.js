@@ -193,6 +193,26 @@ export async function fillFormInPage(map, data) {
     return accepted(el.value, value);
   }
 
+  // What a control shows right now. Used to notice a form that already holds
+  // another car (Facebook restores drafts) and to verify each field after it
+  // is filled: the report says what the form shows, not what was sent.
+  const PLACEHOLDER = /^(select|choose|pick|none|add|enter|type|search)\b/i;
+  function displayed(el, spec) {
+    if (!el) return '';
+    let t = '';
+    if (el.tagName === 'SELECT') t = el.selectedIndex >= 0 && el.value !== '' ? text(el.options[el.selectedIndex]) : '';
+    else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') t = el.type === 'checkbox' ? (el.checked ? 'checked' : '') : String(el.value || '');
+    else if (el.getAttribute('role') === 'checkbox' || el.getAttribute('role') === 'switch') t = el.getAttribute('aria-checked') === 'true' ? 'checked' : '';
+    else if (el.isContentEditable) t = text(el);
+    else {
+      t = text(el); // a dropdown control shows its label and, once chosen, the value
+      const label = spec && spec.label ? spec.label : '';
+      if (label && t.toLowerCase().startsWith(label.toLowerCase())) t = t.slice(label.length).trim();
+    }
+    if (!t || PLACEHOLDER.test(t) || (spec && norm(t) === norm(spec.label))) return '';
+    return t.trim();
+  }
+
   function pickOption(options, wanted) {
     const w = norm(wanted);
     if (!w) return null;
@@ -293,8 +313,21 @@ export async function fillFormInPage(map, data) {
 
   // skipped: things that are not failures (a checkbox left as it is, an
   // optional field this form doesn't have)
-  const result = { url: location.href, filled: [], partial: [], blocked: [], skipped: [], photoLimit: readPhotoLimit() };
+  const result = { url: location.href, filled: [], partial: [], blocked: [], skipped: [], preexisting: [], photoLimit: readPhotoLimit() };
   const fields = (data && data.fields) || {};
+
+  // Anything already in the form that is not ours: another car, most likely
+  // a draft Facebook restored. Reported so nothing of it is published by mistake.
+  for (const spec of map.fields) {
+    if (spec.kind === 'checkbox') continue;
+    const el = findFieldNow(spec);
+    const shown = el ? displayed(el, spec) : '';
+    const ours = fields[spec.key] === null || fields[spec.key] === undefined ? '' : String(fields[spec.key]);
+    if (shown && norm(shown) !== norm(ours) && !(ours && norm(shown).includes(norm(ours)))) {
+      result.preexisting.push({ key: spec.key, label: spec.label, shown: shown.slice(0, 60) });
+    }
+  }
+
   for (const spec of map.fields) {
     const raw = fields[spec.key];
     const entry = { key: spec.key, label: spec.label, value: raw === null || raw === undefined ? '' : String(raw) };
@@ -317,14 +350,24 @@ export async function fillFormInPage(map, data) {
         else result.blocked.push({ ...entry, reason: r.reason });
       } else if (spec.kind === 'choice' || (spec.kind === 'either' && isDropdown(el))) {
         const wantedList = (spec.options && spec.options[entry.value]) || [entry.value];
+        const before = displayed(el, spec);
         const r = await choose(el, wantedList);
-        if (r.ok) result.filled.push({ ...entry, shown: r.chosen });
-        else result.blocked.push({ ...entry, reason: r.reason });
+        if (!r.ok) {
+          result.blocked.push({ ...entry, reason: r.reason });
+        } else {
+          // Verify by reading the control back. A control that never shows
+          // its value can't be verified; say so instead of assuming.
+          await sleep(100);
+          const after = displayed(el, spec);
+          if (after && norm(after).includes(norm(r.chosen))) result.filled.push({ ...entry, shown: after });
+          else if (after && after !== before) result.blocked.push({ ...entry, reason: `chose "${r.chosen}" but the form shows "${after.slice(0, 40)}"` });
+          else result.filled.push({ ...entry, shown: r.chosen, note: "couldn't read it back; check it on the form" });
+        }
       } else if (spec.kind === 'typeahead') {
         const r = await typeahead(el, entry.value, data && data.match && data.match[spec.key]);
         (r.partial ? result.partial : result.filled).push({ ...entry, note: r.note, shown: r.chosen });
       } else if (setText(el, entry.value)) {
-        result.filled.push({ ...entry, shown: el.value !== undefined ? el.value : undefined });
+        result.filled.push({ ...entry, shown: el.value !== undefined ? String(el.value) : text(el) });
       } else {
         const shows = el.value !== undefined ? el.value : text(el);
         result.blocked.push({ ...entry, reason: `the page didn't accept the text (it shows "${String(shows).slice(0, 40)}")` });
@@ -335,6 +378,18 @@ export async function fillFormInPage(map, data) {
     await sleep(50);
   }
   await closePopups(null);
+  // Final read-back of every text field: what the form shows must be ours.
+  for (const entry of [...result.filled]) {
+    const spec = map.fields.find((f) => f.key === entry.key);
+    if (!spec || spec.kind === 'checkbox' || spec.kind === 'choice' || spec.kind === 'typeahead') continue;
+    const el = findFieldNow(spec);
+    if (!el) continue;
+    const shown = displayed(el, spec);
+    if (shown && !accepted(shown, entry.value)) {
+      result.filled.splice(result.filled.indexOf(entry), 1);
+      result.blocked.push({ ...entry, reason: `the form shows "${shown.slice(0, 40)}" instead` });
+    }
+  }
   return result;
 }
 

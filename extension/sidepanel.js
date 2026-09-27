@@ -664,6 +664,10 @@ function photosHtml() {
 function viewPublish() {
   const f = state.fill || { filled: [], partial: [], blocked: [], skipped: [] };
   const skipped = f.skipped || [];
+  const pre = f.preexisting || [];
+  const preexisting = pre.length
+    ? `<div class="banner bad" id="preexisting"><b>This form already held another vehicle before Lot Sync filled it:</b> ${pre.map((p) => `${esc(p.label)} "${esc(p.shown)}"`).join(', ')}. That is probably a draft Facebook restored. Lot Sync replaced the fields it manages (check each one below), but photos and anything else from that draft may still be on the form. Remove them, or discard the draft on Facebook and click <b>Fill again</b>, before you publish.</div>`
+    : '';
   const d = state.detected;
   let detect = '';
   if (d && (d.status === 'listing' || d.status === 'probably')) {
@@ -677,10 +681,11 @@ function viewPublish() {
     ? `<button type="button" class="primary" id="confirmPosted">It's posted, next car</button><button type="button" class="plain" id="savedDraft">Saved as draft, next car</button><button type="button" class="plain" id="skipCar">Skip, next car</button>`
     : `<button type="button" class="primary" id="confirmPosted">It's posted, record it</button><button type="button" class="plain" id="notPosted">It didn't post</button>`;
   return `${carCard()}
+  ${preexisting}
   <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When it posts, the next car loads by itself.' : ''}</div>
   <section id="fillResults">
-    <h3>Filled in <span class="pill good">${f.filled.length}</span></h3>
-    ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}
+    <h3>Filled in <span class="pill good">${f.filled.length}</span> <span class="why">as the form shows them</span></h3>
+    ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}${x.note ? ` <span class="why">${esc(x.note)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}
     ${f.partial.length ? `<h3>Needs a click <span class="pill warn">${f.partial.length}</span></h3><ul class="list">${f.partial.map((x) => `<li>${esc(x.label)}: ${esc(x.value)} <span class="why">${esc(x.note || '')}</span></li>`).join('')}</ul>` : ''}
     ${skipped.length ? `<p class="hint">Left alone: ${skipped.map((x) => `${esc(x.label)} (${esc(x.reason)})`).join('; ')}.</p>` : ''}
   </section>
