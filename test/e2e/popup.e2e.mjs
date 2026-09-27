@@ -7,11 +7,12 @@
 import { chromium } from 'playwright';
 import { cpSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 
-const root = resolve(new URL('../..', import.meta.url).pathname);
+const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
@@ -26,14 +27,19 @@ writeFileSync(join(extDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
 const server = await startMockSite();
 const siteUrl = `http://127.0.0.1:${server.address().port}/used-vehicles/`;
+// 'chromium' is Playwright's own build in new headless mode, which loads
+// unpacked extensions. LOTSYNC_E2E_CHANNEL can point at another Chromium
+// build, but note that branded Google Chrome and Edge 137+ ignore
+// --load-extension, so they can't run this test.
 const context = await chromium.launchPersistentContext(join(tmpdir(), 'lot-sync-profile-' + Date.now()), {
-  channel: 'chromium',
+  channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 640 },
 });
 
 const errors = [];
+let popup;
 try {
   // Find the extension's id from the extensions page
   const ext = await context.newPage();
@@ -64,7 +70,7 @@ try {
   const tab = (p, name) => p.locator(`.tabs button[data-view="${name}"]`);
 
   // ---- Day 1: first scan ----
-  let popup = await openPopup();
+  popup = await openPopup();
   await popup.click('#scan');
   await popup.waitForSelector('.banner.info');
   // 6 used cars in the fixtures; new cars aren't even requested
@@ -125,6 +131,15 @@ try {
 
   assert.deepEqual(errors, [], 'no console errors');
   console.log('E2E passed. Screenshots in test/e2e/screenshots/');
+} catch (e) {
+  // Say what the popup was showing, so a failure is diagnosable from the log.
+  if (popup && !popup.isClosed()) {
+    console.error('Popup status:', await popup.textContent('#status').catch(() => '(none)'));
+    console.error('Popup panel:', (await popup.textContent('#panel').catch(() => '')).slice(0, 400));
+    await popup.screenshot({ path: join(shots, 'failure.png') }).catch(() => {});
+  }
+  console.error('Console errors:', errors);
+  throw e;
 } finally {
   await context.close();
   server.close();

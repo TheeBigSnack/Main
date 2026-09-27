@@ -95,6 +95,15 @@ npm run test:e2e      # both e2e tests: the popup/rescan flow and the post flow,
 
 Never run tests against the real facebook.com. The post e2e uses `test/e2e/mock-marketplace.mjs`, a stand-in form with the same field names, and the test itself clicks Publish in place of the salesperson.
 
+The e2e tests need Playwright's own Chromium build (about 450 MB unpacked): branded Google Chrome and Edge 137+ ignore `--load-extension`, so they can't run them. If your system drive is tight, keep the browser and the throwaway test profiles elsewhere:
+
+```
+set PLAYWRIGHT_BROWSERS_PATH=D:\ms-playwright
+set TEMP=D:\lotsync-tmp
+npx playwright install chromium
+npm run test:e2e
+```
+
 Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan: `PLAN.md`.
 
 | File | What it does |

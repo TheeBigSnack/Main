@@ -44,6 +44,32 @@ export const SCENARIOS = {
 
 let current = 'day1';
 
+// The real site's `description` field mixes a lot-wide disclaimer, feature
+// bullets, and (on some cars) a genuine write-up; `features` is a clean list.
+// The fixtures were captured without those fields, so they're added here.
+const DISCLAIMER =
+  'Ron Lewis Real Price includes all costs to be paid by a consumer except for licensing costs, registration fees and taxes. Documentation fee of $490 is not included. All loans are subject to bank approval.';
+const EXTRA = {
+  [fx.usedNormal.vin]: {
+    features: ['4WD', 'Backup Camera', 'Bluetooth', 'Keyless Entry', 'Tow Package', 'Power Windows', 'Cruise Control'],
+    narrative: 'This 2019 Ram 1500 Classic Express Quad Cab pairs the HEMI 5.7L V8 with 4WD and an 8-Speed Automatic.',
+  },
+};
+// Photo URLs point back at this mock server (the real ones are on the dealer's image host).
+function enrich(r, origin) {
+  const c = clone(r);
+  const x = EXTRA[c.vin] || { features: ['Power Windows', 'Cruise Control'], narrative: '' };
+  c.features = x.features;
+  c.description =
+    (x.narrative
+      ? `${x.narrative}<br>- HEMI 5.7L V8 Multi Displacement VVT Engine<br>- 8-Speed Automatic Transmission with 4WD<br>`
+      : 'Recent Arrival! Air Conditioning, Power Steering, Power Windows, Power Locks, Cruise Control, Tilt Wheel, AM/FM Stereo.<br>') + DISCLAIMER;
+  const n = Number(c.media && c.media.image_count) || 0;
+  c.media = { image_count: n, images: Array.from({ length: n }, (_, i) => `${origin}/photo/${c.vin}/${i + 1}.png`) };
+  return c;
+}
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <title>Used Vehicles for Sale Near Washington | Ron Lewis Chrysler Dodge Jeep Ram Waynesburg</title>
 <meta property="og:site_name" content="Ron Lewis Chrysler Dodge Jeep Ram Waynesburg">
@@ -66,8 +92,13 @@ export function startMockSite(port = 0) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/inventory.json') {
+      const origin = 'http://' + req.headers.host;
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify(SCENARIOS[current]()));
+      return res.end(JSON.stringify(SCENARIOS[current]().map((r) => enrich(r, origin))));
+    }
+    if (url.pathname.startsWith('/photo/')) {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      return res.end(PNG);
     }
     if (url.pathname === '/scenario') {
       current = url.searchParams.get('name') || 'day1';
