@@ -19,6 +19,7 @@ Added
 - CLAUDE.md, PLAN.md, `legal/` drafts (8 files), backend README, `.gitignore`.
 
 Fixed
+- Fill code, from the first live run on the real form (2026-09-27): a dropdown whose option list is drawn slowly (Facebook's Year list) was given up on after 2 seconds, then opened late and stayed open, so every later dropdown click only closed it and the page-wide option lookup kept seeing the year list. Dropdowns are now handled one at a time: close anything open, open with real pointer events, wait up to 6 seconds for that control's own popup (`aria-controls`, or the popup that newly appeared), choose inside it, close it. A reformatted number ("36,603" for "36603") now counts as accepted. Fields are also found by their label anywhere in the accessible name as a second chance. The mock Marketplace form reproduces all of this, so the e2e guards it.
 - Popup: a click on Scan during the popup's own start-up could finish, render, and then be wiped by the start-up's saved-data load, leaving "No scan yet" on screen. The button now stays disabled until start-up finishes and the scan waits for it. Found by the end-to-end test.
 
 Changed

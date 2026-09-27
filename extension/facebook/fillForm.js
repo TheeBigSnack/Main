@@ -5,11 +5,19 @@
 //
 // The only things this code ever clicks are a dropdown control (to open it)
 // and one of that dropdown's options. It has no way to reach Publish.
+//
+// Lessons from the first live run (2026-09-27): Facebook draws a dropdown's
+// option list slowly and leaves it open until something closes it, and a
+// click on the next dropdown only closes the stale one. So every dropdown is
+// handled as: close anything open, open this one with real pointer events,
+// wait (up to 6 s) for ITS popup, choose inside that popup only, close it.
+// Facebook also reformats numbers as you type ("36603" -> "36,603").
 
 export async function fillFormInPage(map, data) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const visible = (el) => {
     if (!el || !el.isConnected) return false;
     const cs = getComputedStyle(el);
@@ -39,36 +47,80 @@ export async function fillFormInPage(map, data) {
     return norm(parts.join(' '));
   }
 
-  const TEXT_INPUTS = 'input[type="text"], input:not([type]), input[type="number"], input[type="search"], input[type="tel"]';
+  const TEXT_INPUTS = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"])';
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
-    typeahead: TEXT_INPUTS + ', [role="combobox"] input, [role="textbox"]',
+    typeahead: TEXT_INPUTS + ', [role="textbox"]',
     choice: 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]',
   };
+  const POPUPS = '[role="listbox"], [role="menu"]';
+  const OPTIONS = '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
 
   const neverNames = (map.neverFill || []).flatMap((f) => f.name).map((p) => new RegExp(p, 'i'));
   const offLimits = (name) => neverNames.some((re) => re.test(name));
 
   function findField(spec) {
-    const patterns = spec.name.map((p) => new RegExp(p, 'i'));
     const candidates = [...document.querySelectorAll(KIND_SELECTORS[spec.kind] || KIND_SELECTORS.text)].filter(visible);
-    const matches = candidates.filter((el) => {
-      const name = accessibleName(el);
-      return name && !offLimits(name) && patterns.some((re) => re.test(name));
-    });
-    matches.sort((a, b) => text(a).length - text(b).length); // the smallest matching element wins
-    return matches[0] || null;
+    const pick = (patterns) => {
+      const matches = candidates.filter((el) => {
+        const name = accessibleName(el);
+        return name && !offLimits(name) && patterns.some((re) => re.test(name));
+      });
+      matches.sort((a, b) => text(a).length - text(b).length); // the smallest matching element wins
+      return matches[0] || null;
+    };
+    // The map's patterns first; the field's label anywhere in the name as a second chance.
+    return pick(spec.name.map((p) => new RegExp(p, 'i'))) || pick([new RegExp('\\b' + escapeRe(spec.label) + '\\b', 'i')]);
   }
 
-  function pressEscape() {
-    const el = document.activeElement || document.body;
-    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
-    el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', bubbles: true }));
+  const visiblePopups = () => [...document.querySelectorAll(POPUPS)].filter(visible);
+  const visibleOptions = (root) => [...(root || document).querySelectorAll(OPTIONS)].filter(visible);
+  const mouse = (el, type) => el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, composed: true, view: window }));
+  const pointer = (el, type) => {
+    if (typeof PointerEvent === 'function') el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  };
+  const key = (el, k) => {
+    for (const type of ['keydown', 'keyup']) el.dispatchEvent(new KeyboardEvent(type, { key: k, code: k, bubbles: true, cancelable: true }));
+  };
+
+  // Pages built with React react to pointer and mouse events, not only click.
+  function openDropdown(control) {
+    pointer(control, 'pointerdown');
+    mouse(control, 'mousedown');
+    control.focus();
+    pointer(control, 'pointerup');
+    mouse(control, 'mouseup');
+    control.click();
+  }
+  function chooseOption(option) {
+    pointer(option, 'pointerdown');
+    mouse(option, 'mousedown');
+    pointer(option, 'pointerup');
+    mouse(option, 'mouseup');
+    option.click();
+  }
+
+  // Leave no menu open behind us: Escape, then a press outside, then the
+  // control itself (which toggles its own popup).
+  async function closePopups(control) {
+    for (let attempt = 0; attempt < 3 && visiblePopups().length; attempt += 1) {
+      if (attempt === 0) {
+        key(document.activeElement || document.body, 'Escape');
+        key(document.body, 'Escape');
+      } else if (attempt === 1) {
+        mouse(document.body, 'mousedown');
+        mouse(document.body, 'mouseup');
+      } else if (control && control.getAttribute('aria-expanded') === 'true') {
+        openDropdown(control);
+      }
+      await sleep(150);
+    }
   }
 
   // React ignores plain `el.value = x`, so set it through the prototype setter
   // and fire the events a typing person would.
+  const accepted = (got, want) => got === want || norm(got) === norm(want) || (/^\d+$/.test(want) && String(got).replace(/\D/g, '') === want);
   function setText(el, value) {
     if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
       el.focus();
@@ -86,7 +138,7 @@ export async function fillFormInPage(map, data) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.blur();
-    return el.value === value;
+    return accepted(el.value, value);
   }
 
   function pickOption(options, wanted) {
@@ -112,38 +164,48 @@ export async function fillFormInPage(map, data) {
       }
       return { ok: false, reason: 'none of the options matched' };
     }
-    control.click();
+    await closePopups(null);
+    const popupsBefore = new Set(visiblePopups());
+    const optionsBefore = new Set(visibleOptions());
+    openDropdown(control);
+    const ids = [control.getAttribute('aria-controls'), control.getAttribute('aria-owns')].filter(Boolean).join(' ').split(/\s+/).filter(Boolean);
+    let popup = null;
     let options = [];
-    for (let i = 0; i < 20 && !options.length; i += 1) {
+    for (let i = 0; i < 60 && !options.length; i += 1) {
       await sleep(100);
-      options = [...document.querySelectorAll('[role="option"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')].filter(visible);
+      if (i === 15) key(control, 'ArrowDown'); // some dropdowns only open from the keyboard
+      popup = ids.map((id) => document.getElementById(id)).find((n) => n && visible(n)) || visiblePopups().find((p) => !popupsBefore.has(p)) || null;
+      options = popup ? visibleOptions(popup) : visibleOptions().filter((o) => !optionsBefore.has(o));
     }
     if (!options.length) {
-      pressEscape();
-      return { ok: false, reason: "the dropdown didn't open" };
+      await closePopups(control);
+      return { ok: false, reason: "the dropdown didn't open (waited 6 seconds)" };
     }
     for (const wanted of wantedList) {
       const option = pickOption(options, wanted);
       if (option) {
-        option.click();
-        await sleep(150);
+        chooseOption(option);
+        await sleep(200);
+        await closePopups(control);
         return { ok: true, chosen: text(option) };
       }
     }
-    pressEscape();
+    await closePopups(control);
     return { ok: false, reason: 'none of the options matched (' + options.slice(0, 8).map(text).join(', ') + ')' };
   }
 
   async function typeahead(el, value) {
+    await closePopups(null);
+    const optionsBefore = new Set(visibleOptions());
     setText(el, value);
     let options = [];
     for (let i = 0; i < 15 && !options.length; i += 1) {
       await sleep(100);
-      options = [...document.querySelectorAll('[role="option"], [role="listbox"] li')].filter(visible);
+      options = visibleOptions().filter((o) => !optionsBefore.has(o));
     }
     if (options.length) {
       const option = options[0];
-      option.click();
+      chooseOption(option);
       await sleep(150);
       return { ok: true, chosen: text(option), note: 'picked the first suggestion: ' + text(option) };
     }
@@ -182,15 +244,17 @@ export async function fillFormInPage(map, data) {
         const r = await typeahead(el, entry.value);
         (r.partial ? result.partial : result.filled).push({ ...entry, note: r.note, shown: r.chosen });
       } else if (setText(el, entry.value)) {
-        result.filled.push(entry);
+        result.filled.push({ ...entry, shown: el.value !== undefined ? el.value : undefined });
       } else {
-        result.blocked.push({ ...entry, reason: "the page didn't accept the text" });
+        const shows = el.value !== undefined ? el.value : text(el);
+        result.blocked.push({ ...entry, reason: `the page didn't accept the text (it shows "${String(shows).slice(0, 40)}")` });
       }
     } catch (e) {
       result.blocked.push({ ...entry, reason: String((e && e.message) || e) });
     }
     await sleep(50);
   }
+  await closePopups(null);
   return result;
 }
 
@@ -202,6 +266,7 @@ export async function fillFormInPage(map, data) {
 export function probeFormInPage(map) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const visible = (el) => {
     if (!el || !el.isConnected) return false;
     const cs = getComputedStyle(el);
@@ -227,24 +292,26 @@ export function probeFormInPage(map) {
     if (el.matches('[role="combobox"],[role="button"],button,[aria-haspopup]')) parts.push(text(el));
     return norm(parts.join(' '));
   }
-  const TEXT_INPUTS = 'input[type="text"], input:not([type]), input[type="number"], input[type="search"], input[type="tel"]';
+  const TEXT_INPUTS = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"])';
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
-    typeahead: TEXT_INPUTS + ', [role="combobox"] input, [role="textbox"]',
+    typeahead: TEXT_INPUTS + ', [role="textbox"]',
     choice: 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]',
   };
   const neverNames = (map.neverFill || []).flatMap((f) => f.name).map((p) => new RegExp(p, 'i'));
   const offLimits = (name) => neverNames.some((re) => re.test(name));
   function findField(spec) {
-    const patterns = spec.name.map((p) => new RegExp(p, 'i'));
     const candidates = [...document.querySelectorAll(KIND_SELECTORS[spec.kind] || KIND_SELECTORS.text)].filter(visible);
-    const matches = candidates.filter((el) => {
-      const name = accessibleName(el);
-      return name && !offLimits(name) && patterns.some((re) => re.test(name));
-    });
-    matches.sort((a, b) => text(a).length - text(b).length);
-    return matches[0] || null;
+    const pick = (patterns) => {
+      const matches = candidates.filter((el) => {
+        const name = accessibleName(el);
+        return name && !offLimits(name) && patterns.some((re) => re.test(name));
+      });
+      matches.sort((a, b) => text(a).length - text(b).length);
+      return matches[0] || null;
+    };
+    return pick(spec.name.map((p) => new RegExp(p, 'i'))) || pick([new RegExp('\\b' + escapeRe(spec.label) + '\\b', 'i')]);
   }
 
   const found = [];

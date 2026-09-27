@@ -153,21 +153,25 @@ try {
 
   const form = await fb.evaluate(() => {
     const v = (id) => document.getElementById(id).value;
+    const chosen = (id) => document.getElementById(id).dataset.value;
     return {
-      vehicleType: document.getElementById('vehicleType').dataset.value,
-      year: v('year'), make: v('make'), model: v('model'), mileage: v('mileage'), price: v('price'),
-      bodyStyle: v('bodyStyle'), exteriorColor: v('exteriorColor'), interiorColor: v('interiorColor'),
+      vehicleType: chosen('vehicleType'),
+      year: chosen('year'), make: v('make'), model: v('model'), mileage: v('mileage'), price: v('price'),
+      bodyStyle: v('bodyStyle'), exteriorColor: chosen('exteriorColor'), interiorColor: v('interiorColor'),
       fuelType: v('fuelType'), transmission: v('transmission'), location: v('location'),
       condition: v('condition'), titleStatus: v('titleStatus'),
       photos: document.getElementById('photoCount').textContent,
+      popupsOpen: [...document.querySelectorAll('[role=listbox]')].filter((l) => !l.hidden).length,
     };
   });
   assert.deepEqual(form, {
-    vehicleType: 'Car/Truck', year: '2019', make: 'Ram', model: '1500 Classic Express', mileage: '20986', price: '27163',
+    vehicleType: 'Car/Truck', year: '2019', make: 'Ram', model: '1500 Classic Express', mileage: '20986',
+    price: '27,163', // the page reformats it; the fill code accepts that
     bodyStyle: 'Truck', exteriorColor: 'Blue', interiorColor: 'Grey', fuelType: 'Gasoline', transmission: 'Automatic transmission',
     location: '15370',
     condition: '', titleStatus: '', // never filled by Lot Sync
     photos: '3 photos',
+    popupsOpen: 0, // the slow Year list was waited for, used, and closed
   });
   assert.equal(await fb.inputValue('#description'), edited);
   const results = await panel.textContent('#fillResults');
