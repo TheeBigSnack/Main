@@ -1,14 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Lot Sync",
-  "version": "0.1.0",
-  "description": "Scans your dealership website's used inventory, checks each car is really pre-owned, and flags sold cars and price changes.",
+  "version": "0.2.0",
+  "description": "Reads your dealership website's used inventory, checks each car is really pre-owned, pre-fills Marketplace listings for you to publish, and flags sold cars and price changes.",
   "action": {
     "default_title": "Lot Sync: scan this dealership website",
     "default_popup": "popup.html",
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
   },
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "permissions": ["activeTab", "scripting", "storage"],
-  "minimum_chrome_version": "111"
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "host_permissions": ["https://www.facebook.com/marketplace/*", "https://vehicle-images.carscommerce.inc/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "minimum_chrome_version": "116"
 }

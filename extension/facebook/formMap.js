@@ -1,0 +1,68 @@
+// Every Facebook Marketplace selector and field-finding rule lives in this one
+// file, so when Facebook changes its page the fix is here and takes minutes.
+// Fields are found by role and accessible name (label text, aria-label,
+// placeholder), never by generated class names.
+//
+// STATUS: NOT YET VERIFIED against the live form. This map was written from
+// public knowledge of the "Create vehicle listing" form (September 2026) and
+// has been proven only against test/e2e/mock-marketplace.mjs, which names its
+// fields the same way. The first run on the real form (see README, "Try it on
+// one real car") will show which `name` patterns need adjusting: every field
+// that can't be found is listed in the side panel with a copy button.
+//
+// There is deliberately NO entry for Publish, Update, Delete or Mark as sold.
+// The fill code can only touch the fields listed here (non-negotiable #1).
+//
+// Each field:
+//   key      the value in listingData.js's `fields`
+//   label    what the side panel calls it
+//   kind     'text' | 'textarea' | 'typeahead' | 'choice'
+//   name     regex sources (case-insensitive) matched against the accessible name
+//   options  for 'choice': canonical value -> Facebook wordings to try, in order
+
+export const FORM_MAP = Object.freeze({
+  version: '2026-09-26',
+  verifiedAgainstFacebook: false,
+  createUrl: 'https://www.facebook.com/marketplace/create/vehicle',
+  // Where the tab ends up after the salesperson publishes.
+  listingUrlPattern: '^https://www\\.facebook\\.com/marketplace/item/(\\d+)',
+  afterPublishPatterns: ['^https://www\\.facebook\\.com/marketplace/(you|selling)(/|$|\\?)'],
+  // Give the page this long to draw its form after it reports loaded.
+  settleMs: 1500,
+  // Photos. The page's own "up to N photos" text is read first.
+  fileInput: 'input[type="file"]',
+  photoLimitDefault: 20, // NOT VERIFIED; used only if the page text has no limit
+  photoLimitTextPattern: 'up to (\\d+) photos',
+
+  fields: [
+    {
+      key: 'vehicleType', label: 'Vehicle type', kind: 'choice', name: ['^vehicle type\\b'],
+      options: { car_truck: ['Car/Truck', 'Car/truck', 'Car or truck', 'Car'], motorcycle: ['Motorcycle', 'Motorcycle/Scooter'] },
+    },
+    { key: 'year', label: 'Year', kind: 'choice', name: ['^year\\b'] },
+    { key: 'make', label: 'Make', kind: 'text', name: ['^make\\b'] },
+    { key: 'model', label: 'Model', kind: 'text', name: ['^model\\b'] },
+    { key: 'mileage', label: 'Mileage', kind: 'text', name: ['^mileage\\b'] },
+    { key: 'price', label: 'Price', kind: 'text', name: ['^price\\b'] },
+    {
+      key: 'bodyStyle', label: 'Body style', kind: 'choice', name: ['^body style\\b'],
+      options: { Truck: ['Truck', 'Pickup'], SUV: ['SUV'], Sedan: ['Sedan'], Coupe: ['Coupe'], Hatchback: ['Hatchback'], Convertible: ['Convertible'], Minivan: ['Minivan', 'Mini-van'], Van: ['Van'], Wagon: ['Wagon', 'Estate'] },
+    },
+    { key: 'exteriorColor', label: 'Exterior color', kind: 'choice', name: ['^exterior colou?r\\b'], options: { Gray: ['Gray', 'Grey'], 'Off white': ['Off white', 'Off-white'] } },
+    { key: 'interiorColor', label: 'Interior color', kind: 'choice', name: ['^interior colou?r\\b'], options: { Gray: ['Gray', 'Grey'], 'Off white': ['Off white', 'Off-white'] } },
+    {
+      key: 'fuelType', label: 'Fuel type', kind: 'choice', name: ['^fuel type\\b'],
+      options: { Gasoline: ['Gasoline', 'Gas', 'Petrol'], Hybrid: ['Hybrid'], 'Plug-in hybrid': ['Plug-in hybrid', 'Plug-in Hybrid', 'Plugin hybrid'], Electric: ['Electric'], Diesel: ['Diesel'], Flex: ['Flex', 'Flex fuel'] },
+    },
+    { key: 'transmission', label: 'Transmission', kind: 'choice', name: ['^transmission\\b'], options: { Automatic: ['Automatic transmission', 'Automatic'], Manual: ['Manual transmission', 'Manual'] } },
+    { key: 'location', label: 'Location', kind: 'typeahead', name: ['^location\\b'] },
+    { key: 'description', label: 'Description', kind: 'textarea', name: ['^description\\b'] },
+  ],
+
+  // Fields Lot Sync must never fill (it can't know them). Any control whose
+  // accessible name matches one of these is off limits to the finder.
+  neverFill: [
+    { key: 'condition', label: 'Vehicle condition', name: ['\\bcondition\\b'] },
+    { key: 'titleStatus', label: 'Title status', name: ['\\btitle status\\b', '\\btitle\\b'] },
+  ],
+});

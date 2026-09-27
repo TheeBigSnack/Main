@@ -2,6 +2,9 @@ import { normalizeVehicle } from './src/normalize.js';
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
 import { scanInventoryInPage } from './src/scan.js';
+import { findBoilerplate } from './src/description.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote } from './src/settings.js';
+import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -17,8 +20,9 @@ const state = {
   siteName: '',
   snapshot: null, // last saved scan
   diff: null, // to-do list from the last scan
-  posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt } }
-  settings: null, // { myStores: [...], basis: 'website' | 'beforeFees' }
+  posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }
+  settings: null, // see src/settings.js
+  boilerplate: [], // description text that repeats across the lot (disclaimers), stripped by the description writer
   view: 'todo',
 };
 
@@ -29,6 +33,7 @@ const storageKeys = (origin) => ({
   diff: `diff:${origin}`,
   posted: `posted:${origin}`,
   settings: `settings:${origin}`,
+  boilerplate: `boilerplate:${origin}`,
 });
 
 async function loadSaved() {
@@ -37,7 +42,8 @@ async function loadSaved() {
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
-  state.settings = data[k.settings] || null;
+  state.settings = data[k.settings] ? withDefaults(data[k.settings], { name: state.snapshot?.site?.name }) : null;
+  state.boilerplate = data[k.boilerplate] || [];
 }
 
 async function save(...names) {
@@ -54,12 +60,6 @@ function setStatus(text, kind = '') {
 }
 
 // ---------- scanning ----------
-
-function defaultSettings(site, vehicles) {
-  const locations = [...new Set(vehicles.map((v) => v.location).filter(Boolean))];
-  const mine = locations.filter((l) => l === site.name || (site.title || '').includes(l));
-  return { myStores: mine, basis: 'website' };
-}
 
 function friendlyError(e) {
   const msg = String((e && e.message) || e);
@@ -91,7 +91,9 @@ async function scan() {
       return;
     }
     const vehicles = res.records.map(normalizeVehicle).filter(Boolean);
-    if (!state.settings) state.settings = defaultSettings(res.site, vehicles);
+    state.settings = state.settings ? withDefaults(state.settings, res.site) : defaultSettings(res.site, vehicles);
+    // Text that repeats across the lot (disclaimers, legal lines) is remembered so the description writer can strip it.
+    state.boilerplate = [...findBoilerplate(vehicles.map((v) => v.descriptionRaw))];
     const assessments = vehicles.map((v) => assessVehicle(v, state.settings));
     const curr = makeSnapshot({ site: res.site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments });
     const diff = diffScans(state.snapshot, curr, { posted: state.posted, confirm: res.confirm, basis: state.settings.basis });
@@ -103,7 +105,7 @@ async function scan() {
     state.diff = diff;
     if (!diff.unreliable) state.snapshot = curr; // keep the last good scan if this one looks broken
     state.siteName = res.site.name;
-    await save('snapshot', 'diff', 'settings');
+    await save('snapshot', 'diff', 'settings', 'boilerplate');
     state.view = 'todo';
     setStatus('');
     render();
@@ -195,9 +197,14 @@ function empty(text) {
   return `<div class="empty">${text}</div>`;
 }
 
-function postButton(vin) {
+// "Post" opens the guided flow in the side panel (only for ready cars). "Mark
+// posted" is for a listing the salesperson made by hand.
+function postButton(vin, { canPost = true } = {}) {
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark">Posted ✓</button>`;
-  return `<button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button>`;
+  const post = canPost
+    ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" title="Pre-fill the Marketplace form in the side panel. You click Publish.">Post</button>`
+    : '';
+  return `<span class="actions">${post}<button type="button" class="small" data-action="post" data-vin="${esc(vin)}" title="Already listed it yourself? Mark it posted so rescans watch it.">Mark posted</button></span>`;
 }
 
 function decisionPill(decision) {
@@ -274,13 +281,13 @@ function viewReady(l) {
 function viewNotReady(l) {
   const lead = `<p class="lead">Pre-owned cars at your store that are missing something a listing needs. They move to Ready to post on their own once the website has it.</p>`;
   if (!l.notReady.length) return lead + empty('Nothing waiting.');
-  return lead + rows(l.notReady.map((e) => row(e, { sub: `<span class="pill warn">${esc(e.reason)}</span> ${facts(e)}`, right: money(price(e)), action: postButton(e.vin) })));
+  return lead + rows(l.notReady.map((e) => row(e, { sub: `<span class="pill warn">${esc(e.reason)}</span> ${facts(e)}`, right: money(price(e)), action: postButton(e.vin, { canPost: false }) })));
 }
 
 function viewOtherStores(l) {
   const lead = `<p class="lead">Pre-owned cars at your group's other stores, kept off your list so you don't advertise a car that's somewhere else. You can change your store in Settings.</p>`;
   if (!l.otherStores.length) return lead + empty('None.');
-  return lead + rows(l.otherStores.map((e) => row(e, { sub: `${facts(e)}${(e.blockers || []).length > 1 ? ' · ' + esc(e.reason.replace(/;?\s*At [^;]+$/, '')) : ''}`, right: money(price(e)), action: postButton(e.vin) })));
+  return lead + rows(l.otherStores.map((e) => row(e, { sub: `${facts(e)}${(e.blockers || []).length > 1 ? ' · ' + esc(e.reason.replace(/;?\s*At [^;]+$/, '')) : ''}`, right: money(price(e)), action: postButton(e.vin, { canPost: false }) })));
 }
 
 function viewReview(l) {
@@ -309,8 +316,9 @@ function viewMine(l) {
           extra = `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>`;
         }
         const entry = { name: p.name, url: now?.url };
+        const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
         return row(entry, {
-          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}`,
+          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${link}`,
           right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
@@ -319,34 +327,57 @@ function viewMine(l) {
   );
 }
 
+const field = (label, name, value, attrs = 'type="text"') =>
+  `<label class="field"><span class="k">${esc(label)}</span><input name="${name}" value="${esc(value)}" ${attrs} /></label>`;
+
 function viewSettings() {
   const entries = Object.values(state.snapshot?.vehicles || {});
   const locations = [...new Set(entries.map((e) => e.location).filter(Boolean))].sort();
-  const s = state.settings || { myStores: [], basis: 'website' };
-  // The usual gap between the main price and the price before fees (the doc
-  // fee on most sites), taken from what most cars agree on.
-  const priced = entries.filter((e) => e.price && e.priceBeforeFees);
-  const gaps = new Map();
-  for (const e of priced) gaps.set(e.price - e.priceBeforeFees, (gaps.get(e.price - e.priceBeforeFees) || 0) + 1);
-  const [gap, gapCount] = [...gaps.entries()].sort((a, b) => b[1] - a[1])[0] || [0, 0];
-  const example = gap > 0 && gapCount >= priced.length * 0.6 ? priced.find((e) => e.price - e.priceBeforeFees === gap) : null;
+  const s = withDefaults(state.settings || {}, { name: state.siteName });
+  const fee = feeGap(entries);
+  const example = fee.example;
+  const suggested = suggestedPriceNote(fee.gap, s.basis);
   const stores = locations.length
     ? locations
         .map((l) => `<label><input type="checkbox" name="store" value="${esc(l)}" ${s.myStores.includes(l) ? 'checked' : ''} /> <span>${esc(l)}</span></label>`)
         .join('')
     : '<p class="hint">Scan once to see the stores.</p>';
   const feeNote = example
-    ? `<p class="hint">On this website the main price is usually ${money(gap)} higher than the price before fees, most likely the doc fee. Posting the website's main price keeps Marketplace and the website matching.</p>`
+    ? `<p class="hint">On this website the main price is usually ${money(fee.gap)} higher than the price before fees, most likely the doc fee. Posting the website's main price keeps Marketplace and the website matching.</p>`
     : '';
   return `<form id="settings" class="settings">
+    <fieldset><legend>You</legend>
+      ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="e.g. Roger"')}
+      ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
+      <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
+    </fieldset>
     <fieldset><legend>Your store</legend>
       <p class="hint">Only cars at these stores count as ready to post. Leave all unticked to include every store.</p>
       ${stores}
+    </fieldset>
+    <fieldset><legend>Dealership, named on every listing</legend>
+      ${field('Dealership name', 'dealerName', s.dealer.name)}
+      ${field('City', 'dealerCity', s.dealer.city)}
+      ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="PA" maxlength="2"')}
+      ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="15370" inputmode="numeric"')}
+      <p class="hint">Marketplace asks for a location. The ZIP is used when it's set, otherwise the city.</p>
     </fieldset>
     <fieldset><legend>Price to post</legend>
       <label><input type="radio" name="basis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> <span>The website's main price${example ? ` (e.g. ${money(example.price)} "${esc(example.priceLabel)}")` : ''}</span></label>
       <label><input type="radio" name="basis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> <span>Price before fees${example ? ` (e.g. ${money(example.priceBeforeFees)})` : ''}</span></label>
       ${feeNote}
+      ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}
+      <p class="hint">Honest prices: the listed price always equals the website price. This note explains what it includes.${suggested ? ` Suggested: "${esc(suggested)}"` : ''}</p>
+    </fieldset>
+    <fieldset><legend>Safety</legend>
+      ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="100"')}
+      <p class="hint">A safety setting, not a guarantee: Meta doesn't publish its limits.</p>
+    </fieldset>
+    <fieldset><legend>Description writer (optional)</legend>
+      <label><input type="checkbox" name="rewriteEnabled" ${s.rewrite.enabled ? 'checked' : ''} /> <span>Use the Lot Sync rewrite service (Claude) for first drafts</span></label>
+      ${field('Service address', 'rewriteEndpoint', s.rewrite.endpoint, 'type="url" placeholder="http://localhost:8787"')}
+      ${field('Service key', 'rewriteKey', s.rewrite.key, 'type="password" autocomplete="off"')}
+      <p class="hint">Off by default: descriptions come from a built-in template. Either way every draft is checked against the website's facts, and you review it before posting.</p>
     </fieldset>
     <div class="actions"><button type="submit" class="plain">Save settings</button><span class="hint" id="saved"></span></div>
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
@@ -386,6 +417,27 @@ async function onPanelClick(ev) {
       await save('posted');
       break;
     }
+    case 'openPost': {
+      // Hands the car to the side panel, which re-checks it on the website,
+      // writes the description and pre-fills the Marketplace form.
+      const entry = state.snapshot?.vehicles?.[vin];
+      if (!entry || entry.decision !== DECISION.READY || !state.tab) return;
+      const cap = capStatus(state.posted, state.settings?.dailyCap);
+      if (cap.reached) {
+        setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+        return;
+      }
+      // Must run straight from the click (a user gesture) or Chrome won't open the panel.
+      let opened = true;
+      try {
+        await chrome.sidePanel.open({ windowId: state.tab.windowId });
+      } catch (e) {
+        opened = false;
+      }
+      await chrome.storage.local.set({ postRequest: { origin: state.origin, vin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
+      setStatus(opened ? `Continue in the side panel: ${entry.name}` : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue posting this car.');
+      return;
+    }
     case 'unpost':
       state.posted = markTakenDown(state.posted, vin);
       await save('posted');
@@ -423,7 +475,21 @@ async function onSettingsSubmit(ev) {
   if (ev.target.id !== 'settings') return;
   ev.preventDefault();
   const form = new FormData(ev.target);
-  state.settings = { myStores: form.getAll('store').map(String), basis: form.get('basis') === 'beforeFees' ? 'beforeFees' : 'website' };
+  const prev = withDefaults(state.settings || {}, { name: state.siteName });
+  const str = (k) => String(form.get(k) ?? '').trim();
+  state.settings = withDefaults(
+    {
+      ...prev,
+      myStores: form.getAll('store').map(String),
+      basis: form.get('basis') === 'beforeFees' ? 'beforeFees' : 'website',
+      salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || 'sales consultant' },
+      dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },
+      priceNote: str('priceNote'),
+      dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),
+      rewrite: { enabled: form.get('rewriteEnabled') === 'on', endpoint: str('rewriteEndpoint'), key: str('rewriteKey') },
+    },
+    { name: state.siteName }
+  );
   await save('settings');
   const note = $('saved');
   if (note) note.textContent = 'Saved. Click Rescan website to apply.';

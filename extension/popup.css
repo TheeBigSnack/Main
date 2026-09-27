@@ -104,3 +104,7 @@ h3 .pill { font-weight: 600; }
 .settings .actions { display: flex; gap: 8px; align-items: center; }
 .settings button.plain { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: var(--radius); padding: 6px 12px; }
 .settings button.danger { border: 1px solid var(--bad); background: none; color: var(--bad); border-radius: var(--radius); padding: 6px 12px; }
+.settings label.field { align-items: center; }
+.settings label.field .k { min-width: 190px; color: var(--muted); }
+.settings input[type="text"], .settings input[type="number"], .settings input[type="url"], .settings input[type="password"] { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); flex: 1; min-width: 0; }
+.row .actions { display: inline-flex; gap: 6px; }
