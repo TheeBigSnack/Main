@@ -115,30 +115,38 @@ try {
   await popup.close();
 
   // ---- 2. The panel picks up the queue and, since every check passes, opens the form for car 1 by itself ----
+  // Car 1's form opens already holding another car, like Facebook restoring a draft at load.
+  await dealer.request.get(`${marketOrigin}/prefill?name=honda`);
   const panel = watch(await context.newPage());
   panelRef = panel;
   const fb1Promise = context.waitForEvent('page', { timeout: 40000 });
   await panel.goto(extUrl('sidepanel.html'));
   const fb1 = watch(await fb1Promise);
-  await panel.waitForSelector('#confirmPosted', { timeout: 40000 });
+  await panel.waitForSelector('#confirmPosted', { timeout: 60000 });
   await panel.waitForSelector('#photos.done', { timeout: 30000 });
   assert.match(await panel.textContent('#queueBar'), /Car 1 of 2/);
   assert.equal(await fb1.inputValue('#vin'), RAM);
+  assert.equal(await fb1.inputValue('#make'), 'Ram');
   assert.equal(await fb1.inputValue('#location'), 'Waynesburg, Pennsylvania', "ZIP from the website's structured data -> the right town");
   assert.equal(await fb1.evaluate(() => document.getElementById('cleanTitle').checked), true);
+  const warning1 = await panel.textContent('#preexisting');
+  assert.match(warning1, /already held another vehicle/);
+  for (const piece of ['VIN "1HGCV1F30LA000000"', 'Year "2020"', 'Make "Honda"', 'Model "Accord EX-L"']) assert.ok(warning1.includes(piece), piece);
+  assert.doesNotMatch(warning1, /Location/, "Facebook's own location default is not another car");
+  assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   await panel.screenshot({ path: join(shots, 'queue-2-car1-filled.png'), fullPage: true });
 
   // ---- 3. The person clicks Publish on car 1; the panel records it and loads car 2 ----
-  // Car 2's form opens already holding another car, like Facebook restoring a draft.
-  await dealer.request.get(`${marketOrigin}/prefill?name=honda`);
+  // Car 2's draft lands late: 2.5 s after the page opens, over the fields already filled.
+  await dealer.request.get(`${marketOrigin}/prefill?name=honda&late=2500`);
   const fb2Promise = context.waitForEvent('page', { timeout: 40000 });
   await fb1.click('#publish');
   const fb2 = watch(await fb2Promise);
   await panel.waitForFunction(() => /Car 2 of 2/.test(document.querySelector('#queueBar')?.textContent || ''), null, { timeout: 40000 });
-  await panel.waitForSelector('#confirmPosted', { timeout: 40000 });
+  await panel.waitForSelector('#confirmPosted', { timeout: 60000 });
   await panel.waitForSelector('#photos.done', { timeout: 30000 });
   assert.match(await panel.textContent('#queueBar'), /1 posted/);
-  // every field shows the Wagoneer, not the restored Honda
+  // every field shows the Wagoneer, not the Honda that landed mid-fill
   const car2 = await fb2.evaluate(() => ({
     prefilled: document.body.dataset.prefilled,
     year: document.getElementById('year').dataset.value,
@@ -149,11 +157,13 @@ try {
     description: document.getElementById('description').value.slice(0, 40),
   }));
   assert.deepEqual(car2, { prefilled: '1', year: '2022', make: 'Jeep', model: 'Wagoneer Series III', vin: WAGONEER, mileage: '52402', description: '2022 Jeep Wagoneer Series III with 52,40' });
-  // and the panel says the form had another car in it
-  const warning = await panel.textContent('#preexisting');
-  assert.match(warning, /already held another vehicle/);
-  for (const piece of ['VIN "1HGCV1F30LA000000"', 'Year "2020"', 'Make "Honda"', 'Model "Accord EX-L"']) assert.ok(warning.includes(piece), piece);
-  assert.doesNotMatch(warning, /Location/, "Facebook's own location default is not another car");
+  // and the panel says Facebook changed fields after the fill, and that they were set again and held
+  assert.equal(await panel.$('#preexisting'), null, 'the form was empty when filling started');
+  const changed = await panel.textContent('#changedAfterFill');
+  assert.match(changed, /Facebook changed[\s\S]*after Lot Sync filled it/);
+  assert.match(changed, /"1HGCV1F30LA000000"|"2020"|"Honda"|"Accord EX-L"/);
+  assert.match(changed, /set them again and they held/);
+  assert.match(changed, /delete that draft on Facebook/);
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   await panel.screenshot({ path: join(shots, 'queue-2b-restored-draft-warning.png'), fullPage: true });
   await dealer.request.get(`${marketOrigin}/prefill?name=none`);

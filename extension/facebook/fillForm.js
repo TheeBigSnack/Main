@@ -424,8 +424,52 @@ export async function fillFormInPage(map, data) {
 
   // skipped: things that are not failures (a checkbox left as it is, an
   // optional field this form doesn't have)
-  const result = { url: location.href, filled: [], partial: [], blocked: [], skipped: [], preexisting: [], photoLimit: readPhotoLimit() };
+  const result = { url: location.href, filled: [], partial: [], blocked: [], skipped: [], preexisting: [], changedAfterFill: [], photoLimit: readPhotoLimit() };
   const fields = (data && data.fields) || {};
+  const match = (data && data.match) || {};
+
+  // Fills one field and says how it went: { status: 'filled'|'partial'|'blocked', shown?, note?, reason? }
+  async function applyField(spec, entry, el) {
+    if (spec.kind === 'checkbox') {
+      const r = await setCheckbox(el, entry.value === 'yes');
+      return r.ok ? { status: 'filled', shown: r.shown } : { status: 'blocked', reason: r.reason };
+    }
+    if (spec.kind === 'choice' || (spec.kind !== 'textarea' && isDropdown(el))) {
+      const wantedList = (spec.options && spec.options[entry.value]) || [entry.value];
+      const before = displayed(el, spec);
+      const r = await choose(el, wantedList);
+      if (!r.ok) return { status: 'blocked', reason: r.reason };
+      // Verify by reading the control back. A control that never shows its
+      // value can't be verified; say so instead of assuming.
+      await sleep(100);
+      const after = displayed(el, spec);
+      if (after && norm(after).includes(norm(r.chosen))) return { status: 'filled', shown: after };
+      if (after && after !== before) return { status: 'blocked', reason: `chose "${r.chosen}" but the form shows "${after.slice(0, 40)}"` };
+      return { status: 'filled', shown: r.chosen, note: "couldn't read it back; check it on the form" };
+    }
+    if (spec.kind === 'typeahead') {
+      const r = await typeahead(el, entry.value, match[spec.key]);
+      if (!r.ok) return { status: 'blocked', reason: r.reason };
+      return { status: r.partial ? 'partial' : 'filled', note: r.note, shown: r.shown };
+    }
+    if (setText(el, entry.value)) return { status: 'filled', shown: el.value !== undefined ? String(el.value) : text(el) };
+    const shows = el.value !== undefined ? el.value : text(el);
+    return { status: 'blocked', reason: `the page didn't accept the text (it shows "${String(shows).slice(0, 40)}")` };
+  }
+
+  // Does the form still show what we filled? { ok, shown }
+  const hasWord = (t, word) => new RegExp('\\b' + escapeRe(word) + '\\b', 'i').test(t);
+  function verifyEntry(spec, entry, el) {
+    const shown = displayed(el, spec);
+    const dropdown = isDropdown(el) || spec.kind === 'choice';
+    if (!shown) return { ok: dropdown, shown: '' }; // a dropdown control may simply not show its value
+    const expectWords = match[spec.key] && match[spec.key].alternatives;
+    const wordsOk = (t) => Array.isArray(expectWords) && expectWords.some((words) => words.every((w) => hasWord(t, w)));
+    const ok = dropdown
+      ? norm(shown).includes(norm(entry.shown || entry.value))
+      : accepted(shown, entry.value) || wordsOk(shown) || (entry.shown && norm(shown) === norm(entry.shown)) || (spec.kind === 'typeahead' && (norm(shown).includes(norm(entry.value)) || Boolean(readNear(el, expectWords && expectWords[0] ? expectWords[0] : [entry.value]))));
+    return { ok, shown };
+  }
 
   // Anything already in the form that is not ours: another car, most likely
   // a draft Facebook restored. Reported so nothing of it is published by
@@ -456,61 +500,45 @@ export async function fillFormInPage(map, data) {
       continue;
     }
     try {
-      if (spec.kind === 'checkbox') {
-        const r = await setCheckbox(el, entry.value === 'yes');
-        if (r.ok) result.filled.push({ ...entry, shown: r.shown });
-        else result.blocked.push({ ...entry, reason: r.reason });
-      } else if (spec.kind === 'choice' || (spec.kind !== 'textarea' && isDropdown(el))) {
-        const wantedList = (spec.options && spec.options[entry.value]) || [entry.value];
-        const before = displayed(el, spec);
-        const r = await choose(el, wantedList);
-        if (!r.ok) {
-          result.blocked.push({ ...entry, reason: r.reason });
-        } else {
-          // Verify by reading the control back. A control that never shows
-          // its value can't be verified; say so instead of assuming.
-          await sleep(100);
-          const after = displayed(el, spec);
-          if (after && norm(after).includes(norm(r.chosen))) result.filled.push({ ...entry, shown: after });
-          else if (after && after !== before) result.blocked.push({ ...entry, reason: `chose "${r.chosen}" but the form shows "${after.slice(0, 40)}"` });
-          else result.filled.push({ ...entry, shown: r.chosen, note: "couldn't read it back; check it on the form" });
-        }
-      } else if (spec.kind === 'typeahead') {
-        const r = await typeahead(el, entry.value, data && data.match && data.match[spec.key]);
-        if (!r.ok) result.blocked.push({ ...entry, reason: r.reason });
-        else (r.partial ? result.partial : result.filled).push({ ...entry, note: r.note, shown: r.shown });
-      } else if (setText(el, entry.value)) {
-        result.filled.push({ ...entry, shown: el.value !== undefined ? String(el.value) : text(el) });
-      } else {
-        const shows = el.value !== undefined ? el.value : text(el);
-        result.blocked.push({ ...entry, reason: `the page didn't accept the text (it shows "${String(shows).slice(0, 40)}")` });
-      }
+      const r = await applyField(spec, entry, el);
+      const item = { ...entry };
+      if (r.shown !== undefined) item.shown = r.shown;
+      if (r.note) item.note = r.note;
+      if (r.reason) item.reason = r.reason;
+      result[r.status].push(item);
     } catch (e) {
       result.blocked.push({ ...entry, reason: String((e && e.message) || e) });
     }
     await sleep(50);
   }
   await closePopups(null);
-  // Final read-back of everything filled: what the form shows must be ours.
-  // A control that could not be read back earlier (note) is left as is.
-  const has = (t, word) => new RegExp('\\b' + escapeRe(word) + '\\b', 'i').test(t);
+
+  // The live form can rewrite fields a few seconds after they were filled
+  // (a saved draft being restored). Wait, read everything back, set any
+  // field that changed underneath us again, and report what changed.
+  await sleep(map.recheckMs === undefined ? 3000 : map.recheckMs);
   for (const entry of [...result.filled]) {
     const spec = map.fields.find((f) => f.key === entry.key);
     if (!spec || spec.kind === 'checkbox' || (entry.note && /read it back/.test(entry.note))) continue;
     const el = findFieldNow(spec);
     if (!el) continue;
-    const shown = displayed(el, spec);
-    if (!shown) continue;
-    const expectWords = data && data.match && data.match[spec.key] && data.match[spec.key].alternatives;
-    const wordsOk = (t) => Array.isArray(expectWords) && expectWords.some((words) => words.every((w) => has(t, w)));
-    const ok = isDropdown(el) || spec.kind === 'choice'
-      ? norm(shown).includes(norm(entry.shown || entry.value))
-      : accepted(shown, entry.value) || wordsOk(shown) || (entry.shown && norm(shown) === norm(entry.shown)) || (spec.kind === 'typeahead' && (norm(shown).includes(norm(entry.value)) || Boolean(readNear(el, expectWords && expectWords[0] ? expectWords[0] : [entry.value]))));
-    if (!ok) {
+    const v = verifyEntry(spec, entry, el);
+    if (v.ok) continue;
+    const was = v.shown || '(empty)';
+    let again = { status: 'blocked' };
+    try { again = await applyField(spec, entry, el); } catch (e) { again = { status: 'blocked', reason: String((e && e.message) || e) }; }
+    await sleep(300);
+    const v2 = verifyEntry(spec, entry, findFieldNow(spec) || el);
+    result.changedAfterFill.push({ key: spec.key, label: spec.label, was, held: again.status === 'filled' && v2.ok });
+    if (again.status === 'filled' && v2.ok) {
+      entry.shown = v2.shown || again.shown || entry.shown;
+      entry.note = `the form changed it to "${was.slice(0, 30)}" after filling; set again`;
+    } else {
       result.filled.splice(result.filled.indexOf(entry), 1);
-      result.blocked.push({ ...entry, reason: `the form shows "${shown.slice(0, 40)}" instead` });
+      result.blocked.push({ ...entry, reason: `the form changed it to "${was.slice(0, 40)}" after filling and would not hold "${entry.value.slice(0, 30)}"` });
     }
   }
+  await closePopups(null);
   return result;
 }
 

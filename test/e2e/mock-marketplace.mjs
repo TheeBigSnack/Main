@@ -150,15 +150,20 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   loc.addEventListener('keydown', (e) => { if (e.key === 'Escape') { loc.value = ''; closeOpen(); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOpen(); });
   document.addEventListener('mousedown', (e) => { if (openList && !e.target.closest('[role=listbox],[role=combobox]')) closeOpen(); });
-  // A restored draft: the page opens with another car already in the form
-  // (applied at load, before anything else can touch the form).
-  (function applyPrefill(p) {
+  // A restored draft: the page opens with another car already in the form,
+  // or (late mode) the draft lands a few seconds after load, over whatever
+  // is there by then, like the live form does.
+  (function schedulePrefill(p) {
     if (!p) return;
-    const setCombo = (id, value) => { const c = document.getElementById(id); c.textContent = value; c.dataset.value = value; };
-    setCombo('year', p.year);
-    document.getElementById('makeWrap').hidden = false;
-    for (const id of ['make', 'model', 'vin', 'mileage', 'description']) document.getElementById(id).value = p[id] || '';
-    document.body.dataset.prefilled = '1';
+    const apply = () => {
+      const setCombo = (id, value) => { const c = document.getElementById(id); c.textContent = value; c.dataset.value = value; };
+      setCombo('year', p.year);
+      document.getElementById('makeWrap').hidden = false;
+      for (const id of ['make', 'model', 'vin', 'mileage', 'description']) document.getElementById(id).value = p[id] || '';
+      document.body.dataset.prefilled = '1';
+    };
+    if (p.late) setTimeout(apply, Number(p.late));
+    else apply();
   })(__PREFILL__);
   // The price box reformats digits with thousands separators, like the real one.
   document.getElementById('price').addEventListener('input', (e) => {
@@ -190,9 +195,11 @@ export function startMockMarketplace(port = 0) {
       return res.end(String(publishClicks));
     }
     if (url.pathname === '/prefill') {
-      prefill = PREFILLS[url.searchParams.get('name')] || null;
+      const base = PREFILLS[url.searchParams.get('name')] || null;
+      const late = Number(url.searchParams.get('late') || 0);
+      prefill = base ? { ...base, late } : null;
       res.writeHead(200, { 'content-type': 'text/plain' });
-      return res.end(prefill ? 'prefill on' : 'prefill off');
+      return res.end(prefill ? `prefill on${late ? ' (late ' + late + 'ms)' : ''}` : 'prefill off');
     }
     if (url.pathname === '/prefill.json') {
       res.writeHead(200, { 'content-type': 'application/json' });

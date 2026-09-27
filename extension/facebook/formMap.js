@@ -29,7 +29,10 @@ export const FORM_MAP = Object.freeze({
   listingUrlPattern: '^https://www\\.facebook\\.com/marketplace/item/(\\d+)',
   afterPublishPatterns: ['^https://www\\.facebook\\.com/marketplace/(you|selling)(/|$|\\?)'],
   // Give the page this long to draw its form after it reports loaded.
-  settleMs: 1500,
+  settleMs: 2500,
+  // After filling, wait this long and read everything back: the live form
+  // restores a saved draft over the fields a few seconds in (seen 2026-09-27).
+  recheckMs: 3000,
   // Photos. The page's own limit wording is read first (several spellings);
   // the live form's exact wording is still to be captured (see README).
   fileInput: 'input[type="file"]',

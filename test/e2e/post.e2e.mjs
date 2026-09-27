@@ -83,6 +83,7 @@ try {
         listingUrlPattern: `^${marketOrigin.replace(/\./g, '\\.')}/marketplace/item/(\\d+)`,
         afterPublishPatterns: [],
         settleMs: 200,
+        recheckMs: 500,
       },
     });
   }, { origin, marketOrigin });
