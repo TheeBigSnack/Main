@@ -1,8 +1,8 @@
 import { normalizeVehicle } from './src/normalize.js';
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
-import { scanInventoryInPage } from './src/scan.js';
-import { findBoilerplate } from './src/description.js';
+import { probeTab, searchViaTab, detectAdapter, scanWithSearch, rememberSite } from './src/scanRunner.js';
+import { todoCountFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -69,6 +69,7 @@ async function save(...names) {
   for (const name of names) out[k[name]] = state[name];
   await chrome.storage.local.set(out);
   if (names.includes('settings') && state.settings) await saveProfile(state.settings);
+  if (names.includes('diff') || names.includes('posted')) chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
 }
 
 function setStatus(text, kind = '') {
@@ -97,42 +98,50 @@ async function scan() {
   button.disabled = true;
   setStatus("Reading the website's used inventory…");
   try {
-    const confirmVins = [...new Set([...Object.keys(state.snapshot?.vehicles || {}), ...Object.keys(state.posted)])];
-    const [injection] = await chrome.scripting.executeScript({
-      target: { tabId: state.tab.id },
-      world: 'MAIN',
-      func: scanInventoryInPage,
-      args: [{ confirmVins }],
-    });
-    const res = injection && injection.result;
-    if (!res || !res.ok) {
-      setStatus((res && res.message) || "Couldn't read this page.", 'error');
+    const probe = await probeTab(state.tab.id);
+    const adapter = probe && detectAdapter(probe);
+    if (!adapter) {
+      setStatus("This page doesn't have the inventory search this tool reads (Dealer Inspire's search service). Open your dealership's website and try again.", 'error');
       return;
     }
-    const vehicles = res.records.map(normalizeVehicle).filter(Boolean);
-    if (state.settings && state.settingsFromProfile) {
-      // first scan here with details from the profile: keep only store names that exist on this website
-      const here = new Set(vehicles.map((v) => v.location).filter(Boolean));
-      const kept = state.settings.myStores.filter((s) => here.has(s));
-      state.settings = withDefaults({ ...state.settings, myStores: kept.length ? kept : defaultSettings(res.site, vehicles).myStores }, res.site);
+    const site = { ...probe.site, adapter: adapter.PLATFORM.id };
+    const search = searchViaTab(state.tab.id, probe.service);
+    // Settings first: the assessments depend on them, and the site's own address fills blanks.
+    // A first pass reads the lot to pick default stores when there are no settings yet.
+    let settings = state.settings ? withDefaults(state.settings, site) : null;
+    const out = await scanWithSearch({ adapter, search, site, settings: settings || withDefaults({}, site), prevSnapshot: state.snapshot, posted: state.posted, status: probe.service.visibleStatusValues });
+    if (!out.ok) {
+      setStatus(out.message || "Couldn't read this page.", 'error');
+      return;
+    }
+    let result = out;
+    if (!settings || state.settingsFromProfile) {
+      if (settings && state.settingsFromProfile) {
+        // first scan here with details from the profile: keep only store names that exist on this website
+        const here = new Set(out.vehicles.map((v) => v.location).filter(Boolean));
+        const kept = settings.myStores.filter((s) => here.has(s));
+        settings = withDefaults({ ...settings, myStores: kept.length ? kept : defaultSettings(site, out.vehicles).myStores }, site);
+      } else {
+        settings = defaultSettings(site, out.vehicles);
+      }
       state.settingsFromProfile = false;
-    } else {
-      state.settings = state.settings ? withDefaults(state.settings, res.site) : defaultSettings(res.site, vehicles);
+      // the store choice changes what is "ready": assess again with the real settings (no second request)
+      const assessments = out.vehicles.map((v) => assessVehicle(v, settings));
+      const snapshot = makeSnapshot({ site: out.snapshot.site, takenAt: out.res.fetchedAt, complete: out.res.complete, vehicles: out.vehicles, assessments });
+      const diff = diffScans(state.snapshot, snapshot, { posted: state.posted, confirm: out.res.confirm, basis: settings.basis });
+      diff.takenAt = out.res.fetchedAt;
+      diff.requests = out.res.requests;
+      if (!out.res.complete) diff.warnings.unshift(out.diff.warnings[0]);
+      result = { ...out, snapshot, diff };
     }
-    // Text that repeats across the lot (disclaimers, legal lines) is remembered so the description writer can strip it.
-    state.boilerplate = [...findBoilerplate(vehicles.map((v) => v.descriptionRaw))];
-    const assessments = vehicles.map((v) => assessVehicle(v, state.settings));
-    const curr = makeSnapshot({ site: res.site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments });
-    const diff = diffScans(state.snapshot, curr, { posted: state.posted, confirm: res.confirm, basis: state.settings.basis });
-    if (!res.complete) {
-      diff.warnings.unshift(`The website returned ${res.records.length} of ${res.total} cars. Missing cars were double-checked one by one.`);
-    }
-    diff.takenAt = res.fetchedAt;
-    diff.requests = res.requests;
-    state.diff = diff;
-    if (!diff.unreliable) state.snapshot = curr; // keep the last good scan if this one looks broken
-    state.siteName = res.site.name;
+    state.settings = settings;
+    state.boilerplate = result.boilerplate;
+    state.diff = result.diff;
+    if (!result.diff.unreliable) state.snapshot = result.snapshot; // keep the last good scan if this one looks broken
+    state.siteName = site.name;
     await save('snapshot', 'diff', 'settings', 'boilerplate');
+    await rememberSite(state.origin, { name: site.name, adapter: adapter.PLATFORM.id, service: probe.service, site: out.snapshot.site, lastScan: result.res.fetchedAt, lastError: null, auto: Boolean(state.settings.autoRescan) });
+    chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
     state.view = 'todo';
     setStatus('');
     render();
@@ -159,12 +168,7 @@ function lists() {
   };
 }
 
-function todoCount() {
-  const d = state.diff;
-  if (!d) return 0;
-  const yours = (x) => x.yours;
-  return (d.takeDown || []).filter(yours).length + (d.priceUpdates || []).filter(yours).length + (d.needsALook || []).filter(yours).length;
-}
+const todoCount = () => todoCountFor(state.diff);
 
 const VIEWS = [
   ['todo', 'To do'],

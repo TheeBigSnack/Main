@@ -3,30 +3,30 @@
 // runs the same pre-owned and ready checks again. Belt and braces: a car that
 // went sale-pending, sold or got retyped since the last scan can't be posted.
 
-import { scanInventoryInPage } from './scan.js';
-import { normalizeVehicle } from './normalize.js';
+import { probeTab, searchViaTab, detectAdapter } from './scanRunner.js';
 import { assessVehicle, DECISION } from './classify.js';
 
 export async function fetchVehicleDetails(tabId, vin) {
   const wanted = String(vin || '').toUpperCase();
-  let injection;
+  let probe;
   try {
-    [injection] = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'MAIN',
-      func: scanInventoryInPage,
-      args: [{ vins: [wanted], types: null, fullRecords: true, confirmVins: [] }],
-    });
+    probe = await probeTab(tabId);
   } catch (e) {
     return { ok: false, message: "Couldn't reach the dealership website tab. Open the used inventory page and click Post again. (" + ((e && e.message) || e) + ')' };
   }
-  const res = injection && injection.result;
-  if (!res || !res.ok) return { ok: false, message: (res && res.message) || "Couldn't read the dealership website." };
-  const raw = res.records.find((r) => r.vin === wanted);
-  if (!raw) {
+  const adapter = probe && detectAdapter(probe);
+  if (!adapter) return { ok: false, message: "This tab isn't a dealership inventory page Lot Sync can read. Open the used inventory page and click Post again." };
+  let r;
+  try {
+    r = await adapter.getDetails(searchViaTab(tabId, probe.service), wanted, { status: probe.service.visibleStatusValues || undefined });
+  } catch (e) {
+    return { ok: false, message: "Couldn't read the dealership website: " + ((e && e.message) || e) };
+  }
+  if (!r.ok) return { ok: false, message: r.message || "Couldn't read the dealership website." };
+  if (!r.record) {
     return { ok: false, notFound: true, message: "This car isn't on the website any more (sold, removed or hidden). Rescan before posting anything." };
   }
-  return { ok: true, vehicle: normalizeVehicle(raw), site: res.site, fetchedAt: res.fetchedAt };
+  return { ok: true, vehicle: adapter.normalize(r.record), site: probe.site, fetchedAt: r.fetchedAt };
 }
 
 // Pure: is this fresh record still allowed into the posting flow?

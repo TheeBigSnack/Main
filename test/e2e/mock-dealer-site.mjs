@@ -97,6 +97,24 @@ export function startMockSite(port = 0) {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify(SCENARIOS[current]().map((r) => enrich(r, origin))));
     }
+    // The search service's own endpoint, as the extension's background rescan
+    // calls it directly (POST, JSON, x-api-key).
+    if (req.method === 'POST' && /^\/api\/v1\/listings\/\d+\/search$/.test(url.pathname)) {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        const b = JSON.parse(raw || '{}');
+        const origin = 'http://' + req.headers.host;
+        const all = SCENARIOS[current]().map((r) => enrich(r, origin));
+        const f = b.filters || {};
+        const list = all.filter((r) => (!f.type || f.type.includes(r.type)) && (!f.vin || f.vin.includes(r.vin)) && (!f.status || f.status.includes(r.status)));
+        const perPage = b.perPage || 50;
+        const start = ((b.page || 1) - 1) * perPage;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ data: { ccid: 153146, total_vehicle_count: list.length, listings: list.slice(start, start + perPage) }, meta: { apiKey: req.headers['x-api-key'] ? 'seen' : 'missing' } }));
+      });
+      return;
+    }
     if (url.pathname.startsWith('/photo/')) {
       res.writeHead(200, { 'content-type': 'image/png' });
       return res.end(PNG);
