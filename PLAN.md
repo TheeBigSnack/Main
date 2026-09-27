@@ -7,7 +7,7 @@ Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a 
 | Milestone | Weeks | State |
 |---|---|---|
 | M1 One-click post | Sep 28 – Oct 11 | **Done Sep 27**: single posts run clean on the live form (six live runs drove the fixes) |
-| M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | In progress from Sep 27: queue (verified live), adapters, automatic rescans + badge, wizard built; listing upkeep next |
+| M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | **Built Sep 27** (all four features, tests green). Verified live: the queue. Still to try on the real site: the wizard's permission step, a background rescan, and upkeep's listing pages (the sold/removed wording in `listingSigns.js` and the edit form's Price box) |
 | M3 Pilot | Oct 26 – Nov 8 | Needs the Waynesburg manager's sign-off |
 | M4 Accounts and manager view | Nov 9 – Nov 22 | Not started |
 | M5 Billing, site, Web Store | Nov 23 – Dec 6 | Not started |

@@ -63,9 +63,14 @@ test('the form map has no selector, name or option that could reach Publish, Upd
 
 test('the fill code never submits a form or clicks anything but a dropdown option', () => {
   const src = read('../extension/facebook/fillForm.js');
-  // the read-only probe must not click at all
-  const probe = src.slice(src.indexOf('function probeFormInPage'), src.indexOf('function attachPhotosInPage'));
+  // the read-only probe and the listing reader must not act on the page at all
+  const probe = src.slice(src.indexOf('function probeFormInPage'), src.indexOf('function fillPriceInPage'));
   assert.ok(probe.length > 100 && !/\.click\(\)|dispatchEvent|\.focus\(\)|\.value\s*=/.test(probe), 'probeFormInPage must be read-only');
+  const reader = src.slice(src.indexOf('function readListingInPage'), src.indexOf('function attachPhotosInPage'));
+  assert.ok(reader.length > 100 && !/\.click\(\)|dispatchEvent|\.focus\(\)|\.value\s*=/.test(reader), 'readListingInPage must be read-only');
+  // the price filler touches one box and never clicks
+  const pricer = src.slice(src.indexOf('function fillPriceInPage'), src.indexOf('function readListingInPage'));
+  assert.ok(pricer.length > 100 && !/\.click\(\)/.test(pricer), 'fillPriceInPage must not click');
   assert.ok(!/\.submit\s*\(|requestSubmit|\bpublish\b|mark as sold|\bdelete\b/i.test(src), 'fillForm.js must not contain submit/publish/delete paths');
   assert.ok(!/type\s*=\s*["']submit["']/i.test(src));
   // the only element type ever clicked is a dropdown control or one of its options
@@ -74,15 +79,26 @@ test('the fill code never submits a form or clicks anything but a dropdown optio
   }
 });
 
-test('the side panel reaches the Facebook tab only through the two fill functions', () => {
+test('the side panel reaches the Facebook tab only through the known fill functions', () => {
   const src = read('../extension/sidepanel.js');
   const injections = (src.match(/executeScript\(/g) || []).length;
   const known = (src.match(/func: (fillFormInPage|attachPhotosInPage|probeFormInPage)\b/g) || []).length;
-  assert.ok(injections >= 3 && injections === known, `every executeScript must use fillFormInPage, attachPhotosInPage or probeFormInPage (${injections} vs ${known})`);
+  assert.ok(injections >= 3 && injections === known, `every executeScript must use one of the known fill functions (${injections} vs ${known})`);
   assert.ok(!/files:\s*\[|chrome\.debugger|tabs\.sendMessage|\.submit\s*\(|requestSubmit/i.test(src));
   // the only thing it ever clicks is its own download link
   for (const m of src.matchAll(/(\w+)\.click\(\)/g)) assert.equal(m[1], 'a');
   assert.match(src, /a\.download = /);
+});
+
+test('listing upkeep only reads the listing page and fills the Price box; the person clicks Update, Mark as sold or Delete', () => {
+  const src = read('../extension/upkeep.js');
+  const injections = (src.match(/executeScript\(/g) || []).length;
+  const known = (src.match(/func: (fillPriceInPage|readListingInPage)\b/g) || []).length;
+  assert.ok(injections === 2 && injections === known, `upkeep.js may inject only the price filler and the listing reader (${injections} vs ${known})`);
+  assert.ok(!/\.click\(\)|files:\s*\[|chrome\.debugger|tabs\.sendMessage|\.submit\s*\(|requestSubmit|tabs\.remove/i.test(src), 'upkeep.js must not click, close tabs or submit');
+  // the signs it watches for are text patterns, never selectors for controls
+  const signs = read('../extension/facebook/listingSigns.js');
+  assert.ok(!/button|role=|querySelector|\.click|\[data-/i.test(signs), 'listingSigns.js must describe text only');
 });
 
 test('the background worker and the listing watcher never touch the page', () => {

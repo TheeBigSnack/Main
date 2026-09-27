@@ -25,7 +25,10 @@ Chrome will say the extension can read and change data on `www.facebook.com/mark
    - shows what it will fill in, including **Vehicle condition** and **Title status** from your dealership's defaults (Settings), which you can change on the form.
 5. Click **Open the Marketplace form**. A new tab opens on Facebook's create-vehicle-listing page and the fields fill in, photos included. Anything it couldn't fill is listed in the panel with a copy button.
 6. On Facebook: check every field, including condition and title, then click **Publish** yourself. The panel notices the listing page and asks you to confirm; paste the listing link if it didn't notice. The car moves to **My listings**.
-7. Click **Rescan website** any time (once a day is plenty). **To do** shows what to take down (sold, or gone sale-pending), what to reprice (with your listing price next to the website's), and what's new. Click **Updated** or **Taken down** once you've done it on Facebook.
+7. Click **Rescan website** any time (or let the automatic rescans do it). **To do** shows what to take down (sold, or gone sale-pending), what to reprice (with your listing price next to the website's), and what's new.
+   - **Open & update price** opens your listing in a new tab. Click **Edit listing** on Facebook; the side panel puts the website's new price in the Price box the moment it appears and tells you what the box shows. Click **Update** yourself. The panel notices the new price on the listing and ticks the item off.
+   - **Open listing** on a sold car opens your listing. Click **Mark as sold** (or **Delete**) yourself; the panel notices and ticks the item off.
+   - **Updated** and **Taken down** tick an item off by hand if you did it another way.
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
@@ -96,13 +99,13 @@ A demo or loaner flag always means "sold as new". A Carfax report counts as a su
 ## For development
 
 ```
-npm test              # 84 unit tests on real records from the site (Node 20+, no dependencies)
+npm test              # 120 unit tests on real records from the site (Node 20+, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
-npm run test:e2e      # both e2e tests: the popup/rescan flow and the post flow, against mock sites
+npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep
 ```
 
-Never run tests against the real facebook.com. The post e2e uses `test/e2e/mock-marketplace.mjs`, a stand-in form with the same field names, and the test itself clicks Publish in place of the salesperson.
+Never run tests against the real facebook.com. The post, queue and upkeep e2es use `test/e2e/mock-marketplace.mjs`, a stand-in form (and listing and edit pages) with the same field names, and the test itself clicks Publish, Update and Mark as sold in place of the salesperson.
 
 The e2e tests need Playwright's own Chromium build (about 450 MB unpacked): branded Google Chrome and Edge 137+ ignore `--load-extension`, so they can't run them. If your system drive is tight, keep the browser and the throwaway test profiles elsewhere:
 
@@ -128,9 +131,13 @@ Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan
 | `extension/src/vehicleDetails.js` | Post-time fetch of one car and the second check |
 | `extension/src/cap.js`, `settings.js` | Daily cap; settings defaults |
 | `extension/facebook/formMap.js` | The only place Facebook's fields are described |
-| `extension/facebook/fillForm.js` | Injected: fills the form, attaches photos, reports everything |
+| `extension/facebook/fillForm.js` | Injected: fills the form, attaches photos, reports everything; fills the edit form's price; reads a listing page |
+| `extension/facebook/listingSigns.js` | How a listing page reads once it is sold or removed (text only, never a control) |
 | `extension/facebook/detectPost.js` | Watches the tab address for the listing page |
-| `extension/sidepanel.*` | The guided post flow |
-| `extension/background.js` | Downloads photos from the dealer's image host |
+| `extension/sidepanel.*` | The guided post flow, the queue, the first-run wizard and listing upkeep |
+| `extension/wizard.js`, `upkeep.js` | The wizard steps; the To do follow-through (open the listing, fill the new price, notice the change) |
+| `extension/adapters/` | One file per dealer-website platform (Dealer Inspire today) behind a small interface |
+| `extension/src/scanRunner.js`, `rescanSchedule.js` | The scan pipeline shared by popup, wizard and service worker; when rescans are due and what the badge says |
+| `extension/background.js` | Downloads photos; rescans every known website every 3 hours and keeps the badge current |
 | `backend/` | The rewrite service (Anthropic API key lives here, never in the extension) |
 | `test/fixtures/records.json` | Real records from the Waynesburg site, one per edge case |

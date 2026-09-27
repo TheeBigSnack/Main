@@ -30,6 +30,11 @@ export const FORM_MAP = Object.freeze({
   // Where the tab ends up after the salesperson publishes.
   listingUrlPattern: '^https://www\\.facebook\\.com/marketplace/item/(\\d+)',
   afterPublishPatterns: ['^https://www\\.facebook\\.com/marketplace/(you|selling)(/|$|\\?)'],
+  // Upkeep: where the salesperson's own listings are, for a To do item whose
+  // listing link was never saved. (How a listing page reads once the person
+  // has marked it sold or removed it is in listingSigns.js.) NOT YET VERIFIED
+  // against the live page.
+  yourListingsUrl: 'https://www.facebook.com/marketplace/you/selling',
   // Give the page this long to draw its form after it reports loaded.
   settleMs: 2500,
   // After filling, wait this long and read everything back: the live form

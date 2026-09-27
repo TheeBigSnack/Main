@@ -685,6 +685,115 @@ export function probeFormInPage(map) {
   return { url: location.href, title: document.title, found, missing, controls, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
 }
 
+// Upkeep, step 1: once the salesperson has opened the listing's edit form,
+// put the new price in its Price box (found the same way as on the create
+// form) and read it back. Nothing else is touched and nothing is clicked.
+export function fillPriceInPage(map, price) {
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+  const visible = (el) => {
+    if (!el || !el.isConnected) return false;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  function accessibleName(el) {
+    const parts = [];
+    const aria = el.getAttribute('aria-label');
+    if (aria) parts.push(aria);
+    const by = el.getAttribute('aria-labelledby');
+    if (by) for (const id of by.split(/\s+/)) { const n = document.getElementById(id); if (n) parts.push(text(n)); }
+    if (el.id) {
+      try { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) parts.push(text(l)); } catch (e) { /* odd id */ }
+    }
+    const wrap = el.closest('label');
+    if (wrap) parts.push(text(wrap));
+    const ph = el.getAttribute('placeholder');
+    if (ph) parts.push(ph);
+    return norm(parts.join(' '));
+  }
+  const spec = (map.fields || []).find((f) => f.key === 'price');
+  if (!spec) return { ok: false, reason: 'no price field in the map' };
+  const patterns = spec.name.map((p) => new RegExp(p, 'i'));
+  const candidates = [...document.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"]), [role="textbox"]')].filter(visible);
+  const el = candidates.filter((c) => patterns.some((re) => re.test(accessibleName(c)))).sort((a, b) => text(a).length - text(b).length)[0];
+  if (!el) return { ok: false, reason: 'no price box on this page yet', url: location.href };
+  const want = String(Math.round(Number(price)));
+  const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+  el.focus();
+  if (desc && desc.set) desc.set.call(el, want);
+  else el.value = want;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  el.blur();
+  const shown = String(el.value || '');
+  const ok = shown === want || shown.replace(/\D/g, '') === want;
+  return ok ? { ok: true, shown, url: location.href } : { ok: false, reason: `the price box shows "${shown.slice(0, 20)}" instead of ${want}`, url: location.href };
+}
+
+// Upkeep, step 2: what a listing page shows, read-only, so the panel can tell
+// when the salesperson has saved a new price or marked the car sold. Only the
+// page's static text counts: text inside buttons, links and menus is skipped,
+// so a "Mark as sold" button never reads as a sold listing.
+export function readListingInPage(map, signs) {
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+  const shown = (el) => (el.checkVisibility ? el.checkVisibility() : true);
+  const visible = (el) => {
+    if (!el || !el.isConnected || !shown(el)) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  function accessibleName(el) {
+    const parts = [];
+    const aria = el.getAttribute('aria-label');
+    if (aria) parts.push(aria);
+    const by = el.getAttribute('aria-labelledby');
+    if (by) for (const id of by.split(/\s+/)) { const n = document.getElementById(id); if (n) parts.push(text(n)); }
+    if (el.id) {
+      try { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) parts.push(text(l)); } catch (e) { /* odd id */ }
+    }
+    const wrap = el.closest('label');
+    if (wrap) parts.push(text(wrap));
+    const ph = el.getAttribute('placeholder');
+    if (ph) parts.push(ph);
+    return norm(parts.join(' '));
+  }
+  // static text, top of the page first, capped so a long page stays cheap
+  const skip = 'button, [role="button"], a, [role="link"], [role="menuitem"], [role="menu"], input, textarea, select, script, style, noscript';
+  const chunks = [];
+  let total = 0;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n && total < 6000; n = walker.nextNode()) {
+    const s = n.nodeValue.replace(/\s+/g, ' ').trim();
+    if (!s) continue;
+    const p = n.parentElement;
+    if (!p || p.closest(skip) || !shown(p)) continue;
+    chunks.push(s);
+    total += s.length + 1;
+  }
+  const body = chunks.join(' ');
+  const prices = [...new Set((body.match(/\$\s?[\d,]{3,}/g) || []).map((p) => p.replace(/[^\d]/g, '')))];
+  const test = (p) => { try { return new RegExp(p, 'i').test(body); } catch (e) { return false; } };
+  // the edit form's Price box, found the same way fillPriceInPage finds it
+  const spec = (map.fields || []).find((f) => f.key === 'price');
+  const patterns = spec ? spec.name.map((p) => new RegExp(p, 'i')) : [/\bprice\b/i];
+  const box = [...document.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"]), [role="textbox"]')]
+    .filter(visible)
+    .find((c) => patterns.some((re) => re.test(accessibleName(c))));
+  return {
+    url: location.href,
+    title: document.title,
+    prices,
+    sold: Boolean(signs && signs.sold) && test(signs.sold),
+    unavailable: Boolean(signs && signs.unavailable) && test(signs.unavailable),
+    hasPriceBox: Boolean(box),
+    priceBoxValue: box ? String(box.value || '') : '',
+  };
+}
+
 // Attaches already-downloaded photos ({ name, type, dataUrl }) to the form's
 // file input, the same way a person dropping files on it would.
 export async function attachPhotosInPage(map, files) {

@@ -240,7 +240,9 @@ function viewTodo(l) {
         row(t, {
           sub: esc(t.text) + (t.yours ? '' : ' · not marked as posted'),
           right: t.lastPrice ? money(t.lastPrice) : '',
-          action: t.yours ? `<button type="button" class="small go" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button>` : '',
+          action: t.yours
+            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="takeDown" data-vin="${esc(t.vin)}" title="Opens your listing so you can mark it sold or delete it">Open listing</button><button type="button" class="small" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button></span>`
+            : '',
           muted: !t.yours,
         })
       ))
@@ -253,7 +255,9 @@ function viewTodo(l) {
         row(p, {
           sub: (p.yours ? 'Your listing' : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
           right: `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
-          action: p.yours ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button>` : '',
+          action: p.yours
+            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`
+            : '',
           muted: !p.yours,
         })
       ))
@@ -553,6 +557,23 @@ async function onPanelClick(ev) {
       state.queue = null;
       await chrome.storage.local.remove(storageKeys(state.origin).queue);
       break;
+    case 'upkeep': {
+      // Hands a to-do item to the side panel: it opens the listing, fills the
+      // new price when the edit form appears, and marks the item done once it
+      // sees the change. The person clicks Update / Mark as sold / Delete.
+      if (!state.tab) return;
+      const p = state.posted[vin] || {};
+      const item = { origin: state.origin, vin, kind: btn.dataset.kind, price: Number(btn.dataset.price) || null, listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
+      let opened = true;
+      try {
+        await chrome.sidePanel.open({ windowId: state.tab.windowId }); // straight from the click
+      } catch (e) {
+        opened = false;
+      }
+      await chrome.storage.local.set({ upkeepRequest: item });
+      setStatus(opened ? `Continue in the side panel: ${item.name}` : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue.');
+      return;
+    }
     case 'setup': {
       if (!state.tab) return;
       let opened = true;

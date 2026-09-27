@@ -18,6 +18,7 @@ import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
+import { up, startUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
@@ -720,7 +721,34 @@ function render() {
     $('panel').innerHTML = wizardHtml();
     return;
   }
+  if (state.step === 'upkeep') {
+    $('panel').innerHTML = upkeepHtml();
+    return;
+  }
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
+}
+
+const upkeepCtx = {
+  render,
+  map: () => state.map || FORM_MAP,
+  onClose: () => { state.step = 'idle'; render(); },
+};
+
+let lastUpkeepAt = 0;
+async function openUpkeep(req) {
+  // the request can arrive twice (storage change + start-up read): act once
+  if (req.at && req.at === lastUpkeepAt) return;
+  lastUpkeepAt = req.at || Date.now();
+  await chrome.storage.local.remove('upkeepRequest');
+  if (watcher) watcher.cancel();
+  state.origin = req.origin;
+  state.dealerTabId = req.dealerTabId || state.dealerTabId;
+  await chrome.storage.local.set({ lastPostOrigin: req.origin });
+  await loadSaved();
+  const { devOverrides } = await chrome.storage.local.get('devOverrides');
+  state.map = { ...FORM_MAP, ...(devOverrides || {}) };
+  state.step = 'upkeep';
+  await startUpkeep(req, upkeepCtx);
 }
 
 const wizardCtx = {
@@ -772,6 +800,7 @@ async function onClick(ev) {
   if (!btn) return;
   if (btn.dataset.copy !== undefined) return copy(btn.dataset.copy);
   if (state.step === 'wizard' && (await handleWizardClick(btn.id, wizardCtx))) return undefined;
+  if (state.step === 'upkeep' && (await handleUpkeepClick(btn.id, upkeepCtx))) return undefined;
   switch (btn.id) {
     case 'openForm': return openForm();
     case 'checkForm': return openForm({ probeOnly: true });
@@ -857,12 +886,14 @@ async function init() {
       chrome.storage.local.remove('setupRequest');
       openWizard(changes.setupRequest.newValue);
     }
+    if (changes.upkeepRequest && changes.upkeepRequest.newValue) openUpkeep(changes.upkeepRequest.newValue);
   });
-  const { postRequest, setupRequest, lastPostOrigin } = await chrome.storage.local.get(['postRequest', 'setupRequest', 'lastPostOrigin']);
+  const { postRequest, setupRequest, upkeepRequest, lastPostOrigin } = await chrome.storage.local.get(['postRequest', 'setupRequest', 'upkeepRequest', 'lastPostOrigin']);
   if (setupRequest) {
     await chrome.storage.local.remove('setupRequest');
     return openWizard(setupRequest);
   }
+  if (upkeepRequest) return openUpkeep(upkeepRequest);
   if (postRequest) return startFlow(postRequest);
   if (lastPostOrigin) {
     if (await resumeWizard(lastPostOrigin)) {

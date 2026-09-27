@@ -182,6 +182,29 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   });
 </script></body></html>`;
 
+// Listings the person has published, for the upkeep pages: id -> { title, price, sold, deleted }.
+const listings = {
+  424242: { title: '2019 Ram 1500 Classic Express', price: 27163, sold: false, deleted: false },
+  515151: { title: '2022 Jeep Wagoneer Series III', price: 38383, sold: false, deleted: false },
+};
+
+const itemPage = (id, l) => `<!doctype html><html><head><meta charset="utf-8"><title>${l.title} (mock listing)</title></head><body>
+<h1>${l.title}</h1>
+${l.deleted ? '<p>This content isn\'t available right now.</p>' : `<p class="price">$${l.price.toLocaleString('en-US')}</p>${l.sold ? '<p class="badge">Sold</p>' : ''}
+<p><a href="/marketplace/edit/${id}/">Edit listing</a></p>
+<form method="post" action="/marketplace/item/${id}/sold"><button type="submit">Mark as sold</button></form>
+<form method="post" action="/marketplace/item/${id}/delete"><button type="submit">Delete</button></form>`}
+</body></html>`;
+
+const editPage = (id, l) => `<!doctype html><html><head><meta charset="utf-8"><title>Edit listing (mock)</title></head><body>
+<h1>Edit listing: ${l.title}</h1>
+<form method="post" action="/marketplace/edit/${id}/save">
+  <label>Price <input id="price" name="price" value="${l.price}"></label>
+  <label>Description <textarea name="description">unchanged</textarea></label>
+  <button type="submit" id="update">Update</button>
+</form>
+</body></html>`;
+
 export function startMockMarketplace(port = 0) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -189,6 +212,39 @@ export function startMockMarketplace(port = 0) {
       publishClicks += 1;
       res.writeHead(204);
       return res.end();
+    }
+    // ---- the person's published listings, and the actions only they take ----
+    const item = /^\/marketplace\/item\/(\d+)\/(sold|delete)$/.exec(url.pathname);
+    if (req.method === 'POST' && item && listings[item[1]]) {
+      listings[item[1]][item[2] === 'sold' ? 'sold' : 'deleted'] = true;
+      res.writeHead(303, { location: `/marketplace/item/${item[1]}/` });
+      return res.end();
+    }
+    const save = /^\/marketplace\/edit\/(\d+)\/save$/.exec(url.pathname);
+    if (req.method === 'POST' && save && listings[save[1]]) {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        const price = Number(new URLSearchParams(raw).get('price'));
+        if (price > 0) listings[save[1]].price = price;
+        res.writeHead(303, { location: `/marketplace/item/${save[1]}/` });
+        res.end();
+      });
+      return;
+    }
+    const edit = /^\/marketplace\/edit\/(\d+)\/?$/.exec(url.pathname);
+    if (edit && listings[edit[1]]) {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      return res.end(editPage(edit[1], listings[edit[1]]));
+    }
+    if (url.pathname === '/listing-state') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(listings));
+    }
+    const known = /^\/marketplace\/item\/(\d+)\/?$/.exec(url.pathname);
+    if (known && listings[known[1]]) {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      return res.end(itemPage(known[1], listings[known[1]]));
     }
     if (url.pathname === '/publish-count') {
       res.writeHead(200, { 'content-type': 'text/plain' });
