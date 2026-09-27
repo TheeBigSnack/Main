@@ -142,7 +142,7 @@ try {
   const car2 = await fb2.evaluate(() => ({
     prefilled: document.body.dataset.prefilled,
     year: document.getElementById('year').dataset.value,
-    make: document.getElementById('make').dataset.value,
+    make: document.getElementById('make').value,
     model: document.getElementById('model').value,
     vin: document.getElementById('vin').value,
     mileage: document.getElementById('mileage').value,
@@ -152,7 +152,8 @@ try {
   // and the panel says the form had another car in it
   const warning = await panel.textContent('#preexisting');
   assert.match(warning, /already held another vehicle/);
-  assert.match(warning, /Year "2020"[\s\S]*Make "Honda"[\s\S]*Model "Accord EX-L"[\s\S]*VIN "1HGCV1F30LA000000"/);
+  for (const piece of ['VIN "1HGCV1F30LA000000"', 'Year "2020"', 'Make "Honda"', 'Model "Accord EX-L"']) assert.ok(warning.includes(piece), piece);
+  assert.doesNotMatch(warning, /Location/, "Facebook's own location default is not another car");
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   await panel.screenshot({ path: join(shots, 'queue-2b-restored-draft-warning.png'), fullPage: true });
   await dealer.request.get(`${marketOrigin}/prefill?name=none`);

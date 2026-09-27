@@ -266,37 +266,82 @@ export async function fillFormInPage(map, data) {
     return { ok: false, reason: 'none of the options matched (' + options.slice(0, 8).map(text).join(', ') + ')' };
   }
 
-  // Types the value and picks a suggestion, but only one that matches what we
-  // know about the place (`expect`: alternatives, each a list of words that
-  // must all appear). The first live run picked Waynesburg, Ohio for a store
-  // in Waynesburg, Pennsylvania; never again.
+  // Types like a person, one character at a time with key events, so a
+  // typeahead sees it. Leaves the box focused: a blur can commit a suggestion
+  // we never chose (the live form turned every make into Honda that way).
+  async function typeText(el, value) {
+    const isInput = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const desc = isInput ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+    const setVal = (v) => { if (desc && desc.set) desc.set.call(el, v); else if (isInput) el.value = v; };
+    el.focus();
+    if (isInput) {
+      setVal('');
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+    } else {
+      const sel = window.getSelection();
+      if (sel) sel.selectAllChildren(el);
+      document.execCommand('insertText', false, ''); // clears the selection
+    }
+    let typed = '';
+    for (const ch of String(value)) {
+      key(el, ch);
+      typed += ch;
+      if (isInput) {
+        setVal(typed);
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
+      } else {
+        document.execCommand('insertText', false, ch);
+      }
+      await sleep(12);
+    }
+    return isInput ? accepted(el.value, value) : norm(text(el)) === norm(value);
+  }
+  const readBack = (el) => (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? String(el.value) : text(el));
+
+  // Types the value, waits for suggestions, and picks one only if it contains
+  // what we typed (or, for the location, the city and state from `expect`).
+  // Otherwise the suggestions are dismissed with Escape and the person picks.
+  // Always reports what the box shows afterwards.
   async function typeahead(el, value, expect) {
     await closePopups(null);
     const optionsBefore = new Set(visibleOptions());
-    setText(el, value);
+    await typeText(el, value);
     let options = [];
-    for (let i = 0; i < 20 && !options.length; i += 1) {
+    for (let i = 0; i < 25 && !options.length; i += 1) {
       await sleep(100);
       options = visibleOptions().filter((o) => !optionsBefore.has(o));
     }
-    if (!options.length) return { ok: true, partial: true, note: 'typed it; pick the suggestion Facebook shows' };
     const has = (t, word) => new RegExp('\\b' + escapeRe(word) + '\\b', 'i').test(t);
-    const alternatives = (expect && expect.alternatives) || [];
-    const matching = alternatives.length ? options.filter((o) => alternatives.some((words) => words.every((w) => has(text(o), w)))) : options;
-    const shown = options.slice(0, 5).map(text).join('; ');
-    if (!matching.length) {
-      await closePopups(null);
-      return { ok: true, partial: true, note: `none of the suggestions matched (${shown}); pick the right one yourself` };
+    const alternatives = expect && expect.alternatives && expect.alternatives.length ? expect.alternatives : [[value]];
+    const strict = expect ? expect.strict !== false : true;
+    const fits = (t) => accepted(t, value) || alternatives.some((words) => words.every((w) => has(t, w)));
+    if (!options.length) {
+      key(el, 'Escape');
+      await sleep(100);
+      const shown = readBack(el);
+      return fits(shown) ? { ok: true, shown } : { ok: false, reason: `typed "${value}" but the box shows "${shown.slice(0, 40)}"` };
     }
-    if (matching.length > 1 && !(expect && expect.strict)) {
+    const matching = options.filter((o) => alternatives.some((words) => words.every((w) => has(text(o), w))));
+    const shownList = options.slice(0, 5).map(text).join('; ');
+    if (!matching.length || (matching.length > 1 && !strict)) {
+      key(el, 'Escape');
+      await sleep(150);
       await closePopups(null);
-      return { ok: true, partial: true, note: `several places match (${matching.slice(0, 4).map(text).join('; ')}); add the state or ZIP in Settings, or pick one yourself` };
+      const shown = readBack(el);
+      if (!fits(shown)) return { ok: false, reason: `the box shows "${shown.slice(0, 40)}" after typing "${value}"` };
+      const note = !matching.length
+        ? `none of the suggestions matched (${shownList}); pick the right one yourself`
+        : `several match (${matching.slice(0, 4).map(text).join('; ')}); add the state or ZIP in Settings, or pick one yourself`;
+      return { ok: true, partial: true, note };
     }
     const option = matching[0];
     chooseOption(option);
     await sleep(200);
     await closePopups(null);
-    return { ok: true, chosen: text(option), note: 'picked ' + text(option) };
+    const shown = readBack(el);
+    const good = fits(shown) || norm(shown).includes(norm(text(option)).slice(0, 20));
+    return good ? { ok: true, shown, note: 'picked ' + text(option) } : { ok: false, reason: `picked "${text(option)}" but the box shows "${shown.slice(0, 40)}"` };
   }
 
   function readPhotoLimit() {
@@ -317,9 +362,10 @@ export async function fillFormInPage(map, data) {
   const fields = (data && data.fields) || {};
 
   // Anything already in the form that is not ours: another car, most likely
-  // a draft Facebook restored. Reported so nothing of it is published by mistake.
+  // a draft Facebook restored. Reported so nothing of it is published by
+  // mistake. The location and the dealership defaults are not "another car".
   for (const spec of map.fields) {
-    if (spec.kind === 'checkbox') continue;
+    if (spec.kind === 'checkbox' || ['location', 'condition', 'titleStatus'].includes(spec.key)) continue;
     const el = findFieldNow(spec);
     const shown = el ? displayed(el, spec) : '';
     const ours = fields[spec.key] === null || fields[spec.key] === undefined ? '' : String(fields[spec.key]);
@@ -348,7 +394,7 @@ export async function fillFormInPage(map, data) {
         const r = await setCheckbox(el, entry.value === 'yes');
         if (r.ok) result.filled.push({ ...entry, shown: r.shown });
         else result.blocked.push({ ...entry, reason: r.reason });
-      } else if (spec.kind === 'choice' || (spec.kind === 'either' && isDropdown(el))) {
+      } else if (spec.kind === 'choice' || (spec.kind !== 'textarea' && isDropdown(el))) {
         const wantedList = (spec.options && spec.options[entry.value]) || [entry.value];
         const before = displayed(el, spec);
         const r = await choose(el, wantedList);
@@ -365,7 +411,8 @@ export async function fillFormInPage(map, data) {
         }
       } else if (spec.kind === 'typeahead') {
         const r = await typeahead(el, entry.value, data && data.match && data.match[spec.key]);
-        (r.partial ? result.partial : result.filled).push({ ...entry, note: r.note, shown: r.chosen });
+        if (!r.ok) result.blocked.push({ ...entry, reason: r.reason });
+        else (r.partial ? result.partial : result.filled).push({ ...entry, note: r.note, shown: r.shown });
       } else if (setText(el, entry.value)) {
         result.filled.push({ ...entry, shown: el.value !== undefined ? String(el.value) : text(el) });
       } else {
@@ -378,14 +425,21 @@ export async function fillFormInPage(map, data) {
     await sleep(50);
   }
   await closePopups(null);
-  // Final read-back of every text field: what the form shows must be ours.
+  // Final read-back of everything filled: what the form shows must be ours.
+  // A control that could not be read back earlier (note) is left as is.
+  const has = (t, word) => new RegExp('\\b' + escapeRe(word) + '\\b', 'i').test(t);
   for (const entry of [...result.filled]) {
     const spec = map.fields.find((f) => f.key === entry.key);
-    if (!spec || spec.kind === 'checkbox' || spec.kind === 'choice' || spec.kind === 'typeahead') continue;
+    if (!spec || spec.kind === 'checkbox' || (entry.note && /read it back/.test(entry.note))) continue;
     const el = findFieldNow(spec);
     if (!el) continue;
     const shown = displayed(el, spec);
-    if (shown && !accepted(shown, entry.value)) {
+    if (!shown) continue;
+    const expectWords = data && data.match && data.match[spec.key] && data.match[spec.key].alternatives;
+    const ok = isDropdown(el) || spec.kind === 'choice'
+      ? norm(shown).includes(norm(entry.shown || entry.value))
+      : accepted(shown, entry.value) || (Array.isArray(expectWords) && expectWords.some((words) => words.every((w) => has(shown, w)))) || (entry.shown && norm(shown) === norm(entry.shown));
+    if (!ok) {
       result.filled.splice(result.filled.indexOf(entry), 1);
       result.blocked.push({ ...entry, reason: `the form shows "${shown.slice(0, 40)}" instead` });
     }

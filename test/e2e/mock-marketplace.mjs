@@ -49,8 +49,8 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   <input id="photos" type="file" multiple accept="image/*"> <span id="photoCount">0 photos</span>
   ${combo('vehicleType', 'Vehicle type', ['Car/Truck', 'Motorcycle', 'Powersport', 'RV/Camper', 'Trailer', 'Boat', 'Commercial/Industrial', 'Other'], 0)}
   ${combo('year', 'Year', YEARS, 2500)}
-  <div id="makeWrap" hidden>${combo('make', 'Make', ['Chevrolet', 'Dodge', 'Ford', 'Honda', 'Jeep', 'Ram', 'Toyota'], 300)}</div>
-  <label>Model <input id="model"></label>
+  <div id="makeWrap" hidden><label>Make <input id="make" role="combobox" aria-autocomplete="list" aria-controls="makeList" autocomplete="off"></label><div id="makeList" role="listbox" hidden></div></div>
+  <label>Model <input id="model" role="combobox" aria-autocomplete="list" aria-controls="modelList" autocomplete="off"></label><div id="modelList" role="listbox" hidden></div>
   <label>VIN <input id="vin"></label>
   <label>Mileage <input id="mileage"></label>
   <label>Price <input id="price"></label>
@@ -96,6 +96,35 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
       if (cb.id === 'year') setTimeout(() => { document.getElementById('makeWrap').hidden = false; }, 1000);
     });
   }
+  // Make and Model typeaheads, like the real form: default suggestions on
+  // focus (Honda first, then Accord), filtered only by real key presses, and
+  // the first suggestion is committed when the box loses focus. Text set
+  // without key events therefore turns into Honda / Accord on blur.
+  function typeaheadField(id, all, defaults) {
+    const input = document.getElementById(id);
+    const list = document.getElementById(id + 'List');
+    let keyed = false;
+    const show = () => {
+      const q = input.value.trim().toLowerCase();
+      const names = keyed && q ? all.filter((n) => n.toLowerCase().includes(q)) : defaults;
+      if (openList && openList !== list) closeOpen();
+      list.innerHTML = names.map((n) => '<div role="option">' + n + '</div>').join('');
+      list.hidden = !names.length;
+      openList = names.length ? list : null;
+    };
+    input.addEventListener('focus', () => { keyed = false; show(); });
+    input.addEventListener('keyup', (e) => { if (e.key.length === 1 || e.key === 'Backspace') { keyed = true; show(); } });
+    list.addEventListener('mousedown', (e) => e.preventDefault());
+    list.addEventListener('click', (e) => { const o = e.target.closest('[role=option]'); if (!o) return; input.value = o.textContent; closeOpen(); });
+    input.addEventListener('blur', () => {
+      if (list.hidden) return;
+      const first = list.querySelector('[role=option]');
+      if (first && input.value !== first.textContent) input.value = first.textContent;
+      closeOpen();
+    });
+  }
+  typeaheadField('make', ['Chevrolet', 'Dodge', 'Ford', 'Harley-Davidson', 'Honda', 'Jeep', 'Ram', 'Toyota'], ['Honda', 'Toyota', 'Ford']);
+  typeaheadField('model', ['Accord', 'Civic', 'CR-V', '1500 Classic Express', 'Wagoneer Series III', 'Street Glide SPECIAL', 'Grand Cherokee Altitude X'], ['Accord', 'Civic', 'CR-V']);
   // Location typeahead. Several towns share the name; the wrong state comes first.
   const loc = document.getElementById('location');
   const locList = document.getElementById('locationList');
@@ -126,8 +155,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
     const setCombo = (id, value) => { const c = document.getElementById(id); c.textContent = value; c.dataset.value = value; };
     setCombo('year', p.year);
     document.getElementById('makeWrap').hidden = false;
-    setCombo('make', p.make);
-    for (const id of ['model', 'vin', 'mileage', 'description']) document.getElementById(id).value = p[id] || '';
+    for (const id of ['make', 'model', 'vin', 'mileage', 'description']) document.getElementById(id).value = p[id] || '';
     document.body.dataset.prefilled = '1';
   })(__PREFILL__);
   // The price box reformats digits with thousands separators, like the real one.

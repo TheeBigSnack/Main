@@ -46,12 +46,18 @@ export const FORM_MAP = Object.freeze({
       key: 'vehicleType', label: 'Vehicle type', kind: 'choice', name: ['^vehicle type\\b'],
       options: { car_truck: ['Car/Truck', 'Car/truck', 'Car or truck', 'Car'], motorcycle: ['Motorcycle', 'Motorcycle/Scooter'] },
     },
-    { key: 'year', label: 'Year', kind: 'choice', name: ['^year\\b'] },
-    // 'either': a text box on some forms, a dropdown of makes on others; it may
-    // only appear once a year is chosen, so the fill code waits for it.
-    { key: 'make', label: 'Make', kind: 'either', name: ['^make\\b', '^brand\\b', '^manufacturer\\b'] },
-    { key: 'model', label: 'Model', kind: 'text', name: ['^model\\b'] },
+    // The VIN goes in first: whatever the form derives from it is then
+    // overwritten by the year, make and model from the website.
     { key: 'vin', label: 'VIN', kind: 'text', name: ['^vin\\b', '^vehicle identification number\\b'] },
+    { key: 'year', label: 'Year', kind: 'choice', name: ['^year\\b'] },
+    // Make and Model are typeahead boxes on the live form (seen 2026-09-27):
+    // they show default suggestions (Honda, then Accord) and commit the first
+    // one when the box loses focus. So they are typed key by key, only a
+    // suggestion containing our text may be picked, and the box is closed
+    // with Escape, never blurred. Make may only appear once a year is chosen.
+    // A dropdown in their place is handled too.
+    { key: 'make', label: 'Make', kind: 'typeahead', name: ['^make\\b', '^brand\\b', '^manufacturer\\b'] },
+    { key: 'model', label: 'Model', kind: 'typeahead', name: ['^model\\b'] },
     { key: 'mileage', label: 'Mileage', kind: 'text', name: ['^mileage\\b'] },
     { key: 'price', label: 'Price', kind: 'text', name: ['^price\\b'] },
     {

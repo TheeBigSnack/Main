@@ -167,7 +167,7 @@ try {
     const chosen = (id) => document.getElementById(id).dataset.value;
     return {
       vehicleType: chosen('vehicleType'),
-      year: chosen('year'), make: chosen('make'), model: v('model'), vin: v('vin'), mileage: v('mileage'), price: v('price'),
+      year: chosen('year'), make: v('make'), model: v('model'), vin: v('vin'), mileage: v('mileage'), price: v('price'),
       bodyStyle: v('bodyStyle'), exteriorColor: chosen('exteriorColor'), interiorColor: v('interiorColor'),
       fuelType: v('fuelType'), transmission: v('transmission'), location: v('location'),
       condition: v('condition'), titleStatus: v('titleStatus'),
