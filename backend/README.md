@@ -26,6 +26,10 @@ The extension works without it: descriptions then come from the built-in templat
 
 From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, banned phrases, dealer name, length); a draft that fails is regenerated once, then the template is used.
 
+## Colors from the photos
+
+`POST /color` with `{ "photos": [up to 4 https addresses], "options": [Facebook's color words] }` asks Claude to look at the photos and pick the exterior and interior color from the list, answering `{ ok, exterior, interior, confidence }`. The extension calls it only for a car whose website record gives no usable color, shows the answer as a guess with its confidence, and never overrides a color the website does state. Each call is about 4 photos of input, roughly $0.006 on Haiku 4.5.
+
 ## Model
 
 `REWRITE_MODEL` in `.env`:

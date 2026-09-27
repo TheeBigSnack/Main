@@ -50,7 +50,7 @@ Two unpublished live runs on Sept 27, 2026 filled 12 of 13 fields on the real fo
 - **Price to post**: the website's main price (on this site it includes the $490 doc fee) or the price before fees. The price note explains it in every description; a note is suggested from what the website's prices show.
 - **Listing defaults**: title status (Clean by default) and vehicle condition (Very good by default) are filled in on every listing. A car whose website text mentions rebuilt, salvage or a lien gets no title default and a warning instead. These are statements about each car that your dealership stands behind; choose "Leave blank" to answer them per car.
 - **Safety**: posts per day per salesperson (default 10). Meta doesn't publish its limits; this is a safety setting, not a guarantee.
-- **Description writer**: off by default. With the rewrite service running (see `backend/README.md`), first drafts come from Claude. Either way every draft is checked: every number must be on the website, no banned claims ("no accidents", "best price in town"), the dealership must be named, 60 to 120 words.
+- **Description writer**: off by default. With the rewrite service running (see `backend/README.md`), first drafts come from Claude, and for a car whose website record gives no usable color, the service looks at the photos and guesses one from Facebook's list (shown as a guess, never overriding a stated color). Either way every draft is checked: every number must be on the website, no banned claims ("no accidents", "best price in town"), the dealership must be named, the VIN must be there, 60 to 120 words.
 
 Each salesperson's scans, settings and posted list are kept only in their own browser, separately per website.
 

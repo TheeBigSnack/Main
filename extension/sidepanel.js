@@ -11,9 +11,9 @@
 
 import { markPosted } from './src/rescan.js';
 import { fetchVehicleDetails, recheck } from './src/vehicleDetails.js';
-import { generateDescription } from './src/rewriter.js';
+import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails } from './src/rewriteTemplate.js';
-import { buildListingData } from './src/listingData.js';
+import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
@@ -36,6 +36,7 @@ const state = {
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
   vinCheck: null, // { local, online } from src/vin.js
+  colorGuess: null, // { exterior, interior, confidence } from the photos, or { error }
   step: 'idle', message: '', doneAt: null,
   map: FORM_MAP,
 };
@@ -61,7 +62,7 @@ async function loadSaved() {
   state.boilerplate = data[k.boilerplate] || [];
 }
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -76,7 +77,7 @@ async function clearFlow() {
   if (state.origin) await chrome.storage.local.remove(keys(state.origin).flow);
   Object.assign(state, {
     vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
 
@@ -113,6 +114,7 @@ async function startFlow(req) {
 
   state.message = 'Writing the description…';
   render();
+  await maybeGuessColors();
   await generate();
   state.step = 'review';
   state.message = '';
@@ -137,10 +139,45 @@ async function resumeFlow(origin, flow) {
   if (state.step === 'publish' && state.fbTabId) startWatcher();
 }
 
+// Which colors the website gives no usable word for (blank, or a word that
+// isn't on Facebook's list, like "Sepia").
+function colorsNeeded() {
+  const v = state.vehicle || {};
+  return { exterior: !normalizeColor(v.exteriorColor), interior: !normalizeColor(v.interiorColor) };
+}
+
+// Ask the rewrite service to read the colors off the photos. Only when the
+// service is on and a color is missing (or on the button); shown as a guess.
+async function maybeGuessColors(force = false) {
+  const rw = state.settings.rewrite;
+  const need = colorsNeeded();
+  if (!rw.enabled || !rw.endpoint || !state.vehicle) return;
+  if (!need.exterior && !need.interior && !force) return;
+  const photos = (state.vehicle.photos || []).slice(0, 4);
+  if (!photos.length) {
+    state.colorGuess = { error: 'no photos to look at' };
+    return;
+  }
+  try {
+    const r = await guessColorsWithBackend({ endpoint: rw.endpoint, key: rw.key, photos, options: COLORS });
+    state.colorGuess = r.ok ? { exterior: need.exterior ? r.exterior : '', interior: need.interior ? r.interior : '', confidence: r.confidence, model: r.model } : { error: r.error };
+  } catch (e) {
+    state.colorGuess = { error: String((e && e.message) || e) };
+  }
+}
+
+// The vehicle as the description writer should see it: a guessed color
+// fills in only where the website gives none.
+function vehicleForText() {
+  const v = state.vehicle;
+  const g = state.colorGuess || {};
+  return { ...v, exteriorColor: v.exteriorColor || g.exterior || '', interiorColor: v.interiorColor || g.interior || '' };
+}
+
 async function generate({ useClaude } = {}) {
   const s = state.settings;
   const settings = useClaude === undefined ? s : { ...s, rewrite: { ...s.rewrite, enabled: useClaude } };
-  const r = await generateDescription({ vehicle: state.vehicle, dealer: s.dealer, salesperson: s.salesperson, priceNote: s.priceNote, price: state.price, boilerplate: state.boilerplate, settings });
+  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: s.priceNote, price: state.price, boilerplate: state.boilerplate, settings });
   state.description = r.text;
   state.descriptionSource = r.source;
   state.note = r.note || '';
@@ -172,7 +209,7 @@ async function openForm({ probeOnly = false } = {}) {
   const box = $('description');
   if (box) state.description = box.value;
   state.guardrails = runGuardrails(state.description, ctx());
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, description: state.description, price: state.price, photos: state.vehicle.photos });
+  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: state.vehicle.photos });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
@@ -382,7 +419,7 @@ function viewBlocked() {
   return `<div class="banner bad">${esc(state.message)}</div><button type="button" class="plain" id="back">Back</button>`;
 }
 
-const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, description: state.description, price: state.price, photos: state.vehicle.photos });
+const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: state.vehicle.photos });
 
 function fieldsTable() {
   const l = currentListing();
@@ -400,7 +437,18 @@ function fieldsTable() {
   const locationHint = !/^\d{5}/.test(String(d.zip || ''))
     ? `<p class="hint" id="locationHint">Add the store's ZIP in Settings so Marketplace picks the right town${d.state ? '' : ' (the state helps too)'}: there are several places with the same name.</p>`
     : '';
-  return `<table class="fields">${rows}<tr><td>Photos</td><td>${l.photos.length} from the website</td></tr></table>${locationHint}`;
+  const need = colorsNeeded();
+  let colorHint = '';
+  if (need.exterior || need.interior) {
+    const rw = state.settings.rewrite;
+    const cg = state.colorGuess;
+    const which = [need.exterior && 'exterior', need.interior && 'interior'].filter(Boolean).join(' and ');
+    const status = cg && cg.error ? `Photo guess failed: ${esc(cg.error)}.` : cg && (cg.exterior || cg.interior) ? `Guessed from the photos with ${esc(cg.confidence)} confidence.` : '';
+    colorHint = `<p class="hint" id="colorHint">The website gives no usable ${which} color. ${status}
+      <button type="button" class="copy" id="guessColors" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>${cg && (cg.exterior || cg.interior) ? 'Guess again from the photos' : 'Guess from the photos'}</button>
+      ${rw.enabled && rw.endpoint ? '' : ' (needs the rewrite service; otherwise pick it on the form)'}</p>`;
+  }
+  return `<table class="fields">${rows}<tr><td>Photos</td><td>${l.photos.length} from the website</td></tr></table>${locationHint}${colorHint}`;
 }
 
 function vinCheckHtml() {
@@ -595,6 +643,15 @@ async function onClick(ev) {
     case 'openForm': return openForm();
     case 'checkForm': return openForm({ probeOnly: true });
     case 'checkVinOnline': return checkVinOnline();
+    case 'guessColors': {
+      btn.disabled = true;
+      setStatus('Looking at the photos…');
+      await maybeGuessColors(true);
+      await generate();
+      setStatus(state.colorGuess && state.colorGuess.error ? '' : 'Colors guessed from the photos; check them on the form.');
+      render();
+      return saveFlow();
+    }
     case 'fillNow': return runFill();
     case 'probeAgain': return runProbe();
     case 'copyReport': return copy(JSON.stringify(state.probe, null, 2));

@@ -124,6 +124,7 @@ try {
   assert.doesNotMatch(draft, /Documentation fee/, 'the lot-wide disclaimer is stripped');
   assert.match(draft, /Price includes the \$490 doc fee; tax and tags extra\./);
   assert.match(draft, /I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\./);
+  assert.match(draft, /VIN 1C6RR7FT0KS643289\./);
   assert.match(await panel.textContent('#checks'), /All checks passed/);
   assert.match(await panel.textContent('#assumed'), /Vehicle condition[\s\S]*Very good[\s\S]*Title status[\s\S]*Clean[\s\S]*default/);
   assert.equal(await panel.$('#leftBlank'), null, 'nothing is left blank when defaults are set');

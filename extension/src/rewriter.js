@@ -6,9 +6,33 @@
 // template is used.
 
 import { cleanDescription } from './description.js';
-import { buildTemplateDescription, runGuardrails } from './rewriteTemplate.js';
+import { buildTemplateDescription, runGuardrails, ensureVinLine } from './rewriteTemplate.js';
 
 export const REWRITE_TIMEOUT_MS = 25000;
+
+// Asks the service to look at the car's photos and pick colors from
+// Facebook's list. Only used when the website gives no usable color, and the
+// result is shown as a guess. Nothing but the photo addresses and the list
+// leaves the browser.
+export async function guessColorsWithBackend({ endpoint, key = '', photos, options, fetchImpl = globalThis.fetch, timeoutMs = REWRITE_TIMEOUT_MS }) {
+  const url = String(endpoint || '').replace(/\/+$/, '') + '/color';
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+      body: JSON.stringify({ photos: (photos || []).slice(0, 4), options }),
+      signal: controller ? controller.signal : undefined,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) return { ok: false, error: body.error || `the service returned ${res.status}` };
+    const pick = (val) => (options || []).find((o) => o.toLowerCase() === String(val || '').trim().toLowerCase()) || '';
+    return { ok: true, exterior: pick(body.exterior), interior: pick(body.interior), confidence: body.confidence || 'low', model: body.model || '' };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 // Exactly what leaves the browser: facts about the car and the dealer.
 // No VIN, no Facebook data, nothing about the salesperson beyond the sign-off.
@@ -61,8 +85,9 @@ export async function generateDescription({ vehicle, dealer = {}, salesperson = 
   try {
     const r = await rewriteWithBackend({ endpoint: rw.endpoint, key: rw.key, facts, fetchImpl });
     if (r.ok && r.text) {
-      const g = runGuardrails(r.text, ctx);
-      if (g.ok) return { text: r.text, source: 'claude', model: r.model, guardrails: g, narrative };
+      const text = ensureVinLine(r.text, vehicle.vin); // the VIN never goes to the service; it is added here
+      const g = runGuardrails(text, ctx);
+      if (g.ok) return { text, source: 'claude', model: r.model, guardrails: g, narrative };
       return { ...fallback, note: `Claude's draft failed a check (${g.problems.map((p) => p.text).join('; ')}), so the template is shown instead.` };
     }
     return { ...fallback, note: `The rewrite service couldn't help (${r.error || 'no text came back'}), so the template is shown instead.` };

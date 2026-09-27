@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
+import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, ensureVinLine, stripVin, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
 import { vehicle } from './helpers.js';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
@@ -21,7 +21,20 @@ test('the Ram gets a full description that passes every check', () => {
   assert.match(text, /Highlights: /);
   assert.match(text, /Price includes the \$490 doc fee; tax and tags extra\./);
   assert.match(text, /I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\./);
+  assert.match(text, /^VIN 1C6RR7FT0KS643289\.$/m);
   assert.ok(text.split('\n').every((line) => wordCount(line) <= 30), 'short lines');
+});
+
+test('the VIN is in every description, its digits are not "numbers", and it is not counted as prose', () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const text = buildTemplateDescription(ctx(v));
+  assert.equal(runGuardrails(text, ctx(v)).ok, true);
+  const without = text.replace(/^VIN .*$/m, '');
+  assert.ok(runGuardrails(without, ctx(v)).problems.some((p) => p.code === 'no-vin'));
+  assert.equal(ensureVinLine(without, v.vin).trimEnd().endsWith('VIN 1C6RR7FT0KS643289.'), true);
+  assert.equal(ensureVinLine(text, v.vin), text.trimEnd()); // already there
+  assert.equal(stripVin('Nice truck.\nVIN 1C6RR7FT0KS643289.\nCall me.').replace(/\s+/g, ' ').trim(), 'Nice truck. Call me.');
+  assert.equal(wordCount(stripVin(text)), wordCount(text) - 2);
 });
 
 test('features: the useful ones first, at most six, no duplicates', () => {

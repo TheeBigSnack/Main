@@ -48,6 +48,21 @@ test('title and condition come from the dealership defaults, never from a guess'
   assert.deepEqual(blank.assumed, []);
 });
 
+test('a color guessed from the photos fills only a blank, and is marked as a guess', () => {
+  const v = vehicle('usedNoCarfax', { styles: { interior_color: 'Sepia' } }); // exterior Black (stated), interior not on the list
+  const d = buildListingData(v, { guesses: { exterior: 'Red', interior: 'Brown', confidence: 'medium' } });
+  assert.equal(d.fields.exteriorColor, 'Black', 'a stated color is never overridden');
+  assert.equal(d.fields.interiorColor, 'Brown');
+  assert.deepEqual(d.assumed.map((a) => a.key), ['interiorColor', 'condition', 'titleStatus']);
+  assert.match(d.assumed[0].why, /guessed from the photos \(medium confidence\); the website says "Sepia"/);
+  // a guess that is not one of the list words is ignored
+  assert.equal(buildListingData(v, { guesses: { interior: 'Mauve' } }).fields.interiorColor, '');
+  // no guess: blank, and not "assumed"
+  const none = buildListingData(v);
+  assert.equal(none.fields.interiorColor, '');
+  assert.deepEqual(none.assumed.map((a) => a.key), ['condition', 'titleStatus']);
+});
+
 test('a branded title in the website text switches the clean-title default off', () => {
   assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuilt title, runs and drives great.<br>Disclaimer.' }), 'Rebuilt');
   assert.equal(brandedTitleSignal({ features: ['Salvage Title'] }), 'Salvage');

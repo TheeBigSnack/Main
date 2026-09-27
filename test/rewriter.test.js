@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateDescription, rewriteFacts, rewriteWithBackend } from '../extension/src/rewriter.js';
+import { generateDescription, rewriteFacts, rewriteWithBackend, guessColorsWithBackend } from '../extension/src/rewriter.js';
 import { vehicle } from './helpers.js';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
@@ -26,13 +26,28 @@ test('with the service off: the template, with the disclaimer stripped and the w
   assert.doesNotMatch(r.text, /Documentation fee/);
 });
 
-test('a Claude draft that passes the checks is used', async () => {
+test('a Claude draft that passes the checks is used, and gets the VIN line if the service left it out', async () => {
   const template = (await generateDescription(args())).text;
-  const draft = template.replace('Highlights:', 'What I like:');
+  const draft = template.replace('Highlights:', 'What I like:').replace(/^VIN .*\n?/m, '');
+  assert.doesNotMatch(draft, /VIN/);
   const r = await generateDescription(args({ settings: on, fetchImpl: reply(200, { ok: true, text: draft, model: 'claude-haiku-4-5' }) }));
   assert.equal(r.source, 'claude');
   assert.equal(r.model, 'claude-haiku-4-5');
-  assert.equal(r.text, draft);
+  assert.match(r.text, /VIN 1C6RR7FT0KS643289\.$/);
+  assert.ok(r.guardrails.ok);
+});
+
+test('color guesses: only the list words come back, and the request carries photos and the list', async () => {
+  let seen;
+  const capture = async (url, init) => { seen = { url, body: JSON.parse(init.body) }; return { ok: true, status: 200, json: async () => ({ ok: true, exterior: 'gray', interior: 'Sepia', confidence: 'medium', model: 'm' }) }; };
+  const r = await guessColorsWithBackend({ endpoint: 'http://localhost:8787', key: 'k', photos: ['https://a/1.jpg', 'https://a/2.jpg', 'https://a/3.jpg', 'https://a/4.jpg', 'https://a/5.jpg'], options: ['Gray', 'Black'], fetchImpl: capture });
+  assert.equal(seen.url, 'http://localhost:8787/color');
+  assert.equal(seen.body.photos.length, 4);
+  assert.deepEqual(seen.body.options, ['Gray', 'Black']);
+  assert.deepEqual({ ok: r.ok, exterior: r.exterior, interior: r.interior, confidence: r.confidence }, { ok: true, exterior: 'Gray', interior: '', confidence: 'medium' });
+  const bad = await guessColorsWithBackend({ endpoint: 'http://x', photos: ['https://a/1.jpg'], options: ['Gray'], fetchImpl: reply(429, { ok: false, error: 'cap reached' }) });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /cap reached/);
 });
 
 test('a Claude draft with a made-up number falls back to the template and says why', async () => {

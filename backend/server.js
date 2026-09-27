@@ -130,6 +130,30 @@ async function rewrite(facts) {
   };
 }
 
+// Colors from the photos, for cars whose website record gives no usable
+// color. Claude looks at up to four photo URLs and picks from the list.
+const COLOR_MAX_PHOTOS = 4;
+const DEFAULT_COLORS = ['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Gray', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white'];
+
+async function guessColors(photos, options) {
+  const content = photos.slice(0, COLOR_MAX_PHOTOS).map((url) => ({ type: 'image', source: { type: 'url', url } }));
+  content.push({
+    type: 'text',
+    text: `These are a car dealer's photos of one used vehicle. From this list only, pick the exterior paint color and the interior color: ${options.join(', ')}. ` +
+      'If no photo shows the interior, answer "unknown" for interior; if the exterior is not clearly visible, answer "unknown". ' +
+      'Reply with JSON only, like {"exterior":"Gray","interior":"Black","confidence":"high"} where confidence is high, medium or low.',
+  });
+  const response = await client.messages.create({ model: config.model, max_tokens: 120, messages: [{ role: 'user', content }] });
+  const cost = addUsage(response.model || config.model, response.usage || {});
+  if (response.stop_reason === 'refusal') return { ok: false, error: 'the model declined to look at these photos', costUsd: cost };
+  const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  const m = /\{[\s\S]*\}/.exec(text);
+  let j = {};
+  try { j = m ? JSON.parse(m[0]) : {}; } catch (e) { return { ok: false, error: 'the model did not answer in the expected form', costUsd: cost }; }
+  const pick = (val) => options.find((o) => o.toLowerCase() === String(val || '').trim().toLowerCase()) || '';
+  return { ok: true, exterior: pick(j.exterior), interior: pick(j.interior), confidence: ['high', 'medium', 'low'].includes(j.confidence) ? j.confidence : 'low', model: response.model, costUsd: Number(cost.toFixed(5)) };
+}
+
 function readBody(req, limit) {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -150,20 +174,29 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     return send(200, { ok: true, model: config.model, month: usage.month, usd: Number(usage.usd.toFixed(4)), capUsd: config.monthlyCapUsd, requests: usage.requests });
   }
-  if (req.method !== 'POST' || req.url !== '/rewrite') return send(404, { ok: false, error: 'not found' });
+  if (req.method !== 'POST' || !['/rewrite', '/color'].includes(req.url)) return send(404, { ok: false, error: 'not found' });
   if (config.key && req.headers.authorization !== `Bearer ${config.key}`) return send(401, { ok: false, error: 'bad or missing service key' });
   if (!allow(req.socket.remoteAddress || 'unknown')) return send(429, { ok: false, error: 'too many requests; slow down' });
   if (usage.month === month() && usage.usd >= config.monthlyCapUsd) return send(429, { ok: false, error: `monthly cost cap of $${config.monthlyCapUsd} reached` });
 
-  let facts;
+  let body;
   try {
-    facts = JSON.parse(await readBody(req, 64 * 1024));
+    body = JSON.parse(await readBody(req, 64 * 1024));
   } catch (e) {
     return send(400, { ok: false, error: 'bad JSON: ' + e.message });
   }
-  if (!facts || typeof facts !== 'object' || !facts.make || !facts.model) return send(400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
 
   try {
+    if (req.url === '/color') {
+      const photos = Array.isArray(body && body.photos) ? body.photos.filter((u) => typeof u === 'string' && /^https:\/\//i.test(u)).slice(0, COLOR_MAX_PHOTOS) : [];
+      if (!photos.length) return send(400, { ok: false, error: 'photos are missing (1 to 4 https addresses)' });
+      const options = Array.isArray(body.options) && body.options.length ? body.options.map(String).slice(0, 40) : DEFAULT_COLORS;
+      const out = await guessColors(photos, options);
+      console.log(`${new Date().toISOString()} color ${photos.length} photo(s) -> ${out.ok ? `${out.exterior || '?'} / ${out.interior || '?'} (${out.confidence})` : out.error} $${out.costUsd} (month $${usage.usd.toFixed(2)})`);
+      return send(200, out);
+    }
+    const facts = body;
+    if (!facts || typeof facts !== 'object' || !facts.make || !facts.model) return send(400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
     const out = await rewrite(facts);
     console.log(`${new Date().toISOString()} rewrite ${facts.year} ${facts.make} ${facts.model} -> ${out.ok ? 'ok' : 'failed checks'} $${out.costUsd} (month $${usage.usd.toFixed(2)})`);
     return send(200, out);

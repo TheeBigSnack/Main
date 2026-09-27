@@ -59,6 +59,19 @@ export function wordCount(text) {
   return String(text || '').trim().split(/\s+/).filter(Boolean).length;
 }
 
+// The VIN line is part of every description but not part of the prose: it
+// is left out of the word count and its digits are not "numbers".
+const VIN_LINE = /^\s*VIN\b[:\s]*[A-HJ-NPR-Z0-9]{17}\.?\s*$/gim;
+const VIN_TOKEN = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
+export const stripVin = (text) => String(text || '').replace(VIN_LINE, '').replace(VIN_TOKEN, ' ');
+
+export function ensureVinLine(text, vin) {
+  const v = String(vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const t = String(text || '').trimEnd();
+  if (!v || t.toUpperCase().includes(v)) return t;
+  return `${t}\nVIN ${v}.`;
+}
+
 // Every number in a piece of text, normalised so "20,986" and "20986" match.
 export function numbersIn(text) {
   const out = new Set();
@@ -145,6 +158,7 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'where', keep: 'always', text: dealerName ? `Pre-owned and on the lot at ${dealerName}${city ? ' in ' + city : ''}.` : '' },
     { id: 'carfax', keep: 'filler', text: v.carfaxUrl ? 'Carfax report available, just ask.' : '' },
     { id: 'stock', keep: 'filler', text: v.stock ? `Stock number ${v.stock}.` : '' },
+    { id: 'vin', keep: 'always', text: v.vin ? `VIN ${String(v.vin).toUpperCase().replace(/[^A-Z0-9]/g, '')}.` : '' },
     { id: 'priceNote', keep: 'always', text: String(priceNote || '').trim() },
     { id: 'signoff', keep: 'always', text: person ? `I'm ${person}, ${title} at ${dealerName}.` : `${capitalize(title)} at ${dealerName}.` },
     { id: 'cta', keep: 'optional', text: 'Message me to set up a test drive or ask a question.' },
@@ -193,15 +207,18 @@ const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).r
  */
 export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '', price = null } = {}) {
   const t = String(text || '');
+  const prose = stripVin(t);
   const problems = [];
-  const words = wordCount(t);
+  const words = wordCount(prose);
   if (words < WORD_LIMITS.min) problems.push({ code: 'too-short', text: `${words} words; needs at least ${WORD_LIMITS.min}` });
   if (words > WORD_LIMITS.max) problems.push({ code: 'too-long', text: `${words} words; the limit is ${WORD_LIMITS.max}` });
 
   const src = sourceNumbers({ vehicle, dealer, priceNote, price });
-  for (const n of numbersIn(t)) {
+  for (const n of numbersIn(prose)) {
     if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
   }
+  const vin = String(vehicle.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (vin && !t.toUpperCase().includes(vin)) problems.push({ code: 'no-vin', text: "Doesn't include the VIN" });
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(t)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
   }

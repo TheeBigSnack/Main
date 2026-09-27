@@ -35,6 +35,9 @@ export function vehicleKind(v = {}) {
   return VEHICLE_KIND.CAR_TRUCK;
 }
 
+// Facebook's color list in Lot Sync's spelling (formMap.js maps Gray to Grey etc.).
+export const COLORS = Object.freeze(['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Gray', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white']);
+
 const COLOR_WORDS = [
   ['off white', 'Off white'], ['off-white', 'Off white'], ['black', 'Black'], ['white', 'White'], ['silver', 'Silver'],
   ['gray', 'Gray'], ['grey', 'Gray'], ['charcoal', 'Charcoal'], ['graphite', 'Charcoal'], ['blue', 'Blue'], ['red', 'Red'],
@@ -136,14 +139,21 @@ export function locationExpect(dealer = {}) {
  * @param {object} vehicle   normalised vehicle
  * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition} }
  *   price is the number to post (the caller applies the dealer's price basis);
- *   defaults are the dealership's answers for the fields the website can't give
+ *   defaults are the dealership's answers for the fields the website can't give;
+ *   guesses ({ exterior, interior, confidence }) are colors read from the photos,
+ *   used only where the website gives no usable color
  */
-export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS } = {}) {
+export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null } = {}) {
   const v = vehicle || {};
   const d = defaults || {};
+  const g = guesses || {};
   const branded = brandedTitleSignal(v);
   const conditionDefault = CONDITIONS.includes(d.condition) ? d.condition : '';
   const titleDefault = TITLE_STATUSES.includes(d.titleStatus) ? d.titleStatus : '';
+  const extStated = normalizeColor(v.exteriorColor);
+  const intStated = normalizeColor(v.interiorColor);
+  const extGuess = !extStated && COLORS.includes(g.exterior) ? g.exterior : '';
+  const intGuess = !intStated && COLORS.includes(g.interior) ? g.interior : '';
   const fields = {
     vehicleType: vehicleKind(v),
     year: v.year ? String(v.year) : '',
@@ -153,8 +163,8 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
     mileage: typeof v.mileage === 'number' && v.mileage >= 0 ? String(Math.round(v.mileage)) : '',
     price: typeof price === 'number' && price > 0 ? String(Math.round(price)) : '',
     bodyStyle: normalizeBodyStyle(v.bodyType),
-    exteriorColor: normalizeColor(v.exteriorColor),
-    interiorColor: normalizeColor(v.interiorColor),
+    exteriorColor: extStated || extGuess,
+    interiorColor: intStated || intGuess,
     fuelType: normalizeFuelType(v.fuelType),
     transmission: normalizeTransmission(v.transmission),
     location: locationQuery(dealer),
@@ -165,6 +175,9 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
   // what the panel highlights: filled from a default (assumed) or left for the person
   const assumed = [];
   const leftBlank = [];
+  const guessWhy = (raw) => `guessed from the photos (${g.confidence || 'unknown'} confidence); the website ${raw ? `says "${raw}"` : 'gives no color'}; check it on the form`;
+  if (extGuess) assumed.push({ key: 'exteriorColor', label: 'Exterior color', value: extGuess, why: guessWhy(v.exteriorColor) });
+  if (intGuess) assumed.push({ key: 'interiorColor', label: 'Interior color', value: intGuess, why: guessWhy(v.interiorColor) });
   if (fields.condition) assumed.push({ key: 'condition', label: 'Vehicle condition', value: fields.condition, why: "your dealership's default; change it on the form if this car is different" });
   else leftBlank.push({ key: 'condition', label: 'Vehicle condition', why: 'no default set in Settings; pick it on the form' });
   if (fields.titleStatus) assumed.push({ key: 'titleStatus', label: 'Title status', value: fields.titleStatus, why: "your dealership's default; change it on the form if this car's title is branded" });
