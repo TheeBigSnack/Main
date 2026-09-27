@@ -1,7 +1,7 @@
 import { normalizeVehicle } from './src/normalize.js';
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
-import { probeTab, searchViaTab, detectAdapter, scanWithSearch, rememberSite } from './src/scanRunner.js';
+import { performScan } from './src/scanRunner.js';
 import { todoCountFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
@@ -98,50 +98,18 @@ async function scan() {
   button.disabled = true;
   setStatus("Reading the website's used inventory…");
   try {
-    const probe = await probeTab(state.tab.id);
-    const adapter = probe && detectAdapter(probe);
-    if (!adapter) {
-      setStatus("This page doesn't have the inventory search this tool reads (Dealer Inspire's search service). Open your dealership's website and try again.", 'error');
+    const r = await performScan({ tabId: state.tab.id, origin: state.origin, settings: state.settings, settingsFromProfile: state.settingsFromProfile, snapshot: state.snapshot, posted: state.posted });
+    if (!r.ok) {
+      setStatus(r.message, 'error');
       return;
     }
-    const site = { ...probe.site, adapter: adapter.PLATFORM.id };
-    const search = searchViaTab(state.tab.id, probe.service);
-    // Settings first: the assessments depend on them, and the site's own address fills blanks.
-    // A first pass reads the lot to pick default stores when there are no settings yet.
-    let settings = state.settings ? withDefaults(state.settings, site) : null;
-    const out = await scanWithSearch({ adapter, search, site, settings: settings || withDefaults({}, site), prevSnapshot: state.snapshot, posted: state.posted, status: probe.service.visibleStatusValues });
-    if (!out.ok) {
-      setStatus(out.message || "Couldn't read this page.", 'error');
-      return;
-    }
-    let result = out;
-    if (!settings || state.settingsFromProfile) {
-      if (settings && state.settingsFromProfile) {
-        // first scan here with details from the profile: keep only store names that exist on this website
-        const here = new Set(out.vehicles.map((v) => v.location).filter(Boolean));
-        const kept = settings.myStores.filter((s) => here.has(s));
-        settings = withDefaults({ ...settings, myStores: kept.length ? kept : defaultSettings(site, out.vehicles).myStores }, site);
-      } else {
-        settings = defaultSettings(site, out.vehicles);
-      }
-      state.settingsFromProfile = false;
-      // the store choice changes what is "ready": assess again with the real settings (no second request)
-      const assessments = out.vehicles.map((v) => assessVehicle(v, settings));
-      const snapshot = makeSnapshot({ site: out.snapshot.site, takenAt: out.res.fetchedAt, complete: out.res.complete, vehicles: out.vehicles, assessments });
-      const diff = diffScans(state.snapshot, snapshot, { posted: state.posted, confirm: out.res.confirm, basis: settings.basis });
-      diff.takenAt = out.res.fetchedAt;
-      diff.requests = out.res.requests;
-      if (!out.res.complete) diff.warnings.unshift(out.diff.warnings[0]);
-      result = { ...out, snapshot, diff };
-    }
-    state.settings = settings;
-    state.boilerplate = result.boilerplate;
-    state.diff = result.diff;
-    if (!result.diff.unreliable) state.snapshot = result.snapshot; // keep the last good scan if this one looks broken
-    state.siteName = site.name;
+    state.settings = r.settings;
+    state.settingsFromProfile = false;
+    state.boilerplate = r.boilerplate;
+    state.diff = r.diff;
+    if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
+    state.siteName = r.site.name;
     await save('snapshot', 'diff', 'settings', 'boilerplate');
-    await rememberSite(state.origin, { name: site.name, adapter: adapter.PLATFORM.id, service: probe.service, site: out.snapshot.site, lastScan: result.res.fetchedAt, lastError: null, auto: Boolean(state.settings.autoRescan) });
-    chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
     state.view = 'todo';
     setStatus('');
     render();
@@ -254,7 +222,10 @@ const price = (e) => basisPrice(e, state.settings?.basis);
 function viewTodo(l) {
   const d = state.diff;
   if (!state.snapshot && !d) {
-    return empty("No scan yet. Open your dealership's used inventory page and click <b>Scan website</b>.");
+    const setup = state.origin && state.tab
+      ? `<div class="banner setup" id="setup"><b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, automatic rescans and the posting rules.<div class="toolbar"><button type="button" class="small go" data-action="setup">Set up Lot Sync</button></div></div>`
+      : '';
+    return setup + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
   }
   let html = `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
@@ -466,6 +437,11 @@ function viewSettings() {
       ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="100"')}
       <p class="hint">A safety setting, not a guarantee: Meta doesn't publish its limits.</p>
     </fieldset>
+    <fieldset><legend>Automatic rescans</legend>
+      <label><input type="checkbox" name="autoRescan" ${s.autoRescan ? 'checked' : ''} /> <span>Rescan this website every 3 hours while Chrome is open, and show the to-do count on the icon</span></label>
+      <label><input type="checkbox" name="notify" ${s.notify !== false ? 'checked' : ''} /> <span>Desktop notification when listings need attention</span></label>
+      <p class="hint">Needs the permission the set-up wizard asks for (to read the website in the background). Turn it on here after granting it in set-up.</p>
+    </fieldset>
     <fieldset><legend>Description writer (optional)</legend>
       <label><input type="checkbox" name="rewriteEnabled" ${s.rewrite.enabled ? 'checked' : ''} /> <span>Use the Lot Sync rewrite service (Claude) for first drafts</span></label>
       ${field('Service address', 'rewriteEndpoint', s.rewrite.endpoint, 'type="url" placeholder="http://localhost:8787"')}
@@ -577,6 +553,18 @@ async function onPanelClick(ev) {
       state.queue = null;
       await chrome.storage.local.remove(storageKeys(state.origin).queue);
       break;
+    case 'setup': {
+      if (!state.tab) return;
+      let opened = true;
+      try {
+        await chrome.sidePanel.open({ windowId: state.tab.windowId }); // straight from the click
+      } catch (e) {
+        opened = false;
+      }
+      await chrome.storage.local.set({ setupRequest: { origin: state.origin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
+      setStatus(opened ? 'Continue in the side panel.' : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue set-up.');
+      return;
+    }
     case 'unpost':
       state.posted = markTakenDown(state.posted, vin);
       await save('posted');
@@ -627,10 +615,18 @@ async function onSettingsSubmit(ev) {
       dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),
       rewrite: { enabled: form.get('rewriteEnabled') === 'on', endpoint: str('rewriteEndpoint'), key: str('rewriteKey') },
       defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },
+      autoRescan: form.get('autoRescan') === 'on',
+      notify: form.get('notify') === 'on',
     },
     { name: state.siteName }
   );
   await save('settings');
+  const sitesData = await chrome.storage.local.get('sites');
+  if (sitesData.sites && sitesData.sites[state.origin]) {
+    sitesData.sites[state.origin].auto = state.settings.autoRescan;
+    await chrome.storage.local.set({ sites: sitesData.sites });
+    chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
+  }
   const note = $('saved');
   if (note) note.textContent = 'Saved. Click Rescan website to apply.';
 }

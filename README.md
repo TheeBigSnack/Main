@@ -17,8 +17,8 @@ Chrome will say the extension can read and change data on `www.facebook.com/mark
 ## Use
 
 1. Open the dealership website's used inventory page, e.g. `ronlewischryslerdodgejeepramwaynesburg.com/used-vehicles/`.
-2. Click the Lot Sync icon, then **Settings**: your name and role, your store, the dealership's city and ZIP, and the price to post. Save.
-3. Click **Scan website**. The first scan is the starting point.
+2. Click the Lot Sync icon. The first time it offers **Set up Lot Sync**: two minutes in the side panel to read the website, pick your store, enter your name, confirm the store's address (read from the website), allow automatic rescans, and read the posting rules. (Or skip it: **Settings** has the same fields.)
+3. Click **Scan website** whenever you like. With automatic rescans on, Lot Sync also re-reads the website every 3 hours while Chrome is open and shows your to-do count on its icon.
 4. **Ready to post** lists pre-owned cars at your store that have photos and a price. Click **Post** on one. The side panel opens and:
    - re-checks the car on the website (still pre-owned, still on the lot, still priced),
    - writes a description from the website's facts, which you can edit,

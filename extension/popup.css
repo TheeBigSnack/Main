@@ -114,3 +114,5 @@ h3 .pill { font-weight: 600; }
 .toolbar button.small { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 9px; font-size: 12px; }
 .toolbar button.small.go { border-color: var(--accent); color: var(--accent); }
 .banner.queue .toolbar { margin: 6px 0 0; }
+.banner.setup { background: var(--good-bg); }
+.banner.setup .toolbar { margin: 6px 0 0; }

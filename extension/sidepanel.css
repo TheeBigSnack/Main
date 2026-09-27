@@ -40,4 +40,6 @@ label.block { display: block; margin: 8px 0; }
 label.block input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--text); }
 .pill.claude { background: var(--info-bg); }
 .queuebar { position: sticky; top: 0; z-index: 2; }
+ol.rules { padding-left: 20px; }
+ol.rules li { margin: 6px 0; }
 .queuebar .actions { margin-top: 6px; }

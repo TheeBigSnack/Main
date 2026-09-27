@@ -7,7 +7,7 @@ Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a 
 | Milestone | Weeks | State |
 |---|---|---|
 | M1 One-click post | Sep 28 – Oct 11 | **Done Sep 27**: single posts run clean on the live form (six live runs drove the fixes) |
-| M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | Batch queue built and verified live Sep 27 (pulled forward); upkeep, wizard, rescans, adapters not started |
+| M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | In progress from Sep 27: queue (verified live), adapters, automatic rescans + badge, wizard built; listing upkeep next |
 | M3 Pilot | Oct 26 – Nov 8 | Needs the Waynesburg manager's sign-off |
 | M4 Accounts and manager view | Nov 9 – Nov 22 | Not started |
 | M5 Billing, site, Web Store | Nov 23 – Dec 6 | Not started |

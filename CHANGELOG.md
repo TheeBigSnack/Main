@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 (2026-09-27, Milestone 2)
+
+Added
+- **Adapters** (`extension/adapters/`): the dealer-platform code lives behind a small interface (detect, scan, normalize, getDetails, makeDirectSearch); `dealerInspire.js` holds today's code and `README.md` lists Dealer.com, DealerOn, Dealer eProcess and DealerFire as TODOs. The page side (`src/scan.js`) is now only a probe plus a per-request call made in the dealer's tab; `src/scanRunner.js` shares the rest between the popup, the wizard and the service worker.
+- **Automatic rescans**: every 3 hours while Chrome is open (`chrome.alarms`), the service worker re-reads each known website by calling its inventory search service directly (verified against the live Cars Commerce service), keeping the VIN double-check and the mass-disappearance guard, and puts the salesperson's to-do count on the toolbar badge, with an optional desktop notification when it grows. Needs the host permission the wizard asks for; on by default after granting it, switchable in Settings.
+- **First-run wizard** (side panel): read the website, choose the store (pre-ticked from the site name), name and role, the store's address (from the website's structured data), permission for automatic rescans, the posting rules (the same text as `legal/posting-rules.md`, kept in step by a test), then a scan with the final settings. The popup offers it on a website with no settings.
+- Manifest: `alarms`, `notifications`, and `optional_host_permissions` for any site (`https://*/*`), requested per dealer website by the wizard.
+- Tests: adapters, rescan scheduling and the shared scan runner (unit); a wizard + background-rescan e2e (the service worker rescans with no tab and the badge shows the to-do).
+
 ## 0.2.0 (2026-09-26, Milestone 1)
 
 One-click post to Facebook Marketplace, with a person clicking Publish.

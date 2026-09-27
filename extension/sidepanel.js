@@ -17,6 +17,7 @@ import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
+import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
@@ -714,8 +715,30 @@ function viewDone() {
 
 function render() {
   $('site').textContent = state.siteName || '';
-  const views = { idle: viewIdle, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone };
+  const views = { idle: viewIdle, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone, wizard: wizardHtml };
+  if (state.step === 'wizard') {
+    $('panel').innerHTML = wizardHtml();
+    return;
+  }
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
+}
+
+const wizardCtx = {
+  render,
+  setStatus,
+  onClose: () => { state.step = 'idle'; render(); },
+};
+
+async function openWizard(req) {
+  await clearFlow();
+  state.origin = req.origin;
+  state.dealerTabId = req.dealerTabId;
+  state.windowId = req.windowId || null;
+  await chrome.storage.local.set({ lastPostOrigin: req.origin });
+  await loadSaved();
+  await startWizard(req);
+  state.step = 'wizard';
+  render();
 }
 
 // ---------- events ----------
@@ -748,6 +771,7 @@ async function onClick(ev) {
   const btn = ev.target.closest('button');
   if (!btn) return;
   if (btn.dataset.copy !== undefined) return copy(btn.dataset.copy);
+  if (state.step === 'wizard' && (await handleWizardClick(btn.id, wizardCtx))) return undefined;
   switch (btn.id) {
     case 'openForm': return openForm();
     case 'checkForm': return openForm({ probeOnly: true });
@@ -825,12 +849,29 @@ async function onClick(ev) {
 async function init() {
   $('panel').addEventListener('click', onClick);
   $('panel').addEventListener('input', onInput);
+  $('panel').addEventListener('change', (ev) => { if (state.step === 'wizard') handleWizardChange(ev.target); });
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.postRequest && changes.postRequest.newValue) startFlow(changes.postRequest.newValue);
+    if (area !== 'local') return;
+    if (changes.postRequest && changes.postRequest.newValue) startFlow(changes.postRequest.newValue);
+    if (changes.setupRequest && changes.setupRequest.newValue) {
+      chrome.storage.local.remove('setupRequest');
+      openWizard(changes.setupRequest.newValue);
+    }
   });
-  const { postRequest, lastPostOrigin } = await chrome.storage.local.get(['postRequest', 'lastPostOrigin']);
+  const { postRequest, setupRequest, lastPostOrigin } = await chrome.storage.local.get(['postRequest', 'setupRequest', 'lastPostOrigin']);
+  if (setupRequest) {
+    await chrome.storage.local.remove('setupRequest');
+    return openWizard(setupRequest);
+  }
   if (postRequest) return startFlow(postRequest);
   if (lastPostOrigin) {
+    if (await resumeWizard(lastPostOrigin)) {
+      state.origin = lastPostOrigin;
+      state.dealerTabId = wiz.dealerTabId;
+      await loadSaved();
+      state.step = 'wizard';
+      return render();
+    }
     const k = keys(lastPostOrigin).flow;
     const flow = (await chrome.storage.local.get(k))[k];
     if (flow && flow.step && flow.step !== 'idle') return resumeFlow(lastPostOrigin, flow);
