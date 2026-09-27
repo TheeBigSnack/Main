@@ -149,6 +149,7 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
     year: v.year ? String(v.year) : '',
     make: String(v.make || '').trim(),
     model: [v.model, v.trim].map((s) => String(s || '').trim()).filter(Boolean).join(' '),
+    vin: String(v.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, ''),
     mileage: typeof v.mileage === 'number' && v.mileage >= 0 ? String(Math.round(v.mileage)) : '',
     price: typeof price === 'number' && price > 0 ? String(Math.round(price)) : '',
     bodyStyle: normalizeBodyStyle(v.bodyType),

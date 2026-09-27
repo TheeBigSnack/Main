@@ -19,6 +19,7 @@ Added
 - CLAUDE.md, PLAN.md, `legal/` drafts (8 files), backend README, `.gitignore`.
 
 Added (after the live runs, 2026-09-27)
+- **VIN on the form**: the car's VIN is filled into the listing's VIN field (form map key `vin`).
 - **Listing defaults** (Settings): title status (Clean) and vehicle condition (Very good) are filled in on every listing, shown in the panel under "Filled from your dealership's defaults", and changeable on the form. A car whose website text mentions rebuilt, salvage, a lien or similar gets no title default and a warning. "Leave blank" restores the per-car choice. Facebook's option wordings for both fields live in `formMap.js`.
 - **VIN check** (`extension/src/vin.js`): format and check digit, model year and manufacturer group decoded locally from the VIN and compared with the website's record, shown in the side panel before posting; "Check with NHTSA" fetches the free vPIC decode and lists every field-by-field difference. New `optional_host_permissions` for `https://vpic.nhtsa.dot.gov/*`, granted by the salesperson in Chrome on first use.
 - **Synced profile** (`chrome.storage.sync`): name, role, dealership, stores, price basis and note, cap and the rewrite address follow the person's Chrome sign-in and seed a website that has no settings yet. The rewrite key stays local.

@@ -142,7 +142,7 @@ try {
   watch(fb);
   await panel.waitForSelector('#fillNow', { timeout: 30000 });
   const probe = await panel.textContent('#probeResults');
-  assert.match(probe, /Found\s*14/);
+  assert.match(probe, /Found\s*15/);
   assert.match(probe, /Not found\s*1[\s\S]*Make/); // Make only appears after a year is chosen
   assert.match(probe, /1 file input\(s\) on the page · limit 20/);
   assert.equal(await fb.inputValue('#model'), '', 'the dry run fills nothing');
@@ -161,7 +161,7 @@ try {
     const chosen = (id) => document.getElementById(id).dataset.value;
     return {
       vehicleType: chosen('vehicleType'),
-      year: chosen('year'), make: chosen('make'), model: v('model'), mileage: v('mileage'), price: v('price'),
+      year: chosen('year'), make: chosen('make'), model: v('model'), vin: v('vin'), mileage: v('mileage'), price: v('price'),
       bodyStyle: v('bodyStyle'), exteriorColor: chosen('exteriorColor'), interiorColor: v('interiorColor'),
       fuelType: v('fuelType'), transmission: v('transmission'), location: v('location'),
       condition: v('condition'), titleStatus: v('titleStatus'),
@@ -170,7 +170,7 @@ try {
     };
   });
   assert.deepEqual(form, {
-    vehicleType: 'Car/Truck', year: '2019', make: 'Ram', model: '1500 Classic Express', mileage: '20986',
+    vehicleType: 'Car/Truck', year: '2019', make: 'Ram', model: '1500 Classic Express', vin: '1C6RR7FT0KS643289', mileage: '20986',
     price: '27,163', // the page reformats it; the fill code accepts that
     bodyStyle: 'Truck', exteriorColor: 'Blue', interiorColor: 'Grey', fuelType: 'Gasoline', transmission: 'Automatic transmission',
     location: 'Waynesburg, Pennsylvania', // not the Ohio one the page suggests first
@@ -180,7 +180,7 @@ try {
   });
   assert.equal(await fb.inputValue('#description'), edited);
   const results = await panel.textContent('#fillResults');
-  assert.match(results, /Filled in\s*15/);
+  assert.match(results, /Filled in\s*16/);
   assert.doesNotMatch(results, /Needs a click/);
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   assert.match(await panel.textContent('#photos'), /3 of 3 attached/);

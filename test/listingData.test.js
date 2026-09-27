@@ -13,6 +13,7 @@ test('the Ram maps to the form fields', () => {
     year: '2019',
     make: 'Ram',
     model: '1500 Classic Express',
+    vin: '1C6RR7FT0KS643289',
     mileage: '20986',
     price: '27163',
     bodyStyle: 'Truck',

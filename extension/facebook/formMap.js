@@ -51,6 +51,7 @@ export const FORM_MAP = Object.freeze({
     // only appear once a year is chosen, so the fill code waits for it.
     { key: 'make', label: 'Make', kind: 'either', name: ['^make\\b', '^brand\\b', '^manufacturer\\b'] },
     { key: 'model', label: 'Model', kind: 'text', name: ['^model\\b'] },
+    { key: 'vin', label: 'VIN', kind: 'text', name: ['^vin\\b', '^vehicle identification number\\b'] },
     { key: 'mileage', label: 'Mileage', kind: 'text', name: ['^mileage\\b'] },
     { key: 'price', label: 'Price', kind: 'text', name: ['^price\\b'] },
     {

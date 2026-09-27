@@ -44,6 +44,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   ${combo('year', 'Year', YEARS, 2500)}
   <div id="makeWrap" hidden>${combo('make', 'Make', ['Chevrolet', 'Dodge', 'Ford', 'Honda', 'Jeep', 'Ram', 'Toyota'], 300)}</div>
   <label>Model <input id="model"></label>
+  <label>VIN <input id="vin"></label>
   <label>Mileage <input id="mileage"></label>
   <label>Price <input id="price"></label>
   <label>Body style <select id="bodyStyle">${opts(['Convertible', 'Coupe', 'Hatchback', 'Minivan', 'Truck', 'SUV', 'Sedan', 'Van', 'Wagon', 'Other'])}</select></label>
