@@ -1,0 +1,6 @@
+node_modules/
+backend/.env
+backend/usage.json
+test/e2e/screenshots/
+.DS_Store
+Thumbs.db

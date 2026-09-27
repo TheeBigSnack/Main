@@ -164,8 +164,9 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
 }
 
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
-export function markPosted(posted, entry, basis = 'website', now = new Date().toISOString()) {
-  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), postedAt: now } };
+// `extra` can carry the listing link and who posted (listingUrl, salesperson).
+export function markPosted(posted, entry, basis = 'website', now = new Date().toISOString(), extra = {}) {
+  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), postedAt: now, ...extra } };
 }
 
 export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {

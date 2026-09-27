@@ -98,8 +98,12 @@ export function normalizeVehicle(raw) {
     location,
     locationShort: shortLocation(location),
     photoCount: toNumber(media.image_count) ?? images.length,
-    photos: images.slice(0, 3),
+    photos: images, // the bulk scan keeps 3 per car; a post-time fetch keeps them all
     dateInStock: raw.date_in_stock || null,
+
+    // Text for the description writer. Not kept in the compact snapshot.
+    descriptionRaw: typeof raw.description === 'string' ? raw.description : '',
+    features: Array.isArray(raw.features) ? raw.features.filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim()) : [],
 
     // Details for the eventual listing
     exteriorColor: raw.styles?.exterior_color || '',

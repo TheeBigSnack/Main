@@ -16,6 +16,8 @@ export async function scanInventoryInPage(options) {
       perPage: 200, // the service accepts up to 250 per request
       maxPages: 20,
       confirmVins: [], // VINs from the last scan / posted list to double-check if missing
+      vins: null, // only these VINs (the post-time re-check of one car)
+      fullRecords: false, // keep every photo URL instead of the first 3
     },
     options || {}
   );
@@ -43,6 +45,8 @@ export async function scanInventoryInPage(options) {
     'vin', 'stock', 'type', 'year', 'make', 'model', 'trim', 'mileage', 'vdp_url', 'status', 'in_transit',
     'is_demo', 'is_loaner', 'date_in_stock', 'history_report', 'pricing', 'media', 'styles', 'body_details',
     'mechanical', 'extra_fields',
+    // for the description writer (verified to exist on the live site 2026-09-26)
+    'description', 'features',
   ];
   const status = Array.isArray(svc.visibleStatusValues) && svc.visibleStatusValues.length ? svc.visibleStatusValues : ['publish', 'modified', 'pend-sale'];
   const helper = window.IDPSearchServiceHelper;
@@ -76,7 +80,9 @@ export async function scanInventoryInPage(options) {
       is_demo: r.is_demo, is_loaner: r.is_loaner, date_in_stock: r.date_in_stock,
       history_report: { carfax_url: hr.carfax_url || null, carfax_oneowner: hr.carfax_oneowner ?? null },
       pricing: { price: p.price, our_price: p.our_price, internet_price: p.internet_price, original_price: p.original_price, msrp: p.msrp, original_price_label: p.original_price_label },
-      media: { image_count: m.image_count, images: Array.isArray(m.images) ? m.images.slice(0, 3) : [] },
+      media: { image_count: m.image_count, images: Array.isArray(m.images) ? (opts.fullRecords ? m.images.slice() : m.images.slice(0, 3)) : [] },
+      description: typeof r.description === 'string' ? r.description : null,
+      features: Array.isArray(r.features) ? r.features.filter((f) => typeof f === 'string') : [],
       styles: { exterior_color: r.styles && r.styles.exterior_color, interior_color: r.styles && r.styles.interior_color },
       body_details: { type: r.body_details && r.body_details.type },
       mechanical: r.mechanical ? { drivetrain: r.mechanical.drivetrain, engine: r.mechanical.engine, transmission: r.mechanical.transmission, fuel_type: r.mechanical.fuel_type } : null,
@@ -107,6 +113,7 @@ export async function scanInventoryInPage(options) {
       for (let page = 1; page <= opts.maxPages; page += 1) {
         const filters = { status };
         if (Array.isArray(opts.types)) filters.type = opts.types;
+        if (Array.isArray(opts.vins) && opts.vins.length) filters.vin = opts.vins.map((v) => String(v).toUpperCase());
         const body = { page, perPage: opts.perPage, filters, requestedFields: FIELDS };
         if (sort) body.sort = sort;
         const data = await search(body);
