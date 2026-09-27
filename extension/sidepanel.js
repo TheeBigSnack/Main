@@ -15,7 +15,8 @@ import { generateDescription } from './src/rewriter.js';
 import { runGuardrails } from './src/rewriteTemplate.js';
 import { buildListingData } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
-import { withDefaults } from './src/settings.js';
+import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
+import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
@@ -34,6 +35,7 @@ const state = {
   description: '', descriptionSource: 'template', note: '', guardrails: null,
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
+  vinCheck: null, // { local, online } from src/vin.js
   step: 'idle', message: '', doneAt: null,
   map: FORM_MAP,
 };
@@ -53,12 +55,13 @@ async function loadSaved() {
   const k = keys(state.origin);
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate]);
   state.siteName = data[k.snapshot]?.site?.name || state.origin;
-  state.settings = withDefaults(data[k.settings] || {}, { name: state.siteName });
+  const site = { name: state.siteName };
+  state.settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), site) || withDefaults({}, site);
   state.posted = data[k.posted] || {};
   state.boilerplate = data[k.boilerplate] || [];
 }
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -73,7 +76,7 @@ async function clearFlow() {
   if (state.origin) await chrome.storage.local.remove(keys(state.origin).flow);
   Object.assign(state, {
     vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
 
@@ -104,6 +107,7 @@ async function startFlow(req) {
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok) return block(check.message);
   state.vehicle = fresh.vehicle;
+  state.vinCheck = { local: localVinCheck(fresh.vehicle), online: null };
   state.price = state.settings.basis === 'beforeFees' ? fresh.vehicle.priceBeforeFees : fresh.vehicle.price;
   if (!state.price) return block("The website shows no price for this car right now, so it can't be posted.");
 
@@ -196,7 +200,7 @@ async function runFill() {
   state.message = 'Filling in the form…';
   render();
   try {
-    const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields }] });
+    const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields, match: state.listing.match || {} }] });
     state.fill = (inj && inj.result) || { filled: [], partial: [], blocked: [], photoLimit: { value: state.map.photoLimitDefault, verified: false } };
   } catch (e) {
     // e.g. no permission for this page: the form is open, so let the salesperson copy everything by hand
@@ -308,6 +312,28 @@ async function notPosted() {
   await saveFlow();
 }
 
+// The full decode from NHTSA's free service. Chrome asks the salesperson for
+// the vpic.nhtsa.dot.gov permission the first time (optional_host_permissions).
+async function checkVinOnline() {
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins: [NHTSA_ORIGIN + '/*'] });
+  } catch (e) {
+    setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
+    return;
+  }
+  if (!granted) {
+    setStatus('Permission for vpic.nhtsa.dot.gov was not granted, so the VIN was not checked online.', 'error');
+    return;
+  }
+  setStatus('Asking NHTSA about this VIN…');
+  const r = await decodeVinOnline(state.vin);
+  state.vinCheck = { ...(state.vinCheck || {}), online: r.ok ? { ok: true, decoded: r.decoded, compare: compareVin(state.vehicle, r.decoded) } : { ok: false, error: r.error } };
+  setStatus('');
+  render();
+  await saveFlow();
+}
+
 async function downloadPhotos() {
   const urls = state.listing ? state.listing.photos : state.vehicle.photos;
   setStatus(`Downloading ${urls.length} photos…`);
@@ -368,7 +394,33 @@ function fieldsTable() {
       return `<tr class="${v ? '' : 'missing'}"><td>${esc(labels[f.key])}</td><td>${shown}</td></tr>`;
     })
     .join('');
-  return `<table class="fields">${rows}<tr><td>Photos</td><td>${l.photos.length} from the website</td></tr></table>`;
+  const d = state.settings.dealer || {};
+  const locationHint = !/^\d{5}/.test(String(d.zip || ''))
+    ? `<p class="hint" id="locationHint">Add the store's ZIP in Settings so Marketplace picks the right town${d.state ? '' : ' (the state helps too)'}: there are several places with the same name.</p>`
+    : '';
+  return `<table class="fields">${rows}<tr><td>Photos</td><td>${l.photos.length} from the website</td></tr></table>${locationHint}`;
+}
+
+function vinCheckHtml() {
+  const vc = state.vinCheck;
+  if (!vc || !vc.local) return '';
+  const mark = (ok) => (ok === true ? '✓' : ok === false ? '✗' : '–');
+  const local = vc.local;
+  const on = vc.online;
+  let html = `<section id="vinCheck"><h3>VIN check <span class="pill ${local.ok ? 'good' : 'bad'}">${local.ok ? 'agrees' : 'differs'}</span></h3>
+    <ul class="list">${local.checks.map((c) => `<li>${mark(c.ok)} ${esc(c.label)}: <span class="why">${esc(c.detail)}</span></li>`).join('')}</ul>`;
+  if (!local.ok) html += `<div class="banner warn">The VIN and the website disagree. Check the car before posting; the website's inventory may need a fix.</div>`;
+  if (on && on.ok) {
+    html += `<table class="fields"><tr><td></td><td><b>Website</b></td><td><b>VIN (NHTSA)</b></td></tr>${on.compare.rows
+      .map((r) => `<tr class="${r.verdict === 'differ' ? 'missing' : ''}"><td>${esc(r.field)}</td><td>${esc(r.website) || '—'}</td><td>${esc(r.vin) || '—'} ${r.verdict === 'agree' ? '✓' : r.verdict === 'differ' ? '✗' : ''}</td></tr>`)
+      .join('')}</table>
+      <p class="hint">${on.compare.ok ? 'NHTSA agrees with the website on everything it knows about this VIN.' : `${on.compare.differ.length} difference(s) between the website and the VIN: check the car before posting.`}</p>`;
+  } else if (on && !on.ok) {
+    html += `<div class="banner warn">NHTSA check failed: ${esc(on.error)}</div>`;
+  }
+  html += `<div class="actions"><button type="button" class="plain" id="checkVinOnline">${on && on.ok ? 'Check again with NHTSA' : 'Check with NHTSA (free government decoder)'}</button></div>
+    <p class="hint">The checks above need no internet. The NHTSA check reads make, model, body, fuel, engine and drive from the VIN; Chrome asks for permission to reach vpic.nhtsa.dot.gov the first time. The VIN never changes what gets posted by itself; it flags what to look at.</p></section>`;
+  return html;
 }
 
 function leftBlankHtml() {
@@ -403,6 +455,7 @@ function viewReview() {
     <p class="hint">Edit anything you like; your edits are kept. Facts only: every number is checked against the website.</p>
   </section>
   <section><h3>What Lot Sync will fill in</h3>${fieldsTable()}</section>
+  ${vinCheckHtml()}
   ${leftBlankHtml()}
   <section>
     <div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>
@@ -426,7 +479,7 @@ function viewProbe() {
     <h3>Found <span class="pill good">${found.length}</span></h3>
     ${found.length ? `<ul class="list">${found.map((f) => `<li>${esc(f.label)} <span class="why">${esc(f.tag)}${f.role ? '[' + esc(f.role) + ']' : ''}: "${esc(f.name)}"</span></li>`).join('')}</ul>` : '<p class="hint">None of the fields were found.</p>'}
     ${missing.length ? `<section class="highlight"><h3>Not found <span class="pill bad">${missing.length}</span></h3><ul class="list">${missing.map((m) => `<li><b>${esc(m.label)}</b> <span class="why">looked for ${esc((m.patterns || []).join(' or '))}</span></li>`).join('')}</ul><p class="hint">Copy the report and send it to whoever maintains formMap.js; each fix is one name pattern.</p></section>` : ''}
-    <p class="hint">Photo upload: ${p.fileInputs ?? '?'} file input(s) on the page · limit ${esc(limit)}</p>
+    <p class="hint">Photo upload: ${p.fileInputs ?? '?'} file input(s) on the page · limit ${esc(limit)}${p.photoText ? ` · the page says: "${esc(p.photoText)}"` : ''}</p>
     <details><summary>Controls on the page (${controls.length})</summary><ul class="list">${controls.map((c) => `<li>${esc(c.tag)}${c.type ? '[' + esc(c.type) + ']' : ''}${c.role ? '[' + esc(c.role) + ']' : ''}: "${esc(c.name)}"</li>`).join('')}</ul></details>
   </section>
   <div class="actions">
@@ -529,6 +582,7 @@ async function onClick(ev) {
   switch (btn.id) {
     case 'openForm': return openForm();
     case 'checkForm': return openForm({ probeOnly: true });
+    case 'checkVinOnline': return checkVinOnline();
     case 'fillNow': return runFill();
     case 'probeAgain': return runProbe();
     case 'copyReport': return copy(JSON.stringify(state.probe, null, 2));

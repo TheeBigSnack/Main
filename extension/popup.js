@@ -3,7 +3,7 @@ import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
 import { scanInventoryInPage } from './src/scan.js';
 import { findBoilerplate } from './src/description.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 
 const $ = (id) => document.getElementById(id);
@@ -22,6 +22,7 @@ const state = {
   diff: null, // to-do list from the last scan
   posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }
   settings: null, // see src/settings.js
+  settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [], // description text that repeats across the lot (disclaimers), stripped by the description writer
   view: 'todo',
 };
@@ -42,7 +43,15 @@ async function loadSaved() {
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
-  state.settings = data[k.settings] ? withDefaults(data[k.settings], { name: state.snapshot?.site?.name }) : null;
+  const site = { name: state.snapshot?.site?.name };
+  if (data[k.settings]) {
+    state.settings = withDefaults(data[k.settings], site);
+    state.settingsFromProfile = false;
+  } else {
+    // a website without settings yet: start from the person's synced profile
+    state.settings = settingsFromProfile(await loadProfile(), site);
+    state.settingsFromProfile = Boolean(state.settings);
+  }
   state.boilerplate = data[k.boilerplate] || [];
 }
 
@@ -51,6 +60,7 @@ async function save(...names) {
   const out = {};
   for (const name of names) out[k[name]] = state[name];
   await chrome.storage.local.set(out);
+  if (names.includes('settings') && state.settings) await saveProfile(state.settings);
 }
 
 function setStatus(text, kind = '') {
@@ -92,7 +102,15 @@ async function scan() {
       return;
     }
     const vehicles = res.records.map(normalizeVehicle).filter(Boolean);
-    state.settings = state.settings ? withDefaults(state.settings, res.site) : defaultSettings(res.site, vehicles);
+    if (state.settings && state.settingsFromProfile) {
+      // first scan here with details from the profile: keep only store names that exist on this website
+      const here = new Set(vehicles.map((v) => v.location).filter(Boolean));
+      const kept = state.settings.myStores.filter((s) => here.has(s));
+      state.settings = withDefaults({ ...state.settings, myStores: kept.length ? kept : defaultSettings(res.site, vehicles).myStores }, res.site);
+      state.settingsFromProfile = false;
+    } else {
+      state.settings = state.settings ? withDefaults(state.settings, res.site) : defaultSettings(res.site, vehicles);
+    }
     // Text that repeats across the lot (disclaimers, legal lines) is remembered so the description writer can strip it.
     state.boilerplate = [...findBoilerplate(vehicles.map((v) => v.descriptionRaw))];
     const assessments = vehicles.map((v) => assessVehicle(v, state.settings));

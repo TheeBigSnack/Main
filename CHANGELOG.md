@@ -18,6 +18,12 @@ Added
 - **Tests**: 44 new unit tests (84 total); a mock Marketplace form and a second Playwright test that drives the whole post flow, with the test standing in for the person's Publish click.
 - CLAUDE.md, PLAN.md, `legal/` drafts (8 files), backend README, `.gitignore`.
 
+Added (after the live runs, 2026-09-27)
+- **VIN check** (`extension/src/vin.js`): format and check digit, model year and manufacturer group decoded locally from the VIN and compared with the website's record, shown in the side panel before posting; "Check with NHTSA" fetches the free vPIC decode and lists every field-by-field difference. New `optional_host_permissions` for `https://vpic.nhtsa.dot.gov/*`, granted by the salesperson in Chrome on first use.
+- **Synced profile** (`chrome.storage.sync`): name, role, dealership, stores, price basis and note, cap and the rewrite address follow the person's Chrome sign-in and seed a website that has no settings yet. The rewrite key stays local.
+- **Location safety**: Marketplace's suggestions are only accepted when they name the city with the right state (either spelling); otherwise the panel asks the person to pick. The panel nudges for a ZIP when none is set.
+- Make is found as either a text box or a dropdown, and the fill code waits up to 3 seconds for fields that only appear after an earlier choice (Make after Year on the real form). Several spellings of the photo-limit text are recognised, and the dry run shows the words next to the photo control.
+
 Fixed
 - Fill code, from the first live run on the real form (2026-09-27): a dropdown whose option list is drawn slowly (Facebook's Year list) was given up on after 2 seconds, then opened late and stayed open, so every later dropdown click only closed it and the page-wide option lookup kept seeing the year list. Dropdowns are now handled one at a time: close anything open, open with real pointer events, wait up to 6 seconds for that control's own popup (`aria-controls`, or the popup that newly appeared), choose inside it, close it. A reformatted number ("36,603" for "36603") now counts as accepted. Fields are also found by their label anywhere in the accessible name as a second chance. The mock Marketplace form reproduces all of this, so the e2e guards it.
 - Popup: a click on Scan during the popup's own start-up could finish, render, and then be wiped by the start-up's saved-data load, leaving "No scan yet" on screen. The button now stays disabled until start-up finishes and the scan waits for it. Found by the end-to-end test.

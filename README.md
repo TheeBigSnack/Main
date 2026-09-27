@@ -38,13 +38,15 @@ Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 5. When the fields are found, click **Fill it in now** and watch the form fill. Compare the panel's "Filled in" list with the form; note anything under "Couldn't fill" or "Needs a click".
 6. **Close the Facebook tab without clicking Publish.** In the panel click **It didn't post**, then **Back**. Nothing was posted or recorded.
 
-The form map was written from public knowledge of the form and has been tested only against a mock page with the same field names, so the first live run may show a few fields to adjust. Each is a one-line pattern in `formMap.js`.
+Two unpublished live runs on Sept 27, 2026 filled 12 of 13 fields on the real form (Make pending a check). They showed that Facebook draws dropdown lists slowly and one at a time, reformats the price, and suggests same-named towns in other states first; the fill code and the mock form now handle all of that. If a field still fails, the "Couldn't fill" reason says why, and the dry run's report shows what the page calls its controls. Please also note the exact wording next to the photo upload (e.g. "Add up to N photos") so the photo limit can be read from the page.
 
 ## Settings
 
 - **You**: name and role, used in every description's sign-off ("I'm Roger, sales consultant at Ron Lewis CDJR Waynesburg"). Posing as a private seller isn't allowed.
 - **Your store**: only cars at ticked stores count as ready.
-- **Dealership**: name, city, state, ZIP. The ZIP goes into Marketplace's location box.
+- **Dealership**: name, city, state, ZIP. Enter the ZIP: Marketplace's location box suggests every town with that name (there are Waynesburgs in Ohio and Kentucky too), and Lot Sync only accepts a suggestion in your state.
+- **Your profile follows you.** Name, role, dealership, price basis, note and cap are also kept in Chrome's synced storage, so they come back after clearing a website's data or reloading the extension, and appear on any computer where you're signed in to Chrome. A Lot Sync account shared with your manager is Milestone 4.
+- **VIN check.** The side panel checks each car's VIN before posting: format and check digit, the model year and the manufacturer encoded in it, against what the website says. "Check with NHTSA" fetches the full free government decode (make, model, body, fuel, engine, drive) and lists every difference. Chrome asks for permission to reach vpic.nhtsa.dot.gov the first time. The VIN never changes what gets posted by itself; it flags what to look at.
 - **Price to post**: the website's main price (on this site it includes the $490 doc fee) or the price before fees. The price note explains it in every description; a note is suggested from what the website's prices show.
 - **Safety**: posts per day per salesperson (default 10). Meta doesn't publish its limits; this is a safety setting, not a guarantee.
 - **Description writer**: off by default. With the rewrite service running (see `backend/README.md`), first drafts come from Claude. Either way every draft is checked: every number must be on the website, no banned claims ("no accidents", "best price in town"), the dealership must be named, 60 to 120 words.

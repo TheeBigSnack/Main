@@ -46,6 +46,55 @@ export function withDefaults(settings, site = {}) {
   };
 }
 
+// The salesperson's own details, kept in chrome.storage.sync so they follow
+// the person's Chrome sign-in to any computer and survive clearing one
+// website's data or reloading the extension. The rewrite-service key stays
+// on this computer only. A real Lot Sync account (shared with the manager,
+// across a team) is Milestone 4.
+export const PROFILE_KEY = 'profile';
+
+export function profileFrom(settings) {
+  const s = withDefaults(settings);
+  return {
+    salesperson: s.salesperson,
+    dealer: s.dealer,
+    myStores: s.myStores,
+    basis: s.basis,
+    priceNote: s.priceNote,
+    dailyCap: s.dailyCap,
+    rewrite: { enabled: s.rewrite.enabled, endpoint: s.rewrite.endpoint },
+    savedAt: new Date().toISOString(),
+  };
+}
+
+// Settings for a website that has none yet, taken from the saved profile.
+// Store names belong to a website, so they only carry over when the dealer
+// name matches; otherwise the first scan picks them.
+export function settingsFromProfile(profile, site = {}) {
+  if (!profile || typeof profile !== 'object') return null;
+  const sameDealer = !site.name || !profile.dealer || !profile.dealer.name || profile.dealer.name === site.name;
+  return withDefaults({ ...profile, myStores: sameDealer ? profile.myStores : [], rewrite: { ...(profile.rewrite || {}), key: '' } }, site);
+}
+
+export async function loadProfile(storage) {
+  try {
+    const area = storage || chrome.storage.sync;
+    return (await area.get(PROFILE_KEY))[PROFILE_KEY] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function saveProfile(settings, storage) {
+  try {
+    const area = storage || chrome.storage.sync;
+    await area.set({ [PROFILE_KEY]: profileFrom(settings) });
+    return true;
+  } catch (e) {
+    return false; // sync storage can be unavailable; the per-website copy still works
+  }
+}
+
 export function defaultSettings(site, vehicles) {
   const locations = [...new Set((vehicles || []).map((v) => v.location).filter(Boolean))];
   const mine = locations.filter((l) => l === site.name || (site.title || '').includes(l));

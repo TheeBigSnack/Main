@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, SETTINGS_VERSION } from '../extension/src/settings.js';
+import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, profileFrom, settingsFromProfile, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION } from '../extension/src/settings.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
 test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () => {
@@ -34,6 +34,34 @@ test('the fee gap is what most priced cars agree on, and it becomes the suggeste
   assert.equal(suggestedPriceNote(0), '');
   // no agreement: no gap
   assert.equal(feeGap([vehicle('usedNormal'), vehicle('certified', { pricing: { internet_price: 30000 } }), vehicle('usedNoCarfax', { pricing: { internet_price: 40000 } })]).gap, 0);
+});
+
+test('the synced profile carries the person and dealer details but never the service key', async () => {
+  const s = withDefaults({ myStores: [WAYNESBURG], salesperson: { name: 'Roger', title: 'sales consultant' }, dealer: { name: WAYNESBURG, city: 'Waynesburg', state: 'PA', zip: '15370' }, priceNote: 'Tax and tags extra.', dailyCap: 8, rewrite: { enabled: true, endpoint: 'http://localhost:8787', key: 'secret' } });
+  const p = profileFrom(s);
+  assert.equal(p.salesperson.name, 'Roger');
+  assert.equal(p.dealer.zip, '15370');
+  assert.equal(p.dailyCap, 8);
+  assert.deepEqual(p.rewrite, { enabled: true, endpoint: 'http://localhost:8787' });
+  assert.ok(!JSON.stringify(p).includes('secret'));
+
+  // a fake chrome.storage.sync
+  const store = {};
+  const fake = { get: async (k) => ({ [k]: store[k] }), set: async (obj) => Object.assign(store, obj) };
+  assert.equal(await saveProfile(s, fake), true);
+  assert.equal((await loadProfile(fake)).salesperson.name, 'Roger');
+  assert.ok(PROFILE_KEY in store);
+  assert.equal(await loadProfile({ get: async () => { throw new Error('no sync'); } }), null);
+
+  // same dealer: stores carry over; another dealer's website: they don't
+  const same = settingsFromProfile(p, { name: WAYNESBURG });
+  assert.deepEqual(same.myStores, [WAYNESBURG]);
+  assert.equal(same.rewrite.key, '');
+  assert.equal(same.salesperson.name, 'Roger');
+  const other = settingsFromProfile(p, { name: 'Some Other Dealer' });
+  assert.deepEqual(other.myStores, []);
+  assert.equal(other.dealer.name, WAYNESBURG); // the person's employer, until they change it
+  assert.equal(settingsFromProfile(null), null);
 });
 
 test('first-run defaults: the store matching the site name, and the price note', () => {
