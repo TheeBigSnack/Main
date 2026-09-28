@@ -1,0 +1,83 @@
+/* The Lot Sync test drive: a fake browser window (tabs, address bar, the
+   extension's toolbar icon with its badge, the popup dropping down from it)
+   with the side panel docked on the right, under a top bar that says what
+   this is and lets you switch the sample website to day 2 or reset. */
+:root {
+  --bg: #e9ebe8;
+  --chrome: #f6f7f5;
+  --line: #d3d7d2;
+  --text: #1c1f1d;
+  --muted: #5f6661;
+  --accent: #14532d;
+  --warn-bg: #fff4dc;
+  --warn: #8a5300;
+  --bad: #9f1d1d;
+  --panel-w: 400px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { display: flex; flex-direction: column; min-width: 1100px; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button { font: inherit; cursor: pointer; }
+
+.top { background: #fff; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.banner { background: var(--warn-bg); color: var(--warn); font-weight: 700; text-align: center; padding: 7px 12px; border-bottom: 1px solid #f1dba8; }
+.bar { display: flex; align-items: center; gap: 14px; padding: 8px 14px; }
+.brand { font-weight: 800; font-size: 16px; white-space: nowrap; }
+.brand span { font-weight: 500; color: var(--muted); font-size: 13px; margin-left: 6px; }
+.scenario { flex: 1; color: var(--muted); font-size: 12px; min-width: 0; }
+.controls { display: flex; gap: 8px; align-items: center; }
+.controls button { border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 8px; padding: 7px 12px; white-space: nowrap; }
+.controls button.go { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.controls button.danger { border-color: var(--bad); color: var(--bad); }
+.controls button:disabled { opacity: 0.5; cursor: default; }
+.howto { padding: 0 14px 8px; }
+.howto summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+.howto ol { margin: 6px 0 4px; padding-left: 22px; columns: 2; column-gap: 28px; }
+.howto li { margin: 2px 0; break-inside: avoid; }
+.howto .fine { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.toasts { position: fixed; top: 44px; right: 12px; z-index: 50; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: #1c1f1d; color: #fff; border-radius: 10px; padding: 10px 14px; min-width: 260px; max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
+.toast b { display: block; margin-bottom: 2px; }
+.toast small { color: #b7c0ba; }
+.rescan { padding: 4px 14px 8px; color: var(--muted); font-size: 12px; }
+
+.work { flex: 1 1 auto; display: flex; min-height: 0; }
+.browser { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; margin: 10px 0 10px 10px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.chrome { background: var(--chrome); border-bottom: 1px solid var(--line); }
+.tabstrip { display: flex; gap: 4px; padding: 6px 8px 0; overflow-x: auto; }
+.tabbtn { display: flex; align-items: center; gap: 6px; max-width: 240px; padding: 6px 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--muted); background: transparent; cursor: pointer; }
+.tabbtn.active { background: #fff; border-color: var(--line); color: var(--text); }
+.tabbtn .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabbtn .x { border: 0; background: none; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 4px; }
+.tabbtn .x:hover { background: var(--line); color: var(--text); }
+.addressbar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px; background: #fff; }
+.addressbar .nav { border: 0; background: none; color: var(--muted); font-size: 16px; padding: 4px 6px; border-radius: 6px; }
+.addressbar .nav:hover { background: var(--chrome); }
+.url { flex: 1; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; background: var(--chrome); color: var(--text); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ext { position: relative; border: 1px solid transparent; background: none; border-radius: 6px; padding: 4px; display: flex; align-items: center; }
+.ext:hover, .ext[aria-expanded="true"] { background: var(--chrome); border-color: var(--line); }
+.ext img { display: block; }
+.badge { position: absolute; right: -4px; bottom: -4px; min-width: 16px; height: 16px; border-radius: 8px; padding: 0 4px; background: #9f1d1d; color: #fff; font-size: 10px; line-height: 16px; text-align: center; font-weight: 700; }
+.page { position: relative; flex: 1 1 auto; min-height: 0; background: #fff; }
+.page iframe.tab { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 1; }
+.page iframe.tab.active { opacity: 1; pointer-events: auto; z-index: 2; }
+
+.popupHost { position: absolute; top: 4px; right: 6px; z-index: 10; width: 722px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 12px 32px rgba(0,0,0,0.22); overflow: hidden; }
+.popupHead { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; background: var(--chrome); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.popupHead label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+#popupFrame { display: block; width: 720px; height: 590px; border: 0; background: #fff; }
+
+.sidepanel { flex: 0 0 var(--panel-w); display: flex; flex-direction: column; margin: 10px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.sidepanel.flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow 0.2s; }
+.panelHead { display: flex; justify-content: space-between; padding: 8px 12px; background: var(--chrome); border-bottom: 1px solid var(--line); font-weight: 600; }
+.panelHead .muted { color: var(--muted); font-weight: 500; }
+#panelFrame { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
+#workerFrame { position: absolute; width: 0; height: 0; border: 0; }
+
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #101311; --chrome: #1f2320; --line: #2f3531; --text: #e9ece9; --muted: #a3aaa5; --accent: #4ade80; --warn-bg: #3a2c0c; --warn: #fbbf24; --bad: #fca5a5; }
+  .top, .browser, .sidepanel, .addressbar, .tabbtn.active, .popupHost, .controls button, .page { background: #161917; }
+  .banner { border-color: #4b3a10; }
+  .toast { background: #e9ece9; color: #161917; }
+  .toast small { color: #5f6661; }
+}

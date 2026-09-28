@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Listing (sample)</title>
+  <link rel="stylesheet" href="marketplace.css" />
+</head>
+<body>
+  <!--
+    A published listing, the way the mock in test/e2e/mock-marketplace.mjs
+    draws one: a "Sold" filter tab at the top, the price, a "Sold" badge once
+    the person marks it sold, prose that itself contains the word "sold" (so
+    the extension's read-only sign check has something to get wrong, and
+    doesn't), and buttons only a person clicks: Edit listing, Mark as sold,
+    Delete. A deleted or unknown listing reads "This content isn't available
+    right now."
+  -->
+  <div class="sample">Sample Marketplace listing for the Lot Sync sandbox. This is not Facebook.</div>
+  <header class="mp"><div class="logo">Sample Marketplace</div><nav><a href="selling.html">Your listings</a><a href="create.html">Create listing</a></nav></header>
+  <main id="main"></main>
+  <script src="marketplace.js"></script>
+  <script>
+    (function () {
+      const mp = window.SandboxMarketplace;
+      const id = mp.param('id');
+      const l = mp.get(id);
+      const main = document.getElementById('main');
+      const esc = mp.esc;
+      if (!l || l.deleted) {
+        document.title = 'Listing (sample)';
+        main.innerHTML = `<div class="tabs"><span role="tab" aria-selected="true">Active</span><span role="tab">Sold</span></div><h1>Listing</h1><p>This content isn't available right now.</p><p class="hint">The listing was removed, or the link is wrong. <a href="selling.html">Your listings</a></p>`;
+        return;
+      }
+      document.title = `${l.title} (sample listing)`;
+      main.innerHTML = `
+        <div class="tabs"><span role="tab" aria-selected="true">Active</span><span role="tab">Sold</span></div>
+        <h1>${esc(l.title)}</h1>
+        <div class="price">${mp.money(l.price)}</div>
+        ${l.sold ? '<p class="badge sold">Sold</p>' : ''}
+        <div class="listing-photo">${l.photos ? `${l.photos} photo${l.photos === 1 ? '' : 's'} attached by Lot Sync` : 'No photos'}</div>
+        <p class="hint">${esc(l.location || '')}${l.mileage ? ' · ' + Number(l.mileage).toLocaleString('en-US') + ' miles' : ''}${l.vin ? ' · VIN ' + esc(l.vin) : ''} · listing ${esc(l.id)}</p>
+        <div class="description">${esc(l.description || '')}</div>
+        <p class="hint">Sold as-is with any remaining factory warranty. Message the seller with questions.</p>
+        <div class="actions">
+          <a class="plain" href="edit.html?id=${esc(l.id)}" style="padding:8px 14px;border:1px solid var(--line);border-radius:8px;text-decoration:none;color:inherit">Edit listing</a>
+          <button type="button" class="plain" id="markSold" ${l.sold ? 'disabled' : ''}>Mark as sold</button>
+          <button type="button" class="plain" id="delete">Delete</button>
+          <span class="hint">Only you click these.</span>
+        </div>`;
+      document.getElementById('markSold').addEventListener('click', () => { mp.update(id, { sold: true }); location.reload(); });
+      document.getElementById('delete').addEventListener('click', () => { mp.update(id, { deleted: true }); location.reload(); });
+    })();
+  </script>
+</body>
+</html>

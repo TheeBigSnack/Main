@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Your listings (sample)</title>
+  <link rel="stylesheet" href="marketplace.css" />
+</head>
+<body>
+  <!-- "Your listings": where a To do item lands when the listing's link was never saved (a car marked posted by hand). -->
+  <div class="sample">Sample Marketplace for the Lot Sync sandbox. This is not Facebook.</div>
+  <header class="mp"><div class="logo">Sample Marketplace</div><nav><a href="selling.html">Your listings</a><a href="create.html">Create listing</a></nav></header>
+  <main>
+    <h1>Your listings</h1>
+    <p class="hint">Everything you have published in this sandbox session. Open one to edit it, mark it sold or delete it.</p>
+    <ul class="listings" id="list"></ul>
+  </main>
+  <script src="marketplace.js"></script>
+  <script>
+    (function () {
+      const mp = window.SandboxMarketplace;
+      const all = Object.values(mp.all()).filter((l) => !l.deleted).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      const list = document.getElementById('list');
+      list.innerHTML = all.length
+        ? all.map((l) => `<li><span><a href="item.html?id=${mp.esc(l.id)}">${mp.esc(l.title)}</a>${l.sold ? ' <span class="badge sold">Sold</span>' : ''}<span class="count">listing ${mp.esc(l.id)}</span></span><b>${mp.money(l.price)}</b></li>`).join('')
+        : '<li><span class="hint">No listings yet. Post a car from the Lot Sync side panel; you click Publish on the form.</span></li>';
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Used Vehicles for Sale in Springfield, OH | Example Motors</title>
+  <meta property="og:site_name" content="Example Motors" />
+  <!-- The store's address, the way dealer platforms publish it (schema.org). The extension reads it for the Marketplace location. Every value is made up. -->
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"AutoDealer","name":"Example Motors","telephone":"(555) 010-0100","address":{"@type":"PostalAddress","streetAddress":"100 Sample Street","addressLocality":"Springfield","addressRegion":"OH","postalCode":"45501","addressCountry":"US"}}</script>
+  <style>
+    :root { --ink: #1c1f1d; --muted: #5f6661; --line: #e2e5e1; --brand: #0f3d5c; --accent: #c8102e; --bg: #f6f7f5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: #fff; }
+    .sample { background: #fff4dc; color: #8a5300; padding: 6px 16px; font-size: 12px; text-align: center; border-bottom: 1px solid #f1dba8; }
+    header.site { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+    header.site .logo { font-weight: 800; font-size: 20px; color: var(--brand); letter-spacing: 0.2px; }
+    header.site .logo small { display: block; font-weight: 500; font-size: 11px; color: var(--muted); letter-spacing: 0; }
+    header.site nav a { margin-left: 16px; color: var(--ink); text-decoration: none; font-weight: 600; }
+    header.site nav a.here { color: var(--accent); }
+    main { max-width: 1100px; margin: 0 auto; padding: 16px 20px 32px; }
+    h1 { font-size: 20px; margin: 4px 0 2px; }
+    .count { color: var(--muted); margin: 0 0 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+    .card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; display: flex; flex-direction: column; }
+    .card.hit { outline: 3px solid var(--accent); }
+    .card .photo { aspect-ratio: 4 / 3; background: var(--bg); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+    .card .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .card .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; }
+    .card .type { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
+    .card .type.new { color: var(--accent); }
+    .card .name { font-weight: 700; font-size: 15px; }
+    .card .facts { color: var(--muted); font-size: 12px; }
+    .card .price { font-size: 17px; font-weight: 800; color: var(--brand); margin-top: 4px; }
+    .card .price small { display: block; font-size: 11px; font-weight: 500; color: var(--muted); }
+    .card .was { color: var(--muted); font-size: 12px; }
+    .card .call { color: var(--accent); font-weight: 700; margin-top: 4px; }
+    .card .loc { font-size: 12px; color: var(--muted); }
+    .detail { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; margin: 0 0 14px; background: var(--bg); }
+    footer { border-top: 1px solid var(--line); padding: 14px 20px; color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="sample">Sample website for the Lot Sync sandbox. Example Motors is not a real dealership, and these are not real cars.</div>
+  <header class="site">
+    <div class="logo">Example Motors <small>100 Sample Street, Springfield, OH 45501 · (555) 010-0100</small></div>
+    <nav><a href="#">New</a><a href="#" class="here">Used</a><a href="#">Specials</a><a href="#">Service</a><a href="#">Finance</a></nav>
+  </header>
+  <main>
+    <div id="detail" class="detail" hidden></div>
+    <h1>Used and Certified Used Vehicles for Sale</h1>
+    <p class="count" id="count">Loading the inventory…</p>
+    <div class="grid" id="grid"></div>
+  </main>
+  <footer>Example Motors Price includes the $250 documentation fee. Tax, title and registration are extra. Sample data only.</footer>
+
+  <script src="inventory.js"></script>
+  <script>
+    // What a Dealer Inspire page carries and the extension reads: the search
+    // service's address and public key on window.SEARCH_SERVICE, and the
+    // page's own helper that makes the request (IDPSearchServiceHelper).
+    // Here the helper answers from inventory.js instead of a network service.
+    (function () {
+      const BASE = new URL('./', location.href).href;
+      const inv = window.LOT_SYNC_INVENTORY;
+      let scenario = 'day1';
+
+      window.SEARCH_SERVICE = {
+        apiKey: 'sample-public-key',
+        search: new URL('api/v1/listings/1', BASE).href,
+        visibleStatusValues: ['publish', 'modified', 'pend-sale'],
+      };
+      window.IDPSearchServiceHelper = {
+        async getListings(body) {
+          await new Promise((r) => setTimeout(r, 120)); // a little latency, like a real service
+          return { data: inv.search(inv.records(scenario, BASE), body) };
+        },
+      };
+
+      // The sandbox page sets this before a scan; 'day1' | 'day2' | { name: 'day2', sold, dropped }.
+      Object.defineProperty(window, 'LOT_SYNC_SCENARIO', {
+        get: () => scenario,
+        set: (v) => { scenario = v && (typeof v === 'string' || typeof v === 'object') ? v : 'day1'; render(); },
+      });
+
+      const money = (n) => '$' + Number(n).toLocaleString('en-US');
+      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+      const name = (r) => [r.year, r.make, r.model, r.trim].filter(Boolean).join(' ');
+
+      function render() {
+        const all = inv.records(scenario, BASE);
+        const grid = document.getElementById('grid');
+        const hash = location.hash || '';
+        const hit = hash ? all.find((r) => hash.toLowerCase().includes(r.vin.toLowerCase())) : null; // #/inventory/<slug>-<vin>/ names one car
+        const detail = document.getElementById('detail');
+        if (hit) {
+          detail.hidden = false;
+          detail.innerHTML = `<b>${esc(name(hit))}</b> · Stock ${esc(hit.stock || '—')} · VIN ${esc(hit.vin)} · ${esc(hit.extra_fields.meta_location)}<br><span style="color:#5f6661">This is where the car's own page would be. The card is highlighted below.</span>`;
+        } else {
+          detail.hidden = true;
+        }
+        const used = all.filter((r) => r.type !== 'New');
+        document.getElementById('count').textContent = `${used.length} used and certified used vehicles · ${all.length - used.length} new arrivals shown for reference`;
+        grid.innerHTML = all.map((r) => {
+          const p = r.extra_fields.lightning.pricing;
+          const price = p.low
+            ? `<div class="price">${money(p.low.value)}<small>${esc(p.low.label)}</small></div><div class="was">${esc(p.high.label)} ${money(p.high.value)}</div>`
+            : `<div class="call">${esc(p.high.value)}</div>`;
+          const photo = r.media.images.length ? `<img src="${esc(r.media.images[0])}" alt="" loading="lazy" />` : 'Photos coming soon';
+          return `<article class="card${hit && hit.vin === r.vin ? ' hit' : ''}" id="${esc(r.vin)}">
+            <div class="photo">${photo}</div>
+            <div class="body">
+              <div class="type${r.type === 'New' ? ' new' : ''}">${esc(r.extra_fields.readable_type)}${r.extra_fields.availability_rt === 'In-Transit' ? ' · in transit' : ''}</div>
+              <div class="name">${esc(name(r))}</div>
+              <div class="facts">${r.mileage.toLocaleString('en-US')} mi · ${esc(r.mechanical.transmission)} · ${esc(r.mechanical.drivetrain)}${r.stock ? ' · Stock ' + esc(r.stock) : ''}</div>
+              ${price}
+              <div class="loc">${esc(r.extra_fields.meta_location)}${r.history_report.carfax_oneowner ? ' · one owner' : ''}</div>
+            </div>
+          </article>`;
+        }).join('');
+        if (hit) { const el = document.getElementById(hit.vin); if (el) el.scrollIntoView({ block: 'center' }); }
+      }
+      window.addEventListener('hashchange', render);
+      render();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lot Sync test drive</title>
+  <meta name="description" content="Try Lot Sync in the browser: the real popup, side panel and service worker running against a sample dealership website and a sample Marketplace form. Sample data only." />
+  <link rel="icon" href="../extension/icons/icon32.png" />
+  <link rel="stylesheet" href="demo.css" />
+</head>
+<body>
+  <!--
+    The Lot Sync test drive. This page runs the extension's own files
+    unchanged (extension/popup.html, sidepanel.html, background.js) in iframes,
+    with demo/chrome-shim.js standing in for the chrome.* API, against a fake
+    dealership website (demo/site/) and a fake Marketplace (demo/marketplace/)
+    that live in this folder. Nothing on this page is loaded from any other
+    site, and nothing here is Facebook or a real dealership.
+  -->
+  <header class="top">
+    <div class="banner" id="banner" role="note">Sandbox with sample data. Nothing here is Facebook or a real dealership.</div>
+    <div class="bar">
+      <div class="brand">Lot Sync <span>test drive</span></div>
+      <div class="scenario" id="scenario">Website inventory: day 1</div>
+      <div class="controls">
+        <button type="button" id="day2" class="go">Day 2: a car sells and a price drops</button>
+        <button type="button" id="rescanNow" title="Sends the service worker the same message its 3-hour alarm would. Needs one scan from the popup first.">Run the automatic rescan now</button>
+        <button type="button" id="reset" class="danger">Reset sandbox</button>
+      </div>
+    </div>
+    <details class="howto" id="howto" open>
+      <summary>How to try it</summary>
+      <ol>
+        <li>In the popup (the Lot Sync icon in the toolbar), click <b>Scan website</b>. The popup reads the sample dealership's used inventory and sorts it: ready, not ready, needs a look, skipped as new.</li>
+        <li>Open <b>Ready to post</b> and click <b>Post</b> on a car. The side panel re-checks the car on the website, writes the description and checks every number in it.</li>
+        <li>Click <b>Open the Marketplace form</b>. A sample form opens in a new tab and fills itself in, photos included.</li>
+        <li>Check the form, then click <b>Publish</b> on it yourself. Lot Sync never does. Back in the panel, click <b>It's posted, record it</b>.</li>
+        <li>In the popup: <b>My listings</b> has the car; the <b>Pilot</b> tab has the timing. Post a second car the same way, or tick two on Ready to post and post them as a queue.</li>
+        <li>Click <b>Day 2</b> up here, then <b>Rescan website</b> in the popup. <b>To do</b> lists the sold car and the price drop on your listings.</li>
+        <li><b>Open &amp; update price</b>: on the sample listing click Edit listing; the panel fills the new price; you click Update. <b>Open listing</b> for the sold car, then Mark as sold. The panel notices both.</li>
+      </ol>
+      <p class="fine">Every file of the extension runs unchanged; only the chrome.* API is stood in (demo/chrome-shim.js). Storage is in memory and empties when you leave. The daily post cap is 10, as in the default settings.</p>
+    </details>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+    <div class="rescan" id="rescanStatus" hidden></div>
+  </header>
+
+  <div class="work">
+    <section class="browser" aria-label="Sample browser">
+      <div class="chrome">
+        <div class="tabstrip" id="tabstrip" role="tablist" aria-label="Tabs"></div>
+        <div class="addressbar">
+          <button type="button" id="reload" class="nav" title="Reload this tab" aria-label="Reload">&#8635;</button>
+          <div class="url" id="url" title="The current tab's address"></div>
+          <button type="button" id="lotSyncButton" class="ext" title="Lot Sync: scan this dealership website" aria-haspopup="dialog" aria-expanded="false">
+            <img src="../extension/icons/icon32.png" alt="" width="20" height="20" /><span id="badge" class="badge" hidden></span>
+          </button>
+        </div>
+      </div>
+      <div class="page" id="page">
+        <div class="popupHost" id="popupHost" hidden>
+          <div class="popupHead"><span>Lot Sync popup</span><label><input type="checkbox" id="pinPopup" /> Keep open</label></div>
+          <iframe id="popupFrame" title="Lot Sync popup"></iframe>
+        </div>
+      </div>
+    </section>
+    <aside class="sidepanel" id="sidepanel" aria-label="Side panel">
+      <div class="panelHead"><span>Side panel</span><span class="muted">Lot Sync</span></div>
+      <iframe id="panelFrame" title="Lot Sync side panel"></iframe>
+    </aside>
+  </div>
+  <iframe id="workerFrame" title="Lot Sync service worker (hidden)" hidden></iframe>
+
+  <script src="site/inventory.js"></script>
+  <script src="chrome-shim.js"></script>
+  <script type="module" src="demo.js"></script>
+</body>
+</html>

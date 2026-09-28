@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Edit listing (sample)</title>
+  <link rel="stylesheet" href="marketplace.css" />
+</head>
+<body>
+  <!-- The edit form: a Price box and an Update button. Lot Sync fills the box; a person clicks Update. -->
+  <div class="sample">Sample Marketplace edit form for the Lot Sync sandbox. This is not Facebook.</div>
+  <header class="mp"><div class="logo">Sample Marketplace</div><nav><a href="selling.html">Your listings</a><a href="create.html">Create listing</a></nav></header>
+  <main id="main"></main>
+  <script src="marketplace.js"></script>
+  <script>
+    (function () {
+      const mp = window.SandboxMarketplace;
+      const id = mp.param('id');
+      const l = mp.get(id);
+      const main = document.getElementById('main');
+      if (!l || l.deleted) {
+        main.innerHTML = `<h1>Edit listing</h1><p>This content isn't available right now.</p>`;
+        return;
+      }
+      document.title = `Edit listing: ${l.title} (sample)`;
+      main.innerHTML = `<h1>Edit listing: ${mp.esc(l.title)}</h1>
+        <form id="form">
+          <label>Price <input id="price" name="price" value="${mp.esc(l.price)}" /></label>
+          <label>Description <textarea name="description" rows="6">${mp.esc(l.description || '')}</textarea></label>
+          <div class="actions"><button type="submit" class="primary" id="update" style="margin-top:0">Update</button><a href="item.html?id=${mp.esc(l.id)}">Cancel</a><span class="hint">You click Update. Lot Sync only fills in the price.</span></div>
+        </form>`;
+      document.getElementById('form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const price = Number(String(document.getElementById('price').value).replace(/\D/g, ''));
+        const description = e.target.elements.description.value;
+        mp.update(id, price > 0 ? { price, description } : { description });
+        location.href = 'item.html?id=' + id;
+      });
+    })();
+  </script>
+</body>
+</html>

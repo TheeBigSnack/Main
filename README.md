@@ -117,7 +117,9 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan: `PLAN.md`. The pilot: `PILOT.md`. Positioning, pricing hypothesis, sales sheet, demo script and emails: `marketing/`.
+Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan: `PLAN.md`. The pilot: `PILOT.md`. Positioning, pricing hypothesis, sales sheet, demo script and emails: `marketing/`. Help for salespeople and managers: `docs/help.md`.
+
+Test drive without installing: `npm run demo`, then open http://127.0.0.1:8765/demo/. The real popup, side panel and service worker run against a sample dealership website and a sample Marketplace form inside one page (`demo/`; sample data only, nothing there is Facebook). `npm run test:demo` drives the whole flow in headless Chromium; CI runs it too.
 
 | File | What it does |
 |---|---|
