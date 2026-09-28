@@ -4,7 +4,7 @@
 // a first scan with the final settings. Progress is kept in storage so the
 // panel can be closed and reopened.
 
-import { performScan } from './src/scanRunner.js';
+import { performScan, rememberSite } from './src/scanRunner.js';
 import { withDefaults, saveProfile } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation } from './src/normalize.js';
@@ -50,6 +50,24 @@ export async function endWizard() {
   wiz.active = false;
 }
 
+// The dealer tab this wizard started from may be gone (closed, or Chrome was
+// restarted, which renumbers tabs). Look for a live tab on the site first;
+// that only works once the site's host permission is granted, so the popup's
+// "Continue set-up" (which sends a fresh tab id) remains the sure route.
+async function findDealerTab() {
+  try {
+    // Without the tabs permission Chrome ignores the url filter for tabs the
+    // extension can't read, so only a tab whose address is visible and on the
+    // site counts.
+    const tabs = (await chrome.tabs.query({ url: wiz.origin + '/*' })).filter((t) => t.id && typeof t.url === 'string' && t.url.startsWith(wiz.origin + '/'));
+    const pick = tabs.find((t) => t.id === wiz.dealerTabId) || tabs.find((t) => t.windowId === wiz.windowId) || tabs[0];
+    if (pick) wiz.dealerTabId = pick.id;
+  } catch (e) { /* no access to tab addresses: keep the stored id */ }
+  return wiz.dealerTabId;
+}
+
+export const TAB_GONE = "Couldn't reach the dealership tab. Open the used inventory page, click the Lot Sync icon and click Continue set-up.";
+
 // Reads the website with the settings so far (defaults on the first pass) and saves the result.
 async function runScan(ctx) {
   wiz.busy = true;
@@ -59,9 +77,10 @@ async function runScan(ctx) {
   const data = await chrome.storage.local.get([k('snapshot'), k('posted')]);
   let r;
   try {
-    r = await performScan({ tabId: wiz.dealerTabId, origin: wiz.origin, settings: wiz.settings, snapshot: data[k('snapshot')] || null, posted: data[k('posted')] || {} });
+    const tabId = await findDealerTab();
+    r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, snapshot: data[k('snapshot')] || null, posted: data[k('posted')] || {} });
   } catch (e) {
-    r = { ok: false, message: "Couldn't reach the dealership tab. Keep the used inventory page open in this window, then try again. (" + ((e && e.message) || e) + ')' };
+    r = { ok: false, message: TAB_GONE + ' (' + ((e && e.message) || e) + ')' };
   }
   wiz.busy = false;
   if (!r.ok) {
@@ -72,9 +91,12 @@ async function runScan(ctx) {
   wiz.settings = r.settings;
   wiz.service = r.service;
   wiz.site = r.site;
+  // Like the popup and the background rescan: a scan that lost most of the
+  // lot at once is a website hiccup, so the last good snapshot is kept.
+  const kept = r.diff.unreliable && data[k('snapshot')] ? data[k('snapshot')] : r.snapshot;
   const stores = [...new Set(r.vehicles.map((v) => v.location).filter(Boolean))].sort();
-  wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(r.snapshot.vehicles).filter((v) => v.decision === 'ready').length };
-  await chrome.storage.local.set({ [k('snapshot')]: r.snapshot, [k('diff')]: r.diff, [k('boilerplate')]: r.boilerplate, [k('settings')]: r.settings });
+  wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [] };
+  await chrome.storage.local.set({ [k('snapshot')]: kept, [k('diff')]: r.diff, [k('boilerplate')]: r.boilerplate, [k('settings')]: r.settings });
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   await persist();
   ctx.render();
@@ -101,7 +123,7 @@ export function wizardHtml() {
         ${nav(false, 'Start')}`;
     case 'scan':
       return `${progress}<h3>Reading the website</h3>${error}
-        ${wiz.busy ? '<p>Reading the used inventory…</p>' : wiz.scan ? `<div class="banner good">${wiz.scan.cars} used cars read from ${esc(wiz.scan.siteName)}. ${wiz.scan.stores.length} store${wiz.scan.stores.length === 1 ? '' : 's'} found.</div>` : '<p>Click Read to scan the used inventory.</p>'}
+        ${wiz.busy ? '<p>Reading the used inventory…</p>' : wiz.scan ? `<div class="banner good">${wiz.scan.cars} used cars read from ${esc(wiz.scan.siteName)}. ${wiz.scan.stores.length} store${wiz.scan.stores.length === 1 ? '' : 's'} found.</div>${(wiz.scan.warnings || []).map((w) => `<div class="banner warn">${esc(w)}</div>`).join('')}` : '<p>Click Read to scan the used inventory.</p>'}
         ${wiz.scan ? nav(true, 'Next') : `<div class="actions"><button type="button" class="plain" id="wizBack">Back</button><button type="button" class="primary" id="wizScan" ${wiz.busy ? 'disabled' : ''}>Read the website</button><button type="button" class="plain" id="wizQuit">Quit set-up</button></div>`}`;
     case 'store': {
       const stores = (wiz.scan && wiz.scan.stores) || [];
@@ -168,12 +190,15 @@ async function finish(ctx) {
   const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: new Date().toISOString() }, wiz.site || {});
   wiz.settings = settings;
   const k = (name) => `${name}:${wiz.origin}`;
-  await chrome.storage.local.set({ [k('settings')]: settings, [`wizardDone:${wiz.origin}`]: new Date().toISOString() });
+  await chrome.storage.local.set({ [k('settings')]: settings });
   await saveProfile(settings);
+  // the site registry must agree with the settings even if the final read below fails
+  await rememberSite(wiz.origin, { auto: Boolean(settings.autoRescan) });
   // one more read with the final settings, so Ready to post is right from the start
   const ok = await runScan(ctx);
   wiz.busy = false;
   if (!ok) { ctx.render(); return; }
+  await chrome.storage.local.set({ [`wizardDone:${wiz.origin}`]: new Date().toISOString() });
   chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
   wiz.step = 'done';
   await persist();
@@ -203,6 +228,7 @@ export async function handleWizardClick(id, ctx) {
       await runScan(ctx);
       return true;
     case 'wizGrant': {
+      readInputs(); // keep the notification tick as the person left it across the re-render
       const origins = originsFor(wiz.site, wiz.service);
       try {
         wiz.granted = await chrome.permissions.request({ origins }); // straight from the click
@@ -219,7 +245,7 @@ export async function handleWizardClick(id, ctx) {
     case 'wizQuit':
     case 'wizClose':
       await endWizard();
-      ctx.setStatus(id === 'wizQuit' ? 'Set-up stopped. You can run it again from the popup.' : '');
+      ctx.setStatus(id === 'wizQuit' ? 'Set-up stopped. The popup offers Set up Lot Sync again until it is finished; Settings has the same fields.' : '');
       ctx.onClose();
       return true;
     default:
@@ -234,4 +260,5 @@ export function handleWizardChange(target) {
     const btn = document.getElementById('wizFinish');
     if (btn) btn.disabled = !wiz.rulesRead;
   }
+  if (target.id === 'wizNotify' && wiz.settings) wiz.settings = { ...wiz.settings, notify: target.checked };
 }

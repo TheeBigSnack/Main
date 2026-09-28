@@ -1,8 +1,8 @@
-# Lot Sync (v0.2)
+# Lot Sync (v0.3)
 
 A Chrome extension for dealership salespeople. It reads your dealership website's used inventory, checks every car is really pre-owned, pre-fills a Facebook Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
-**You click Publish. Lot Sync never does.** It fills in the form and opens pages; a person publishes every post and every edit, and nothing happens in the background or while you're away. Lot Sync is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used here only as the names of the places you post.
+**You click Publish. Lot Sync never does.** It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. The one thing it does on its own, and only if you allow it, is re-read your dealership's website every 3 hours while Chrome is open to keep your to-do count current; it never touches Facebook then. Lot Sync is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used here only as the names of the places you post.
 
 ## Install (each tester, about 2 minutes)
 
@@ -92,7 +92,7 @@ A demo or loaner flag always means "sold as new". A Carfax report counts as a su
 
 ## Limits
 
-- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page). Other platforms come later (`extension/adapters/` in Milestone 2).
+- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page). Other platforms come later; each is one file under `extension/adapters/`.
 - If more than half the cars vanish between scans, nothing is marked gone and a warning shows.
 - The Facebook form map needs a live check (above). Photos go in through the form's file input; if that fails, **Download photos** saves them to your Downloads folder to add by hand.
 
@@ -120,7 +120,7 @@ Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan
 
 | File | What it does |
 |---|---|
-| `extension/src/scan.js` | Runs in the dealer tab; reads the used inventory (plus description and features) and double-checks missing VINs |
+| `extension/src/scan.js` | Injected into the dealer tab: probes the page (site name, address, inventory service) and makes one search call the way the page's own helper does |
 | `extension/src/normalize.js` | Turns a website record into a flat vehicle |
 | `extension/src/classify.js` | The pre-owned check and the ready-to-post check |
 | `extension/src/rescan.js` | Compares scans: sold, price changes, new arrivals; the posted registry |
@@ -136,7 +136,7 @@ Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan
 | `extension/facebook/detectPost.js` | Watches the tab address for the listing page |
 | `extension/sidepanel.*` | The guided post flow, the queue, the first-run wizard and listing upkeep |
 | `extension/wizard.js`, `upkeep.js` | The wizard steps; the To do follow-through (open the listing, fill the new price, notice the change) |
-| `extension/adapters/` | One file per dealer-website platform (Dealer Inspire today) behind a small interface |
+| `extension/adapters/` | One file per dealer-website platform behind a small interface; `dealerInspire.js` reads the lot in pages, de-duplicates by VIN, double-checks missing VINs and makes the direct service call the background rescan uses |
 | `extension/src/scanRunner.js`, `rescanSchedule.js` | The scan pipeline shared by popup, wizard and service worker; when rescans are due and what the badge says |
 | `extension/background.js` | Downloads photos; rescans every known website every 3 hours and keeps the badge current |
 | `backend/` | The rewrite service (Anthropic API key lives here, never in the extension) |

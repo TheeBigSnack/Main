@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, isDue, originsFor, RESCAN_PERIOD_MINUTES } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE } from './helpers.js';
@@ -24,12 +24,19 @@ test('a notification only when the count went up', () => {
   assert.deepEqual(notificationFor(undefined, 1).message, '1 of your listings needs attention');
 });
 
-test('due every 3 hours, with a minute of slack', () => {
+test('due every 3 hours, with slack for a scan that took a while', () => {
   assert.equal(RESCAN_PERIOD_MINUTES, 180);
   assert.equal(isDue(null), true);
   assert.equal(isDue('2026-09-27T09:00:00Z', '2026-09-27T11:00:00Z'), false);
   assert.equal(isDue('2026-09-27T09:00:00Z', '2026-09-27T11:59:30Z'), true);
+  // the alarm fired at 09:00:05 and the scan finished 90 s later; the next alarm at 12:00:05 must still be due
+  assert.equal(isDue('2026-09-27T09:01:35Z', '2026-09-27T12:00:05Z'), true);
+  assert.equal(isDue('2026-09-27T09:00:00Z', '2026-09-27T11:54:00Z'), false);
   assert.equal(isDue('garbage', '2026-09-27T11:00:00Z'), true);
+  // the worker measures from the latest of the last attempt and the last manual scan
+  assert.equal(latestOf('2026-09-27T09:00:00Z', '2026-09-27T10:00:00Z'), '2026-09-27T10:00:00Z');
+  assert.equal(latestOf(undefined, 'garbage', '2026-09-27T10:00:00Z'), '2026-09-27T10:00:00Z');
+  assert.equal(latestOf(null, undefined), null);
 });
 
 test('the host permissions a site needs: its own origin and its service', () => {

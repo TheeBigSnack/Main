@@ -2,7 +2,7 @@ import { normalizeVehicle } from './src/normalize.js';
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
-import { todoCountFor } from './src/rescanSchedule.js';
+import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -27,7 +27,12 @@ const state = {
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [],
   queue: null, // the batch queue (src/queue.js), shared with the side panel
-  drafts: {}, // cars saved as drafts on Facebook during a queue: { vin: { name, savedAt } } // description text that repeats across the lot (disclaimers), stripped by the description writer
+  drafts: {}, // cars saved as drafts on Facebook during a queue: { vin: { name, savedAt } }
+  wizardDone: false, // set-up finished (or skipped) for this website
+  wizardActive: false, // set-up started in the side panel and not finished
+  site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
+  rescanPermission: null, // true/false once known: may the service worker read this website?
+  scanning: false,
   view: 'todo',
 };
 
@@ -41,11 +46,25 @@ const storageKeys = (origin) => ({
   boilerplate: `boilerplate:${origin}`,
   queue: `postQueue:${origin}`,
   drafts: `drafts:${origin}`,
+  wizardDone: `wizardDone:${origin}`,
+  wizard: `wizard:${origin}`,
 });
+
+const rescanOrigins = () => (state.site ? originsFor(state.site.site || { origin: state.origin }, state.site.service) : []);
+
+async function checkRescanPermission() {
+  const origins = rescanOrigins();
+  if (!origins.length) { state.rescanPermission = null; return; }
+  try {
+    state.rescanPermission = await chrome.permissions.contains({ origins });
+  } catch (e) {
+    state.rescanPermission = false;
+  }
+}
 
 async function loadSaved() {
   const k = storageKeys(state.origin);
-  const data = await chrome.storage.local.get(Object.values(k));
+  const data = await chrome.storage.local.get([...Object.values(k), 'sites']);
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
@@ -61,13 +80,50 @@ async function loadSaved() {
   state.boilerplate = data[k.boilerplate] || [];
   state.queue = data[k.queue] || null;
   state.drafts = data[k.drafts] || {};
+  state.wizardDone = Boolean(data[k.wizardDone]);
+  state.wizardActive = Boolean(data[k.wizard] && data[k.wizard].active && data[k.wizard].step !== 'done');
+  state.site = (data.sites || {})[state.origin] || null;
+  await checkRescanPermission();
+}
+
+// The registry entry the service worker reads: auto on or off for this website.
+async function setSiteAuto(auto) {
+  const data = await chrome.storage.local.get('sites');
+  const sites = data.sites || {};
+  if (!sites[state.origin]) return false;
+  sites[state.origin] = { ...sites[state.origin], auto: Boolean(auto) };
+  state.site = sites[state.origin];
+  await ownSet({ sites });
+  chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
+  return true;
+}
+
+// The popup's own storage writes come back through storage.onChanged like
+// anyone else's; they are counted here so the listener can tell an echo
+// from a change made by the side panel or the service worker.
+const ownWrites = new Map();
+const noteOwn = (keys) => { for (const key of keys) ownWrites.set(key, (ownWrites.get(key) || 0) + 1); };
+const isOwnEcho = (key) => {
+  const n = ownWrites.get(key) || 0;
+  if (!n) return false;
+  if (n === 1) ownWrites.delete(key);
+  else ownWrites.set(key, n - 1);
+  return true;
+};
+async function ownSet(obj) {
+  noteOwn(Object.keys(obj));
+  await chrome.storage.local.set(obj);
+}
+async function ownRemove(keys) {
+  noteOwn(keys);
+  await chrome.storage.local.remove(keys);
 }
 
 async function save(...names) {
   const k = storageKeys(state.origin);
   const out = {};
   for (const name of names) out[k[name]] = state[name];
-  await chrome.storage.local.set(out);
+  await ownSet(out);
   if (names.includes('settings') && state.settings) await saveProfile(state.settings);
   if (names.includes('diff') || names.includes('posted')) chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
 }
@@ -94,8 +150,8 @@ async function scan() {
     setStatus("Open your dealership's website in this tab first, then click Scan.", 'error');
     return;
   }
-  const button = $('scan');
-  button.disabled = true;
+  state.scanning = true;
+  $('scan').disabled = true;
   setStatus("Reading the website's used inventory…");
   try {
     const r = await performScan({ tabId: state.tab.id, origin: state.origin, settings: state.settings, settingsFromProfile: state.settingsFromProfile, snapshot: state.snapshot, posted: state.posted });
@@ -110,13 +166,16 @@ async function scan() {
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
     state.siteName = r.site.name;
     await save('snapshot', 'diff', 'settings', 'boilerplate');
+    // the scan registered the website for background rescans; show its state
+    state.site = ((await chrome.storage.local.get('sites')).sites || {})[state.origin] || null;
+    await checkRescanPermission();
     state.view = 'todo';
     setStatus('');
-    render();
   } catch (e) {
     setStatus(friendlyError(e), 'error');
   } finally {
-    button.disabled = false;
+    state.scanning = false;
+    render();
   }
 }
 
@@ -219,15 +278,39 @@ function decisionPill(decision) {
 
 const price = (e) => basisPrice(e, state.settings?.basis);
 
+// Offered until set-up has been finished or skipped for this website, so the
+// posting rules and the background permission stay reachable; "Continue"
+// when it was started and left.
+function setupBanner() {
+  if (!state.origin || !state.tab || state.wizardDone) return '';
+  const active = state.wizardActive;
+  const text = active
+    ? '<b>Set-up is not finished.</b> Pick up where you left off in the side panel.'
+    : "<b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, automatic rescans and the posting rules.";
+  const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields">Not now</button>' : '';
+  return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Sync'}</button>${later}</div></div>`;
+}
+
+// When automatic rescans are switched on but cannot run, say so here rather than nowhere.
+function scheduleBanner() {
+  const s = state.site;
+  if (!s || !s.auto) return '';
+  if (state.rescanPermission === false) {
+    return `<div class="banner warn" id="scheduleWarning">Automatic rescans are on, but Lot Sync has no permission to read this website in the background, so they can't run. <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></div>`;
+  }
+  if (s.lastError && (!s.lastScan || String(s.lastAttempt || '') > String(s.lastScan))) {
+    return `<div class="banner warn" id="scheduleWarning">The last automatic rescan (${esc(when(s.lastAttempt))}) failed: ${esc(s.lastError)}</div>`;
+  }
+  return '';
+}
+
 function viewTodo(l) {
   const d = state.diff;
   if (!state.snapshot && !d) {
-    const setup = state.origin && state.tab
-      ? `<div class="banner setup" id="setup"><b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, automatic rescans and the posting rules.<div class="toolbar"><button type="button" class="small go" data-action="setup">Set up Lot Sync</button></div></div>`
-      : '';
-    return setup + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
+    return setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
   }
-  let html = `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
+  let html = setupBanner() + scheduleBanner();
+  html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
   if (d?.firstScan) {
     html += `<div class="banner info">First scan saved. Start with the <b>Ready to post</b> tab. From now on, each scan compares with the last one and lists what sold, what changed price and what's new. Mark cars as posted so your own listings come first.</div>`;
@@ -444,7 +527,11 @@ function viewSettings() {
     <fieldset><legend>Automatic rescans</legend>
       <label><input type="checkbox" name="autoRescan" ${s.autoRescan ? 'checked' : ''} /> <span>Rescan this website every 3 hours while Chrome is open, and show the to-do count on the icon</span></label>
       <label><input type="checkbox" name="notify" ${s.notify !== false ? 'checked' : ''} /> <span>Desktop notification when listings need attention</span></label>
-      <p class="hint">Needs the permission the set-up wizard asks for (to read the website in the background). Turn it on here after granting it in set-up.</p>
+      ${!state.site
+        ? '<p class="hint">Scan this website once first. Then the permission to read it in the background can be granted here.</p>'
+        : state.rescanPermission
+          ? '<p class="hint">Permission to read this website in the background: granted. Lot Sync only reads the website then; it never touches Facebook on its own.</p>'
+          : '<p class="hint">Needs permission to read this website in the background (Chrome will ask). <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></p>'}
     </fieldset>
     <fieldset><legend>Description writer (optional)</legend>
       <label><input type="checkbox" name="rewriteEnabled" ${s.rewrite.enabled ? 'checked' : ''} /> <span>Use the Lot Sync rewrite service (Claude) for first drafts</span></label>
@@ -463,7 +550,7 @@ function viewSettings() {
 function render() {
   $('site').textContent = state.origin ? state.siteName || state.origin : "Open your dealership's website, then scan.";
   $('scan').textContent = state.snapshot ? 'Rescan website' : 'Scan website';
-  $('scan').disabled = false; // stays disabled (popup.html) until the first render after start-up
+  $('scan').disabled = Boolean(state.scanning); // disabled in popup.html until the first render after start-up, and while a scan runs
   $('settingsBtn').setAttribute('aria-pressed', String(state.view === 'settings'));
   const l = lists();
   renderTabs(l);
@@ -544,7 +631,7 @@ async function onPanelClick(ev) {
         opened = false;
       }
       state.queue = queue;
-      await chrome.storage.local.set({
+      await ownSet({
         [storageKeys(state.origin).queue]: queue,
         postRequest: { origin: state.origin, vin: first, dealerTabId: state.tab.id, windowId: state.tab.windowId, queue: true, at: Date.now() },
       });
@@ -555,7 +642,7 @@ async function onPanelClick(ev) {
     }
     case 'clearQueue':
       state.queue = null;
-      await chrome.storage.local.remove(storageKeys(state.origin).queue);
+      await ownRemove([storageKeys(state.origin).queue]);
       break;
     case 'upkeep': {
       // Hands a to-do item to the side panel: it opens the listing, fills the
@@ -586,6 +673,33 @@ async function onPanelClick(ev) {
       setStatus(opened ? 'Continue in the side panel.' : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue set-up.');
       return;
     }
+    case 'skipSetup':
+      state.wizardDone = true;
+      await ownSet({ [storageKeys(state.origin).wizardDone]: { skipped: true, at: new Date().toISOString() } });
+      setStatus('Settings has the same fields. Set-up can be run later after "Clear everything for this website".');
+      break;
+    case 'allowRescans': {
+      // Asks Chrome straight from the click (a user gesture) for the host
+      // permission the service worker needs, then switches rescans on.
+      if (!state.site) return;
+      let granted = false;
+      try {
+        granted = await chrome.permissions.request({ origins: rescanOrigins() });
+      } catch (e) {
+        setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
+      }
+      state.rescanPermission = granted;
+      if (granted) {
+        state.settings = withDefaults({ ...(state.settings || {}), autoRescan: true }, state.snapshot?.site || { name: state.siteName });
+        await save('settings');
+        await setSiteAuto(true);
+        setStatus('Automatic rescans are on: every 3 hours while Chrome is open.');
+      } else {
+        await setSiteAuto(false);
+        setStatus('Not allowed, so automatic rescans stay off. Scan by hand any time.', 'error');
+      }
+      break;
+    }
     case 'unpost':
       state.posted = markTakenDown(state.posted, vin);
       await save('posted');
@@ -608,10 +722,19 @@ async function onPanelClick(ev) {
         btn.textContent = 'Click again to clear everything';
         return;
       }
-      await chrome.storage.local.remove(Object.values(storageKeys(state.origin)));
-      Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, view: 'todo' });
+      Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, rescanPermission: null, view: 'todo' });
+      await ownRemove(Object.values(storageKeys(state.origin)));
+      {
+        // forget the website for background rescans too, and take its count off the badge
+        const data = await chrome.storage.local.get('sites');
+        if (data.sites && data.sites[state.origin]) {
+          delete data.sites[state.origin];
+          await ownSet({ sites: data.sites });
+        }
+      }
+      chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
       clearArmed = false;
-      setStatus('Cleared. Scan again to start over.');
+      setStatus('Cleared. Scan again, or run set-up, to start over.');
       break;
     default:
       return;
@@ -641,15 +764,30 @@ async function onSettingsSubmit(ev) {
     },
     { name: state.siteName }
   );
-  await save('settings');
-  const sitesData = await chrome.storage.local.get('sites');
-  if (sitesData.sites && sitesData.sites[state.origin]) {
-    sitesData.sites[state.origin].auto = state.settings.autoRescan;
-    await chrome.storage.local.set({ sites: sitesData.sites });
-    chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
+  let message = 'Saved. Click Rescan website to apply.';
+  if (state.settings.autoRescan && state.site && !state.rescanPermission) {
+    // Rescans need the host permission; the Save click is a user gesture, so ask now.
+    try {
+      state.rescanPermission = await chrome.permissions.request({ origins: rescanOrigins() });
+    } catch (e) {
+      state.rescanPermission = false;
+    }
+    if (!state.rescanPermission) {
+      state.settings.autoRescan = false;
+      message = 'Saved, but automatic rescans stay off: Lot Sync was not allowed to read this website in the background.';
+    }
   }
+  if (state.settings.autoRescan && !state.site) {
+    state.settings.autoRescan = false;
+    message = 'Saved, but automatic rescans need one scan of this website first.';
+  }
+  await save('settings');
+  await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');
-  if (note) note.textContent = 'Saved. Click Rescan website to apply.';
+  if (note) note.textContent = message;
+  render();
+  const again = $('saved');
+  if (again) again.textContent = message;
 }
 
 async function init() {
@@ -670,20 +808,49 @@ async function init() {
     if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) onPickChange(ev.target);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
-    // the side panel moves the queue and the posted list along; keep up
+    // the side panel, the wizard and the service worker all write while the
+    // popup can be open; keep up so a click here never writes stale data back.
+    // The popup's own writes come back through here too: a value that is
+    // already what the popup holds is not a change, so nothing is redrawn
+    // under the person's pointer.
     if (area !== 'local' || !state.origin) return;
     const k = storageKeys(state.origin);
+    const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
     let touched = false;
-    if (changes[k.queue]) { state.queue = changes[k.queue].newValue || null; touched = true; }
-    if (changes[k.posted]) { state.posted = changes[k.posted].newValue || {}; touched = true; }
-    if (changes[k.drafts]) { state.drafts = changes[k.drafts].newValue || {}; touched = true; }
-    if (touched && state.view !== 'settings') render();
+    const changed = (key) => Boolean(changes[key]) && !isOwnEcho(key);
+    const take = (key, field, fallback) => {
+      if (!changed(key)) return;
+      const next = changes[key].newValue ?? fallback;
+      if (same(next, state[field])) return;
+      state[field] = next;
+      touched = true;
+    };
+    take(k.queue, 'queue', null);
+    take(k.posted, 'posted', {});
+    take(k.drafts, 'drafts', {});
+    take(k.diff, 'diff', null);
+    take(k.snapshot, 'snapshot', null);
+    if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
+      state.settings = withDefaults(changes[k.settings].newValue, state.snapshot?.site || {});
+      state.settingsFromProfile = false;
+      touched = true;
+    }
+    if (changed(k.wizardDone)) { const v = Boolean(changes[k.wizardDone].newValue); if (v !== state.wizardDone) { state.wizardDone = v; touched = true; } }
+    if (changed(k.wizard)) { const w = changes[k.wizard].newValue; const v = Boolean(w && w.active && w.step !== 'done'); if (v !== state.wizardActive) { state.wizardActive = v; touched = true; } }
+    if (changed('sites')) {
+      const before = scheduleBanner();
+      state.site = (changes.sites.newValue || {})[state.origin] || null;
+      if (scheduleBanner() !== before) touched = true;
+    }
+    // while a scan runs, its final render draws everything at once
+    if (touched && state.view !== 'settings' && !state.scanning) render();
   });
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab || null;
     const url = tab && tab.url ? new URL(tab.url) : null;
-    if (url && /^https?:$/.test(url.protocol)) {
+    if (url && /^https?:$/.test(url.protocol) && !/(^|\.)facebook\.com$/i.test(url.hostname)) {
+      // Facebook is where listings go, never a dealership website to scan or set up.
       state.origin = url.origin;
       await loadSaved();
       state.siteName = state.snapshot?.site?.name || url.hostname.replace(/^www\./, '');

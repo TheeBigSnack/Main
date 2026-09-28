@@ -18,7 +18,7 @@ import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
-import { up, startUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
+import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
@@ -107,6 +107,7 @@ const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, pric
 
 async function startFlow(req) {
   await chrome.storage.local.remove('postRequest');
+  endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
   await clearFlow();
   state.origin = req.origin;
   state.vin = String(req.vin || '').toUpperCase();
@@ -443,7 +444,7 @@ async function notPosted() {
 async function checkVinOnline() {
   let granted = false;
   try {
-    granted = await chrome.permissions.request({ origins: [NHTSA_ORIGIN + '/*'] });
+    granted = await chrome.permissions.request({ origins: [NHTSA_ORIGIN + '/' + '*'] }); // split so the guard test's comment stripper never sees a block-comment opener
   } catch (e) {
     setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
     return;
@@ -729,10 +730,16 @@ function render() {
 }
 
 const upkeepCtx = {
-  render,
+  render: () => { if (state.step === 'upkeep') render(); }, // a late poll never redraws another step's view
   map: () => state.map || FORM_MAP,
   onClose: () => { state.step = 'idle'; render(); },
 };
+
+// A post that is under way (a car being checked, reviewed, filled or waiting
+// for Publish) is not abandoned for a to-do item; the person finishes or
+// stops it first.
+const LIVE_STEPS = ['checking', 'review', 'filling', 'probe', 'publish'];
+const postUnderWay = () => Boolean(state.vin) && LIVE_STEPS.includes(state.step);
 
 let lastUpkeepAt = 0;
 async function openUpkeep(req) {
@@ -740,6 +747,11 @@ async function openUpkeep(req) {
   if (req.at && req.at === lastUpkeepAt) return;
   lastUpkeepAt = req.at || Date.now();
   await chrome.storage.local.remove('upkeepRequest');
+  if (postUnderWay()) {
+    setStatus(`Finish or stop the current post (${state.vehicle ? state.vehicle.name : state.vin}) first, then click that To do button again.`, 'error');
+    return;
+  }
+  endUpkeep();
   if (watcher) watcher.cancel();
   state.origin = req.origin;
   state.dealerTabId = req.dealerTabId || state.dealerTabId;
@@ -758,6 +770,7 @@ const wizardCtx = {
 };
 
 async function openWizard(req) {
+  endUpkeep();
   await clearFlow();
   state.origin = req.origin;
   state.dealerTabId = req.dealerTabId;
@@ -875,27 +888,52 @@ async function onClick(ev) {
   }
 }
 
+// Requests from the popup carry the window they were clicked in. Chrome runs
+// one side panel per window, so a panel acts only on requests for its own
+// window; a request older than this is a leftover, not something to act on.
+const REQUEST_MAX_AGE_MS = 10 * 60 * 1000;
+let panelWindowId = null;
+const forThisWindow = (req) => Boolean(req) && (!req.windowId || panelWindowId === null || req.windowId === panelWindowId);
+const isFresh = (req) => Boolean(req) && (!req.at || Date.now() - req.at <= REQUEST_MAX_AGE_MS);
+
+const REQUEST_KEYS = ['postRequest', 'setupRequest', 'upkeepRequest'];
+const handlers = { postRequest: startFlow, setupRequest: openWizard, upkeepRequest: openUpkeep };
+
 async function init() {
   $('panel').addEventListener('click', onClick);
   $('panel').addEventListener('input', onInput);
   $('panel').addEventListener('change', (ev) => { if (state.step === 'wizard') handleWizardChange(ev.target); });
+  try {
+    const win = await chrome.windows.getCurrent();
+    panelWindowId = win && typeof win.id === 'number' ? win.id : null;
+  } catch (e) {
+    panelWindowId = null;
+  }
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.postRequest && changes.postRequest.newValue) startFlow(changes.postRequest.newValue);
-    if (changes.setupRequest && changes.setupRequest.newValue) {
-      chrome.storage.local.remove('setupRequest');
-      openWizard(changes.setupRequest.newValue);
+    for (const name of REQUEST_KEYS) {
+      const req = changes[name] && changes[name].newValue;
+      if (!req || !forThisWindow(req)) continue;
+      if (name === 'setupRequest') chrome.storage.local.remove('setupRequest');
+      handlers[name](req);
     }
-    if (changes.upkeepRequest && changes.upkeepRequest.newValue) openUpkeep(changes.upkeepRequest.newValue);
   });
-  const { postRequest, setupRequest, upkeepRequest, lastPostOrigin } = await chrome.storage.local.get(['postRequest', 'setupRequest', 'upkeepRequest', 'lastPostOrigin']);
-  if (setupRequest) {
-    await chrome.storage.local.remove('setupRequest');
-    return openWizard(setupRequest);
+  const stored = await chrome.storage.local.get([...REQUEST_KEYS, 'lastPostOrigin']);
+  // the newest request for this window wins; every request key is cleared
+  // once one is acted on, so nothing stale fires on a later panel load
+  const pending = REQUEST_KEYS.map((name) => ({ name, req: stored[name] })).filter(({ req }) => forThisWindow(req) && isFresh(req)).sort((a, b) => (b.req.at || 0) - (a.req.at || 0));
+  const stale = REQUEST_KEYS.filter((name) => stored[name] && !isFresh(stored[name]));
+  if (stale.length) await chrome.storage.local.remove(stale);
+  if (pending.length) {
+    await chrome.storage.local.remove(REQUEST_KEYS);
+    return handlers[pending[0].name](pending[0].req);
   }
-  if (upkeepRequest) return openUpkeep(upkeepRequest);
-  if (postRequest) return startFlow(postRequest);
+  const { lastPostOrigin } = stored;
   if (lastPostOrigin) {
+    // a post under way comes back first; an unfinished set-up only when nothing else is going on
+    const k = keys(lastPostOrigin).flow;
+    const flow = (await chrome.storage.local.get(k))[k];
+    if (flow && flow.step && flow.step !== 'idle') return resumeFlow(lastPostOrigin, flow);
     if (await resumeWizard(lastPostOrigin)) {
       state.origin = lastPostOrigin;
       state.dealerTabId = wiz.dealerTabId;
@@ -903,9 +941,6 @@ async function init() {
       state.step = 'wizard';
       return render();
     }
-    const k = keys(lastPostOrigin).flow;
-    const flow = (await chrome.storage.local.get(k))[k];
-    if (flow && flow.step && flow.step !== 'idle') return resumeFlow(lastPostOrigin, flow);
     state.origin = lastPostOrigin;
     await loadSaved();
   }

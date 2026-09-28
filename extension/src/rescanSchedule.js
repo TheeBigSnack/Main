@@ -23,11 +23,27 @@ export function notificationFor(previousCount, count) {
   return { title: 'Lot Sync', message: `${count} of your listings need${count === 1 ? 's' : ''} attention` };
 }
 
-export function isDue(lastScanIso, nowIso = new Date().toISOString(), periodMinutes = RESCAN_PERIOD_MINUTES) {
-  if (!lastScanIso) return true;
-  const last = Date.parse(lastScanIso);
+// Due when a period has passed since the last attempt, less five minutes of
+// slack: the alarm fires a whole period after the previous firing, but the
+// stored time is when the previous scan finished, which can be a minute or
+// more later on a large lot. The slack only matters for skipping a site the
+// person scanned by hand shortly before the alarm.
+export const DUE_SLACK_MS = 5 * 60 * 1000;
+export function isDue(lastIso, nowIso = new Date().toISOString(), periodMinutes = RESCAN_PERIOD_MINUTES) {
+  if (!lastIso) return true;
+  const last = Date.parse(lastIso);
   if (Number.isNaN(last)) return true;
-  return Date.parse(nowIso) - last >= periodMinutes * 60 * 1000 - 60 * 1000; // a minute's slack for the alarm
+  return Date.parse(nowIso) - last >= periodMinutes * 60 * 1000 - DUE_SLACK_MS;
+}
+
+// The most recent of several ISO timestamps (missing or unparsable ones are ignored).
+export function latestOf(...isos) {
+  let best = null;
+  for (const iso of isos) {
+    if (!iso || Number.isNaN(Date.parse(iso))) continue;
+    if (!best || Date.parse(iso) > Date.parse(best)) best = iso;
+  }
+  return best;
 }
 
 // The host-permission patterns a site needs for background rescans: its own

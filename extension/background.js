@@ -12,7 +12,7 @@
 import { adapterById } from './adapters/index.js';
 import { scanWithSearch, SITES_KEY } from './src/scanRunner.js';
 import { withDefaults } from './src/settings.js';
-import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, originsFor } from './src/rescanSchedule.js';
+import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
@@ -75,19 +75,32 @@ async function hasPermission(info) {
   }
 }
 
+export const NO_PERMISSION = 'Lot Sync has no permission to read this website in the background. Click Allow automatic rescans in Settings.';
+export const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
+
+// A failed attempt is recorded so the popup can show that the schedule is not working.
+async function noteFailure(origin, info, error) {
+  const fresh = await loadSites();
+  fresh[origin] = { ...(fresh[origin] || info), lastAttempt: new Date().toISOString(), lastError: error };
+  await chrome.storage.local.set({ [SITES_KEY]: fresh });
+  return { ok: false, error };
+}
+
 // One rescan of one website, from the service worker: same code path as the
-// popup's Scan button, with the service called directly.
+// popup's Scan button, with the service called directly. It only reads: the
+// settings are never written back from here.
 export async function runRescan(origin, { reason = 'alarm' } = {}) {
   const sites = await loadSites();
   const info = sites[origin];
   if (!info || !info.service) return { ok: false, error: 'This website has not been scanned from the popup yet.' };
   const adapter = adapterById(info.adapter);
-  if (!adapter) return { ok: false, error: `No adapter for ${info.adapter}` };
-  if (!(await hasPermission({ ...info, origin }))) return { ok: false, error: 'Lot Sync has no permission to read this website in the background. Grant it in the set-up wizard.' };
+  if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`);
+  if (!(await hasPermission({ ...info, origin }))) return noteFailure(origin, info, NO_PERMISSION);
   const k = keysFor(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff]);
+  if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS);
   const site = { ...(info.site || {}), origin, name: info.name, adapter: info.adapter };
-  const settings = withDefaults(data[k.settings] || {}, site);
+  const settings = withDefaults(data[k.settings], site);
   const now = new Date().toISOString();
   let out;
   try {
@@ -95,17 +108,15 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   } catch (e) {
     out = { ok: false, message: String((e && e.message) || e) };
   }
-  const fresh = await loadSites();
-  if (!out.ok) {
-    fresh[origin] = { ...(fresh[origin] || info), lastAttempt: now, lastError: out.message };
-    await chrome.storage.local.set({ [SITES_KEY]: fresh });
-    return { ok: false, error: out.message };
-  }
-  const save = { [k.diff]: out.diff, [k.boilerplate]: out.boilerplate, [k.settings]: settings };
+  if (!out.ok) return noteFailure(origin, info, out.message);
+  const save = { [k.diff]: out.diff, [k.boilerplate]: out.boilerplate };
   if (!out.diff.unreliable) save[k.snapshot] = out.snapshot;
   await chrome.storage.local.set(save);
   const count = todoCountFor(out.diff);
-  const note = notificationFor(fresh[origin] && fresh[origin].lastNotifiedCount, count);
+  // Compared with the person's outstanding list (the saved diff, which the
+  // popup and upkeep trim as items are handled), not with the last rescan's count.
+  const note = notificationFor(todoCountFor(data[k.diff]), count);
+  const fresh = await loadSites();
   fresh[origin] = { ...(fresh[origin] || info), lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count };
   await chrome.storage.local.set({ [SITES_KEY]: fresh });
   await updateBadge();
@@ -122,7 +133,7 @@ async function rescanDueSites(reason) {
   const results = {};
   for (const [origin, info] of Object.entries(sites)) {
     if (!info.auto) continue;
-    if (reason === 'alarm' && !isDue(info.lastScan)) continue;
+    if (reason === 'alarm' && !isDue(latestOf(info.lastAttempt, info.lastScan))) continue;
     results[origin] = await runRescan(origin, { reason });
   }
   return results;

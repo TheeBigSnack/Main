@@ -735,9 +735,12 @@ export function fillPriceInPage(map, price) {
 
 // Upkeep, step 2: what a listing page shows, read-only, so the panel can tell
 // when the salesperson has saved a new price or marked the car sold. Only the
-// page's static text counts: text inside buttons, links and menus is skipped,
-// so a "Mark as sold" button never reads as a sold listing.
-export function readListingInPage(map, signs) {
+// page's static text counts: text inside buttons, links, menus, tabs and
+// dialogs is skipped, so a "Mark as sold" button never reads as a sold
+// listing, and the sold sign is looked for in short standalone labels only,
+// never in prose such as a description. `expect` ({ id, name }) says which
+// listing the panel is working on; the result reports whether this page is it.
+export function readListingInPage(map, signs, expect) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
   const shown = (el) => (el.checkVisibility ? el.checkVisibility() : true);
@@ -762,7 +765,7 @@ export function readListingInPage(map, signs) {
     return norm(parts.join(' '));
   }
   // static text, top of the page first, capped so a long page stays cheap
-  const skip = 'button, [role="button"], a, [role="link"], [role="menuitem"], [role="menu"], input, textarea, select, script, style, noscript';
+  const skip = 'button, [role="button"], a, [role="link"], [role="menuitem"], [role="menu"], [role="dialog"], [role="alertdialog"], [role="tab"], [role="tablist"], input, textarea, select, script, style, noscript';
   const chunks = [];
   let total = 0;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -776,7 +779,18 @@ export function readListingInPage(map, signs) {
   }
   const body = chunks.join(' ');
   const prices = [...new Set((body.match(/\$\s?[\d,]{3,}/g) || []).map((p) => p.replace(/[^\d]/g, '')))];
-  const test = (p) => { try { return new RegExp(p, 'i').test(body); } catch (e) { return false; } };
+  const re = (p) => { try { return new RegExp(p, 'i'); } catch (e) { return null; } };
+  // a status label is a short chunk of its own ("Sold"), never a sentence
+  const soldRe = signs && signs.sold ? re(signs.sold) : null;
+  const sold = Boolean(soldRe) && chunks.some((c) => c.length <= 40 && soldRe.test(c));
+  const unavailableRe = signs && signs.unavailable ? re(signs.unavailable) : null;
+  const unavailable = Boolean(unavailableRe) && unavailableRe.test(body);
+  // is this the listing the panel is working on?
+  const want = expect || {};
+  const matchesId = Boolean(want.id) && new RegExp('(^|\\D)' + String(want.id).replace(/\D/g, '') + '(\\D|$)').test(location.href);
+  const tokens = String(want.name || '').toLowerCase().split(/\s+/).filter((t) => t.length >= 2).slice(0, 4);
+  const hay = (document.title + ' ' + body.slice(0, 2000)).toLowerCase();
+  const matchesName = tokens.length >= 2 && tokens.every((t) => hay.includes(t));
   // the edit form's Price box, found the same way fillPriceInPage finds it
   const spec = (map.fields || []).find((f) => f.key === 'price');
   const patterns = spec ? spec.name.map((p) => new RegExp(p, 'i')) : [/\bprice\b/i];
@@ -787,8 +801,10 @@ export function readListingInPage(map, signs) {
     url: location.href,
     title: document.title,
     prices,
-    sold: Boolean(signs && signs.sold) && test(signs.sold),
-    unavailable: Boolean(signs && signs.unavailable) && test(signs.unavailable),
+    sold,
+    unavailable,
+    matchesId,
+    matchesName,
     hasPriceBox: Boolean(box),
     priceBoxValue: box ? String(box.value || '') : '',
   };

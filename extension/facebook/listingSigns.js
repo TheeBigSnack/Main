@@ -7,8 +7,10 @@
 // "I took it down" buttons in the side panel still close the item by hand.
 
 export const LISTING_SIGNS = Object.freeze({
-  // The listing has been marked sold: Marketplace labels it "Sold".
+  // The listing has been marked sold: Marketplace labels it "Sold". Tested
+  // only against short standalone labels, never against prose, and only
+  // counted when it appears after the page was first read.
   sold: '(^|\\s)sold(\\s|$|[.!])',
-  // The listing was removed: the page no longer shows it.
-  unavailable: "isn'?t available|no longer available|has been removed|content not found|page not found",
+  // The listing was removed: the page no longer shows it (either apostrophe).
+  unavailable: "isn[\\u2019']?t available|no longer available|has been removed|content not found|page not found",
 });

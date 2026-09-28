@@ -188,9 +188,14 @@ const listings = {
   515151: { title: '2022 Jeep Wagoneer Series III', price: 38383, sold: false, deleted: false },
 };
 
+// Like a real listing page: the description is prose (here it even contains
+// the word "sold"), the status badge is a short label of its own, the
+// controls are buttons, and a "Sold" filter tab sits at the top.
 const itemPage = (id, l) => `<!doctype html><html><head><meta charset="utf-8"><title>${l.title} (mock listing)</title></head><body>
+<div role="tablist"><span role="tab">Active</span><span role="tab">Sold</span></div>
 <h1>${l.title}</h1>
 ${l.deleted ? '<p>This content isn\'t available right now.</p>' : `<p class="price">$${l.price.toLocaleString('en-US')}</p>${l.sold ? '<p class="badge">Sold</p>' : ''}
+<p class="description">Sold as-is with the remaining factory warranty. Ask for Roger, sales consultant at the dealership.</p>
 <p><a href="/marketplace/edit/${id}/">Edit listing</a></p>
 <form method="post" action="/marketplace/item/${id}/sold"><button type="submit">Mark as sold</button></form>
 <form method="post" action="/marketplace/item/${id}/delete"><button type="submit">Delete</button></form>`}

@@ -116,6 +116,15 @@ try {
   assert.match(listing.url(), /\/marketplace\/item\/515151\/$/, 'the saved listing link is opened');
   await panel.waitForSelector('#priceWaiting');
   assert.match(await panel.textContent('#priceWaiting'), /\$36,883/);
+  // The person opens the WRONG car's edit form in that tab: nothing may be filled there.
+  await listing.goto(`${marketOrigin}/marketplace/edit/424242/`);
+  await panel.waitForFunction(() => /isn't showing the listing for 2022 Jeep Wagoneer/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
+  await listing.waitForTimeout(3500);
+  assert.equal(await listing.inputValue('#price'), '27163', "the other listing's price box is untouched");
+  assert.equal(await panel.$('#priceFilled'), null);
+  // Back to the right listing, then Edit: now it fills.
+  await listing.goto(`${marketOrigin}/marketplace/item/515151/`);
+  await panel.waitForFunction(() => !document.querySelector('#upkeepNote'), null, { timeout: 10000 });
   await listing.click('text=Edit listing'); // the person
   await panel.waitForSelector('#priceFilled', { timeout: 20000 });
   assert.equal(await listing.inputValue('#price'), '36883');
@@ -143,7 +152,9 @@ try {
   assert.match(listing2.url(), /\/marketplace\/item\/424242\/$/);
   await panel.waitForSelector('#takeDownWaiting');
   assert.equal(context.pages().filter((p) => /\/marketplace\/item\/424242\//.test(p.url())).length, 1, 'the request is acted on once');
-  await listing2.waitForTimeout(3500); // a listing page with a "Mark as sold" button must not read as sold
+  // A listing page with a "Mark as sold" button, a "Sold" filter tab and
+  // "Sold as-is" in its description must not read as sold.
+  await listing2.waitForTimeout(3500);
   assert.ok(await panel.$('#takeDownWaiting'), 'still waiting for the person');
   await listing2.click('text=Mark as sold'); // the person
   await panel.waitForSelector('#upkeepDone', { timeout: 20000 });
