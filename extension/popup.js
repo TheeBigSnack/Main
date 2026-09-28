@@ -11,6 +11,9 @@ import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilot
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
+import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
+import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, NOT_CONFIGURED } from './src/accountFlow.js';
+import { loadSession, redeemInvite } from './src/account.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -37,6 +40,8 @@ const state = {
   wizardActive: false, // set-up started in the side panel and not finished
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
   pilot: null, // pilot numbers (src/pilot.js): post timings, fill failures per field, to-do item durations
+  syncState: null, // this website's sync state (src/sync.js nextSyncState): dealership, role, when it last synced; accounts only
+  account: { session: null, email: '', note: '', error: '' }, // the signed-in session (read only when accounts are configured) and what the Account section says
   rescanPermission: null, // true/false once known: may the service worker read this website?
   scanning: false,
   view: 'todo',
@@ -81,6 +86,7 @@ async function loadSaved() {
   state.wizardActive = Boolean(data[k.wizard] && data[k.wizard].active && data[k.wizard].step !== 'done');
   state.site = (data[SITES_KEY] || {})[state.origin] || null;
   state.pilot = data[k.pilot] || null;
+  state.syncState = data[k.sync] || null;
   await checkRescanPermission();
 }
 
@@ -577,6 +583,52 @@ const field = (label, name, value, attrs = 'type="text"') =>
 const choices = (list, current) =>
   `<option value="" ${current === '' ? 'selected' : ''}>Leave blank</option>` + list.map((o) => `<option value="${esc(o)}" ${o === current ? 'selected' : ''}>${esc(o)}</option>`).join('');
 
+// ---------- the Account section (Milestone 4) ----------
+// One line while src/accountConfig.js is empty. Once the owner has filled it
+// in: sign in with the six-digit code from an email, join a dealership with
+// an invite code, sync this website's posted list by hand, sign out. None of
+// it is saved by the Save settings button; each button does its own thing.
+const signedIn = () => accountsConfigured() && Boolean(state.account.session);
+const sameAddress = (a, b) => String(a || '').trim().replace(/\/+$/, '').toLowerCase() === String(b || '').trim().replace(/\/+$/, '').toLowerCase();
+// Signed in and the rewrite service is the account's own function: the sign-in is the key, so no key field.
+const usesAccountRewrite = (s) => signedIn() && sameAddress(s.rewrite.endpoint, rewriteEndpointFor(ACCOUNT));
+
+function accountFieldset() {
+  if (!accountsConfigured()) return `<fieldset><legend>Account</legend><p class="hint" id="accountStatus">${esc(NOT_CONFIGURED)}</p></fieldset>`;
+  const a = state.account;
+  const note = a.error
+    ? `<p class="hint" id="accountNote" style="color: var(--bad)">${esc(a.error)}</p>`
+    : a.note ? `<p class="hint" id="accountNote">${esc(a.note)}</p>` : '';
+  if (!a.session) {
+    return `<fieldset><legend>Account</legend>
+      <p class="hint">Sign in to share your posted list with your dealership: every salesperson sees the same listings and your manager sees who posted what. No password: a six-digit code is emailed to you.</p>
+      ${field('Your email', 'accountEmail', a.email, 'type="text" inputmode="email" autocomplete="email" placeholder="you@example.com"')}
+      <div class="actions"><button type="button" class="plain" data-action="accountSendCode">Send me a sign-in code</button></div>
+      ${field('Code from the email', 'accountCode', '', 'type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 digits"')}
+      <div class="actions"><button type="button" class="plain" data-action="accountSignIn">Sign in</button></div>
+      ${note}
+    </fieldset>`;
+  }
+  const ss = state.syncState || {};
+  const site = state.site || {};
+  const email = (a.session.user && a.session.user.email) || '';
+  const dealership = ss.dealershipName ? ` · ${esc(ss.dealershipName)}${ss.role ? ` (${esc(ss.role)})` : ''}` : '';
+  const last = ss.lastSyncAt ? `Last sync ${esc(when(ss.lastSyncAt))}` : 'Not synced yet';
+  const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}` : '';
+  const syncHint = state.origin
+    ? `<p class="hint" id="syncStatus">${last}${failed}. Lot Sync also syncs after every rescan and after each post you record.</p>`
+    : `<p class="hint" id="syncStatus">Open your dealership's website to sync its listings.</p>`;
+  return `<fieldset><legend>Account</legend>
+    <p id="accountStatus">Signed in as <b>${esc(email)}</b>${dealership}</p>
+    ${syncHint}
+    <div class="actions"><button type="button" class="plain" data-action="accountSyncNow" ${state.origin ? '' : 'disabled'}>Sync now</button><button type="button" class="plain" data-action="accountSignOut">Sign out</button></div>
+    <p class="hint"><b>Join a dealership with an invite code.</b> Your manager gives you one; it works once.</p>
+    ${field('Invite code', 'inviteCode', '', 'type="text" autocomplete="off"')}
+    <div class="actions"><button type="button" class="plain" data-action="accountJoin">Join</button></div>
+    ${note}
+  </fieldset>`;
+}
+
 function viewSettings() {
   const entries = Object.values(state.snapshot?.vehicles || {});
   const locations = [...new Set(entries.map((e) => e.location).filter(Boolean))].sort();
@@ -639,10 +691,13 @@ function viewSettings() {
           ? '<p class="hint">Permission to read this website in the background: granted. Lot Sync only reads the website then; it never touches Facebook on its own.</p>'
           : '<p class="hint">Needs permission to read this website in the background (Chrome will ask). <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></p>'}
     </fieldset>
+    ${accountFieldset()}
     <fieldset><legend>Description writer (optional)</legend>
       <label><input type="checkbox" name="rewriteEnabled" ${s.rewrite.enabled ? 'checked' : ''} /> <span>Use the Lot Sync rewrite service (Claude) for first drafts</span></label>
       ${field('Service address', 'rewriteEndpoint', s.rewrite.endpoint, 'type="url" placeholder="http://localhost:8787"')}
-      ${field('Service key', 'rewriteKey', s.rewrite.key, 'type="password" autocomplete="off"')}
+      ${usesAccountRewrite(s)
+        ? `<p class="hint" id="rewriteKeyHint">Your sign-in is the key: nothing to type here while you are signed in and the address is your account's rewrite service.</p>`
+        : field('Service key', 'rewriteKey', s.rewrite.key, 'type="password" autocomplete="off"')}
       <p class="hint">Off by default: descriptions come from a built-in template. Either way every draft is checked against the website's facts, and you review it before posting.</p>
     </fieldset>
     <fieldset><legend>Terms and privacy</legend>
@@ -704,6 +759,7 @@ function problemReport() {
     `Last automatic rescan attempt: ${site.lastAttempt || 'never'}`,
     `Last error: ${site.lastError || 'none'}`,
     `Automatic rescans: ${site.auto ? 'on' : 'off'}; background permission: ${permission}`,
+    `Account: ${accountsConfigured() ? (state.account.session ? 'signed in' : 'signed out') : 'not set up'}; last sync: ${site.lastSync || 'never'}; last sync error: ${site.lastSyncError || 'none'}`,
     `Counts: to do ${todoCount()}, ready to post ${l.ready.length}, not ready ${l.notReady.length}, other stores ${l.otherStores.length}, needs a look ${l.review.length + l.skipped.length}, my listings ${l.mine.length}, queue: ${state.queue ? describeQueue(state.queue) : 'none'}`,
     lastFill
       ? `Last fill: ${lastFill.at || 'unknown time'}, form map ${lastFill.mapVersion || 'unknown'}, build ${lastFill.version || 'unknown'}; needed a click: ${keysOf(lastFill.partial)}; couldn't fill: ${keysOf(lastFill.blocked)}; changed by the form afterwards: ${keysOf(lastFill.changed)}`
@@ -958,15 +1014,148 @@ async function onPanelClick(ev) {
       chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
       clearArmed = false;
       break;
+    case 'accountSendCode':
+    case 'accountSignIn':
+    case 'accountSignOut':
+    case 'accountSyncNow':
+    case 'accountJoin':
+      await accountAction(btn.dataset.action);
+      break;
     default:
       return;
   }
   render();
 }
 
+// ---------- account actions ----------
+
+const accountDeps = () => ({ config: ACCOUNT, storage: chrome.storage.local });
+const settingsInput = (name) => {
+  const el = document.querySelector(`#settings [name="${name}"]`);
+  return el ? String(el.value || '').trim() : '';
+};
+
+// The worker does the sync (one place, one lock per key); the answer is
+// shown here and the merged lists are read back so the redraw is current.
+async function syncNow() {
+  if (!state.origin) return;
+  setStatus('Syncing…');
+  let r;
+  try {
+    r = await chrome.runtime.sendMessage({ type: 'syncNow', origin: state.origin });
+  } catch (e) {
+    r = { ok: false, error: String((e && e.message) || e) };
+  }
+  if (r && r.signedOut) state.account.session = null;
+  setStatus(describeSync(r), r && r.ok ? '' : 'error');
+  const k = siteKeys(state.origin);
+  const data = await chrome.storage.local.get([k.posted, k.pilot, k.sync, SITES_KEY]);
+  state.posted = data[k.posted] || {};
+  state.pilot = data[k.pilot] || null;
+  state.syncState = data[k.sync] || null;
+  state.site = (data[SITES_KEY] || {})[state.origin] || null;
+}
+
+// On sign-in the rewrite service's address becomes the account's own
+// function. Whether it is used stays the person's choice: the "Use the Lot
+// Sync rewrite service" box is not ticked for them. The key field goes away
+// (the sign-in is the key; the panel reads the token where it needs it), and
+// a key typed for a self-hosted backend is kept in case they switch back.
+async function pointRewriteAtAccount() {
+  if (!state.origin) return;
+  const site = state.snapshot?.site || { name: state.siteName };
+  const prev = withDefaults(state.settings || {}, site);
+  const endpoint = rewriteEndpointFor(ACCOUNT);
+  if (!endpoint || sameAddress(prev.rewrite.endpoint, endpoint)) return;
+  state.settings = withDefaults({ ...prev, rewrite: { ...prev.rewrite, endpoint } }, site);
+  await save('settings');
+}
+
+async function accountAction(action) {
+  const a = state.account;
+  a.error = '';
+  a.note = '';
+  switch (action) {
+    case 'accountSendCode': {
+      a.email = settingsInput('accountEmail');
+      setStatus('Sending the code…');
+      const r = await signInStart(a.email, accountDeps());
+      setStatus('');
+      if (r.ok) {
+        a.email = r.email;
+        a.note = r.message;
+      } else a.error = r.error;
+      return;
+    }
+    case 'accountSignIn': {
+      a.email = settingsInput('accountEmail') || a.email;
+      const code = settingsInput('accountCode');
+      setStatus('Signing in…');
+      const r = await signInFinish(a.email, code, accountDeps());
+      if (!r.ok) {
+        setStatus('');
+        a.error = r.error;
+        return;
+      }
+      a.session = r.session;
+      setStatus(`Signed in as ${(r.session.user && r.session.user.email) || a.email}.`);
+      await pointRewriteAtAccount();
+      if (state.origin) await syncNow(); // the first sync says whether the account is in a dealership yet
+      return;
+    }
+    case 'accountSignOut':
+      await signOutAll({ ...accountDeps(), origins: state.origin ? [state.origin] : [] });
+      a.session = null;
+      state.syncState = null;
+      setStatus('Signed out. Your posted list stays on this computer.');
+      return;
+    case 'accountSyncNow':
+      return syncNow();
+    case 'accountJoin': {
+      const code = settingsInput('inviteCode');
+      const s = await currentSession(accountDeps());
+      if (!s.ok) {
+        if (s.signedOut) a.session = null;
+        a.error = s.error;
+        return;
+      }
+      setStatus('Joining…');
+      let r;
+      try {
+        r = await redeemInvite(code, state.settings?.salesperson?.name || '', { url: ACCOUNT.url, anonKey: ACCOUNT.anonKey, session: s.session });
+      } catch (e) {
+        r = { ok: false, error: `couldn't reach the account server (${(e && e.message) || e})` };
+      }
+      setStatus('');
+      if (!r.ok) {
+        if (r.signedOut) a.session = null;
+        a.error = r.error;
+        return;
+      }
+      const m = r.membership;
+      a.note = `Joined ${m.dealershipName || 'the dealership'} as ${m.role || 'a member'}.`;
+      if (state.origin && m.websiteOrigin && !sameAddress(m.websiteOrigin, state.origin)) {
+        a.note += ` Its website is ${m.websiteOrigin}: open it there to sync its listings.`;
+      } else if (state.origin) {
+        await syncNow();
+      }
+      return;
+    }
+    default:
+  }
+}
+
 async function onSettingsSubmit(ev) {
   if (ev.target.id !== 'settings') return;
   ev.preventDefault();
+  // Enter in one of the Account boxes means that box's button, not Save settings
+  const active = document.activeElement && document.activeElement.name;
+  const viaEnter = { accountEmail: 'accountSendCode', accountCode: 'accountSignIn', inviteCode: 'accountJoin' }[active];
+  if (viaEnter) {
+    await accountAction(viaEnter);
+    render();
+    return;
+  }
   const form = new FormData(ev.target);
   const prev = withDefaults(state.settings || {}, { name: state.siteName });
   const str = (k) => String(form.get(k) ?? '').trim();
@@ -979,7 +1168,7 @@ async function onSettingsSubmit(ev) {
       dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },
       priceNote: str('priceNote'),
       dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),
-      rewrite: { enabled: form.get('rewriteEnabled') === 'on', endpoint: str('rewriteEndpoint'), key: str('rewriteKey') },
+      rewrite: { enabled: form.get('rewriteEnabled') === 'on', endpoint: str('rewriteEndpoint'), key: form.has('rewriteKey') ? str('rewriteKey') : prev.rewrite.key }, // no key field while signed in: the typed one is kept, never the token
       defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },
       autoRescan: form.get('autoRescan') === 'on',
       notify: form.get('notify') === 'on',
@@ -1054,6 +1243,8 @@ async function init() {
     take(k.diff, 'diff', null);
     take(k.snapshot, 'snapshot', null);
     take(k.pilot, 'pilot', null);
+    if (changes[k.sync]) state.syncState = changes[k.sync].newValue ?? null; // shown in Settings only, which is not redrawn from here
+    if (accountsConfigured() && changes[GLOBAL_KEYS.account]) state.account.session = changes[GLOBAL_KEYS.account].newValue || null; // the worker refreshed the session, or a rejected token signed the person out
     if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
       state.settings = withDefaults(changes[k.settings].newValue, state.snapshot?.site || {});
       state.settingsFromProfile = false;
@@ -1082,6 +1273,7 @@ async function init() {
   } catch (e) {
     // no access to this tab's address; the Scan button explains what to do
   }
+  if (accountsConfigured()) state.account.session = await loadSession(chrome.storage.local); // with an empty config the session is never even read
   render();
 }
 

@@ -64,6 +64,8 @@
     money: (n) => '$' + Number(n || 0).toLocaleString('en-US'),
     esc: (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]),
     param: (name) => new URLSearchParams(root.location ? root.location.search : '').get(name) || '',
+    // The listing page for an id, built with URLSearchParams so the id is encoded.
+    itemUrl: (id) => { const u = new URL('item.html', root.location ? root.location.href : 'http://localhost/'); u.searchParams.set('id', String(id)); return u.href; },
   };
   root.SandboxMarketplace = api;
 })(typeof window !== 'undefined' ? window : globalThis);

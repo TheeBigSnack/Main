@@ -37,7 +37,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    supabase db push
    ```
 
-   `db push` applies the three migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies all three together.
+   `db push` applies the four migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together.
 
 3. **Sign-in settings** (Dashboard, Authentication):
    - Providers, Email: keep it on; passwords are never used, so "Confirm email" can stay off (the magic link is the confirmation).
@@ -148,3 +148,105 @@ Only what the extension already keeps in the browser and the privacy policy name
 `functions/rewrite` is `backend/server.js` moved behind real accounts: the same two endpoints, the same guardrails, the same model and cost table, but a per-user token instead of one shared key, and a cost cap per dealership instead of one for the whole service. The prompt and the guardrails are copies (not imports, since the function is its own bundle) kept equal by `tests/port-check.mjs`.
 
 `backend/` stays until the first dealership is signed in through the extension and its rewrite address points at the function; then `backend/` can go (the README, CLAUDE.md and the Settings copy that mention it change with it). During the pilot both can run: a salesperson without an account keeps using `backend/` with the shared key; one with an account uses the function.
+
+## Billing (Milestone 5)
+
+Billing runs on Stripe: a subscription per rooftop per month, a free pilot period a manager starts without a card, and Stripe's own Billing Portal for the card, the invoices and cancelling. What is in the repo is code the owner deploys; nothing in it is switched on, and nothing charges anyone until the owner creates the Stripe objects below and sets the secrets. The prices are the ones in `marketing/pricing.json`, which stays a hypothesis until a dealer pays.
+
+| Path | What it is |
+|---|---|
+| `migrations/0004_billing.sql` | `subscriptions` (one row per dealership: the pilot or the Stripe status), `billing_events` (every webhook event once), `subscription_state()` and `start_pilot()`, RLS. |
+| `functions/billing/` | `/checkout`, `/portal`, `/status` behind sign-in, `/webhook` behind Stripe's signature. Talks to Stripe's REST API with `fetch`; no SDK. |
+| `functions/_shared/billing.mjs` | The pure parts, plain JavaScript so Node tests them: the state machine, the line items, the form encoding, what each event does to the row, the signature check. |
+| `tests/billing.sql` | Proves the pilot rules and the wall between dealerships against a running database (same recipe as `rls.sql`, with `0004_billing.sql` added to the list). |
+| `test/billing.test.js` | The unit tests, in `npm test`. |
+
+### What to create in Stripe, once
+
+In the Stripe Dashboard, in **test mode** first (the toggle at the top; everything below exists separately in test and live mode):
+
+1. **A product** called Lot Sync, with two recurring monthly prices, the planned amounts from `marketing/pricing.json`:
+   - the rooftop price: `perRooftopMonthly` per month, quantity 1 per dealership (`includedSalespeople` salespeople are included in it);
+   - the extra-seat price: `extraSalespersonMonthly` per month, quantity = seats above the included count.
+
+   Note each price's id (`price_...`). The founding-dealer rate (`foundingDealerMonthly` for `foundingDealerMonths` months, the first `foundingDealerCount` stores) is not a third price: Checkout has promotion codes switched on, so the owner creates a coupon with that discount and a code, and hands the code to the dealer. The pilot period is not a Stripe trial either; it lives in the database (below).
+
+2. **The Billing Portal configuration**: Settings, Billing, Customer portal. Turn on updating the payment method, viewing invoices and cancelling; save. Without a saved configuration the `/portal` route gets an error from Stripe saying so.
+
+3. **A webhook endpoint** pointing at `https://<ref>.supabase.co/functions/v1/billing/webhook`, subscribed to these five events and no others: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`. Note its signing secret (`whsec_...`).
+
+4. The **secret key** from Developers, API keys (`sk_test_...` in test mode, `sk_live_...` in live mode). It only ever goes into the function secrets.
+
+Then the secrets and the function:
+
+```
+supabase secrets set STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_...
+supabase secrets set STRIPE_PRICE_ROOFTOP=price_... STRIPE_PRICE_SEAT=price_...
+supabase secrets set ALLOWED_RETURN_ORIGINS=https://<where the manager page is served>
+supabase db push                                # applies 0004_billing.sql
+supabase functions deploy billing --no-verify-jwt
+```
+
+`--no-verify-jwt` (or a `[functions.billing]` block with `verify_jwt = false` in `config.toml`, like the other two functions) is required: Stripe's webhook carries no Supabase token, and the function checks the caller's token itself on the other three routes.
+
+### Environment variables
+
+| Name | Where | Meaning |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | function secret | Stripe's secret API key. Only the billing function has it; it goes out only as the bearer on calls to `api.stripe.com`, and it is never logged or answered. |
+| `STRIPE_WEBHOOK_SECRET` | function secret | The webhook endpoint's signing secret. Every event's `Stripe-Signature` header is checked against the raw body (HMAC-SHA256, five-minute tolerance) before anything is read from it. |
+| `STRIPE_PRICE_ROOFTOP` | function secret | The rooftop price id. Without it `/checkout` answers 500 naming the variable. |
+| `STRIPE_PRICE_SEAT` | function secret | The extra-seat price id. Needed only when a dealership asks for more seats than the included count; `/checkout` says so if it is missing then. |
+| `ALLOWED_RETURN_ORIGINS` | function secret | Comma-separated origins (scheme and host) Stripe may send the manager back to after Checkout or the portal. The request's `returnUrl` must sit on one of them or `/checkout` and `/portal` answer 400. Until it is set, neither route works. Add the same origin to `ALLOWED_ORIGINS` so the page may call the functions at all. |
+
+### The routes
+
+All three signed-in routes take `Authorization: Bearer <the user's access token>` and pick the dealership from `dealershipId`, from `origin` (the dealer website's origin), or, for a person in one dealership, from nothing.
+
+**`POST .../functions/v1/billing/checkout`** (managers): `{ returnUrl, seats?, dealershipId? | origin? }`. Creates the dealership's Stripe customer if it has none (name, the manager's email, `metadata.dealership_id`), then a Checkout Session in subscription mode with the rooftop price and, above the included count, the seat price times the extra seats, `success_url` and `cancel_url` = `returnUrl` with `?billing=success` or `?billing=canceled`. During a running pilot with more than 48 hours left, the subscription starts as a trial ending when the pilot does, so the card is charged at the end of the free period and not at checkout. Answers `{ ok, url }`: the page sends the manager to `url`. 409 when the dealership already has an active subscription (the portal is the place to change it).
+
+**`POST .../functions/v1/billing/portal`** (managers): `{ returnUrl, dealershipId? | origin? }`. A Billing Portal session for the dealership's customer; answers `{ ok, url }`. 404 until a checkout has created the customer.
+
+**`GET .../functions/v1/billing/status?dealershipId=|origin=`** (any member): `{ ok, dealership, role, state, subscription, canStartPilot, canSubscribe, canManageBilling, pilotDays, includedSalespeople }`. `state` is one of the four words below; `subscription` is the row or null. For the manager page and, later, the extension.
+
+**`POST .../functions/v1/billing/webhook`** (Stripe only): verifies the signature, records the event in `billing_events` once (a redelivery of a recorded event is acknowledged and not applied again), and on the five subscribed events updates the dealership's row with the service-role client. Which row: the one carrying the customer or subscription id, else the `dealership_id` Checkout wrote into the subscription's metadata, else the customer's metadata. An event about a customer that is not a Lot Sync dealership is recorded and left alone. A database failure answers 500 so Stripe retries (it does, with backoff, for up to three days); an older event never overwrites a newer one for the same subscription (Stripe does not deliver in order).
+
+### The state machine
+
+`subscription_state(dealership_id)` in SQL and `subscriptionState(row, now)` in `billing.mjs` give the same word from the row; `tests/billing.sql` and `test/billing.test.js` hold both to it.
+
+| State | When | What the product does with it |
+|---|---|---|
+| `none` | No row, or a row with only a customer id (a checkout opened and not finished). | The manager page offers "Start the free pilot" and "Subscribe". |
+| `pilot` | `pilot_ends_at` is in the future and nothing is paid. Stripe's word does not matter meanwhile: the free period was promised. | Everything works; the page shows the end date and "Subscribe". |
+| `active` | Stripe says `trialing` (a subscription whose first charge waits for the pilot to end) or `active`. | Everything works; the page shows the paid-through date, seats, and "Manage billing". |
+| `lapsed` | Everything else: the pilot ended unpaid, `past_due`, `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, `paused`. | The page says so and offers "Subscribe" (and "Manage billing" when a customer exists). Whether the extension keeps posting for a lapsed dealership is a product decision for the wiring; the state is there to read. |
+
+The row: `status` (`pilot`, or a Stripe status, or null), `pilot_ends_at`, `current_period_end`, `seats` (the included count plus the seat price's quantity; informational for now), `stripe_customer_id`, `stripe_subscription_id`, `updated_at`.
+
+### How the free pilot starts
+
+The manager, signed in, calls `start_pilot(<dealership id>)` (PostgREST: `POST /rest/v1/rpc/start_pilot` with `{ "dealership_id": "..." }`, or `supabase.rpc('start_pilot', { dealership_id })` from the manager page). No card, no Stripe object: the row gets `status = 'pilot'` and `pilot_ends_at` = now plus `pilotDays` from `marketing/pricing.json`. Only a manager of that dealership may call it; it starts the pilot once and never restarts it (a second call, or a call on a dealership that pays or already had its pilot, answers with the standing unchanged and `started: false`). The answer is `{ dealership_id, started, status, pilot_ends_at, state }`.
+
+### What the manager page will show once wired
+
+A billing card on the manager view, from `GET /billing/status`: the state in one line (in the pilot until a date; paid through a date with the seat count; lapsed since when), and the buttons the answer allows: **Start the free pilot** (`start_pilot`), **Subscribe** (`/checkout`, then the page follows `url`; back on `?billing=success` it re-reads the status, which the webhook has by then usually updated, and on `?billing=canceled` it says nothing was charged), **Manage billing** (`/portal`, then follows `url`). Salespeople see the state and no buttons. The page is not wired in this step; the routes and the answer shape are.
+
+### Testing with Stripe's test mode and the CLI
+
+Everything above in test mode uses test keys and test cards (`4242 4242 4242 4242`, any future date, any CVC; `4000 0000 0000 0341` attaches and then fails the payment, which is how to see `past_due` arrive). With the Stripe CLI:
+
+```
+stripe login
+stripe listen --forward-to https://<ref>.supabase.co/functions/v1/billing/webhook
+```
+
+`listen` prints a signing secret of its own (`whsec_...`); while it runs, set that as `STRIPE_WEBHOOK_SECRET` (and set the endpoint's own secret back afterwards). Then `stripe trigger customer.subscription.created` and the other four event names send test events through; the function's log (Dashboard, Edge Functions, billing, Logs) shows each one recorded and, when the customer belongs to a dealership, applied. A triggered event's customer belongs to no dealership, so it is recorded and not applied; to see a row change, complete a real test-mode checkout from the manager page (or from `curl` with a manager's token) and watch `subscriptions` in the Table editor.
+
+To run the SQL checks, add `0004_billing.sql` after `0003_views.sql` and `tests/billing.sql` after `tests/rls.sql` in the `psql` command under "Run the RLS test"; the last line is `billing.sql: every check passed`.
+
+### What is stored
+
+`subscriptions`: the ids Stripe gave the dealership's customer and subscription, the status, the dates and the seat count. `billing_events`: each webhook event as Stripe sent it (ids, statuses, amounts, the billing email; Stripe never sends a card number). The privacy policy already names billing details and Stripe as the processor. Deleting a dealership row deletes its subscription row; `billing_events` keeps the accounting trail, which is what the retention line of the privacy policy allows.
+
+Pricing is a hypothesis until a dealer pays: the amounts in Stripe are copied from `marketing/pricing.json` by hand, and the first paying dealer is the moment to revisit that file, the sales sheet and the prices in Stripe together.

@@ -7,6 +7,11 @@
 //      (chrome.alarms), calling the site's inventory service directly with
 //      the host permission the wizard asked for, then update the toolbar badge
 //      with the salesperson's to-do count and, optionally, notify.
+//   4. Sync the posted list and the pilot numbers with the dealership's
+//      account server (src/accountFlow.js) after a rescan and when the popup
+//      or the side panel asks (syncNow): only once the owner has filled in
+//      src/accountConfig.js and the person is signed in. With an empty
+//      config nothing here calls out.
 // It never touches Facebook and never posts anything.
 
 import { adapterById } from './adapters/index.js';
@@ -16,6 +21,8 @@ import { updateKey, storageErrorText } from './src/storage.js';
 import { withDefaults } from './src/settings.js';
 import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
+import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
+import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
 
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
@@ -70,6 +77,41 @@ async function loadSites() {
 }
 
 const updateSites = (change) => updateKey(SITES_KEY, (sites) => change(sites || {}));
+
+// ---------- accounts: sync ----------
+// One round of sync for one website (src/accountFlow.js syncOnce): the
+// registry and the pilot changes go up, the dealership's registry comes down
+// and is merged under the keys' locks. It runs here, in one place, whether
+// a rescan, the popup's Sync now or the panel's confirmed post asked for
+// it; one sync per website at a time, a second request while one runs gets
+// the same result. The outcome is recorded on the website's registry entry
+// (lastSyncAttempt, lastSync, lastSyncError) so Settings can show it. Never
+// throws: a failed sync is a result, not an exception.
+const syncing = new Map(); // origin -> the promise of the sync under way
+
+export function syncSite(origin, { scan = null } = {}) {
+  if (!accountsConfigured()) return Promise.resolve({ ok: false, notConfigured: true, error: NOT_CONFIGURED });
+  const key = String(origin || '');
+  if (syncing.has(key)) return syncing.get(key);
+  const run = (async () => {
+    let r;
+    try {
+      r = await syncOnce({ origin: key, scan, deps: { config: ACCOUNT, fetchImpl: fetch, storage: chrome.storage.local } });
+    } catch (e) {
+      r = { ok: false, error: String((e && e.message) || e) };
+    }
+    const at = new Date().toISOString();
+    try {
+      await updateSites((sites) => (sites[key]
+        ? { ...sites, [key]: { ...sites[key], lastSyncAttempt: at, ...(r.ok ? { lastSync: at, lastSyncError: null } : { lastSyncError: r.error || 'unknown error' }) } }
+        : undefined)); // a website not registered for rescans has nowhere to record it; the result still says
+    } catch (e) { /* the registry could not be written; the result still says what happened */ }
+    return r;
+  })();
+  syncing.set(key, run);
+  run.finally(() => { if (syncing.get(key) === run) syncing.delete(key); });
+  return run;
+}
 
 export async function updateBadge() {
   const sites = await loadSites();
@@ -145,6 +187,8 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
     return noteFailure(origin, info, storageErrorText(e));
   }
   await updateBadge();
+  // the dealership's shared registry, once accounts exist: recorded on the site entry, never a reason for the rescan to fail
+  if (accountsConfigured()) await syncSite(origin, { scan: scanFromStored({ snapshot: out.snapshot, diff: out.diff }) });
   if (note && settings.notify !== false && reason === 'alarm') {
     try {
       await chrome.notifications.create(`lot-sync-${origin}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: note.title, message: `${note.message} (${info.name || origin})`, priority: 0 });
@@ -195,6 +239,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'rescanNow') {
     runRescan(msg.origin, { reason: msg.reason || 'manual' }).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg.type === 'syncNow') {
+    syncSite(msg.origin).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
   if (msg.type === 'ensureAlarm') {

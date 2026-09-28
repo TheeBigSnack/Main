@@ -67,6 +67,7 @@ Six live runs on Sept 27, 2026 shaped the fill code: Facebook draws dropdown lis
 - **Price to post**: the website's main price, or the lower second price some websites show (usually the price before the doc fee; only offered when the website shows one). A price note can be typed in Settings and goes into every description; Lot Sync suggests one from the gap the website shows but never fills it in for you. Installs from before 0.4.0 keep the note they had; a new machine starts with none until it is typed (the suggestion is one click away).
 - **Listing defaults**: title status (Clean by default) and vehicle condition (Very good by default) are filled in on every listing; on Facebook's form that means the "This vehicle has a clean title" box is ticked. A car whose website text mentions rebuilt, salvage or a lien gets no title default and a warning instead. These are statements about each car that your dealership stands behind; choose "Leave blank" to answer them per car.
 - **Safety**: posts per day per salesperson (default 10; raise it in Settings if your store expects more, e.g. 30). Meta doesn't publish its limits; this is a safety setting, not a guarantee.
+- **Account** (optional, Milestone 4): sign in with a code sent to your email, and your posted list and pilot numbers sync to your dealership's account so a colleague's machine and the manager view see them; a manager's invite code joins you to the dealership. Until the owner has set the account service up (`extension/src/accountConfig.js`), the section only says so and nothing is contacted. The sign-in is kept in your browser's local storage, never in the synced profile.
 - **Description writer**: off by default. With the rewrite service running (see `backend/README.md`), first drafts come from Claude, and for a car whose website record gives no usable color, the service looks at the photos and guesses one from Facebook's list (shown as a guess, never overriding a stated color). Either way every draft is checked: every number must be on the website, no banned claims ("no accidents", "best price in town"), the dealership must be named, the VIN must be there, 60 to 120 words.
 
 Each salesperson's scans, settings and posted list are kept only in their own browser, separately per website.
@@ -100,7 +101,7 @@ A demo or loaner flag always means "sold as new". A Carfax report counts as a su
 ## For development
 
 ```
-npm test              # 150 unit tests on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 269 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep
@@ -144,4 +145,6 @@ Test drive without installing: `npm run demo`, then open http://127.0.0.1:8765/d
 | `extension/src/scanRunner.js`, `rescanSchedule.js` | The scan pipeline shared by popup, wizard and service worker; when rescans are due and what the badge says |
 | `extension/background.js` | Downloads photos; rescans every known website every 3 hours and keeps the badge current |
 | `backend/` | The rewrite service (Anthropic API key lives here, never in the extension) |
+| `supabase/` | The accounts: schema with row-level security, the `rewrite`, `sync` and `billing` Edge Functions, SQL tests (`supabase/README.md`) |
+| `manager/`, `site/`, `demo/` | The manager view, the dealer landing page and the in-browser test drive; static pages, sample-data modes, their own tests |
 | `test/fixtures/records.json` | Real records from the Waynesburg site, one per edge case |

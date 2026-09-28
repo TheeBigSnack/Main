@@ -1,0 +1,305 @@
+// The account flows the popup, the side panel and the service worker run
+// (Milestone 4), with no UI: sign in with the emailed six-digit code, keep
+// the session fresh, sign out, and one round of sync for one dealer website.
+// Everything the network or chrome.storage is reached through is injected
+// (deps: config, fetchImpl, storage, now), so the whole file runs in Node.
+//
+//   signInStart(email, deps)          -> the auth server emails a code
+//   signInFinish(email, code, deps)   -> the code becomes a stored session
+//   currentSession(deps)              -> the stored session, refreshed when due
+//   signOutAll(deps)                  -> the token is revoked and forgotten
+//   syncOnce({ origin, scan, deps })  -> POST .../sync, merge the answer
+//   rewriteEndpointFor(config)        -> the rewrite function's address
+//   rewriteKeyFor({ rewrite, session, config }) -> what goes in Authorization
+//
+// With an empty config (src/accountConfig.js) every entry point answers
+// { ok: false, notConfigured: true } without touching the network or storage,
+// so an extension without accounts behaves as before.
+//
+// What a sync writes, all under the key's lock (src/storage.js): the merged
+// registry to posted:<origin>, closed flags to pilot:<origin>, and the state
+// for the next call (since, dealership, role) to sync:<origin>. The access
+// token is only ever read from the session in chrome.storage.local; it is
+// never copied into the settings or the synced profile.
+
+import { ACCOUNT, accountsConfigured } from './accountConfig.js';
+import { signInWithMagicLink, verifyOtp, ensureFreshSession, loadSession, storeSession, clearSession, signOut, authHeaders, errorText, DEFAULT_OTP_TYPE } from './account.js';
+import { syncPayload, mergeRegistry, mergeFlags, nextSyncState, scanSummary } from './sync.js';
+import { withPilotDefaults } from './pilot.js';
+import { siteKeys } from './storageKeys.js';
+import { updateKey, storageErrorText } from './storage.js';
+import { DECISION } from './classify.js';
+
+export const SYNC_TIMEOUT_MS = 20000;
+export const NOT_CONFIGURED = 'Accounts are not set up yet (Milestone 4).';
+export const NOT_SIGNED_IN = 'not signed in';
+
+const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// ---------- addresses ----------
+
+// Where the Edge Functions answer: the configured functionsUrl, else the
+// project URL plus Supabase's own /functions/v1; '' with no project at all.
+export function functionsUrlFor(config = ACCOUNT) {
+  const c = config && typeof config === 'object' ? config : {};
+  if (trimSlash(c.functionsUrl)) return trimSlash(c.functionsUrl);
+  return trimSlash(c.url) ? trimSlash(c.url) + '/functions/v1' : '';
+}
+
+// The Settings value for the rewrite service once a person is signed in
+// (src/rewriter.js appends /rewrite and /color to it).
+export function rewriteEndpointFor(config = ACCOUNT) {
+  const f = functionsUrlFor(config);
+  return f ? f + '/rewrite' : '';
+}
+
+export function syncUrlFor(config = ACCOUNT) {
+  const f = functionsUrlFor(config);
+  return f ? f + '/sync' : '';
+}
+
+// ---------- the injected pieces ----------
+
+function withDeps(deps = {}) {
+  const chromeStorage = globalThis.chrome && globalThis.chrome.storage;
+  return {
+    config: deps.config || ACCOUNT,
+    fetchImpl: deps.fetchImpl || globalThis.fetch,
+    storage: deps.storage || (chromeStorage ? chromeStorage.local : null),
+    now: typeof deps.now === 'number' ? deps.now : Date.now(),
+    timeoutMs: deps.timeoutMs || SYNC_TIMEOUT_MS,
+  };
+}
+
+const readKey = async (storage, key) => (await storage.get(key))[key];
+const unreachable = (e) => `couldn't reach the account server (${(e && e.message) || e})`;
+
+// ---------- signing in and out ----------
+
+/**
+ * Asks the auth server to email a sign-in code to this address. No
+ * redirect is asked for, so the email's code is the way in (the template
+ * carries {{ .Token }}, supabase/README.md step 3).
+ * @returns {{ ok: true, email, message } | { ok: false, error, notConfigured? }}
+ */
+export async function signInStart(email, deps = {}) {
+  const { config, fetchImpl } = withDeps(deps);
+  if (!accountsConfigured(config)) return { ok: false, notConfigured: true, error: NOT_CONFIGURED };
+  let r;
+  try {
+    r = await signInWithMagicLink(email, { url: config.url, anonKey: config.anonKey, fetchImpl });
+  } catch (e) {
+    return { ok: false, error: unreachable(e) };
+  }
+  if (!r.ok) return { ok: false, status: r.status, error: r.error };
+  return { ok: true, email: r.email, message: `A six-digit sign-in code is on its way to ${r.email}. Enter it below.` };
+}
+
+/**
+ * The code from the email becomes a session, kept in chrome.storage.local
+ * under `account` (never the sync area).
+ * @returns {{ ok: true, session } | { ok: false, error }}
+ */
+export async function signInFinish(email, code, deps = {}) {
+  const { config, fetchImpl, storage, now } = withDeps(deps);
+  if (!accountsConfigured(config)) return { ok: false, notConfigured: true, error: NOT_CONFIGURED };
+  let r;
+  try {
+    r = await verifyOtp(email, code, { url: config.url, anonKey: config.anonKey, type: DEFAULT_OTP_TYPE, fetchImpl, now });
+  } catch (e) {
+    return { ok: false, error: unreachable(e) };
+  }
+  if (!r.ok) return { ok: false, status: r.status, error: r.error };
+  if (!(await storeSession(r.session, storage))) return { ok: false, error: "signed in, but the session couldn't be kept on this computer (Chrome's storage refused it)" };
+  return { ok: true, session: r.session };
+}
+
+/**
+ * The session to use right now: the stored one, refreshed and stored again
+ * when it is about to expire, cleared when the refresh is rejected.
+ * @returns {{ ok: true, session, refreshed } | { ok: false, error, signedOut?, notConfigured?, offline? }}
+ */
+export async function currentSession(deps = {}) {
+  const { config, fetchImpl, storage, now } = withDeps(deps);
+  if (!accountsConfigured(config)) return { ok: false, notConfigured: true, error: NOT_CONFIGURED };
+  const session = await loadSession(storage);
+  if (!session) return { ok: false, signedOut: true, error: NOT_SIGNED_IN };
+  try {
+    return await ensureFreshSession({ session, url: config.url, anonKey: config.anonKey, fetchImpl, storage, now });
+  } catch (e) {
+    return { ok: false, offline: true, error: unreachable(e) };
+  }
+}
+
+/**
+ * Revokes the token (best effort) and forgets the session. The sync state of
+ * the websites named in deps.origins goes too, so the next sign-in starts
+ * with a first sync, which takes nothing down.
+ */
+export async function signOutAll(deps = {}) {
+  const { config, fetchImpl, storage } = withDeps(deps);
+  const session = await loadSession(storage);
+  await signOut(session, { url: config.url, anonKey: config.anonKey, fetchImpl, storage });
+  const keys = (Array.isArray(deps.origins) ? deps.origins : []).filter(Boolean).map((o) => siteKeys(o).sync);
+  if (keys.length && storage) {
+    try {
+      await storage.remove(keys);
+    } catch {
+      /* the session is gone; a stale sync state only makes the next sync a full one */
+    }
+  }
+  return { ok: true };
+}
+
+// ---------- the rewrite service ----------
+
+/**
+ * What goes after "Bearer" when the panel calls the rewrite service: the
+ * signed-in session's access token when the service address is the
+ * account's own rewrite function, else the key typed in Settings (a
+ * self-hosted backend/ keeps working, signed in or not).
+ */
+export function rewriteKeyFor({ rewrite = {}, session = null, config = ACCOUNT } = {}) {
+  const rw = rewrite && typeof rewrite === 'object' ? rewrite : {};
+  const own = rewriteEndpointFor(config).toLowerCase();
+  const endpoint = trimSlash(rw.endpoint).toLowerCase();
+  if (own && endpoint === own && session && session.accessToken) return String(session.accessToken);
+  return String(rw.key || '');
+}
+
+// ---------- sync ----------
+
+// This scan's counts from what a scan leaves behind (the snapshot and the
+// diff), for the sync function's scan summary; null when nothing was scanned.
+export function scanFromStored({ snapshot = null, diff = null } = {}) {
+  const takenAt = (diff && diff.takenAt) || (snapshot && snapshot.takenAt) || null;
+  if (!takenAt) return null;
+  const vehicles = snapshot && snapshot.vehicles && typeof snapshot.vehicles === 'object' ? Object.values(snapshot.vehicles) : [];
+  const count = (list) => (Array.isArray(list) ? list.length : 0);
+  return scanSummary({
+    takenAt,
+    cars: vehicles.length,
+    ready: vehicles.filter((v) => v && v.decision === DECISION.READY).length,
+    takeDownCount: count(diff && diff.takeDown),
+    priceUpdateCount: count(diff && diff.priceUpdates),
+  });
+}
+
+async function postJson(fetchImpl, url, body, headers, timeoutMs) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined,
+    });
+    let answer = null;
+    try {
+      answer = await res.json();
+    } catch {
+      answer = null;
+    }
+    return { status: res.status, ok: res.ok, body: answer && typeof answer === 'object' ? answer : {} };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * One round of sync for one dealer website: the salesperson's registry and
+ * the pilot's changes go up, the dealership's registry comes down and is
+ * merged into posted:<origin>, closed flags into pilot:<origin>, and the
+ * state for the next call into sync:<origin>.
+ * @param {object} args
+ *   origin: the dealer website's origin
+ *   scan:   this scan's counts ({ takenAt, cars, ready, takeDownCount, priceUpdateCount }),
+ *           or null to send the counts of the stored scan
+ *   deps:   { config, fetchImpl, storage, now, timeoutMs }
+ * @returns {{ ok: true, serverTime, dealership: { id, name, websiteOrigin }, role, counts, listed, state }
+ *   | { ok: false, error, signedOut?, notConfigured?, notMember?, status? }}
+ */
+export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
+  const { config, fetchImpl, storage, now, timeoutMs } = withDeps(deps);
+  if (!accountsConfigured(config)) return { ok: false, notConfigured: true, error: NOT_CONFIGURED };
+  const o = trimSlash(origin);
+  if (!o) return { ok: false, error: "no website to sync: open your dealership's website first" };
+  if (!storage) return { ok: false, error: 'no storage to sync from' };
+  const s = await currentSession({ config, fetchImpl, storage, now });
+  if (!s.ok) return { ok: false, signedOut: Boolean(s.signedOut), error: s.error };
+  const session = s.session;
+  const k = siteKeys(o);
+  let posted;
+  let pilot;
+  let state;
+  let summary;
+  try {
+    posted = (await readKey(storage, k.posted)) || {};
+    pilot = await readKey(storage, k.pilot);
+    state = (await readKey(storage, k.sync)) || null;
+    summary = scanSummary(scan) || scanFromStored({ snapshot: await readKey(storage, k.snapshot), diff: await readKey(storage, k.diff) });
+  } catch (e) {
+    return { ok: false, error: storageErrorText(e) };
+  }
+  const since = state && state.since ? state.since : null;
+  const body = syncPayload({ origin: o, posted, pilot, scan: summary, since, userId: (session.user && session.user.id) || '' });
+  let res;
+  try {
+    res = await postJson(fetchImpl, syncUrlFor(config), body, authHeaders(session, config.anonKey), timeoutMs);
+  } catch (e) {
+    return { ok: false, error: `couldn't reach the sync service (${(e && e.message) || e})` };
+  }
+  const answer = res.body;
+  if (!res.ok || !answer.ok) {
+    const error = errorText(answer, res.status);
+    if (res.status === 401) {
+      await clearSession(storage); // the token was rejected outright: the person signs in again
+      return { ok: false, status: 401, signedOut: true, error };
+    }
+    return { ok: false, status: res.status, notMember: res.status === 403, error };
+  }
+  let next;
+  try {
+    await updateKey(k.posted, (current) => {
+      const merged = mergeRegistry(current || {}, answer, { since });
+      return same(merged, current || {}) ? undefined : merged;
+    }, storage);
+    await updateKey(k.pilot, (current) => {
+      const before = withPilotDefaults(current);
+      const merged = mergeFlags(before, answer);
+      return same(merged, before) ? undefined : merged;
+    }, storage);
+    next = await updateKey(k.sync, (prev) => nextSyncState(prev, answer), storage);
+  } catch (e) {
+    return { ok: false, error: storageErrorText(e) };
+  }
+  const rows = Array.isArray(answer.listings) ? answer.listings : [];
+  const d = answer.dealership && typeof answer.dealership === 'object' ? answer.dealership : {};
+  return {
+    ok: true,
+    serverTime: answer.serverTime || null,
+    dealership: { id: d.id || null, name: String(d.name || ''), websiteOrigin: String(d.websiteOrigin || '') },
+    role: String(answer.role || ''),
+    counts: answer.counts && typeof answer.counts === 'object' ? answer.counts : {},
+    listed: rows.filter((r) => r && r.status === 'listed').length,
+    state: next,
+  };
+}
+
+// One sentence about a sync result, for the status line.
+export function describeSync(r) {
+  if (!r || typeof r !== 'object') return 'Sync failed: no answer.';
+  if (r.ok) {
+    const c = r.counts || {};
+    const sent = (c.listingsInserted || 0) + (c.listingsUpdated || 0);
+    const who = r.dealership && r.dealership.name ? ` with ${r.dealership.name}` : '';
+    const role = r.role ? ` as ${r.role}` : '';
+    const down = c.takenDown ? `, ${c.takenDown} taken down` : '';
+    return `Synced${who}${role}: ${r.listed} listing${r.listed === 1 ? '' : 's'} shared, ${sent} of yours sent${down}.`;
+  }
+  if (r.notConfigured) return r.error || NOT_CONFIGURED;
+  if (r.signedOut) return `Not synced: sign in first (${r.error || NOT_SIGNED_IN}).`;
+  return `Sync failed: ${r.error || 'unknown error'}`;
+}

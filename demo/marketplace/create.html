@@ -181,7 +181,7 @@
           location: v('location'), bodyStyle: v('bodyStyle'), exteriorColor: $('exteriorColor').dataset.value, interiorColor: v('interiorColor'),
           fuelType: v('fuelType'), transmission: v('transmission'), condition: v('condition'), titleStatus: v('titleStatus'), cleanTitle: $('cleanTitle').checked, photos,
         });
-        location.href = 'item.html?id=' + id;
+        location.href = mp.itemUrl(id);
       });
     })();
   </script>

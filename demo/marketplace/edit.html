@@ -34,7 +34,7 @@
         const price = Number(String(document.getElementById('price').value).replace(/\D/g, ''));
         const description = e.target.elements.description.value;
         mp.update(id, price > 0 ? { price, description } : { description });
-        location.href = 'item.html?id=' + id;
+        location.href = mp.itemUrl(id);
       });
     })();
   </script>

@@ -26,6 +26,8 @@ import { watchForListing } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
+import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
+import { currentSession, rewriteKeyFor } from './src/accountFlow.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -335,21 +337,35 @@ function colorsNeeded() {
 // Ask the rewrite service to read the colors off the photos. Only when the
 // service is on and a color is missing (or on the button); shown as a guess.
 async function maybeGuessColors(force = false) {
-  const rw = state.settings.rewrite;
+  const base = state.settings.rewrite;
   const need = colorsNeeded();
-  if (!rw.enabled || !rw.endpoint || !state.vehicle) return;
+  if (!base.enabled || !base.endpoint || !state.vehicle) return;
   if (!need.exterior && !need.interior && !force) return;
   const photos = (state.vehicle.photos || []).slice(0, 4);
   if (!photos.length) {
     state.colorGuess = { error: 'no photos to look at' };
     return;
   }
+  const rw = await rewriteWithKey(base);
   try {
     const r = await guessColorsWithBackend({ endpoint: rw.endpoint, key: rw.key, photos, options: COLORS });
     state.colorGuess = r.ok ? { exterior: need.exterior ? r.exterior : '', interior: need.interior ? r.interior : '', confidence: r.confidence, model: r.model } : { error: r.error };
   } catch (e) {
     state.colorGuess = { error: String((e && e.message) || e) };
   }
+}
+
+// The rewrite settings as the writer should use them. Signed in, with the
+// account's own rewrite function as the address, the session's token is the
+// key: read from chrome.storage.local here, at call time, and never written
+// into the settings or the synced profile (src/accountFlow.js rewriteKeyFor).
+// Any other address keeps the key typed in Settings, and with no account
+// server configured this is the settings' own rewrite block, untouched.
+async function rewriteWithKey(rewrite) {
+  const rw = rewrite || {};
+  if (!accountsConfigured() || !rw.enabled || !rw.endpoint) return rw;
+  const s = await currentSession({ config: ACCOUNT, storage: chrome.storage.local });
+  return { ...rw, key: rewriteKeyFor({ rewrite: rw, session: s.ok ? s.session : null, config: ACCOUNT }) };
 }
 
 // The vehicle as the description writer should see it: a guessed color
@@ -362,7 +378,8 @@ function vehicleForText() {
 
 async function generate({ useClaude } = {}) {
   const s = state.settings;
-  const settings = useClaude === undefined ? s : { ...s, rewrite: { ...s.rewrite, enabled: useClaude } };
+  const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
+  const settings = { ...s, rewrite };
   const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings });
   state.description = r.text;
   state.descriptionSource = r.source;
@@ -530,6 +547,8 @@ async function confirmPosted() {
     return;
   }
   await pilotNote((p) => endPost(p, state.vin, 'posted', { at: now }));
+  // the dealership's shared registry (accounts only): the worker syncs; nothing here waits for it
+  if (accountsConfigured()) chrome.runtime.sendMessage({ type: 'syncNow', origin: state.origin }).catch(() => {});
   if (watcher) watcher.cancel();
   if (state.queueMode) return afterQueueStep('posted');
   state.step = 'done';
@@ -1054,6 +1073,8 @@ function adoptChanges(changes) {
       touched = true;
       queueChanged = true;
       if (!next && state.queueMode && postUnderWay()) setStatus('The queue was stopped from the popup. Finish or skip this car; the panel stops after it. Posted cars stay recorded.');
+      // the popup cleared a finished queue: its summary view has nothing left to describe, so back to the idle view
+      if (!next && state.step === 'queueDone') state.step = 'idle';
     }
   }
   if (!touched || OWN_VIEW_STEPS.includes(state.step)) return;
