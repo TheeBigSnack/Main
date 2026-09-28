@@ -18,6 +18,7 @@ Fixed (after a multi-reviewer pass over Milestone 2, 2026-09-27; 29 confirmed fi
 - **Wizard:** the final read looks for a live dealer tab, keeps the last good snapshot when a read looks broken (like the popup), writes the site registry alongside the settings so the two agree even if the last read fails, and keeps the notification tick across the permission prompt.
 - **Side panel:** a post under way comes back before an unfinished set-up on reopen; a to-do item is refused while a post is under way; starting a post or set-up stops a waiting upkeep, whose late polls can no longer redraw another view; each panel acts only on requests for its own window, the newest one, and never on leftovers older than ten minutes.
 - **Guard tests** now catch clicks on any receiver expression and synthesised click events, cover the dealer-site probe and search injections, and check that no guarded file hides a block-comment opener in a string. README no longer says nothing happens in the background (rescans do, with permission; posting never does).
+- The end-to-end tests delete their throwaway browser profile and extension copy when they finish (a day of runs had left 1.4 GB behind).
 
 ## 0.2.0 (2026-09-26, Milestone 1)
 

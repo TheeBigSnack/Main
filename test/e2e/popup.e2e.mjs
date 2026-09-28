@@ -33,7 +33,8 @@ const siteUrl = `http://127.0.0.1:${server.address().port}/used-vehicles/`;
 // unpacked extensions. LOTSYNC_E2E_CHANNEL can point at another Chromium
 // build, but note that branded Google Chrome and Edge 137+ ignore
 // --load-extension, so they can't run this test.
-const context = await chromium.launchPersistentContext(join(tmpdir(), 'lot-sync-profile-' + Date.now()), {
+const profileDir = join(tmpdir(), 'lot-sync-profile-' + Date.now());
+const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
@@ -148,5 +149,7 @@ try {
   throw e;
 } finally {
   await context.close();
+  // leave nothing behind: the throwaway profile and the extension copy
+  for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* still locked by the closing browser; the next run overwrites it */ } }
   server.close();
 }

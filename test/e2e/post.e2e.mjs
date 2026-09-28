@@ -40,7 +40,8 @@ const siteUrl = `http://127.0.0.1:${site.address().port}/used-vehicles/`;
 const origin = new URL(siteUrl).origin;
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
 // See popup.e2e.mjs about LOTSYNC_E2E_CHANNEL.
-const context = await chromium.launchPersistentContext(join(tmpdir(), 'lot-sync-profile-post-' + Date.now()), {
+const profileDir = join(tmpdir(), 'lot-sync-profile-post-' + Date.now());
+const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
@@ -224,6 +225,8 @@ try {
   console.log('Post E2E passed. Screenshots in test/e2e/screenshots/');
 } finally {
   await context.close();
+  // leave nothing behind: the throwaway profile and the extension copy
+  for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* still locked by the closing browser; the next run overwrites it */ } }
   site.close();
   market.close();
 }
