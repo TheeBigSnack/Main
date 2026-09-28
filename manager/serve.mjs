@@ -20,8 +20,13 @@ const types = {
 const port = Number(process.env.PORT) || 8787;
 
 createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  let path = normalize(decodeURIComponent(url.pathname));
+  let path;
+  try {
+    path = normalize(decodeURIComponent(new URL(req.url, 'http://localhost').pathname));
+  } catch (e) {
+    res.writeHead(400, { 'content-type': 'text/plain' });
+    return res.end('Bad request');
+  }
   if (path.endsWith(sep) || path.endsWith('/')) path += 'index.html';
   const file = join(root, path);
   if (!file.startsWith(root)) {

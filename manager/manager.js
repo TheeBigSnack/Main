@@ -226,12 +226,18 @@ async function onSendLink(ev) {
   const button = form.querySelector('button');
   button.disabled = true;
   setStatus('Sending the link…');
-  const redirect = new URL(location.href);
-  redirect.search = '';
-  redirect.hash = '';
-  const { error } = await state.supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect.toString() } });
+  try {
+    const supabase = state.supabase || (await connect()); // after "Leave sample data" the client may not exist yet
+    const redirect = new URL(location.href);
+    redirect.search = '';
+    redirect.hash = '';
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect.toString() } });
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    button.disabled = false;
+    return setStatus(`Couldn't send the link: ${(e && e.message) || e}`, true);
+  }
   button.disabled = false;
-  if (error) return setStatus(`Couldn't send the link: ${error.message}`, true);
   setStatus('');
   viewSent(email);
 }

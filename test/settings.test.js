@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
-import { LEGAL, acceptLegal, legalIsCurrent } from '../extension/src/legalLinks.js';
+import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from '../extension/src/legalLinks.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
 test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () => {
@@ -148,4 +148,9 @@ test('the Terms and Privacy acceptance: blank by default, garbage becomes blank,
   // a profile saved before the Terms step existed
   const { legal, ...older } = p;
   assert.deepEqual(settingsFromProfile(older, { origin: HOME }).legal, blank);
+});
+
+test('while the legal addresses are placeholders, nothing gates on them and no acceptance is recorded', () => {
+  assert.equal(legalHosted(), false, 'lotsync.example is a placeholder: the Terms step stays informational');
+  assert.match(LEGAL.termsUrl, /\.example\//);
 });

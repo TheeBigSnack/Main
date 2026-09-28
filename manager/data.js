@@ -260,8 +260,10 @@ function scanLine(s, nowAt, zone) {
 // ---------- the spreadsheet ----------
 
 const csvCell = (v) => {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  if (typeof v === 'number') return String(v);
+  let s = v === null || v === undefined ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // a spreadsheet would otherwise run a typed name as a formula
+  return /[",\n\r']/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 const csvRow = (cells) => cells.map(csvCell).join(',');
 const kindLabel = (k) => (k === 'price' ? 'price change' : 'sold / take down');

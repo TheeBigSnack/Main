@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 (2026-09-28, toward a sellable product)
+
+Ten tasks were chosen for the three months to a sellable product (PLAN.md M4 to M6). This release carries the first of them; every piece runs against sample data or a mock until the owner creates the accounts.
+
+Added
+- **CI** (`.github/workflows/ci.yml`): the unit tests, each e2e flow in its own Ubuntu job with Playwright's Chromium, and the packed zip as an artifact, on every push. The flows now run one at a time by default through `scripts/e2e-all.mjs` (`npm run test:e2e:parallel` for two at a time) in unique temp folders.
+- **Terms and Privacy in the wizard**: a step after the posting rules with the two documents and an acceptance the synced profile keeps with its edition (`settings.legal`, `src/legalLinks.js`); Settings shows it and has the same tick. Until the documents are published (the addresses are placeholders today) the step is informational and records nothing: nobody is asked to accept what they cannot read.
+- **Chrome Web Store listing draft** (`store/listing.md`): summary equal to the manifest's description (a test keeps it so), the long description, the permission justifications, the screenshot plan, the submission checklist.
+- **The adapter contract is complete** (`extension/adapters/README.md`): a platform is one module with `probeInPage`, `searchInPage`, `detect`, `origins`, `scanOptions`, `scan`, `getDetails`, `normalize`, `makeDirectSearch` and `photoOrigins`; `src/scan.js` keeps only the neutral site probe; the Dealer Inspire normaliser lives under `adapters/`; the service object is opaque outside its adapter; photo hosts are recorded per website (never requested); contract tests run every adapter against the mock site in a sandbox and the guard tests forbid any adapter that acts on a page.
+- **Manager view** (`manager/`): the Milestone 4 page over Supabase with magic-link sign-in and a sample-data mode, posts per salesperson, sold cars still listed with hours open, price changes not yet updated, a CSV with the pilot's definitions.
+- **Landing page** (`site/`): mobile-first, pricing from `marketing/pricing.json`, an honest FAQ, a demo request form with a configurable endpoint and a mail fallback; its own honesty test.
+- **Accounts foundation** (`supabase/`): the schema (dealerships, memberships, listings, to-do items, scan summaries, post attempts, rewrite usage, invites) with row-level security per dealership and a plain-SQL test that dealership A cannot read B; Edge Functions `rewrite` (auth, per-user rate limit, monthly cost cap, the same prompt and guardrails as `backend/`) and `sync` (the posted registry and pilot numbers converge across machines); `extension/src/account.js` (magic-link and code sign-in, sessions in local storage only) and `extension/src/sync.js` (pure merge of registries and flags, tested with two machines converging). The UI wiring in Settings and the worker's sync call follow in the next release.
+- **Launch kit** (`docs/`): the help document by task, the support process and log, the launch checklist, the next-platform decision memo.
+- Spreadsheet-safe CSV cells, a manager page heading, and a sign-in form that recovers after leaving sample data.
+
 ## 0.4.0 (2026-09-28, Milestone 3 started)
 
 Changed, for any dealer (2026-09-28, after an audit for wider use: 44 findings, 43 confirmed; 21 fixed here, the rest scheduled in PLAN.md)

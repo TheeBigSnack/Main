@@ -298,3 +298,14 @@ test('config.js: three fields, empty means not configured, the client comes from
   const js = read('manager/manager.js');
   assert.match(js, /CONFIG\.supabaseUrl && CONFIG\.supabaseAnonKey/, 'an empty url means not configured');
 });
+
+test('the CSV never hands a spreadsheet a formula typed as a name', () => {
+  const now = '2026-11-16T13:00:00.000Z';
+  const data = mockData(now);
+  for (const m of data.memberships) m.name = '=HYPERLINK("https://x.test";"' + m.name + '")';
+  for (const l of data.listings) { l.salesperson = '=HYPERLINK("https://x.test";"x")'; l.name = '@SUM(1)'; }
+  const csv = managerCsv(data, { now, dealer: 'Example Motors', origin: 'https://www.example-motors-springfield.test', timeZone: 'America/New_York' });
+  assert.ok(/(^|,)"'=HYPERLINK\(""https:\/\/x\.test"";""/m.test(csv), 'a typed formula is neutralised with a leading apostrophe');
+  assert.ok(/(^|,)"'@SUM\(1\)"/m.test(csv));
+  assert.ok(!/(^|,)[=@+\-][^,\r\n]*HYPERLINK|(^|,)@SUM/m.test(csv), 'no cell starts with a formula character');
+});

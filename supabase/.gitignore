@@ -1,0 +1,6 @@
+# Supabase CLI working files and local secrets. The migrations, functions and
+# tests are the source; nothing here is.
+.temp/
+.branches/
+.env
+.env.*

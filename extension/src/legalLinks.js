@@ -16,6 +16,13 @@ export const LEGAL = Object.freeze({
   rulesUrl: 'https://lotsync.example/posting-rules',
 });
 
+// Are the documents really published? While the addresses are placeholders
+// nobody can read them, so the wizard's Terms step is informational and no
+// acceptance is recorded (asking a person to accept what they cannot open
+// would be a false record). The step starts gating on its own once the
+// addresses point at a real host.
+export const legalHosted = () => !/\.example(\/|$)/i.test(LEGAL.termsUrl) && !/\.example(\/|$)/i.test(LEGAL.privacyUrl);
+
 // The record settings.legal holds once a person has accepted the current edition.
 export const acceptLegal = (now = new Date().toISOString()) => ({ version: LEGAL.version, acceptedAt: String(now) });
 

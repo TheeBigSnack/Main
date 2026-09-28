@@ -1,0 +1,41 @@
+# Lot Sync: the Supabase CLI's project file (Milestone 4). Minimal on purpose;
+# `supabase init` would write a much longer one and every value left out here
+# keeps the CLI's default. The owner links it to their project once with
+# `supabase link --project-ref <ref>`; nothing secret lives here.
+
+project_id = "lot-sync"
+
+[api]
+enabled = true
+# Only the public schema is exposed through the API. Row-level security
+# (migrations/0002_rls.sql) decides what a signed-in member gets from it.
+schemas = ["public"]
+
+[db]
+# Match the project's Postgres version (Dashboard: Project settings, Infrastructure).
+# The views in 0003_views.sql need 15 or newer (security_invoker).
+major_version = 17
+
+[auth]
+enabled = true
+# Magic links only: no passwords anywhere in Lot Sync.
+enable_signup = true
+# Where the sign-in email may send people. The extension's sign-in page and
+# the manager page go here once they have addresses (chrome-extension://<id>/*
+# and the page's https origin); the README says how.
+site_url = "http://localhost:3000"
+additional_redirect_urls = []
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+# The two Edge Functions check the caller's token themselves (a bad token gets
+# a plain 401 with a message the extension shows), so the gateway's own check
+# is off. That also lets the browser's CORS preflight through, which carries
+# no token.
+[functions.rewrite]
+verify_jwt = false
+
+[functions.sync]
+verify_jwt = false
