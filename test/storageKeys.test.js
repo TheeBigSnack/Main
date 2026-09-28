@@ -263,7 +263,7 @@ test('withLock: the fallback mutex serialises holders of one name and lets other
 
 test('a full storage is said in words the person can act on; any other failure keeps its own reason', () => {
   assert.equal(storageErrorText(new Error('QUOTA_BYTES quota exceeded')), STORAGE_FULL);
-  assert.equal(STORAGE_FULL, "Couldn't save: Chrome's storage for Lot Sync is full. Clear pilot numbers, or open an old dealership website and click Clear everything for this website in Settings.");
+  assert.equal(STORAGE_FULL, "Couldn't save: Chrome's storage for Lot Sync is full. Clear the numbers on the Numbers tab, or open an old dealership website and click Clear everything for this website in Settings.");
   assert.equal(storageErrorText(new Error('Extension context invalidated.')), "Couldn't save: Extension context invalidated.");
   assert.equal(storageErrorText('gone'), "Couldn't save: gone");
   assert.equal(storageErrorText(undefined), "Couldn't save: unknown error");

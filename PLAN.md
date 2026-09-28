@@ -8,7 +8,7 @@ Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a 
 |---|---|---|
 | M1 One-click post | Sep 28 – Oct 11 | **Done Sep 27**: single posts run clean on the live form (six live runs drove the fixes) |
 | M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | **Built Sep 27** (all four features, tests green), then a multi-reviewer pass found 29 defects, all fixed the same day. Verified live: the queue. Still to try on the real site: the wizard's permission step, a background rescan, and upkeep's listing pages (the sold/removed wording in `listingSigns.js` and the edit form's Price box) |
-| M3 Pilot | Oct 26 – Nov 8 | **Started Sep 28**: the pilot numbers (time per post, fields not filled, hours until sold cars and price changes were fixed) are recorded and exported from a Pilot tab; the runbook is `PILOT.md`; positioning, the pricing hypothesis, the sales sheet, the demo script, the pilot offer and the onboarding emails are in `marketing/`. Waiting on the owner: the M2 live checks, the attorney's answers (sections 1 and 2), the manager's sign-off |
+| M3 Pilot | Oct 26 – Nov 8 | **Started Sep 28**: the pilot numbers (time per post, fields not filled, hours until sold cars and price changes were fixed) are recorded and exported from the popup's Numbers tab (called Pilot until 0.5.0); the runbook is `PILOT.md`; positioning, the pricing hypothesis, the sales sheet, the demo script, the pilot offer and the onboarding emails are in `marketing/`. Waiting on the owner: the M2 live checks, the attorney's answers (sections 1 and 2), the manager's sign-off |
 | M4 Accounts and manager view | Nov 9 – Nov 22 | **Built Sep 28, code only**: Supabase schema with RLS and SQL tests, the `rewrite`, `sync` and `billing` functions, sign-in and sync in Settings and the worker, the manager view with a sample-data mode. No project exists yet: the owner creates it (`supabase/README.md`), then the two-machine and manager demos can be run for real |
 | M5 Billing, site, Web Store | Nov 23 – Dec 6 | **Built Sep 28, code only**: Stripe Checkout and portal through the billing function, the Billing card, the plan state in Settings, the landing page with sandbox screenshots, the store listing draft and the packed zip. Waiting on the owner: the Stripe account, the hosted Terms and Privacy, real screenshots, the attorney's pass, the submission |
 | M6 Design partners | Dec 7 – Dec 20 | **Launch kit built Sep 28** (help, support process, launch checklist, next-platform memo, store-install emails). Partners and the next platform need the owner: named dealers and a real site to verify against (this container cannot reach dealer websites) |
@@ -60,7 +60,7 @@ Scope
 - Pilot with 2–3 Waynesburg salespeople, manager's approval first. Track time per post, prefill failures (which field, how often), and how long sold cars stay listed.
 - Weekly fixes.
 - Positioning (`marketing/positioning.md`), the pricing hypothesis in one config (`marketing/pricing.json`), the sales sheet and the 10-minute demo script, shaped by pilot feedback. (Drafted Sep 28, before feedback; the pilot offer email and the onboarding emails too.)
-- The numbers, recorded by the extension itself (`extension/src/pilot.js`, the Pilot tab, CSV export) and defined in `PILOT.md`.
+- The numbers, recorded by the extension itself (`extension/src/pilot.js`, the Numbers tab, CSV export) and defined in `PILOT.md`.
 
 Acceptance criteria
 1. Each pilot salesperson posts at least 5 cars through Lot Sync and keeps them updated for two weeks.
@@ -121,9 +121,9 @@ Demo: the partner list with usage numbers, and the chosen next platform.
 ## Wider use (audit of 2026-09-28)
 
 The owner wants Lot Sync built for any dealership. An audit for single-dealer, single-platform and single-machine assumptions found 44 items; 21 were fixed in 0.4.0 (CHANGELOG). The rest ride with their milestone:
-- M4 (done Sep 28 unless noted): the daily cap per salesperson across machines (the sync answer's post count); one storage-key module (`src/storageKeys.js`); the shared rewrite key replaced by sign-in; local retention (500 entries, 90 days, per list). Still open: a pilot runbook for a second dealer built on the manager view instead of one CSV per person.
-- M5: blank Schedule A, the pilot agreement's table, the store-install emails, the wizard's Price step and the Terms and Privacy acceptance (informational until hosted) are done (Sep 28). Still open: the Web Store answers and legal drafts rewritten with the attorney; the Pilot tab renamed "Numbers".
-- M6: the adapter contract is complete (probe and search per adapter, normalise inside the adapter, opaque service, photo hosts; Sep 28); the second platform itself waits for a named dealer and a real site. Still open: the store-name and brand-list heuristics; the boilerplate floor for tiny lots; a Spanish form map with a Spanish-speaking partner.
+- M4 (done Sep 28 unless noted): the daily cap per salesperson across machines (the sync answer's post count); one storage-key module (`src/storageKeys.js`); the shared rewrite key replaced by sign-in; local retention (500 entries, 90 days, per list). The pilot runbook for a second dealer on the manager view is in PILOT.md (Sep 28).
+- M5: blank Schedule A, the pilot agreement's table, the store-install emails, the wizard's Price step and the Terms and Privacy acceptance (informational until hosted) are done (Sep 28). The Pilot tab is renamed Numbers (Sep 28). Still open: the Web Store answers and legal drafts rewritten with the attorney.
+- M6: the adapter contract is complete (probe and search per adapter, normalise inside the adapter, opaque service, photo hosts; Sep 28); the second platform itself waits for a named dealer and a real site. The store-name heuristic is per website and the boilerplate rule has a floor (Sep 28). Still open: a Spanish form map with a Spanish-speaking partner.
 - Needs the owner's OK (a permission change): asking for the photo host's permission at post time and dropping the static image host before the Web Store submission.
 
 ## Open risks

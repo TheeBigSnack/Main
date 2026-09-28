@@ -3,7 +3,7 @@
 // description, the sample Marketplace form filling itself, the person's own
 // click on Publish (this script stands in for the person; the extension never
 // clicks it, and the sample Marketplace counts the clicks to prove it),
-// confirm, My listings, the Pilot tab, a queue of two, day 2 on the website,
+// confirm, My listings, the Numbers tab, a queue of two, day 2 on the website,
 // the rescan's To do items, the price update and the take-down through the
 // side panel, the background rescan, and Reset.
 //
@@ -155,7 +155,7 @@ try {
   assert.match(await text(panel.locator('#done')), /Recorded: 2020 Ford F-150 XLT at \$32,995/);
   await shot(page, 'drive-05-posted.png');
 
-  // ---- 5. My listings and the Pilot tab ----
+  // ---- 5. My listings and the Numbers tab (view id 'pilot') ----
   await openPopup();
   assert.equal(await text(popupTab('mine').locator('.count')), '1');
   await popupTab('mine').click();

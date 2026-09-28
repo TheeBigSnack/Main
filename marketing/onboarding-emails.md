@@ -55,7 +55,7 @@ By now Lot Sync has re-read the website a few times. Click the icon and look at 
 
 Same-day take-downs are the point of the pilot, so please clear To do items the day they appear.
 
-**[Day] at [time], five minutes:** click the **Pilot** tab in Lot Sync and click **Download CSV**, then send me the file (or bring it). It has how long your posts took, anything the tool couldn't fill, and how long items sat on To do. No customer data is in it. We'll go over it with [manager] on [day].
+**[Day] at [time], five minutes:** click the **Numbers** tab in Lot Sync and click **Download CSV**, then send me the file (or bring it). It has how long your posts took, anything the tool couldn't fill, and how long items sat on To do. No customer data is in it. We'll go over it with [manager] on [day].
 
 **Weekly fixes:** what the check-in turns up gets fixed and comes back to you as a new zip. Follow the Update steps in `README.md`: unzip it over the same folder and click the reload icon on chrome://extensions. Your settings and your listings stay put.
 

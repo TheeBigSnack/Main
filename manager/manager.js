@@ -11,9 +11,15 @@
 // through POST .../billing/checkout and /portal: the function answers an
 // address and the page goes there. Stripe sends the manager back to this
 // page with ?billing=success or ?billing=canceled, which becomes one note.
+//
+// The Invite codes card (managers only) calls the create_invite() function
+// in the database and shows the code it answers with a Copy button. The
+// invites table has no read policy, so the codes made here live in
+// state.invites until the page reloads; nothing can list a dealership's
+// open codes, and the card says so.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, OVERDUE_HOURS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, memberRole, OVERDUE_HOURS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -36,6 +42,9 @@ const state = {
   data: null, // { dealership, memberships, listings, todoItems, postAttempts, scans }
   billing: null, // { status, error }: GET .../billing/status's answer for the chosen dealership (the sample data carries its own)
   billingNote: '', // one line in the Billing card: back from Stripe, the pilot just started, or what a sample button would do
+  invites: [], // create_invite()'s answers this page session, newest first: { code, role, dealership_id, created_at }
+  inviteNote: '', // one line in the Invite codes card: what a sample button would do
+  inviteError: '', // the last failed create_invite or copy, shown in the card
 };
 
 // ---------- the page frame ----------
@@ -151,6 +160,36 @@ function renderBilling() {
   if (el) el.outerHTML = billingHtml();
 }
 
+// The signed-in person's role in the chosen dealership: the memberships rows
+// say so (a manager reads every row, a salesperson their own); the billing
+// answer is the fallback when memberships could not be read. The sample is
+// seen by its manager.
+function myRole() {
+  if (state.mock) return state.data?.billing?.role || '';
+  return memberRole(state.data?.memberships, state.session?.user?.id) || state.billing?.status?.role || '';
+}
+
+// The Invite codes card: Invite a salesperson and Invite a manager, then
+// each code made on this page in a box with Copy and the one sentence on
+// what the person does with it. Drawn only for a manager (data.js decides);
+// in sample-data mode the buttons only explain themselves.
+function invitesHtml() {
+  const card = inviteCard(state.invites, { role: myRole(), dealershipId: state.dealershipId, now: new Date().toISOString() });
+  if (!card.manager) return '';
+  const note = state.inviteNote ? `<p class="banner info">${esc(state.inviteNote)}</p>` : '';
+  const error = state.inviteError ? `<p class="banner warn">${esc(state.inviteError)}</p>` : '';
+  const buttons = card.buttons.map((b) => `<button type="button" class="ghost" data-action="invite" data-role="${esc(b.role)}" data-does="${esc(b.does)}">${esc(b.label)}</button>`).join('');
+  const codes = card.codes.length
+    ? `<ul class="codes">${card.codes.map((c) => `<li><div class="row"><span class="code">${esc(c.code)}</span><button type="button" class="ghost" data-action="copy" data-copy="${esc(c.copyText)}">Copy</button><span class="meta">${esc(c.line)}</span></div><p class="hint">${esc(c.sentence)}</p></li>`).join('')}</ul>`
+    : '';
+  return `<section class="card" id="invites"><h2>Invite codes${card.codes.length ? ` ${pill('', `${card.codes.length} made on this page`)}` : ''}</h2>${note}${error}<p class="plan">${esc(card.line)}</p><div class="toolbar">${buttons}</div>${codes}<p class="hint">${esc(card.hint)}</p></section>`;
+}
+
+function renderInvites() {
+  const el = $('invites');
+  if (el) el.outerHTML = invitesHtml();
+}
+
 function viewData() {
   state.mode = 'view';
   const d = state.data;
@@ -202,9 +241,9 @@ function viewData() {
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  $('main').innerHTML = scan + billingHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
+  $('main').innerHTML = scan + billingHtml() + invitesHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
   const sel = $('pickDealer');
-  if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; loadLive().catch((e) => viewError(e.message)); });
+  if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; loadLive().catch((e) => viewError(e.message)); });
 }
 
 // ---------- actions ----------
@@ -219,6 +258,8 @@ document.addEventListener('click', (ev) => {
     case 'retry': start(); break;
     case 'signout': signOut(); break;
     case 'billing': onBilling(btn.dataset.billing, btn); break;
+    case 'invite': onInvite(btn.dataset.role, btn); break;
+    case 'copy': copyCode(btn.dataset.copy, btn); break;
     default: break;
   }
 });
@@ -228,6 +269,9 @@ function showMock() {
   state.data = mockData(new Date().toISOString());
   state.dealerships = [state.data.dealership];
   state.dealershipId = state.data.dealership.id;
+  state.invites = state.data.invites || [];
+  state.inviteNote = '';
+  state.inviteError = '';
   setUrlMock(true);
   viewData();
 }
@@ -248,6 +292,9 @@ function downloadCsv() {
 
 async function signOut() {
   state.billingNote = '';
+  state.invites = []; // the sample's code, or codes that belong to the person signing out
+  state.inviteNote = '';
+  state.inviteError = '';
   if (state.mock) {
     state.mock = false;
     state.data = null;
@@ -266,6 +313,48 @@ async function signOut() {
   state.data = null;
   state.billing = null;
   viewSignIn('Signed out.');
+}
+
+// ---------- invite codes ----------
+
+// Invite a salesperson or Invite a manager: create_invite() in the database
+// answers { code, dealership_id, role } for a manager of the dealership and
+// refuses anyone else; the answer joins state.invites and the card redraws.
+// A failure is one line in the card, never the page's. The sample data only
+// says what the button would do.
+async function onInvite(role, btn) {
+  const label = btn.textContent;
+  state.inviteError = '';
+  if (state.mock) {
+    state.inviteNote = `Sample data: "${label}" ${btn.dataset.does || 'would ask the account server for a code'}. Nothing is called here.`;
+    return renderInvites();
+  }
+  btn.disabled = true;
+  try {
+    const { data, error } = await state.supabase.rpc('create_invite', { dealership_id: state.dealershipId, role });
+    if (error) throw new Error(error.message);
+    const answer = data && typeof data === 'object' ? data : {};
+    if (!answer.code) throw new Error('the server answered without a code');
+    state.invites.unshift({ code: answer.code, role: answer.role || role, dealership_id: answer.dealership_id || state.dealershipId, created_at: new Date().toISOString() });
+    state.inviteNote = '';
+  } catch (e) {
+    state.inviteError = `Couldn't ${label.toLowerCase()}: ${(e && e.message) || e}`;
+  }
+  renderInvites();
+}
+
+// Copy puts the code alone on the clipboard (the install email has a
+// [code] bracket for it). A page opened from disk or over plain http has no
+// clipboard; the code is selectable either way.
+async function copyCode(code, btn) {
+  try {
+    await navigator.clipboard.writeText(code);
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  } catch {
+    state.inviteError = 'Couldn\'t reach the clipboard: select the code and copy it by hand.';
+    renderInvites();
+  }
 }
 
 // ---------- billing ----------

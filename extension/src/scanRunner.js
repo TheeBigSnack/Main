@@ -7,7 +7,8 @@ import { ADAPTERS, detectAdapter, unsupportedSiteMessage } from '../adapters/ind
 import { assessVehicle } from './classify.js';
 import { makeSnapshot, diffScans } from './rescan.js';
 import { findBoilerplate } from './description.js';
-import { withDefaults, defaultSettings } from './settings.js';
+import { withDefaults } from './settings.js';
+import { storeNames, shortLocation, matchStore } from './normalize.js';
 import { probeSiteInPage } from './scan.js';
 import { SITES_KEY } from './storageKeys.js';
 import { updateKey } from './storage.js';
@@ -60,6 +61,12 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   const res = await adapter.scan(search, { ...(options || {}), confirmVins });
   if (!res.ok) return { ok: false, message: res.message, res };
   const vehicles = res.records.map(adapter.normalize).filter(Boolean);
+  // The adapter's normalise sees one record, so its store label is a guess
+  // from brand words; over the whole lot, what differs between this
+  // website's store names is each store's own part (read here every scan,
+  // never baked in).
+  const stores = storeNames(vehicles);
+  for (const v of vehicles) v.locationShort = shortLocation(v.location, stores);
   const assessments = vehicles.map((v) => assessVehicle(v, settings));
   const snapshot = makeSnapshot({ site: siteForSnapshot(site), takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments });
   const diff = diffScans(prevSnapshot, snapshot, { posted, confirm: res.confirm, basis: settings.basis });
@@ -74,6 +81,12 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
 }
 
 export const UNSUPPORTED_MESSAGE = unsupportedSiteMessage();
+
+// First-run store choice: the one store that matches the website's own name
+// (normalize.js matchStore), never more; none when nothing stands out, so
+// the wizard says so and a person picks. The rest of the defaults come from
+// withDefaults (name and address from the site's probe).
+const defaultStores = (site, stores) => { const mine = matchStore(site, stores); return mine ? [mine] : []; };
 
 /**
  * A full scan from a dealer tab: probe, detect the adapter, read the lot,
@@ -94,14 +107,14 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   if (!out.ok) return { ok: false, message: out.message || "Couldn't read this page." };
   let result = out;
   if (!s || settingsFromProfile) {
+    const stores = storeNames(out.vehicles);
     if (s && settingsFromProfile) {
       // (whether the profile's dealership part applies here was decided by
       // settingsFromProfile from the website it was saved on)
-      const here = new Set(out.vehicles.map((v) => v.location).filter(Boolean));
-      const kept = s.myStores.filter((st) => here.has(st));
-      s = withDefaults({ ...s, myStores: kept.length ? kept : defaultSettings(site, out.vehicles).myStores }, site);
+      const kept = s.myStores.filter((st) => stores.includes(st));
+      s = withDefaults({ ...s, myStores: kept.length ? kept : defaultStores(site, stores) }, site);
     } else {
-      s = defaultSettings(site, out.vehicles);
+      s = withDefaults({ myStores: defaultStores(site, stores) }, site);
     }
     // the store choice changes what is "ready": assess again with the real settings (no second request)
     const assessments = out.vehicles.map((v) => assessVehicle(v, s));

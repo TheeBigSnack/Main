@@ -67,7 +67,7 @@ Until then, `npm run screenshots` draws five draft images at 1280 x 800 from the
 | 2 | The side panel's review screen: the car re-checked on the website, the description drafted from the website's facts, the fields it will fill, condition and title from the dealership's defaults | `post-2-review.png` (post flow) | Read the description, then open the Marketplace form. |
 | 3 | The Marketplace vehicle-listing form filled in, photos attached, Publish untouched | `post-4-mock-form.png` (post flow; the store image comes from a live run on the real form, with the account details blurred) | Every field filled in. You check it and click Publish. |
 | 4 | The popup's To do tab after a rescan: a sold car to take down, a price change with the website's price next to the listing price, a new arrival | `5-rescan-todo.png` (popup flow) or `upkeep-1-todo.png` (upkeep flow) | Rescans flag sold cars and price changes on your listings. |
-| 5 | The Pilot tab (to be renamed Numbers in Milestone 5): time per post, fields that could not be filled, hours until to-do items were fixed, the CSV button | `post-7-pilot.png` (post flow) or `upkeep-4-pilot.png` (upkeep flow) | The numbers your manager sees, kept in your browser. |
+| 5 | The Numbers tab: time per post, fields that could not be filled, hours until to-do items were fixed, the CSV button | `post-7-pilot.png` (post flow) or `upkeep-4-pilot.png` (upkeep flow) | The numbers your manager sees, kept in your browser. |
 
 ## Promo tile
 

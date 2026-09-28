@@ -1,7 +1,7 @@
 // Settings shared by the popup and the side panel, with defaults so a
 // settings object saved by v0.1 ({ myStores, basis }) keeps working.
 
-import { shortLocation } from './normalize.js';
+import { shortLocation, storeNames, matchStore } from './normalize.js';
 import { DEFAULT_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 
@@ -160,7 +160,6 @@ export async function saveProfile(settings, storage, origin = '') {
 // website. The price note stays empty: Settings shows the suggested wording
 // from the price gap, and a person decides whether it is true for this store.
 export function defaultSettings(site, vehicles) {
-  const locations = [...new Set((vehicles || []).map((v) => v.location).filter(Boolean))];
-  const mine = locations.filter((l) => l === site.name || (site.title || '').includes(l));
-  return withDefaults({ myStores: mine }, site);
+  const mine = matchStore(site, storeNames(vehicles)); // one store at most (normalize.js); none when nothing stands out
+  return withDefaults({ myStores: mine ? [mine] : [] }, site);
 }

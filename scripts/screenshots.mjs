@@ -1,7 +1,7 @@
 // Takes the landing page's product screenshots from the in-browser sandbox
 // (demo/) with its sample data, in headless Chromium at 1280 x 800: the popup
 // after a scan, the side panel's description and checks, the sample
-// Marketplace form filled in, the To do tab after day 2, and the Pilot tab.
+// Marketplace form filled in, the To do tab after day 2, and the Numbers tab.
 // The steps are demo/drive.mjs's without its assertions. The clicks on
 // Publish, Edit listing, Update and Mark as sold stand in for the person;
 // the extension never makes them, and the sample Marketplace counts them.
@@ -165,7 +165,7 @@ try {
   await panel.locator('#upkeepDone').waitFor({ timeout: 20000 });
   await panel.locator('#upkeepClose').click();
 
-  // ---- 7. The Pilot tab: two posts timed, every field filled, both to-do items fixed ----
+  // ---- 7. The Numbers tab (view id 'pilot'): two posts timed, every field filled, both to-do items fixed ----
   await openPopup();
   await popupTab('pilot').click();
   await popup.locator('.panel').filter({ hasText: /Posted through Lot Sync/ }).waitFor();

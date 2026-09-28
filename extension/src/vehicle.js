@@ -36,7 +36,7 @@ export const VEHICLE_FIELDS = Object.freeze([
   'availability', // "In-Stock" / "In-Transit" text: blockers, the rescan's "arrived on the lot"
   'inTransit', // true = not on the lot yet, blocks posting (classify.js)
   'location', // the store name the site gives the car: the store choice (settings.js, the wizard), the "at another store" check
-  'locationShort', // that name without brand words (normalize.js shortLocation): labels in the popup and the panel
+  'locationShort', // the store's own part of that name (normalize.js shortLocation): labels in the popup and the panel. The normaliser sees one record and guesses from brand words; scanRunner.js scanWithSearch settles it over the lot's store names
   'photoCount', // number: no photos = not ready (classify.js); the rescan's "photos added"
   'photos', // photo URLs: 3 per car from the bulk scan, all from getDetails; the panel attaches them
   'dateInStock', // ISO date or null: kept from the site; no check reads it today (new arrivals come from the VIN diff)

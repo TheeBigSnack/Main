@@ -6,6 +6,8 @@ import { startMockSite } from './e2e/mock-dealer-site.mjs';
 import dealerInspire, { scan, getDetails, makeDirectSearch, detect, trimRecord, FIELDS, probeInPage, searchInPage, origins, scanOptions, photoOrigins } from '../extension/adapters/dealerInspire.js';
 import { ADAPTERS, detectAdapter, adapterById, adapterForService, unsupportedSiteMessage, platformNames } from '../extension/adapters/index.js';
 import { VEHICLE_FIELDS } from '../extension/src/vehicle.js';
+import { scanWithSearch } from '../extension/src/scanRunner.js';
+import { withDefaults } from '../extension/src/settings.js';
 import { fixtures, fakeDealerPage, runInPage } from './helpers.js';
 
 const records = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => ({ ...r, media: { ...r.media, images: ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'] } }));
@@ -343,4 +345,22 @@ test('trimRecord keeps only what the extension reads', () => {
   assert.deepEqual(Object.keys(t.pricing), ['price', 'our_price', 'internet_price', 'original_price', 'msrp', 'original_price_label']);
   assert.equal(t.description, null);
   assert.deepEqual(t.features, []);
+});
+
+// ---------- the store label is a per-website read, settled over the lot ----------
+
+test('normalize labels a store from brand words alone; scanWithSearch settles the label over the lot\'s store names', async () => {
+  // a group whose store names share no brand word: only the lot can say what differs per store
+  const lot = records.map((r, i) => ({ ...r, extra_fields: { ...r.extra_fields, meta_location: i % 2 ? 'Smith Auto Sales South' : 'Smith Auto Sales North' } }));
+  for (const a of ADAPTERS) {
+    const alone = a.normalize(lot[0]);
+    assert.equal(alone.locationShort, 'Smith Auto Sales North', `${a.PLATFORM.id}: one record has no lot to compare with, so the full name stands`);
+  }
+  const site = { origin: 'https://x', host: 'x', name: 'Smith Auto Sales North', title: 't', adapter: 'dealerInspire' };
+  const out = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(lot), site, settings: withDefaults({}), prevSnapshot: null, posted: {} });
+  assert.equal(out.ok, true);
+  const labels = new Map(out.vehicles.map((v) => [v.location, v.locationShort]));
+  assert.deepEqual([...labels.entries()].sort(), [['Smith Auto Sales North', 'North'], ['Smith Auto Sales South', 'South']]);
+  // the snapshot carries the settled label, so the popup and the panel show the same words
+  assert.deepEqual(new Set(Object.values(out.snapshot.vehicles).map((e) => e.locationShort)), new Set(['North', 'South']));
 });

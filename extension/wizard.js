@@ -8,7 +8,7 @@
 import { performScan, rememberSite } from './src/scanRunner.js';
 import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
-import { shortLocation } from './src/normalize.js';
+import { shortLocation, storeNames, matchStore } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
@@ -103,7 +103,7 @@ async function runScan(ctx) {
   // Like the popup and the background rescan: a scan that lost most of the
   // lot at once is a website hiccup, so the last good snapshot is kept.
   const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
-  const stores = [...new Set(r.vehicles.map((v) => v.location).filter(Boolean))].sort();
+  const stores = storeNames(r.vehicles);
   // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
   wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
   await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: r.diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
@@ -138,9 +138,14 @@ export function wizardHtml() {
         ${wiz.scan ? nav(true, 'Next') : `<div class="actions"><button type="button" class="plain" id="wizBack">Back</button><button type="button" class="primary" id="wizScan" ${wiz.busy ? 'disabled' : ''}>Read the website</button><button type="button" class="plain" id="wizQuit">Quit set-up</button></div>`}`;
     case 'store': {
       const stores = (wiz.scan && wiz.scan.stores) || [];
+      // The same match the read used for the default tick (performScan,
+      // normalize.js matchStore): one store at most, and when nothing stands
+      // out none is ticked and the hint says so, so a person picks.
+      const matched = stores.length ? matchStore(wiz.site, stores) : null;
+      const hint = !stores.length ? '' : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
-        <p class="hint">Only cars at your store count as ready to post. The website lists these stores.</p>
-        ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${s.myStores.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}
+        <p class="hint">Only cars at your store count as ready to post.${hint ? ' ' + hint : ''}</p>
+        ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${s.myStores.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st, stores))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}
         ${nav()}`;
     }
     case 'you':

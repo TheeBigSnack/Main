@@ -85,6 +85,13 @@ test('the pilot runbook names the three acceptance criteria and where the number
   assert.match(doc, /legal\/pilot-agreement\.md/);
 });
 
+test('the pilot emails and the positioning send people to the numbers tab as the popup labels it', () => {
+  const label = read('../extension/popup.js').match(/\['pilot', '([^']+)'\]/)[1];
+  assert.equal(label, 'Numbers', 'the tab was renamed again: update the emails, the positioning and this test together');
+  assert.ok(read('../marketing/onboarding-emails.md').includes(`**${label}** tab`), `onboarding-emails.md does not send people to the ${label} tab`);
+  assert.ok(read('../marketing/positioning.md').includes(`The ${label} tab`), `positioning.md does not name the ${label} tab`);
+});
+
 test('the emails are templates for any dealership: no pilot-dealer value, no "our store", no fixed weekday, the cap as a bracket', () => {
   for (const rel of EMAILS) {
     const doc = read('../marketing/' + rel);
@@ -121,10 +128,12 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   assert.match(store, /\*\*You click Publish\. Lot Sync never does\.\*\*/);
   assert.match(store, /\*\*Keep prices honest\.\*\*/);
   assert.match(store, /\*\*Clear the To do tab the day items appear\.\*\*/);
-  // who creates invite codes today is stated from the code: the manager view has no button for it
-  const manager = read('../manager/manager.js');
-  assert.ok(!/create_invite|createInvite/.test(manager), 'the manager view can now create invite codes: update onboarding-store.md (who creates the codes) and this test together');
-  assert.match(store, /manager view (doesn't|does not) have a button/, 'says the owner creates the codes today');
+  // who creates invite codes is stated from the code: the manager view's Invite codes card calls create_invite
+  const manager = read('../manager/manager.js') + read('../manager/data.js');
+  assert.ok(/create_invite/.test(manager), 'the manager view no longer creates invite codes: update onboarding-store.md (who creates the codes) and this test together');
+  assert.ok(manager.includes('Invite a salesperson'), '"Invite a salesperson" is no longer a label in manager/: update onboarding-store.md and this test together');
+  assert.match(store, /\*\*Invite a salesperson\*\*/, 'says the manager makes the codes in the manager view');
+  assert.doesNotMatch(store, /manager view (doesn't|does not) have a button/, 'the old sentence about the missing button');
   // the controls, word for word as the popup, the side panel and the manager view label them
   const ui = (read('../extension/popup.js') + read('../extension/sidepanel.js')).replace(/&amp;/g, '&');
   for (const label of ['Send me a sign-in code', 'Sign in', 'Invite code', 'Join', 'Set up Lot Sync', 'Ready to post', 'Open the Marketplace form', "It's posted, record it", 'Open & update price', 'Mark posted']) {

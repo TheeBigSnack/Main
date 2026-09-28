@@ -107,6 +107,10 @@ test('every screenshot the page shows exists at 1280 x 800, has alt text and say
     assert.match(caption, /Sandbox with sample data\./, `${src} has a caption that says it is the sandbox with sample data`);
   }
   assert.match(css, /\.shots img \{[^}]*max-width: 100%/, 'images scale to the column');
+  // the fifth image is the popup's numbers tab, named as the popup labels it (Numbers since 0.5.0)
+  const popup = read('../extension/popup.js');
+  const label = popup.match(/\['pilot', '([^']+)'\]/)[1];
+  assert.match(figures[4], new RegExp(`alt="The popup's ${label} tab`), `the fifth image's alt text names the ${label} tab`);
 });
 
 test('every link is an anchor or a legal placeholder, and nothing loads from a third party', () => {

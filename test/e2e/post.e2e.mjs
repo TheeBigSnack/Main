@@ -219,7 +219,7 @@ try {
   assert.match(await popup.textContent('.rows'), /Posted ✓/);
   await popup.screenshot({ path: join(shots, 'post-6-my-listings.png') });
 
-  // ---- 7. Pilot numbers: one post with its timing, one fill with nothing to fix, and never the description ----
+  // ---- 7. The Numbers tab (view id 'pilot'): one post with its timing, one fill with nothing to fix, and never the description ----
   await tab(popup, 'pilot').click();
   const pilotView = await popup.textContent('.panel');
   assert.match(pilotView, /Posted through Lot Sync\s*1\b/);

@@ -49,7 +49,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 | `extension/src/normalize.js`, `classify.js`, `rescan.js` | Flat vehicle shape, the pre-owned + ready gate, the rescan diff |
 | `extension/src/description.js`, `rewriteTemplate.js`, `rewriter.js` | Strip website boilerplate, template writer + guardrails, optional Claude call |
 | `extension/src/listingData.js`, `vehicleDetails.js`, `cap.js`, `settings.js` | Form values, post-time re-check, daily cap, settings defaults |
-| `extension/src/pilot.js` | Pilot numbers: post timings, fill failures per field, hours until to-do items were fixed; summary, CSV; the Pilot tab in the popup |
+| `extension/src/pilot.js` | Pilot numbers: post timings, fill failures per field, hours until to-do items were fixed; summary, CSV; the Numbers tab in the popup (view id and storage key still say pilot) |
 | `extension/facebook/formMap.js`, `fillForm.js`, `detectPost.js` | The one Facebook map, the injected fill code, the listing-address watcher |
 | `backend/` | Standalone Node rewrite service (Claude Haiku 4.5 by default) |
 | `test/` | Unit tests, fixtures (real records from the live site), e2e with mock sites |

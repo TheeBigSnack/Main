@@ -267,7 +267,7 @@ const VIEWS = [
   ['otherStores', 'Other stores'],
   ['review', 'Needs a look'],
   ['mine', 'My listings'],
-  ['pilot', 'Pilot'],
+  ['pilot', 'Numbers'], // the view id and the storage key keep the pilot name: renaming the key would orphan installs
 ];
 
 function renderTabs(l) {
@@ -544,12 +544,14 @@ const FIELD_LABELS = Object.fromEntries(FORM_MAP.fields.map((f) => [f.key, f.lab
 const secs = (s) => (typeof s === 'number' ? `${s} s` : '—');
 const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
 
-// What the pilot agreement lets Lot Sync record, for the weekly check-in and
-// the manager: time per post, fields that could not be filled, how long sold
-// cars and price changes stayed on the salesperson's listings. Kept in this
-// browser only, per website; Download CSV is how it leaves.
+// The Numbers tab: what the pilot agreement lets Lot Sync record, for the
+// weekly check-in and the manager: time per post, fields that could not be
+// filled, how long sold cars and price changes stayed on the salesperson's
+// listings. Kept in this browser, per website; Download CSV is how it leaves,
+// and with accounts the posts and the to-do items also sync (src/sync.js).
 function viewPilot() {
-  const lead = `<p class="lead">Numbers for the pilot, kept in this browser only: how long each post takes, which form fields Lot Sync couldn't fill, and how long sold cars and price changes stayed on your listings. No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
+  const synced = accountsConfigured() ? ' While you are signed in, the posts and the to-do items also sync to your dealership\'s account for the manager view.' : '';
+  const lead = `<p class="lead">The numbers your dealership sees, kept in this browser per website: how long each post takes, which form fields Lot Sync couldn't fill, and how long sold cars and price changes stayed on your listings.${synced} No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
   if (!hasPilotData(state.pilot)) return lead + empty('Nothing recorded yet. The numbers start with the first post through the side panel.');
   const s = summarizePilot(state.pilot, { labels: FIELD_LABELS });
   const stat = (k, v) => `<tr><td>${k}</td><td class="n">${v}</td></tr>`;
@@ -577,7 +579,7 @@ function viewPilot() {
     ${stat('Still open', t.open ? t.openItems.map((o) => `${esc(o.name)} (${hrs(o.hoursOpen)})`).join('<br>') : '0')}
     ${t.cleared ? stat('Cleared by the website (the car came back, or the price went back)', t.cleared) : ''}
   </table>`;
-  const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear pilot numbers</button></div>`;
+  const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear the numbers</button></div>`;
   return lead + toolbar + posts + fields + flagTable('Sold cars to take down', s.takeDowns, 'pilotTakeDowns') + flagTable('Price changes', s.priceUpdates, 'pilotPrices');
 }
 
@@ -990,13 +992,13 @@ async function onPanelClick(ev) {
     case 'pilotClear':
       if (!pilotClearArmed) {
         pilotClearArmed = true;
-        btn.textContent = 'Click again to clear the pilot numbers';
+        btn.textContent = 'Click again to clear the numbers';
         return;
       }
       pilotClearArmed = false;
       state.pilot = null;
       await ownRemove([siteKeys(state.origin).pilot]);
-      setStatus('Pilot numbers cleared for this website.');
+      setStatus('The numbers for this website were cleared.');
       break;
     case 'clear':
       if (!clearArmed) {

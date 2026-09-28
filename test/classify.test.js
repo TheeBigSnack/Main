@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shortLocation } from '../extension/src/normalize.js';
 import { websitePrice, conditionWordFromUrl, normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { assessVehicle, readCondition, titleConditionWords, DECISION } from '../extension/src/classify.js';
 import { fixtures, vehicle, raw, MY_STORE } from './helpers.js';
@@ -34,11 +33,6 @@ test('reads the condition word from the vehicle page address', () => {
   assert.equal(conditionWordFromUrl('https://x.com/inventory/2019-ram-1500/'), null);
 });
 
-test('short store names', () => {
-  assert.equal(shortLocation('Ron Lewis Chrysler Dodge Jeep Ram Cranberry'), 'Cranberry');
-  assert.equal(shortLocation('Ron Lewis Chrysler Dodge Jeep Ram Pleasant Hills'), 'Pleasant Hills');
-});
-
 test('condition words', () => {
   assert.equal(readCondition('Used'), 'pre-owned');
   assert.equal(readCondition('Certified Used'), 'pre-owned');
@@ -63,7 +57,7 @@ test('certified used Wagoneer at Cranberry: pre-owned, but at another store', ()
   const a = assess('certified');
   assert.equal(a.decision, DECISION.NOT_READY);
   assert.deepEqual(a.blockers.map((b) => b.code), ['other-store']);
-  assert.equal(a.blockers[0].text, 'At Cranberry');
+  assert.equal(a.blockers[0].text, 'At Cranberry'); // the short name a record on its own gets (normalize.test.js has the per-lot rule)
   // with no store filter it's ready
   assert.equal(assess('certified', {}, {}).decision, DECISION.READY);
 });

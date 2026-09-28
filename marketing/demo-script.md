@@ -43,7 +43,7 @@ Ready to post: tick three cars. Show **Select the next N** and the daily cap in 
 
 To do tab. If the last rescan flagged anything, show it. Otherwise describe it with the buttons on screen: "Every 3 hours while Chrome is open it re-reads the website. A sold car shows here as **Take down**; **Open listing** opens the salesperson's own listing so they can mark it sold. A price change shows as **Update price**; **Open & update price** opens the listing with the new price ready in the box, and they click Update."
 
-Click the **Pilot** tab: "During the pilot this records how long each post takes, anything it couldn't fill, and how long sold cars stayed listed. You get it as a spreadsheet every week."
+Click the **Numbers** tab: "During the pilot this records how long each post takes, anything it couldn't fill, and how long sold cars stayed listed. You get it as a spreadsheet every week."
 
 ## 8:00 What it won't do, and the honest part
 

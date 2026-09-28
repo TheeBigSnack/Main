@@ -18,7 +18,7 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 ## Product
 
 - [ ] **The M2 live checks done on a real site**: the wizard's permission step, a background rescan with the badge and the notification, one price update and one take-down on real listings (`PLAN.md` M2). Done when: each is ticked in `PILOT.md`'s "Once, before the first pilot" list and any fix is in `listingSigns.js` or `formMap.js` only.
-- [ ] **The top pilot field failure fixed.** Done when: the Pilot tab's field table shows "Every field filled every time" for the last week of the pilot, or the remaining failure is one the form map cannot fix and the help doc tells people what to do by hand.
+- [ ] **The top pilot field failure fixed.** Done when: the Numbers tab's field table shows "Every field filled every time" for the last week of the pilot, or the remaining failure is one the form map cannot fix and the help doc tells people what to do by hand.
 - [ ] **The photo-host permission decision made** (`PLAN.md`, "Needs the owner's OK"). Done when: the owner has decided whether the static image host stays in the manifest or is requested at post time from the salesperson's own click; the manifest, `legal/chrome-web-store-privacy.md`, `store/listing.md` and `test/manifest.test.js` agree; and it was checked by hand that photos still attach.
 - [ ] **Chrome Web Store submission, unlisted.** Done when: every box in the "Before submitting" list in `store/listing.md` is ticked, the zip from `npm run pack` is uploaded with the five real screenshots, visibility is Unlisted, and the review has passed or every rejection reason is logged and fixed.
 - [ ] **Install and update from the Web Store.** Done when: `docs/help.md` and the day-0 onboarding email describe the store install for new dealers, with the zip steps kept for anyone still on it.
@@ -31,7 +31,7 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 
 - [ ] **Supabase project live** (`PLAN.md` M4). Done when: magic-link sign-in works for two people at one dealership, row-level security tests show one dealership cannot read another's rows, and the rewrite endpoint refuses unauthenticated calls and stops at the monthly cap.
 - [ ] **The posted registry syncs.** Done when: two salespeople on two machines see the same posted registry, and a car posted on one shows on the other after its next scan.
-- [ ] **The manager view works** (`manager/`). Done when: a manager at the pilot dealer signs in and sees posts per salesperson, sold cars still listed and for how long, and price mismatches, with the numbers matching the salespeople's Pilot tabs for the same week.
+- [ ] **The manager view works** (`manager/`). Done when: a manager at the pilot dealer signs in and sees posts per salesperson, sold cars still listed and for how long, and price mismatches, with the numbers matching the salespeople's Numbers tabs for the same week.
 - [ ] **Stripe set up** (`PLAN.md` M5). Done when: a per-rooftop subscription with the free pilot period and the customer portal exist, a test-mode dealer can subscribe, start the pilot period and manage billing without help, and the prices are the ones in `marketing/pricing.json`.
 - [ ] **Pricing confirmed.** Done when: a dealer has agreed to pay a price in writing, `marketing/pricing.json` has `"hypothesis": false` and the same numbers, and `test/marketing.test.js` still passes.
 - [ ] **The per-salesperson cap follows the account, not the browser** (`PLAN.md`, "Wider use", M4). Done when: the same person on two machines shares one day's count.
@@ -60,7 +60,7 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 - [ ] **Each partner is active.** Done when: each partner dealer has at least two salespeople posting and one manager using the manager view, as M6's first criterion asks, and the partner list with usage numbers is what the M6 demo shows.
 - [ ] **Each partner has done the set-up.** Done when: every salesperson has finished set-up, including the posting rules and the Terms, and has run one dry run (**Open the form and check fields only (nothing filled)**) with nothing under "Not found".
 - [ ] **The next platform's first dealer is among them, or is named.** Done when: `docs/next-platform.md`'s output line is filled in with a dealer who has agreed to be the first on that platform.
-- [ ] **A weekly check-in with each partner.** Done when: the check-in is in the calendar, the Pilot tab (or the manager view) numbers are collected each week, and the log and the pipeline sheet are updated from it.
+- [ ] **A weekly check-in with each partner.** Done when: the check-in is in the calendar, the Numbers tab (or the manager view) numbers are collected each week, and the log and the pipeline sheet are updated from it.
 
 ## The line that says we are launched
 

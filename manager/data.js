@@ -26,6 +26,11 @@
 // press; the numbers in the sentence come from the answer (or, in tests,
 // from marketing/pricing.json), never from this file.
 //
+// The Invite codes card is drawn from create_invite()'s answers, { code,
+// dealership_id, role }, as the page collected them: the invites table has
+// no read policy, so nothing can list a dealership's codes. inviteCard()
+// gives a manager the two buttons and the codes made on this page.
+//
 // What the shape can and cannot say:
 //   - "Sold cars still listed" are the open take-down items (todo_items, kind
 //     takeDown, no done_at). A scan summary carries counts, not VINs, so
@@ -380,6 +385,74 @@ export function billingReturnNote(flag) {
   return '';
 }
 
+// ---------- invite codes ----------
+
+// The roles create_invite() accepts, and the two buttons with what each does
+// in words: the page shows `does` as a note in sample-data mode instead of
+// calling anything.
+export const INVITE_ROLES = Object.freeze(['salesperson', 'manager']);
+export const INVITE_BUTTONS = Object.freeze({
+  salesperson: Object.freeze({ action: 'invite', role: 'salesperson', label: 'Invite a salesperson', does: 'asks the account server for a fresh single-use code that puts one salesperson into this dealership' }),
+  manager: Object.freeze({ action: 'invite', role: 'manager', label: 'Invite a manager', does: 'asks the account server for a fresh single-use code that makes one person a manager of this dealership' }),
+});
+export const INVITE_LINE = 'A code puts one person into this dealership, as a salesperson or as a manager, and works once.';
+// why the list is only this page's: the database never answers "which codes are open"
+export const INVITE_HINT = 'The account server never lists codes, so the ones made on this page stay here only until it is reloaded: send each code as you make it. A code belongs to one person.';
+
+// The signed-in person's role in the dealership, from the memberships rows
+// the page read (a manager sees every row, a salesperson only their own).
+export function memberRole(memberships, userId) {
+  if (!userId) return '';
+  const m = rows(memberships).find((r) => r.user_id === userId);
+  return m && INVITE_ROLES.includes(m.role) ? m.role : '';
+}
+
+// One sentence on what the invited person does with the code, in the words
+// the extension's Settings uses (Account, Invite code, Join).
+export function inviteSentence(role) {
+  return role === 'manager'
+    ? 'The new manager enters it in the Lot Sync extension under Settings, Account, Invite code, and clicks Join; the manager view then lets them in. It works once.'
+    : 'The salesperson enters it in the Lot Sync extension under Settings, Account, Invite code, and clicks Join. It works once.';
+}
+
+/**
+ * The Invite codes card: the two buttons a manager may press and the codes
+ * made on this page, newest first, each as create_invite() typed it (upper
+ * case). A salesperson gets no buttons and no codes, so the page draws
+ * nothing. `invites` is what this page session collected from the
+ * function's answers, { code, role, dealership_id, created_at }, the last
+ * stamped by the page when the answer arrived; the sample data carries one.
+ * @param {object[]} invites
+ * @param {object} options
+ *   role:         the signed-in person's role in the dealership
+ *   dealershipId: when given, only that dealership's codes are listed
+ *   now:          ISO time; a code without created_at is dated now
+ *   timeZone:     IANA zone for the times (default: this computer's)
+ * @returns {{ manager, buttons, codes: { code, role, createdAt, when, line, sentence, copyText }[], line, hint }}
+ */
+export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZone } = {}) {
+  const manager = role === 'manager';
+  const zone = resolveTimeZone(timeZone);
+  const nowAt = new Date(ms(now) ?? Date.now()).toISOString();
+  const codes = !manager ? [] : rows(invites)
+    .filter((i) => text(i.code, 64) && (!dealershipId || !i.dealership_id || i.dealership_id === dealershipId))
+    .map((i) => {
+      const code = text(i.code, 64).toUpperCase();
+      const r = INVITE_ROLES.includes(i.role) ? i.role : 'salesperson';
+      const createdAt = ms(i.created_at) === null ? nowAt : new Date(ms(i.created_at)).toISOString();
+      const when = fmtLocal(createdAt, zone);
+      return { code, role: r, createdAt, when, line: `${when} · for a ${r}`, sentence: inviteSentence(r), copyText: code };
+    })
+    .sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
+  return {
+    manager,
+    buttons: manager ? [{ ...INVITE_BUTTONS.salesperson }, { ...INVITE_BUTTONS.manager }] : [],
+    codes,
+    line: INVITE_LINE,
+    hint: INVITE_HINT,
+  };
+}
+
 // ---------- the spreadsheet ----------
 
 const csvCell = (v) => {
@@ -481,8 +554,9 @@ export function csvFileName(now = nowIso(), { dealer = '', timeZone } = {}) {
 
 // A small made-up dealership for the demo and the tests: two salespeople,
 // eight listings, three open to-do items, a week of post attempts, four
-// scans, and a free pilot with 19 days left, seen as its manager. Every
-// time is relative to `now`. No real dealer, person or town.
+// scans, a free pilot with 19 days left, seen as its manager, and one
+// unused invite code. Every time is relative to `now`. No real dealer,
+// person or town.
 export function mockData(now = nowIso()) {
   const t = ms(now) ?? Date.now();
   const ago = (hours) => new Date(t - hours * 3600 * 1000).toISOString();
@@ -594,5 +668,10 @@ export function mockData(now = nowIso()) {
     includedSalespeople: null,
   };
 
-  return { dealership, memberships, listings, todoItems, postAttempts, scans, billing };
+  // One unused code the manager made a quarter of an hour ago, in the shape
+  // create_invite() answers (12 upper-case hex characters) plus the stamp
+  // the page adds. Made up: redeeming it finds nothing.
+  const invites = [{ code: 'ABCDEF012345', dealership_id: D, role: 'salesperson', created_at: ago(0.25) }];
+
+  return { dealership, memberships, listings, todoItems, postAttempts, scans, billing, invites };
 }

@@ -28,10 +28,20 @@ export function splitSegments(raw) {
     .filter(Boolean);
 }
 
+// The absolute floor under the share: a share alone misbehaves on a tiny
+// lot (with 3 cars, any sentence in one car is already 33%, and a 2-car lot
+// would lose every sentence the two share). A segment is boilerplate only
+// when it appears in at least this many descriptions AND in the share, so a
+// 3-car lot and a 124-car lot both behave: on 3 cars only a sentence on all
+// three goes, on 124 the share decides.
+export const MIN_BOILERPLATE_COUNT = 3;
+
 // A segment that repeats across a large share of the current lot's
 // descriptions is boilerplate (a disclaimer, a legal paragraph), not
-// anything specific to one car. Default threshold matches the brief: ~30%.
-export function findBoilerplate(allDescriptions, threshold = 0.3) {
+// anything specific to one car. Default threshold matches the brief: ~30%,
+// with MIN_BOILERPLATE_COUNT as the floor. Both are re-derived from each
+// website's own lot on every scan; nothing about one lot is kept.
+export function findBoilerplate(allDescriptions, threshold = 0.3, minCount = MIN_BOILERPLATE_COUNT) {
   const counts = new Map();
   const total = Array.isArray(allDescriptions) ? allDescriptions.length : 0;
   for (const raw of allDescriptions || []) {
@@ -42,7 +52,7 @@ export function findBoilerplate(allDescriptions, threshold = 0.3) {
   const boilerplate = new Set();
   if (total > 0) {
     for (const [seg, count] of counts) {
-      if (count / total >= threshold) boilerplate.add(seg);
+      if (count >= minCount && count / total >= threshold) boilerplate.add(seg);
     }
   }
   return boilerplate;

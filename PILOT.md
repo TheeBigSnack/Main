@@ -1,6 +1,6 @@
 # Pilot runbook (Milestone 3): the first pilot at Waynesburg
 
-Written for the first pilot; the bracketed values and the checklist apply to any dealer.
+Written for the first pilot; the bracketed values and the checklist apply to any dealer. The popup tab that shows the numbers is called **Numbers** (it was called Pilot until 0.5.0; the view id and the storage key still say `pilot`). A second dealership runs on the accounts and the manager view: the last section.
 
 Two weeks of real posting by 2 or 3 salespeople at Ron Lewis CDJR Waynesburg, with the used car manager's sign-off, weekly fixes, and numbers the manager can confirm. The plan and acceptance criteria are in `PLAN.md` (M3); the rules in `CLAUDE.md` apply throughout. This file is the checklist and the definitions.
 
@@ -10,7 +10,7 @@ Two weeks of real posting by 2 or 3 salespeople at Ron Lewis CDJR Waynesburg, wi
 2. Median time per post under 60 seconds including review; the prefill failure rate per field is recorded and the top failure fixed.
 3. Every sold car is flagged within one rescan cycle, and the manager confirms the numbers.
 
-Demo at the end: the pilot numbers (the Pilot tab's CSV, even if it ends up in a spreadsheet) and one salesperson posting live.
+Demo at the end: the pilot numbers (the Numbers tab's CSV, even if it ends up in a spreadsheet) and one salesperson posting live.
 
 ## Before the pilot starts
 
@@ -33,7 +33,7 @@ Owner's list, in order. Nothing under "Before every pilot" runs until the one-ti
 **Daily (each salesperson):** post from Ready to post, clear To do items the day they appear (Open listing → Mark as sold; Open & update price → Update), and when the panel shows **Couldn't fill**, copy the report and send it.
 
 **Weekly (owner, with the manager):**
-1. Collect the numbers: each salesperson clicks **Pilot → Download CSV** (or **Copy summary** for the chat). The numbers live in each salesperson's own browser, per website; there is no shared view until Milestone 4, so it is one CSV per person.
+1. Collect the numbers: each salesperson clicks **Numbers → Download CSV** (or **Copy summary** for the chat). Without accounts the numbers live in each salesperson's own browser, per website, so the first pilot is one CSV per person; a pilot on the accounts reads the manager view instead ("Running a pilot at a second dealership", below).
 2. Fill in the log below.
 3. Fix the top prefill failure that week (one line in `formMap.js` when Facebook changed a name; `listingSigns.js` when a listing page reads differently), re-run `npm test` and the e2e flows, and send the new `lot-sync-extension-<version>.zip` (`npm run pack`) and the Update steps in `README.md`.
 4. Ask the manager to confirm sold cars against the store's own records: did every one show up on To do within 3 hours of leaving the website?
@@ -47,7 +47,7 @@ Owner's list, in order. Nothing under "Before every pilot" runs until the one-ti
 
 ## What the numbers mean (so the manager can check them)
 
-Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser, under `pilot:<origin>`. The Pilot tab shows them; the CSV has every row.
+Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser, under `pilot:<origin>`. The Numbers tab shows them; the CSV has every row.
 
 - **Time per post:** from the click on **Post** in the popup (or the queue loading the car) to **It's posted** in the side panel. That includes the website re-check, the description, the salesperson's review, the form filling, their own check of the form and their click on Publish. A car left open (the panel closed on it, Back, Stop queue) is recorded as abandoned and is not in the median. **Saved as draft** and **It didn't post** are recorded as such.
 - **Reason (blocked posts):** why the panel stopped before the form opened: `not-on-website` (the car was no longer on the site at post time), `site-unreachable` (the website could not be read), `check-not-ready`, `check-review` or `check-skip` (the post-time re-check found something missing, signs that disagree, or a car the website now calls new), `no-price` (the website showed no price).
@@ -57,7 +57,7 @@ Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser,
 
 **Pruning:** each list (post attempts, fills, flags) keeps its newest 500 entries and nothing older than 90 days (`MAX_ENTRIES` and `PILOT_RETENTION_DAYS` in `extension/src/pilot.js`), applied each time a number is recorded; an open flag stays until it is closed. A two-week pilot is never affected, but a longer engagement must collect the CSV weekly, since the CSV is the only complete record.
 
-**Clearing:** **Pilot → Clear pilot numbers** (two clicks), or **Settings → Clear everything for this website**. The pilot agreement (section 6) says pilot records Lot Sync holds are deleted within 30 days of the end unless the dealer subscribes; the CSVs the owner collected are those records.
+**Clearing:** **Numbers → Clear the numbers** (two clicks), or **Settings → Clear everything for this website**. The pilot agreement (section 6) says pilot records Lot Sync holds are deleted within 30 days of the end unless the dealer subscribes; the CSVs the owner collected are those records.
 
 ## Weekly fixes: the loop
 
@@ -71,4 +71,14 @@ Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser,
 - Put the final CSVs and the manager's confirmation in the log above.
 - Decide with the manager: continue into a subscription (`legal/dealer-subscription-agreement.md`, pricing from `marketing/pricing.json`, billing in Milestone 5), extend the pilot, or stop.
 - With the store's written permission (pilot agreement section 3), the confirmed numbers go into `marketing/sales-sheet.md`. Without it, nothing about the store is published.
-- Update `PLAN.md` (M3 state) and start Milestone 4 (accounts, sync and the manager view), which replaces one-CSV-per-person with a shared view.
+- Update `PLAN.md` (M3 state). The next dealership runs on the accounts and the manager view, which replace one CSV per person: the section below.
+
+## Running a pilot at a second dealership
+
+The first pilot ran without accounts, so its numbers were one CSV per person. A second dealership runs on the Milestone 4 accounts (`supabase/`) and the manager view (`manager/`). Everything above still applies: the one-time items, the manager's sign-off, the daily list, the definitions, the pruning and the weekly fixes. What is different:
+
+1. **The account, once** (owner; `supabase/README.md`, "The first dealership and its manager"): insert the dealership with its website's origin and one single-use invite code for the manager. The manager redeems that code in the extension's Settings (**Account**: **Send me a sign-in code**, **Sign in**, the code, **Join**), signs in to the manager view (**Send me a sign-in link**; no password), and from then on makes one code per salesperson there: **Invite a salesperson** in its Invite codes card (`create_invite`). A code works once and goes to one person; never forward one.
+2. **Salespeople install and join** with the emails in `marketing/onboarding-store.md` ("To each salesperson"): install, then in **Settings → Account**: **Send me a sign-in code**, **Sign in**, the invite code, **Join**, then set-up on the dealership's website. From the first sign-in each person's posted list and numbers sync to the dealership's account after every rescan and every recorded post; two machines signed in as one person share one daily cap.
+3. **Settings on each machine** as in "Before every pilot", and the price note typed once: Lot Sync suggests wording from the website's price gap and never fills it in; the manager's wording is typed into Settings once per person and follows them through their synced profile. That is the only place a dealer fact is typed. Nothing about the store (a name, a town, a fee, a store pattern) goes into code, the manifest or the copy; the pilot dealer is a fixture, and what Lot Sync learned from one lot it re-derives on every website.
+4. **The weekly loop reads the manager view**, not a CSV per person: the **Salespeople** table (posted this week, median seconds per post), **Sold cars still listed** (hours open, red past the overdue line) and **Price changes not yet updated** (the same), with the last-scan line above them. The day-7 email in `marketing/onboarding-store.md` walks the manager through the three tables; fill in the pilot log from them (the view's **Download CSV** gives the same rows in a spreadsheet). The Numbers tab's **Download CSV** is only for a machine that is offline: no account yet, or a sync that keeps failing (the Account line in Settings says when it last synced). The form-field records never leave the browser, so the top prefill failure still comes from the panel's **Couldn't fill** reports and the Numbers tab's field table.
+5. **Fixes ship the same way**: `formMap.js` or `listingSigns.js`, `npm test`, the e2e flow, then a new zip, or the Web Store update once the listing is live.

@@ -52,7 +52,7 @@ Don't say (until the attorney answers the questions in `legal/questions-for-atto
 
 ## Proof we can build honestly during the pilot
 
-The extension records, with the dealer's agreement (pilot agreement section 2): time per post, which form fields could not be filled, how long sold cars and price changes stayed on the listings, and posts per salesperson. The Pilot tab exports them as a CSV. Those, confirmed by the manager, become the first numbers in the sales sheet, with the store's written permission (pilot agreement section 3).
+The extension records, with the dealer's agreement (pilot agreement section 2): time per post, which form fields could not be filled, how long sold cars and price changes stayed on the listings, and posts per salesperson. The Numbers tab exports them as a CSV. Those, confirmed by the manager, become the first numbers in the sales sheet, with the store's written permission (pilot agreement section 3).
 
 ## Pricing hypothesis
 

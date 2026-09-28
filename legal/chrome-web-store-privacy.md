@@ -29,7 +29,7 @@ One row per pattern in `extension/manifest.json`.
 
 | Data | Where it lives | Why |
 |---|---|---|
-| Usage numbers: when a post started and ended and its outcome, which form fields could not be filled, hours until a flagged sold car or price change was fixed, and the salesperson name from Settings | Kept in the user's browser; leaves it only as the CSV the user chooses to export. Deleted by "Clear pilot numbers" in the Pilot tab and by "Clear everything for this website" in Settings, and pruned automatically to the newest 500 entries per list and nothing older than 90 days (open to-do items excepted) | Pilot check-ins and, from Milestone 4, the manager view |
+| Usage numbers: when a post started and ended and its outcome, which form fields could not be filled, hours until a flagged sold car or price change was fixed, and the salesperson name from Settings | Kept in the user's browser; leaves it only as the CSV the user chooses to export. Deleted by "Clear the numbers" in the Numbers tab and by "Clear everything for this website" in Settings, and pruned automatically to the newest 500 entries per list and nothing older than 90 days (open to-do items excepted) | Pilot check-ins and, from Milestone 4, the manager view |
 
 ## Data use disclosures (tick as applicable)
 

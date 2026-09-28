@@ -1,15 +1,16 @@
 // The manager view (Milestone 4): the numbers in manager/data.js on the
 // sample dealership and on hand-built rows, the definitions kept equal to
-// the pilot's, the Billing card (Milestone 5) in each plan state, and the
-// page free of pilot-dealer values, of typed prices and of anything that
-// sounds like a Meta affiliation.
+// the pilot's, the Billing card (Milestone 5) in each plan state, the Invite
+// codes card (a manager's two buttons, the codes as create_invite types
+// them, the sample's one code), and the page free of pilot-dealer values, of
+// typed prices and of anything that sounds like a Meta affiliation.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -379,6 +380,98 @@ test('the sample dealership is in a free pilot with 19 days left, seen by a mana
   assert.equal(summarize(sample()).totals.postedAllTime, 8);
 });
 
+// ---------- the Invite codes card ----------
+
+test('inviteCard: a manager gets the two buttons in the SQL\'s two roles; a salesperson, or nobody, gets no button and no code', () => {
+  assert.deepEqual(INVITE_ROLES, ['salesperson', 'manager']);
+  const c = inviteCard([], { role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.equal(c.manager, true);
+  assert.deepEqual(c.buttons.map((b) => b.label), ['Invite a salesperson', 'Invite a manager']);
+  assert.deepEqual(c.buttons.map((b) => b.role), ['salesperson', 'manager']);
+  for (const b of c.buttons) {
+    assert.equal(b.action, 'invite');
+    assert.ok(b.does.length > 10, 'each button says what it does');
+  }
+  assert.deepEqual(c.codes, []);
+  assert.equal(c.line, 'A code puts one person into this dealership, as a salesperson or as a manager, and works once.');
+  assert.equal(c.hint, INVITE_HINT);
+  assert.match(c.hint, /never lists codes/, 'honest about the table having no read policy');
+  assert.match(c.hint, /until it is reloaded/);
+  const invites = [{ code: 'ABCDEF012345', role: 'salesperson', created_at: NOW }];
+  for (const role of ['salesperson', '', undefined, 'owner']) {
+    const sp = inviteCard(invites, { role, now: NOW, timeZone: 'UTC' });
+    assert.equal(sp.manager, false, String(role));
+    assert.deepEqual(sp.buttons, []);
+    assert.deepEqual(sp.codes, [], 'a salesperson never sees a code, whatever the list holds');
+  }
+  // the button texts are one list, frozen, with no number in them
+  assert.deepEqual(Object.keys(INVITE_BUTTONS), ['salesperson', 'manager']);
+  assert.ok(Object.isFrozen(INVITE_BUTTONS.salesperson) && Object.isFrozen(INVITE_BUTTONS.manager));
+  assert.doesNotMatch(JSON.stringify(INVITE_BUTTONS), /\$|\d/);
+});
+
+test('inviteCard: codes render as create_invite typed them (upper case, trimmed), newest first, with the local time, the role, the sentence and the copy text', () => {
+  const invites = [
+    { code: 'abcdef012345', role: 'salesperson', dealership_id: DEALER, created_at: ago(2) },
+    { code: ' 0123456789AB ', role: 'manager', dealership_id: DEALER, created_at: ago(0.5) },
+    { code: 'FEDCBA987654', dealership_id: DEALER }, // no role, no time: the SQL's default role, dated now
+    { code: 'AAAAAAAAAAAA', role: 'salesperson', dealership_id: 'another-dealership' },
+    { code: '', role: 'salesperson' }, null, 'junk', { role: 'salesperson' },
+  ];
+  const c = inviteCard(invites, { role: 'manager', dealershipId: DEALER, now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(c.codes.map((x) => x.code), ['FEDCBA987654', '0123456789AB', 'ABCDEF012345']);
+  assert.deepEqual(c.codes.map((x) => x.role), ['salesperson', 'manager', 'salesperson']);
+  assert.deepEqual(c.codes.map((x) => x.when), ['2026-11-16 15:00', '2026-11-16 14:30', '2026-11-16 13:00']);
+  assert.equal(c.codes[0].createdAt, NOW, 'a code without a time is dated now');
+  assert.equal(c.codes[1].line, '2026-11-16 14:30 · for a manager');
+  for (const x of c.codes) {
+    assert.match(x.code, /^[0-9A-F]{12}$/, 'as the function types it: 12 upper-case hex characters');
+    assert.equal(x.copyText, x.code, 'Copy puts the code alone on the clipboard');
+    assert.equal(x.sentence, inviteSentence(x.role));
+  }
+  // the other dealership's code is listed only when no dealership is asked for
+  assert.equal(inviteCard(invites, { role: 'manager', now: NOW, timeZone: 'UTC' }).codes.length, 4);
+  assert.equal(inviteCard('nope', { role: 'manager' }).codes.length, 0);
+  assert.doesNotThrow(() => inviteCard([{ code: 'x', created_at: 'garbage' }], { role: 'manager', now: 'not a time', timeZone: 'Not/AZone' }));
+  assert.equal(inviteCard([{ code: 'x', created_at: 'garbage' }], { role: 'manager', now: NOW, timeZone: 'UTC' }).codes[0].createdAt, NOW);
+});
+
+test('inviteSentence: what the invited person does, in the words the extension\'s Settings uses', () => {
+  for (const role of ['salesperson', 'manager']) {
+    const s = inviteSentence(role);
+    for (const word of ['Settings', 'Account', 'Invite code', 'Join']) assert.ok(s.includes(word), `${role}: "${word}"`);
+    assert.match(s, /It works once\.$/);
+  }
+  const popup = read('extension/popup.js');
+  assert.ok(popup.includes('Invite code') && popup.includes('>Join<'), 'the popup still labels the field and the button that way: update inviteSentence and this test together');
+  assert.match(inviteSentence('manager'), /the manager view then lets them in/);
+  assert.doesNotMatch(inviteSentence('salesperson'), /manager view/);
+  assert.equal(inviteSentence(undefined), inviteSentence('salesperson'));
+});
+
+test('memberRole: the signed-in person\'s role from the memberships rows, nothing for a stranger or a role the SQL does not know', () => {
+  const memberships = [{ user_id: 'u1', role: 'salesperson' }, { user_id: 'u3', role: 'manager' }, { user_id: 'u4', role: 'owner' }];
+  assert.equal(memberRole(memberships, 'u3'), 'manager');
+  assert.equal(memberRole(memberships, 'u1'), 'salesperson');
+  assert.equal(memberRole(memberships, 'u4'), '');
+  assert.equal(memberRole(memberships, 'u9'), '');
+  assert.equal(memberRole(memberships, ''), '');
+  assert.equal(memberRole(undefined, 'u1'), '');
+});
+
+test('the sample dealership carries one made-up unused invite code, shown to its manager with the same layout', () => {
+  const d = mockData(NOW);
+  assert.equal(d.invites.length, 1);
+  const [inv] = d.invites;
+  assert.match(inv.code, /^[0-9A-F]{12}$/, 'shaped as create_invite types a code');
+  assert.equal(inv.role, 'salesperson');
+  assert.equal(inv.dealership_id, d.dealership.id);
+  assert.equal(inv.created_at, ago(0.25));
+  const c = inviteCard(d.invites, { role: d.billing.role, dealershipId: d.dealership.id, now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(c.buttons.map((b) => b.label), ['Invite a salesperson', 'Invite a manager']);
+  assert.deepEqual(c.codes.map((x) => [x.code, x.when, x.copyText]), [['ABCDEF012345', '2026-11-16 14:45', 'ABCDEF012345']]);
+});
+
 // ---------- the page ----------
 
 const MANAGER_FILES = readdirSync(join(root, 'manager')).filter((f) => /\.(html|js|mjs|css)$/.test(f));
@@ -441,6 +534,26 @@ test('the page is relative, mobile-friendly, and offers what the brief names', (
   }
   // the light and the dark blocks both
   assert.equal((css.match(/--accent:/g) || []).length, 2);
+});
+
+test('the page makes invite codes through the client, for managers only, and never reads the invites table', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /rpc\('create_invite', \{ dealership_id: /, 'the database function, through the client');
+  assert.match(js, /inviteCard\(state\.invites, \{ role: myRole\(\)/);
+  assert.match(js, /memberRole\(state\.data\?\.memberships, state\.session\?\.user\?\.id\)/, 'the role comes from the memberships rows');
+  assert.match(js, /navigator\.clipboard\.writeText\(code\)/);
+  assert.match(js, />Copy</);
+  assert.match(js, /Invite codes/);
+  assert.doesNotMatch(js, /from\('invites'\)/, 'the page never selects invites: 0002_rls.sql gives the table no read policy');
+  assert.match(js, /state\.inviteNote = `Sample data: /, 'sample-data buttons only explain themselves');
+  // the SQL the card relies on: the function's parameters and answer, the two roles, upper-case codes, and the table's silence
+  const rls = read('supabase/migrations/0002_rls.sql');
+  assert.match(rls, /create or replace function public\.create_invite\(dealership_id uuid, role text default 'salesperson'\)/);
+  assert.match(rls, /return jsonb_build_object\('code', new_code, 'dealership_id', create_invite\.dealership_id, 'role', wanted\)/);
+  assert.match(rls, /if wanted not in \('salesperson', 'manager'\)/);
+  assert.match(rls, /new_code := upper\(substr\(md5\(/, 'codes are typed in upper case, as the card renders them');
+  assert.doesNotMatch(rls, /on public\.invites for/, 'no policy on invites, so the card lists only this page\'s codes');
+  assert.match(read('manager/manager.css'), /\.codes \{/);
 });
 
 test('config.js: four fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {

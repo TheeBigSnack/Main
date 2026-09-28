@@ -168,7 +168,7 @@ try {
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '1');
   assert.equal(await popup.evaluate(() => chrome.action.getBadgeText({})), '');
 
-  // ---- 4. Pilot numbers: both items were flagged by the day-2 scan and seen done on the listing by Lot Sync ----
+  // ---- 4. The Numbers tab (view id 'pilot'): both items were flagged by the day-2 scan and seen done on the listing by Lot Sync ----
   await tab(popup, 'pilot').click();
   const pilotView = await popup.textContent('.panel');
   assert.match(pilotView, /Sold cars to take down\s*1\b/);

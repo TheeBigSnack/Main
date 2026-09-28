@@ -33,6 +33,8 @@ const LABELS = [
   'Taken down',
   'Open & update price',
   'Download CSV',
+  'Numbers',
+  'Clear the numbers',
   'Clear everything for this website',
   'Forget my synced profile',
   'Allow automatic rescans',
@@ -59,7 +61,7 @@ test('help.md names the popup and side panel controls as the code labels them', 
 test('help.md is organised by what people are trying to do', () => {
   const help = doc('help.md');
   const sections = [
-    'Install and update', 'Set up', 'Scan', 'Post one car', 'Post several', 'When a car sells or a price changes', 'The Pilot tab', 'Settings',
+    'Install and update', 'Set up', 'Scan', 'Post one car', 'Post several', 'When a car sells or a price changes', 'The Numbers tab', 'Settings',
     'When a field could not be filled', 'When Facebook restored a draft', 'When Chrome asks for a permission', 'When the website scan fails',
     'When the description writer is off', 'The daily cap', 'What Lot Sync never does', 'Where the data lives', 'How to forget the synced profile',
   ];
@@ -173,9 +175,70 @@ test('help.md quotes the storage-full message as the code shows it, with the two
   const section = help.slice(help.indexOf('## Where the data lives'), help.indexOf('## How to forget'));
   assert.ok(section.includes(STORAGE_FULL), 'docs/help.md "Where the data lives" does not quote STORAGE_FULL (src/storage.js) word for word');
   const advice = section.slice(section.indexOf(STORAGE_FULL));
-  assert.match(advice, /\*\*Clear pilot numbers\*\*/, 'the first way out: the Pilot tab');
+  assert.match(advice, /\*\*Clear the numbers\*\* on the \*\*Numbers\*\* tab/, 'the first way out: the Numbers tab');
   assert.match(advice, /\*\*Clear everything for this website\*\*/, 'the second way out: Settings on the old website');
   assert.match(advice, /no longer (post from|use)/, 'says it is an old website, not the current one');
+});
+
+// The tab was called Pilot until 0.5.0. The view id and the storage key keep
+// that name (renaming the key would orphan installs); every text a person
+// reads uses the label the popup renders.
+const PERSON_FACING = ['../docs/help.md', '../README.md', '../PILOT.md', '../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../marketing/onboarding-emails.md', '../marketing/positioning.md', '../store/listing.md', '../site/index.html'];
+
+test('the numbers tab is labelled Numbers, help.md lists the tabs as the popup does, and no text a person reads still says Pilot tab', () => {
+  const popup = read('../extension/popup.js');
+  const block = popup.slice(popup.indexOf('const VIEWS = ['), popup.indexOf('];', popup.indexOf('const VIEWS = [')));
+  const views = [...block.matchAll(/^  \['(\w+)', '([^']+)'\],/gm)].map((m) => [m[1], m[2]]);
+  assert.ok(views.length >= 7, 'the VIEWS list moved: update this test');
+  assert.deepEqual(views.find(([id]) => id === 'pilot'), ['pilot', 'Numbers'], 'the pilot view is labelled Numbers');
+  assert.ok(!views.some(([, label]) => label === 'Pilot'));
+  assert.ok(popup.includes('Clear the numbers') && popup.includes('Click again to clear the numbers'), 'the clear button and its armed text');
+  assert.ok(!popup.includes('Clear pilot numbers'), 'the old button label');
+  // help.md names every tab, in the popup\'s order
+  const line = doc('help.md').split('\n').find((l) => l.startsWith('- The tabs, left to right:'));
+  assert.ok(line, 'docs/help.md lists the tabs');
+  let at = -1;
+  for (const [, label] of views) {
+    const i = line.indexOf(`**${label}**`);
+    assert.ok(i > at, `docs/help.md tab list lacks **${label}** in the popup's order`);
+    at = i;
+  }
+  // nothing a person reads sends them to a Pilot tab (the storage-full message is quoted as the code has it)
+  for (const rel of PERSON_FACING) {
+    const text = read(rel).replace(STORAGE_FULL, '');
+    const hit = text.match(/pilot tab|\*\*Pilot\*\*|Pilot →|Clear pilot numbers|clear the pilot numbers|Pilot numbers cleared/i);
+    assert.equal(hit, null, `${rel} still says "${hit && hit[0]}"`);
+  }
+});
+
+test('PILOT.md runs a second dealership on the accounts and the manager view, with the CSV only for an offline machine', () => {
+  const runbook = read('../PILOT.md');
+  const heading = '## Running a pilot at a second dealership';
+  const start = runbook.indexOf(heading);
+  assert.ok(start >= 0, `PILOT.md has no "${heading}" section`);
+  const end = runbook.indexOf('\n## ', start + heading.length);
+  const section = runbook.slice(start, end > 0 ? end : undefined);
+  for (const path of ['`manager/`', '`supabase/README.md`', '`marketing/onboarding-store.md`']) assert.ok(section.includes(path), `the section does not point at ${path}`);
+  // the manager view\'s tables and buttons, as manager/manager.js labels them
+  const manager = read('../manager/manager.js') + read('../manager/data.js');
+  for (const label of ['Salespeople', 'Sold cars still listed', 'Price changes not yet updated', 'Send me a sign-in link', 'Download CSV', 'Invite a salesperson']) {
+    assert.ok(manager.includes(label), `"${label}" is no longer a label in manager/: update PILOT.md and this test together`);
+    assert.ok(section.includes(label), `PILOT.md's second-dealership section does not name "${label}"`);
+  }
+  // the extension\'s controls, as popup.js labels them
+  const popup = read('../extension/popup.js');
+  for (const label of ['Send me a sign-in code', 'Sign in', 'Join', 'Numbers']) {
+    assert.ok(popup.includes(label), `"${label}" is no longer a label in popup.js: update PILOT.md and this test together`);
+    assert.ok(section.includes(label), `PILOT.md's second-dealership section does not name "${label}"`);
+  }
+  assert.match(section, /offline/, 'the Numbers tab\'s CSV is for an offline machine only');
+  assert.doesNotMatch(section, /each salesperson clicks \*\*Numbers/, 'a CSV per person is not the weekly loop');
+  assert.match(section, /price note[^.]*typed once|typed once[^.]*price note/i, 'the price note is typed once in Settings');
+  assert.match(section, /Nothing about the store[^.]*code/, 'nothing dealer-specific goes into code');
+  // the first pilot\'s way is described as the first pilot\'s, not as the only way
+  assert.doesNotMatch(runbook, /no shared view/);
+  assert.match(runbook, /reads the manager view instead/, 'the weekly loop points at the second-dealership section');
+  assert.match(runbook, /called \*\*Numbers\*\*/, 'the runbook says what the tab is called');
 });
 
 test('help.md describes the Terms step and the Settings section in both states the code renders', () => {

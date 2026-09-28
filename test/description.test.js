@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitSegments, findBoilerplate, cleanDescription } from '../extension/src/description.js';
+import { splitSegments, findBoilerplate, cleanDescription, MIN_BOILERPLATE_COUNT } from '../extension/src/description.js';
 
 // Text captured from the live Waynesburg site on 2026-09-26 (the equipment
 // dump is abridged; the real one runs to 30+ items).
@@ -25,20 +25,43 @@ test('segments split on <br> in any spelling, tags stripped, whitespace collapse
 
 test('text on 30% or more of the lot is boilerplate, rarer text is not', () => {
   const lot = [];
-  for (let i = 0; i < 10; i += 1) {
+  for (let i = 0; i < 12; i += 1) {
     const parts = [`Unique write-up for car ${i}.`];
-    if (i < 4) parts.push(DISCLAIMER); // 40%
-    if (i < 2) parts.push('Recent Arrival!'); // 20%
+    if (i < 5) parts.push(DISCLAIMER); // 5 of 12: 42%
+    if (i < 3) parts.push('Recent Arrival!'); // 3 of 12: 25%
     lot.push(parts.join('<br>'));
   }
   const b = findBoilerplate(lot);
   assert.ok(b.has(DISCLAIMER));
   assert.ok(!b.has('Recent Arrival!'));
   assert.ok(!b.has('Unique write-up for car 0.'));
-  // the threshold can be tuned
+  // the threshold can be tuned (the floor of 3 cars is met here)
   assert.ok(findBoilerplate(lot, 0.2).has('Recent Arrival!'));
   assert.equal(findBoilerplate([]).size, 0);
   assert.equal(findBoilerplate(null).size, 0);
+});
+
+test('the absolute floor: a share alone never decides on a tiny lot', () => {
+  assert.equal(MIN_BOILERPLATE_COUNT, 3);
+  // a 3-car lot keeps a sentence one car has, even though 1 of 3 is 33%
+  const three = [`Local trade.<br>${DISCLAIMER}`, 'Nice car.', 'Another car.'];
+  assert.ok(!findBoilerplate(three).has(DISCLAIMER));
+  assert.ok(!findBoilerplate(three).has('Local trade.'));
+  // ...but a sentence on all three of them is boilerplate: the floor is a floor, not a ban
+  const allThree = three.map((d) => `${d}<br>${DISCLAIMER}`);
+  assert.ok(findBoilerplate(allThree).has(DISCLAIMER));
+  assert.ok(!findBoilerplate(allThree).has('Nice car.'));
+  // a 2-car lot drops nothing, whatever the two share
+  const two = [`Nice car.<br>${DISCLAIMER}`, `Another car.<br>${DISCLAIMER}`];
+  assert.equal(findBoilerplate(two).size, 0);
+  assert.equal(findBoilerplate(two, 0.1).size, 0);
+  // a 10-car lot drops a sentence 4 cars share (40%, above the floor)
+  const ten = Array.from({ length: 10 }, (_, i) => (i < 4 ? `Car ${i}.<br>${DISCLAIMER}` : `Car ${i}.`));
+  assert.ok(findBoilerplate(ten).has(DISCLAIMER));
+  assert.equal(findBoilerplate(ten).size, 1);
+  // the floor can be tuned like the share; a floor of 1 is the old share-only rule
+  assert.ok(findBoilerplate(three, 0.3, 1).has(DISCLAIMER));
+  assert.ok(findBoilerplate(three, 0.3, 1).has('Local trade.'));
 });
 
 test('a segment counts once per car even if the site repeats it', () => {

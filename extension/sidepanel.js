@@ -10,6 +10,7 @@
 // This file never clicks anything on the Facebook page.
 
 import { markPosted, basisPrice } from './src/rescan.js';
+import { shortLocation, storeNames } from './src/normalize.js';
 import { fetchVehicleDetails, recheck } from './src/vehicleDetails.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails } from './src/rewriteTemplate.js';
@@ -186,6 +187,8 @@ async function startFlow(req) {
   if (!fresh.ok) return block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok) return block(check.message, 'check-' + check.assessment.decision);
+  // the store label the popup shows: settled over the lot's store names, not the adapter's brand-word guess for one record
+  fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
   state.vehicle = fresh.vehicle;
   state.vinCheck = { local: localVinCheck(fresh.vehicle), online: null };
   state.price = basisPrice(fresh.vehicle, state.settings.basis); // the lower second price only when this car shows one
