@@ -24,6 +24,8 @@ import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
+import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
+import { updateKey, storageErrorText } from './src/storage.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -56,20 +58,48 @@ const state = {
 };
 let watcher = null;
 
-const keys = (origin) => ({
-  settings: `settings:${origin}`,
-  snapshot: `snapshot:${origin}`,
-  posted: `posted:${origin}`,
-  boilerplate: `boilerplate:${origin}`,
-  flow: `postFlow:${origin}`,
-  queue: `postQueue:${origin}`,
-  drafts: `drafts:${origin}`,
-});
-
 // ---------- saved data ----------
+// The keys are named in src/storageKeys.js (siteKeys(origin) for this
+// website's, GLOBAL_KEYS for the requests and the test hook).
+
+// The panel's own storage writes come back through storage.onChanged like
+// the popup's and the worker's; they are counted here so adoptChanges can
+// tell an echo from a change made elsewhere (the pattern popup.js uses). A
+// write that failed never echoes, so its note is taken back.
+const ownWrites = new Map();
+const noteOwn = (keys) => { for (const key of keys) ownWrites.set(key, (ownWrites.get(key) || 0) + 1); };
+const isOwnEcho = (key) => {
+  const n = ownWrites.get(key) || 0;
+  if (!n) return false;
+  if (n === 1) ownWrites.delete(key);
+  else ownWrites.set(key, n - 1);
+  return true;
+};
+async function ownSet(obj) {
+  const keys = Object.keys(obj);
+  noteOwn(keys);
+  try {
+    await chrome.storage.local.set(obj);
+  } catch (e) {
+    keys.forEach(isOwnEcho);
+    throw e;
+  }
+}
+async function ownRemove(keys) {
+  noteOwn(keys);
+  try {
+    await chrome.storage.local.remove(keys);
+  } catch (e) {
+    keys.forEach(isOwnEcho);
+    throw e;
+  }
+}
+// Read-modify-writes of the posted list, the drafts and the queue go through
+// src/storage.js under the key's lock: the popup changes all three too.
+const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet };
 
 async function loadSaved() {
-  const k = keys(state.origin);
+  const k = siteKeys(state.origin);
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts]);
   state.siteName = data[k.snapshot]?.site?.name || state.origin;
   const site = data[k.snapshot]?.site || { name: state.siteName };
@@ -81,7 +111,15 @@ async function loadSaved() {
   state.snapshotVehicles = data[k.snapshot]?.vehicles || {};
 }
 
-const saveQueue = () => (state.queue ? chrome.storage.local.set({ [keys(state.origin).queue]: state.queue }) : chrome.storage.local.remove(keys(state.origin).queue));
+const saveQueue = async () => {
+  const key = siteKeys(state.origin).queue;
+  try {
+    if (state.queue) await ownSet({ [key]: state.queue });
+    else await ownRemove([key]);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+  }
+};
 
 const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'queueMode', 'step', 'message', 'doneAt', 'map'];
 
@@ -89,14 +127,18 @@ async function saveFlow() {
   if (!state.origin) return;
   const flow = {};
   for (const f of FLOW_FIELDS) flow[f] = state[f];
-  await chrome.storage.local.set({ [keys(state.origin).flow]: flow, lastPostOrigin: state.origin });
+  try {
+    await chrome.storage.local.set({ [siteKeys(state.origin).flow]: flow, [GLOBAL_KEYS.lastPostOrigin]: state.origin });
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error'); // the quota, most likely; the post goes on from what the panel holds
+  }
 }
 
 async function clearFlow() {
   if (watcher) watcher.cancel();
   watcher = null;
   if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
-  if (state.origin) await chrome.storage.local.remove(keys(state.origin).flow);
+  if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
     vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, queueMode: false, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
@@ -122,7 +164,7 @@ const pilotNote = (change) => (state.origin ? updatePilot(state.origin, change).
 // ---------- the flow ----------
 
 async function startFlow(req) {
-  await chrome.storage.local.remove('postRequest');
+  await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
   endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
   await clearFlow();
   state.origin = req.origin;
@@ -189,8 +231,9 @@ async function startNextInQueue() {
 }
 
 // Records how this car ended and moves on: the next car, a pause, or the end.
-// The queue is re-read first: the popup may have stopped it (or paused it)
-// while this car was on the form, and a stale copy must not bring it back.
+// The queue is advanced from what is stored, under its lock: the popup may
+// have stopped it (or paused it) while this car was on the form, and a stale
+// copy must not bring it back.
 let advancing = false;
 async function afterQueueStep(outcome) {
   if (advancing) return; // the watcher and a click on the same car advance once
@@ -199,7 +242,13 @@ async function afterQueueStep(outcome) {
   try {
     if (watcher) watcher.cancel();
     if (state.vin) await pilotNote((p) => endPost(p, state.vin, outcome)); // a no-op for a car already recorded as posted or drafted
-    const stored = (await chrome.storage.local.get(keys(state.origin).queue))[keys(state.origin).queue];
+    let stored;
+    try {
+      stored = await updateKey(siteKeys(state.origin).queue, (q) => (q ? advance(q, outcome) : undefined), panelStorage);
+    } catch (e) {
+      setStatus(storageErrorText(e), 'error'); // the queue stays where it is; the button can be clicked again
+      return;
+    }
     if (!stored) {
       state.queue = null;
       await clearFlow();
@@ -208,8 +257,7 @@ async function afterQueueStep(outcome) {
       render();
       return;
     }
-    state.queue = advance(stored, outcome);
-    await saveQueue();
+    state.queue = stored;
     const next = currentVin(state.queue);
     startNext = Boolean(next && state.queue.status === 'running');
     if (!startNext) {
@@ -225,10 +273,14 @@ async function afterQueueStep(outcome) {
 }
 
 async function savedDraft() {
-  const k = keys(state.origin).drafts;
-  const fresh = (await chrome.storage.local.get(k))[k] || {}; // the popup may have changed the list meanwhile
-  state.drafts = { ...fresh, [state.vin]: { name: state.vehicle.name, savedAt: new Date().toISOString() } };
-  await chrome.storage.local.set({ [k]: state.drafts });
+  const savedAt = new Date().toISOString();
+  try {
+    // added to the list as it is stored now: the popup may have changed it meanwhile
+    state.drafts = await updateKey(siteKeys(state.origin).drafts, (fresh) => ({ ...(fresh || {}), [state.vin]: { name: state.vehicle.name, savedAt } }), panelStorage);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+    return;
+  }
   await pilotNote((p) => endPost(p, state.vin, 'draft'));
   return afterQueueStep('draft');
 }
@@ -335,7 +387,7 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
 async function openForm({ probeOnly = false } = {}) {
-  const pk = keys(state.origin).posted;
+  const pk = siteKeys(state.origin).posted;
   state.posted = (await chrome.storage.local.get(pk))[pk] || state.posted; // as it is now: the popup may have marked cars meanwhile
   const cap = capStatus(state.posted, state.settings.dailyCap);
   if (cap.reached) {
@@ -353,7 +405,7 @@ async function openForm({ probeOnly = false } = {}) {
   await saveFlow();
   await pilotNote((p) => notePostStep(p, state.vin, 'formOpenedAt'));
   try {
-    const { devOverrides } = await chrome.storage.local.get('devOverrides'); // test hook: addresses and timings only, see formMap.js
+    const devOverrides = (await chrome.storage.local.get(GLOBAL_KEYS.devOverrides))[GLOBAL_KEYS.devOverrides]; // test hook: addresses and timings only, see formMap.js
     state.map = applyOverrides(FORM_MAP, devOverrides);
     const tab = await chrome.tabs.create({ url: state.map.createUrl, active: true });
     state.fbTabId = tab.id;
@@ -470,10 +522,13 @@ async function confirmPosted() {
   const now = new Date().toISOString();
   const extra = { postedWith: 'lotsync', salesperson: state.settings.salesperson.name || '' };
   if (listingUrl) extra.listingUrl = listingUrl;
-  const pk = keys(state.origin).posted;
-  const fresh = (await chrome.storage.local.get(pk))[pk] || {}; // the popup may have marked or unmarked cars while this one was on the form
-  state.posted = markPosted(fresh, state.vehicle, state.settings.basis, now, extra);
-  await chrome.storage.local.set({ [pk]: state.posted });
+  try {
+    // recorded into the list as it is stored now: the popup may have marked or unmarked cars while this one was on the form
+    state.posted = await updateKey(siteKeys(state.origin).posted, (fresh) => markPosted(fresh || {}, state.vehicle, state.settings.basis, now, extra), panelStorage);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error'); // the post is on Facebook; the panel stays here so it can be recorded once there is room
+    return;
+  }
   await pilotNote((p) => endPost(p, state.vin, 'posted', { at: now }));
   if (watcher) watcher.cancel();
   if (state.queueMode) return afterQueueStep('posted');
@@ -652,6 +707,8 @@ function carCard() {
   </section>`;
 }
 
+const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
+
 function viewReview() {
   const cap = capStatus(state.posted, state.settings.dailyCap);
   const rw = state.settings.rewrite;
@@ -672,7 +729,7 @@ function viewReview() {
   ${vinCheckHtml()}
   ${assumptionsHtml()}
   <section>
-    <div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>
+    ${capHtml(cap)}
     <button type="button" class="primary wide" id="openForm" ${cap.reached ? 'disabled' : ''}>Open the Marketplace form</button>
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
     <button type="button" class="plain wide" id="checkForm" ${cap.reached ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
@@ -806,7 +863,7 @@ async function openUpkeep(req) {
   // the request can arrive twice (storage change + start-up read): act once
   if (req.at && req.at === lastUpkeepAt) return;
   lastUpkeepAt = req.at || Date.now();
-  await chrome.storage.local.remove('upkeepRequest');
+  await chrome.storage.local.remove(GLOBAL_KEYS.upkeepRequest);
   if (postUnderWay()) {
     setStatus(`Finish or stop the current post (${state.vehicle ? state.vehicle.name : state.vin}) first, then click that To do button again.`, 'error');
     return;
@@ -815,9 +872,9 @@ async function openUpkeep(req) {
   if (watcher) watcher.cancel();
   state.origin = req.origin;
   state.dealerTabId = req.dealerTabId || state.dealerTabId;
-  await chrome.storage.local.set({ lastPostOrigin: req.origin });
+  await chrome.storage.local.set({ [GLOBAL_KEYS.lastPostOrigin]: req.origin });
   await loadSaved();
-  const { devOverrides } = await chrome.storage.local.get('devOverrides'); // test hook: addresses and timings only
+  const devOverrides = (await chrome.storage.local.get(GLOBAL_KEYS.devOverrides))[GLOBAL_KEYS.devOverrides]; // test hook: addresses and timings only
   state.map = applyOverrides(FORM_MAP, devOverrides);
   state.step = 'upkeep';
   await startUpkeep(req, upkeepCtx);
@@ -835,7 +892,7 @@ async function openWizard(req) {
   state.origin = req.origin;
   state.dealerTabId = req.dealerTabId;
   state.windowId = req.windowId || null;
-  await chrome.storage.local.set({ lastPostOrigin: req.origin });
+  await chrome.storage.local.set({ [GLOBAL_KEYS.lastPostOrigin]: req.origin });
   await loadSaved();
   await startWizard(req);
   state.step = 'wizard';
@@ -956,8 +1013,64 @@ let panelWindowId = null;
 const forThisWindow = (req) => Boolean(req) && (!req.windowId || panelWindowId === null || req.windowId === panelWindowId);
 const isFresh = (req) => Boolean(req) && (!req.at || Date.now() - req.at <= REQUEST_MAX_AGE_MS);
 
-const REQUEST_KEYS = ['postRequest', 'setupRequest', 'upkeepRequest'];
-const handlers = { postRequest: startFlow, setupRequest: openWizard, upkeepRequest: openUpkeep };
+const handlers = { [GLOBAL_KEYS.postRequest]: startFlow, [GLOBAL_KEYS.setupRequest]: openWizard, [GLOBAL_KEYS.upkeepRequest]: openUpkeep };
+
+// Changes to this website's posted list, drafts, queue and settings made by
+// the popup or the service worker are adopted here, so the cap, the queue
+// bar and the next car's record are current without reopening the panel.
+// The panel's own writes echo back too: they are marked (ownSet), and a value
+// the panel already holds is not a change. What is redrawn: steps without a
+// text box are redrawn whole; on review and publish only the queue bar and
+// the cap line are replaced, so the description and the listing link the
+// person is typing stay put; the wizard and upkeep draw their own views.
+// When the popup stops the queue while a car is under way, that car can
+// still be finished; afterQueueStep then finds no queue and stops.
+const INPUT_STEPS = ['review', 'publish'];
+const OWN_VIEW_STEPS = ['wizard', 'upkeep'];
+function adoptChanges(changes) {
+  if (!state.origin) return;
+  const k = siteKeys(state.origin);
+  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const changed = (key) => Boolean(changes[key]) && !isOwnEcho(key);
+  let touched = false;
+  let queueChanged = false;
+  const take = (key, field, fallback) => {
+    if (!changed(key)) return;
+    const next = changes[key].newValue ?? fallback;
+    if (same(next, state[field])) return;
+    state[field] = next;
+    touched = true;
+  };
+  take(k.posted, 'posted', {});
+  take(k.drafts, 'drafts', {});
+  if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
+    state.settings = withDefaults(changes[k.settings].newValue, { name: state.siteName });
+    touched = true;
+  }
+  if (changed(k.queue)) {
+    const next = changes[k.queue].newValue ?? null;
+    if (!same(next, state.queue)) {
+      state.queue = next;
+      touched = true;
+      queueChanged = true;
+      if (!next && state.queueMode && postUnderWay()) setStatus('The queue was stopped from the popup. Finish or skip this car; the panel stops after it. Posted cars stay recorded.');
+    }
+  }
+  if (!touched || OWN_VIEW_STEPS.includes(state.step)) return;
+  if (!INPUT_STEPS.includes(state.step)) return render();
+  if (queueChanged) {
+    const bar = $('queueBar');
+    const html = queueBar();
+    if (bar) bar.outerHTML = html;
+    else if (html) $('panel').insertAdjacentHTML('afterbegin', html);
+  }
+  const capLine = $('cap');
+  if (capLine && state.settings) {
+    const cap = capStatus(state.posted, state.settings.dailyCap);
+    capLine.outerHTML = capHtml(cap);
+    for (const id of ['openForm', 'checkForm']) { const b = $(id); if (b) b.disabled = cap.reached; }
+  }
+}
 
 async function init() {
   $('panel').addEventListener('click', onClick);
@@ -971,14 +1084,15 @@ async function init() {
   }
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    adoptChanges(changes);
     for (const name of REQUEST_KEYS) {
       const req = changes[name] && changes[name].newValue;
       if (!req || !forThisWindow(req)) continue;
-      if (name === 'setupRequest') chrome.storage.local.remove('setupRequest');
+      if (name === GLOBAL_KEYS.setupRequest) chrome.storage.local.remove(GLOBAL_KEYS.setupRequest);
       handlers[name](req);
     }
   });
-  const stored = await chrome.storage.local.get([...REQUEST_KEYS, 'lastPostOrigin']);
+  const stored = await chrome.storage.local.get([...REQUEST_KEYS, GLOBAL_KEYS.lastPostOrigin]);
   // the newest request for this window wins; every request key is cleared
   // once one is acted on, so nothing stale fires on a later panel load
   const pending = REQUEST_KEYS.map((name) => ({ name, req: stored[name] })).filter(({ req }) => forThisWindow(req) && isFresh(req)).sort((a, b) => (b.req.at || 0) - (a.req.at || 0));
@@ -988,10 +1102,10 @@ async function init() {
     await chrome.storage.local.remove(REQUEST_KEYS);
     return handlers[pending[0].name](pending[0].req);
   }
-  const { lastPostOrigin } = stored;
+  const lastPostOrigin = stored[GLOBAL_KEYS.lastPostOrigin];
   if (lastPostOrigin) {
     // a post under way comes back first; an unfinished set-up only when nothing else is going on
-    const k = keys(lastPostOrigin).flow;
+    const k = siteKeys(lastPostOrigin).flow;
     const flow = (await chrome.storage.local.get(k))[k];
     if (flow && flow.step && flow.step !== 'idle') return resumeFlow(lastPostOrigin, flow);
     if (await resumeWizard(lastPostOrigin)) {

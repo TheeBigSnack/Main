@@ -8,7 +8,9 @@ import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
-import { LEGAL, acceptLegal, legalIsCurrent } from './src/legalLinks.js';
+import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
+import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
+import { updateKey, storageErrorText } from './src/storage.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -41,20 +43,9 @@ const state = {
 };
 
 // ---------- saved data (kept per website, in this browser only) ----------
-
-const storageKeys = (origin) => ({
-  snapshot: `snapshot:${origin}`,
-  diff: `diff:${origin}`,
-  posted: `posted:${origin}`,
-  settings: `settings:${origin}`,
-  boilerplate: `boilerplate:${origin}`,
-  queue: `postQueue:${origin}`,
-  drafts: `drafts:${origin}`,
-  wizardDone: `wizardDone:${origin}`,
-  wizard: `wizard:${origin}`,
-  pilot: `pilot:${origin}`,
-  flow: `postFlow:${origin}`, // the side panel's in-progress post; cleared with everything else
-});
+// The keys are named in src/storageKeys.js: siteKeys(origin) is every key
+// this website owns (the side panel's in-progress post included, so "Clear
+// everything" clears it too); SITES_KEY is the background-rescan registry.
 
 const rescanOrigins = () => (state.site ? originsFor(state.site.site || { origin: state.origin }, state.site.service) : []);
 
@@ -69,8 +60,8 @@ async function checkRescanPermission() {
 }
 
 async function loadSaved() {
-  const k = storageKeys(state.origin);
-  const data = await chrome.storage.local.get([...Object.values(k), 'sites']);
+  const k = siteKeys(state.origin);
+  const data = await chrome.storage.local.get([...Object.values(k), SITES_KEY]);
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
@@ -88,26 +79,15 @@ async function loadSaved() {
   state.drafts = data[k.drafts] || {};
   state.wizardDone = Boolean(data[k.wizardDone]);
   state.wizardActive = Boolean(data[k.wizard] && data[k.wizard].active && data[k.wizard].step !== 'done');
-  state.site = (data.sites || {})[state.origin] || null;
+  state.site = (data[SITES_KEY] || {})[state.origin] || null;
   state.pilot = data[k.pilot] || null;
   await checkRescanPermission();
 }
 
-// The registry entry the service worker reads: auto on or off for this website.
-async function setSiteAuto(auto) {
-  const data = await chrome.storage.local.get('sites');
-  const sites = data.sites || {};
-  if (!sites[state.origin]) return false;
-  sites[state.origin] = { ...sites[state.origin], auto: Boolean(auto) };
-  state.site = sites[state.origin];
-  await ownSet({ sites });
-  chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
-  return true;
-}
-
 // The popup's own storage writes come back through storage.onChanged like
 // anyone else's; they are counted here so the listener can tell an echo
-// from a change made by the side panel or the service worker.
+// from a change made by the side panel or the service worker. A write that
+// failed (the quota) never echoes, so its note is taken back.
 const ownWrites = new Map();
 const noteOwn = (keys) => { for (const key of keys) ownWrites.set(key, (ownWrites.get(key) || 0) + 1); };
 const isOwnEcho = (key) => {
@@ -118,21 +98,90 @@ const isOwnEcho = (key) => {
   return true;
 };
 async function ownSet(obj) {
-  noteOwn(Object.keys(obj));
-  await chrome.storage.local.set(obj);
+  const keys = Object.keys(obj);
+  noteOwn(keys);
+  try {
+    await chrome.storage.local.set(obj);
+  } catch (e) {
+    keys.forEach(isOwnEcho);
+    throw e;
+  }
 }
 async function ownRemove(keys) {
   noteOwn(keys);
-  await chrome.storage.local.remove(keys);
+  try {
+    await chrome.storage.local.remove(keys);
+  } catch (e) {
+    keys.forEach(isOwnEcho);
+    throw e;
+  }
 }
 
+// Read-modify-writes go through src/storage.js under the key's lock, since
+// the side panel and the service worker change the same keys (the posted
+// list, the diff, the site registry); the write itself is ownSet, so the
+// echo is ignored like any other own write.
+const popupStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet };
+
+// The registry entry the service worker reads: auto on or off for this website.
+async function setSiteAuto(auto) {
+  let sites;
+  try {
+    sites = await updateKey(SITES_KEY, (current) => {
+      if (!current || !current[state.origin]) return undefined;
+      return { ...current, [state.origin]: { ...current[state.origin], auto: Boolean(auto) } };
+    }, popupStorage);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+    return false;
+  }
+  if (!sites) return false;
+  state.site = sites[state.origin];
+  chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
+  return true;
+}
+
+// Writes what the popup holds for these fields. False when the write failed
+// (the status says why; the values stay on screen until the popup closes).
 async function save(...names) {
-  const k = storageKeys(state.origin);
+  const k = siteKeys(state.origin);
   const out = {};
   for (const name of names) out[k[name]] = state[name];
-  await ownSet(out);
+  try {
+    await ownSet(out);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+    return false;
+  }
   if (names.includes('settings') && state.settings) await saveProfile(state.settings, undefined, state.origin);
   if (names.includes('diff') || names.includes('posted')) chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
+  return true;
+}
+
+// Changes one of this website's fields from what is stored now (not from
+// the popup's copy: the side panel may have recorded a post, the worker a
+// rescan, since the popup opened), under the key's lock. `change` gets the
+// stored value and returns the next one; undefined leaves the key alone.
+async function update(name, change) {
+  const key = siteKeys(state.origin)[name];
+  try {
+    const next = await updateKey(key, change, popupStorage);
+    if (next !== undefined) state[name] = next;
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+    return false;
+  }
+  if (name === 'diff' || name === 'posted') chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
+  return true;
+}
+
+// The diff without one car's items in the given lists (a to-do item handled).
+// Undefined when nothing is stored, so nothing is written.
+function withoutVin(diff, vin, lists) {
+  if (!diff || typeof diff !== 'object') return undefined;
+  const next = { ...diff };
+  for (const list of lists) if (Array.isArray(next[list])) next[list] = next[list].filter((x) => x.vin !== vin);
+  return next;
 }
 
 function setStatus(text, kind = '') {
@@ -172,10 +221,10 @@ async function scan() {
     state.diff = r.diff;
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
     state.siteName = r.site.name;
-    await save('snapshot', 'diff', 'settings', 'boilerplate');
+    if (!(await save('snapshot', 'diff', 'settings', 'boilerplate'))) return; // the status says why (the quota); the read stays on screen
     state.pilot = await recordFlags(state.origin, r.diff, r.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
     // the scan registered the website for background rescans; show its state
-    state.site = ((await chrome.storage.local.get('sites')).sites || {})[state.origin] || null;
+    state.site = ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {})[state.origin] || null;
     await checkRescanPermission();
     state.view = 'todo';
     setStatus('');
@@ -597,11 +646,13 @@ function viewSettings() {
       <p class="hint">Off by default: descriptions come from a built-in template. Either way every draft is checked against the website's facts, and you review it before posting.</p>
     </fieldset>
     <fieldset><legend>Terms and privacy</legend>
-      <p class="hint" id="legalLinks"><a href="${esc(LEGAL.termsUrl)}" target="_blank" rel="noopener">Terms of Service</a> · <a href="${esc(LEGAL.privacyUrl)}" target="_blank" rel="noopener">Privacy Policy</a></p>
+      ${!legalHosted()
+        ? `<p class="hint" id="legalStatus">The Terms of Service and the Privacy Policy are being finalised. You will be asked to accept them here when they are published.</p>`
+        : `<p class="hint" id="legalLinks"><a href="${esc(LEGAL.termsUrl)}" target="_blank" rel="noopener">Terms of Service</a> · <a href="${esc(LEGAL.privacyUrl)}" target="_blank" rel="noopener">Privacy Policy</a></p>
       ${legalIsCurrent(s.legal)
         ? `<p class="hint" id="legalStatus">Accepted ${esc(dateOnly(s.legal.acceptedAt))} (version ${esc(s.legal.version)}).</p>`
-        : `<p class="hint" id="legalStatus">${s.legal.acceptedAt ? `You accepted version ${esc(s.legal.version || 'unknown')} on ${esc(dateOnly(s.legal.acceptedAt))}; the current version is ${esc(LEGAL.version)}` : 'Not accepted yet'}: run Set up Lot Sync, or tick here.</p>
-      <label><input type="checkbox" name="legalAccept" /> <span>I have read and accept the Terms of Service and the Privacy Policy</span></label>`}
+        : `<p class="hint" id="legalStatus">${s.legal.acceptedAt ? `You accepted version ${esc(s.legal.version || 'unknown')} on ${esc(dateOnly(s.legal.acceptedAt))}; the current version is ${esc(LEGAL.version)}` : 'Not accepted yet'}: ${state.wizardDone ? 'tick here to accept.' : 'run Set up Lot Sync, or tick here.'}</p>
+      <label><input type="checkbox" name="legalAccept" /> <span>I have read and accept the Terms of Service and the Privacy Policy</span></label>`}`}
     </fieldset>
     <div class="actions"><button type="submit" class="plain">Save settings</button><span class="hint" id="saved"></span></div>
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
@@ -610,7 +661,57 @@ function viewSettings() {
       <p class="hint">Your profile (name, role, dealership, price basis, note, cap, listing defaults, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
       <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>
     </fieldset>
+    <fieldset><legend>Report a problem</legend>
+      <p class="hint">Copies a short technical report to paste into your message to support: the versions, this website and its platform, the last scan and its error, the tab counts, which form fields the last fill couldn't do, your Chrome version and time zone. No names, no cars, no listing links.</p>
+      <button type="button" class="small" data-action="reportProblem">Copy problem report</button>
+    </fieldset>
   </form>`;
+}
+
+// ---------- report a problem ----------
+
+// Chrome's version, from the client hints when the popup has them, else the
+// Chrome/ token of the user-agent string.
+function chromeVersion() {
+  const uad = navigator.userAgentData;
+  const brands = uad && Array.isArray(uad.brands) ? uad.brands : [];
+  const b = brands.find((x) => /google chrome/i.test(x.brand)) || brands.find((x) => /chromium/i.test(x.brand));
+  if (b && b.version) return String(b.version);
+  const m = /Chrome\/(\d+[\d.]*)/.exec(navigator.userAgent || '');
+  return m ? m[1] : 'unknown';
+}
+
+// A plain-text diagnostic for a support message: the versions, the website
+// and its adapter, when the last scan ran and what failed, the counts on each
+// tab, the field keys the last fill could not do, Chrome's version and the
+// time zone. Nothing personal: no names, no VINs, no descriptions, no
+// listing links.
+function problemReport() {
+  const l = lists();
+  const site = state.site || {};
+  const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
+  const fills = state.pilot && Array.isArray(state.pilot.fills) ? state.pilot.fills : [];
+  const lastFill = fills.length ? fills[fills.length - 1] : null;
+  const keysOf = (list) => (Array.isArray(list) && list.length ? list.filter((k) => typeof k === 'string').join(', ') : 'none');
+  const permission = state.rescanPermission === null ? 'unknown' : state.rescanPermission ? 'granted' : 'not granted';
+  return [
+    'Lot Sync problem report',
+    `Lot Sync version: ${version || 'unknown'}`,
+    `Form map version: ${FORM_MAP.version}`,
+    `Website: ${state.origin || 'none open'}`,
+    `Adapter: ${site.adapter || 'unknown'}`,
+    `Last scan: ${state.diff?.takenAt || state.snapshot?.takenAt || 'never'}`,
+    `Last automatic rescan attempt: ${site.lastAttempt || 'never'}`,
+    `Last error: ${site.lastError || 'none'}`,
+    `Automatic rescans: ${site.auto ? 'on' : 'off'}; background permission: ${permission}`,
+    `Counts: to do ${todoCount()}, ready to post ${l.ready.length}, not ready ${l.notReady.length}, other stores ${l.otherStores.length}, needs a look ${l.review.length + l.skipped.length}, my listings ${l.mine.length}, queue: ${state.queue ? describeQueue(state.queue) : 'none'}`,
+    lastFill
+      ? `Last fill: ${lastFill.at || 'unknown time'}, form map ${lastFill.mapVersion || 'unknown'}, build ${lastFill.version || 'unknown'}; needed a click: ${keysOf(lastFill.partial)}; couldn't fill: ${keysOf(lastFill.blocked)}; changed by the form afterwards: ${keysOf(lastFill.changed)}`
+      : 'Last fill: none recorded',
+    `Chrome: ${chromeVersion()}`,
+    `Time zone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+    `Reported: ${new Date().toISOString()}`,
+  ].join('\n');
 }
 
 function render() {
@@ -637,15 +738,11 @@ async function onPanelClick(ev) {
   const btn = ev.target.closest('button[data-action]');
   if (!btn) return;
   const vin = btn.dataset.vin;
-  const dropFromDiff = (list) => {
-    if (state.diff && Array.isArray(state.diff[list])) state.diff[list] = state.diff[list].filter((x) => x.vin !== vin);
-  };
   switch (btn.dataset.action) {
     case 'post': {
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry) return;
-      state.posted = markPosted(state.posted, entry, state.settings?.basis);
-      await save('posted');
+      await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis));
       break;
     }
     case 'openPost': {
@@ -665,7 +762,7 @@ async function onPanelClick(ev) {
       } catch (e) {
         opened = false;
       }
-      await chrome.storage.local.set({ postRequest: { origin: state.origin, vin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
+      await chrome.storage.local.set({ [GLOBAL_KEYS.postRequest]: { origin: state.origin, vin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
       setStatus(opened ? `Continue in the side panel: ${entry.name}` : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue posting this car.');
       return;
     }
@@ -701,10 +798,15 @@ async function onPanelClick(ev) {
         opened = false;
       }
       state.queue = queue;
-      await ownSet({
-        [storageKeys(state.origin).queue]: queue,
-        postRequest: { origin: state.origin, vin: first, dealerTabId: state.tab.id, windowId: state.tab.windowId, queue: true, at: Date.now() },
-      });
+      try {
+        await ownSet({
+          [siteKeys(state.origin).queue]: queue,
+          [GLOBAL_KEYS.postRequest]: { origin: state.origin, vin: first, dealerTabId: state.tab.id, windowId: state.tab.windowId, queue: true, at: Date.now() },
+        });
+      } catch (e) {
+        setStatus(storageErrorText(e), 'error');
+        return;
+      }
       if (!opened) setStatus('Open the Lot Sync side panel (Chrome menu → Side panel) to work through the queue.');
       else setStatus(`Queue of ${queue.vins.length}: continue in the side panel.`);
       render();
@@ -712,7 +814,7 @@ async function onPanelClick(ev) {
     }
     case 'clearQueue':
       state.queue = null;
-      await ownRemove([storageKeys(state.origin).queue]);
+      await ownRemove([siteKeys(state.origin).queue]);
       break;
     case 'upkeep': {
       // Hands a to-do item to the side panel: it opens the listing, fills the
@@ -727,7 +829,7 @@ async function onPanelClick(ev) {
       } catch (e) {
         opened = false;
       }
-      await chrome.storage.local.set({ upkeepRequest: item });
+      await chrome.storage.local.set({ [GLOBAL_KEYS.upkeepRequest]: item });
       setStatus(opened ? `Continue in the side panel: ${item.name}` : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue.');
       return;
     }
@@ -739,13 +841,13 @@ async function onPanelClick(ev) {
       } catch (e) {
         opened = false;
       }
-      await chrome.storage.local.set({ setupRequest: { origin: state.origin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
+      await chrome.storage.local.set({ [GLOBAL_KEYS.setupRequest]: { origin: state.origin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
       setStatus(opened ? 'Continue in the side panel.' : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue set-up.');
       return;
     }
     case 'skipSetup':
       state.wizardDone = true;
-      await ownSet({ [storageKeys(state.origin).wizardDone]: { skipped: true, at: new Date().toISOString() } });
+      await ownSet({ [siteKeys(state.origin).wizardDone]: { skipped: true, at: new Date().toISOString() } });
       setStatus('Settings has the same fields. Set-up can be run later after "Clear everything for this website".');
       break;
     case 'allowRescans': {
@@ -771,22 +873,17 @@ async function onPanelClick(ev) {
       break;
     }
     case 'unpost':
-      state.posted = markTakenDown(state.posted, vin);
-      await save('posted');
+      await update('posted', (p) => markTakenDown(p || {}, vin));
       notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
       break;
     case 'takenDown':
-      state.posted = markTakenDown(state.posted, vin);
-      dropFromDiff('takeDown');
-      dropFromDiff('priceUpdates');
-      dropFromDiff('needsALook');
-      await save('posted', 'diff');
+      await update('posted', (p) => markTakenDown(p || {}, vin));
+      await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook']));
       notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
       break;
     case 'priceUpdated':
-      state.posted = markPriceUpdated(state.posted, vin, Number(btn.dataset.price));
-      dropFromDiff('priceUpdates');
-      await save('posted', 'diff');
+      await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price)));
+      await update('diff', (d) => withoutVin(d, vin, ['priceUpdates']));
       notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
       break;
     case 'pilotCsv': {
@@ -811,6 +908,14 @@ async function onPanelClick(ev) {
         setStatus("Couldn't copy: " + ((e && e.message) || e), 'error');
       }
       return;
+    case 'reportProblem':
+      try {
+        await navigator.clipboard.writeText(problemReport());
+        setStatus('Copied. Paste it into your report.');
+      } catch (e) {
+        setStatus("Couldn't copy: " + ((e && e.message) || e), 'error');
+      }
+      return;
     case 'forgetProfile':
       try {
         await chrome.storage.sync.remove(PROFILE_KEY);
@@ -827,7 +932,7 @@ async function onPanelClick(ev) {
       }
       pilotClearArmed = false;
       state.pilot = null;
-      await ownRemove([storageKeys(state.origin).pilot]);
+      await ownRemove([siteKeys(state.origin).pilot]);
       setStatus('Pilot numbers cleared for this website.');
       break;
     case 'clear':
@@ -837,18 +942,21 @@ async function onPanelClick(ev) {
         return;
       }
       Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
-      await ownRemove(Object.values(storageKeys(state.origin)));
-      {
-        // forget the website for background rescans too, and take its count off the badge
-        const data = await chrome.storage.local.get('sites');
-        if (data.sites && data.sites[state.origin]) {
-          delete data.sites[state.origin];
-          await ownSet({ sites: data.sites });
-        }
+      await ownRemove(Object.values(siteKeys(state.origin)));
+      // forget the website for background rescans too, and take its count off the badge
+      try {
+        await updateKey(SITES_KEY, (sites) => {
+          if (!sites || !sites[state.origin]) return undefined;
+          const next = { ...sites };
+          delete next[state.origin];
+          return next;
+        }, popupStorage);
+        setStatus('Cleared. Scan again, or run set-up, to start over.');
+      } catch (e) {
+        setStatus(storageErrorText(e), 'error');
       }
       chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
       clearArmed = false;
-      setStatus('Cleared. Scan again, or run set-up, to start over.');
       break;
     default:
       return;
@@ -875,7 +983,7 @@ async function onSettingsSubmit(ev) {
       defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },
       autoRescan: form.get('autoRescan') === 'on',
       notify: form.get('notify') === 'on',
-      legal: form.get('legalAccept') === 'on' ? acceptLegal() : prev.legal, // the tick is the same acceptance the wizard's Terms step records
+      legal: form.get('legalAccept') === 'on' && legalHosted() ? acceptLegal() : prev.legal, // the tick is the same acceptance the wizard's Terms step records; nothing while the documents are placeholders
     },
     { name: state.siteName }
   );
@@ -929,7 +1037,7 @@ async function init() {
     // already what the popup holds is not a change, so nothing is redrawn
     // under the person's pointer.
     if (area !== 'local' || !state.origin) return;
-    const k = storageKeys(state.origin);
+    const k = siteKeys(state.origin);
     const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
     let touched = false;
     const changed = (key) => Boolean(changes[key]) && !isOwnEcho(key);
@@ -953,9 +1061,9 @@ async function init() {
     }
     if (changed(k.wizardDone)) { const v = Boolean(changes[k.wizardDone].newValue); if (v !== state.wizardDone) { state.wizardDone = v; touched = true; } }
     if (changed(k.wizard)) { const w = changes[k.wizard].newValue; const v = Boolean(w && w.active && w.step !== 'done'); if (v !== state.wizardActive) { state.wizardActive = v; touched = true; } }
-    if (changed('sites')) {
+    if (changed(SITES_KEY)) {
       const before = scheduleBanner();
-      state.site = (changes.sites.newValue || {})[state.origin] || null;
+      state.site = (changes[SITES_KEY].newValue || {})[state.origin] || null;
       if (scheduleBanner() !== before) touched = true;
     }
     // while a scan runs, its final render draws everything at once

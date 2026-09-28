@@ -16,6 +16,8 @@ import { markPriceUpdated, markTakenDown } from './src/rescan.js';
 import { fillPriceInPage, readListingInPage } from './facebook/fillForm.js';
 import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { resolveFlag, updatePilot } from './src/pilot.js';
+import { siteKeys } from './src/storageKeys.js';
+import { updateKey, storageErrorText } from './src/storage.js';
 
 export const up = {
   active: false,
@@ -132,25 +134,32 @@ async function poll(ctx) {
   }
 }
 
+// The diff without this car's items in the given lists; undefined when no
+// diff is stored, so nothing is written.
+function dropFromDiff(diff, lists) {
+  if (!diff || typeof diff !== 'object') return undefined;
+  const next = { ...diff };
+  for (const list of lists) if (Array.isArray(next[list])) next[list] = next[list].filter((x) => x.vin !== up.vin);
+  return next;
+}
+
 async function finish(ctx, how) {
   stopPolling();
-  const k = (name) => `${name}:${up.origin}`;
-  const data = await chrome.storage.local.get([k('posted'), k('diff')]);
-  let posted = data[k('posted')] || {};
-  const diff = data[k('diff')] || null;
-  const drop = (list) => { if (diff && Array.isArray(diff[list])) diff[list] = diff[list].filter((x) => x.vin !== up.vin); };
-  if (up.kind === 'price') {
-    posted = markPriceUpdated(posted, up.vin, up.price);
-    drop('priceUpdates');
-  } else {
-    posted = markTakenDown(posted, up.vin);
-    drop('takeDown');
-    drop('priceUpdates');
-    drop('needsALook');
+  // The posted list and the diff are changed from what is stored now, each
+  // under its key's lock (src/storage.js): the popup and the worker write
+  // them too. A write that fails (the quota) leaves the item open, with the
+  // reason shown, so "I updated it" can be clicked again once there is room.
+  const k = siteKeys(up.origin);
+  const price = up.kind === 'price';
+  try {
+    await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
+    await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook']));
+  } catch (e) {
+    up.error = storageErrorText(e);
+    ctx.render();
+    return;
   }
-  const save = { [k('posted')]: posted };
-  if (diff) save[k('diff')] = diff;
-  await chrome.storage.local.set(save);
+  up.error = '';
   // pilot numbers: how long the item stayed open, and whether Lot Sync saw the change itself
   await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, up.kind === 'price' ? 'price' : 'takeDown', { how })).catch(() => null);
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});

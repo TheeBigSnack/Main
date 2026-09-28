@@ -10,16 +10,26 @@
 // No customer or buyer data, and nothing from Facebook beyond what the posted
 // registry already holds. Everything here is pure; updatePilot at the end is
 // the one storage helper the popup, the side panel and the worker share, and
-// it holds a lock so those three never overwrite each other's writes. Times
-// are stored as ISO; only the CSV and the file name show them in local time.
+// it runs under the key's lock (src/storage.js) so those three never
+// overwrite each other's writes. Times are stored as ISO; only the CSV and
+// the file name show them in local time.
 
+import { pilotKey } from './storageKeys.js';
+import { updateKey } from './storage.js';
+
+export { pilotKey };
 export const PILOT_VERSION = 1;
-export const pilotKey = (origin) => `pilot:${origin}`;
 export const POST_OUTCOMES = Object.freeze(['posted', 'draft', 'skipped', 'blocked', 'not-posted', 'abandoned']);
 export const FLAG_KINDS = Object.freeze(['takeDown', 'price']);
 export const FLAG_HOWS = Object.freeze(['detected', 'manual', 'cleared']);
 export const POST_STEPS = Object.freeze(['reviewedAt', 'formOpenedAt', 'filledAt']);
-const MAX_ENTRIES = 2000; // per list; the oldest are dropped beyond that
+// Each list keeps this many entries at most, and nothing older than the
+// retention window (the pilot agreement's numbers are weekly; the CSV is
+// how they leave the browser, so an old record is one that was exported
+// long ago). Open to-do flags stay whatever their age.
+export const PILOT_RETENTION_DAYS = 90;
+const MAX_ENTRIES = 500; // per list; the oldest are dropped beyond that
+const RETENTION_MS = PILOT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 const nowIso = () => new Date().toISOString();
 const ms = (iso) => {
@@ -49,7 +59,21 @@ export const hasPilotData = (pilot) => {
   return p.posts.length > 0 || p.fills.length > 0 || p.flags.length > 0;
 };
 
-const trim = (list) => (list.length > MAX_ENTRIES ? list.slice(list.length - MAX_ENTRIES) : list);
+// The newest MAX_ENTRIES entries, none older than the retention window as of
+// `now` (the time of the change being recorded). `stamp` reads an entry's
+// time; `keep` names entries that stay whatever their age or the count (open
+// flags). An entry whose stamp cannot be read counts as new. The list is
+// oldest first, so the oldest droppable entries go first.
+function trim(list, now, stamp, keep = () => false) {
+  const at = ms(now);
+  const recent = at === null ? list : list.filter((e) => keep(e) || (ms(stamp(e)) ?? at) >= at - RETENTION_MS);
+  if (recent.length <= MAX_ENTRIES) return recent;
+  let excess = recent.length - MAX_ENTRIES;
+  return recent.filter((e) => {
+    if (excess > 0 && !keep(e)) { excess -= 1; return false; }
+    return true;
+  });
+}
 const clean = (s, max = 120) => String(s ?? '').slice(0, max);
 
 function openPostIndex(posts, vin) {
@@ -67,7 +91,7 @@ export function beginPost(pilot, { vin, name = '', salesperson = '', queue = fal
   if (!key) return p;
   const posts = p.posts.map((a) => (a.vin === key && !a.endedAt ? { ...a, endedAt: at, outcome: 'abandoned', seconds: secondsBetween(a.startedAt, at) } : a));
   posts.push({ vin: key, name: clean(name, 80), salesperson: clean(salesperson, 60), queue: Boolean(queue), startedAt: at });
-  return { ...p, posts: trim(posts) };
+  return { ...p, posts: trim(posts, at, (a) => a.startedAt) };
 }
 
 // reviewedAt and formOpenedAt keep their first time; filledAt keeps the latest
@@ -116,7 +140,7 @@ export function noteFill(pilot, { vin, fill, at = nowIso(), mapVersion = '', ver
     changed: keysOf(f.changedAfterFill),
     preexisting: Array.isArray(f.preexisting) && f.preexisting.length > 0,
   };
-  return { ...p, fills: trim([...p.fills, entry]) };
+  return { ...p, fills: trim([...p.fills, entry], at, (f) => f.at) };
 }
 
 // ---------- to-do flags ----------
@@ -147,7 +171,7 @@ export function noteFlags(pilot, diff, { at } = {}) {
   for (const w of wanted) {
     if (!flags.some((f) => flagOpen(f) && f.vin === w.vin && f.kind === w.kind)) flags.push({ ...w, flaggedAt: when });
   }
-  return { ...p, flags: trim(flags) };
+  return { ...p, flags: trim(flags, when, (f) => f.doneAt || f.flaggedAt, flagOpen) };
 }
 
 // The item was handled: Lot Sync saw the listing change (detected), the person
@@ -324,9 +348,16 @@ export function pilotText(summary, { site = '' } = {}) {
   return lines.join('\n');
 }
 
+// One cell of the spreadsheet. A string that starts like a formula (=, +, -,
+// @, a tab or a carriage return) gets a leading apostrophe so a spreadsheet
+// shows it as text instead of running it (a car's name or a salesperson's
+// comes from outside); numbers are written as they are. Quotes, commas,
+// apostrophes and line breaks put the cell in quotes.
 const csvCell = (v) => {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  if (v === null || v === undefined) return '';
+  let s = String(v);
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",'\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 const csvRow = (cells) => cells.map(csvCell).join(',');
 
@@ -414,23 +445,11 @@ export function pilotFileName(now = nowIso(), { site = '', salesperson = '', tim
 
 // Read, change, write: the popup, the side panel and the service worker all
 // use this, sometimes at the same moment (a rescan lands while a post is being
-// recorded). chrome.storage has no transactions, so two callers that both read
-// before either writes lose one write; the get/change/set runs under a Web
-// Lock named after the key, which the three share since they share the
-// extension's origin. An injected storage may bring its own lock(name, fn)
-// (tests); without either the call runs unlocked. A failure here must never
-// stop a post, so callers catch.
-export async function updatePilot(origin, change, storage) {
-  const area = storage || chrome.storage.local;
-  const key = pilotKey(origin);
-  const run = async () => {
-    const data = await area.get(key);
-    const next = change(withPilotDefaults(data[key]));
-    await area.set({ [key]: next });
-    return next;
-  };
-  if (typeof area.lock === 'function') return area.lock(key, run);
-  return globalThis.navigator && navigator.locks ? navigator.locks.request(key, run) : run();
+// recorded). updateKey (src/storage.js) runs the get/change/set under a lock
+// named after the key; an injected storage may bring its own get, set and
+// lock (tests). A failure here must never stop a post, so callers catch.
+export function updatePilot(origin, change, storage) {
+  return updateKey(pilotKey(origin), (current) => change(withPilotDefaults(current)), storage);
 }
 
 export const recordFlags = (origin, diff, at, storage) => updatePilot(origin, (p) => noteFlags(p, diff, { at }), storage);

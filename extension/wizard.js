@@ -11,7 +11,8 @@ import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
-import { LEGAL, acceptLegal } from './src/legalLinks.js';
+import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
+import { siteKeys } from './src/storageKeys.js';
 
 const STEPS = ['welcome', 'scan', 'store', 'you', 'address', 'permission', 'rules', 'terms', 'done'];
 
@@ -26,7 +27,7 @@ export const wiz = {
 };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const key = (origin) => `wizard:${origin}`;
+const key = (origin) => siteKeys(origin).wizard; // the wizard's own persisted state
 
 async function persist() {
   if (!wiz.origin) return;
@@ -76,12 +77,12 @@ async function runScan(ctx) {
   wiz.busy = true;
   wiz.error = '';
   ctx.render();
-  const k = (name) => `${name}:${wiz.origin}`;
-  const data = await chrome.storage.local.get([k('snapshot'), k('posted')]);
+  const k = siteKeys(wiz.origin);
+  const data = await chrome.storage.local.get([k.snapshot, k.posted]);
   let r;
   try {
     const tabId = await findDealerTab();
-    r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, snapshot: data[k('snapshot')] || null, posted: data[k('posted')] || {} });
+    r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, snapshot: data[k.snapshot] || null, posted: data[k.posted] || {} });
   } catch (e) {
     r = { ok: false, message: TAB_GONE + ' (' + ((e && e.message) || e) + ')' };
   }
@@ -96,10 +97,10 @@ async function runScan(ctx) {
   wiz.site = r.site;
   // Like the popup and the background rescan: a scan that lost most of the
   // lot at once is a website hiccup, so the last good snapshot is kept.
-  const kept = r.diff.unreliable && data[k('snapshot')] ? data[k('snapshot')] : r.snapshot;
+  const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
   const stores = [...new Set(r.vehicles.map((v) => v.location).filter(Boolean))].sort();
   wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [] };
-  await chrome.storage.local.set({ [k('snapshot')]: kept, [k('diff')]: r.diff, [k('boilerplate')]: r.boilerplate, [k('settings')]: r.settings });
+  await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: r.diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
   await recordFlags(wiz.origin, r.diff, r.diff.takenAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   await persist();
@@ -163,12 +164,21 @@ export function wizardHtml() {
         <ol class="rules">${POSTING_RULES.map((r) => `<li><b>${esc(r.title)}</b> ${esc(r.text)}</li>`).join('')}</ol>
         <label class="block"><input type="checkbox" id="wizRulesRead" ${wiz.rulesRead ? 'checked' : ''} /> I have read the posting rules and will follow them</label>
         ${nav(true, 'Next', 'wizNext', !wiz.rulesRead)}`;
-    case 'terms':
+    case 'terms': {
+      const summary = `<p>In short: Lot Sync reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login. You publish every post yourself. Lot Sync is not affiliated with Meta Platforms, Inc.</p>`;
+      if (!legalHosted()) {
+        // The documents are not published yet: nobody is asked to accept what they cannot read.
+        return `${progress}<h3>Terms and privacy</h3>
+        ${summary}
+        <p class="hint" id="legalPending">The Terms of Service and the Privacy Policy are being finalised. You will be asked to accept them here when they are published; nothing is recorded until then.</p>
+        ${nav(true, wiz.busy ? 'Finishing…' : 'Finish set-up', 'wizFinish', wiz.busy)}${error}`;
+      }
       return `${progress}<h3>Terms and privacy</h3>
         <p>Two documents to read before you post: the <a href="${esc(LEGAL.termsUrl)}" target="_blank" rel="noopener">Terms of Service</a> and the <a href="${esc(LEGAL.privacyUrl)}" target="_blank" rel="noopener">Privacy Policy</a>.</p>
-        <p>In short: Lot Sync reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login. You publish every post yourself. Lot Sync is not affiliated with Meta Platforms, Inc.</p>
+        ${summary}
         <label class="block"><input type="checkbox" id="wizTermsRead" ${wiz.termsAccepted ? 'checked' : ''} /> I have read and accept the Terms of Service and the Privacy Policy</label>
         ${nav(true, wiz.busy ? 'Finishing…' : 'Finish set-up', 'wizFinish', !wiz.termsAccepted || wiz.busy)}${error}`;
+    }
     case 'done':
       return `${progress}<div class="banner good"><b>Set up.</b> ${wiz.scan ? `${wiz.scan.ready} car${wiz.scan.ready === 1 ? ' is' : 's are'} ready to post.` : ''} Click the Lot Sync icon and open <b>Ready to post</b>.${wiz.granted ? ' Automatic rescans are on; the icon shows your to-do count.' : ''}</div>
         <div class="actions"><button type="button" class="primary" id="wizClose">Close</button></div>`;
@@ -199,10 +209,10 @@ async function finish(ctx) {
   wiz.busy = true;
   ctx.render();
   const now = new Date().toISOString();
-  const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: now, legal: acceptLegal(now) }, wiz.site || {});
+  const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: now, legal: legalHosted() && wiz.termsAccepted ? acceptLegal(now) : (wiz.settings && wiz.settings.legal) || undefined }, wiz.site || {});
   wiz.settings = settings;
-  const k = (name) => `${name}:${wiz.origin}`;
-  await chrome.storage.local.set({ [k('settings')]: settings });
+  const k = siteKeys(wiz.origin);
+  await chrome.storage.local.set({ [k.settings]: settings });
   await saveProfile(settings, undefined, wiz.origin);
   // the site registry must agree with the settings even if the final read below fails
   await rememberSite(wiz.origin, { auto: Boolean(settings.autoRescan) });
@@ -210,7 +220,7 @@ async function finish(ctx) {
   const ok = await runScan(ctx);
   wiz.busy = false;
   if (!ok) { ctx.render(); return; }
-  await chrome.storage.local.set({ [`wizardDone:${wiz.origin}`]: new Date().toISOString() });
+  await chrome.storage.local.set({ [k.wizardDone]: new Date().toISOString() });
   chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
   wiz.step = 'done';
   await persist();

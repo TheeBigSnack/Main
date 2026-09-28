@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   withPilotDefaults, hasPilotData, beginPost, notePostStep, endPost, noteFill, noteFlags, resolveFlag,
   summarizePilot, pilotText, pilotCsv, pilotFileName, updatePilot, recordFlags, median, secondsBetween, hoursBetween, pilotKey,
-  DEFINITIONS, fmtLocal,
+  DEFINITIONS, fmtLocal, PILOT_RETENTION_DAYS,
 } from '../extension/src/pilot.js';
 import { diffScans } from '../extension/src/rescan.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
@@ -221,7 +221,7 @@ test('the text summary and the CSV say the same numbers; the CSV quotes what nee
   assert.ok(lines.includes('Median seconds per post,50'));
   assert.ok(lines.includes('Sold cars still listed,1'));
   assert.ok(lines.includes('Roger,2,45'));
-  assert.ok(lines.includes("Field,Attempts,Filled,Needed a click,Couldn't fill,Changed by the form afterwards,Failure rate %"));
+  assert.ok(lines.includes('Field,Attempts,Filled,Needed a click,"Couldn\'t fill",Changed by the form afterwards,Failure rate %'), 'an apostrophe puts the cell in quotes');
   assert.ok(lines.includes('Make,3,1,0,2,0,67'));
   assert.ok(lines.includes('2026-10-26 05:00,Roger,Car 1,VIN00001,posted,40,no,0,,,'));
   assert.ok(lines.includes('2026-10-26 05:06,Roger,Car 6,VIN00006,in progress,,no,,,,'));
@@ -230,6 +230,12 @@ test('the text summary and the CSV say the same numbers; the CSV quotes what nee
   assert.ok(lines.includes('2026-10-26 05:10,sold / take down,Car 2,VIN00002,,open,5,,'));
   assert.ok(lines.includes('2026-10-26 05:10,price change,Car 3,VIN00003,2026-10-26 08:10,manual,3,20000,19000'));
   assert.doesNotMatch(csv, /\d\dT\d\d:\d\d/, 'no ISO timestamps reach the spreadsheet');
+  // a name that starts like a formula is written as text, never run by the spreadsheet; numbers stay numbers
+  const hostile = endPost(beginPost(withComma, { vin: 'VIN00008', name: '-Car', salesperson: '=HYPERLINK("x")', at: T(22) }), 'VIN00008', 'posted', { at: T(23) });
+  const hostileLines = pilotCsv(hostile, { now: T(310), labels, timeZone: 'America/New_York' }).split('\r\n');
+  assert.ok(hostileLines.includes(`2026-10-26 05:22,"'=HYPERLINK(""x"")","'-Car",VIN00008,posted,60,no,,,,`), hostileLines.filter((l) => /VIN00008/.test(l)).join(' | '));
+  assert.ok(hostileLines.includes(`"'=HYPERLINK(""x"")",1,60`), 'the salesperson table too');
+  assert.ok(hostileLines.includes('2026-10-26 05:10,price change,Car 3,VIN00003,2026-10-26 08:10,manual,3,20000,19000'), 'numbers are not prefixed');
   assert.ok(csv.endsWith('\r\n'));
   assert.equal(withComma.posts[0].startedAt, T(0), 'storage keeps ISO');
   // the same export in another zone, and the local zone when none is given
@@ -303,24 +309,30 @@ test('the storage helper reads, changes and writes one key; a failure is the cal
 // gets sent before either set both see the same old record, and the second
 // set then wipes out the first. That is the lost update updatePilot's lock
 // exists for (a background rescan recording a flag while the side panel
-// records a post).
+// records a post). src/storage.js provides the lock: a Web Lock in the
+// browser, a promise-chain mutex here.
 function tickStorage() {
   const store = {};
   const later = (fn) => new Promise((resolve) => setTimeout(() => resolve(fn()), 0));
   return { store, get: (key) => later(() => ({ [key]: store[key] })), set: (obj) => later(() => { Object.assign(store, obj); }) };
 }
 
-test('two callers at once: without a lock one write is lost; with storage.lock both survive', async () => {
+test('two callers at once: a lock that does nothing loses one write; the fallback mutex and an injected storage.lock keep both', async () => {
   const origin = 'https://example-dealer.test';
   const key = pilotKey(origin);
   const diff = { warnings: [], takeDown: [{ vin: RAM, yours: true, name: 'Ram', why: 'gone' }], priceUpdates: [], takenAt: T(5) };
   const post = (storage) => updatePilot(origin, (p) => beginPost(p, { vin: 'A', at: T(0) }), storage);
 
-  const bare = tickStorage();
+  const bare = { ...tickStorage(), lock: (name, fn) => fn() }; // a lock that holds nothing: the hazard itself
   await Promise.all([post(bare), recordFlags(origin, diff, T(5), bare)]);
   const lost = bare.store[key];
   assert.equal(lost.posts.length + lost.flags.length, 1, 'unlocked, the second set overwrites the first: one of the two is gone');
   assert.equal(lost.posts.length, 0, 'the post (recorded first) is the one lost');
+
+  const fallback = tickStorage(); // no lock of its own and no Web Locks under node: updateKey's own mutex
+  await Promise.all([post(fallback), recordFlags(origin, diff, T(5), fallback)]);
+  assert.equal(fallback.store[key].posts.length, 1);
+  assert.equal(fallback.store[key].flags.length, 1);
 
   const locked = tickStorage();
   const chains = new Map(); // a promise-chain mutex per name, the shape navigator.locks.request has
@@ -360,9 +372,48 @@ test('in the browser the lock is a Web Lock on the pilot key', async () => {
   }
 });
 
-test('the lists stay bounded', () => {
+test('the lists stay bounded at 500', () => {
   let p = null;
-  for (let i = 0; i < 2005; i += 1) p = endPost(beginPost(p, { vin: `V${i}`, at: T(0) }), `V${i}`, 'posted', { at: T(1) });
-  assert.equal(p.posts.length, 2000);
+  for (let i = 0; i < 505; i += 1) p = endPost(beginPost(p, { vin: `V${i}`, at: T(0) }), `V${i}`, 'posted', { at: T(1) });
+  assert.equal(p.posts.length, 500);
   assert.equal(p.posts[0].vin, 'V5', 'the oldest go first');
+  // open flags are never dropped for the count: 505 open, then 5 closed and 2 new ones
+  const many = { warnings: [], takeDown: [], priceUpdates: [], takenAt: T(0) };
+  for (let i = 0; i < 505; i += 1) many.takeDown.push({ vin: `F${i}`, yours: true, name: `Car ${i}` });
+  let q = noteFlags(null, many);
+  assert.equal(q.flags.length, 505);
+  for (let i = 0; i < 5; i += 1) q = resolveFlag(q, `F${i}`, 'takeDown', { at: T(1) });
+  // the next scan no longer lists the five handled cars, and brings two new ones
+  q = noteFlags(q, { ...many, takeDown: [...many.takeDown.slice(5), { vin: 'NEW1', yours: true, name: 'New 1' }, { vin: 'NEW2', yours: true, name: 'New 2' }], takenAt: T(2) });
+  assert.equal(q.flags.length, 502, 'the five closed flags went, the open ones stayed');
+  assert.ok(q.flags.every((f) => !f.doneAt));
+});
+
+test('posts and fills older than 90 days go when the next one is recorded; open flags stay whatever their age, closed ones go', () => {
+  assert.equal(PILOT_RETENTION_DAYS, 90);
+  const DAY = 24 * 60 * 60 * 1000;
+  const old = new Date(Date.UTC(2026, 5, 1, 9, 0)).toISOString(); // June 1
+  const later = (days) => new Date(Date.parse(old) + days * DAY).toISOString();
+  let p = endPost(beginPost(null, { vin: 'OLD', at: old }), 'OLD', 'posted', { at: old });
+  p = noteFill(p, { vin: 'OLD', at: old, fill: {} });
+  p = noteFlags(p, { warnings: [], takeDown: [{ vin: 'OPEN', yours: true, name: 'Open' }, { vin: 'DONE', yours: true, name: 'Done' }], priceUpdates: [], takenAt: old });
+  p = resolveFlag(p, 'DONE', 'takeDown', { at: old, how: 'manual' });
+  // 89 days on: everything is still there
+  let q = noteFill(beginPost(p, { vin: 'NEW', at: later(89) }), { vin: 'NEW', at: later(89), fill: {} });
+  assert.deepEqual(q.posts.map((a) => a.vin), ['OLD', 'NEW']);
+  assert.deepEqual(q.fills.map((f) => f.vin), ['OLD', 'NEW']);
+  // 91 days on: the old post and fill go; the closed flag goes, the open one stays
+  q = beginPost(p, { vin: 'NEW', at: later(91) });
+  assert.deepEqual(q.posts.map((a) => a.vin), ['NEW']);
+  q = noteFill(q, { vin: 'NEW', at: later(91), fill: {} });
+  assert.deepEqual(q.fills.map((f) => f.vin), ['NEW']);
+  q = noteFlags(q, { warnings: ['incomplete'], takeDown: [], priceUpdates: [], takenAt: later(91) }); // a scan with a warning keeps open flags open
+  assert.deepEqual(q.flags.map((f) => [f.vin, Boolean(f.doneAt)]), [['OPEN', false]]);
+  // a flag closed recently stays even though it was flagged long ago: its age counts from when it was done
+  let r = resolveFlag(p, 'OPEN', 'takeDown', { at: later(100), how: 'detected' });
+  r = noteFlags(r, { warnings: [], takeDown: [], priceUpdates: [], takenAt: later(101) });
+  assert.deepEqual(r.flags.map((f) => f.vin), ['OPEN']);
+  // a stamp that cannot be read never causes a drop
+  const odd = { version: 1, posts: [{ vin: 'X', startedAt: 'garbage' }], fills: [], flags: [] };
+  assert.equal(beginPost(odd, { vin: 'Y', at: later(200) }).posts.length, 2);
 });

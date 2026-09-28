@@ -155,7 +155,10 @@ test('the dealer-site scan reaches the dealer tab only through the neutral probe
   const known = (runner.match(/func: (probeSiteInPage|adapter\.probeInPage|adapter\.searchInPage)\b/g) || []).length;
   assert.ok(injections === 3 && injections === known, `scanRunner.js may inject only the neutral probe and the adapters' probe and search (${injections} vs ${known})`);
   assert.ok(!/files:\s*\[|chrome\.debugger|tabs\.sendMessage/.test(runner), 'no other way into a page');
-  const READ_ONLY = /\.click\(|dispatchEvent|\.focus\(|\.value\s*=|\.submit\s*\(|requestSubmit|\.innerHTML\s*=|\.setAttribute\(/;
+  // word forms and indirect calls too: no click or submit by any name, no
+  // assignment into the page, no navigation, no call/apply/Reflect/eval
+  // that could reach one of those another way
+  const READ_ONLY = /\bclick\b|\bsubmit\b|requestSubmit|dispatchEvent|\.focus\b|\.value\s*[?|&+-]*=|\.innerHTML\s*=|\.setAttribute\(|\.insertAdjacentHTML|location\.(href|assign|replace)|\.call\(|\.apply\(|Reflect\.|new Function|\beval\b/;
   const page = read('../extension/src/scan.js');
   assert.ok(!READ_ONLY.test(page), 'scan.js must only read the page');
   assert.ok(ADAPTERS.length >= 1);
@@ -164,6 +167,7 @@ test('the dealer-site scan reaches the dealer tab only through the neutral probe
       const src = stripComments(String(adapter[name]));
       assert.ok(src.length > 50, `${adapter.PLATFORM.id}.${name} exists`);
       assert.ok(!READ_ONLY.test(src), `${adapter.PLATFORM.id}.${name} must only read the page`);
+      assert.ok(!/['"`]click['"`]/.test(src), `${adapter.PLATFORM.id}.${name} must not name a click event`);
     }
   }
   for (const rel of ['../extension/wizard.js', '../extension/popup.js', '../extension/src/vehicleDetails.js', '../extension/adapters/index.js']) {

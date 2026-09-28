@@ -10,7 +10,9 @@
 // It never touches Facebook and never posts anything.
 
 import { adapterById } from './adapters/index.js';
-import { scanWithSearch, SITES_KEY } from './src/scanRunner.js';
+import { scanWithSearch } from './src/scanRunner.js';
+import { siteKeys, SITES_KEY } from './src/storageKeys.js';
+import { updateKey, storageErrorText } from './src/storage.js';
 import { withDefaults } from './src/settings.js';
 import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
@@ -58,20 +60,23 @@ async function downloadPhoto(url, index) {
 }
 
 // ---------- automatic rescans ----------
-
-const keysFor = (origin) => ({ settings: `settings:${origin}`, snapshot: `snapshot:${origin}`, diff: `diff:${origin}`, posted: `posted:${origin}`, boilerplate: `boilerplate:${origin}` });
+// The keys are named in src/storageKeys.js. The site registry is shared with
+// the popup (auto on or off, clearing a website) and the scan runner, so
+// every change to it is a read-modify-write under its lock (src/storage.js).
 
 async function loadSites() {
   const data = await chrome.storage.local.get(SITES_KEY);
   return data[SITES_KEY] || {};
 }
 
+const updateSites = (change) => updateKey(SITES_KEY, (sites) => change(sites || {}));
+
 export async function updateBadge() {
   const sites = await loadSites();
   const origins = Object.keys(sites);
-  const data = await chrome.storage.local.get(origins.map((o) => keysFor(o).diff));
+  const data = await chrome.storage.local.get(origins.map((o) => siteKeys(o).diff));
   let count = 0;
-  for (const o of origins) count += todoCountFor(data[keysFor(o).diff]);
+  for (const o of origins) count += todoCountFor(data[siteKeys(o).diff]);
   await chrome.action.setBadgeBackgroundColor({ color: '#9f1d1d' });
   await chrome.action.setBadgeText({ text: badgeText(count) });
   return count;
@@ -93,9 +98,9 @@ export const NO_SETTINGS = 'This website has no settings on this computer (they 
 
 // A failed attempt is recorded so the popup can show that the schedule is not working.
 async function noteFailure(origin, info, error) {
-  const fresh = await loadSites();
-  fresh[origin] = { ...(fresh[origin] || info), lastAttempt: new Date().toISOString(), lastError: error };
-  await chrome.storage.local.set({ [SITES_KEY]: fresh });
+  try {
+    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), lastAttempt: new Date().toISOString(), lastError: error } }));
+  } catch (e) { /* the registry could not be written either; the result still says what failed */ }
   return { ok: false, error };
 }
 
@@ -109,7 +114,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   const adapter = adapterById(info.adapter);
   if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`);
   if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION);
-  const k = keysFor(origin);
+  const k = siteKeys(origin);
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff]);
   if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS);
   const site = { ...(info.site || {}), origin, name: info.name, adapter: info.adapter };
@@ -124,15 +129,21 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   if (!out.ok) return noteFailure(origin, info, out.message);
   const save = { [k.diff]: out.diff, [k.boilerplate]: out.boilerplate };
   if (!out.diff.unreliable) save[k.snapshot] = out.snapshot;
-  await chrome.storage.local.set(save);
+  try {
+    await chrome.storage.local.set(save);
+  } catch (e) {
+    return noteFailure(origin, info, storageErrorText(e)); // the quota, most likely: the popup's To do shows it as the last error
+  }
   await recordFlags(origin, out.diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   const count = todoCountFor(out.diff);
   // Compared with the person's outstanding list (the saved diff, which the
   // popup and upkeep trim as items are handled), not with the last rescan's count.
   const note = notificationFor(todoCountFor(data[k.diff]), count);
-  const fresh = await loadSites();
-  fresh[origin] = { ...(fresh[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count };
-  await chrome.storage.local.set({ [SITES_KEY]: fresh });
+  try {
+    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count } }));
+  } catch (e) {
+    return noteFailure(origin, info, storageErrorText(e));
+  }
   await updateBadge();
   if (note && settings.notify !== false && reason === 'alarm') {
     try {
@@ -148,7 +159,11 @@ async function rescanDueSites(reason) {
   for (const [origin, info] of Object.entries(sites)) {
     if (!info.auto) continue;
     if (reason === 'alarm' && !isDue(latestOf(info.lastAttempt, info.lastScan))) continue;
-    results[origin] = await runRescan(origin, { reason });
+    try {
+      results[origin] = await runRescan(origin, { reason });
+    } catch (e) {
+      results[origin] = { ok: false, error: String((e && e.message) || e) }; // one website's failure never stops the others
+    }
   }
   return results;
 }

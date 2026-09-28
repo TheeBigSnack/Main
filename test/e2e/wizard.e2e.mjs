@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
-import { LEGAL } from '../../extension/src/legalLinks.js';
+import { legalHosted } from '../../extension/src/legalLinks.js';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -110,21 +110,21 @@ try {
   assert.equal(await panel.isDisabled('#wizNext'), false);
   await panel.screenshot({ path: join(shots, 'wizard-2-rules.png'), fullPage: true });
   await panel.click('#wizNext'); // -> terms
-  await panel.waitForSelector('#wizTermsRead');
+  await panel.waitForSelector('#legalPending');
   assert.match(await panel.textContent('#panel'), /step 8 of 9/);
   assert.match(await panel.textContent('#panel'), /Terms and privacy[\s\S]*never your Facebook login[\s\S]*not affiliated with Meta Platforms, Inc\./);
-  const links = await panel.$$eval('#panel a[target="_blank"]', (as) => as.map((a) => [a.textContent, a.href, a.rel]));
-  assert.deepEqual(links, [['Terms of Service', LEGAL.termsUrl, 'noopener'], ['Privacy Policy', LEGAL.privacyUrl, 'noopener']]);
-  assert.equal(await panel.isDisabled('#wizFinish'), true, 'the Terms must be accepted before Finish');
-  await panel.check('#wizTermsRead');
+  // The documents are placeholders until the site exists (legalLinks.js legalHosted): the step is
+  // informational, there is nothing to accept, and no dead link is offered.
+  assert.equal(legalHosted(), false);
+  assert.match(await panel.textContent('#legalPending'), /being finalised/);
+  assert.equal(await panel.$('#wizTermsRead'), null, 'no acceptance tick while the documents cannot be read');
+  assert.equal(await panel.$$eval('#panel a[target="_blank"]', (as) => as.length), 0, 'no dead links');
   assert.equal(await panel.isDisabled('#wizFinish'), false);
-  await panel.click('#wizBack'); // the ticks survive a step back and forward
+  await panel.click('#wizBack'); // the rules tick survives a step back and forward
   await panel.waitForSelector('#wizRulesRead');
   assert.equal(await panel.isChecked('#wizRulesRead'), true);
   await panel.click('#wizNext');
-  await panel.waitForSelector('#wizTermsRead');
-  assert.equal(await panel.isChecked('#wizTermsRead'), true);
-  assert.equal(await panel.isDisabled('#wizFinish'), false);
+  await panel.waitForSelector('#legalPending');
   await panel.screenshot({ path: join(shots, 'wizard-3-terms.png'), fullPage: true });
   await panel.click('#wizFinish');
   await panel.waitForFunction(() => /Set up\./.test(document.querySelector('.banner.good')?.textContent || ''), null, { timeout: 30000 });
@@ -137,7 +137,7 @@ try {
     const alarm = await chrome.alarms.get('lot-sync-rescan');
     return { name: s.salesperson.name, stores: s.myStores, zip: s.dealer.zip, autoRescan: s.autoRescan, notify: s.notify, rulesRead: Boolean(s.rulesReadAt), legalVersion: s.legal.version, legalAccepted: Boolean(s.legal.acceptedAt), wizardDone: Boolean(all[`wizardDone:${o}`]), siteAuto: all.sites[o].auto, service: all.sites[o].service.search, alarmMinutes: alarm && alarm.periodInMinutes };
   }, origin);
-  assert.deepEqual(saved, { name: 'Roger', stores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg'], zip: '15370', autoRescan: true, notify: true, rulesRead: true, legalVersion: LEGAL.version, legalAccepted: true, wizardDone: true, siteAuto: true, service: `${origin}/api/v1/listings/153146`, alarmMinutes: 180 });
+  assert.deepEqual(saved, { name: 'Roger', stores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg'], zip: '15370', autoRescan: true, notify: true, rulesRead: true, legalVersion: '', legalAccepted: false, wizardDone: true, siteAuto: true, service: `${origin}/api/v1/listings/153146`, alarmMinutes: 180 });
   await panel.click('#wizClose');
 
   // ---- 3. The popup is ready to use; mark the Ram posted ----

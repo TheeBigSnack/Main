@@ -9,6 +9,8 @@ import { makeSnapshot, diffScans } from './rescan.js';
 import { findBoilerplate } from './description.js';
 import { withDefaults, defaultSettings } from './settings.js';
 import { probeSiteInPage } from './scan.js';
+import { SITES_KEY } from './storageKeys.js';
+import { updateKey } from './storage.js';
 
 /**
  * What the dealer tab says about itself and which platform it runs on: the
@@ -119,12 +121,18 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
 // `service` is the adapter's own data, stored as its probe returned it and
 // read only through that adapter (origins, scanOptions, makeDirectSearch).
 // `photoOrigins` are the hosts the lot's photos come from: recorded only.
-export const SITES_KEY = 'sites';
+// The key itself is named in src/storageKeys.js; it is re-exported here for
+// the callers that always imported it from this module.
+export { SITES_KEY };
 
+// One entry merged into the registry under its lock: the popup (auto on or
+// off, clearing a website) and the service worker (every rescan's outcome)
+// change the same object.
 export async function rememberSite(origin, info) {
-  const data = await chrome.storage.local.get(SITES_KEY);
-  const sites = data[SITES_KEY] || {};
-  sites[origin] = { ...(sites[origin] || {}), ...info };
-  await chrome.storage.local.set({ [SITES_KEY]: sites });
+  const sites = await updateKey(SITES_KEY, (current) => {
+    const next = { ...(current || {}) };
+    next[origin] = { ...(next[origin] || {}), ...info };
+    return next;
+  });
   return sites[origin];
 }

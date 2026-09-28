@@ -13,7 +13,7 @@ How support works for the pilot and the design-partner dealers. The commitment, 
 
 Reply with these four questions when any of them is missing. Most fixes need all four.
 
-1. **The report from the panel.** When the side panel shows **Couldn't fill**, that list, or the text from **Copy report** on the dry run (**Open the form and check fields only (nothing filled)**). It says what the form showed, which is what the fix is made from.
+1. **The report from the panel.** When the side panel shows **Couldn't fill**, that list, or the text from **Copy report** on the dry run (**Open the form and check fields only (nothing filled)**). It says what the form showed, which is what the fix is made from. Ask also for **Copy problem report** (Settings, **Report a problem**): the version, website, adapter, last scan, last error and the last fill's field names, nothing personal.
 2. **The version.** The first line of **Settings** in the popup: "Lot Sync <version> · form map <date>". A fix already shipped in a newer zip is the most common answer.
 3. **The website.** The address of the dealership's used inventory page, and the tab the person was on when it happened.
 4. **What was on screen.** In their own words: which button they clicked, what the panel said, what Facebook showed. A screenshot of the panel is welcome. A screenshot of Facebook is fine only with no messages, buyer names or account details in it.
