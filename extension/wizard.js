@@ -9,6 +9,7 @@ import { withDefaults, saveProfile } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
+import { recordFlags } from './src/pilot.js';
 
 const STEPS = ['welcome', 'scan', 'store', 'you', 'address', 'permission', 'rules', 'done'];
 
@@ -97,6 +98,7 @@ async function runScan(ctx) {
   const stores = [...new Set(r.vehicles.map((v) => v.location).filter(Boolean))].sort();
   wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [] };
   await chrome.storage.local.set({ [k('snapshot')]: kept, [k('diff')]: r.diff, [k('boilerplate')]: r.boilerplate, [k('settings')]: r.settings });
+  await recordFlags(wiz.origin, r.diff, r.diff.takenAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   await persist();
   ctx.render();

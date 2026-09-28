@@ -8,7 +8,7 @@ Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a 
 |---|---|---|
 | M1 One-click post | Sep 28 – Oct 11 | **Done Sep 27**: single posts run clean on the live form (six live runs drove the fixes) |
 | M2 Batch, upkeep, wizard, rescans | Oct 12 – Oct 25 | **Built Sep 27** (all four features, tests green), then a multi-reviewer pass found 29 defects, all fixed the same day. Verified live: the queue. Still to try on the real site: the wizard's permission step, a background rescan, and upkeep's listing pages (the sold/removed wording in `listingSigns.js` and the edit form's Price box) |
-| M3 Pilot | Oct 26 – Nov 8 | Needs the Waynesburg manager's sign-off |
+| M3 Pilot | Oct 26 – Nov 8 | **Started Sep 28**: the pilot numbers (time per post, fields not filled, hours until sold cars and price changes were fixed) are recorded and exported from a Pilot tab; the runbook is `PILOT.md`; positioning, the pricing hypothesis, the sales sheet, the demo script, the pilot offer and the onboarding emails are in `marketing/`. Waiting on the owner: the M2 live checks, the attorney's answers (sections 1 and 2), the manager's sign-off |
 | M4 Accounts and manager view | Nov 9 – Nov 22 | Not started |
 | M5 Billing, site, Web Store | Nov 23 – Dec 6 | Not started |
 | M6 Design partners | Dec 7 – Dec 20 | Not started |
@@ -59,7 +59,8 @@ Demo: fresh profile, wizard, first scan, queue of 5, then the mock site "sells" 
 Scope
 - Pilot with 2–3 Waynesburg salespeople, manager's approval first. Track time per post, prefill failures (which field, how often), and how long sold cars stay listed.
 - Weekly fixes.
-- Positioning (`marketing/positioning.md`), the pricing hypothesis in one config, the sales sheet and the 10-minute demo script, shaped by pilot feedback.
+- Positioning (`marketing/positioning.md`), the pricing hypothesis in one config (`marketing/pricing.json`), the sales sheet and the 10-minute demo script, shaped by pilot feedback. (Drafted Sep 28, before feedback; the pilot offer email and the onboarding emails too.)
+- The numbers, recorded by the extension itself (`extension/src/pilot.js`, the Pilot tab, CSV export) and defined in `PILOT.md`.
 
 Acceptance criteria
 1. Each pilot salesperson posts at least 5 cars through Lot Sync and keeps them updated for two weeks.

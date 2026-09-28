@@ -1,6 +1,6 @@
 {
   "name": "lot-sync",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Scans a dealership website's used inventory, checks each car is really pre-owned, pre-fills Marketplace listings for a person to publish, and rescans for sold cars and price changes.",

@@ -33,6 +33,8 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 - Ask the owner before: adding paid services, widening extension permissions, doing anything that touches a real Facebook account, or spending money. Widenings so far: `sidePanel`, host permissions for `https://www.facebook.com/marketplace/*` and `https://vehicle-images.carscommerce.inc/*` (Milestone 1, called out in CHANGELOG).
 - No secrets in git: the backend key lives in `backend/.env` (ignored). Commit after each working step. Keep README (for testers) and CHANGELOG up to date.
 - The rewrite service (`backend/`) is the only place an Anthropic API key exists. The extension only calls it when the dealer turns it on in Settings; the template writer is the default and the fallback.
+- Customer-facing copy lives in `marketing/` and must pass `test/marketing.test.js`: a person clicks Publish and Lot Sync never does, not affiliated with Meta, no promise of account safety, no Meta-approval or partnership wording, no invented numbers, prices only from `marketing/pricing.json` (a hypothesis until a dealer pays).
+- The pilot numbers (`extension/src/pilot.js`) record only what `legal/pilot-agreement.md` section 2 names: post timings, field keys that could not be filled, hours until sold cars and price changes were fixed. Never values, descriptions, buyers or anything from the Facebook account.
 
 ## Repo map
 
@@ -45,8 +47,10 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 | `extension/src/normalize.js`, `classify.js`, `rescan.js` | Flat vehicle shape, the pre-owned + ready gate, the rescan diff |
 | `extension/src/description.js`, `rewriteTemplate.js`, `rewriter.js` | Strip website boilerplate, template writer + guardrails, optional Claude call |
 | `extension/src/listingData.js`, `vehicleDetails.js`, `cap.js`, `settings.js` | Form values, post-time re-check, daily cap, settings defaults |
+| `extension/src/pilot.js` | Pilot numbers: post timings, fill failures per field, hours until to-do items were fixed; summary, CSV; the Pilot tab in the popup |
 | `extension/facebook/formMap.js`, `fillForm.js`, `detectPost.js` | The one Facebook map, the injected fill code, the listing-address watcher |
 | `backend/` | Standalone Node rewrite service (Claude Haiku 4.5 by default) |
 | `test/` | Unit tests, fixtures (real records from the live site), e2e with mock sites |
 | `legal/` | Attorney-review drafts; `posting-rules.md` is shown to salespeople |
+| `PILOT.md`, `marketing/` | The pilot runbook and definitions; positioning, pricing hypothesis (`pricing.json`), sales sheet, demo script, pilot offer and onboarding emails |
 | `PLAN.md`, `CHANGELOG.md` | The 12-week plan with acceptance criteria; what changed |

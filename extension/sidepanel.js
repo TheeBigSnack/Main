@@ -23,6 +23,7 @@ import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/
 import { FORM_MAP } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
+import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -88,6 +89,7 @@ async function saveFlow() {
 async function clearFlow() {
   if (watcher) watcher.cancel();
   watcher = null;
+  if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
   if (state.origin) await chrome.storage.local.remove(keys(state.origin).flow);
   Object.assign(state, {
     vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
@@ -102,6 +104,10 @@ function setStatus(text, kind = '') {
 }
 
 const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: state.settings.priceNote, price: state.price });
+
+// Pilot numbers (src/pilot.js): when each post started and ended, and what
+// each fill could not do. Bookkeeping only; a failure here never stops a post.
+const pilotNote = (change) => (state.origin ? updatePilot(state.origin, change).catch(() => null) : Promise.resolve(null));
 
 // ---------- the flow ----------
 
@@ -118,6 +124,7 @@ async function startFlow(req) {
   state.step = 'checking';
   setStatus('');
   render();
+  await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
 
   const fresh = await fetchVehicleDetails(state.dealerTabId, state.vin);
   if (!fresh.ok) return block(fresh.message);
@@ -136,6 +143,7 @@ async function startFlow(req) {
   state.message = '';
   render();
   await saveFlow();
+  await pilotNote((p) => notePostStep(p, state.vin, 'reviewedAt'));
   // In a queue, a car that passes every check goes straight to the form;
   // one with a warning waits here so the person sees it.
   if (state.queueMode && canAutoOpen()) await openForm();
@@ -172,6 +180,7 @@ async function startNextInQueue() {
 // Records how this car ended and moves on: the next car, a pause, or the end.
 async function afterQueueStep(outcome) {
   if (watcher) watcher.cancel();
+  if (state.vin) await pilotNote((p) => endPost(p, state.vin, outcome)); // a no-op for a car already recorded as posted or drafted
   state.queue = advance(state.queue, outcome);
   await saveQueue();
   const next = currentVin(state.queue);
@@ -185,6 +194,7 @@ async function afterQueueStep(outcome) {
 async function savedDraft() {
   state.drafts = { ...state.drafts, [state.vin]: { name: state.vehicle.name, savedAt: new Date().toISOString() } };
   await chrome.storage.local.set({ [keys(state.origin).drafts]: state.drafts });
+  await pilotNote((p) => endPost(p, state.vin, 'draft'));
   return afterQueueStep('draft');
 }
 
@@ -214,6 +224,7 @@ async function block(message) {
   state.message = message;
   render();
   await saveFlow();
+  await pilotNote((p) => endPost(p, state.vin, 'blocked', { reason: message }));
 }
 
 async function resumeFlow(origin, flow) {
@@ -302,6 +313,7 @@ async function openForm({ probeOnly = false } = {}) {
   setStatus('');
   render();
   await saveFlow();
+  await pilotNote((p) => notePostStep(p, state.vin, 'formOpenedAt'));
   try {
     const { devOverrides } = await chrome.storage.local.get('devOverrides'); // test hook, see formMap.js
     state.map = { ...FORM_MAP, ...(devOverrides || {}) };
@@ -339,6 +351,7 @@ async function runFill() {
   state.message = '';
   render();
   await saveFlow();
+  await pilotNote((p) => notePostStep(noteFill(p, { vin: state.vin, fill: state.fill, mapVersion: state.map.version }), state.vin, 'filledAt'));
   startWatcher();
   await attachPhotos();
 }
@@ -421,6 +434,7 @@ async function confirmPosted() {
   if (listingUrl) extra.listingUrl = listingUrl;
   state.posted = markPosted(state.posted, state.vehicle, state.settings.basis, now, extra);
   await chrome.storage.local.set({ [keys(state.origin).posted]: state.posted });
+  await pilotNote((p) => endPost(p, state.vin, 'posted', { at: now }));
   if (watcher) watcher.cancel();
   if (state.queueMode) return afterQueueStep('posted');
   state.step = 'done';
@@ -431,6 +445,7 @@ async function confirmPosted() {
 
 async function notPosted() {
   if (watcher) watcher.cancel();
+  await pilotNote((p) => endPost(p, state.vin, 'not-posted'));
   state.step = 'review';
   state.fill = null;
   state.photos = null;

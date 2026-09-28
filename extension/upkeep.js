@@ -15,6 +15,7 @@
 import { markPriceUpdated, markTakenDown } from './src/rescan.js';
 import { fillPriceInPage, readListingInPage } from './facebook/fillForm.js';
 import { LISTING_SIGNS } from './facebook/listingSigns.js';
+import { resolveFlag, updatePilot } from './src/pilot.js';
 
 export const up = {
   active: false,
@@ -150,6 +151,8 @@ async function finish(ctx, how) {
   const save = { [k('posted')]: posted };
   if (diff) save[k('diff')] = diff;
   await chrome.storage.local.set(save);
+  // pilot numbers: how long the item stayed open, and whether Lot Sync saw the change itself
+  await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, up.kind === 'price' ? 'price' : 'takeDown', { how })).catch(() => null);
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   up.status = 'done';
   up.note = how === 'detected' ? (up.kind === 'price' ? `The listing now shows ${money(up.price)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';

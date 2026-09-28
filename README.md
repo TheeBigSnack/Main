@@ -1,4 +1,4 @@
-# Lot Sync (v0.3)
+# Lot Sync (v0.4)
 
 A Chrome extension for dealership salespeople. It reads your dealership website's used inventory, checks every car is really pre-owned, pre-fills a Facebook Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
@@ -31,6 +31,8 @@ Chrome will say the extension can read and change data on `www.facebook.com/mark
    - **Updated** and **Taken down** tick an item off by hand if you did it another way.
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
+
+8. **Pilot** shows the numbers the pilot agreement lets Lot Sync record, kept in this browser only: how long each post took (from the click on Post to "It's posted", your review included), which form fields it couldn't fill, and how long sold cars and price changes stayed on your listings. **Download CSV** gives your manager the spreadsheet; **Copy summary** is for the weekly check-in. No customer data, nothing from Facebook beyond your own listings, and never the description text. `PILOT.md` defines each number.
 
 ### Several cars at once (the queue)
 
@@ -99,7 +101,7 @@ A demo or loaner flag always means "sold as new". A Carfax report counts as a su
 ## For development
 
 ```
-npm test              # 118 unit tests on real records from the site (Node 20+, no dependencies)
+npm test              # 137 unit tests on real records from the site (Node 20+, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep
@@ -116,7 +118,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan: `PLAN.md`.
+Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan: `PLAN.md`. The pilot: `PILOT.md`. Positioning, pricing hypothesis, sales sheet, demo script and emails: `marketing/`.
 
 | File | What it does |
 |---|---|
@@ -130,6 +132,7 @@ Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan
 | `extension/src/listingData.js` | Vehicle to form values (body style, colors, fuel, transmission, location) |
 | `extension/src/vehicleDetails.js` | Post-time fetch of one car and the second check |
 | `extension/src/cap.js`, `settings.js` | Daily cap; settings defaults |
+| `extension/src/pilot.js` | The pilot numbers: post timings, fill failures per field, hours until sold cars and price changes were fixed; the summary and the CSV |
 | `extension/facebook/formMap.js` | The only place Facebook's fields are described |
 | `extension/facebook/fillForm.js` | Injected: fills the form, attaches photos, reports everything; fills the edit form's price; reads a listing page |
 | `extension/facebook/listingSigns.js` | How a listing page reads once it is sold or removed (text only, never a control) |

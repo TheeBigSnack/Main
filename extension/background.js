@@ -13,6 +13,7 @@ import { adapterById } from './adapters/index.js';
 import { scanWithSearch, SITES_KEY } from './src/scanRunner.js';
 import { withDefaults } from './src/settings.js';
 import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
+import { recordFlags } from './src/pilot.js';
 
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
@@ -112,6 +113,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   const save = { [k.diff]: out.diff, [k.boilerplate]: out.boilerplate };
   if (!out.diff.unreliable) save[k.snapshot] = out.snapshot;
   await chrome.storage.local.set(save);
+  await recordFlags(origin, out.diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   const count = todoCountFor(out.diff);
   // Compared with the person's outstanding list (the saved diff, which the
   // popup and upkeep trim as items are handled), not with the last rescan's count.

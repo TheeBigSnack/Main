@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 (2026-09-28, Milestone 3 started)
+
+Added
+- **Pilot numbers** (`extension/src/pilot.js`, the popup's **Pilot** tab): what the pilot agreement lets Lot Sync record, kept per website in the salesperson's browser. Time per post (from the click on Post to "It's posted", the review included; drafts, skips and abandoned cars recorded as such), which form fields could not be filled per fill attempt (field keys only, never the values or the description), and how long each sold car or price change stayed on the salesperson's listing (from the scan that flagged it to Lot Sync seeing the change on the listing, the person ticking it off, or the website taking it back). The tab shows the medians, the per-field failure table and the open items, and offers **Download CSV** (every post and every item as a row, for the manager), **Copy summary** and **Clear pilot numbers**; "Clear everything for this website" clears them too. The side panel, upkeep, the popup, the wizard and the service worker record; a bookkeeping failure never stops a post.
+- **The pilot runbook** (`PILOT.md`): the checklist before the pilot (Milestone 2 live checks, attorney answers, the manager's sign-off, set-up per salesperson), the weekly loop, the log, and the exact definition of each number so the manager can check it.
+- **Marketing** (`marketing/`): positioning (internal), the pricing hypothesis in one config (`pricing.json`, quoted by the sales sheet and the positioning and kept equal by a test), the one-page sales sheet, the 10-minute demo script, the pilot offer email and the three onboarding emails. `test/marketing.test.js` keeps the customer-facing copy honest: a person clicks Publish and Lot Sync never does, not affiliated with Meta, no guarantee of account safety, no Meta-approval or partnership wording, no invented statistics, no prices outside the config.
+- Tests: 17 new unit tests (137); the post and upkeep e2e flows also check the recorded numbers (not yet run since the change: see HANDOFF.md).
+
+Changed
+- The repository now lives on GitHub as well (TheeBigSnack/Main, branch `claude/fervent-fermi-exkhz9`); `package-lock.json` carries the package version.
+
 ## 0.3.0 (2026-09-27, Milestone 2)
 
 Added

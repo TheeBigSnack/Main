@@ -168,6 +168,15 @@ try {
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '1');
   assert.equal(await popup.evaluate(() => chrome.action.getBadgeText({})), '');
+
+  // ---- 4. Pilot numbers: both items were flagged by the day-2 scan and seen done on the listing by Lot Sync ----
+  await tab(popup, 'pilot').click();
+  const pilotView = await popup.textContent('.panel');
+  assert.match(pilotView, /Sold cars to take down\s*1\b/);
+  assert.match(pilotView, /Price changes\s*1\b/);
+  await popup.screenshot({ path: join(shots, 'upkeep-4-pilot.png'), fullPage: true });
+  const pilot = await popup.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
+  assert.deepEqual(pilot.flags.map((f) => [f.kind, f.how, typeof f.hours]).sort(), [['price', 'detected', 'number'], ['takeDown', 'detected', 'number']]);
   await popup.close();
   await panel.close();
 

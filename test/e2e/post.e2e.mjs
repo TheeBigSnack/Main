@@ -218,6 +218,22 @@ try {
   await tab(popup, 'ready').click();
   assert.match(await popup.textContent('.rows'), /Posted ✓/);
   await popup.screenshot({ path: join(shots, 'post-6-my-listings.png') });
+
+  // ---- 7. Pilot numbers: one post with its timing, one fill with nothing to fix, and never the description ----
+  await tab(popup, 'pilot').click();
+  const pilotView = await popup.textContent('.panel');
+  assert.match(pilotView, /Posted through Lot Sync\s*1\b/);
+  assert.match(pilotView, /Every field filled every time/);
+  await popup.screenshot({ path: join(shots, 'post-7-pilot.png'), fullPage: true });
+  const pilot = await popup.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
+  assert.equal(pilot.posts.length, 1);
+  assert.equal(pilot.posts[0].outcome, 'posted');
+  assert.equal(pilot.posts[0].salesperson, 'Roger');
+  assert.ok(pilot.posts[0].seconds >= 0 && pilot.posts[0].reviewedAt && pilot.posts[0].formOpenedAt && pilot.posts[0].filledAt, 'every step is timed');
+  assert.equal(pilot.fills.length, 1, 'the dry run is not a fill');
+  assert.equal(pilot.fills[0].filled.length, 17);
+  assert.deepEqual([...pilot.fills[0].partial, ...pilot.fills[0].blocked], []);
+  assert.doesNotMatch(JSON.stringify(pilot), /Call or message me|HEMI/, 'the description and the car\'s details are never recorded');
   await popup.close();
   await panel.close();
 

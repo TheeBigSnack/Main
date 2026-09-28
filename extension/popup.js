@@ -7,6 +7,8 @@ import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile,
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
+import { FORM_MAP } from './facebook/formMap.js';
+import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -31,6 +33,7 @@ const state = {
   wizardDone: false, // set-up finished (or skipped) for this website
   wizardActive: false, // set-up started in the side panel and not finished
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
+  pilot: null, // pilot numbers (src/pilot.js): post timings, fill failures per field, to-do item durations
   rescanPermission: null, // true/false once known: may the service worker read this website?
   scanning: false,
   view: 'todo',
@@ -48,6 +51,7 @@ const storageKeys = (origin) => ({
   drafts: `drafts:${origin}`,
   wizardDone: `wizardDone:${origin}`,
   wizard: `wizard:${origin}`,
+  pilot: `pilot:${origin}`,
 });
 
 const rescanOrigins = () => (state.site ? originsFor(state.site.site || { origin: state.origin }, state.site.service) : []);
@@ -83,6 +87,7 @@ async function loadSaved() {
   state.wizardDone = Boolean(data[k.wizardDone]);
   state.wizardActive = Boolean(data[k.wizard] && data[k.wizard].active && data[k.wizard].step !== 'done');
   state.site = (data.sites || {})[state.origin] || null;
+  state.pilot = data[k.pilot] || null;
   await checkRescanPermission();
 }
 
@@ -166,6 +171,7 @@ async function scan() {
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
     state.siteName = r.site.name;
     await save('snapshot', 'diff', 'settings', 'boilerplate');
+    state.pilot = await recordFlags(state.origin, r.diff, r.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
     // the scan registered the website for background rescans; show its state
     state.site = ((await chrome.storage.local.get('sites')).sites || {})[state.origin] || null;
     await checkRescanPermission();
@@ -204,6 +210,7 @@ const VIEWS = [
   ['otherStores', 'Other stores'],
   ['review', 'Needs a look'],
   ['mine', 'My listings'],
+  ['pilot', 'Pilot'],
 ];
 
 function renderTabs(l) {
@@ -471,6 +478,49 @@ function viewMine(l) {
   );
 }
 
+// ---------- pilot numbers ----------
+
+const FIELD_LABELS = Object.fromEntries(FORM_MAP.fields.map((f) => [f.key, f.label]));
+const secs = (s) => (typeof s === 'number' ? `${s} s` : '—');
+const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
+
+// What the pilot agreement lets Lot Sync record, for the weekly check-in and
+// the manager: time per post, fields that could not be filled, how long sold
+// cars and price changes stayed on the salesperson's listings. Kept in this
+// browser only, per website; Download CSV is how it leaves.
+function viewPilot() {
+  const lead = `<p class="lead">Numbers for the pilot, kept in this browser only: how long each post takes, which form fields Lot Sync couldn't fill, and how long sold cars and price changes stayed on your listings. No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
+  if (!hasPilotData(state.pilot)) return lead + empty('Nothing recorded yet. The numbers start with the first post through the side panel.');
+  const s = summarizePilot(state.pilot, { labels: FIELD_LABELS });
+  const stat = (k, v) => `<tr><td>${k}</td><td class="n">${v}</td></tr>`;
+  const notPosted = s.posts.skipped + s.posts.blocked + s.posts.notPosted + s.posts.abandoned;
+  const posts = `<h3>Posts <span class="pill ${s.posts.posted ? 'good' : ''}">${s.posts.posted}</span></h3><table class="stats" id="pilotPosts">
+    ${stat('Posted through Lot Sync', s.posts.posted)}
+    ${stat('Median time per post <span class="hint">(from the click on Post to "It\'s posted", your review included)</span>', secs(s.posts.medianSeconds))}
+    ${stat('Within 60 seconds', s.posts.under60Share === null ? '—' : `${s.posts.under60} of ${s.posts.posted} (${s.posts.under60Share}%)`)}
+    ${stat('Fastest / slowest', `${secs(s.posts.fastestSeconds)} / ${secs(s.posts.slowestSeconds)}`)}
+    ${stat('Saved as drafts on Facebook', s.posts.drafts)}
+    ${stat('Started but not posted', notPosted)}
+    ${s.posts.inProgress ? stat('Under way now', s.posts.inProgress) : ''}
+    ${s.salespeople.map((sp) => stat(esc(sp.name), `${sp.posted} posted, median ${secs(sp.medianSeconds)}`)).join('')}
+  </table>`;
+  const failing = s.fields.filter((f) => f.failures || f.changed);
+  const fillsNote = `${s.fills.attempts} form fill${s.fills.attempts === 1 ? '' : 's'}, ${s.fills.clean} with nothing to fix by hand${s.fills.withDraft ? `; ${s.fills.withDraft} found another car already on the form (a restored draft)` : ''}.`;
+  const fields = `<h3>Form fields <span class="pill ${s.fills.attempts && s.fills.clean === s.fills.attempts ? 'good' : failing.length ? 'warn' : ''}">${s.fills.attempts}</span></h3>
+    <p class="hint">${fillsNote}</p>` + (failing.length
+    ? `<table class="stats" id="pilotFields"><tr><th>Field</th><th class="n">Not filled</th><th class="n">Changed by the form afterwards</th></tr>${failing.map((f) => `<tr><td>${esc(f.label)}</td><td class="n">${f.failures} of ${f.attempts} (${f.failureRate}%)</td><td class="n">${f.changed}</td></tr>`).join('')}</table><p class="hint">"Not filled" counts a field that needed a click or couldn't be filled. Copy the side panel's report when it happens; each fix is one line in formMap.js.</p>`
+    : `<p class="hint" id="pilotFields">${s.fills.attempts ? 'Every field filled every time.' : 'No form filled yet.'}</p>`);
+  const flagTable = (title, t, id) => `<h3>${esc(title)} <span class="pill ${t.open ? 'warn' : t.flagged ? 'good' : ''}">${t.flagged}</span></h3><table class="stats" id="${id}">
+    ${stat('Done', `${t.done}${t.done ? ` (${t.detected} seen on the listing by Lot Sync)` : ''}`)}
+    ${stat('Median time open, from the scan that flagged it', hrs(t.medianHours))}
+    ${stat('Longest', hrs(t.longestHours))}
+    ${stat('Still open', t.open ? t.openItems.map((o) => `${esc(o.name)} (${hrs(o.hoursOpen)})`).join('<br>') : '0')}
+    ${t.cleared ? stat('Cleared by the website (the car came back, or the price went back)', t.cleared) : ''}
+  </table>`;
+  const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear pilot numbers</button></div>`;
+  return lead + toolbar + posts + fields + flagTable('Sold cars to take down', s.takeDowns, 'pilotTakeDowns') + flagTable('Price changes', s.priceUpdates, 'pilotPrices');
+}
+
 const field = (label, name, value, attrs = 'type="text"') =>
   `<label class="field"><span class="k">${esc(label)}</span><input name="${name}" value="${esc(value)}" ${attrs} /></label>`;
 const choices = (list, current) =>
@@ -554,7 +604,7 @@ function render() {
   $('settingsBtn').setAttribute('aria-pressed', String(state.view === 'settings'));
   const l = lists();
   renderTabs(l);
-  const views = { todo: viewTodo, ready: viewReady, notReady: viewNotReady, otherStores: viewOtherStores, review: viewReview, mine: viewMine, settings: viewSettings };
+  const views = { todo: viewTodo, ready: viewReady, notReady: viewNotReady, otherStores: viewOtherStores, review: viewReview, mine: viewMine, pilot: viewPilot, settings: viewSettings };
   if (state.view === 'otherStores' && !l.otherStores.length) state.view = 'todo';
   $('panel').innerHTML = (views[state.view] || viewTodo)(l);
 }
@@ -562,6 +612,10 @@ function render() {
 // ---------- actions ----------
 
 let clearArmed = false;
+let pilotClearArmed = false;
+
+// Pilot numbers: an item the person ticked off by hand, or a car unmarked.
+const notePilot = (change) => updatePilot(state.origin, change).then((p) => { state.pilot = p; }).catch(() => null);
 
 async function onPanelClick(ev) {
   const btn = ev.target.closest('button[data-action]');
@@ -703,6 +757,7 @@ async function onPanelClick(ev) {
     case 'unpost':
       state.posted = markTakenDown(state.posted, vin);
       await save('posted');
+      await notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' }));
       break;
     case 'takenDown':
       state.posted = markTakenDown(state.posted, vin);
@@ -710,11 +765,44 @@ async function onPanelClick(ev) {
       dropFromDiff('priceUpdates');
       dropFromDiff('needsALook');
       await save('posted', 'diff');
+      await notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
       break;
     case 'priceUpdated':
       state.posted = markPriceUpdated(state.posted, vin, Number(btn.dataset.price));
       dropFromDiff('priceUpdates');
       await save('posted', 'diff');
+      await notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
+      break;
+    case 'pilotCsv': {
+      // A file for the manager, saved by the browser like any download.
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([pilotCsv(state.pilot, { labels: FIELD_LABELS, site: state.siteName })], { type: 'text/csv' }));
+      a.download = pilotFileName();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      setStatus(`Saved ${a.download} to your Downloads folder.`);
+      return;
+    }
+    case 'pilotCopy':
+      try {
+        await navigator.clipboard.writeText(pilotText(summarizePilot(state.pilot, { labels: FIELD_LABELS }), { site: state.siteName }));
+        setStatus('Copied.');
+      } catch (e) {
+        setStatus("Couldn't copy: " + ((e && e.message) || e), 'error');
+      }
+      return;
+    case 'pilotClear':
+      if (!pilotClearArmed) {
+        pilotClearArmed = true;
+        btn.textContent = 'Click again to clear the pilot numbers';
+        return;
+      }
+      pilotClearArmed = false;
+      state.pilot = null;
+      await ownRemove([storageKeys(state.origin).pilot]);
+      setStatus('Pilot numbers cleared for this website.');
       break;
     case 'clear':
       if (!clearArmed) {
@@ -722,7 +810,7 @@ async function onPanelClick(ev) {
         btn.textContent = 'Click again to clear everything';
         return;
       }
-      Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, rescanPermission: null, view: 'todo' });
+      Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
       await ownRemove(Object.values(storageKeys(state.origin)));
       {
         // forget the website for background rescans too, and take its count off the badge
@@ -830,6 +918,7 @@ async function init() {
     take(k.drafts, 'drafts', {});
     take(k.diff, 'diff', null);
     take(k.snapshot, 'snapshot', null);
+    take(k.pilot, 'pilot', null);
     if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
       state.settings = withDefaults(changes[k.settings].newValue, state.snapshot?.site || {});
       state.settingsFromProfile = false;

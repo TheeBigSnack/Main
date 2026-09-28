@@ -116,3 +116,10 @@ h3 .pill { font-weight: 600; }
 .banner.queue .toolbar { margin: 6px 0 0; }
 .banner.setup { background: var(--good-bg); }
 .banner.setup .toolbar { margin: 6px 0 0; }
+
+.stats { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 6px; font-size: 12px; }
+.stats td, .stats th { padding: 5px 10px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+.stats tr:first-child td, .stats tr:first-child th { border-top: 0; }
+.stats th { color: var(--muted); font-weight: 600; }
+.stats td.n, .stats th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stats td .hint { color: var(--muted); }
