@@ -1,12 +1,12 @@
 // The first-run wizard, shown in the side panel for a website that has no
 // settings yet: read the website, choose the store, name and role, the
-// store's address, permission for automatic rescans, the posting rules, the
-// Terms of Service and Privacy Policy, and a first scan with the final
-// settings. Progress is kept in storage so the panel can be closed and
-// reopened.
+// store's address, the price to post, permission for automatic rescans, the
+// posting rules, the Terms of Service and Privacy Policy, and a first scan
+// with the final settings. Progress is kept in storage so the panel can be
+// closed and reopened.
 
 import { performScan, rememberSite } from './src/scanRunner.js';
-import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
+import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -14,7 +14,7 @@ import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
 
-const STEPS = ['welcome', 'scan', 'store', 'you', 'address', 'permission', 'rules', 'terms', 'done'];
+const STEPS = ['welcome', 'scan', 'store', 'you', 'address', 'price', 'permission', 'rules', 'terms', 'done'];
 
 export const wiz = {
   active: false,
@@ -27,7 +27,12 @@ export const wiz = {
 };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
 const key = (origin) => siteKeys(origin).wizard; // the wizard's own persisted state
+// The Price step's model from the last read (showsLower, gap, example); empty for a read saved before the step existed.
+const priceModel = () => (wiz.scan && wiz.scan.price) || { showsLower: false, gap: 0, example: null };
+const NOTE_PLACEHOLDER = 'e.g. Tax and tags extra.';
+const priceHint = (suggested) => `Honest prices: the listed price always equals the website price. This note explains what it includes.${suggested ? ` Suggested: "${suggested}"` : ''}`;
 
 async function persist() {
   if (!wiz.origin) return;
@@ -99,7 +104,8 @@ async function runScan(ctx) {
   // lot at once is a website hiccup, so the last good snapshot is kept.
   const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
   const stores = [...new Set(r.vehicles.map((v) => v.location).filter(Boolean))].sort();
-  wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [] };
+  // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
+  wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
   await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: r.diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
   await recordFlags(wiz.origin, r.diff, r.diff.takenAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
@@ -123,7 +129,7 @@ export function wizardHtml() {
   switch (wiz.step) {
     case 'welcome':
       return `${progress}<h3>Set up Lot Sync for this dealership</h3>
-        <p>In a few steps: read the website, pick your store, your name, the store's address, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy. About two minutes.</p>
+        <p>In a few steps: read the website, pick your store, your name, the store's address, the price to post, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy. About two minutes.</p>
         <p class="hint">Keep the dealership's used inventory page open in this window while you do this.</p>
         ${nav(false, 'Start')}`;
     case 'scan':
@@ -151,6 +157,26 @@ export function wizardHtml() {
         <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="e.g. OH" /></label>
         <label class="block">ZIP <input type="text" id="wizZip" value="${esc(s.dealer.zip)}" placeholder="e.g. 43215" inputmode="numeric" /></label>
         ${nav()}`;
+    case 'price': {
+      // The same choice and wording as Settings' "Price to post". The note is
+      // never filled in: the gap only suggests wording, and a person decides
+      // whether it is true for this store.
+      const pm = priceModel();
+      const ex = pm.example;
+      const suggested = suggestedPriceNote(pm.gap, s.basis);
+      const choice = pm.showsLower
+        ? `<label class="block"><input type="radio" name="wizBasis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> The website's main price${ex ? ` (e.g. ${money(ex.price)} "${esc(ex.priceLabel)}")` : ''}</label>
+        <label class="block"><input type="radio" name="wizBasis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> The lower second price the website shows${ex ? ` (e.g. ${money(ex.priceBeforeFees)}; usually the price before the doc fee)` : ''}</label>
+        <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>`
+        : `<p>Cars are posted at the website's main price; this website shows no lower second price to choose instead.</p>`;
+      const gapNote = ex ? `<p class="hint">On this website the main price is usually ${money(pm.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>` : '';
+      return `${progress}<h3>The price to post</h3>
+        ${choice}
+        ${gapNote}
+        <label class="block">Price note in every description <input type="text" id="wizPriceNote" value="${esc(s.priceNote)}" placeholder="${esc(suggested || NOTE_PLACEHOLDER)}" /></label>
+        <p class="hint" id="wizPriceHint">${esc(priceHint(suggested))}</p>
+        ${nav()}`;
+    }
     case 'permission': {
       const origins = originsFor(wiz.site, wiz.service);
       return `${progress}<h3>Automatic rescans</h3>
@@ -191,13 +217,18 @@ function readInputs() {
   // Before the first read there are no settings yet: the read computes the
   // defaults (store from the site name, address from the page), so don't
   // invent an empty settings object here.
-  if (!wiz.settings && !['store', 'you', 'address', 'permission', 'rules', 'terms'].includes(wiz.step)) return;
+  if (!wiz.settings && !['store', 'you', 'address', 'price', 'permission', 'rules', 'terms'].includes(wiz.step)) return;
   const s = wiz.settings || withDefaults({}, wiz.site || {});
   const val = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : undefined; };
   const next = { ...s };
   if (wiz.step === 'store') next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
   if (wiz.step === 'you') next.salesperson = { name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE };
   if (wiz.step === 'address') next.dealer = { name: val('wizDealer') || s.dealer.name, city: val('wizCity') ?? s.dealer.city, state: (val('wizState') ?? s.dealer.state).toUpperCase(), zip: val('wizZip') ?? s.dealer.zip };
+  if (wiz.step === 'price') {
+    const picked = document.querySelector('input[name="wizBasis"]:checked');
+    next.basis = chooseBasis(picked ? picked.value : s.basis, s.basis, wiz.scan ? priceModel() : null); // never a basis this website cannot support
+    next.priceNote = val('wizPriceNote') ?? s.priceNote;
+  }
   if (wiz.step === 'permission') { const n = document.getElementById('wizNotify'); if (n) next.notify = n.checked; }
   if (wiz.step === 'rules') { const r = document.getElementById('wizRulesRead'); if (r) wiz.rulesRead = r.checked; }
   if (wiz.step === 'terms') { const t = document.getElementById('wizTermsRead'); if (t) wiz.termsAccepted = t.checked; }
@@ -288,4 +319,14 @@ export function handleWizardChange(target) {
     if (btn) btn.disabled = !wiz.termsAccepted;
   }
   if (target.id === 'wizNotify' && wiz.settings) wiz.settings = { ...wiz.settings, notify: target.checked };
+  if (target.name === 'wizBasis' && wiz.settings) {
+    wiz.settings = { ...wiz.settings, basis: chooseBasis(target.value, wiz.settings.basis, wiz.scan ? priceModel() : null) };
+    // the suggested wording follows the basis; the typed note stays as it is
+    const suggested = suggestedPriceNote(priceModel().gap, wiz.settings.basis);
+    const note = document.getElementById('wizPriceNote');
+    if (note) note.placeholder = suggested || NOTE_PLACEHOLDER;
+    const hint = document.getElementById('wizPriceHint');
+    if (hint) hint.textContent = priceHint(suggested);
+  }
+  if (target.id === 'wizPriceNote' && wiz.settings) wiz.settings = { ...wiz.settings, priceNote: String(target.value || '').trim() };
 }

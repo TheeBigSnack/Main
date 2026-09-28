@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { capStatus, postsToday } from '../extension/src/cap.js';
+import { capStatus, postsToday, serverPostsToday } from '../extension/src/cap.js';
 import { mergeRegistry, syncPayload } from '../extension/src/sync.js';
 import { markPosted } from '../extension/src/rescan.js';
 
@@ -64,4 +64,35 @@ test('mergeRegistry without a caller id marks nothing (a machine that cannot tel
   const replaced = mergeRegistry({ [VIN_A]: { name: 'A', price: 20000, postedAt: today(0) } }, { listings: [row(VIN_A, U2, { posted_at: today(5) })] }, { userId: U1 });
   assert.equal(replaced[VIN_A].mine, false);
   assert.equal(replaced[VIN_A].postedAt, today(5));
+});
+
+// The cap across the salesperson's machines: the sync function counts their
+// posts in the local day the extension sent (sync:<origin>.postsToday, kept
+// by src/sync.js nextSyncState as { count, from, to }); the cap takes the
+// larger of that and this machine's own count while the range covers now.
+test('the server\'s count of today\'s posts raises the cap\'s count when it is higher, never lowers it, and only for the day it covers', () => {
+  const posted = {
+    [VIN_A]: { name: 'A', price: 1, postedAt: today(1) },
+    [VIN_C]: { name: 'C', price: 3, postedAt: today(3), userId: U2, mine: false }, // a colleague's: never this person's post
+  };
+  const day = { from: new Date(2026, 8, 26).toISOString(), to: new Date(2026, 8, 27).toISOString() };
+  // higher wins: two more posts were made from the showroom desktop today
+  assert.deepEqual(capStatus(posted, 3, now, { serverCount: { count: 3, ...day } }), { used: 3, cap: 3, remaining: 0, reached: true });
+  assert.deepEqual(capStatus(posted, 10, now, { serverCount: { count: 4, ...day } }), { used: 4, cap: 10, remaining: 6, reached: false });
+  // lower is ignored: this machine has a post the server has not received yet
+  assert.equal(capStatus(posted, 10, now, { serverCount: { count: 0, ...day } }).used, 1);
+  // yesterday's count says nothing about today
+  const yesterday = { from: new Date(2026, 8, 25).toISOString(), to: new Date(2026, 8, 26).toISOString() };
+  assert.equal(capStatus(posted, 10, now, { serverCount: { count: 9, ...yesterday } }).used, 1);
+  assert.equal(serverPostsToday({ count: 9, ...yesterday }, now), 0);
+  // the range is half-open: a day that ends exactly now is over; one that starts now has begun
+  assert.equal(serverPostsToday({ count: 9, from: yesterday.from, to: now.toISOString() }, now), 0);
+  assert.equal(serverPostsToday({ count: 9, from: now.toISOString(), to: day.to }, now), 9);
+  // garbage is no count
+  for (const bad of [null, undefined, {}, { count: 'many', ...day }, { count: -1, ...day }, { count: 2.5, ...day }, { count: 2, from: 'x', to: day.to }]) assert.equal(serverPostsToday(bad, now), 0, JSON.stringify(bad));
+  // the old three-argument call still counts this machine alone, and a colleague's entry is still skipped either way
+  assert.deepEqual(capStatus(posted, 10, now), { used: 1, cap: 10, remaining: 9, reached: false });
+  assert.deepEqual(capStatus(posted, 10, now, undefined), capStatus(posted, 10, now));
+  assert.deepEqual(capStatus(posted, 10, now, null), capStatus(posted, 10, now));
+  assert.equal(capStatus(posted, 10, now, { serverCount: { count: 1, ...day } }).used, 1, 'the colleague\'s entry would make 2 if it counted');
 });

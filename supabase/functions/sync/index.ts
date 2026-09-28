@@ -6,13 +6,21 @@
 // open to-do items, so every machine of the dealership converges
 // (extension/src/sync.js merges the answer).
 //
-//   POST …/sync  { origin, posted, pilot: { posts, flags }, scan | null, since | null }
-//     -> { ok, serverTime, dealership: { id, name, websiteOrigin }, role, counts, listings, todoItems }
+//   POST …/sync  { origin, posted, pilot: { posts, flags }, scan | null, since | null, today: { from, to } | null }
+//     -> { ok, serverTime, dealership: { id, name, websiteOrigin }, role, plan, postsToday, counts, listings, todoItems }
+//     -> 402 { ok: false, error, code: 'lapsed', plan } when the dealership's plan has lapsed; nothing is written
 //
 // Everything is written with the caller's own token, so row-level security
 // (migrations/0002_rls.sql) is the guard: a salesperson can only ever write
 // their own listings and attempts, and only inside their dealership. Rules
 // the function adds on top of RLS:
+//   - the dealership's plan (its subscriptions row, read with the caller's
+//     client; planOf in _shared/billing.mjs) goes back as `plan`, and a
+//     lapsed dealership is refused with 402 before anything is written;
+//   - `today` is the caller's local calendar day; `postsToday` counts their
+//     own rows posted in it (any status), so the per-salesperson daily cap
+//     (extension/src/cap.js) can take the larger of its local count and
+//     the server's. No `today`, or one that is not a day, gives null;
 //   - a listing row of another user, or one already taken down, is never
 //     changed by an upload (a stale machine cannot relist a sold car);
 //   - the caller's listed rows that are missing from their registry, among
@@ -25,7 +33,8 @@
 // them; keep the two mappings the same.
 
 import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin } from '../_shared/http.ts';
-import { requireUser, membershipsOf, type Membership } from '../_shared/auth.ts';
+import { requireUser, membershipsOf, subscriptionRowOf, type Membership } from '../_shared/auth.ts';
+import { planOf, lapsedAnswer, todayRange } from '../_shared/billing.mjs';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 const BODY_LIMIT = 2 * 1024 * 1024;
@@ -254,6 +263,18 @@ function must(res: DbResult, what: string): void {
   if (res.error) throw new DbError(what, res.error);
 }
 
+interface CountResult {
+  count: number | null;
+  error: { message: string; code?: string } | null;
+}
+
+// A head-only count: the number of matching rows, none of them travelling.
+async function countOf(query: PromiseLike<CountResult>, what: string): Promise<number> {
+  const res = await query;
+  if (res.error) throw new DbError(what, res.error);
+  return typeof res.count === 'number' ? res.count : 0;
+}
+
 // ---------- the handler ----------
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -282,7 +303,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   const dealershipId = membership.dealership_id;
   const me = user.id;
+
+  // The plan before anything else: a lapsed dealership is refused with 402
+  // and nothing below runs. The row is read with the caller's own client
+  // (a member may read their dealership's row; no service-role key here).
+  let plan: ReturnType<typeof planOf>;
+  try {
+    plan = planOf(await subscriptionRowOf(client, dealershipId));
+  } catch (e) {
+    return json(req, 500, { ok: false, error: errorMessage(e) });
+  }
+  if (plan.state === 'lapsed') return json(req, 402, lapsedAnswer(plan));
+
   const since = isoOrNull(body.since);
+  const today = todayRange(body.today); // the caller's local calendar day, or null
   const pilot = isRecord(body.pilot) ? body.pilot : {};
   const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, attempts: 0, todoItems: 0, scans: 0 };
 
@@ -398,11 +432,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const open = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).is('done_at', null).order('flagged_at', { ascending: false }).range(from, to));
     const closed = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).not('done_at', 'is', null).gte('done_at', cutoff).order('done_at', { ascending: false }).range(from, to));
 
+    // 7. the caller's posts in the calendar day they sent, for the daily
+    //    cap: their own rows only (the cap is per salesperson), any status
+    //    (a post taken down later was still a post that day). Counted after
+    //    the writes so the posts this call brought are in it; null when the
+    //    request sent no day, and the cap then counts locally alone.
+    const postsToday = today ? await countOf(client.from('listings').select('id', { count: 'exact', head: true }).eq('dealership_id', dealershipId).eq('user_id', me).gte('posted_at', today.from).lt('posted_at', today.to), 'could not count listings') : null;
+
     return json(req, 200, {
       ok: true,
       serverTime,
       dealership: { id: dealershipId, name: membership.dealership.name, websiteOrigin: membership.dealership.website_origin },
       role: membership.role,
+      plan,
+      postsToday,
       counts,
       listings: [...listed, ...down],
       todoItems: [...open, ...closed],

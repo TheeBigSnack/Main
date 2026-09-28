@@ -112,6 +112,15 @@ h2 .pill { font-weight: 600; }
 
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
 
+/* The Billing card: one boxed section above the tables, its heading flush
+   with the top of the box. */
+.card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px 12px; margin: 16px 0 6px; }
+.card h2 { margin-top: 0; }
+.card .plan { margin: 0 0 4px; }
+.card .hint { margin: 0 0 4px; }
+.card .banner { margin: 0 0 8px; }
+.card .toolbar { margin: 8px 0 0; }
+
 .signin { max-width: 520px; }
 .signin form { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
 .signin input[type="email"] { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); flex: 1; min-width: 200px; }

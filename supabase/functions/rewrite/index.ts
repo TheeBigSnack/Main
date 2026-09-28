@@ -10,12 +10,15 @@
 //
 // Protection, in order: a valid Supabase user token (401), a membership in
 // a dealership (403; the one for the `origin` sent with the facts, matched
-// the way /sync matches it), a per-user per-minute rate limit (429; kept in this
-// instance's memory, so with several instances a burst can exceed it by
-// that factor), and the dealership's monthly cost cap summed from
-// rewrite_usage (429 with a plain message; the extension then uses its
-// template). The Anthropic API key is a function secret; the browser never
-// sees it. Claude is called with fetch, no SDK, through the Messages API.
+// the way /sync matches it), the dealership's plan (402 with code 'lapsed'
+// and the plan when its subscription has lapsed, the same answer /sync
+// gives, on every route: nothing is spent for a store that no longer
+// pays), a per-user per-minute rate limit (429; kept in this instance's
+// memory, so with several instances a burst can exceed it by that factor),
+// and the dealership's monthly cost cap summed from rewrite_usage (429 with
+// a plain message; the extension then uses its template). The Anthropic
+// API key is a function secret; the browser never sees it. Claude is
+// called with fetch, no SDK, through the Messages API.
 //
 // The draft is checked with the same guardrails the extension runs
 // (_shared/guardrails.ts, ported from extension/src/rewriteTemplate.js) and
@@ -24,7 +27,8 @@
 import { buildRewritePrompt, type RewriteFacts } from '../_shared/rewritePrompt.ts';
 import { runGuardrails, type GuardrailContext, type GuardrailResult } from '../_shared/guardrails.ts';
 import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin } from '../_shared/http.ts';
-import { requireUser, membershipsOf, serviceClient, env, type Membership } from '../_shared/auth.ts';
+import { requireUser, membershipsOf, subscriptionRowOf, serviceClient, env, type Membership } from '../_shared/auth.ts';
+import { planOf, lapsedAnswer } from '../_shared/billing.mjs';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 const config = {
@@ -312,6 +316,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const membership = wantedOrigin ? memberships.find((m) => m.dealership !== null && sameOrigin(m.dealership.website_origin, wantedOrigin)) : memberships[0];
   if (!membership) return json(req, 403, { ok: false, error: `your account is not a member of the dealership for ${wantedOrigin}` });
   const who: Who = { dealershipId: membership.dealership_id, userId: caller.user.id };
+
+  // The plan next, before the cost cap and the model call: a lapsed
+  // dealership gets 402 and nothing is spent on it. The row is read with
+  // the caller's own client (a member may read their dealership's row), the
+  // way /sync reads it, so the two functions always agree on the state.
+  let plan: ReturnType<typeof planOf>;
+  try {
+    plan = planOf(await subscriptionRowOf(caller.client, who.dealershipId));
+  } catch (e) {
+    return json(req, 500, { ok: false, error: errorMessage(e) });
+  }
+  if (plan.state === 'lapsed') return json(req, 402, lapsedAnswer(plan));
 
   let service: SupabaseClient;
   let spent: number;

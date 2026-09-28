@@ -5,13 +5,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
+import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
 const money = (n) => '$' + Number(n).toLocaleString('en-US');
 
-const CUSTOMER_FACING = ['sales-sheet.md', 'pilot-offer-email.md', 'onboarding-emails.md', 'demo-script.md'];
+const CUSTOMER_FACING = ['sales-sheet.md', 'pilot-offer-email.md', 'onboarding-emails.md', 'onboarding-store.md', 'demo-script.md'];
 const ALL = [...CUSTOMER_FACING, 'positioning.md'];
+// the emails are templates one owner sends to any dealership
+const EMAILS = ['pilot-offer-email.md', 'onboarding-emails.md', 'onboarding-store.md'];
+// the two agreements the parties fill in
+const AGREEMENTS = ['pilot-agreement.md', 'dealer-subscription-agreement.md'];
+const legal = (rel) => read('../legal/' + rel);
+// the pilot dealer is a fixture, not a default (the same words as test/anyDealer.test.js)
+const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
+const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('the pricing hypothesis is one config with the fields the docs quote', () => {
   assert.equal(pricing.hypothesis, true, 'it stays a hypothesis until a dealer pays');
@@ -73,4 +83,95 @@ test('the pilot runbook names the three acceptance criteria and where the number
   assert.match(doc, /extension\/src\/pilot\.js/);
   assert.match(doc, /Download CSV/);
   assert.match(doc, /legal\/pilot-agreement\.md/);
+});
+
+test('the emails are templates for any dealership: no pilot-dealer value, no "our store", no fixed weekday, the cap as a bracket', () => {
+  for (const rel of EMAILS) {
+    const doc = read('../marketing/' + rel);
+    const hit = doc.match(PILOT);
+    assert.equal(hit, null, `${rel} contains the pilot value "${hit && hit[0]}"`);
+    // the sender is a vendor writing to a dealership, not one of its staff
+    assert.doesNotMatch(doc, /\b(our|my) (own )?(website|store|site|inventory|rooftop|lot)\b/i, `${rel} speaks as the dealership's own staff`);
+    // a check-in day is a bracket, not the first pilot's weekday
+    assert.doesNotMatch(doc, /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/, `${rel} pins a weekday`);
+    // the daily cap is the dealer's to set: a bracket showing the code's default
+    if (/daily cap/i.test(doc)) assert.ok(doc.includes(`[${DEFAULT_DAILY_CAP}]`), `${rel} names the daily cap without the bracketed default [${DEFAULT_DAILY_CAP}]`);
+  }
+  const offer = read('../marketing/pilot-offer-email.md');
+  assert.match(offer, new RegExp(`${pricing.pilotDays}-day pilot`), 'the pilot offer quotes the pilot length');
+  assert.match(offer, /\[dealership\]/, 'the pilot offer names the dealership as a bracket');
+});
+
+test('the store-install emails quote the pricing config and the code\'s numbers, and name the controls as the code labels them', () => {
+  const store = read('../marketing/onboarding-store.md');
+  for (const h of ['## To the manager', '## To each salesperson', '## Day 7, to the manager']) {
+    assert.match(store, new RegExp('^' + escapeRe(h), 'm'), `onboarding-store.md has no "${h}" email`);
+  }
+  // counts and prices: pricing.json by name, or a bracket
+  const five = pricing.includedSalespeople === 5 ? 'five' : String(pricing.includedSalespeople);
+  assert.match(store, new RegExp(`includes ${five} salespeople`), 'the included seats come from pricing.json');
+  assert.match(store, new RegExp(`\\${money(pricing.extraSalespersonMonthly)} a month`), 'the seat price comes from pricing.json');
+  const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
+  for (const m of store.matchAll(/\$[\d,]+/g)) assert.ok(allowed.has(m[0]), `onboarding-store.md: ${m[0]} is not from pricing.json`);
+  assert.ok(store.includes(`[${DEFAULT_DAILY_CAP}]`), 'the daily cap is a bracket showing the default');
+  // the day-7 numbers are read the way the manager view draws them
+  assert.match(store, new RegExp(`more than ${OVERDUE_HOURS} hours`), 'the red threshold is OVERDUE_HOURS from manager/data.js');
+  assert.match(store, new RegExp(`more than ${SCAN_STALE_HOURS} hours ago`), 'the stale-scan line is SCAN_STALE_HOURS from manager/data.js');
+  // the three sentences that matter
+  assert.match(store, /\*\*You click Publish\. Lot Sync never does\.\*\*/);
+  assert.match(store, /\*\*Keep prices honest\.\*\*/);
+  assert.match(store, /\*\*Clear the To do tab the day items appear\.\*\*/);
+  // who creates invite codes today is stated from the code: the manager view has no button for it
+  const manager = read('../manager/manager.js');
+  assert.ok(!/create_invite|createInvite/.test(manager), 'the manager view can now create invite codes: update onboarding-store.md (who creates the codes) and this test together');
+  assert.match(store, /manager view (doesn't|does not) have a button/, 'says the owner creates the codes today');
+  // the controls, word for word as the popup, the side panel and the manager view label them
+  const ui = (read('../extension/popup.js') + read('../extension/sidepanel.js')).replace(/&amp;/g, '&');
+  for (const label of ['Send me a sign-in code', 'Sign in', 'Invite code', 'Join', 'Set up Lot Sync', 'Ready to post', 'Open the Marketplace form', "It's posted, record it", 'Open & update price', 'Mark posted']) {
+    assert.ok(ui.includes(label), `"${label}" is no longer a label in popup.js or sidepanel.js: update onboarding-store.md and this list together`);
+    assert.ok(store.includes(label), `onboarding-store.md does not name "${label}"`);
+  }
+  for (const label of ['Send me a sign-in link', 'Download CSV', 'Salespeople', 'Sold cars still listed', 'Price changes not yet updated']) {
+    assert.ok(manager.includes(label), `"${label}" is no longer a label in manager/manager.js: update onboarding-store.md and this list together`);
+    assert.ok(store.includes(label), `onboarding-store.md does not name "${label}"`);
+  }
+  // no promise about anyone's Facebook account, and no invented number
+  assert.doesNotMatch(store, /account (will|won't|will not) (be|get|stay)/i);
+  assert.doesNotMatch(store, /\d+\s*(%|percent)/);
+});
+
+test('the two agreements are templates: no pilot-dealer value, every dollar amount a bracket, prices named from pricing.json, the attorney notes kept', () => {
+  for (const rel of AGREEMENTS) {
+    const doc = legal(rel);
+    const hit = doc.match(PILOT);
+    assert.equal(hit, null, `legal/${rel} contains the pilot value "${hit && hit[0]}"`);
+    // a dollar amount is a bracket the parties fill in (a suggested figure may sit inside it)
+    const outside = doc.replace(/\[[^\]]*\]/g, '');
+    const dollar = outside.match(/\$\s?[\d,]*\d/);
+    assert.equal(dollar, null, `legal/${rel} types a dollar amount: "${dollar && dollar[0]}"`);
+    // every camelCase name in backticks is a field of pricing.json
+    for (const m of doc.matchAll(/`([a-z]+[A-Z][A-Za-z]*)`/g)) assert.ok(Object.hasOwn(pricing, m[1]), `legal/${rel} names ${m[1]}, which is not in pricing.json`);
+    assert.ok((doc.match(/\[Attorney:/g) || []).length >= 1, `legal/${rel} lost its [Attorney: …] notes`);
+  }
+  // the pilot agreement's table: blank rows the parties fill in, the length named from pricing.json
+  const pilot = legal('pilot-agreement.md');
+  const s1 = pilot.slice(pilot.indexOf('## 1.'), pilot.indexOf('## 2.'));
+  for (const row of ['Rooftop', 'Website address', 'Number of designated salespeople', 'Pilot length in days', 'Start date']) {
+    assert.match(s1, new RegExp(`^\\| ${escapeRe(row)}[^|]*\\| \\[ \\]`, 'm'), `pilot agreement section 1 has no blank "${row}" row`);
+  }
+  assert.match(s1, /`pilotDays`/, 'the pilot length is named from pricing.json');
+  assert.doesNotMatch(s1, /\[\d[^\]]*\]/, 'pilot agreement section 1 carries a filled-in value');
+  // Schedule A: the seven columns, blank, the fees named and explained as the ones shown at purchase
+  const sub = legal('dealer-subscription-agreement.md');
+  const a = sub.slice(sub.indexOf('## Schedule A'), sub.indexOf('## Schedule B'));
+  assert.match(a, /^\| Rooftop \| Website \| Included salespeople \| Extra seats \| Monthly fee \| Founding rate \(if any\) \| Start date \|$/m, 'Schedule A has the seven columns');
+  const rows = a.split('\n').filter((l) => l.startsWith('|') && !l.startsWith('| Rooftop') && !l.startsWith('|---'));
+  assert.ok(rows.length >= 1, 'Schedule A has a row to fill in');
+  for (const row of rows) assert.match(row, /^\|( *\|){7}$/, `Schedule A row is not blank: ${row.slice(0, 60)}`);
+  for (const name of ['perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'foundingDealerMonthly', 'foundingDealerMonths']) {
+    assert.ok(a.includes('`' + name + '`'), `Schedule A does not name ${name}`);
+  }
+  assert.match(a, /shown at purchase/, 'Schedule A says the fees are the ones shown at purchase');
+  assert.match(sub, /\[Attorney: see questions-for-attorney\.md item 3/, 'the website-terms note stays');
+  assert.match(sub, /\[Attorney: see item 7\.\]/, 'the personal-accounts note stays');
 });

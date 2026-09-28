@@ -1,14 +1,15 @@
 // The manager view (Milestone 4): the numbers in manager/data.js on the
 // sample dealership and on hand-built rows, the definitions kept equal to
-// the pilot's, and the page free of pilot-dealer values and of anything
-// that sounds like a Meta affiliation.
+// the pilot's, the Billing card (Milestone 5) in each plan state, and the
+// page free of pilot-dealer values, of typed prices and of anything that
+// sounds like a Meta affiliation.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, median, hoursBetween, DEFINITIONS, OVERDUE_HOURS, WEEK_MS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -17,6 +18,7 @@ const read = (rel) => readFileSync(join(root, rel), 'utf8');
 const NOW = '2026-11-16T15:00:00.000Z';
 const ago = (hours) => new Date(Date.parse(NOW) - hours * 3600 * 1000).toISOString();
 const sample = () => ({ ...mockData(NOW), now: NOW, timeZone: 'UTC' });
+const pricing = JSON.parse(read('marketing/pricing.json'));
 
 // ---------- the definitions ----------
 
@@ -242,6 +244,141 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.equal(csvFileName(NOW, { dealer: 'Example Motors', timeZone: 'UTC' }), 'lot-sync-manager-example-motors-2026-11-16.csv');
 });
 
+// ---------- the Billing card ----------
+
+const inDays = (days) => new Date(Date.parse(NOW) + days * DAY_MS).toISOString();
+const DEALER = '00000000-0000-4000-8000-0000000000d1';
+// GET .../billing/status's answer, as the function builds it from the row and the role
+const status = (over = {}) => ({ ok: true, dealership: { id: DEALER, name: 'Example Motors', websiteOrigin: 'https://www.example-motors-springfield.test' }, role: 'manager', state: 'none', subscription: null, canStartPilot: false, canSubscribe: false, canManageBilling: false, pilotDays: pricing.pilotDays, includedSalespeople: pricing.includedSalespeople, ...over });
+const subRow = (over = {}) => ({ dealership_id: DEALER, stripe_customer_id: null, stripe_subscription_id: null, status: null, pilot_ends_at: null, current_period_end: null, seats: pricing.includedSalespeople, updated_at: NOW, ...over });
+const card = (st, opts = {}) => billingCard(st, { now: NOW, timeZone: 'UTC', ...opts });
+
+test('billingCard: no plan yet quotes the pilot length and the included seats from the answer, never its own', () => {
+  assert.deepEqual(PLAN_STATES, ['none', 'pilot', 'active', 'lapsed']);
+  const c = card(status({ state: 'none', canStartPilot: true, canSubscribe: true }));
+  assert.equal(c.state, 'none');
+  assert.equal(c.label, 'No plan yet');
+  assert.equal(c.tone, '');
+  assert.equal(c.line, `No plan yet. Start the free pilot: ${pricing.pilotDays} days, ${pricing.includedSalespeople} salespeople included, no card.`);
+  assert.equal(c.detail, '');
+  assert.equal(c.daysLeft, null);
+  assert.deepEqual(c.buttons.map((b) => b.label), ['Start the free pilot', 'Subscribe']);
+  assert.deepEqual(c.buttons.map((b) => b.action), ['pilot', 'subscribe']);
+  for (const b of c.buttons) assert.ok(b.does.length > 10, 'each button says what it does');
+  // the answer's numbers win over the fallback; the fallback fills in when the answer has none; with neither the numbers are left out
+  assert.match(card(status({ state: 'none', pilotDays: 14, includedSalespeople: 1 })).line, /: 14 days, 1 salesperson included, no card\.$/);
+  assert.equal(card(status({ state: 'none', pilotDays: null, includedSalespeople: null }), { pricing }).line, `No plan yet. Start the free pilot: ${pricing.pilotDays} days, ${pricing.includedSalespeople} salespeople included, no card.`);
+  assert.equal(card(status({ state: 'none', pilotDays: null, includedSalespeople: undefined })).line, 'No plan yet. Start the free pilot: no card.');
+  // a salesperson is told a manager can start it, and gets nothing to press
+  const sp = card(status({ state: 'none', role: 'salesperson' }));
+  assert.equal(sp.line, `No plan yet. A manager can start the free pilot: ${pricing.pilotDays} days, ${pricing.includedSalespeople} salespeople included, no card.`);
+  assert.deepEqual(sp.buttons, []);
+});
+
+test('billingCard: the pilot counts the days left (rounded up) and shows its end as a local date', () => {
+  const st = status({ state: 'pilot', canSubscribe: true, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(18.5) }) });
+  const c = card(st);
+  assert.equal(c.state, 'pilot');
+  assert.equal(c.label, 'Free pilot');
+  assert.equal(c.tone, 'good');
+  assert.equal(c.daysLeft, 19, '18.5 days left reads as 19');
+  assert.equal(c.line, 'Free pilot: 19 days left (ends 2026-12-05).');
+  assert.match(c.detail, /first charged when the pilot ends/);
+  assert.deepEqual(c.buttons.map((b) => b.label), ['Subscribe']);
+  // the same instant is 2026-12-04 in the evening on the US west coast
+  assert.equal(card(st, { timeZone: 'America/Los_Angeles' }).line, 'Free pilot: 19 days left (ends 2026-12-04).');
+  assert.equal(fmtLocalDate(inDays(18.5), 'UTC'), '2026-12-05');
+  // whole days, the last day, and the pill turning amber near the end
+  assert.equal(card(status({ state: 'pilot', subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(30) }) })).line, 'Free pilot: 30 days left (ends 2026-12-16).');
+  const last = card(status({ state: 'pilot', subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(0.4) }) }));
+  assert.equal(last.line, 'Free pilot: 1 day left (ends 2026-11-17).');
+  assert.equal(last.tone, 'warn');
+  // a salesperson sees the line, no detail about subscribing, no buttons
+  const sp = card(status({ state: 'pilot', role: 'salesperson', subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(18.5) }) }));
+  assert.equal(sp.line, 'Free pilot: 19 days left (ends 2026-12-05).');
+  assert.equal(sp.detail, '');
+  assert.deepEqual(sp.buttons, []);
+});
+
+test('billingCard: subscribed shows the seats and the renewal date; a trial says when the first charge is', () => {
+  const c = card(status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', seats: 7, current_period_end: inDays(30) }) }));
+  assert.equal(c.state, 'active');
+  assert.equal(c.label, 'Subscribed');
+  assert.equal(c.tone, 'good');
+  assert.equal(c.line, 'Subscribed: 7 salespeople, renews 2026-12-16.');
+  assert.deepEqual(c.buttons.map((b) => b.label), ['Manage billing']);
+  assert.equal(c.buttons[0].action, 'portal');
+  const trial = card(status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'trialing', stripe_customer_id: 'cus_1', seats: 1, current_period_end: inDays(12), pilot_ends_at: inDays(12) }) }));
+  assert.equal(trial.line, 'Subscribed: 1 salesperson, first charge 2026-11-28.');
+  assert.equal(card(status({ state: 'active', subscription: subRow({ status: 'active', seats: null, current_period_end: null }) })).line, 'Subscribed.');
+  assert.deepEqual(card(status({ state: 'active', role: 'salesperson', canManageBilling: true, subscription: subRow({ status: 'active' }) })).buttons, [], 'a salesperson never gets a button, whatever the flags say');
+});
+
+test('billingCard: lapsed says so in the agreed words, why, and offers Subscribe (and Manage billing once a customer exists)', () => {
+  const words = 'The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed.';
+  const pilotOver = card(status({ state: 'lapsed', canSubscribe: true, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(-2) }) }));
+  assert.equal(pilotOver.state, 'lapsed');
+  assert.equal(pilotOver.label, 'Lapsed');
+  assert.equal(pilotOver.tone, 'bad');
+  assert.equal(pilotOver.line, words);
+  assert.equal(pilotOver.detail, 'The free pilot ended 2026-11-14.');
+  assert.deepEqual(pilotOver.buttons.map((b) => b.label), ['Subscribe']);
+  const unpaid = card(status({ state: 'lapsed', canSubscribe: true, canManageBilling: true, subscription: subRow({ status: 'past_due', stripe_customer_id: 'cus_1', current_period_end: inDays(3) }) }));
+  assert.equal(unpaid.line, words);
+  assert.equal(unpaid.detail, 'The last payment did not go through.');
+  assert.deepEqual(unpaid.buttons.map((b) => b.label), ['Subscribe', 'Manage billing']);
+  assert.equal(card(status({ state: 'lapsed', subscription: subRow({ status: 'canceled' }) })).detail, 'The subscription was cancelled.');
+  assert.equal(card(status({ state: 'lapsed', subscription: subRow({ status: 'paused' }) })).detail, 'The subscription is paused.');
+  const sp = card(status({ state: 'lapsed', role: 'salesperson', canSubscribe: true, subscription: subRow({ status: 'unpaid' }) }));
+  assert.equal(sp.line, words);
+  assert.deepEqual(sp.buttons, []);
+});
+
+test('billingCard: no answer, a broken one, or an unknown state gives a card that says so, and never a button', () => {
+  for (const bad of [null, undefined, 'nope', 42, {}, { ok: false, error: 'x' }, { state: 'gold', role: 'manager', canStartPilot: true }]) {
+    const c = card(bad);
+    assert.equal(c.state, 'unknown', String(bad));
+    assert.equal(c.line, 'The plan could not be read.');
+    assert.equal(c.tone, 'warn');
+    assert.deepEqual(c.buttons, []);
+  }
+  assert.doesNotThrow(() => billingCard(status({ state: 'pilot', subscription: subRow({ status: 'pilot', pilot_ends_at: 'garbage' }) }), { now: 'not a time', timeZone: 'Not/AZone' }));
+  assert.equal(card(status({ state: 'pilot', subscription: subRow({ status: 'pilot', pilot_ends_at: 'garbage' }) })).line, 'Free pilot running.');
+  // the button texts are one list, frozen, with no price in them
+  assert.deepEqual(Object.keys(BILLING_BUTTONS), ['pilot', 'subscribe', 'portal']);
+  assert.ok(Object.isFrozen(BILLING_BUTTONS.pilot));
+  assert.doesNotMatch(JSON.stringify(BILLING_BUTTONS), /\$|\d/);
+});
+
+test('billingReturnNote: one honest line back from Stripe, nothing for anything else', () => {
+  assert.match(billingReturnNote('success'), /^Checkout is done\. The plan below updates when Stripe confirms/);
+  assert.match(billingReturnNote('success'), /reload/i);
+  assert.equal(billingReturnNote('canceled'), 'Checkout was closed before paying. Nothing was charged.');
+  assert.equal(billingReturnNote('other'), '');
+  assert.equal(billingReturnNote(''), '');
+  assert.equal(billingReturnNote(null), '');
+});
+
+test('the sample dealership is in a free pilot with 19 days left, seen by a manager, with no price typed into it', () => {
+  const b = mockData(NOW).billing;
+  assert.equal(b.role, 'manager');
+  assert.equal(b.state, 'pilot');
+  assert.equal(b.subscription.status, 'pilot');
+  assert.equal(b.canStartPilot, false);
+  assert.equal(b.canSubscribe, true);
+  assert.equal(b.canManageBilling, false);
+  assert.equal(b.pilotDays, null, 'the sample does not type the pilot length');
+  assert.equal(b.includedSalespeople, null, 'the sample does not type the included seats');
+  const c = card(b);
+  assert.equal(c.daysLeft, 19);
+  assert.equal(c.line, 'Free pilot: 19 days left (ends 2026-12-05).');
+  assert.deepEqual(c.buttons.map((x) => x.label), ['Subscribe']);
+  // still 19 hours later, as the page re-renders through the day
+  assert.equal(billingCard(b, { now: new Date(Date.parse(NOW) + 8 * 3600 * 1000).toISOString(), timeZone: 'UTC' }).daysLeft, 19);
+  // the sample's numbers feed summarize and the CSV as before
+  assert.equal(summarize(sample()).totals.postedAllTime, 8);
+});
+
 // ---------- the page ----------
 
 const MANAGER_FILES = readdirSync(join(root, 'manager')).filter((f) => /\.(html|js|mjs|css)$/.test(f));
@@ -275,6 +412,22 @@ test('the page is relative, mobile-friendly, and offers what the brief names', (
   assert.match(js, /mock=1|get\('mock'\)/);
   assert.match(js, /from '\.\/config\.js'/);
   assert.match(js, /from '\.\/data\.js'/);
+  // the Billing card: the three routes, the pilot function, the token pair, the way back from Stripe
+  assert.match(js, /billingCard/);
+  assert.match(js, /billing\/status\?dealershipId=/);
+  assert.match(js, /`billing\/\$\{route\}`/, 'checkout and portal are one POST');
+  assert.match(js, /kind === 'portal' \? 'portal' : 'checkout'/);
+  assert.match(js, /rpc\('start_pilot', \{ dealership_id: /);
+  assert.match(js, /Authorization: `Bearer \$\{await freshToken\(\)\}`/);
+  assert.match(js, /apikey: CONFIG\.supabaseAnonKey/);
+  assert.match(js, /returnUrl: pageUrl\(\)/);
+  assert.match(js, /location\.assign\(answer\.url\)/);
+  assert.match(js, /billingReturnNote\(params\.get\('billing'\)\)/);
+  assert.match(js, /setParam\('billing', null\)/);
+  assert.match(js, /history\.replaceState/);
+  assert.match(js, /Nothing is called here/, 'sample-data buttons only explain themselves');
+  assert.doesNotMatch(js, /\/rest\/v1\/rpc/, 'start_pilot goes through the client, not a hand-built REST call');
+  assert.match(read('manager/manager.css'), /\.card \{/);
   const css = read('manager/manager.css');
   assert.match(css, /system-ui/);
   assert.match(css, /@media \(min-width: 700px\)/, 'single column under 700px');
@@ -290,13 +443,25 @@ test('the page is relative, mobile-friendly, and offers what the brief names', (
   assert.equal((css.match(/--accent:/g) || []).length, 2);
 });
 
-test('config.js: three fields, empty means not configured, the client comes from the CDN', () => {
-  assert.deepEqual(Object.keys(CONFIG).sort(), ['supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
+test('config.js: four fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {
+  assert.deepEqual(Object.keys(CONFIG).sort(), ['functionsUrl', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
   assert.equal(typeof CONFIG.supabaseUrl, 'string');
   assert.equal(typeof CONFIG.supabaseAnonKey, 'string');
+  assert.equal(CONFIG.functionsUrl, '', 'empty: the project\'s own /functions/v1');
   assert.match(CONFIG.supabaseJs, /^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/);
   const js = read('manager/manager.js');
   assert.match(js, /CONFIG\.supabaseUrl && CONFIG\.supabaseAnonKey/, 'an empty url means not configured');
+  assert.match(js, /trimSlash\(CONFIG\.functionsUrl\) \|\| trimSlash\(CONFIG\.supabaseUrl\) \+ '\/functions\/v1'/, 'the function base is the configured one, else the project URL plus /functions/v1');
+});
+
+test('the page types no price: the pilot length and the included seats come from the status answer', () => {
+  for (const name of MANAGER_FILES) {
+    const src = read(join('manager', name));
+    assert.doesNotMatch(src, new RegExp(`\\b${pricing.pilotDays}[ -]day`), `manager/${name} types the pilot length`);
+    assert.doesNotMatch(src, new RegExp(`\\b${pricing.includedSalespeople} salesp`), `manager/${name} types the included seats`);
+    assert.doesNotMatch(src, /\$\s?\d+\s*(a|per)\s*month/i, `manager/${name} quotes a price`);
+    assert.doesNotMatch(src, /pilotDays: \d|includedSalespeople: \d/, `manager/${name} sets a pricing number`);
+  }
 });
 
 test('the CSV never hands a spreadsheet a formula typed as a name', () => {

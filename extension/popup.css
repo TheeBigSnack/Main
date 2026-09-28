@@ -62,8 +62,8 @@ button:disabled { opacity: 0.55; cursor: default; }
 .status:not(:empty) { padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .status.error { color: var(--bad); background: var(--bad-bg); }
 
-.tabs { display: flex; flex: none; gap: 2px; padding: 6px 10px 0; border-bottom: 1px solid var(--line); overflow-x: auto; } /* flex: none: a long tab body must not squeeze the strip */
-.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 7px 9px; color: var(--muted); white-space: nowrap; }
+.tabs { display: flex; flex: none; gap: 0; padding: 6px 10px 0; border-bottom: 1px solid var(--line); overflow-x: auto; } /* flex: none: a long tab body must not squeeze the strip */
+.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 7px 5px; color: var(--muted); white-space: nowrap; } /* 5px sides, no gap: all seven tabs must fit the 720px popup */
 .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .tabs .count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 9px; background: var(--surface); font-size: 11px; text-align: center; }
 .tabs .count.hot { background: var(--bad-bg); color: var(--bad); }

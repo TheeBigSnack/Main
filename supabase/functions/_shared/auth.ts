@@ -1,5 +1,6 @@
-// Who is calling: the Supabase user behind the Bearer token, and which
-// dealerships they belong to. Both functions start here.
+// Who is calling: the Supabase user behind the Bearer token, which
+// dealerships they belong to, and where a dealership stands with billing
+// (its subscriptions row). Every function starts here.
 //
 // The caller's own client (anon key + their token) is what the functions
 // read and write with, so row-level security decides what they can touch.
@@ -82,6 +83,20 @@ export async function membershipsOf(client: SupabaseClient, userId: string): Pro
       dealership: d ? { id: String(d.id ?? ''), name: String(d.name ?? ''), website_origin: String(d.website_origin ?? '') } : null,
     };
   });
+}
+
+export type SubscriptionRow = Record<string, unknown>;
+
+// The dealership's subscriptions row (migrations/0004_billing.sql), or null
+// when it has none yet, through the caller's own client: a member may read
+// their dealership's row and nobody else's, so no service-role key is
+// needed to learn the plan. /sync and /rewrite read it first and refuse a
+// lapsed dealership (402) before doing anything else; the billing function
+// reads it with the service role because it also writes it.
+export async function subscriptionRowOf(client: SupabaseClient, dealershipId: string): Promise<SubscriptionRow | null> {
+  const { data, error } = await client.from('subscriptions').select('*').eq('dealership_id', dealershipId).maybeSingle();
+  if (error) throw new Error('could not read subscriptions: ' + error.message);
+  return isRecord(data) ? data : null;
 }
 
 // Bypasses row-level security. Only for the usage log, only in here.

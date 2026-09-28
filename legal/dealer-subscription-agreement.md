@@ -22,7 +22,7 @@ The Dealer is responsible for: the accuracy of its website inventory and prices;
 
 ## 5. Fees
 
-Per rooftop per month as in Schedule A, billed monthly in advance via Stripe. A free pilot period, if any, is stated in Schedule A or in a separate Pilot Agreement. Prices may change with 30 days' notice.
+Per rooftop per month as in Schedule A, billed monthly in advance via Stripe. A free pilot period, if any, is stated in a separate Pilot Agreement. Prices may change with 30 days' notice.
 
 ## 6. Term and termination
 
@@ -38,7 +38,7 @@ Section 5, 10 and 11 of the Terms of Service apply: no guarantee of leads, sales
 
 ## 9. General
 
-Pennsylvania law; the Terms of Service govern anything not covered here; this Agreement, the Terms, the Privacy Policy and any Pilot Agreement are the whole agreement; amendments in writing.
+The law of [state] governs [Attorney: governing law and venue, once the Lot Sync entity exists]; the Terms of Service govern anything not covered here; this Agreement, the Terms, the Privacy Policy and any Pilot Agreement are the whole agreement; amendments in writing.
 
 Signed:
 
@@ -48,9 +48,11 @@ Dealer: ________________________ Name/Title: ______________ Date: ________
 
 ## Schedule A: rooftops, websites and fees
 
-| Rooftop | Website | Monthly fee | Pilot period |
-|---|---|---|---|
-| Ron Lewis Chrysler Dodge Jeep Ram Waynesburg | ronlewischryslerdodgejeepramwaynesburg.com | $[ ] | [30 days free] |
+One row per rooftop, filled in by the parties. The fees are the ones shown at purchase, on the Checkout page the Dealer's manager completes for that rooftop; this Schedule records them. No amount is typed into this template: the monthly fee is `perRooftopMonthly` (which includes `includedSalespeople` salespeople) plus `extraSalespersonMonthly` for each extra seat, and the founding rate, where one applies, is `foundingDealerMonthly` for the first `foundingDealerMonths` months, all in `marketing/pricing.json`.
+
+| Rooftop | Website | Included salespeople | Extra seats | Monthly fee | Founding rate (if any) | Start date |
+|---|---|---|---|---|---|---|
+| | | | | | | |
 
 ## Schedule B: authorised users
 

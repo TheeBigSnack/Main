@@ -12,7 +12,7 @@ import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLink
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
-import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, NOT_CONFIGURED } from './src/accountFlow.js';
+import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
 
 const $ = (id) => document.getElementById(id);
@@ -40,7 +40,7 @@ const state = {
   wizardActive: false, // set-up started in the side panel and not finished
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
   pilot: null, // pilot numbers (src/pilot.js): post timings, fill failures per field, to-do item durations
-  syncState: null, // this website's sync state (src/sync.js nextSyncState): dealership, role, when it last synced; accounts only
+  syncState: null, // this website's sync state (src/sync.js nextSyncState): dealership, role, when it last synced, the plan, the server's count of today's posts (the cap reads it); accounts only
   account: { session: null, email: '', note: '', error: '' }, // the signed-in session (read only when accounts are configured) and what the Account section says
   rescanPermission: null, // true/false once known: may the service worker read this website?
   scanning: false,
@@ -327,7 +327,7 @@ function postButton(vin, { canPost = true } = {}) {
   if (state.drafts[vin]) {
     return `<span class="actions"><span class="pill warn" title="Saved as a draft on Facebook; publish it there, then mark it posted">Draft on Facebook</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
-  const capReached = capStatus(state.posted, state.settings?.dailyCap).reached;
+  const capReached = dailyCap().reached;
   const post = canPost
     ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${capReached ? 'disabled' : ''} title="${capReached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
     : '';
@@ -350,7 +350,7 @@ function setupBanner() {
   const active = state.wizardActive;
   const text = active
     ? '<b>Set-up is not finished.</b> Pick up where you left off in the side panel.'
-    : "<b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, automatic rescans, the posting rules and the Terms of Service.";
+    : "<b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, the price to post, automatic rescans, the posting rules and the Terms of Service.";
   const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields">Not now</button>' : '';
   return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Sync'}</button>${later}</div></div>`;
 }
@@ -446,12 +446,15 @@ function queueStatusHtml() {
   return `<div class="banner info queue" id="queueStatus"><b>${esc(describeQueue(q))}</b>${next ? ` · next: ${esc(name)}` : ''}<div class="toolbar">${buttons}</div></div>`;
 }
 
+// The day's cap for this salesperson: this machine's posts and, after a
+// sync, the server's count of theirs across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
 const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
 
 function viewReady(l) {
   const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. Click <b>Post</b> on one car, or tick several and <b>Post</b> them as a queue: the side panel pre-fills each form and you click Publish on each. Listed one by hand? Click <b>Mark posted</b>.</p>`;
   if (!l.ready.length) return lead + queueStatusHtml() + empty('No cars are ready right now.');
-  const cap = capStatus(state.posted, state.settings?.dailyCap);
+  const cap = dailyCap();
   const pickable = l.ready.filter((e) => !state.posted[e.vin]);
   const capBanner = cap.reached ? `<div class="banner warn" id="capReached">${esc(capText(cap))}</div>` : '';
   const toolbar = pickable.length > 1 && !cap.reached
@@ -463,7 +466,7 @@ function viewReady(l) {
 // Ticking: never more than the day's remaining posts. "Select all" takes the
 // first N cars from the top, where N is what's left today.
 function onPickChange(target) {
-  const cap = capStatus(state.posted, state.settings?.dailyCap);
+  const cap = dailyCap();
   const boxes = [...document.querySelectorAll('.pick')];
   if (target.id === 'pickAll') {
     boxes.forEach((box, i) => { box.checked = target.checked && i < cap.remaining; });
@@ -613,13 +616,16 @@ function accountFieldset() {
   const site = state.site || {};
   const email = (a.session.user && a.session.user.email) || '';
   const dealership = ss.dealershipName ? ` · ${esc(ss.dealershipName)}${ss.role ? ` (${esc(ss.role)})` : ''}` : '';
+  // the plan as the last sync learned it (src/accountFlow.js planText); lapsed is what stops syncing, so it is the one in red
+  const plan = planText(ss.plan);
+  const planLine = plan ? ` · <span id="planStatus"${ss.plan.state === 'lapsed' ? ' style="color: var(--bad)"' : ''}>${esc(plan)}</span>` : '';
   const last = ss.lastSyncAt ? `Last sync ${esc(when(ss.lastSyncAt))}` : 'Not synced yet';
   const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}` : '';
   const syncHint = state.origin
     ? `<p class="hint" id="syncStatus">${last}${failed}. Lot Sync also syncs after every rescan and after each post you record.</p>`
     : `<p class="hint" id="syncStatus">Open your dealership's website to sync its listings.</p>`;
   return `<fieldset><legend>Account</legend>
-    <p id="accountStatus">Signed in as <b>${esc(email)}</b>${dealership}</p>
+    <p id="accountStatus">Signed in as <b>${esc(email)}</b>${dealership}${planLine}</p>
     ${syncHint}
     <div class="actions"><button type="button" class="plain" data-action="accountSyncNow" ${state.origin ? '' : 'disabled'}>Sync now</button><button type="button" class="plain" data-action="accountSignOut">Sign out</button></div>
     <p class="hint"><b>Join a dealership with an invite code.</b> Your manager gives you one; it works once.</p>
@@ -759,7 +765,7 @@ function problemReport() {
     `Last automatic rescan attempt: ${site.lastAttempt || 'never'}`,
     `Last error: ${site.lastError || 'none'}`,
     `Automatic rescans: ${site.auto ? 'on' : 'off'}; background permission: ${permission}`,
-    `Account: ${accountsConfigured() ? (state.account.session ? 'signed in' : 'signed out') : 'not set up'}; last sync: ${site.lastSync || 'never'}; last sync error: ${site.lastSyncError || 'none'}`,
+    `Account: ${accountsConfigured() ? (state.account.session ? 'signed in' : 'signed out') : 'not set up'}; plan: ${state.syncState && state.syncState.plan ? state.syncState.plan.state : 'unknown'}; last sync: ${site.lastSync || 'never'}; last sync error: ${site.lastSyncError || 'none'}`,
     `Counts: to do ${todoCount()}, ready to post ${l.ready.length}, not ready ${l.notReady.length}, other stores ${l.otherStores.length}, needs a look ${l.review.length + l.skipped.length}, my listings ${l.mine.length}, queue: ${state.queue ? describeQueue(state.queue) : 'none'}`,
     lastFill
       ? `Last fill: ${lastFill.at || 'unknown time'}, form map ${lastFill.mapVersion || 'unknown'}, build ${lastFill.version || 'unknown'}; needed a click: ${keysOf(lastFill.partial)}; couldn't fill: ${keysOf(lastFill.blocked)}; changed by the form afterwards: ${keysOf(lastFill.changed)}`
@@ -806,7 +812,7 @@ async function onPanelClick(ev) {
       // writes the description and pre-fills the Marketplace form.
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry || entry.decision !== DECISION.READY || !state.tab) return;
-      const cap = capStatus(state.posted, state.settings?.dailyCap);
+      const cap = dailyCap();
       if (cap.reached) {
         setStatus(capText(cap), 'error');
         return;
@@ -833,7 +839,7 @@ async function onPanelClick(ev) {
         const vins = btn.dataset.action === 'queue'
           ? [...document.querySelectorAll('.pick:checked')].map((i) => i.dataset.vin)
           : (state.diff?.newArrivals || []).filter((n) => n.decision === DECISION.READY && !state.posted[n.vin]).map((n) => n.vin);
-        const cap = capStatus(state.posted, state.settings?.dailyCap);
+        const cap = dailyCap();
         const made = createQueue(vins, { remaining: cap.remaining, dealerTabId: state.tab.id, windowId: state.tab.windowId });
         if (!made.ok) {
           setStatus(made.error, 'error');
@@ -1244,7 +1250,12 @@ async function init() {
     take(k.diff, 'diff', null);
     take(k.snapshot, 'snapshot', null);
     take(k.pilot, 'pilot', null);
-    if (changes[k.sync]) state.syncState = changes[k.sync].newValue ?? null; // shown in Settings only, which is not redrawn from here
+    if (changes[k.sync]) {
+      const next = changes[k.sync].newValue ?? null;
+      // the server's count of today's posts feeds the cap, so the lists are redrawn when it moves; the rest is shown in Settings only
+      if (!same(next && next.postsToday, state.syncState && state.syncState.postsToday)) touched = true;
+      state.syncState = next;
+    }
     if (accountsConfigured() && changes[GLOBAL_KEYS.account]) state.account.session = changes[GLOBAL_KEYS.account].newValue || null; // the worker refreshed the session, or a rejected token signed the person out
     if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
       state.settings = withDefaults(changes[k.settings].newValue, state.snapshot?.site || {});

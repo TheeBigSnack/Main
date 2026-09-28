@@ -38,6 +38,7 @@ table.fields tr.missing td:last-child { color: var(--warn); }
 .copy { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 6px; padding: 2px 8px; font-size: 11px; margin-left: 6px; }
 label.block { display: block; margin: 8px 0; }
 label.block input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+label.block input[type="checkbox"], label.block input[type="radio"] { width: auto; padding: 0; margin: 0 6px 0 0; vertical-align: middle; }
 .pill.claude { background: var(--info-bg); }
 .queuebar { position: sticky; top: 0; z-index: 2; }
 ol.rules { padding-left: 20px; }

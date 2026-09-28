@@ -18,6 +18,14 @@
 //                   take_down_count, price_update_count
 //   memberships     user_id, dealership_id, role 'salesperson' | 'manager', name
 //
+// The Billing card (Milestone 5) is drawn from GET .../billing/status's
+// answer instead of rows: { role, state 'none' | 'pilot' | 'active' |
+// 'lapsed', subscription (the subscriptions row or null), canStartPilot,
+// canSubscribe, canManageBilling, pilotDays, includedSalespeople }.
+// billingCard() turns it into one sentence and the buttons a manager may
+// press; the numbers in the sentence come from the answer (or, in tests,
+// from marketing/pricing.json), never from this file.
+//
 // What the shape can and cannot say:
 //   - "Sold cars still listed" are the open take-down items (todo_items, kind
 //     takeDown, no done_at). A scan summary carries counts, not VINs, so
@@ -257,6 +265,121 @@ function scanLine(s, nowAt, zone) {
   };
 }
 
+// ---------- billing ----------
+
+export const DAY_MS = 24 * 3600 * 1000;
+export const PLAN_STATES = Object.freeze(['none', 'pilot', 'active', 'lapsed']);
+export const PILOT_WARN_DAYS = 3; // this close to the end the pilot pill turns amber
+
+// The three buttons, with what each does in words: the page shows `does`
+// as a note in sample-data mode instead of calling anything.
+export const BILLING_BUTTONS = Object.freeze({
+  pilot: Object.freeze({ action: 'pilot', label: 'Start the free pilot', does: 'starts the dealership\'s free pilot; no card is asked for' }),
+  subscribe: Object.freeze({ action: 'subscribe', label: 'Subscribe', does: 'opens Stripe Checkout to pay by card, then comes back to this page' }),
+  portal: Object.freeze({ action: 'portal', label: 'Manage billing', does: 'opens Stripe\'s billing portal to change the card, see invoices or cancel' }),
+});
+
+// Why a plan has lapsed, from the Stripe status on the row; a pilot that
+// ran out is worded from its end date instead.
+const LAPSED_WHY = Object.freeze({
+  past_due: 'The last payment did not go through.',
+  unpaid: 'The last payment did not go through.',
+  incomplete: 'The first payment did not go through.',
+  incomplete_expired: 'The first payment did not go through.',
+  canceled: 'The subscription was cancelled.',
+  paused: 'The subscription is paused.',
+});
+
+// The local calendar date alone (2026-12-05), for a plan line.
+export function fmtLocalDate(iso, timeZone) {
+  return fmtLocal(iso, timeZone).slice(0, 10);
+}
+
+/**
+ * The Billing card from the status answer: the plan state in one sentence
+ * a manager understands, a pill, a detail line, and the buttons the answer
+ * allows. Buttons are for managers only, whatever the flags say; a
+ * salesperson gets the sentence and nothing to press. The pilot length and
+ * the included seats are read from the answer (pilotDays,
+ * includedSalespeople), else from `pricing` (marketing/pricing.json, which
+ * the tests read); with neither the sentence leaves the numbers out.
+ * @param {object} status   GET .../billing/status's answer (or the sample's)
+ * @param {object} options
+ *   now:      ISO time the days left count from (default: the clock)
+ *   timeZone: IANA zone for the dates (default: this computer's)
+ *   pricing:  { pilotDays, includedSalespeople } fallback
+ * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, buttons: { action, label, does }[] }}
+ */
+export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) {
+  const s = status && typeof status === 'object' ? status : {};
+  const p = pricing && typeof pricing === 'object' ? pricing : {};
+  const sub = s.subscription && typeof s.subscription === 'object' ? s.subscription : {};
+  const t = ms(now) ?? Date.now();
+  const zone = resolveTimeZone(timeZone);
+  const date = (iso) => fmtLocalDate(iso, zone);
+  const manager = s.role === 'manager';
+  const state = PLAN_STATES.includes(s.state) ? s.state : 'unknown';
+  const pilotDays = num(s.pilotDays) ?? num(p.pilotDays);
+  const includedSalespeople = num(s.includedSalespeople) ?? num(p.includedSalespeople);
+
+  // buttons only for a manager and a state this page knows: a word the page
+  // cannot read is a page and a function that disagree, and nothing to press
+  const buttons = [];
+  if (manager && state !== 'unknown') {
+    if (s.canStartPilot) buttons.push({ ...BILLING_BUTTONS.pilot });
+    if (s.canSubscribe) buttons.push({ ...BILLING_BUTTONS.subscribe });
+    if (s.canManageBilling) buttons.push({ ...BILLING_BUTTONS.portal });
+  }
+
+  let label = 'Unknown';
+  let tone = 'warn';
+  let line = 'The plan could not be read.';
+  let detail = '';
+  let daysLeft = null;
+
+  if (state === 'none') {
+    label = 'No plan yet';
+    tone = '';
+    const terms = [
+      pilotDays !== null ? plural(pilotDays, 'day') : '',
+      includedSalespeople !== null ? `${plural(includedSalespeople, 'salesperson', 'salespeople')} included` : '',
+      'no card',
+    ].filter(Boolean).join(', ');
+    line = `No plan yet. ${manager ? 'Start' : 'A manager can start'} the free pilot: ${terms}.`;
+  } else if (state === 'pilot') {
+    label = 'Free pilot';
+    const end = ms(sub.pilot_ends_at);
+    daysLeft = end === null ? null : Math.max(0, Math.ceil((end - t) / DAY_MS));
+    tone = daysLeft !== null && daysLeft <= PILOT_WARN_DAYS ? 'warn' : 'good';
+    line = daysLeft === null ? 'Free pilot running.' : `Free pilot: ${plural(daysLeft, 'day')} left (ends ${date(sub.pilot_ends_at)}).`;
+    // Checkout during a pilot with more than two days left starts the subscription as a trial to the pilot's end (the billing function)
+    if (manager && s.canSubscribe) detail = 'Subscribe any time: with more than two days of pilot left, the card is first charged when the pilot ends.';
+  } else if (state === 'active') {
+    label = 'Subscribed';
+    tone = 'good';
+    const seats = num(sub.seats);
+    const who = seats !== null ? `: ${plural(seats, 'salesperson', 'salespeople')}` : '';
+    const when = sub.current_period_end ? `, ${sub.status === 'trialing' ? 'first charge' : 'renews'} ${date(sub.current_period_end)}` : '';
+    line = `Subscribed${who}${when}.`;
+  } else if (state === 'lapsed') {
+    label = 'Lapsed';
+    tone = 'bad';
+    line = 'The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed.';
+    const pilotEnd = ms(sub.pilot_ends_at);
+    detail = LAPSED_WHY[sub.status] || (pilotEnd !== null && pilotEnd <= t ? `The free pilot ended ${date(sub.pilot_ends_at)}.` : '');
+  }
+
+  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, buttons };
+}
+
+// The one line the page shows when Stripe sends the manager back with
+// ?billing=success or ?billing=canceled; '' for anything else.
+export function billingReturnNote(flag) {
+  if (flag === 'success') return 'Checkout is done. The plan below updates when Stripe confirms the subscription, usually within a minute; reload the page if it still shows the old state.';
+  if (flag === 'canceled') return 'Checkout was closed before paying. Nothing was charged.';
+  return '';
+}
+
 // ---------- the spreadsheet ----------
 
 const csvCell = (v) => {
@@ -358,7 +481,8 @@ export function csvFileName(now = nowIso(), { dealer = '', timeZone } = {}) {
 
 // A small made-up dealership for the demo and the tests: two salespeople,
 // eight listings, three open to-do items, a week of post attempts, four
-// scans. Every time is relative to `now`. No real dealer, person or town.
+// scans, and a free pilot with 19 days left, seen as its manager. Every
+// time is relative to `now`. No real dealer, person or town.
 export function mockData(now = nowIso()) {
   const t = ms(now) ?? Date.now();
   const ago = (hours) => new Date(t - hours * 3600 * 1000).toISOString();
@@ -452,5 +576,23 @@ export function mockData(now = nowIso()) {
     price_update_count: price,
   }));
 
-  return { dealership, memberships, listings, todoItems, postAttempts, scans };
+  // What GET .../billing/status would answer: a running pilot, seen by a
+  // manager (so "Subscribe" shows). The real answer also carries the pilot
+  // length and the included seats from marketing/pricing.json; the sample
+  // leaves them null rather than type a price into the page. Ending at 18.5
+  // days keeps "19 days left" true for hours after the sample was built.
+  const billing = {
+    ok: true,
+    dealership: { id: D, name: dealership.name, websiteOrigin: origin },
+    role: 'manager',
+    state: 'pilot',
+    subscription: { dealership_id: D, stripe_customer_id: null, stripe_subscription_id: null, status: 'pilot', pilot_ends_at: ago(-18.5 * 24), current_period_end: null, updated_at: ago(24 * 11) },
+    canStartPilot: false,
+    canSubscribe: true,
+    canManageBilling: false,
+    pilotDays: null,
+    includedSalespeople: null,
+  };
+
+  return { dealership, memberships, listings, todoItems, postAttempts, scans, billing };
 }

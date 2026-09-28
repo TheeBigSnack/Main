@@ -9,15 +9,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   functionsUrlFor, rewriteEndpointFor, syncUrlFor, signInStart, signInFinish, currentSession, signOutAll, syncOnce,
-  rewriteKeyFor, scanFromStored, describeSync, NOT_CONFIGURED, NOT_SIGNED_IN,
+  rewriteKeyFor, scanFromStored, describeSync, planText, NOT_CONFIGURED, NOT_SIGNED_IN, LAPSED_CODE, LAPSED_MESSAGE, LAPSED_SENTENCE,
 } from '../extension/src/accountFlow.js';
 import { ACCOUNT, accountsConfigured } from '../extension/src/accountConfig.js';
 import { sessionFromTokenResponse, ACCOUNT_KEY } from '../extension/src/account.js';
 import { siteKeys, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
 import { markPosted } from '../extension/src/rescan.js';
-import { postsToday } from '../extension/src/cap.js';
+import { postsToday, capStatus } from '../extension/src/cap.js';
 import { beginPost, endPost, noteFlags } from '../extension/src/pilot.js';
-import { toServerRows } from '../extension/src/sync.js';
+import { toServerRows, localDayRange } from '../extension/src/sync.js';
 
 const CONFIG = Object.freeze({ url: 'https://abcdefgh.supabase.co/', anonKey: 'anon-key-for-tests', functionsUrl: '' });
 const ORIGIN = 'https://www.example-motors.test';
@@ -248,15 +248,21 @@ test('scanFromStored turns the stored snapshot and diff into the sync function\'
 });
 
 // A small model of the sync function (supabase/functions/sync/index.ts):
-// the caller's rows are upserted, the caller's listed rows missing from the
-// registry and posted before `since` are taken down, a to-do item is closed
-// by an upload, and the dealership's whole current state comes back.
-function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math.floor(NOW / 1000) + 3600 })]: U1 } } = {}) {
+// a lapsed plan is refused with 402 before anything else; the caller's rows
+// are upserted, stamped created_at from the server's clock; the caller's
+// listed rows missing from the registry among those the server already
+// held at `since` (created_at, never posted_at) are taken down; a to-do
+// item is closed by an upload; and the dealership's whole current state
+// comes back with the plan and the caller's posts in the day they sent.
+// `plan` overrides the default (a pilot with 30 days to run, the included 5
+// seats); { state: 'lapsed' } makes every call answer 402 like the function.
+function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math.floor(NOW / 1000) + 3600 })]: U1 }, plan = null } = {}) {
   const listings = [];
   const todoItems = [];
   const clock = { t: NOW + 60 * 60 * 1000 };
   const tick = () => new Date((clock.t += 1000)).toISOString();
   const requests = [];
+  const thePlan = { state: 'pilot', pilotEndsAt: new Date(clock.t + 30 * 24 * 3600 * 1000).toISOString(), currentPeriodEnd: null, seats: 5, ...(plan || {}) };
   const handler = async (call) => {
     requests.push(call);
     const m = /^Bearer (.+)$/.exec(call.headers.Authorization || '');
@@ -264,12 +270,13 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
     if (!userId) return { status: 401, body: { ok: false, error: 'sign in again (the token was rejected or has expired)' } };
     const body = call.body;
     if (body.origin !== ORIGIN) return { status: 403, body: { ok: false, error: `your account is not a member of the dealership for ${body.origin}` } };
+    if (thePlan.state === 'lapsed') return { status: 402, body: { ok: false, error: "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view", code: 'lapsed', plan: { ...thePlan } } };
     const now = tick();
     const rows = toServerRows({ origin: body.origin, posted: body.posted, pilot: body.pilot, dealershipId: D, userId });
     const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, attempts: rows.postAttempts.length, todoItems: 0, scans: body.scan ? 1 : 0 };
     const sent = new Set(rows.listings.map((r) => `${r.vin}@${r.posted_at}`));
     for (const r of listings) {
-      if (r.user_id === userId && r.status === 'listed' && !sent.has(`${r.vin}@${r.posted_at}`) && body.since && Date.parse(r.posted_at) <= Date.parse(body.since)) {
+      if (r.user_id === userId && r.status === 'listed' && !sent.has(`${r.vin}@${r.posted_at}`) && body.since && Date.parse(r.created_at) <= Date.parse(body.since)) {
         r.status = 'taken_down';
         r.taken_down_at = now;
         counts.takenDown += 1;
@@ -278,7 +285,7 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
     for (const incoming of rows.listings) {
       const have = listings.find((r) => r.vin === incoming.vin && r.posted_at === incoming.posted_at);
       if (!have) {
-        listings.push({ id: `${incoming.vin}@${incoming.posted_at}`, ...incoming });
+        listings.push({ id: `${incoming.vin}@${incoming.posted_at}`, ...incoming, created_at: now });
         counts.listingsInserted += 1;
         continue;
       }
@@ -294,9 +301,14 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
       else if (!have.done_at && t.done_at) Object.assign(have, { done_at: t.done_at, how: t.how });
       counts.todoItems += 1;
     }
-    return { status: 200, body: { ok: true, serverTime: now, dealership: { id: D, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'salesperson', counts, listings: listings.map((r) => ({ ...r })), todoItems: todoItems.map((t) => ({ ...t })) } };
+    // the caller's own rows, any status, in the day the request sent; null
+    // for no day or one that is not a day (the function's todayRange rule)
+    const day = body.today && typeof body.today === 'object' ? [Date.parse(body.today.from), Date.parse(body.today.to)] : [NaN, NaN];
+    const isDay = Number.isFinite(day[0]) && Number.isFinite(day[1]) && day[0] < day[1] && day[1] - day[0] <= 48 * 3600 * 1000;
+    const postsToday = isDay ? listings.filter((r) => r.user_id === userId && Date.parse(r.posted_at) >= day[0] && Date.parse(r.posted_at) < day[1]).length : null;
+    return { status: 200, body: { ok: true, serverTime: now, dealership: { id: D, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'salesperson', plan: { ...thePlan }, postsToday, counts, listings: listings.map((r) => ({ ...r })), todoItems: todoItems.map((t) => ({ ...t })) } };
   };
-  return { listings, todoItems, requests, handler };
+  return { listings, todoItems, requests, handler, plan: thePlan };
 }
 
 test('syncOnce: signed out means no request; a first sync sends the whole registry without `since` and merges a colleague\'s listing, a closed flag and the state', async () => {
@@ -329,6 +341,8 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const body = calls[0].body;
   assert.equal(body.origin, ORIGIN, 'the trailing slash is dropped');
   assert.equal(body.since, null, 'a first sync');
+  const today = localDayRange(new Date(NOW));
+  assert.deepEqual(body.today, today, 'the caller\'s local day goes up, for the server\'s count of their posts in it');
   assert.deepEqual(Object.keys(body.posted), [VIN_A]);
   assert.deepEqual(body.posted[VIN_A], { name: '2019 Ram 1500', price: 28995, postedAt: T(0), salesperson: 'Alex' }, 'postedWith stays in the browser');
   assert.equal(body.pilot.posts.length, 1);
@@ -355,7 +369,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const flag = storage.data[K.pilot].flags[0];
   assert.equal(flag.doneAt, T(40), 'the flag closed on the colleague\'s machine is closed here');
   assert.equal(flag.how, 'detected');
-  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime });
+  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today } }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap');
   assert.equal(storage.data[ACCOUNT_KEY].accessToken, freshSession().accessToken, 'the session is untouched');
 
   // the second sync carries `since`, sends only pilot changes after it, and writes nothing that did not change
@@ -437,6 +451,104 @@ test('syncOnce: two machines converge through the flows, and a take-down on one 
   assert.equal(server.listings.find((x) => x.vin === VIN_B).user_id, U1, 'Sam\'s sync never claims Alex\'s row');
 });
 
+// ---------- the plan and the cap across machines (Milestone 5) ----------
+
+test('syncOnce: a lapsed dealership (402) syncs nothing, keeps the session, stores the plan so Settings can say so, and describeSync says it in one sentence', async () => {
+  const server = fakeSyncServer({ plan: { state: 'lapsed', pilotEndsAt: T(-60), currentPeriodEnd: null, seats: null } });
+  const { fetchImpl, calls } = fakeFetch({ sync: server.handler });
+  const posted = markPosted({}, { vin: VIN_A, name: '2019 Ram 1500', price: 28995 }, 'website', T(0));
+  const before = { version: 1, since: T(1), dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: { state: 'pilot', pilotEndsAt: T(2), currentPeriodEnd: null, seats: 5 }, postsToday: { count: 4, ...localDayRange(new Date(NOW)) } };
+  const storage = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted, [K.sync]: before });
+  const r = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 402);
+  assert.equal(r.code, LAPSED_CODE);
+  assert.equal(r.lapsed, true);
+  assert.equal(r.error, LAPSED_MESSAGE);
+  assert.equal(r.plan.state, 'lapsed');
+  assert.equal(r.signedOut, undefined);
+  assert.equal(r.notMember, undefined);
+  assert.equal(calls.length, 1);
+  assert.equal(server.listings.length, 0, 'nothing was written on the server');
+  assert.equal(ACCOUNT_KEY in storage.data, true, 'the session stays: renewing is a manager\'s job, not a sign-in');
+  assert.deepEqual(storage.data[K.posted], posted, 'the registry is untouched');
+  assert.deepEqual(storage.writes, [[K.sync]], 'only the sync state was written');
+  const s = storage.data[K.sync];
+  assert.equal(s.plan.state, 'lapsed');
+  assert.equal(s.since, T(1), 'since is kept: nothing new was synced');
+  assert.equal(s.lastSyncAt, T(1));
+  assert.equal(s.postsToday, null, 'a 402 counted nothing, so no number lingers');
+  assert.equal(s.dealershipName, 'Example Motors');
+  assert.equal(describeSync(r), `Not synced: ${LAPSED_MESSAGE}.`);
+  assert.equal(planText(s.plan), LAPSED_SENTENCE);
+  // the cap falls back to this machine's count
+  assert.equal(capStatus(storage.data[K.posted], 10, new Date(NOW), { serverCount: s.postsToday }).used, 1);
+  // a machine that never synced this website gets the plan too, with nothing else invented
+  const fresh = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  const r2 = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage: fresh }) });
+  assert.equal(r2.code, LAPSED_CODE);
+  assert.equal(fresh.data[K.sync].plan.state, 'lapsed');
+  assert.equal(fresh.data[K.sync].since, null);
+  assert.equal(ACCOUNT_KEY in fresh.data, true);
+});
+
+test('syncOnce: the server\'s count of today\'s posts comes down with the plan, and the cap takes the larger of it and this machine\'s count', async () => {
+  const server = fakeSyncServer();
+  const { fetchImpl, calls } = fakeFetch({ sync: server.handler });
+  const today = localDayRange(new Date(NOW));
+  // the showroom desktop already synced three of Alex's posts today
+  for (const [vin, min] of [[VIN_A, 0], [VIN_B, 1], [VIN_C, 2]]) server.listings.push({ id: vin, dealership_id: D, user_id: U1, vin, name: `Car ${vin.slice(-2)}`, price: 20000, posted_at: T(min), listing_url: null, salesperson: 'Alex', updated_at: null, status: 'listed', taken_down_at: null, created_at: T(3) });
+  // the laptop has one post of its own that the server has not seen
+  const posted = markPosted({}, { vin: 'TESTVIN00000000D4', name: '2017 Ford', price: 15995 }, 'website', T(5));
+  const storage = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  const r = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) });
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(calls[0].body.today, today);
+  const s = storage.data[K.sync];
+  assert.deepEqual(s.plan, server.plan);
+  assert.deepEqual(s.postsToday, { count: 4, ...today }, 'the four rows the server holds for Alex today, counted after the upload');
+  assert.deepEqual(r.state, s);
+  assert.match(planText(s.plan, NOW), /^Free pilot: 3[01] days left$/);
+  // what the popup's cap does with it: after the merge the registry has all four as Alex's own
+  const merged = storage.data[K.posted];
+  assert.equal(postsToday(merged, new Date(NOW)), 4);
+  assert.deepEqual(capStatus(merged, 5, new Date(NOW), { serverCount: s.postsToday }), { used: 4, cap: 5, remaining: 1, reached: false });
+  // a machine holding fewer rows still gets the server's number, so the cap holds across Alex's machines
+  assert.equal(postsToday(posted, new Date(NOW)), 1);
+  assert.deepEqual(capStatus(posted, 5, new Date(NOW), { serverCount: s.postsToday }), { used: 4, cap: 5, remaining: 1, reached: false });
+  assert.equal(capStatus(posted, 4, new Date(NOW), { serverCount: s.postsToday }).reached, true);
+  // tomorrow the count is stale and only this machine's posts count
+  const tomorrow = new Date(Date.parse(today.to) + 3600 * 1000);
+  assert.equal(capStatus(merged, 5, tomorrow, { serverCount: s.postsToday }).used, postsToday(merged, tomorrow));
+  // a colleague's posts never enter the count: Sam syncs and sees Alex's four, counted as none of Sam's
+  const samToken = jwt({ sub: U2, email: 'sam@example.test', exp: Math.floor(NOW / 1000) + 3600 });
+  const shared = fakeSyncServer({ users: { [samToken]: U2 } });
+  shared.listings.push(...server.listings.map((row) => ({ ...row })));
+  const samFetch = fakeFetch({ sync: shared.handler });
+  const sam = fakeStorage({ [ACCOUNT_KEY]: sessionFromTokenResponse(tokenBody({ access_token: samToken, user: { id: U2, email: 'sam@example.test' } }), NOW), [K.posted]: {} });
+  const rs = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl: samFetch.fetchImpl, storage: sam }) });
+  assert.equal(rs.ok, true, rs.error);
+  assert.deepEqual(sam.data[K.sync].postsToday, { count: 0, ...today });
+  assert.equal(Object.keys(sam.data[K.posted]).length, 4, 'Sam sees the dealership\'s listings');
+  assert.deepEqual(capStatus(sam.data[K.posted], 5, new Date(NOW), { serverCount: sam.data[K.sync].postsToday }), { used: 0, cap: 5, remaining: 5, reached: false });
+});
+
+test('planText: one line per plan state for the Account section', () => {
+  const day = 24 * 3600 * 1000;
+  assert.equal(planText(null), '', 'nothing to say before the first sync');
+  assert.equal(planText(undefined), '');
+  assert.equal(planText({ state: 'none', pilotEndsAt: null, currentPeriodEnd: null, seats: null }), 'No plan yet: a manager starts the free pilot in the manager view');
+  assert.equal(planText({ state: 'pilot', pilotEndsAt: new Date(NOW + 12 * day).toISOString(), currentPeriodEnd: null, seats: 5 }, NOW), 'Free pilot: 12 days left');
+  assert.equal(planText({ state: 'pilot', pilotEndsAt: new Date(NOW + day / 2).toISOString() }, NOW), 'Free pilot: 1 day left', 'a part of a day is a day');
+  assert.equal(planText({ state: 'pilot', pilotEndsAt: new Date(NOW - day).toISOString() }, NOW), 'Free pilot: 0 days left', 'never negative (the server would say lapsed anyway)');
+  assert.equal(planText({ state: 'pilot', pilotEndsAt: null }, NOW), 'Free pilot');
+  assert.equal(planText({ state: 'active', pilotEndsAt: null, currentPeriodEnd: new Date(NOW + 20 * day).toISOString(), seats: 5 }, NOW), 'Subscribed');
+  assert.equal(planText({ state: 'lapsed' }), LAPSED_SENTENCE);
+  assert.equal(LAPSED_SENTENCE, "The dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view");
+  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view", 'the sentence the functions answer with (supabase/functions/_shared/billing.mjs)');
+  assert.equal(LAPSED_CODE, 'lapsed');
+});
+
 // ---------- the wiring stays inert without a config, and the token stays where it is ----------
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -456,6 +568,16 @@ test('the popup, the side panel and the worker gate every account call on accoun
   assert.match(worker, /msg\.type === 'syncNow'/);
   assert.match(worker, /lastSyncError/);
   const popup = read('../extension/popup.js');
+  // the cap takes the server's count of today's posts from sync:<origin> wherever it is drawn or enforced (non-negotiable 7, across machines)
+  for (const [rel, src] of [['../extension/popup.js', popup], ['../extension/sidepanel.js', panel]]) {
+    assert.doesNotMatch(src, /capStatus\(state\.posted, state\.settings\??\.dailyCap\)/, `${rel}: every cap reading goes through dailyCap(), which passes the server count`);
+    assert.equal((src.match(/capStatus\(/g) || []).length, 1, `${rel}: capStatus is called in one place only, the dailyCap() helper`);
+    assert.ok((src.match(/dailyCap\(\)/g) || []).length >= 3, `${rel}: the cap readings call dailyCap()`);
+    assert.match(src, /serverCount: state\.syncState && state\.syncState\.postsToday/, `${rel} passes the server count to the cap`);
+  }
+  assert.match(popup, /planText\(/, 'Settings shows the plan');
+  assert.match(popup, /plan: \$\{state\.syncState && state\.syncState\.plan \? state\.syncState\.plan\.state : 'unknown'\}/, 'the problem report names the plan state');
+  assert.match(panel, /r\.note\.includes\(LAPSED_MESSAGE\) \? `\$\{LAPSED_SENTENCE\}\. The template is shown instead\.`/, 'the panel turns the rewrite function\'s lapsed answer into its own sentence and falls back to the template');
   assert.equal(NOT_CONFIGURED, 'Accounts are not set up yet (Milestone 4).');
   assert.match(popup, /\$\{esc\(NOT_CONFIGURED\)\}/, 'the one line Settings shows with an empty config');
   for (const label of ['Send me a sign-in code', 'Sign in', 'Sync now', 'Sign out', 'Join a dealership with an invite code']) assert.ok(popup.includes(label), `Settings has "${label}"`);

@@ -101,7 +101,7 @@ A demo or loaner flag always means "sold as new". A Carfax report counts as a su
 ## For development
 
 ```
-npm test              # 291 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 315 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep

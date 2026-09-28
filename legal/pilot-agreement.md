@@ -6,7 +6,17 @@ Between [Lot Sync entity name] ("Lot Sync") and [Dealership legal name] ("Dealer
 
 ## 1. The pilot
 
-Lot Sync will provide the Lot Sync Service to the Dealer's [Waynesburg] rooftop for [2 to 3] designated salespeople for [30] days from the effective date (the "Pilot"), free of charge, so both parties can evaluate it. The Terms of Service, Privacy Policy and the Dealer Subscription Agreement (sections 2, 3 and 4: authorisation to read the website inventory, authorisation for staff to post, and Dealer responsibilities) apply during the Pilot.
+Lot Sync will provide the Lot Sync Service to the Dealer's rooftop, for the designated salespeople and for the pilot length, each as filled in below (the "Pilot"), free of charge, so both parties can evaluate it.
+
+| Pilot detail | Filled in by the parties |
+|---|---|
+| Rooftop (store name) | [ ] |
+| Website address | [ ] |
+| Number of designated salespeople | [ ] |
+| Pilot length in days | [ ] (the standard length is `pilotDays` in `marketing/pricing.json`) |
+| Start date | [ ] (the effective date unless stated) |
+
+The salespeople are named at the signature block. The Terms of Service, Privacy Policy and the Dealer Subscription Agreement (sections 2, 3 and 4: authorisation to read the website inventory, authorisation for staff to post, and Dealer responsibilities) apply during the Pilot.
 
 ## 2. What the Dealer agrees to
 
@@ -26,7 +36,7 @@ Each party keeps the other's non-public information confidential during and for 
 
 ## 5. No warranty; no obligation
 
-The Service is provided as is. Lot Sync makes no promise of leads, sales, listing visibility or Facebook account status, and does not guarantee that Meta will treat the Dealer's use as compliant with its Terms. Neither party is obliged to enter a paid subscription after the Pilot. Liability is limited as in the Terms of Service; during a free Pilot, Lot Sync's total liability is limited to $100.
+The Service is provided as is. Lot Sync makes no promise of leads, sales, listing visibility or Facebook account status, and does not guarantee that Meta will treat the Dealer's use as compliant with its Terms. Neither party is obliged to enter a paid subscription after the Pilot. Liability is limited as in the Terms of Service; during a free Pilot, Lot Sync's total liability is limited to [$100]. [Attorney: the liability cap for a free pilot.]
 
 ## 6. Ending the pilot
 
@@ -34,7 +44,7 @@ Either party may end the Pilot at any time on notice. At the end, the Dealer may
 
 ## 7. General
 
-Pennsylvania law. This Agreement plus the documents it references are the whole agreement for the Pilot.
+The law of [state] governs. [Attorney: governing law and venue, once the Lot Sync entity exists.] This Agreement plus the documents it references are the whole agreement for the Pilot.
 
 Signed:
 

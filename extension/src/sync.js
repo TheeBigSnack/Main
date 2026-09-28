@@ -7,7 +7,8 @@
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
 //   posted = mergeRegistry(posted, response, { since, userId });
 //   pilot  = mergeFlags(pilot, response);
-//   state  = nextSyncState(state, response)   // since, dealership id and role
+//   state  = nextSyncState(state, response, { today: body.today })
+//            // since, dealership id and role, the plan, the server's count of today's posts
 //
 // The state is per website; the wiring keeps it under a `sync` entry added
 // to SITE_KEY_NAMES in src/storageKeys.js, so clearing a website removes it.
@@ -68,6 +69,20 @@ const changedAfter = (since, ...stamps) => {
 };
 // An entry merged in from a colleague carries their userId and `mine: false`; it is theirs to sync.
 const isOwn = (entry, userId) => entry.mine !== false && (!entry.userId || !userId || entry.userId === userId);
+
+// ---------- the day the cap counts ----------
+
+// The machine's local calendar day holding `now`, as two ISO stamps, [from,
+// to): the same day cap.js counts (the machine's own year, month and date),
+// so the sync function's postsToday and the local count speak of one day.
+// A clock-change day is 23 or 25 hours; the function accepts up to 48.
+export function localDayRange(now = new Date()) {
+  const d = now instanceof Date ? now : new Date(now ?? Date.now());
+  if (Number.isNaN(d.getTime())) return null;
+  const from = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const to = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
 
 // ---------- what goes up ----------
 
@@ -165,8 +180,11 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
  *   pilot:  posts and flags that changed after `since` (all of them the first time)
  *   scan:   this scan's counts, or null when nothing was scanned
  *   since:  the serverTime of the last answer, or null
+ *   today:  the caller's local calendar day ({ from, to }, localDayRange), so
+ *           the function can count their posts in it (postsToday); `now` is
+ *           the moment, a parameter for the tests
  */
-export function syncPayload({ origin = '', posted = {}, pilot = null, scan = null, since = null, userId = '' } = {}) {
+export function syncPayload({ origin = '', posted = {}, pilot = null, scan = null, since = null, userId = '', now = new Date() } = {}) {
   const own = {};
   for (const [key, e] of Object.entries(isObject(posted) ? posted : {})) {
     if (!isObject(e) || !isOwn(e, userId)) continue;
@@ -184,7 +202,7 @@ export function syncPayload({ origin = '', posted = {}, pilot = null, scan = nul
   const p = withPilotDefaults(pilot);
   const posts = p.posts.filter((a) => changedAfter(since, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
   const flags = p.flags.filter((f) => changedAfter(since, f.flaggedAt, f.doneAt));
-  return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since) };
+  return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
 }
 
 // ---------- what comes down ----------
@@ -315,11 +333,34 @@ export function mergeFlags(pilot, remote) {
   return touched ? { ...p, flags } : p;
 }
 
-// What to keep for the website after an answer, for the next call.
-export function nextSyncState(previous, response) {
+// The plan words the sync function answers (subscription_state() on the server).
+export const PLAN_STATES = Object.freeze(['none', 'pilot', 'active', 'lapsed']);
+
+// The dealership's plan as the function answers it ({ state, pilotEndsAt,
+// currentPeriodEnd, seats }, planOf in supabase/functions/_shared/billing.mjs),
+// in one shape; null when the answer carries none. A state word this build
+// does not know reads as 'none': the server, not this word, does the gating.
+export function planFrom(plan) {
+  if (!isObject(plan)) return null;
+  return {
+    state: PLAN_STATES.includes(plan.state) ? plan.state : 'none',
+    pilotEndsAt: isoOrNull(plan.pilotEndsAt),
+    currentPeriodEnd: isoOrNull(plan.currentPeriodEnd),
+    seats: Number.isInteger(plan.seats) && plan.seats >= 1 ? plan.seats : null,
+  };
+}
+
+// What to keep for the website after an answer: for the next call, and for
+// what Settings and the cap show. `plan` is the last one learned (a 402
+// carries one too). `postsToday` is the function's count of the caller's
+// posts in `today`, the day the request sent, and only from this answer: a
+// count is good for the day and the moment it was made, so an answer
+// without one leaves null rather than an old number.
+export function nextSyncState(previous, response, { today = null } = {}) {
   const prev = isObject(previous) ? previous : {};
   const r = isObject(response) ? response : {};
   const d = isObject(r.dealership) ? r.dealership : {};
+  const day = isObject(today) && isoOrNull(today.from) && isoOrNull(today.to) ? { from: isoOrNull(today.from), to: isoOrNull(today.to) } : null;
   return {
     version: SYNC_VERSION,
     since: isoOrNull(r.serverTime) || prev.since || null,
@@ -327,5 +368,7 @@ export function nextSyncState(previous, response) {
     dealershipName: d.name || prev.dealershipName || '',
     role: r.role || prev.role || '',
     lastSyncAt: isoOrNull(r.serverTime) || prev.lastSyncAt || null,
+    plan: planFrom(r.plan) || planFrom(prev.plan),
+    postsToday: day && Number.isInteger(r.postsToday) && r.postsToday >= 0 ? { count: r.postsToday, ...day } : null,
   };
 }

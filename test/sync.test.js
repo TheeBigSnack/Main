@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, SYNC_VERSION } from '../extension/src/sync.js';
+import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, SYNC_VERSION } from '../extension/src/sync.js';
 import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
@@ -100,6 +100,25 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   assert.equal('fills' in body.pilot, false);
 });
 
+test('syncPayload sends the caller\'s local calendar day as today: { from, to }, the day cap.js counts, so the server can count their posts in it', () => {
+  const at = new Date(2026, 10, 16, 15, 30); // a local afternoon
+  const body = syncPayload({ origin: ORIGIN, posted: {}, now: at });
+  assert.deepEqual(body.today, { from: new Date(2026, 10, 16).toISOString(), to: new Date(2026, 10, 17).toISOString() });
+  assert.deepEqual(localDayRange(at), body.today);
+  assert.deepEqual(localDayRange(at.toISOString()), body.today, 'an ISO stamp works too');
+  assert.deepEqual(localDayRange(at.getTime()), body.today, 'and milliseconds');
+  // the range is the local day, half-open, so a post at 23:59 local counts on the day it was made, wherever the server sits
+  const late = new Date(2026, 10, 16, 23, 59);
+  assert.ok(Date.parse(localDayRange(late).from) <= late.getTime() && late.getTime() < Date.parse(localDayRange(late).to));
+  assert.deepEqual(localDayRange(late), body.today, 'the same day');
+  assert.notDeepEqual(localDayRange(new Date(2026, 10, 17, 0, 0)), body.today, 'midnight starts the next one');
+  // the span is a day (23 to 25 hours on a clock-change day; the function accepts up to 48)
+  const span = Date.parse(body.today.to) - Date.parse(body.today.from);
+  assert.ok(span >= 23 * 3600 * 1000 && span <= 25 * 3600 * 1000);
+  assert.equal(localDayRange('nonsense'), null);
+  assert.ok(syncPayload({ origin: ORIGIN }).today, 'the moment defaults to now');
+});
+
 // ---------- what comes down ----------
 
 const row = (vin, over = {}) => ({
@@ -176,10 +195,38 @@ test('mergeFlags: a flag closed on another machine closes here; nothing is added
   assert.deepEqual(mergeFlags(pilot, null), pilot, 'no answer: the same record back');
 });
 
-test('the state kept for the next sync', () => {
+test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {
+  const today = { from: T(0), to: new Date(Date.UTC(2026, 10, 17, 9, 0)).toISOString() };
   const s = nextSyncState(null, { serverTime: T(1), dealership: { id: D, name: 'Example Motors' }, role: 'salesperson' });
-  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1) });
+  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: null, postsToday: null }, 'an answer without a plan or a count (an older function) leaves both null');
   assert.equal(nextSyncState(s, { ok: false }).since, T(1), 'a failed answer keeps the last state');
+  const plan = { state: 'pilot', pilotEndsAt: T(30), currentPeriodEnd: null, seats: 5 };
+  const s2 = nextSyncState(s, { serverTime: T(2), plan, postsToday: 3 }, { today });
+  assert.deepEqual(s2.plan, plan);
+  assert.deepEqual(s2.postsToday, { count: 3, from: today.from, to: today.to });
+  assert.equal(s2.dealershipName, 'Example Motors', 'what the answer leaves out is kept');
+  assert.equal(s2.since, T(2));
+  // a count without the day it was counted in is no count; null from the server (no usable today) is null here; so is a bad number
+  assert.equal(nextSyncState(s2, { serverTime: T(3), postsToday: 3 }).postsToday, null);
+  assert.equal(nextSyncState(s2, { serverTime: T(3), postsToday: null }, { today }).postsToday, null);
+  assert.equal(nextSyncState(s2, { serverTime: T(3), postsToday: -1 }, { today }).postsToday, null);
+  assert.equal(nextSyncState(s2, { serverTime: T(3), postsToday: '3' }, { today }).postsToday, null);
+  assert.equal(nextSyncState(s2, { serverTime: T(3), postsToday: 0 }, { today }).postsToday.count, 0, 'zero is a count');
+  assert.equal(nextSyncState(s2, { serverTime: T(3), postsToday: 2 }, { today: { from: 'x', to: today.to } }).postsToday, null, 'a day that does not parse is no day');
+  // a 402 carries the plan and nothing else: the plan is replaced; since and the count are not invented
+  const lapsed = nextSyncState(s2, { ok: false, error: 'lapsed', code: 'lapsed', plan: { state: 'lapsed', pilotEndsAt: T(0), currentPeriodEnd: null, seats: null } });
+  assert.deepEqual(lapsed.plan, { state: 'lapsed', pilotEndsAt: T(0), currentPeriodEnd: null, seats: null });
+  assert.equal(lapsed.since, T(2));
+  assert.equal(lapsed.lastSyncAt, T(2));
+  assert.equal(lapsed.postsToday, null);
+  // an answer without a plan keeps the last one learned
+  assert.deepEqual(nextSyncState(lapsed, { serverTime: T(4) }).plan, lapsed.plan);
+  // the plan is one shape: dates as ISO text, seats an integer or null, an unknown word as none, not an object as no plan
+  assert.deepEqual(planFrom({ state: 'active', pilotEndsAt: null, currentPeriodEnd: '2026-12-01T00:00:00+00:00', seats: '7' }), { state: 'active', pilotEndsAt: null, currentPeriodEnd: '2026-12-01T00:00:00.000Z', seats: null });
+  assert.deepEqual(planFrom({ state: 'active', seats: 7 }), { state: 'active', pilotEndsAt: null, currentPeriodEnd: null, seats: 7 });
+  assert.equal(planFrom({ state: 'gold' }).state, 'none');
+  assert.equal(planFrom('pilot'), null);
+  assert.equal(planFrom(null), null);
 });
 
 // ---------- two machines converge ----------

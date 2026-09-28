@@ -10,10 +10,16 @@
 // the sample data instead (?mock=1), so the page can be demoed and tested
 // before the project exists.
 //
+// functionsUrl is where the Edge Functions answer (the Billing card calls
+// .../billing/status, /checkout and /portal). Leave it empty to use the
+// project's own <supabaseUrl>/functions/v1, as the extension does; set it
+// only when the functions are served from somewhere else.
+//
 // supabaseJs is the supabase-js client, loaded on demand from a CDN only when
 // the page is configured; the sample-data mode never touches the network.
 export const CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
+  functionsUrl: '',
   supabaseJs: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
 };

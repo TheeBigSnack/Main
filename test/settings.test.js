@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
+import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
@@ -106,6 +106,26 @@ test('the lower second price is a basis only on a website that shows one; withou
   assert.equal(chooseBasis('website', 'beforeFees', lot), 'website');
   assert.equal(chooseBasis('website', 'beforeFees', null), 'beforeFees', 'no scan yet: a Save must not flip a synced choice');
   assert.equal(chooseBasis('beforeFees', 'website', null), 'website');
+});
+
+test("the wizard's Price step model: the lower price only on a website that shows one, the gap's wording, and the example's prices only", () => {
+  const lot = [vehicle('usedNormal'), vehicle('certified'), vehicle('usedNoCarfax'), vehicle('usedNoPrice')];
+  const m = priceStepModel(lot);
+  assert.equal(m.showsLower, true);
+  assert.equal(m.gap, 490);
+  assert.equal(m.suggested, 'Price includes the $490 doc fee; tax and tags extra.');
+  assert.deepEqual(m.example, { price: lot[0].price, priceBeforeFees: lot[0].priceBeforeFees, priceLabel: lot[0].priceLabel }, 'three prices, not the whole car: the model sits in the wizard\'s saved state');
+  assert.equal(priceStepModel(lot, 'beforeFees').suggested, 'Price is before the $490 doc fee; tax and tags extra.');
+  // a website with one price per car: nothing to choose, nothing to suggest
+  const plain = priceStepModel([{ price: 20000 }, { price: 21000, priceBeforeFees: 22000 }]);
+  assert.deepEqual(plain, { showsLower: false, gap: 0, example: null, suggested: '' });
+  assert.deepEqual(priceStepModel([]), { showsLower: false, gap: 0, example: null, suggested: '' });
+  assert.deepEqual(priceStepModel(null), { showsLower: false, gap: 0, example: null, suggested: '' });
+  // the basis is chosen through chooseBasis, from the model as from the entries: a radio value the site cannot support never lands in settings
+  assert.equal(chooseBasis('beforeFees', 'website', m), 'beforeFees');
+  assert.equal(chooseBasis('beforeFees', 'beforeFees', plain), 'website', 'not shown here: coerced, even against the previous choice');
+  assert.equal(chooseBasis('website', 'beforeFees', m), 'website');
+  assert.equal(chooseBasis('beforeFees', 'website', null), 'website', 'no read yet: the previous choice stands');
 });
 
 test('first-run defaults: the store matching the site name; the price note is only suggested, never filled in', () => {

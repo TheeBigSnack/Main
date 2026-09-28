@@ -27,7 +27,7 @@ import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/p
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
-import { currentSession, rewriteKeyFor } from './src/accountFlow.js';
+import { currentSession, rewriteKeyFor, LAPSED_MESSAGE, LAPSED_SENTENCE } from './src/accountFlow.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -55,6 +55,7 @@ const state = {
   queueMode: false, // this car is being posted as part of the queue
   drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
   snapshotVehicles: {}, // names for the queue bar
+  syncState: null, // this website's sync state (src/sync.js nextSyncState): the server's count of today's posts feeds the cap
   step: 'idle', message: '', doneAt: null,
   map: FORM_MAP,
 };
@@ -102,7 +103,7 @@ const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet 
 
 async function loadSaved() {
   const k = siteKeys(state.origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync]);
   state.siteName = data[k.snapshot]?.site?.name || state.origin;
   const site = data[k.snapshot]?.site || { name: state.siteName };
   state.settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), { ...site, origin: state.origin }) || withDefaults({}, site);
@@ -111,6 +112,7 @@ async function loadSaved() {
   state.queue = data[k.queue] || null;
   state.drafts = data[k.drafts] || {};
   state.snapshotVehicles = data[k.snapshot]?.vehicles || {};
+  state.syncState = data[k.sync] || null;
 }
 
 const saveQueue = async () => {
@@ -204,12 +206,16 @@ async function startFlow(req) {
   if (state.queueMode && canAutoOpen()) await openForm();
 }
 
+// The day's cap for this salesperson: this machine's posts and, after a
+// sync, the server's count of theirs across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
+
 function canAutoOpen() {
   if (!state.guardrails || !state.guardrails.ok) return false;
   if (state.vinCheck && state.vinCheck.local && !state.vinCheck.local.ok) return false;
   const blockers = currentListing().missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
   if (blockers.length) return false;
-  return !capStatus(state.posted, state.settings.dailyCap).reached;
+  return !dailyCap().reached;
 }
 
 // ---------- the queue ----------
@@ -220,7 +226,7 @@ async function startNextInQueue() {
   const q = state.queue;
   const vin = currentVin(q);
   if (!vin) return;
-  const cap = capStatus(state.posted, state.settings.dailyCap);
+  const cap = dailyCap();
   if (cap.reached) {
     state.queue = pauseQueue(q);
     await saveQueue();
@@ -383,7 +389,8 @@ async function generate({ useClaude } = {}) {
   const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin }); // the origin tells the service which store this is
   state.description = r.text;
   state.descriptionSource = r.source;
-  state.note = r.note || '';
+  // the function's 402 (the dealership's plan has lapsed) arrives as the service's error text: said plainly, not as a service hiccup
+  state.note = r.note && r.note.includes(LAPSED_MESSAGE) ? `${LAPSED_SENTENCE}. The template is shown instead.` : (r.note || '');
   state.guardrails = r.guardrails;
 }
 
@@ -404,9 +411,11 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
 async function openForm({ probeOnly = false } = {}) {
-  const pk = siteKeys(state.origin).posted;
-  state.posted = (await chrome.storage.local.get(pk))[pk] || state.posted; // as it is now: the popup may have marked cars meanwhile
-  const cap = capStatus(state.posted, state.settings.dailyCap);
+  const k = siteKeys(state.origin);
+  const fresh = await chrome.storage.local.get([k.posted, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
+  state.posted = fresh[k.posted] || state.posted;
+  state.syncState = fresh[k.sync] || state.syncState;
+  const cap = dailyCap();
   if (cap.reached) {
     setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
     return;
@@ -729,7 +738,7 @@ function carCard() {
 const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
 
 function viewReview() {
-  const cap = capStatus(state.posted, state.settings.dailyCap);
+  const cap = dailyCap();
   const rw = state.settings.rewrite;
   return `${carCard()}
   <section>
@@ -1062,6 +1071,7 @@ function adoptChanges(changes) {
   };
   take(k.posted, 'posted', {});
   take(k.drafts, 'drafts', {});
+  take(k.sync, 'syncState', null); // the server's count of today's posts feeds the cap line
   if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
     state.settings = withDefaults(changes[k.settings].newValue, { name: state.siteName });
     touched = true;
@@ -1087,7 +1097,7 @@ function adoptChanges(changes) {
   }
   const capLine = $('cap');
   if (capLine && state.settings) {
-    const cap = capStatus(state.posted, state.settings.dailyCap);
+    const cap = dailyCap();
     capLine.outerHTML = capHtml(cap);
     for (const id of ['openForm', 'checkForm']) { const b = $(id); if (b) b.disabled = cap.reached; }
   }

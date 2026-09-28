@@ -25,7 +25,7 @@ export const SITE_KEY_NAMES = Object.freeze({
   wizardDone: 'wizardDone',
   flow: 'postFlow',
   pilot: 'pilot',
-  sync: 'sync', // the sync state for this website (src/sync.js, Milestone 4): since, dealership id, role
+  sync: 'sync', // the sync state for this website (src/sync.js, Milestone 4): since, dealership id, role, the plan state, today's server-side post count
 });
 
 // { settings: 'settings:<origin>', queue: 'postQueue:<origin>', ... }: every

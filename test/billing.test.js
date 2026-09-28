@@ -14,6 +14,7 @@ import { createHmac } from 'node:crypto';
 import {
   PRICING, STATUSES, STATES, HANDLED_EVENTS, MAX_SEATS, MIN_TRIAL_SECONDS,
   ms, subscriptionState, pilotAvailable, statusAnswer,
+  planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
   formEncode, applyStripeEvent, normalizeStatus,
   parseStripeSignature, hmacSha256Hex, timingSafeEqualHex, verifyStripeSignature,
@@ -109,6 +110,71 @@ test('ms reads ISO text, Postgres microseconds, Dates and numbers', () => {
   assert.equal(ms(null), null);
   assert.equal(ms('not a date'), null);
   assert.equal(ms(NaN), null);
+});
+
+// ---------- the plan the product reads ----------
+
+test('planOf: the state word plus the dates and the seats the extension shows, in one shape, for every state', () => {
+  const none = { state: 'none', pilotEndsAt: null, currentPeriodEnd: null, seats: null };
+  assert.deepEqual(planOf(null, NOW), none);
+  assert.deepEqual(planOf(undefined, NOW), none);
+  assert.deepEqual(planOf('nonsense', NOW), none);
+  assert.deepEqual(planOf(row({ stripe_customer_id: 'cus_1' }), NOW), { ...none, seats: 5 }, 'a customer shell is still no plan; the row\'s seats come along');
+  assert.deepEqual(planOf(row({ status: 'pilot', pilot_ends_at: '2026-12-06T15:00:00.123456+00:00' }), NOW), { state: 'pilot', pilotEndsAt: '2026-12-06T15:00:00.123Z', currentPeriodEnd: null, seats: 5 }, 'Postgres microseconds and an offset become one ISO shape');
+  assert.deepEqual(planOf(row({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: iso(NOW + 20 * DAY), seats: 7 }), NOW), { state: 'active', pilotEndsAt: null, currentPeriodEnd: iso(NOW + 20 * DAY), seats: 7 });
+  assert.deepEqual(planOf(row({ status: 'trialing', pilot_ends_at: iso(NOW + 12 * DAY), current_period_end: iso(NOW + 12 * DAY) }), NOW), { state: 'active', pilotEndsAt: iso(NOW + 12 * DAY), currentPeriodEnd: iso(NOW + 12 * DAY), seats: 5 }, 'a trial waiting for the pilot to end is active, and both dates travel');
+  assert.deepEqual(planOf(row({ status: 'pilot', pilot_ends_at: iso(NOW - DAY) }), NOW), { state: 'lapsed', pilotEndsAt: iso(NOW - DAY), currentPeriodEnd: null, seats: 5 }, 'a lapsed plan keeps its dates, so the page can say since when');
+  assert.deepEqual(planOf(row({ status: 'canceled', current_period_end: iso(NOW - 3 * DAY) }), NOW), { state: 'lapsed', pilotEndsAt: null, currentPeriodEnd: iso(NOW - 3 * DAY), seats: 5 });
+  // the state is subscriptionState's, whatever the row says
+  for (const s of STATUSES) {
+    const r = row({ status: s, pilot_ends_at: s === 'pilot' ? iso(NOW + DAY) : null });
+    assert.equal(planOf(r, NOW).state, subscriptionState(r, NOW), s);
+    assert.ok(STATES.includes(planOf(r, NOW).state), s);
+  }
+  // seats: the row's integer, or null when it is not one
+  assert.equal(planOf(row({ seats: 0 }), NOW).seats, null);
+  assert.equal(planOf(row({ seats: '7' }), NOW).seats, null);
+  assert.equal(planOf(row({ seats: undefined }), NOW).seats, null);
+  // the clock is the caller's, as for subscriptionState (milliseconds or ISO)
+  assert.equal(planOf(row({ status: 'pilot', pilot_ends_at: iso(NOW + DAY) }), NOW + 2 * DAY).state, 'lapsed');
+  assert.equal(planOf(row({ status: 'pilot', pilot_ends_at: iso(NOW + DAY) }), iso(NOW)).state, 'pilot');
+  assert.deepEqual(Object.keys(planOf(null)), ['state', 'pilotEndsAt', 'currentPeriodEnd', 'seats'], 'the shape the sync answer promises');
+});
+
+test('lapsedAnswer: what /sync and /rewrite answer with 402, with the plan for the extension', () => {
+  assert.equal(LAPSED_CODE, 'lapsed');
+  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view");
+  const plan = planOf(row({ status: 'canceled', stripe_customer_id: 'cus_1' }), NOW);
+  assert.deepEqual(lapsedAnswer(plan), { ok: false, error: LAPSED_MESSAGE, code: 'lapsed', plan });
+  assert.equal(lapsedAnswer(plan).plan, plan, 'the plan itself');
+  assert.equal(lapsedAnswer(plan).plan.state, 'lapsed');
+  // the sentence says who can fix it and where, and promises nothing else
+  assert.match(LAPSED_MESSAGE, /a manager can renew it in the manager view$/);
+  assert.doesNotMatch(LAPSED_MESSAGE, /\$|guarantee|Facebook|Meta/);
+});
+
+test('todayRange: the calendar day the extension sent, in one ISO shape, or null for anything that is not a day', () => {
+  assert.equal(MAX_TODAY_HOURS, 48);
+  const from = Date.UTC(2026, 10, 16, 5, 0, 0); // a US Eastern midnight, as the extension would send it
+  const day = { from: iso(from), to: iso(from + DAY) };
+  assert.deepEqual(todayRange(day), day);
+  assert.deepEqual(todayRange({ from: '2026-11-16T05:00:00.000000+00:00', to: '2026-11-17T00:00:00-05:00' }), day, 'any parseable stamps become UTC ISO with milliseconds');
+  assert.deepEqual(todayRange({ from: from, to: from + DAY }), day, 'milliseconds work too');
+  assert.deepEqual(todayRange({ from: iso(from), to: iso(from + 25 * 3600 * 1000) }), { from: iso(from), to: iso(from + 25 * 3600 * 1000) }, 'a clock-change day has 25 hours');
+  assert.deepEqual(todayRange({ from: iso(from), to: iso(from + 48 * 3600 * 1000) }), { from: iso(from), to: iso(from + 48 * 3600 * 1000) }, 'the limit itself passes');
+  assert.equal(todayRange({ from: iso(from), to: iso(from + 48 * 3600 * 1000 + 1) }), null, 'longer than the limit is not a day');
+  assert.equal(todayRange({ from: iso(from), to: iso(from) }), null, 'an empty range');
+  assert.equal(todayRange({ from: iso(from + DAY), to: iso(from) }), null, 'backwards');
+  assert.equal(todayRange({ from: 'yesterday', to: iso(from + DAY) }), null);
+  assert.equal(todayRange({ from: iso(from), to: '' }), null);
+  assert.equal(todayRange({ from: iso(from) }), null);
+  assert.equal(todayRange({ from: null, to: null }), null);
+  assert.equal(todayRange({}), null);
+  assert.equal(todayRange(null), null);
+  assert.equal(todayRange(undefined), null);
+  assert.equal(todayRange('2026-11-16'), null);
+  assert.equal(todayRange([iso(from), iso(from + DAY)]), null);
+  assert.equal(todayRange(day).from < todayRange(day).to, true);
 });
 
 // ---------- Checkout ----------

@@ -4,9 +4,16 @@
 // hand them to data.js and render. ?mock=1, or "Try with sample data" when
 // nothing is configured, shows a made-up dealership without touching the
 // network. Every number is computed in data.js so the tests cover it.
+//
+// The Billing card (Milestone 5) reads GET .../billing/status with the
+// person's own token, starts the free pilot through the start_pilot()
+// function in the database, and opens Stripe Checkout or the billing portal
+// through POST .../billing/checkout and /portal: the function answers an
+// address and the page goes there. Stripe sends the manager back to this
+// page with ?billing=success or ?billing=canceled, which becomes one note.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, OVERDUE_HOURS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, OVERDUE_HOURS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -14,6 +21,10 @@ const secs = (s) => (typeof s === 'number' ? `${s} s` : '—');
 const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
 const money = (n) => (typeof n === 'number' ? '$' + n.toLocaleString('en-US') : '—');
 const configured = () => Boolean(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);
+const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
+// Where the Edge Functions answer: config.js's functionsUrl, else the
+// project's own /functions/v1 (the extension derives it the same way).
+const functionsUrl = () => trimSlash(CONFIG.functionsUrl) || trimSlash(CONFIG.supabaseUrl) + '/functions/v1';
 
 const state = {
   mode: 'loading', // loading | unconfigured | signin | sent | view | error
@@ -23,6 +34,8 @@ const state = {
   dealerships: [],
   dealershipId: null,
   data: null, // { dealership, memberships, listings, todoItems, postAttempts, scans }
+  billing: null, // { status, error }: GET .../billing/status's answer for the chosen dealership (the sample data carries its own)
+  billingNote: '', // one line in the Billing card: back from Stripe, the pilot just started, or what a sample button would do
 };
 
 // ---------- the page frame ----------
@@ -41,12 +54,23 @@ function setDealer(text) {
   $('dealer').textContent = text;
 }
 
-function setUrlMock(on) {
+// One query parameter set or removed in the address bar without a reload.
+function setParam(name, value) {
   try {
     const url = new URL(location.href);
-    if (on) url.searchParams.set('mock', '1'); else url.searchParams.delete('mock');
+    if (value === null) url.searchParams.delete(name); else url.searchParams.set(name, value);
     history.replaceState(null, '', url.toString());
   } catch { /* some file:// pages refuse; the view is on screen either way */ }
+}
+const setUrlMock = (on) => setParam('mock', on ? '1' : null);
+
+// This page's address with no query or fragment: where the sign-in link
+// lands and where Stripe sends the manager back.
+function pageUrl() {
+  const url = new URL(location.href);
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
 
 // ---------- the views ----------
@@ -104,6 +128,29 @@ function pill(cls, text) {
   return `<span class="pill ${cls}">${esc(text)}</span>`;
 }
 
+// The Billing card: the plan in one sentence and the buttons the status
+// answer allows (managers only; data.js decides). In sample-data mode the
+// buttons only explain themselves. A status that could not be read gets a
+// Try again button and leaves the rest of the page alone.
+function billingHtml() {
+  const status = state.mock ? state.data?.billing : state.billing?.status;
+  const error = state.mock ? '' : (state.billing && state.billing.error) || '';
+  const card = billingCard(status, { now: new Date().toISOString() });
+  const note = state.billingNote ? `<p class="banner info">${esc(state.billingNote)}</p>` : '';
+  const body = error
+    ? `<p class="plan">Couldn't read the plan: ${esc(error)}</p><p class="hint">The rest of the page does not depend on it.</p>`
+    : `<p class="plan">${esc(card.line)}</p>${card.detail ? `<p class="hint">${esc(card.detail)}</p>` : ''}`;
+  const buttons = error
+    ? '<button type="button" class="ghost" data-action="billing" data-billing="reload">Try again</button>'
+    : card.buttons.map((b, i) => `<button type="button" class="${i === 0 ? 'primary' : 'ghost'}" data-action="billing" data-billing="${esc(b.action)}" data-does="${esc(b.does)}">${esc(b.label)}</button>`).join('');
+  return `<section class="card" id="billing"><h2>Billing ${error ? pill('warn', 'Unknown') : pill(card.tone, card.label)}</h2>${note}${body}${buttons ? `<div class="toolbar">${buttons}</div>` : ''}</section>`;
+}
+
+function renderBilling() {
+  const el = $('billing');
+  if (el) el.outerHTML = billingHtml();
+}
+
 function viewData() {
   state.mode = 'view';
   const d = state.data;
@@ -155,9 +202,9 @@ function viewData() {
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  $('main').innerHTML = scan + people + `<div class="grid two">${sold}${prices}</div>`;
+  $('main').innerHTML = scan + billingHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
   const sel = $('pickDealer');
-  if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; loadLive().catch((e) => viewError(e.message)); });
+  if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; loadLive().catch((e) => viewError(e.message)); });
 }
 
 // ---------- actions ----------
@@ -171,6 +218,7 @@ document.addEventListener('click', (ev) => {
     case 'signin': viewSignIn(); break;
     case 'retry': start(); break;
     case 'signout': signOut(); break;
+    case 'billing': onBilling(btn.dataset.billing, btn); break;
     default: break;
   }
 });
@@ -199,6 +247,7 @@ function downloadCsv() {
 }
 
 async function signOut() {
+  state.billingNote = '';
   if (state.mock) {
     state.mock = false;
     state.data = null;
@@ -215,7 +264,82 @@ async function signOut() {
   }
   state.session = null;
   state.data = null;
+  state.billing = null;
   viewSignIn('Signed out.');
+}
+
+// ---------- billing ----------
+
+// Start the free pilot, Subscribe, Manage billing, or Try again after a
+// failed status read. Checkout and the portal answer an address to open;
+// the page goes there and comes back with ?billing=... The sample data only
+// says what the button would do.
+async function onBilling(kind, btn) {
+  if (kind === 'reload') return reloadBilling();
+  const label = btn.textContent;
+  if (state.mock) {
+    state.billingNote = `Sample data: "${label}" ${btn.dataset.does || 'would act on a real dealership'}. Nothing is called here.`;
+    return renderBilling();
+  }
+  btn.disabled = true;
+  setStatus('');
+  try {
+    if (kind === 'pilot') {
+      const { data, error } = await state.supabase.rpc('start_pilot', { dealership_id: state.dealershipId });
+      if (error) throw new Error(error.message);
+      state.billingNote = data && data.started === false ? 'The pilot was not started again; the plan below is where the dealership stands.' : 'The free pilot has started.';
+      return reloadBilling();
+    }
+    const route = kind === 'portal' ? 'portal' : 'checkout';
+    const answer = await callFunction('POST', `billing/${route}`, { returnUrl: pageUrl(), dealershipId: state.dealershipId });
+    if (!answer.url) throw new Error('the server returned no address to open');
+    setStatus(route === 'portal' ? 'Opening the billing portal…' : 'Opening Checkout…');
+    location.assign(answer.url);
+  } catch (e) {
+    btn.disabled = false;
+    setStatus(`Couldn't ${label.toLowerCase()}: ${(e && e.message) || e}`, true);
+  }
+}
+
+// The Edge Functions want the person's token as the bearer and the anon
+// key as apikey (the extension sends the same pair). supabase-js refreshes
+// the token on its own; asking for the session gets the current one.
+async function freshToken() {
+  const { data, error } = await state.supabase.auth.getSession();
+  if (error || !data.session) throw new Error('not signed in');
+  state.session = data.session;
+  return data.session.access_token;
+}
+
+async function callFunction(method, path, body = null) {
+  const headers = { apikey: CONFIG.supabaseAnonKey, Authorization: `Bearer ${await freshToken()}` };
+  if (body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(`${functionsUrl()}/${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  let answer = null;
+  try {
+    answer = await res.json();
+  } catch {
+    answer = null;
+  }
+  const a = answer && typeof answer === 'object' ? answer : {};
+  if (!res.ok || !a.ok) throw new Error(a.error || a.msg || a.message || (res.status === 401 ? 'not signed in' : `the server answered ${res.status}`));
+  return a;
+}
+
+// GET .../billing/status for one dealership; a failure becomes the card's
+// error line, never the page's.
+async function loadBilling(dealershipId) {
+  try {
+    const status = await callFunction('GET', `billing/status?dealershipId=${encodeURIComponent(dealershipId)}`);
+    return { status, error: '' };
+  } catch (e) {
+    return { status: null, error: (e && e.message) || String(e) };
+  }
+}
+
+async function reloadBilling() {
+  state.billing = await loadBilling(state.dealershipId);
+  renderBilling();
 }
 
 async function onSendLink(ev) {
@@ -228,10 +352,7 @@ async function onSendLink(ev) {
   setStatus('Sending the link…');
   try {
     const supabase = state.supabase || (await connect()); // after "Leave sample data" the client may not exist yet
-    const redirect = new URL(location.href);
-    redirect.search = '';
-    redirect.hash = '';
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect.toString() } });
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: pageUrl() } });
     if (error) throw new Error(error.message);
   } catch (e) {
     button.disabled = false;
@@ -284,14 +405,16 @@ async function loadLive() {
   const dealership = dealerships.find((d) => d.id === state.dealershipId) || dealerships[0];
   state.dealershipId = dealership.id;
   const own = (q) => q.eq('dealership_id', dealership.id);
-  const [memberships, listings, todoItems, postAttempts, scans] = await Promise.all([
+  const [memberships, listings, todoItems, postAttempts, scans, billing] = await Promise.all([
     read('memberships', own),
     read('listings', (q) => own(q).order('posted_at', { ascending: false })),
     read('todo_items', (q) => own(q).order('flagged_at', { ascending: false })),
     read('post_attempts', (q) => own(q).order('started_at', { ascending: false })),
     read('scan_summaries', (q) => own(q).order('taken_at', { ascending: false }).limit(50)),
+    loadBilling(dealership.id),
   ]);
   state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };
+  state.billing = billing;
   viewData();
 }
 
@@ -299,6 +422,11 @@ async function loadLive() {
 
 async function start() {
   const params = new URLSearchParams(location.search);
+  // back from Stripe: one note in the Billing card, and the flag leaves the address so a reload does not repeat it
+  if (params.has('billing')) {
+    state.billingNote = billingReturnNote(params.get('billing'));
+    setParam('billing', null);
+  }
   if (params.get('mock') === '1') return showMock();
   if (!configured()) return viewUnconfigured();
   try {

@@ -11,6 +11,7 @@
 //   syncOnce({ origin, scan, deps })  -> POST .../sync, merge the answer
 //   rewriteEndpointFor(config)        -> the rewrite function's address
 //   rewriteKeyFor({ rewrite, session, config }) -> what goes in Authorization
+//   planText(plan)                    -> one line about the dealership's plan
 //
 // With an empty config (src/accountConfig.js) every entry point answers
 // { ok: false, notConfigured: true } without touching the network or storage,
@@ -19,8 +20,8 @@
 // What a sync writes, all under the key's lock (src/storage.js): the merged
 // registry to posted:<origin> (colleagues' entries marked `mine: false`, so
 // the cap and the rescan flags stay the salesperson's own), closed flags to
-// pilot:<origin>, and the state
-// for the next call (since, dealership, role) to sync:<origin>. The access
+// pilot:<origin>, and the state for the next call (since, dealership, role,
+// the plan, the server's count of today's posts) to sync:<origin>. The access
 // token is only ever read from the session in chrome.storage.local; it is
 // never copied into the settings or the synced profile.
 
@@ -35,6 +36,15 @@ import { DECISION } from './classify.js';
 export const SYNC_TIMEOUT_MS = 20000;
 export const NOT_CONFIGURED = 'Accounts are not set up yet (Milestone 4).';
 export const NOT_SIGNED_IN = 'not signed in';
+
+// The sync and rewrite functions' answer for a dealership whose plan has
+// lapsed: HTTP 402 with this code and this sentence (lapsedAnswer in
+// supabase/functions/_shared/billing.mjs). The sentence is the function's,
+// repeated here so the side panel can tell that answer from any other
+// failure of the rewrite service, and so Settings can say it after a sync.
+export const LAPSED_CODE = 'lapsed';
+export const LAPSED_MESSAGE = "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_SENTENCE = LAPSED_MESSAGE[0].toUpperCase() + LAPSED_MESSAGE.slice(1);
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -221,6 +231,7 @@ async function postJson(fetchImpl, url, body, headers, timeoutMs) {
  *           or null to send the counts of the stored scan
  *   deps:   { config, fetchImpl, storage, now, timeoutMs }
  * @returns {{ ok: true, serverTime, dealership: { id, name, websiteOrigin }, role, counts, listed, state }
+ *   | { ok: false, error, code: 'lapsed', lapsed: true, plan, status: 402 }   (the plan is stored; the session stays)
  *   | { ok: false, error, signedOut?, notConfigured?, notMember?, status? }}
  */
 export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
@@ -247,7 +258,7 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
   }
   const since = state && state.since ? state.since : null;
   const userId = (session.user && session.user.id) || '';
-  const body = syncPayload({ origin: o, posted, pilot, scan: summary, since, userId });
+  const body = syncPayload({ origin: o, posted, pilot, scan: summary, since, userId, now: new Date(now) }); // `today` is built from this clock
   let res;
   try {
     res = await postJson(fetchImpl, syncUrlFor(config), body, authHeaders(session, config.anonKey), timeoutMs);
@@ -260,6 +271,20 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
     if (res.status === 401) {
       await clearSession(storage); // the token was rejected outright: the person signs in again
       return { ok: false, status: 401, signedOut: true, error };
+    }
+    if (res.status === 402 || answer.code === LAPSED_CODE) {
+      // The dealership's plan has lapsed: nothing was synced. The plan is
+      // kept so Settings can say so; the session stays, since renewing is a
+      // manager's job in the manager view, not a matter of signing in again.
+      let plan = null;
+      try {
+        const next = await updateKey(k.sync, (prev) => nextSyncState(prev, answer, { today: body.today }), storage);
+        plan = (next && next.plan) || null;
+      } catch {
+        /* the state could not be written; the answer still says what happened */
+      }
+      const lapsedError = typeof answer.error === 'string' && answer.error ? answer.error : LAPSED_MESSAGE;
+      return { ok: false, status: res.status, code: LAPSED_CODE, lapsed: true, error: lapsedError, plan: plan || (answer.plan && typeof answer.plan === 'object' ? answer.plan : null) };
     }
     return { ok: false, status: res.status, notMember: res.status === 403, error };
   }
@@ -274,7 +299,7 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
       const merged = mergeFlags(before, answer);
       return same(merged, before) ? undefined : merged;
     }, storage);
-    next = await updateKey(k.sync, (prev) => nextSyncState(prev, answer), storage);
+    next = await updateKey(k.sync, (prev) => nextSyncState(prev, answer, { today: body.today }), storage);
   } catch (e) {
     return { ok: false, error: storageErrorText(e) };
   }
@@ -303,6 +328,24 @@ export function describeSync(r) {
     return `Synced${who}${role}: ${r.listed} listing${r.listed === 1 ? '' : 's'} shared, ${sent} of yours sent${down}.`;
   }
   if (r.notConfigured) return r.error || NOT_CONFIGURED;
+  if (r.code === LAPSED_CODE || r.lapsed) return `Not synced: ${r.error || LAPSED_MESSAGE}.`;
   if (r.signedOut) return `Not synced: sign in first (${r.error || NOT_SIGNED_IN}).`;
   return `Sync failed: ${r.error || 'unknown error'}`;
+}
+
+// One line about the dealership's plan for the Account section, from the
+// plan kept in sync:<origin> (src/sync.js planFrom); '' when none has been
+// learned yet, since there is nothing to say before the first sync.
+export function planText(plan, now = Date.now()) {
+  if (!plan || typeof plan !== 'object') return '';
+  if (plan.state === 'active') return 'Subscribed';
+  if (plan.state === 'lapsed') return LAPSED_SENTENCE;
+  if (plan.state === 'pilot') {
+    const end = Date.parse(plan.pilotEndsAt);
+    const at = new Date(now).getTime();
+    if (Number.isNaN(end) || Number.isNaN(at)) return 'Free pilot';
+    const days = Math.max(0, Math.ceil((end - at) / 86400000)); // a part of a day is still a day to use
+    return `Free pilot: ${days} day${days === 1 ? '' : 's'} left`;
+  }
+  return 'No plan yet: a manager starts the free pilot in the manager view';
 }

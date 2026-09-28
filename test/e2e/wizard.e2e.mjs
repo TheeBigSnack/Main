@@ -1,8 +1,8 @@
 // End-to-end test of the first-run wizard and the background rescan: a fresh
 // profile with no settings -> the popup offers set-up -> the side panel walks
 // the steps (read the website, store, name, address from the site's own
-// structured data, permission for automatic rescans, the posting rules, the
-// Terms of Service and Privacy Policy) ->
+// structured data, the price to post, permission for automatic rescans, the
+// posting rules, the Terms of Service and Privacy Policy) ->
 // Ready to post is right -> the salesperson marks a car posted -> the mock
 // site "sells" it -> the service worker rescans it by calling the inventory
 // service directly (no tab) -> the badge shows 1 and the popup's To do agrees.
@@ -97,6 +97,33 @@ try {
   assert.equal(await panel.inputValue('#wizCity'), 'Waynesburg');
   assert.equal(await panel.inputValue('#wizState'), 'PA');
   assert.equal(await panel.inputValue('#wizZip'), '15370', "from the website's structured data");
+  await panel.click('#wizNext'); // -> price
+  await panel.waitForSelector('#wizPriceNote');
+  assert.match(await panel.textContent('h3'), /^The price to post$/);
+  assert.match(await panel.textContent('#panel'), /step 6 of 10/);
+  // The mock site shows a lower second price on every priced car ($490 below the main one), so the
+  // choice is offered with the main price first; on a site with one price per car there is no radio.
+  const bases = await panel.$$eval('input[name="wizBasis"]', (rs) => rs.map((r) => `${r.value}=${r.checked}`));
+  assert.deepEqual(bases, ['website=true', 'beforeFees=false'], "the website's main price is the default");
+  const priceStep = await panel.textContent('#panel');
+  assert.match(priceStep, /Some states require the advertised price to include dealer fees\. Check with your manager before choosing this\./);
+  assert.match(priceStep, /main price is usually \$490 higher than the lower second price/);
+  assert.match(priceStep, /e\.g\. \$27,163 "Ron Lewis Real Price"[\s\S]*e\.g\. \$26,673; usually the price before the doc fee/);
+  assert.equal(await panel.inputValue('#wizPriceNote'), '', 'the note is never filled in for the person');
+  assert.equal(await panel.getAttribute('#wizPriceNote', 'placeholder'), 'Price includes the $490 doc fee; tax and tags extra.');
+  assert.equal(await panel.textContent('#wizPriceHint'), 'Honest prices: the listed price always equals the website price. This note explains what it includes. Suggested: "Price includes the $490 doc fee; tax and tags extra."');
+  await panel.check('input[name="wizBasis"][value="beforeFees"]'); // the suggested wording follows the basis
+  assert.equal(await panel.getAttribute('#wizPriceNote', 'placeholder'), 'Price is before the $490 doc fee; tax and tags extra.');
+  assert.match(await panel.textContent('#wizPriceHint'), /Suggested: "Price is before the \$490 doc fee; tax and tags extra\."$/);
+  await panel.fill('#wizPriceNote', 'Tax and tags extra.');
+  await panel.click('#wizBack'); // the choice and the typed note survive Back and Next
+  await panel.waitForSelector('#wizZip');
+  await panel.click('#wizNext');
+  await panel.waitForSelector('#wizPriceNote');
+  assert.equal(await panel.inputValue('#wizPriceNote'), 'Tax and tags extra.');
+  assert.equal(await panel.isChecked('input[name="wizBasis"][value="beforeFees"]'), true);
+  assert.equal(await panel.getAttribute('#wizPriceNote', 'placeholder'), 'Price is before the $490 doc fee; tax and tags extra.');
+  await panel.screenshot({ path: join(shots, 'wizard-1a-price.png'), fullPage: true });
   await panel.click('#wizNext'); // -> permission
   assert.match(await panel.textContent('#panel'), /Automatic rescans/);
   await panel.click('#wizGrant'); // the test copy already has this host; Chrome answers without a prompt
@@ -104,7 +131,7 @@ try {
   assert.match(await panel.textContent('.banner.good'), /Permission granted/);
   await panel.click('#wizNext'); // -> rules
   assert.match(await panel.textContent('ol.rules'), /You publish every post\.[\s\S]*Ads law applies\./);
-  assert.match(await panel.textContent('#panel'), /step 7 of 9/);
+  assert.match(await panel.textContent('#panel'), /step 8 of 10/);
   assert.equal(await panel.isDisabled('#wizNext'), true, 'the rules must be ticked before Next');
   await panel.check('#wizRulesRead');
   assert.equal(await panel.isDisabled('#wizNext'), false);
@@ -116,7 +143,7 @@ try {
   const termsReady = hosted ? '#wizTermsRead' : '#legalPending';
   await panel.click('#wizNext'); // -> terms
   await panel.waitForSelector(termsReady);
-  assert.match(await panel.textContent('#panel'), /step 8 of 9/);
+  assert.match(await panel.textContent('#panel'), /step 9 of 10/);
   assert.match(await panel.textContent('#panel'), /Terms and privacy[\s\S]*never your Facebook login[\s\S]*not affiliated with Meta Platforms, Inc\./);
   if (!hosted) {
     assert.match(await panel.textContent('#legalPending'), /being finalised/);
@@ -150,10 +177,11 @@ try {
     const all = await chrome.storage.local.get(null);
     const s = all[`settings:${o}`];
     const alarm = await chrome.alarms.get('lot-sync-rescan');
-    return { name: s.salesperson.name, stores: s.myStores, zip: s.dealer.zip, autoRescan: s.autoRescan, notify: s.notify, rulesRead: Boolean(s.rulesReadAt), legalVersion: s.legal.version, legalAccepted: Boolean(s.legal.acceptedAt), wizardDone: Boolean(all[`wizardDone:${o}`]), siteAuto: all.sites[o].auto, service: all.sites[o].service.search, alarmMinutes: alarm && alarm.periodInMinutes };
+    return { name: s.salesperson.name, stores: s.myStores, zip: s.dealer.zip, basis: s.basis, priceNote: s.priceNote, autoRescan: s.autoRescan, notify: s.notify, rulesRead: Boolean(s.rulesReadAt), legalVersion: s.legal.version, legalAccepted: Boolean(s.legal.acceptedAt), wizardDone: Boolean(all[`wizardDone:${o}`]), siteAuto: all.sites[o].auto, service: all.sites[o].service.search, alarmMinutes: alarm && alarm.periodInMinutes };
   }, origin);
-  // the acceptance is recorded only when the documents could be read and the tick was given
-  assert.deepEqual(saved, { name: 'Roger', stores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg'], zip: '15370', autoRescan: true, notify: true, rulesRead: true, legalVersion: hosted ? LEGAL.version : '', legalAccepted: hosted, wizardDone: true, siteAuto: true, service: `${origin}/api/v1/listings/153146`, alarmMinutes: 180 });
+  // the acceptance is recorded only when the documents could be read and the tick was given; the
+  // lower price was accepted as the basis because this website shows one, and the note is the typed one
+  assert.deepEqual(saved, { name: 'Roger', stores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg'], zip: '15370', basis: 'beforeFees', priceNote: 'Tax and tags extra.', autoRescan: true, notify: true, rulesRead: true, legalVersion: hosted ? LEGAL.version : '', legalAccepted: hosted, wizardDone: true, siteAuto: true, service: `${origin}/api/v1/listings/153146`, alarmMinutes: 180 });
   await panel.click('#wizClose');
 
   // ---- 3. The popup is ready to use; mark the Ram posted ----

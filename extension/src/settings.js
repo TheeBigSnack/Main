@@ -111,12 +111,30 @@ export function settingsFromProfile(profile, site = {}) {
 // price? Only then can "the lower second price" be a basis at all.
 export const showsLowerPrice = (entries) => (entries || []).some((e) => e && typeof e.priceBeforeFees === 'number' && e.priceBeforeFees > 0 && typeof e.price === 'number' && e.priceBeforeFees < e.price);
 
-// The basis to store from a Settings save. Without a scan to judge by
-// (entries null) the previous choice stands; with one, the lower price is
-// accepted only when the website shows it.
+// The basis to store from a Settings save or the wizard's Price step. Without
+// a scan to judge by (entries null) the previous choice stands; with one (the
+// snapshot's entries, or the wizard's priceStepModel of them), the lower
+// price is accepted only when the website shows it.
 export function chooseBasis(requested, previous, entries) {
   if (!entries) return previous === 'beforeFees' ? 'beforeFees' : 'website';
-  return requested === 'beforeFees' && showsLowerPrice(entries) ? 'beforeFees' : 'website';
+  const shown = Array.isArray(entries) ? showsLowerPrice(entries) : Boolean(entries.showsLower);
+  return requested === 'beforeFees' && shown ? 'beforeFees' : 'website';
+}
+
+// What the wizard's Price step needs from a scan, judged over the same
+// snapshot entries Settings judges by: whether the website shows a lower
+// second price at all (only then is it offered as a basis), the usual gap,
+// and the note that gap suggests for the chosen basis. The example keeps
+// only its prices, so the model can sit in the wizard's saved state.
+export function priceStepModel(entries, basis = 'website') {
+  const fee = feeGap(entries);
+  const ex = fee.example;
+  return {
+    showsLower: showsLowerPrice(entries),
+    gap: fee.gap,
+    example: ex ? { price: ex.price, priceBeforeFees: ex.priceBeforeFees, priceLabel: String(ex.priceLabel || '') } : null,
+    suggested: suggestedPriceNote(fee.gap, basis),
+  };
 }
 
 export async function loadProfile(storage) {

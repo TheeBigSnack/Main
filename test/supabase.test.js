@@ -5,7 +5,9 @@
 // an invite code is matched ignoring case and spaces on both sides, the sync
 // function's take-down rule compares server stamps only, both functions
 // pick the dealership by the same origin comparison and refuse an unknown
-// one, and the README says what the code does.
+// one, both refuse a lapsed dealership with 402 before writing or spending
+// (Milestone 5), the sync answer carries the plan and the caller's posts
+// today for the daily cap, and the README says what the code does.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,8 +18,11 @@ const schema = read('../supabase/migrations/0001_schema.sql');
 const rls = read('../supabase/migrations/0002_rls.sql');
 const rlsTest = read('../supabase/tests/rls.sql');
 const http = read('../supabase/functions/_shared/http.ts');
+const auth = read('../supabase/functions/_shared/auth.ts');
+const billingShared = read('../supabase/functions/_shared/billing.mjs');
 const sync = read('../supabase/functions/sync/index.ts');
 const rewrite = read('../supabase/functions/rewrite/index.ts');
+const billing = read('../supabase/functions/billing/index.ts');
 const readme = read('../supabase/README.md');
 
 // ---------- the schema ----------
@@ -89,7 +94,77 @@ test('rewrite/index.ts: the dealership comes from the origin sent with the facts
   assert.ok(strip > 0 && strip < rewrite.indexOf('await rewrite(facts, who, service)'), 'origin is removed from the facts before the prompt');
 });
 
+// ---------- the plan gate and the daily cap's count (Milestone 5) ----------
+
+test('sync/index.ts and rewrite/index.ts refuse a lapsed dealership with 402 and code lapsed, from the row read with the caller\'s client, before any write or spend', () => {
+  const gate = /if \(plan\.state === 'lapsed'\) return json\(req, 402, lapsedAnswer\(plan\)\);/;
+  for (const [name, src] of [['sync', sync], ['rewrite', rewrite]]) {
+    assert.match(src, /import \{[^}]*\bplanOf\b[^}]*\blapsedAnswer\b[^}]*\} from '\.\.\/_shared\/billing\.mjs'/, `${name} takes the rule from the shared module`);
+    assert.match(src, /import \{[^}]*\bsubscriptionRowOf\b[^}]*\} from '\.\.\/_shared\/auth\.ts'/, `${name} reads the row through the shared helper`);
+    assert.equal((src.match(new RegExp(gate.source, 'g')) || []).length, 1, `${name} gates once`);
+    assert.doesNotMatch(src, /json\(req, 402, \{/, `${name} never builds the 402 by hand`);
+  }
+  // sync: with the caller's client, after the membership and before the first write; no service role at all
+  assert.match(sync, /plan = planOf\(await subscriptionRowOf\(client, dealershipId\)\);/);
+  assert.doesNotMatch(sync, /serviceClient/, 'the sync function has no service-role client');
+  const syncGate = sync.search(gate);
+  assert.ok(syncGate > sync.indexOf('const dealershipId = membership.dealership_id;'), 'after the membership is picked');
+  assert.ok(syncGate < sync.indexOf('  try {\n    // 1. the registry'), 'before the writes begin');
+  assert.ok(syncGate < sync.indexOf('.insert('), 'before any insert');
+  assert.ok(syncGate < sync.indexOf('.update('), 'before any update');
+  assert.ok(syncGate < sync.indexOf('.upsert('), 'before any upsert');
+  // rewrite: after the membership, before the cost cap and the model call; the health route is behind it too
+  assert.match(rewrite, /plan = planOf\(await subscriptionRowOf\(caller\.client, who\.dealershipId\)\);/);
+  const rewriteGate = rewrite.search(gate);
+  assert.ok(rewriteGate > rewrite.indexOf('const who: Who = '), 'after the membership is picked');
+  assert.ok(rewriteGate < rewrite.indexOf('spent = await monthSpend('), 'before the cost cap is read');
+  assert.ok(rewriteGate < rewrite.indexOf('if (isHealth) {'), 'every route, health included');
+  assert.ok(rewriteGate < rewrite.indexOf('await rewrite(facts, who, service)'), 'before the model call');
+  assert.ok(rewriteGate < rewrite.indexOf('await guessColors('), 'before the color call');
+  // the shared pieces: one query by dealership id under RLS; the answer's code and sentence
+  assert.match(auth, /export async function subscriptionRowOf\(client: SupabaseClient, dealershipId: string\): Promise<SubscriptionRow \| null>/);
+  assert.match(auth, /client\.from\('subscriptions'\)\.select\('\*'\)\.eq\('dealership_id', dealershipId\)\.maybeSingle\(\)/);
+  assert.match(billingShared, /export const LAPSED_CODE = 'lapsed';/);
+  assert.match(billingShared, /export const LAPSED_MESSAGE = "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view";/);
+  assert.match(billingShared, /return \{ ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan \};/);
+  // the billing function is never gated: a lapsed dealership must be able to renew
+  assert.doesNotMatch(billing, /lapsedAnswer|402/);
+});
+
+test('sync/index.ts answers plan and postsToday; postsToday counts the caller\'s own rows, any status, in the day the extension sent, after the writes', () => {
+  assert.match(sync, /import \{[^}]*\btodayRange\b[^}]*\} from '\.\.\/_shared\/billing\.mjs'/);
+  assert.match(sync, /const today = todayRange\(body\.today\);/, 'the request\'s day is taken through the shared check, or it is null');
+  const count = /const postsToday = today \? await countOf\(client\.from\('listings'\)\.select\('id', \{ count: 'exact', head: true \}\)\.eq\('dealership_id', dealershipId\)\.eq\('user_id', me\)\.gte\('posted_at', today\.from\)\.lt\('posted_at', today\.to\), 'could not count listings'\) : null;/;
+  assert.match(sync, count);
+  assert.ok(sync.search(count) > sync.indexOf('const serverTime = new Date().toISOString();'), 'after the writes, so the posts this call brought are in the count');
+  assert.doesNotMatch(sync, /gte\('posted_at', since\)|lt\('posted_at', since\)|lte\('posted_at', since\)/, 'the day is the only thing posted_at is compared with');
+  assert.match(sync, /\n      role: membership\.role,\n      plan,\n      postsToday,\n      counts,\n/, 'both fields in the answer');
+  assert.match(sync, /-> 402 \{ ok: false, error, code: 'lapsed', plan \}/, 'the header says what a lapsed dealership gets');
+  assert.match(sync, /today: \{ from, to \} \| null \}/, 'and what the request carries');
+});
+
 // ---------- the README ----------
+
+test('supabase/README.md names today, postsToday, plan, the 402 rule and the Billing card', () => {
+  assert.match(readme, /`today` is `\{ from, to \}`, two ISO stamps bounding the caller's local calendar day/);
+  assert.match(readme, /answers 402 `\{ ok: false, error, code: "lapsed", plan \}` and writes nothing/);
+  assert.match(readme, /`plan` is `\{ state, pilotEndsAt, currentPeriodEnd, seats \}`/);
+  assert.match(readme, /`postsToday` is the number of the caller's own listings rows, any status/);
+  assert.match(readme, /the daily cap takes the larger of its local count and the server's/);
+  assert.match(readme, /gets 402 `\{ ok: false, error, code: "lapsed", plan \}` on every route of the function/, 'the rewrite paragraph');
+  assert.match(readme, /402 \(the dealership's subscription has lapsed/, 'the error list');
+  assert.match(readme, /The billing routes are never gated/);
+  // the Billing card: one row per state, and which route each button calls
+  const card = readme.slice(readme.indexOf("### The manager page's Billing card"), readme.indexOf('### Testing with Stripe'));
+  assert.ok(card.length > 0, 'the card has its own section');
+  for (const state of ['none', 'pilot', 'active', 'lapsed']) assert.match(card, new RegExp(`^\\| \`${state}\` \\|`, 'm'), `a row for ${state}`);
+  assert.match(card, /`GET \/billing\/status\?dealershipId=/);
+  assert.match(card, /\*\*Start the free pilot\*\* runs `supabase\.rpc\('start_pilot', \{ dealership_id \}\)`/);
+  assert.match(card, /\*\*Subscribe\*\* POSTs `\{ returnUrl, dealershipId \}` to `\/billing\/checkout`/);
+  assert.match(card, /\*\*Manage billing\*\* POSTs `\{ returnUrl, dealershipId \}` to `\/billing\/portal`/);
+  assert.match(card, /salespeople see the line and no buttons/);
+  assert.doesNotMatch(readme, /not wired in this step/, 'the card is wired now');
+});
 
 test('supabase/README.md says what the code does: the code folding, the created_at rule, the rewrite origin rule, in-place migrations', () => {
   assert.match(readme, /any text works as a code \(matched ignoring case and surrounding spaces\)/);

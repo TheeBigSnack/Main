@@ -1,0 +1,93 @@
+# Onboarding emails for a store-wide install
+
+Three short emails for a dealership that has finished its pilot and is putting Lot Sync on every salesperson's machine, with the used car manager leading: one to the manager before anything is installed, one to each salesperson, and a day-7 check-in to the manager. Sent by the owner. Fill in the brackets; every count or price that is not a bracket is quoted from `marketing/pricing.json` (`includedSalespeople`, `extraSalespersonMonthly`) and checked by `test/marketing.test.js`. The pilot's own emails are in `onboarding-emails.md`.
+
+Before the first email goes out (`supabase/README.md`, "The first dealership and its manager"): the dealership's account exists with its website, the manager is on it as its manager, and there is one single-use invite code per salesperson. Today the owner creates the codes (`create_invite`, run in the SQL editor while signed in as the manager); the manager view has no button for them yet, and the email to the manager says so. The Web Store link is the unlisted listing's address (`store/listing.md`); the manager view address is wherever `manager/` is hosted.
+
+---
+
+## To the manager: what happens next
+
+**Subject:** Lot Sync: what happens next at [dealership]
+
+Hi [name],
+
+Thanks for signing. Here is the whole roll-out in one email, so nothing is a surprise.
+
+**1. The account.** I have set up [dealership]'s Lot Sync account with [website address] as its website and added you as its manager. Nothing from the pilot is lost: each pilot salesperson's posted list and numbers sync into the account the first time they sign in.
+
+**2. Invite codes.** Each salesperson joins the account with an invite code that works once. Today I create them (the manager view doesn't have a button for that yet; when it does, you will make them yourself), so please send me the list: name and work email for each person, [N] in all. I email each person their own code with the install steps below. A code belongs to one person, so please don't forward one.
+
+**3. Install.** Each salesperson installs Lot Sync from the Chrome Web Store at [Web Store link], about two minutes, then signs in with a code sent to their email (no password), enters their invite code, and runs set-up on [website address]. My email to them walks through it step by step, and I'm reachable on [install day] for anyone who gets stuck.
+
+**4. The manager view.** [manager view address] shows who posted what, which sold cars are still listed and for how long, and which price changes haven't reached the listing yet. Sign in with your email address: click **Send me a sign-in link** and open the link on the same device. There is no password. The view reads only what the salespeople's extensions record: VINs, listing links, prices and times. Nothing from Facebook beyond the listing links they saved, and never a description or a buyer.
+
+**5. The posting rules.** Every salesperson reads them during set-up and ticks that they will follow them: a person publishes every post, pre-owned cars only, the website price only, the dealership named in every description, facts only, sold cars down the same day. They are at [posting rules address]. Please back them; they are what keeps the store's listings honest, and they are the store's listings.
+
+**6. The daily cap.** Each salesperson may record [10] posts a day. It lives in each person's Settings (Safety, Posts per day, per salesperson), and the number in their install email is the one you choose, so tell me now if you want a different one. It is a safety setting, not a guarantee of anything from Facebook; Meta does not publish its limits.
+
+**7. Seats.** The subscription includes five salespeople; each one beyond that is $20 a month, the figures you saw at purchase and in Schedule A of the agreement. Tell me when the list changes.
+
+I'll write on day 7 with the three numbers to look at in the manager view.
+
+Two things I will keep saying: Lot Sync never clicks Publish, and it never asks anyone for their Facebook login. Having a person click Publish is the safest way to do this, not a guarantee. Lot Sync is not affiliated with Meta.
+
+[your name]
+[phone]
+
+---
+
+## To each salesperson: install, sign in, first car
+
+**Subject:** Lot Sync: install, sign in and your first car (about fifteen minutes)
+
+Hi [name],
+
+[Manager] has put Lot Sync on for everyone at [dealership]. It fills in a Facebook Marketplace listing from the website in about ten seconds; you check it and click Publish yourself. Here is the whole set-up.
+
+**1. Install (2 minutes).** Open [Web Store link] in Chrome, click **Add to Chrome**, then **Add extension**. Chrome says the extension can read and change data on www.facebook.com/marketplace and on the dealership's photo host; that is what filling the form and attaching the photos needs. It never reads your Facebook password, cookies or messages. Then click the puzzle-piece icon in Chrome's toolbar and pin **Lot Sync**.
+
+**2. Sign in (2 minutes).** Open [dealership used inventory URL], click the Lot Sync icon, then **Settings**. Under **Account**, type your work email and click **Send me a sign-in code**. Enter the six-digit code from the email and click **Sign in**. There is no password.
+
+**3. Join the store.** Still under Account, enter your invite code, **[code]**, and click **Join**. It works once and it is yours alone. From then on your posted list syncs to the store's account: [manager] sees who posted what, and you can see which cars a colleague has already listed.
+
+**4. Set-up (5 minutes).** Back on the **To do** tab, click **Set up Lot Sync**. The side panel walks you through: reading the website, your store, your name and role, the store's address (already filled from the website), the price to post and the price note that goes into every description (a suggested sentence is shown; only your store can say whether it is true), permission for automatic rescans (say yes so your To do list stays current), the posting rules and the Terms. Please read the rules once; they are short and they matter. The price note can be changed later under **Settings**.
+
+**5. Your first car.** First, on Facebook Marketplace, open Your listings, then Drafts, and delete any old drafts: Facebook sometimes puts a saved draft back onto a new listing form. Then click the Lot Sync icon on the inventory page, **Ready to post**, then **Post** on a car. Read the description in the side panel (edit it if you like), click **Open the Marketplace form**, check every field on Facebook, especially condition and title, and click Publish yourself. Back in the panel, click **It's posted, record it**. The daily cap is [10]; it's a safety setting, not a target.
+
+Three sentences that matter:
+
+- **You click Publish. Lot Sync never does.** It fills in the form and opens pages; nothing is posted or edited while you're away.
+- **Keep prices honest.** The price is the website price, and it changes only when the website changes. No made-up drops, no deleting and relisting to bump a car.
+- **Clear the To do tab the day items appear.** When a car sells, click **Open listing** and mark it sold on Facebook yourself. When a price changes, click **Open & update price** and click Update yourself.
+
+If the panel ever shows **Couldn't fill**, copy the report with the button and send it to [support email]. Meta's Terms prohibit automated access without permission; having you click Publish is the safest way to do this, not a guarantee, and if Facebook ever warns you about your listings, stop and tell [manager]. Lot Sync is not affiliated with Meta.
+
+[your name]
+[phone]
+
+---
+
+## Day 7, to the manager: three numbers
+
+**Subject:** Lot Sync: week one at [dealership], three numbers
+
+Hi [name],
+
+A week in. Open the manager view at [manager view address] and look at three things:
+
+**1. Posted this week, per salesperson**, in the Salespeople table. Anyone at zero either hasn't finished set-up or hasn't found a first car to post, and a word from you does more than one from me. The median seconds per post is the time from Post to It's posted, their own review and Publish click included.
+
+**2. Sold cars still listed.** The count in the heading should be zero, and a car on the list should be there for hours, not days: red means open for more than 24 hours. Each one is on that salesperson's To do tab with a button that opens the listing; they click Mark as sold on Facebook.
+
+**3. Price changes not yet updated.** Same reading: zero, or hours. The listing price must match the website; Open & update price puts the new price in the box, and they click Update.
+
+Above the table, the last-scan line says when a salesperson's extension last read the website. Rescans run every 3 hours while someone's Chrome is open with rescans allowed; if that line says more than 6 hours ago on a working day, nobody's Chrome had it on.
+
+Two things the view can't show: a car listed by hand without clicking Mark posted in Lot Sync isn't watched, so a sold one won't appear here; and the numbers are what the extensions recorded, nothing from Facebook itself. **Download CSV** at the top gives you the same rows in a spreadsheet.
+
+Can we take ten minutes on [day] to go over it? Bring anything the salespeople have run into; every Couldn't fill report fixes something.
+
+Lot Sync is not affiliated with Meta. A person clicks Publish every time and Lot Sync never does; that is the safest design available, not a guarantee.
+
+[your name]

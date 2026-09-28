@@ -5,7 +5,9 @@
 // line items and session parameters, Stripe's form encoding, what each
 // webhook event does to the subscription row, and the webhook signature
 // check (HMAC-SHA256 through Web Crypto, which Deno and Node 22 both offer
-// on globalThis.crypto.subtle). No Stripe SDK anywhere.
+// on globalThis.crypto.subtle), plus what /sync and /rewrite tell a member
+// about the plan (planOf, and the 402 for a lapsed dealership) and the
+// calendar day the daily cap counts (todayRange). No Stripe SDK anywhere.
 //
 // The row is public.subscriptions from migrations/0004_billing.sql:
 //   dealership_id, stripe_customer_id, stripe_subscription_id, status,
@@ -88,6 +90,58 @@ export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICI
     pilotDays: pricing.pilotDays,
     includedSalespeople: pricing.includedSalespeople,
   };
+}
+
+// ---------- the plan the product reads ----------
+
+const isoOrNull = (x) => {
+  const t = ms(x);
+  return t === null ? null : new Date(t).toISOString();
+};
+
+// What a member's extension learns about the dealership's plan from /sync:
+// the state word and, for the lines it shows, the pilot's end, the
+// paid-through date and the seat count, from the row (or null for none).
+// Dates go out as ISO text with milliseconds whatever shape Postgres gave
+// them, so the extension parses one shape.
+export function planOf(row, now = Date.now()) {
+  const r = isRecord(row) ? row : null;
+  return {
+    state: subscriptionState(r, now),
+    pilotEndsAt: r ? isoOrNull(r.pilot_ends_at) : null,
+    currentPeriodEnd: r ? isoOrNull(r.current_period_end) : null,
+    seats: r && Number.isInteger(r.seats) && r.seats >= 1 ? r.seats : null,
+  };
+}
+
+// A lapsed dealership: /sync and /rewrite answer this with HTTP 402 and do
+// nothing else (nothing written, nothing generated, nothing spent). The
+// sentence is for the salesperson; `code` is what the extension branches
+// on; `plan` lets it say since when. The billing function is never gated:
+// a lapsed dealership must be able to renew.
+export const LAPSED_CODE = 'lapsed';
+export const LAPSED_MESSAGE = "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view";
+export function lapsedAnswer(plan) {
+  return { ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan };
+}
+
+// ---------- the day the daily cap counts ----------
+
+// The extension sends its local calendar day with /sync as
+// { today: { from, to } }, two ISO stamps, and the function counts the
+// caller's posts in that half-open range (postsToday) so the per-salesperson
+// cap holds across their machines. The range is taken only when it is a
+// day: both stamps parse, from is before to, and the span is at most
+// MAX_TODAY_HOURS (a 25-hour clock-change day fits; a week does not). Null
+// otherwise, and then postsToday is null: a count over a made-up range
+// would be a made-up number.
+export const MAX_TODAY_HOURS = 48;
+export function todayRange(today) {
+  if (!isRecord(today)) return null;
+  const from = ms(today.from);
+  const to = ms(today.to);
+  if (from === null || to === null || from >= to || to - from > MAX_TODAY_HOURS * 3600 * 1000) return null;
+  return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
 }
 
 // ---------- Checkout ----------

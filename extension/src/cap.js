@@ -18,8 +18,29 @@ export function postsToday(posted, now = new Date()) {
   }).length;
 }
 
-export function capStatus(posted, cap = DEFAULT_DAILY_CAP, now = new Date()) {
+// The sync function's count of this salesperson's posts in the local day the
+// extension sent it, kept in sync:<origin> as { count, from, to } (src/sync.js
+// nextSyncState). It includes posts made on the person's other machines that
+// have not come down here yet. It counts only while its range covers `now`:
+// yesterday's count says nothing about today. 0 for none or a stale one.
+export function serverPostsToday(serverCount, now = new Date()) {
+  if (!serverCount || typeof serverCount !== 'object') return 0;
+  const count = Number(serverCount.count);
+  const from = Date.parse(serverCount.from);
+  const to = Date.parse(serverCount.to);
+  const at = new Date(now).getTime();
+  if (!Number.isInteger(count) || count < 0 || Number.isNaN(from) || Number.isNaN(to) || Number.isNaN(at)) return 0;
+  return from <= at && at < to ? count : 0;
+}
+
+// The day's standing. `options.serverCount` is the count above; the larger
+// of the two counts is the day's, since both are real posts by this person
+// (this machine knows the ones made here; the server knows the ones synced
+// from anywhere, minus what has not gone up yet). The fourth argument is
+// optional: the old three-argument call is the local count alone.
+export function capStatus(posted, cap = DEFAULT_DAILY_CAP, now = new Date(), options = undefined) {
   const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : DEFAULT_DAILY_CAP;
-  const used = postsToday(posted, now);
+  const serverCount = options && typeof options === 'object' ? options.serverCount : null;
+  const used = Math.max(postsToday(posted, now), serverPostsToday(serverCount, now));
   return { used, cap: limit, remaining: Math.max(0, limit - used), reached: used >= limit };
 }
