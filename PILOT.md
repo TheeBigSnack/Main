@@ -55,6 +55,8 @@ Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser,
 - **Sold cars and price changes:** a flag starts at the scan (popup, wizard or background) that first put the item on To do for one of the salesperson's own listings. It ends when Lot Sync sees the listing page show the change (upkeep, "detected"), when the person clicks Taken down / Updated ("manual"), or when a complete, confirmed scan no longer lists it ("cleared": the car came back or the price went back; not counted in the medians). A scan with a warning (incomplete, or the VIN double-check failed) never clears a flag. The hours are from the flagging scan, so with rescans every 3 hours a car sold at 9:00 and flagged at 11:50 reads from 11:50; the acceptance criterion is about the flag arriving within one cycle, which the manager confirms from the store's records.
 - **What is not recorded:** anything about buyers, messages, or the Facebook account; listing links beyond what the posted registry already keeps; the description text.
 
+**Pruning:** each list (post attempts, fills, flags) keeps its newest 500 entries and nothing older than 90 days (`MAX_ENTRIES` and `PILOT_RETENTION_DAYS` in `extension/src/pilot.js`), applied each time a number is recorded; an open flag stays until it is closed. A two-week pilot is never affected, but a longer engagement must collect the CSV weekly, since the CSV is the only complete record.
+
 **Clearing:** **Pilot → Clear pilot numbers** (two clicks), or **Settings → Clear everything for this website**. The pilot agreement (section 6) says pilot records Lot Sync holds are deleted within 30 days of the end unless the dealer subscribes; the CSVs the owner collected are those records.
 
 ## Weekly fixes: the loop

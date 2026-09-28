@@ -13,7 +13,9 @@
 --   a_sales    A           salesperson
 --   a_mgr      A           manager
 --   b_sales    B           salesperson
---   newcomer   (none yet)  redeems an invite for B during the test
+--   newcomer   (none yet)  redeems two invites for B during the test: one
+--                          from create_invite's mould and one the owner
+--                          typed in lower case
 
 \set ON_ERROR_STOP on
 \set a_sales   '00000000-0000-4000-8000-0000000000a1'
@@ -62,7 +64,8 @@ insert into public.rewrite_usage (dealership_id, user_id, model, input_tokens, o
   (:'dealer_b', :'b_sales', 'claude-haiku-4-5', 1500, 200, 0.0025, 'rewrite');
 
 insert into public.invites (code, dealership_id, role, created_by) values
-  ('NEWCOMERB001', :'dealer_b', 'salesperson', :'b_sales');
+  ('NEWCOMERB001', :'dealer_b', 'salesperson', :'b_sales'),
+  ('made-up-b002', :'dealer_b', 'manager',     null); -- as the owner types the first code in SQL: any case
 
 -- ---------------------------------------------------------------------------
 -- a_sales: a salesperson of A
@@ -354,6 +357,17 @@ begin
     if sqlstate <> 'P0003' then raise; end if;
   end;
   raise notice 'ok: an invite code works once';
+
+  -- an owner-made lower-case code, typed the way the extension sends it
+  -- (upper case, with spaces around it): found, and rejoining B with it
+  -- takes the invite's role and keeps the name
+  got := public.redeem_invite(' MADE-UP-B002 ', null);
+  if (got ->> 'dealership_id')::uuid <> b or got ->> 'role' <> 'manager' or got ->> 'name' <> 'Riley' then
+    raise exception 'redeeming a lower-case owner-made code returned %', got;
+  end if;
+  select count(*) into n from public.memberships where user_id = auth.uid() and dealership_id = b and role = 'manager';
+  if n <> 1 then raise exception 'redeeming the second invite did not update the membership'; end if;
+  raise notice 'ok: an invite code is matched ignoring case and surrounding spaces';
 end;
 $$;
 
@@ -363,6 +377,9 @@ do $$
 begin
   if not exists (select 1 from public.invites where code = 'NEWCOMERB001' and used_by = '00000000-0000-4000-8000-0000000000c1' and used_at is not null) then
     raise exception 'the redeemed invite was not marked used';
+  end if;
+  if not exists (select 1 from public.invites where code = 'made-up-b002' and used_by = '00000000-0000-4000-8000-0000000000c1' and used_at is not null) then
+    raise exception 'the redeemed lower-case invite was not marked used (it is stored as typed)';
   end if;
   raise notice 'ok: the redeemed invite is marked used';
 end;

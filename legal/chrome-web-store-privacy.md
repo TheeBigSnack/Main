@@ -16,7 +16,7 @@ One row per pattern in `extension/manifest.json`.
 |---|---|
 | `activeTab` | To read the inventory search on the dealership website tab the user is looking at when they click Scan |
 | `scripting` | To run the scan code in that tab, and to fill in the Marketplace create-listing form when the user clicks Post |
-| `storage` | Scans, settings, the user's posted list and the usage numbers below, kept locally per website. The user's profile (name, role, dealership, price basis, note, cap, listing defaults) is kept in Chrome's sync storage under the user's own Google account and is removed by "Forget my synced profile" in Settings |
+| `storage` | Scans, settings, the user's posted list and the usage numbers below, kept locally per website. The user's profile (name, role, dealership, price basis, note, cap, listing defaults, Terms acceptance) is kept in Chrome's sync storage under the user's own Google account and is removed by "Forget my synced profile" in Settings |
 | `sidePanel` | The guided post flow runs in the side panel so it stays open while the user moves between the dealership tab and the Marketplace tab |
 | `alarms` | Re-reads the dealership website every 3 hours while Chrome is open, only for a website the user allowed in the set-up wizard, to keep the to-do count on the toolbar icon current. Never touches Facebook |
 | `notifications` | A desktop notification when a background rescan adds to the user's to-do list (a sold car or a price change on the user's own listings). The user can turn it off in Settings |
@@ -29,7 +29,7 @@ One row per pattern in `extension/manifest.json`.
 
 | Data | Where it lives | Why |
 |---|---|---|
-| Usage numbers: when a post started and ended and its outcome, which form fields could not be filled, hours until a flagged sold car or price change was fixed, and the salesperson name from Settings | Kept in the user's browser; leaves it only as the CSV the user chooses to export. Deleted by "Clear pilot numbers" in the Pilot tab and by "Clear everything for this website" in Settings | Pilot check-ins and, from Milestone 4, the manager view |
+| Usage numbers: when a post started and ended and its outcome, which form fields could not be filled, hours until a flagged sold car or price change was fixed, and the salesperson name from Settings | Kept in the user's browser; leaves it only as the CSV the user chooses to export. Deleted by "Clear pilot numbers" in the Pilot tab and by "Clear everything for this website" in Settings, and pruned automatically to the newest 500 entries per list and nothing older than 90 days (open to-do items excepted) | Pilot check-ins and, from Milestone 4, the manager view |
 
 ## Data use disclosures (tick as applicable)
 

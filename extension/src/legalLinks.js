@@ -6,8 +6,9 @@
 // product website once it exists (Milestone 5). Until then these addresses
 // are placeholders: replace all three when the site is up. `version` is the
 // edition the wizard's Terms step and the tick in Settings record next to the
-// acceptance time (settings.legal); changing it re-asks everyone, so bump it
-// whenever the texts change in a way people must accept again.
+// acceptance time (settings.legal); after a change Settings shows everyone's
+// acceptance as out of date (legalIsCurrent), so bump it whenever the texts
+// change in a way people must accept again.
 
 export const LEGAL = Object.freeze({
   version: '2026-09-28-draft',
@@ -16,12 +17,26 @@ export const LEGAL = Object.freeze({
   rulesUrl: 'https://lotsync.example/posting-rules',
 });
 
+// A placeholder address: not an https address at all, or one under the
+// reserved .example domain (RFC 2606), which nobody can host.
+export function isPlaceholderUrl(url) {
+  const u = String(url || '').trim();
+  if (!/^https:\/\//i.test(u)) return true;
+  let host = '';
+  try {
+    host = new URL(u).hostname;
+  } catch {
+    return true;
+  }
+  return /(^|\.)example$/i.test(host);
+}
+
 // Are the documents really published? While the addresses are placeholders
 // nobody can read them, so the wizard's Terms step is informational and no
 // acceptance is recorded (asking a person to accept what they cannot open
 // would be a false record). The step starts gating on its own once the
 // addresses point at a real host.
-export const legalHosted = () => !/\.example(\/|$)/i.test(LEGAL.termsUrl) && !/\.example(\/|$)/i.test(LEGAL.privacyUrl);
+export const legalHosted = () => !isPlaceholderUrl(LEGAL.termsUrl) && !isPlaceholderUrl(LEGAL.privacyUrl);
 
 // The record settings.legal holds once a person has accepted the current edition.
 export const acceptLegal = (now = new Date().toISOString()) => ({ version: LEGAL.version, acceptedAt: String(now) });

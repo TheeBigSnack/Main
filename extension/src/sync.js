@@ -5,12 +5,18 @@
 //
 //   const body = syncPayload({ origin, posted, pilot, scan, since, userId });
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
-//   posted = mergeRegistry(posted, response, { since });
+//   posted = mergeRegistry(posted, response, { since, userId });
 //   pilot  = mergeFlags(pilot, response);
 //   state  = nextSyncState(state, response)   // since, dealership id and role
 //
 // The state is per website; the wiring keeps it under a `sync` entry added
 // to SITE_KEY_NAMES in src/storageKeys.js, so clearing a website removes it.
+//
+// A colleague's entry that the merge writes into posted:<origin> carries
+// their userId and `mine: false`; the person's own entries carry no flag, so
+// a machine that never synced is unchanged. cap.js and rescan.js read the
+// flag: a colleague's car never counts toward this salesperson's daily cap
+// and is never flagged as theirs to take down or update.
 //
 // What travels: the salesperson's own entries of posted:<origin> (VIN, name,
 // price, times, the listing link they saved, their name), the post attempts
@@ -60,8 +66,8 @@ const changedAfter = (since, ...stamps) => {
   const l = latest(...stamps);
   return l === null || l > s;
 };
-// An entry merged in from a colleague carries their userId; it is theirs to sync.
-const isOwn = (entry, userId) => !entry.userId || !userId || entry.userId === userId;
+// An entry merged in from a colleague carries their userId and `mine: false`; it is theirs to sync.
+const isOwn = (entry, userId) => entry.mine !== false && (!entry.userId || !userId || entry.userId === userId);
 
 // ---------- what goes up ----------
 
@@ -183,10 +189,18 @@ export function syncPayload({ origin = '', posted = {}, pilot = null, scan = nul
 
 // ---------- what comes down ----------
 
+// Whose entry a row is: its user's id, plus `mine: false` when the caller
+// (userId) is known and the row is a colleague's. Own entries carry no flag.
+function ownership(r, userId) {
+  if (!r.user_id) return {};
+  const id = String(r.user_id);
+  return userId && id !== String(userId) ? { userId: id, mine: false } : { userId: id };
+}
+
 // A server row as a registry entry. Only the keys markPosted() would set
 // are written; postedWith (which build posted it) is kept from the local
 // entry when there is one.
-function entryFromRow(r, prev = {}) {
+function entryFromRow(r, prev = {}, userId = '') {
   return {
     name: text(r.name, 80) || text(prev.name, 80),
     price: intOrNull(r.price),
@@ -195,7 +209,7 @@ function entryFromRow(r, prev = {}) {
     ...(text(r.salesperson, 60) ? { salesperson: text(r.salesperson, 60) } : {}),
     ...(isoOrNull(r.updated_at) ? { updatedAt: isoOrNull(r.updated_at) } : {}),
     ...(prev.postedWith ? { postedWith: prev.postedWith } : {}),
-    ...(r.user_id ? { userId: String(r.user_id) } : {}),
+    ...ownership(r, userId),
   };
 }
 
@@ -213,9 +227,12 @@ const rowsOf = (remote, key) => (Array.isArray(remote) ? remote : isObject(remot
  *     postedAt) wins for the price; a change made here after `since` is
  *     therefore kept unless the server's is newer still; a listing link or a
  *     name that is missing on one side is filled from the other.
- * `remote` is the sync answer ({ listings: [...] }) or a plain array of rows.
+ * Every entry the server knows gets its row's userId; with the caller's
+ * `userId` given, a colleague's entry also gets `mine: false` (own entries
+ * carry no flag). `remote` is the sync answer ({ listings: [...] }) or a
+ * plain array of rows.
  */
-export function mergeRegistry(local, remote, { since = null } = {}) {
+export function mergeRegistry(local, remote, { since = null, userId = '' } = {}) {
   void since; // the newest-change rule covers it; kept in the signature so callers can say when they last synced
   const base = isObject(local) ? local : {};
   const current = new Map(); // vin -> the latest post the server knows for it
@@ -246,7 +263,7 @@ export function mergeRegistry(local, remote, { since = null } = {}) {
     }
     if (localPosted === null || remotePosted > localPosted + 999) {
       // the server knows a newer post of this car (from another machine)
-      if (r.status === 'listed') out[key] = entryFromRow(r, e);
+      if (r.status === 'listed') out[key] = entryFromRow(r, e, userId);
       continue;
     }
     if (r.status !== 'listed') continue; // taken down elsewhere
@@ -262,12 +279,15 @@ export function mergeRegistry(local, remote, { since = null } = {}) {
     if (!merged.listingUrl && httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
     if (!merged.salesperson && text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
     if (!merged.name && text(r.name, 80)) merged.name = text(r.name, 80);
-    if (r.user_id) merged.userId = String(r.user_id);
+    if (r.user_id) {
+      delete merged.mine; // the server says whose it is
+      Object.assign(merged, ownership(r, userId));
+    }
     out[key] = merged;
   }
   for (const [vin, r] of current) {
     if (seen.has(vin) || r.status !== 'listed') continue;
-    out[vin] = entryFromRow(r);
+    out[vin] = entryFromRow(r, {}, userId);
   }
   return out;
 }

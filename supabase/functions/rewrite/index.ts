@@ -9,7 +9,8 @@
 //   GET  …/rewrite/health    -> { ok, model, month, usd, capUsd, perMinute, dealership }
 //
 // Protection, in order: a valid Supabase user token (401), a membership in
-// a dealership (403), a per-user per-minute rate limit (429; kept in this
+// a dealership (403; the one for the `origin` sent with the facts, matched
+// the way /sync matches it), a per-user per-minute rate limit (429; kept in this
 // instance's memory, so with several instances a burst can exceed it by
 // that factor), and the dealership's monthly cost cap summed from
 // rewrite_usage (429 with a plain message; the extension then uses its
@@ -22,7 +23,7 @@
 
 import { buildRewritePrompt, type RewriteFacts } from '../_shared/rewritePrompt.ts';
 import { runGuardrails, type GuardrailContext, type GuardrailResult } from '../_shared/guardrails.ts';
-import { json, preflight, readJson, routeOf, isRecord, errorMessage } from '../_shared/http.ts';
+import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin } from '../_shared/http.ts';
 import { requireUser, membershipsOf, serviceClient, env, type Membership } from '../_shared/auth.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
@@ -301,10 +302,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(req, 500, { ok: false, error: errorMessage(e) });
   }
   if (!memberships.length) return json(req, 403, { ok: false, error: 'your account is not in a dealership yet: redeem an invite code first' });
-  // a person in several dealerships (sister stores) can say which one with an
-  // `origin` in the body; otherwise the first membership is used
-  const wantedOrigin = isRecord(body) && typeof body.origin === 'string' ? body.origin : '';
-  const membership = memberships.find((m) => m.dealership !== null && m.dealership.website_origin === wantedOrigin) || memberships[0];
+  // the extension sends the dealer website's `origin` with the facts, which
+  // picks the dealership for a person in several (sister stores), compared
+  // as /sync compares it; an origin that matches none of their dealerships
+  // is refused as /sync refuses it, so a store is never billed or capped
+  // for another store's cars. Only a body without an origin (the health
+  // route, an older extension) falls back to the first membership.
+  const wantedOrigin = isRecord(body) && typeof body.origin === 'string' ? body.origin.trim().replace(/\/+$/, '') : '';
+  const membership = wantedOrigin ? memberships.find((m) => m.dealership !== null && sameOrigin(m.dealership.website_origin, wantedOrigin)) : memberships[0];
+  if (!membership) return json(req, 403, { ok: false, error: `your account is not a member of the dealership for ${wantedOrigin}` });
   const who: Who = { dealershipId: membership.dealership_id, userId: caller.user.id };
 
   let service: SupabaseClient;

@@ -155,6 +155,28 @@ test('a posted car that stops passing the pre-owned check needs a look', () => {
   assert.equal(d.needsALook[0].yours, true);
 });
 
+test('a colleague\'s entry (mine: false, merged in by sync) is never yours: no take-down or price flag as yours, no posted-price comparison', () => {
+  const posted = {
+    [VIN.ram]: { name: 'Ram', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' }, // own: no flag
+    [VIN.hellcat]: { name: 'Hellcat', price: 50000, postedAt: '2026-09-26T21:00:00.000Z', userId: 'u2', mine: false }, // a colleague's
+  };
+  // both cars gone: yours is the Ram only, and the colleague's car still shows, after yours
+  const gone = diffScans(snapshot(LOT), snapshot([['certified'], ['usedNoPhotos']]), { posted, confirm: confirmed(VIN.ram, VIN.hellcat) });
+  assert.deepEqual(gone.takeDown.map((t) => [t.vin, t.yours]), [[VIN.ram, true], [VIN.hellcat, false]]);
+  assert.equal(gone.takeDown[1].lastPrice, 53485, 'the website price, not the colleague\'s listing price');
+  // the colleague's listing price is not compared with the website (their machine does that); the last scan's is
+  const same = diffScans(snapshot(LOT), snapshot(LOT), { posted, confirm: confirmed() });
+  assert.deepEqual(same.priceUpdates, []);
+  assert.deepEqual(same.needsALook, []);
+  // the colleague's car goes sale-pending: not a take-down of yours
+  const pending = diffScans(snapshot(LOT), snapshot([['usedNormal'], ['certified'], ['usedNoCarfax', { status: 'pend-sale' }], ['usedNoPhotos']]), { posted, confirm: confirmed() });
+  assert.deepEqual(pending.takeDown, []);
+  // an entry with userId but no flag (an own entry the server labelled) is still yours
+  const labelled = { [VIN.ram]: { name: 'Ram', price: 27163, userId: 'u1' } };
+  const d = diffScans(snapshot(LOT), snapshot(LOT.filter(([n]) => n !== 'usedNormal')), { posted: labelled, confirm: confirmed(VIN.ram) });
+  assert.equal(d.takeDown[0].yours, true);
+});
+
 test('posted-listing bookkeeping', () => {
   const s = snapshot(LOT);
   let posted = markPosted({}, s.vehicles[VIN.ram], 'website', '2026-09-26T21:00:00.000Z');

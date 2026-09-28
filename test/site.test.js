@@ -1,11 +1,12 @@
 // The landing page (site/) is customer-facing copy, so it passes the same
 // honesty checks as marketing/ (test/marketing.test.js; the regex lists are
 // copied here, not imported, so each file stays self-contained), quotes the one
-// pricing config, names no dealer, and loads nothing from anywhere else.
+// pricing config, names no dealer, loads nothing from anywhere else, and shows
+// only the sandbox's screenshots (site/screenshots/, drawn by npm run screenshots).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -45,8 +46,8 @@ test('no claim we have not measured, and nothing that sounds like Meta approval'
   const rest = text.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
   assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, 'the page makes a guarantee');
   for (const re of [...never, ...notToCustomers]) assert.doesNotMatch(text, re, `the page matches ${re}`);
-  // no logos, no review widgets, no invented proof
-  assert.doesNotMatch(html, /<img\b/i, 'no images (no logos)');
+  // no logos, no review widgets, no invented proof: the only images are the sandbox screenshots
+  for (const m of html.matchAll(/<img\b([^>]*)>/gi)) assert.match(m[1], /\bsrc="screenshots\/[\w-]+\.png"/, `an image that is not a sandbox screenshot: <img${m[1]}>`);
   assert.doesNotMatch(text, /\b(reviews?|rated|trusted by)\b/i, 'no review or trust claims');
 });
 
@@ -75,11 +76,37 @@ test('site/pricing.json is the marketing pricing config, and the page quotes it'
 test('the page speaks to any dealership', () => {
   // copied from test/anyDealer.test.js
   const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
-  for (const name of readdirSync(new URL('../site/', import.meta.url))) {
-    const src = read('../site/' + name);
-    const hit = src.match(PILOT);
-    assert.equal(hit, null, `site/${name} contains "${hit && hit[0]}"`);
+  const files = readdirSync(new URL('../site/', import.meta.url), { withFileTypes: true }).filter((d) => d.isFile()).map((d) => '../site/' + d.name);
+  for (const rel of [...files, '../scripts/screenshots.mjs']) {
+    const hit = read(rel).match(PILOT);
+    assert.equal(hit, null, `${rel.slice(3)} contains "${hit && hit[0]}"`);
   }
+});
+
+test('every screenshot the page shows exists at 1280 x 800, has alt text and says it is the sandbox with sample data', () => {
+  const figures = [...html.matchAll(/<figure\b[\s\S]*?<\/figure>/g)].map((m) => m[0]);
+  assert.equal(figures.length, 5, 'the five images of the store plan (store/listing.md, Screenshots)');
+  assert.equal((html.match(/<img\b/gi) || []).length, figures.length, 'one image per figure and no other');
+  const section = html.match(/<section id="see"[\s\S]*?<\/section>/);
+  assert.ok(section, 'the See it section');
+  assert.match(stripTags(section[0]), /sandbox[\s\S]*sample data/i, 'the section says where the images come from');
+  for (const fig of figures) {
+    const attrs = fig.match(/<img\b([^>]*)>/)[1];
+    const src = (attrs.match(/\bsrc="([^"]+)"/) || [])[1];
+    assert.match(src, /^screenshots\/[\w-]+\.png$/, `image source ${src}`);
+    const file = new URL('../site/' + src, import.meta.url);
+    assert.ok(existsSync(file), `${src} exists (npm run screenshots draws it)`);
+    const png = readFileSync(file);
+    assert.equal(png.toString('ascii', 12, 16), 'IHDR', `${src} is a PNG`);
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [1280, 800], `${src} is 1280 x 800`);
+    assert.ok(png.length <= 400 * 1024, `${src} is ${png.length} bytes; keep it under 400 KB (a JPEG, with this test extended for it)`);
+    const alt = (attrs.match(/\balt="([^"]*)"/) || [])[1] || '';
+    assert.ok(alt.trim().length >= 40, `${src} has alt text that says what is shown`);
+    for (const a of ['width="1280"', 'height="800"', 'loading="lazy"']) assert.ok(attrs.includes(a), `${src} has ${a}`);
+    const caption = stripTags((fig.match(/<figcaption>[\s\S]*?<\/figcaption>/) || [''])[0]);
+    assert.match(caption, /Sandbox with sample data\./, `${src} has a caption that says it is the sandbox with sample data`);
+  }
+  assert.match(css, /\.shots img \{[^}]*max-width: 100%/, 'images scale to the column');
 });
 
 test('every link is an anchor or a legal placeholder, and nothing loads from a third party', () => {
@@ -136,7 +163,7 @@ test('semantic, labelled and reachable: skip link, landmarks, labels on every fi
   }
   // sections in the order the plan names
   const ids = [...html.matchAll(/<section[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(ids, ['how', 'features', 'wont', 'needs', 'pricing', 'faq', 'demo']);
+  assert.deepEqual(ids, ['how', 'see', 'features', 'wont', 'needs', 'pricing', 'faq', 'demo']);
   assert.match(html, /<section class="hero"/);
   for (const q of ['Does it post for me?', 'What does it read?', 'Where is my data?', 'What about my Facebook password?', 'Which websites work?', 'How do updates arrive?']) {
     assert.ok(text.includes(q), `FAQ: ${q}`);

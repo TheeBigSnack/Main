@@ -380,7 +380,7 @@ async function generate({ useClaude } = {}) {
   const s = state.settings;
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
   const settings = { ...s, rewrite };
-  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings });
+  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin }); // the origin tells the service which store this is
   state.description = r.text;
   state.descriptionSource = r.source;
   state.note = r.note || '';

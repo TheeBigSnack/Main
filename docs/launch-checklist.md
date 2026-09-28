@@ -48,7 +48,7 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 
 ## Support
 
-- [ ] **The inbox exists.** Done when: `support@lotsync.example` is replaced by a real address in `docs/support.md`, `store/listing.md` and `extension/src/legalLinks.js`, mail to it reaches a named person, and a test message was answered.
+- [ ] **The inbox exists.** Done when: `support@lotsync.example` is replaced by a real address in `docs/support.md`, the `[support email]` brackets in `store/listing.md` are filled with the same address, mail to it reaches a named person, and a test message was answered.
 - [ ] **The help doc is current.** Done when: `docs/help.md` names every button as the current popup and side panel label it (`test/docs.test.js` checks a list of them), covers the store install, and a pilot salesperson has read it and found nothing missing.
 - [ ] **The log is running.** Done when: every request from the pilot is in the log in `docs/support.md`'s format, each with a first answer within one business day, and the weekly read of the log has produced at least one help-doc change or one fix.
 - [ ] **The severity words are in use.** Done when: every log row has one of the three, and a "blocks posting" row shows a workaround in its first answer.

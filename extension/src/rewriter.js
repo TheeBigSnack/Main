@@ -35,8 +35,10 @@ export async function guessColorsWithBackend({ endpoint, key = '', photos, optio
   }
 }
 
-// Exactly what leaves the browser: facts about the car and the dealer.
-// No VIN, no Facebook data, nothing about the salesperson beyond the sign-off.
+// Exactly what leaves the browser: facts about the car and the dealer (plus
+// the dealer website's origin, added by generateDescription, so the service
+// knows which store the car belongs to). No VIN, no Facebook data, nothing
+// about the salesperson beyond the sign-off.
 export function rewriteFacts({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [] }) {
   return {
     year: v.year, make: v.make, model: v.model, trim: v.trim, mileage: v.mileage, stock: v.stock,
@@ -73,16 +75,19 @@ export async function rewriteWithBackend({ endpoint, key = '', facts, fetchImpl 
 }
 
 /**
+ * `origin` is the dealer website's origin; it goes to the service with the
+ * facts, so a person who belongs to two stores is billed and capped against
+ * the right one.
  * @returns {{ text, source: 'template'|'claude', model?, guardrails, narrative, note? }}
  */
-export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, fetchImpl }) {
+export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', fetchImpl }) {
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
   const ctx = { vehicle, dealer, priceNote, price };
   const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };
   const rw = settings.rewrite || {};
   if (!rw.enabled || !rw.endpoint) return fallback;
-  const facts = rewriteFacts({ vehicle, dealer, salesperson, priceNote, narrative });
+  const facts = { ...rewriteFacts({ vehicle, dealer, salesperson, priceNote, narrative }), ...(origin ? { origin: String(origin) } : {}) };
   try {
     const r = await rewriteWithBackend({ endpoint: rw.endpoint, key: rw.key, facts, fetchImpl });
     if (r.ok && r.text) {

@@ -187,8 +187,11 @@ test('the state kept for the next sync', () => {
 // A small model of the sync function (supabase/functions/sync/index.ts):
 // the caller's rows are upserted (a row of another user is never touched,
 // a taken-down row is never relisted), the caller's listed rows that are
-// missing from the registry and were posted before `since` are taken down,
-// and the whole current registry comes back.
+// missing from the registry among those the server already held at `since`
+// (created_at, the server's stamp; the client's posted_at is never compared
+// with since) are taken down, and the whole current registry comes back.
+// A row inserted by a call gets the call's own serverTime as created_at,
+// as the function takes serverTime after its writes.
 function fakeServer() {
   const listings = [];
   const clock = { t: Date.UTC(2026, 10, 16, 12, 0, 0) };
@@ -200,7 +203,7 @@ function fakeServer() {
       const rows = toServerRows({ origin: body.origin, posted: body.posted, pilot: body.pilot, dealershipId: D, userId });
       const sent = new Set(rows.listings.map((r) => `${r.vin}@${r.posted_at}`));
       for (const r of listings) {
-        if (r.user_id === userId && r.status === 'listed' && !sent.has(`${r.vin}@${r.posted_at}`) && body.since && Date.parse(r.posted_at) <= Date.parse(body.since)) {
+        if (r.user_id === userId && r.status === 'listed' && !sent.has(`${r.vin}@${r.posted_at}`) && body.since && Date.parse(r.created_at) <= Date.parse(body.since)) {
           r.status = 'taken_down';
           r.taken_down_at = now;
         }
@@ -208,7 +211,7 @@ function fakeServer() {
       for (const incoming of rows.listings) {
         const have = listings.find((r) => r.vin === incoming.vin && r.posted_at === incoming.posted_at);
         if (!have) {
-          listings.push({ id: `${incoming.vin}@${incoming.posted_at}`, ...incoming });
+          listings.push({ id: `${incoming.vin}@${incoming.posted_at}`, ...incoming, created_at: now });
           continue;
         }
         if (have.user_id !== userId || have.status !== 'listed') continue;
@@ -275,4 +278,86 @@ test('two machines starting from different registries converge after both sync, 
   sync(server, alexLaptop);
   assert.deepEqual(prices(alexLaptop), prices(alex));
   assert.equal(server.listings.filter((r) => r.status === 'taken_down').length, 1, 'a first sync from an empty machine takes nothing down');
+});
+
+// The take-down rule compares server stamps only. Two traced cases from the
+// review, both the same salesperson signed in on a showroom desktop and a
+// laptop: a post whose upload from the desktop is delayed past a laptop
+// sync, and a desktop clock six minutes slow. Under the old rule (the
+// client's posted_at against since) the laptop's next sync marked the post
+// taken down, the desktop could never relist it, and its merge dropped the
+// entry from the registry that owned it.
+
+test('the same salesperson on two machines: a post uploaded late from one is not taken down by the other, which never received it', () => {
+  const server = fakeServer();
+  const desktop = machine(U1, {});
+  const laptop = machine(U1, {});
+  sync(server, desktop);
+  sync(server, laptop);
+
+  // the desktop posts the Ram; its upload is delayed (offline, say) while the laptop syncs
+  desktop.posted = markPosted({}, car(VIN_A, '2019 Ram 1500', 28995), 'website', T(30), { salesperson: 'Alex' });
+  sync(server, laptop);
+  const laptopSince = laptop.since;
+
+  // the desktop's upload arrives: the Ram was posted before the laptop's last sync, which is what the old rule tripped on
+  sync(server, desktop);
+  const ram = server.listings.find((r) => r.vin === VIN_A);
+  assert.ok(Date.parse(ram.posted_at) < Date.parse(laptopSince), 'the post is older than the laptop\'s last sync');
+  assert.ok(Date.parse(ram.created_at) > Date.parse(laptopSince), 'but the server first saw it after that sync');
+
+  // the laptop syncs again without the Ram in its registry
+  sync(server, laptop);
+  assert.equal(ram.status, 'listed', 'the Ram stays listed');
+  assert.equal(laptop.posted[VIN_A].price, 28995, 'and the laptop receives it');
+  assert.equal(laptop.posted[VIN_A].userId, U1);
+
+  // from then on both machines carry it through every sync
+  sync(server, laptop);
+  sync(server, desktop);
+  assert.equal(ram.status, 'listed');
+  assert.deepEqual(prices(desktop), prices(laptop));
+
+  // a real take-down from the laptop still reaches the server and the desktop
+  laptop.posted = markTakenDown(laptop.posted, VIN_A);
+  sync(server, laptop);
+  assert.equal(ram.status, 'taken_down');
+  sync(server, desktop);
+  assert.equal(VIN_A in desktop.posted, false);
+});
+
+test('a clock six minutes slow on one machine: its post survives the other machine\'s sync', () => {
+  const server = fakeServer();
+  const desktop = machine(U1, {});
+  const laptop = machine(U1, {});
+  sync(server, desktop);
+  sync(server, laptop);
+
+  // the desktop's clock is six minutes behind: the Ram it posts now is stamped before the laptop's last sync
+  const slow = new Date(Date.parse(laptop.since) - 6 * 60 * 1000).toISOString();
+  desktop.posted = markPosted({}, car(VIN_A, '2019 Ram 1500', 28995), 'website', slow, { salesperson: 'Alex' });
+  sync(server, desktop);
+  const ram = server.listings.find((r) => r.vin === VIN_A);
+  assert.equal(ram.posted_at, slow);
+  assert.ok(Date.parse(ram.posted_at) < Date.parse(laptop.since), 'the post looks older than the laptop\'s last sync');
+
+  sync(server, laptop);
+  assert.equal(ram.status, 'listed', 'the server first saw the Ram after the laptop\'s last sync, whatever the desktop\'s clock said');
+  assert.equal(laptop.posted[VIN_A].postedAt, slow);
+  sync(server, desktop);
+  assert.equal(VIN_A in desktop.posted, true);
+  assert.equal(ram.status, 'listed');
+});
+
+test('a take-down right after the post\'s own sync counts at the very next sync (created_at is not after that sync\'s serverTime)', () => {
+  const server = fakeServer();
+  const desktop = machine(U1, {});
+  sync(server, desktop);
+  desktop.posted = markPosted({}, car(VIN_A, '2019 Ram 1500', 28995), 'website', T(30), { salesperson: 'Alex' });
+  sync(server, desktop);
+  const ram = server.listings.find((r) => r.vin === VIN_A);
+  assert.equal(ram.created_at, desktop.since);
+  desktop.posted = markTakenDown(desktop.posted, VIN_A);
+  sync(server, desktop);
+  assert.equal(ram.status, 'taken_down');
 });

@@ -252,6 +252,10 @@ create policy "members read their dealership's rewrite usage"
 -- insert into memberships. Rejoining an existing membership updates its role
 -- and name rather than failing. Returns what the extension needs to store:
 -- the dealership's id, name and website origin, and the role.
+-- The code is compared ignoring case and surrounding spaces on both sides:
+-- create_invite() stores upper-case codes and the extension sends upper
+-- case, but the first manager's code is typed by the owner in SQL
+-- (supabase/README.md) in whatever case they chose.
 -- Parameters are referenced as redeem_invite.code to avoid the PL/pgSQL
 -- name clash with the column of the same name.
 -- ---------------------------------------------------------------------------
@@ -269,9 +273,10 @@ begin
   if uid is null then
     raise exception 'not signed in' using errcode = '42501';
   end if;
+  -- both sides folded (changed in place: no project has applied this file yet)
   select * into inv
   from public.invites i
-  where i.code = upper(trim(redeem_invite.code))
+  where upper(trim(i.code)) = upper(trim(redeem_invite.code))
   for update;
   if not found then
     raise exception 'that invite code was not found' using errcode = 'P0002';

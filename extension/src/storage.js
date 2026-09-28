@@ -58,7 +58,7 @@ export async function updateKey(key, change, storage) {
 // which Lot Sync does not ask for); a set beyond it rejects with a message
 // naming the quota. This is what the popup, the panel and the worker show
 // instead of an unhandled rejection.
-export const STORAGE_FULL = "Couldn't save: Chrome's storage for Lot Sync is full. Clear pilot numbers or an old website in Settings.";
+export const STORAGE_FULL = "Couldn't save: Chrome's storage for Lot Sync is full. Clear pilot numbers, or open an old dealership website and click Clear everything for this website in Settings.";
 
 export function storageErrorText(e) {
   const msg = String((e && e.message) || e || '');

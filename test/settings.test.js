@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
-import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from '../extension/src/legalLinks.js';
+import { LEGAL, acceptLegal, legalIsCurrent, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
 test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () => {
@@ -150,7 +150,14 @@ test('the Terms and Privacy acceptance: blank by default, garbage becomes blank,
   assert.deepEqual(settingsFromProfile(older, { origin: HOME }).legal, blank);
 });
 
-test('while the legal addresses are placeholders, nothing gates on them and no acceptance is recorded', () => {
-  assert.equal(legalHosted(), false, 'lotsync.example is a placeholder: the Terms step stays informational');
-  assert.match(LEGAL.termsUrl, /\.example\//);
+test('a placeholder legal address is one nobody can read; the Terms step gates only once both documents are hosted', () => {
+  // the predicate, against sample addresses (the live constant changes when the site is up)
+  for (const url of ['https://lotsync.example/terms', 'https://www.lotsync.example/privacy/', 'https://LOTSYNC.EXAMPLE', 'https://example', '', null, 'not a url', 'http://lotsync.com/terms', 'ftp://lotsync.com/terms']) {
+    assert.equal(isPlaceholderUrl(url), true, `${url} is a placeholder`);
+  }
+  for (const url of ['https://lotsync.com/terms', 'https://www.lot-sync.co/privacy', 'https://example.com/terms', 'https://myexample.net/terms']) {
+    assert.equal(isPlaceholderUrl(url), false, `${url} could be hosted`);
+  }
+  // legalHosted is that predicate over the live addresses, whatever they are today
+  assert.equal(legalHosted(), !isPlaceholderUrl(LEGAL.termsUrl) && !isPlaceholderUrl(LEGAL.privacyUrl));
 });

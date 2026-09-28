@@ -15,14 +15,16 @@
 // the function adds on top of RLS:
 //   - a listing row of another user, or one already taken down, is never
 //     changed by an upload (a stale machine cannot relist a sold car);
-//   - the caller's listed rows that are missing from their registry and were
-//     posted before `since` are marked taken down (a machine that never
-//     synced, since null, takes nothing down);
+//   - the caller's listed rows that are missing from their registry, among
+//     those the server already held at `since` (created_at, the server's
+//     stamp; the client's posted_at is never compared with since), are
+//     marked taken down (a machine that never synced, since null, takes
+//     nothing down);
 //   - a to-do item is closed by an upload but never reopened.
 // The rows are built the way extension/src/sync.js toServerRows() builds
 // them; keep the two mappings the same.
 
-import { json, preflight, readJson, routeOf, isRecord, errorMessage } from '../_shared/http.ts';
+import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin } from '../_shared/http.ts';
 import { requireUser, membershipsOf, type Membership } from '../_shared/auth.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
@@ -111,7 +113,6 @@ const sameMoment = (a: unknown, b: unknown): boolean => {
   const y = ms(b);
   return x !== null && y !== null && Math.abs(x - y) < 1000;
 };
-const sameOrigin = (a: string, b: string): boolean => a.trim().replace(/\/+$/, '').toLowerCase() === b.trim().replace(/\/+$/, '').toLowerCase();
 function chunk<T>(list: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
@@ -282,7 +283,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const dealershipId = membership.dealership_id;
   const me = user.id;
   const since = isoOrNull(body.since);
-  const serverTime = new Date().toISOString();
   const pilot = isRecord(body.pilot) ? body.pilot : {};
   const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, attempts: 0, todoItems: 0, scans: 0 };
 
@@ -321,14 +321,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // 2. take-downs: the caller's listed rows the registry no longer has,
-    //    among those posted before the last sync (so a post made on another
-    //    machine a moment ago is not mistaken for a take-down)
+    //    among those the server already held at the caller's last sync
+    //    (created_at <= since: both stamps are the server's). The client's
+    //    posted_at is never compared with since: a post uploaded late from
+    //    another of the caller's machines, or stamped by a slow clock, looks
+    //    older than the last sync although the caller never received it,
+    //    and a row marked taken down is never relisted.
     if (since) {
-      const mine = rowsOf(await client.from('listings').select('id, vin, posted_at').eq('dealership_id', dealershipId).eq('user_id', me).eq('status', 'listed').lte('posted_at', since), 'could not read listings');
+      const mine = rowsOf(await client.from('listings').select('id, vin, posted_at').eq('dealership_id', dealershipId).eq('user_id', me).eq('status', 'listed').lte('created_at', since), 'could not read listings');
       const sent = new Set(incoming.map((r) => `${r.vin}@${ms(r.posted_at)}`));
       const gone = mine.filter((r) => !sent.has(`${vinOf(r.vin)}@${ms(r.posted_at)}`)).map((r) => String(r.id));
       if (gone.length) {
-        must(await client.from('listings').update({ status: 'taken_down', taken_down_at: serverTime }).in('id', gone), 'could not mark listings taken down');
+        must(await client.from('listings').update({ status: 'taken_down', taken_down_at: new Date().toISOString() }).in('id', gone), 'could not mark listings taken down');
         counts.takenDown = gone.length;
       }
     }
@@ -378,6 +382,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       must(await client.from('scan_summaries').upsert(scan, { onConflict: 'dealership_id,website_origin,taken_at', ignoreDuplicates: true }), 'could not record the scan');
       counts.scans = 1;
     }
+
+    // The next call's `since`: taken after the writes above, so a row this
+    // call inserted has created_at <= serverTime and the caller's own
+    // take-down of it counts at the very next sync, and before the reads
+    // below, so nothing the caller receives now was stamped after it.
+    const serverTime = new Date().toISOString();
 
     // 6. the dealership's current state: every listing that is up, the
     //    take-downs since the last sync (the last 90 days for a machine that

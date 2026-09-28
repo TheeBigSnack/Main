@@ -170,7 +170,7 @@ export function wizardHtml() {
         // The documents are not published yet: nobody is asked to accept what they cannot read.
         return `${progress}<h3>Terms and privacy</h3>
         ${summary}
-        <p class="hint" id="legalPending">The Terms of Service and the Privacy Policy are being finalised. You will be asked to accept them here when they are published; nothing is recorded until then.</p>
+        <p class="hint" id="legalPending">The Terms of Service and the Privacy Policy are being finalised. Once they are published you can read and accept them in Settings (Terms and privacy); nothing is recorded until then.</p>
         ${nav(true, wiz.busy ? 'Finishing…' : 'Finish set-up', 'wizFinish', wiz.busy)}${error}`;
       }
       return `${progress}<h3>Terms and privacy</h3>

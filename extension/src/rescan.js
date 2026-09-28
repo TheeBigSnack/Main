@@ -80,7 +80,9 @@ function whatGotReady(before, now) {
  * @param {object|null} prev  previous snapshot (null on the first scan)
  * @param {object} curr       this scan's snapshot
  * @param {object} options
- *   posted:  { [vin]: { price, postedAt, name } } cars the salesperson posted
+ *   posted:  { [vin]: { price, postedAt, name, mine? } } cars the salesperson posted;
+ *            an entry with `mine: false` is a colleague's (merged in by sync):
+ *            its car shows in the lists but is never "yours"
  *   confirm: { checked: [vin], notFound: [vin], error?: string } direct VIN lookups
  *   basis:   'website' | 'beforeFees' which price goes on Marketplace
  */
@@ -98,7 +100,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   };
   const prevVehicles = prev ? prev.vehicles : {};
   const currVehicles = curr.vehicles;
-  const yours = (vin) => Object.prototype.hasOwnProperty.call(posted, vin);
+  const yours = (vin) => Object.prototype.hasOwnProperty.call(posted, vin) && posted[vin]?.mine !== false;
 
   // 1. Cars that are no longer on the website
   const candidates = new Set([...Object.keys(prevVehicles), ...Object.keys(posted)]);

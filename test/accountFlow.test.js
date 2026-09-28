@@ -15,6 +15,7 @@ import { ACCOUNT, accountsConfigured } from '../extension/src/accountConfig.js';
 import { sessionFromTokenResponse, ACCOUNT_KEY } from '../extension/src/account.js';
 import { siteKeys, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
 import { markPosted } from '../extension/src/rescan.js';
+import { postsToday } from '../extension/src/cap.js';
 import { beginPost, endPost, noteFlags } from '../extension/src/pilot.js';
 import { toServerRows } from '../extension/src/sync.js';
 
@@ -345,9 +346,12 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   assert.deepEqual(Object.keys(merged).sort(), [VIN_A, VIN_C].sort(), 'the colleague\'s Honda arrived');
   assert.equal(merged[VIN_C].salesperson, 'Sam');
   assert.equal(merged[VIN_C].userId, U2);
+  assert.equal(merged[VIN_C].mine, false, 'a colleague\'s entry is marked as not this salesperson\'s');
   assert.equal(merged[VIN_C].listingUrl, 'https://www.facebook.com/marketplace/item/3/');
   assert.equal(merged[VIN_A].postedWith, 'lotsync', 'the local entry keeps what the server does not carry');
   assert.equal(merged[VIN_A].userId, U1, 'the server says whose it is');
+  assert.equal('mine' in merged[VIN_A], false, 'an own entry carries no flag');
+  assert.equal(postsToday(merged, new Date(T(2))), 1, 'the colleague\'s post does not count toward the cap');
   const flag = storage.data[K.pilot].flags[0];
   assert.equal(flag.doneAt, T(40), 'the flag closed on the colleague\'s machine is closed here');
   assert.equal(flag.how, 'detected');
@@ -417,6 +421,11 @@ test('syncOnce: two machines converge through the flows, and a take-down on one 
   assert.deepEqual(Object.keys(sam.data[K.posted]).sort(), [VIN_A, VIN_B, VIN_C].sort());
   assert.equal((await sync(alex)).ok, true);
   assert.deepEqual(prices(alex), prices(sam));
+  // the cap stays per salesperson: each machine counts only its own person's posts
+  assert.equal(postsToday(alex.data[K.posted], new Date(T(2))), 2);
+  assert.equal(postsToday(sam.data[K.posted], new Date(T(2))), 1);
+  assert.equal(sam.data[K.posted][VIN_A].mine, false);
+  assert.equal('mine' in alex.data[K.posted][VIN_A], false);
 
   // Alex takes the Ram down (the popup's "Taken down" removes the entry); Sam's machine drops it on its next sync
   delete alex.data[K.posted][VIN_A];

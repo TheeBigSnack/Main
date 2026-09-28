@@ -17,7 +17,9 @@
 // so an extension without accounts behaves as before.
 //
 // What a sync writes, all under the key's lock (src/storage.js): the merged
-// registry to posted:<origin>, closed flags to pilot:<origin>, and the state
+// registry to posted:<origin> (colleagues' entries marked `mine: false`, so
+// the cap and the rescan flags stay the salesperson's own), closed flags to
+// pilot:<origin>, and the state
 // for the next call (since, dealership, role) to sync:<origin>. The access
 // token is only ever read from the session in chrome.storage.local; it is
 // never copied into the settings or the synced profile.
@@ -244,7 +246,8 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
     return { ok: false, error: storageErrorText(e) };
   }
   const since = state && state.since ? state.since : null;
-  const body = syncPayload({ origin: o, posted, pilot, scan: summary, since, userId: (session.user && session.user.id) || '' });
+  const userId = (session.user && session.user.id) || '';
+  const body = syncPayload({ origin: o, posted, pilot, scan: summary, since, userId });
   let res;
   try {
     res = await postJson(fetchImpl, syncUrlFor(config), body, authHeaders(session, config.anonKey), timeoutMs);
@@ -263,7 +266,7 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
   let next;
   try {
     await updateKey(k.posted, (current) => {
-      const merged = mergeRegistry(current || {}, answer, { since });
+      const merged = mergeRegistry(current || {}, answer, { since, userId });
       return same(merged, current || {}) ? undefined : merged;
     }, storage);
     await updateKey(k.pilot, (current) => {

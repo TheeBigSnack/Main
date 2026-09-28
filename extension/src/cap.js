@@ -5,10 +5,14 @@ export const DEFAULT_DAILY_CAP = 10;
 
 const localDay = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 
+// A colleague's entry (merged in by sync, src/sync.js mergeRegistry, marked
+// `mine: false`) is not this salesperson's post: the cap is per salesperson.
+const own = (p) => Boolean(p) && p.mine !== false;
+
 export function postsToday(posted, now = new Date()) {
   const today = localDay(now);
   return Object.values(posted || {}).filter((p) => {
-    if (!p || !p.postedAt) return false;
+    if (!own(p) || !p.postedAt) return false;
     const d = new Date(p.postedAt);
     return !Number.isNaN(d.getTime()) && localDay(d) === today;
   }).length;

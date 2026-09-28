@@ -97,6 +97,15 @@ section:first-of-type { border-top: 0; }
 .steps h3 { margin-bottom: 4px; }
 .steps p { margin: 0; }
 
+/* See it: screenshots from the sandbox, one column so the popup's text stays readable */
+.shots { list-style: none; padding: 0; margin: 0; display: grid; gap: 28px; }
+.shots li { margin: 0; }
+.shots figure { margin: 0; }
+.shots img { display: block; width: 100%; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.shots figcaption { margin-top: 8px; color: var(--muted); font-size: 0.95rem; }
+.shots figcaption b { color: var(--text); }
+.shots .from { display: block; font-size: 0.85rem; }
+
 /* Feature cards */
 .cards { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin: 0; }

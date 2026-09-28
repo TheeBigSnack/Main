@@ -3,10 +3,17 @@
 // value or Meta-affiliation wording (the same rules as test/marketing.test.js
 // and test/anyDealer.test.js), and the support process, the launch checklist
 // and the next-platform memo carry what PLAN.md Milestone 6 asks for.
+// The second half holds the other documents to the code: the privacy texts,
+// PILOT.md, README, CHANGELOG and HANDOFF.md each went stale once on a rule
+// the code can state (the pilot pruning numbers, the storage-full message,
+// the Terms step, the settings shape, the wizard steps, the version).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
+import { PILOT_RETENTION_DAYS } from '../extension/src/pilot.js';
+import { STORAGE_FULL } from '../extension/src/storage.js';
+import { withDefaults, profileFrom } from '../extension/src/settings.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -137,4 +144,121 @@ test('next-platform.md names the four candidates from adapters/README.md, the cr
   assert.match(n, /chosen with a written reason and a named first dealer/, 'the PLAN.md M6 wording');
   assert.match(n, /\*\*Chosen platform:\*\* \[platform\]/);
   assert.match(n, /\*\*First dealer:\*\* \[dealer name/);
+});
+
+// ---------- the other documents against the code ----------
+
+const manifest = () => JSON.parse(read('../extension/manifest.json'));
+
+test('every text that describes the pilot numbers states the pruning rule with pilot.js\'s numbers', () => {
+  // MAX_ENTRIES is private to the module; the source is the one place it is spelled
+  const max = Number(read('../extension/src/pilot.js').match(/^const MAX_ENTRIES = (\d+)/m)[1]);
+  assert.ok(max > 0);
+  const entries = new RegExp(`\\b${max} entries\\b`);
+  const days = new RegExp(`\\b${PILOT_RETENTION_DAYS} days\\b`);
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/help.md', '../PILOT.md', '../HANDOFF.md', '../CHANGELOG.md']) {
+    const text = read(rel);
+    assert.match(text, entries, `${rel} does not state the ${max}-entry cap per list`);
+    assert.match(text, days, `${rel} does not state the ${PILOT_RETENTION_DAYS}-day window`);
+    assert.match(text, /open (to-do )?(items?|flags?)[^.]*(excepted|stays?)/i, `${rel} does not say open to-do items are kept`);
+  }
+  // the legal texts must not also claim the numbers stay until cleared
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md']) {
+    assert.doesNotMatch(read(rel), /usage numbers (stay|are kept) until/i, `${rel} says the usage numbers stay until cleared`);
+  }
+});
+
+test('help.md quotes the storage-full message as the code shows it, with the two ways out', () => {
+  const help = doc('help.md');
+  const section = help.slice(help.indexOf('## Where the data lives'), help.indexOf('## How to forget'));
+  assert.ok(section.includes(STORAGE_FULL), 'docs/help.md "Where the data lives" does not quote STORAGE_FULL (src/storage.js) word for word');
+  const advice = section.slice(section.indexOf(STORAGE_FULL));
+  assert.match(advice, /\*\*Clear pilot numbers\*\*/, 'the first way out: the Pilot tab');
+  assert.match(advice, /\*\*Clear everything for this website\*\*/, 'the second way out: Settings on the old website');
+  assert.match(advice, /no longer (post from|use)/, 'says it is an old website, not the current one');
+});
+
+test('help.md describes the Terms step and the Settings section in both states the code renders', () => {
+  const help = doc('help.md');
+  const wizard = read('../extension/wizard.js');
+  const popup = read('../extension/popup.js');
+  const tick = 'I have read and accept the Terms of Service and the Privacy Policy';
+  assert.ok(wizard.includes(tick) && popup.includes(tick), 'the tick label moved: update the help doc and this test together');
+  assert.ok(wizard.includes('being finalised') && popup.includes('being finalised'), 'the informational variant (legalHosted() false) moved');
+  const setup = help.slice(help.indexOf('## Set up'), help.indexOf('## Scan'));
+  const settings = help.slice(help.indexOf('## Settings'), help.indexOf('## When a field'));
+  for (const [name, text] of [['Set up', setup], ['Settings', settings]]) {
+    const terms = text.slice(text.indexOf('**Terms and privacy**'));
+    assert.ok(terms.length > 100, `docs/help.md "${name}" has no Terms and privacy entry`);
+    assert.match(terms, /being finalised/, `docs/help.md "${name}" does not describe the informational step`);
+    assert.match(terms, /published/, `docs/help.md "${name}" does not say when the links and the tick appear`);
+    assert.ok(terms.includes(tick), `docs/help.md "${name}" does not quote the tick`);
+  }
+});
+
+test('the synced-profile lists name the Terms acceptance the profile carries', () => {
+  assert.ok(Object.keys(profileFrom({})).includes('legal'), 'the profile no longer carries the acceptance: update the lists');
+  assert.ok(read('../extension/popup.js').includes('Terms acceptance'), 'the popup\'s own hint names it');
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/help.md']) {
+    const lists = read(rel).match(/\(name, role, dealership[^)]*\)/g) || [];
+    assert.ok(lists.length, `${rel} has no profile list`);
+    for (const l of lists) assert.match(l, /Terms acceptance/, `${rel} profile list lacks the Terms acceptance: ${l}`);
+  }
+});
+
+test('README.md carries the shipped version in its title and the queue controls as the popup labels them', () => {
+  const readme = read('../README.md');
+  const [major, minor] = manifest().version.split('.');
+  assert.match(readme, new RegExp(`^# Lot Sync \\(v${major}\\.${minor}\\)`), `README.md title is not v${major}.${minor}`);
+  const popup = read('../extension/popup.js');
+  assert.ok(popup.includes('Select the next ') && popup.includes('Post selected'), 'the queue labels moved: update README and help.md');
+  assert.doesNotMatch(readme, /Select all/, 'README.md names a control the popup does not have');
+  assert.match(readme, /\*\*Select the next N\*\*/);
+  assert.match(readme, /\*\*Post selected\*\*/);
+});
+
+test('the CHANGELOG entry for the shipped version names what support and the help doc send people to', () => {
+  const changelog = read('../CHANGELOG.md');
+  const start = changelog.indexOf('## ' + manifest().version);
+  assert.ok(start >= 0, `CHANGELOG.md has no ${manifest().version} section`);
+  const end = changelog.indexOf('\n## ', start + 1);
+  const section = changelog.slice(start, end > 0 ? end : undefined);
+  assert.match(section, /Copy problem report/, 'the button support.md asks for in every report');
+  assert.match(section, /storageKeys\.js/, 'the storage hardening');
+  assert.match(section, /STORAGE_FULL/, 'the storage-full message');
+});
+
+test('the files support.md and the launch checklist say hold the support address do hold it', () => {
+  for (const name of ['support.md', 'launch-checklist.md']) {
+    const lines = doc(name).split('\n').filter((l) => l.includes('support@lotsync.example'));
+    assert.ok(lines.length, `docs/${name} no longer names the placeholder inbox`);
+    for (const line of lines) {
+      const paths = [...line.matchAll(/`([\w./-]+\.(?:md|js))`/g)].map((m) => m[1]).filter((p) => p !== 'docs/' + name);
+      for (const p of paths) {
+        const url = new URL('../' + p, import.meta.url);
+        assert.ok(existsSync(url), `${p}, named in docs/${name}, does not exist`);
+        assert.match(readFileSync(url, 'utf8'), /support@|\[support email\]/, `docs/${name} says the support address lives in ${p}, which has no support address or bracket for one`);
+      }
+    }
+  }
+});
+
+test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 lists the wizard steps in order', () => {
+  const handoff = read('../HANDOFF.md');
+  const s51 = handoff.slice(handoff.indexOf('### 5.1'), handoff.indexOf('### 5.2'));
+  const line = s51.split('\n').find((l) => l.startsWith('- `settings:<origin>`'));
+  assert.ok(line, 'HANDOFF.md 5.1 documents settings:<origin>');
+  for (const key of Object.keys(withDefaults({}))) {
+    assert.ok(new RegExp(`[\\s{,]${key}[\\s:,\\[}]`).test(line), `HANDOFF.md 5.1 settings shape lacks "${key}"`);
+  }
+  // the profile is keyed on the website it was saved from, never the editable dealer name (CLAUDE.md)
+  const profile = s51.split('\n').find((l) => l.includes('chrome.storage.sync `profile`'));
+  assert.ok(profile, 'HANDOFF.md 5.1 documents the synced profile');
+  assert.doesNotMatch(profile, /dealer name matches/, 'the rule 0.4.0 removed');
+  assert.match(profile, /`origin`/);
+  assert.match(profile, /never the key/);
+  const steps = read('../extension/wizard.js').match(/^const STEPS = \[([^\]]+)\]/m)[1].split(',').map((s) => s.trim().replace(/^'|'$/g, ''));
+  const heading = handoff.match(/^### 5\.7 .*steps `([^`]+)`/m);
+  assert.ok(heading, 'HANDOFF.md 5.7 lists the steps');
+  assert.deepEqual(heading[1].split(',').map((s) => s.trim()), steps, 'HANDOFF.md 5.7 step list differs from wizard.js STEPS');
 });

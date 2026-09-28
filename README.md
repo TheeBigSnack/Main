@@ -1,4 +1,4 @@
-# Lot Sync (v0.4)
+# Lot Sync (v0.5)
 
 A Chrome extension for dealership salespeople. It reads your dealership website's used inventory, checks every car is really pre-owned, pre-fills a Facebook Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
@@ -42,7 +42,7 @@ Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
 ### Several cars at once (the queue)
 
-On **Ready to post**, tick the cars (or **Select all**) and click **Post N cars**; on **To do**, **Queue all ready arrivals** does the same for new arrivals. The side panel then takes them one at a time: it re-checks the car, writes the description and, when every check passes, opens and fills the Marketplace form straight away (a car with a warning stops at the review screen so you see it). You check the form and click **Publish**; the panel notices the listing, records it and loads the next car. Prefer drafts? Click Facebook's **Save draft** instead, then **Saved as draft, next car** in the panel; the car shows as "Draft on Facebook" on the Ready tab until you publish it there and mark it posted. **Skip**, **Pause** and **Stop** are always in the panel's queue bar, the queue survives closing the panel, and it can't be longer than the day's remaining cap: "Select the next N" ticks the first N cars from the top, and at the cap the tick boxes and Post buttons go away until tomorrow.
+On **Ready to post**, tick the cars (or **Select the next N**, which ticks the first N from the top) and click **Post N cars** (the button reads **Post selected** until you tick); on **To do**, **Queue all ready arrivals** does the same for new arrivals. The side panel then takes them one at a time: it re-checks the car, writes the description and, when every check passes, opens and fills the Marketplace form straight away (a car with a warning stops at the review screen so you see it). You check the form and click **Publish**; the panel notices the listing, records it and loads the next car. Prefer drafts? Click Facebook's **Save draft** instead, then **Saved as draft, next car** in the panel; the car shows as "Draft on Facebook" on the Ready tab until you publish it there and mark it posted. **Skip**, **Pause** and **Stop** are always in the panel's queue bar, the queue survives closing the panel, and it can't be longer than the day's remaining cap (N in **Select the next N** is what is left today); at the cap the tick boxes and Post buttons go away until tomorrow.
 
 Facebook sometimes opens the create-listing page with a saved draft or an unfinished listing already in it (another car). Lot Sync notices, replaces every field it manages, reads each one back and reports what the form actually shows, and puts a red warning in the panel so you remove that car's photos or discard the draft before publishing.
 
@@ -101,10 +101,11 @@ A demo or loaner flag always means "sold as new". A Carfax report counts as a su
 ## For development
 
 ```
-npm test              # 269 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 291 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep
+npm run screenshots   # the landing page's product images, taken from the sandbox with sample data (site/screenshots/)
 ```
 
 Never run tests against the real facebook.com. The post, queue and upkeep e2es use `test/e2e/mock-marketplace.mjs`, a stand-in form (and listing and edit pages) with the same field names, and the test itself clicks Publish, Update and Mark as sold in place of the salesperson.

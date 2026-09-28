@@ -51,6 +51,13 @@ comment on table public.memberships is 'Who belongs to which dealership and as w
 -- salesperson, updatedAt } becomes one row; a car posted again later is a
 -- second row (the unique key includes posted_at). status and taken_down_at
 -- move together: a take-down sets both.
+-- posted_at is the time the salesperson's browser recorded the post (that
+-- machine's clock); created_at is when this database first saw the row (the
+-- server's clock). The sync function's take-down rule compares created_at
+-- with the caller's last sync time and never posted_at, so a slow clock, or
+-- a post uploaded late from another of the salesperson's machines, cannot
+-- look like a take-down. (created_at was added here in place rather than in
+-- a later migration: no project has applied these files yet.)
 -- user_id is the poster's auth.users id, kept without a foreign key so the
 -- dealership's record survives that account being deleted.
 -- ---------------------------------------------------------------------------
@@ -62,6 +69,7 @@ create table public.listings (
   name text,
   price integer,
   posted_at timestamptz not null,
+  created_at timestamptz not null default now(),
   listing_url text,
   salesperson text,
   updated_at timestamptz,
@@ -175,4 +183,9 @@ create table public.invites (
   used_at timestamptz
 );
 create index invites_dealership_idx on public.invites (dealership_id);
+-- redeem_invite() matches a code ignoring case and surrounding spaces (the
+-- first manager's code is typed by the owner in SQL, in any case), so two
+-- codes may not differ only in those; the index also serves that lookup.
+-- (Added in place: no project has applied this file yet.)
+create unique index invites_code_folded_idx on public.invites (upper(trim(code)));
 comment on table public.invites is 'Single-use invite codes. Read only inside redeem_invite(); the API never lists them.';

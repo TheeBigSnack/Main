@@ -25,7 +25,7 @@
 // with --no-verify-jwt): Stripe's webhook carries no Supabase token, and
 // the function checks the caller's token itself on the other three routes.
 
-import { json, preflight, readJson, routeOf, isRecord, errorMessage } from '../_shared/http.ts';
+import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin } from '../_shared/http.ts';
 import { requireUser, membershipsOf, serviceClient, env, type Membership, type Dealership } from '../_shared/auth.ts';
 import {
   PRICING, HANDLED_EVENTS,
@@ -160,7 +160,6 @@ async function ensureCustomer(service: SupabaseClient, dealership: Dealership, r
 
 // ---------- who and which dealership ----------
 
-const sameOrigin = (a: string, b: string): boolean => a.trim().replace(/\/+$/, '').toLowerCase() === b.trim().replace(/\/+$/, '').toLowerCase();
 
 // The membership the request is about: by dealership id, by the dealer
 // website's origin, else the first one (a person in one dealership needs

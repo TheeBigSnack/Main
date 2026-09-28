@@ -59,6 +59,8 @@ English (United States).
 
 Five, 1280 x 800 pixels, PNG or JPEG. The end-to-end flows write reference screenshots to `test/e2e/screenshots/` (`npm run test:e2e`; the folder is not in git). They show what each store screenshot must show, but they are taken at the popup's and the side panel's own sizes against the mock dealer site and the mock Marketplace form, with the pilot fixtures as data, so they are not the store images. The owner takes the real ones at 1280 x 800 on a real dealership website with a real listing, with that dealership's OK, and blurs anything personal: the salesperson's name and Facebook profile, the listing address, and any customer detail on the page. No Meta logo or brand colour beyond what the page itself shows.
 
+Until then, `npm run screenshots` draws five draft images at 1280 x 800 from the in-browser sandbox (`demo/`) with its sample data into `site/screenshots/`, one per row of the table below, and the landing page shows them as what the sandbox looks like. The owner replaces them with the real ones per the table before submission; the drafts never go to the store.
+
 | # | Shows | Reference from the e2e flows | Caption |
 |---|---|---|---|
 | 1 | The popup's Ready to post tab after a scan: pre-owned cars at the store with a Post button each, the counts on the tabs | `post-1-ready-post.png` (post flow) | Scan your website. Only pre-owned cars at your store are ready to post. |

@@ -702,7 +702,7 @@ function viewSettings() {
     </fieldset>
     <fieldset><legend>Terms and privacy</legend>
       ${!legalHosted()
-        ? `<p class="hint" id="legalStatus">The Terms of Service and the Privacy Policy are being finalised. You will be asked to accept them here when they are published.</p>`
+        ? `<p class="hint" id="legalStatus">The Terms of Service and the Privacy Policy are being finalised. You can read and accept them here once they are published.</p>`
         : `<p class="hint" id="legalLinks"><a href="${esc(LEGAL.termsUrl)}" target="_blank" rel="noopener">Terms of Service</a> · <a href="${esc(LEGAL.privacyUrl)}" target="_blank" rel="noopener">Privacy Policy</a></p>
       ${legalIsCurrent(s.legal)
         ? `<p class="hint" id="legalStatus">Accepted ${esc(dateOnly(s.legal.acceptedAt))} (version ${esc(s.legal.version)}).</p>`
@@ -919,9 +919,8 @@ async function onPanelClick(ev) {
       state.rescanPermission = granted;
       if (granted) {
         state.settings = withDefaults({ ...(state.settings || {}), autoRescan: true }, state.snapshot?.site || { name: state.siteName });
-        await save('settings');
-        await setSiteAuto(true);
-        setStatus('Automatic rescans are on: every 3 hours while Chrome is open.');
+        if (!(await save('settings'))) break; // the status says why; the registry the worker reads is left as it was
+        if (await setSiteAuto(true)) setStatus('Automatic rescans are on: every 3 hours while Chrome is open.');
       } else {
         await setSiteAuto(false);
         setStatus('Not allowed, so automatic rescans stay off. Scan by hand any time.', 'error');
@@ -932,14 +931,16 @@ async function onPanelClick(ev) {
       await update('posted', (p) => markTakenDown(p || {}, vin));
       notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
       break;
+    // Two keys, two writes: stop at the first that fails (the status says
+    // why) so the item stays open and can be ticked again once there is room.
     case 'takenDown':
-      await update('posted', (p) => markTakenDown(p || {}, vin));
-      await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook']));
+      if (!(await update('posted', (p) => markTakenDown(p || {}, vin)))) break;
+      if (!(await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook'])))) break;
       notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
       break;
     case 'priceUpdated':
-      await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price)));
-      await update('diff', (d) => withoutVin(d, vin, ['priceUpdates']));
+      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
+      if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
       notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
       break;
     case 'pilotCsv': {
@@ -1193,7 +1194,7 @@ async function onSettingsSubmit(ev) {
     state.settings.autoRescan = false;
     message = 'Saved, but automatic rescans need one scan of this website first.';
   }
-  await save('settings');
+  if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
   await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');
   if (note) note.textContent = message;

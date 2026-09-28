@@ -1,5 +1,6 @@
-// HTTP helpers shared by the two Edge Functions: CORS for the extension's
-// origin, JSON answers, a bounded JSON body reader, the route name.
+// HTTP helpers shared by the Edge Functions: CORS for the extension's
+// origin, JSON answers, a bounded JSON body reader, the route name, and the
+// comparison that picks a caller's dealership by its website origin.
 
 // Chrome sends Origin: chrome-extension://<id> for the extension's own
 // requests. Those are always allowed; any other page origin (the manager
@@ -60,6 +61,16 @@ export async function readJson(req: Request, limit: number): Promise<JsonBody> {
 export function routeOf(req: Request): string {
   const parts = new URL(req.url).pathname.split('/').filter(Boolean);
   return parts.length ? parts[parts.length - 1] : '';
+}
+
+// The dealer website's origin the extension keys everything by
+// (posted:<origin>, settings:<origin>), compared without surrounding spaces,
+// trailing slashes or case, so a website_origin the owner typed with a
+// slash or a capital letter still matches. Both /sync and /rewrite pick
+// the caller's dealership with this, so they always agree on which one.
+export function sameOrigin(a: string, b: string): boolean {
+  const fold = (s: string): string => s.trim().replace(/\/+$/, '').toLowerCase();
+  return fold(a) === fold(b);
 }
 
 export const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);

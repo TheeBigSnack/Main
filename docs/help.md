@@ -41,7 +41,7 @@ Click the Lot Sync icon, then **Settings**. The first line reads "Lot Sync <vers
    - **The store's address**: read from the website. Check the dealership name, city, state and ZIP. Marketplace asks for a location, and the ZIP is what gets typed.
    - **Automatic rescans**: click **Allow automatic rescans** and Chrome asks for permission to read the website in the background. Or click **Skip for now**; the **Scan website** button still works by hand. The tick "Show a desktop notification when listings need attention" is yours to set.
    - **The posting rules**: read them and tick "I have read the posting rules and will follow them".
-   - **Terms and privacy**: read the Terms of Service and the Privacy Policy, tick "I have read and accept the Terms of Service and the Privacy Policy", then click **Finish set-up**. Lot Sync reads the website once more with your final settings.
+   - **Terms and privacy**: a short summary of what Lot Sync reads and keeps. While the Terms of Service and the Privacy Policy are being finalised (they are today) the step says so, shows no links or tick, and records nothing. Once they are published, the step shows links to both documents and the tick "I have read and accept the Terms of Service and the Privacy Policy", which you must tick before you can finish; Settings has the same tick. Click **Finish set-up**. Lot Sync reads the website once more with your final settings.
    - **Close**. The popup's **Ready to post** tab is where to go next.
 4. **Quit set-up** stops at any step. The popup then offers **Continue set-up**. **Not now** on the banner skips set-up altogether; **Settings** has the same fields.
 
@@ -124,6 +124,7 @@ It never records buyers, messages, the description text or anything from your Fa
 - **Download CSV** saves the spreadsheet to your Downloads folder; that is what your manager collects.
 - **Copy summary** copies a short text for the weekly check-in.
 - **Clear pilot numbers** needs two clicks (the button changes to "Click again to clear the pilot numbers").
+- The numbers also prune themselves each time one is recorded: each list (post attempts, form fills, to-do items) keeps its newest 500 entries and nothing older than 90 days. An open to-do item stays until it is closed. Download the CSV before then if your manager wants the full record.
 
 ## Settings
 
@@ -137,7 +138,7 @@ Click **Settings** at the top of the popup. Click **Save settings** at the botto
 - **Safety**: **Posts per day, per salesperson**. See the daily cap below.
 - **Automatic rescans**: the rescan tick, the desktop notification tick, and **Allow automatic rescans** when the permission has not been granted yet.
 - **Description writer (optional)**: off by default. See below.
-- **Terms and privacy**: links to the Terms of Service and the Privacy Policy, and when you accepted them.
+- **Terms and privacy**: today, a note that the Terms of Service and the Privacy Policy are being finalised and can be read and accepted here once they are published. From then on: links to both documents, the date and edition you accepted, and the tick "I have read and accept the Terms of Service and the Privacy Policy" until you have accepted the current edition.
 - **Saved data**: **Clear everything for this website** and **Forget my synced profile**. See "Where the data lives" below.
 
 Your profile follows you. Your name, role and listing defaults follow you to any dealership website. The dealership part (name, address, stores, price basis, price note and daily cap) belongs to that dealership's website and does not travel to another site. Both are kept in Chrome's synced storage under your own Google account, so they come back after clearing a website's data or reloading the extension.
@@ -215,7 +216,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 ## Where the data lives and how to clear it
 
-**In this browser, per website:** the last scan, the to-do list, your posted list, your settings for that website (including the rewrite service key, which stays on this computer), the queue, drafts, set-up progress, a post under way, and the pilot numbers. Each website's data is separate. Nothing is sent to a Lot Sync server today; a shared account for your manager is planned, not built.
+**In this browser, per website:** the last scan, the to-do list, your posted list, your settings for that website (including the rewrite service key, which stays on this computer), the queue, drafts, set-up progress, a post under way, and the pilot numbers (which prune themselves: each list keeps its newest 500 entries and nothing older than 90 days, open to-do items excepted). Each website's data is separate. Nothing is sent to a Lot Sync server today; a shared account for your manager is planned, not built.
 
 **In Chrome's synced storage, under your own Google account:** your profile (name, role, dealership, price basis, note, cap, listing defaults, Terms acceptance). It follows you to other computers where you are signed in to Chrome.
 
@@ -225,6 +226,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 - **Settings**, **Saved data**, **Clear everything for this website**. Click twice; the button changes to "Click again to clear everything". This removes everything above for this website, takes the website off the automatic rescan list and its count off the icon. The synced profile stays.
 - **Pilot**, **Clear pilot numbers** (two clicks) clears only the pilot numbers for this website.
+- "Couldn't save: Chrome's storage for Lot Sync is full. Clear pilot numbers, or open an old dealership website and click Clear everything for this website in Settings." Chrome gives Lot Sync 10 MB for every website together, and each website's scans, drafts and pilot numbers count toward it. First click **Clear pilot numbers** on the **Pilot** tab (download the CSV first if your manager still needs it). If that is not enough, open a dealership website you no longer post from, click the Lot Sync icon, then **Settings**, **Saved data**, **Clear everything for this website**. Then do again what you were doing when the message appeared.
 - Removing the extension at `chrome://extensions` removes what it kept on this computer.
 
 ## How to forget the synced profile
