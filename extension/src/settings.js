@@ -34,6 +34,7 @@ export function withDefaults(settings, site = {}) {
   const d = s.dealer || {};
   const rw = s.rewrite || {};
   const ld = s.defaults || {};
+  const lg = s.legal && typeof s.legal === 'object' ? s.legal : {};
   // '' means "leave blank on the form"; anything unknown falls back to the default
   const pickDefault = (value, allowed, fallback) => (value === '' ? '' : allowed.includes(value) ? value : fallback);
   return {
@@ -60,6 +61,8 @@ export function withDefaults(settings, site = {}) {
     autoRescan: Boolean(s.autoRescan),
     notify: s.notify !== false,
     rulesReadAt: typeof s.rulesReadAt === 'string' ? s.rulesReadAt : '',
+    // the edition of the Terms of Service and Privacy Policy the person accepted (src/legalLinks.js LEGAL.version) and when; '' until they do
+    legal: { version: typeof lg.version === 'string' ? lg.version : '', acceptedAt: typeof lg.acceptedAt === 'string' ? lg.acceptedAt : '' },
   };
 }
 
@@ -82,13 +85,14 @@ export function profileFrom(settings, origin = '') {
     dailyCap: s.dailyCap,
     defaults: s.defaults,
     rewrite: { enabled: s.rewrite.enabled, endpoint: s.rewrite.endpoint },
+    legal: s.legal, // the Terms acceptance is the person's, so it follows them
     savedAt: new Date().toISOString(),
   };
 }
 
 // Settings for a website that has none yet, taken from the saved profile.
-// The person's own fields (name, role, listing defaults, the rewrite service
-// address) follow them anywhere. The dealership's fields (name, address,
+// The person's own fields (name, role, listing defaults, the Terms acceptance,
+// the rewrite service address) follow them anywhere. The dealership's fields (name, address,
 // stores, price basis, price note, daily cap) belong to that dealership's
 // website: on another dealer's site they are dropped and the website fills
 // them. While the site is still unknown (before the first scan) the whole
@@ -99,7 +103,7 @@ export function settingsFromProfile(profile, site = {}) {
   // name. A profile saved before that was recorded (0.4.0) is kept whole, as
   // before, until it is saved again.
   const sameDealer = !profile.origin || !site.origin || profile.origin === site.origin;
-  const person = { salesperson: profile.salesperson, defaults: profile.defaults, rewrite: { ...(profile.rewrite || {}), key: '' } };
+  const person = { salesperson: profile.salesperson, defaults: profile.defaults, legal: profile.legal, rewrite: { ...(profile.rewrite || {}), key: '' } };
   return withDefaults(sameDealer ? { ...profile, ...person } : person, site);
 }
 

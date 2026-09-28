@@ -18,7 +18,7 @@ export async function fetchVehicleDetails(tabId, vin) {
   if (!adapter) return { ok: false, message: "This tab isn't a dealership inventory page Lot Sync can read. Open the used inventory page and click Post again." };
   let r;
   try {
-    r = await adapter.getDetails(searchViaTab(tabId, probe.service), wanted, { status: probe.service.visibleStatusValues || undefined });
+    r = await adapter.getDetails(searchViaTab(tabId, adapter, probe.service), wanted, adapter.scanOptions(probe.service));
   } catch (e) {
     return { ok: false, message: "Couldn't read the dealership website: " + ((e && e.message) || e) };
   }

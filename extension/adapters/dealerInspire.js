@@ -1,20 +1,30 @@
-// Dealer Inspire websites (the Cars Commerce inventory search behind them),
-// e.g. ronlewischryslerdodgejeepramwaynesburg.com. This is the adapter the
-// popup and the background rescan both use. It never touches the page
-// itself: it is given a `search(body)` function, which is either a direct
-// fetch to the search service (background rescans, with the host permission)
-// or a call made inside the dealer's tab (src/scan.js, no permission needed).
-//
-// Interface every adapter provides:
-//   detect(probe)              -> true if this adapter handles the probed page
-//   scan(search, options)      -> { ok, fetchedAt, total, complete, requests, records, confirm }
-//   normalize(record)          -> the flat vehicle (src/normalize.js)
-//   getDetails(search, vin)    -> one full record (every photo, description, features) or null
-//   makeDirectSearch(service)  -> a search(body) that talks to the service from the extension
+// Dealer Inspire websites: the Cars Commerce inventory search behind them
+// (window.SEARCH_SERVICE on the page; service host
+// websites-search.api.carscommerce.inc). This is the adapter the popup, the
+// wizard, the side panel's post-time re-check and the background rescan all
+// use. The contract every adapter implements is in README.md; in short:
+//   PLATFORM                         { id, name }
+//   probeInPage()                    runs IN the dealer tab: this platform's service details, or null
+//   searchInPage(service, body)      runs IN the dealer tab: one search, the way the page's own helper makes it
+//   detect(probe)                    does this adapter handle the probed page?
+//   origins(service)                 host-permission patterns background work needs
+//   scanOptions(service)             the options scan() and getDetails() need from the service
+//   scan(search, options)            { ok, fetchedAt, total, complete, requests, records, confirm }
+//   getDetails(search, vin, options) one full record (every photo, description, features) or null
+//   normalize(record)                the flat vehicle (src/vehicle.js VEHICLE_FIELDS; dealerInspireNormalize.js)
+//   makeDirectSearch(service)        a search(body) that calls the service from the extension
+//   photoOrigins(records)            where the photos are hosted (recorded, never requested)
+// The two *InPage functions are copied into the page by
+// chrome.scripting.executeScript, so they are self-contained (no imports,
+// nothing from outside the function body) and read-only. Everything else
+// never touches the page: it is given a search(body), which is either a
+// direct fetch to the service (background rescans, with the host permission)
+// or a call made inside the dealer's tab (src/scanRunner.js searchViaTab, no
+// permission needed).
 
-import { normalizeVehicle } from '../src/normalize.js';
+import { normalizeVehicle } from './dealerInspireNormalize.js';
 
-export const PLATFORM = Object.freeze({ id: 'dealerInspire', name: 'Dealer Inspire (Cars Commerce search)' });
+export const PLATFORM = Object.freeze({ id: 'dealerInspire', name: 'Dealer Inspire' });
 
 export const FIELDS = Object.freeze([
   'vin', 'stock', 'type', 'year', 'make', 'model', 'trim', 'mileage', 'vdp_url', 'status', 'in_transit',
@@ -26,9 +36,84 @@ export const FIELDS = Object.freeze([
 
 const DEFAULT_STATUS = ['publish', 'modified', 'pend-sale'];
 
+// ---------- in the dealer tab (self-contained, read-only) ----------
+
+// What a Dealer Inspire page carries: window.SEARCH_SERVICE with the search
+// address and the site's own public key, and (usually) the page's helper
+// that makes the request. Returns the service or null on any other page.
+export function probeInPage() {
+  const svc = window.SEARCH_SERVICE || null;
+  const helper = window.IDPSearchServiceHelper;
+  if (!svc || !svc.search || !svc.apiKey) return null;
+  let search = String(svc.search);
+  try { search = new URL(search, location.origin).href; } catch (e) { /* keep as is */ }
+  return {
+    search, // absolute address of the inventory search, e.g. https://websites-search.api.carscommerce.inc/api/v1/listings/<site id>
+    apiKey: svc.apiKey, // the website's own public key for that service
+    visibleStatusValues: Array.isArray(svc.visibleStatusValues) && svc.visibleStatusValues.length ? svc.visibleStatusValues : null,
+    hasHelper: Boolean(helper && typeof helper.getListings === 'function'),
+  };
+}
+
+// One search request, made the way the page's own helper makes it (the
+// helper when the page has one, else the same POST the helper would send).
+export async function searchInPage(service, body) {
+  try {
+    const helper = window.IDPSearchServiceHelper;
+    if (helper && typeof helper.getListings === 'function') {
+      const r = await helper.getListings(body);
+      return { ok: true, data: (r && r.data) || r || {} };
+    }
+    const res = await fetch(String(service.search).replace(/\/+$/, '') + '/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': service.apiKey },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { ok: false, error: 'inventory search returned ' + res.status };
+    const json = await res.json();
+    return { ok: true, data: (json && json.data) || json || {} };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+// ---------- in the extension ----------
+
 export function detect(probe) {
   const s = probe && probe.service;
   return Boolean(s && s.search && s.apiKey);
+}
+
+// The host-permission patterns the background rescan needs: the search
+// service's origin. (The pattern is built in two pieces so the guard tests'
+// comment stripper never meets a block-comment opener inside a string.)
+export function origins(service) {
+  try {
+    return [new URL(String(service && service.search)).origin + '/' + '*'];
+  } catch (e) {
+    return [];
+  }
+}
+
+// What scan() and getDetails() need from the service: the status values the
+// website itself shows (publish, modified, pend-sale on the sites seen so far).
+export function scanOptions(service) {
+  const v = service && service.visibleStatusValues;
+  return Array.isArray(v) && v.length ? { status: v.slice() } : {};
+}
+
+// The origins the photos are hosted on, from the records a scan returned.
+// Recorded on the site registry entry so the owner can decide about asking
+// for them; nothing here requests a permission.
+export function photoOrigins(records) {
+  const out = new Set();
+  for (const r of Array.isArray(records) ? records : []) {
+    const images = r && r.media && Array.isArray(r.media.images) ? r.media.images : [];
+    for (const u of images) {
+      try { out.add(new URL(u).origin); } catch (e) { /* not an absolute URL */ }
+    }
+  }
+  return [...out].sort();
 }
 
 // A search(body) that calls the service directly, the way the website's own
@@ -164,10 +249,10 @@ export const normalize = normalizeVehicle;
 
 export async function getDetails(search, vin, options = {}) {
   const wanted = String(vin || '').toUpperCase();
-  const res = await scan(search, { vins: [wanted], types: null, fullRecords: true, confirmVins: [], ...(options.status ? { status: options.status } : {}) });
+  const res = await scan(search, { vins: [wanted], types: null, fullRecords: true, confirmVins: [], ...(options && options.status ? { status: options.status } : {}) });
   if (!res.ok) return { ok: false, message: res.message };
   const record = res.records.find((r) => r.vin === wanted) || null;
   return { ok: true, record, fetchedAt: res.fetchedAt };
 }
 
-export default { PLATFORM, detect, scan, normalize, getDetails, makeDirectSearch };
+export default { PLATFORM, probeInPage, searchInPage, detect, origins, scanOptions, scan, getDetails, normalize, makeDirectSearch, photoOrigins };

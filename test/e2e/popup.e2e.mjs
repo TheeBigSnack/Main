@@ -115,6 +115,8 @@ try {
   await popup.screenshot({ path: join(shots, '5-rescan-todo.png'), fullPage: true });
 
   await popup.click('button[data-action="takenDown"]');
+  // the click writes to storage before it redraws: wait for the redraw rather than read the old count
+  await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count')?.textContent === '0');
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '0');
 

@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { capStatus, postsToday, DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { markPosted } from '../extension/src/rescan.js';
 import { FORM_MAP, DEV_OVERRIDE_KEYS, applyOverrides } from '../extension/facebook/formMap.js';
+import { ADAPTERS } from '../extension/adapters/index.js';
 import { snapshot, fixtures } from './helpers.js';
 
 const VIN = fixtures.usedNormal.vin;
@@ -126,7 +127,8 @@ function blockOpenerInsideString(src) {
 test('the guarded files contain no block-comment opener inside a string', () => {
   assert.equal(blockOpenerInsideString("const a = 'x'; /* fine */ const b = 1;"), 0);
   assert.equal(blockOpenerInsideString("const p = ORIGIN + '/*';"), 1);
-  for (const rel of ['../extension/facebook/fillForm.js', '../extension/sidepanel.js', '../extension/upkeep.js', '../extension/src/scanRunner.js', '../extension/src/scan.js']) {
+  const adapterFiles = readdirSync(new URL('../extension/adapters/', import.meta.url)).filter((f) => /\.js$/.test(f)).map((f) => '../extension/adapters/' + f);
+  for (const rel of ['../extension/facebook/fillForm.js', '../extension/sidepanel.js', '../extension/upkeep.js', '../extension/src/scanRunner.js', '../extension/src/scan.js', ...adapterFiles]) {
     const raw = readFileSync(new URL(rel, import.meta.url), 'utf8');
     const line = blockOpenerInsideString(raw);
     assert.equal(line, 0, `${rel} line ${line} has a /* inside a string, which would blind the comment stripper`);
@@ -146,16 +148,30 @@ test('the side panel reaches the Facebook tab only through the known fill functi
   assert.match(src, /a\.download = /);
 });
 
-test('the dealer-site scan reaches the dealer tab only through the read-only probe and search call', () => {
+test('the dealer-site scan reaches the dealer tab only through the neutral probe and each adapter\'s own read-only probe and search', () => {
   // the wizard, the popup and the post-time re-check all go through scanRunner.js
   const runner = read('../extension/src/scanRunner.js');
   const injections = (runner.match(/executeScript\(/g) || []).length;
-  const known = (runner.match(/func: (probeSiteInPage|searchInPage)\b/g) || []).length;
-  assert.ok(injections === 2 && injections === known, `scanRunner.js may inject only the probe and the search call (${injections} vs ${known})`);
+  const known = (runner.match(/func: (probeSiteInPage|adapter\.probeInPage|adapter\.searchInPage)\b/g) || []).length;
+  assert.ok(injections === 3 && injections === known, `scanRunner.js may inject only the neutral probe and the adapters' probe and search (${injections} vs ${known})`);
+  assert.ok(!/files:\s*\[|chrome\.debugger|tabs\.sendMessage/.test(runner), 'no other way into a page');
+  const READ_ONLY = /\.click\(|dispatchEvent|\.focus\(|\.value\s*=|\.submit\s*\(|requestSubmit|\.innerHTML\s*=|\.setAttribute\(/;
   const page = read('../extension/src/scan.js');
-  assert.ok(!/\.click\(|dispatchEvent|\.focus\(|\.value\s*=|\.submit\s*\(|requestSubmit/.test(page), 'scan.js must only read the page');
-  for (const rel of ['../extension/wizard.js', '../extension/popup.js', '../extension/src/vehicleDetails.js']) {
+  assert.ok(!READ_ONLY.test(page), 'scan.js must only read the page');
+  assert.ok(ADAPTERS.length >= 1);
+  for (const adapter of ADAPTERS) {
+    for (const name of ['probeInPage', 'searchInPage']) {
+      const src = stripComments(String(adapter[name]));
+      assert.ok(src.length > 50, `${adapter.PLATFORM.id}.${name} exists`);
+      assert.ok(!READ_ONLY.test(src), `${adapter.PLATFORM.id}.${name} must only read the page`);
+    }
+  }
+  for (const rel of ['../extension/wizard.js', '../extension/popup.js', '../extension/src/vehicleDetails.js', '../extension/adapters/index.js']) {
     assert.ok(!/executeScript\(/.test(read(rel)), `${rel} must not inject into pages itself`);
+  }
+  // no adapter file injects either: the runner is the only place that does
+  for (const file of readdirSync(new URL('../extension/adapters/', import.meta.url)).filter((f) => /\.js$/.test(f))) {
+    assert.ok(!/executeScript\(|permissions\.request/.test(read('../extension/adapters/' + file)), `adapters/${file} must not inject into pages or ask for permissions`);
   }
 });
 

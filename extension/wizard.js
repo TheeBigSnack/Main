@@ -1,8 +1,9 @@
 // The first-run wizard, shown in the side panel for a website that has no
 // settings yet: read the website, choose the store, name and role, the
-// store's address, permission for automatic rescans, the posting rules, and
-// a first scan with the final settings. Progress is kept in storage so the
-// panel can be closed and reopened.
+// store's address, permission for automatic rescans, the posting rules, the
+// Terms of Service and Privacy Policy, and a first scan with the final
+// settings. Progress is kept in storage so the panel can be closed and
+// reopened.
 
 import { performScan, rememberSite } from './src/scanRunner.js';
 import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
@@ -10,8 +11,9 @@ import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
+import { LEGAL, acceptLegal } from './src/legalLinks.js';
 
-const STEPS = ['welcome', 'scan', 'store', 'you', 'address', 'permission', 'rules', 'done'];
+const STEPS = ['welcome', 'scan', 'store', 'you', 'address', 'permission', 'rules', 'terms', 'done'];
 
 export const wiz = {
   active: false,
@@ -20,7 +22,7 @@ export const wiz = {
   scan: null, // { cars, stores, siteName }
   settings: null, // built up as the person goes
   service: null, site: null,
-  granted: false, rulesRead: false, busy: false, error: '',
+  granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '',
 };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -28,12 +30,12 @@ const key = (origin) => `wizard:${origin}`;
 
 async function persist() {
   if (!wiz.origin) return;
-  const { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead } = wiz;
-  await chrome.storage.local.set({ [key(origin)]: { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead } });
+  const { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead, termsAccepted } = wiz;
+  await chrome.storage.local.set({ [key(origin)]: { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead, termsAccepted } });
 }
 
 export async function startWizard(req) {
-  Object.assign(wiz, { active: true, origin: req.origin, dealerTabId: req.dealerTabId, windowId: req.windowId || null, step: 'welcome', scan: null, settings: null, service: null, site: null, granted: false, rulesRead: false, busy: false, error: '' });
+  Object.assign(wiz, { active: true, origin: req.origin, dealerTabId: req.dealerTabId, windowId: req.windowId || null, step: 'welcome', scan: null, settings: null, service: null, site: null, granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '' });
   const saved = (await chrome.storage.local.get(key(req.origin)))[key(req.origin)];
   if (saved && saved.active && saved.step !== 'done') Object.assign(wiz, saved, { dealerTabId: req.dealerTabId || saved.dealerTabId, busy: false, error: '' });
   await persist();
@@ -120,7 +122,7 @@ export function wizardHtml() {
   switch (wiz.step) {
     case 'welcome':
       return `${progress}<h3>Set up Lot Sync for this dealership</h3>
-        <p>In a few steps: read the website, pick your store, your name, the store's address, permission for automatic rescans, and the posting rules. About two minutes.</p>
+        <p>In a few steps: read the website, pick your store, your name, the store's address, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy. About two minutes.</p>
         <p class="hint">Keep the dealership's used inventory page open in this window while you do this.</p>
         ${nav(false, 'Start')}`;
     case 'scan':
@@ -160,7 +162,13 @@ export function wizardHtml() {
       return `${progress}<h3>The posting rules</h3>
         <ol class="rules">${POSTING_RULES.map((r) => `<li><b>${esc(r.title)}</b> ${esc(r.text)}</li>`).join('')}</ol>
         <label class="block"><input type="checkbox" id="wizRulesRead" ${wiz.rulesRead ? 'checked' : ''} /> I have read the posting rules and will follow them</label>
-        ${nav(true, wiz.busy ? 'Finishing…' : 'Finish set-up', 'wizFinish', !wiz.rulesRead || wiz.busy)}${error}`;
+        ${nav(true, 'Next', 'wizNext', !wiz.rulesRead)}`;
+    case 'terms':
+      return `${progress}<h3>Terms and privacy</h3>
+        <p>Two documents to read before you post: the <a href="${esc(LEGAL.termsUrl)}" target="_blank" rel="noopener">Terms of Service</a> and the <a href="${esc(LEGAL.privacyUrl)}" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+        <p>In short: Lot Sync reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login. You publish every post yourself. Lot Sync is not affiliated with Meta Platforms, Inc.</p>
+        <label class="block"><input type="checkbox" id="wizTermsRead" ${wiz.termsAccepted ? 'checked' : ''} /> I have read and accept the Terms of Service and the Privacy Policy</label>
+        ${nav(true, wiz.busy ? 'Finishing…' : 'Finish set-up', 'wizFinish', !wiz.termsAccepted || wiz.busy)}${error}`;
     case 'done':
       return `${progress}<div class="banner good"><b>Set up.</b> ${wiz.scan ? `${wiz.scan.ready} car${wiz.scan.ready === 1 ? ' is' : 's are'} ready to post.` : ''} Click the Lot Sync icon and open <b>Ready to post</b>.${wiz.granted ? ' Automatic rescans are on; the icon shows your to-do count.' : ''}</div>
         <div class="actions"><button type="button" class="primary" id="wizClose">Close</button></div>`;
@@ -173,7 +181,7 @@ function readInputs() {
   // Before the first read there are no settings yet: the read computes the
   // defaults (store from the site name, address from the page), so don't
   // invent an empty settings object here.
-  if (!wiz.settings && !['store', 'you', 'address', 'permission', 'rules'].includes(wiz.step)) return;
+  if (!wiz.settings && !['store', 'you', 'address', 'permission', 'rules', 'terms'].includes(wiz.step)) return;
   const s = wiz.settings || withDefaults({}, wiz.site || {});
   const val = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : undefined; };
   const next = { ...s };
@@ -182,6 +190,7 @@ function readInputs() {
   if (wiz.step === 'address') next.dealer = { name: val('wizDealer') || s.dealer.name, city: val('wizCity') ?? s.dealer.city, state: (val('wizState') ?? s.dealer.state).toUpperCase(), zip: val('wizZip') ?? s.dealer.zip };
   if (wiz.step === 'permission') { const n = document.getElementById('wizNotify'); if (n) next.notify = n.checked; }
   if (wiz.step === 'rules') { const r = document.getElementById('wizRulesRead'); if (r) wiz.rulesRead = r.checked; }
+  if (wiz.step === 'terms') { const t = document.getElementById('wizTermsRead'); if (t) wiz.termsAccepted = t.checked; }
   wiz.settings = withDefaults(next, wiz.site || {});
 }
 
@@ -189,7 +198,8 @@ async function finish(ctx) {
   readInputs();
   wiz.busy = true;
   ctx.render();
-  const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: new Date().toISOString() }, wiz.site || {});
+  const now = new Date().toISOString();
+  const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: now, legal: acceptLegal(now) }, wiz.site || {});
   wiz.settings = settings;
   const k = (name) => `${name}:${wiz.origin}`;
   await chrome.storage.local.set({ [k('settings')]: settings });
@@ -259,8 +269,13 @@ export function handleWizardChange(target) {
   if (!wiz.active) return;
   if (target.id === 'wizRulesRead') {
     wiz.rulesRead = target.checked;
-    const btn = document.getElementById('wizFinish');
+    const btn = document.getElementById('wizNext');
     if (btn) btn.disabled = !wiz.rulesRead;
+  }
+  if (target.id === 'wizTermsRead') {
+    wiz.termsAccepted = target.checked;
+    const btn = document.getElementById('wizFinish');
+    if (btn) btn.disabled = !wiz.termsAccepted;
   }
   if (target.id === 'wizNotify' && wiz.settings) wiz.settings = { ...wiz.settings, notify: target.checked };
 }

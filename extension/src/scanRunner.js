@@ -1,24 +1,40 @@
 // Everything a scan needs after the records come back, shared by the popup's
-// Scan button and the background rescan: normalise, assess, snapshot, diff,
-// boilerplate. Plus the two ways to reach the inventory service from a tab.
+// Scan button, the wizard and the background rescan: normalise, assess,
+// snapshot, diff, boilerplate. Plus the two ways to reach the inventory
+// service from a tab, both through code the adapters own.
 
-import { detectAdapter } from '../adapters/index.js';
+import { ADAPTERS, detectAdapter, unsupportedSiteMessage } from '../adapters/index.js';
 import { assessVehicle } from './classify.js';
 import { makeSnapshot, diffScans } from './rescan.js';
 import { findBoilerplate } from './description.js';
 import { withDefaults, defaultSettings } from './settings.js';
-import { probeSiteInPage, searchInPage } from './scan.js';
+import { probeSiteInPage } from './scan.js';
 
+/**
+ * What the dealer tab says about itself and which platform it runs on: the
+ * neutral probe (src/scan.js) for the site, then each adapter's own in-page
+ * probe, in ADAPTERS order, until one returns its service.
+ * @returns {{ site, service, adapterId } | null}  service and adapterId are
+ *   null on a page no adapter recognises; null when the tab gave no answer.
+ */
 export async function probeTab(tabId) {
   const [inj] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: probeSiteInPage });
-  return (inj && inj.result) || null;
+  const site = (inj && inj.result) || null;
+  if (!site) return null;
+  for (const adapter of ADAPTERS) {
+    const [got] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: adapter.probeInPage });
+    const service = (got && got.result) || null;
+    if (service) return { site, service, adapterId: adapter.PLATFORM.id };
+  }
+  return { site, service: null, adapterId: null };
 }
 
-// A search(body) that asks the dealer's own tab to make the request (no host
-// permission needed; the page's helper does the work).
-export function searchViaTab(tabId, service) {
+// A search(body) that asks the dealer's own tab to make the request through
+// the adapter's in-page search (no host permission needed; the page's own
+// code does the work).
+export function searchViaTab(tabId, adapter, service) {
   return async (body) => {
-    const [inj] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: searchInPage, args: [service, body] });
+    const [inj] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: adapter.searchInPage, args: [service, body] });
     const r = inj && inj.result;
     if (!r || !r.ok) throw new Error((r && r.error) || 'no answer from the page');
     return r.data;
@@ -35,11 +51,11 @@ export function siteForSnapshot(site) {
 /**
  * @param {object} args
  *   adapter, search, site (from the probe, plus adapter id), settings,
- *   prevSnapshot, posted, status (the service's visible statuses, optional)
+ *   prevSnapshot, posted, options (adapter.scanOptions(service), optional)
  */
-export async function scanWithSearch({ adapter, search, site, settings, prevSnapshot = null, posted = {}, status = null }) {
+export async function scanWithSearch({ adapter, search, site, settings, prevSnapshot = null, posted = {}, options = null }) {
   const confirmVins = [...new Set([...Object.keys((prevSnapshot && prevSnapshot.vehicles) || {}), ...Object.keys(posted || {})])];
-  const res = await adapter.scan(search, { confirmVins, ...(status ? { status } : {}) });
+  const res = await adapter.scan(search, { ...(options || {}), confirmVins });
   if (!res.ok) return { ok: false, message: res.message, res };
   const vehicles = res.records.map(adapter.normalize).filter(Boolean);
   const assessments = vehicles.map((v) => assessVehicle(v, settings));
@@ -50,10 +66,12 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   diff.requests = res.requests;
   // Text that repeats across the lot (disclaimers, legal lines) is kept so the description writer can strip it.
   const boilerplate = [...findBoilerplate(vehicles.map((v) => v.descriptionRaw))];
-  return { ok: true, res, vehicles, assessments, snapshot, diff, boilerplate };
+  // Where this lot's photos are hosted: recorded, never requested (a permission change is the owner's call).
+  const photoOrigins = typeof adapter.photoOrigins === 'function' ? adapter.photoOrigins(res.records) : [];
+  return { ok: true, res, vehicles, assessments, snapshot, diff, boilerplate, photoOrigins };
 }
 
-export const UNSUPPORTED_MESSAGE = "This page doesn't have the inventory search this tool reads (Dealer Inspire's search service). Open your dealership's website and try again.";
+export const UNSUPPORTED_MESSAGE = unsupportedSiteMessage();
 
 /**
  * A full scan from a dealer tab: probe, detect the adapter, read the lot,
@@ -67,9 +85,10 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   const adapter = probe && detectAdapter(probe);
   if (!adapter) return { ok: false, message: UNSUPPORTED_MESSAGE };
   const site = { ...probe.site, adapter: adapter.PLATFORM.id };
-  const search = searchViaTab(tabId, probe.service);
+  const service = probe.service;
+  const search = searchViaTab(tabId, adapter, service);
   let s = settings ? withDefaults(settings, site) : null;
-  const out = await scanWithSearch({ adapter, search, site, settings: s || withDefaults({}, site), prevSnapshot: snapshot, posted, status: probe.service.visibleStatusValues });
+  const out = await scanWithSearch({ adapter, search, site, settings: s || withDefaults({}, site), prevSnapshot: snapshot, posted, options: adapter.scanOptions(service) });
   if (!out.ok) return { ok: false, message: out.message || "Couldn't read this page." };
   let result = out;
   if (!s || settingsFromProfile) {
@@ -91,12 +110,15 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
     if (!out.res.complete) diff.warnings.unshift(out.diff.warnings[0]);
     result = { ...out, snapshot: snap, diff };
   }
-  await rememberSite(origin, { name: site.name, adapter: adapter.PLATFORM.id, service: probe.service, site: out.snapshot.site, lastScan: result.res.fetchedAt, lastError: null, auto: Boolean(s.autoRescan) });
-  return { ok: true, settings: s, site, service: probe.service, adapterId: adapter.PLATFORM.id, snapshot: result.snapshot, diff: result.diff, boilerplate: result.boilerplate, vehicles: result.vehicles, res: result.res };
+  await rememberSite(origin, { name: site.name, adapter: adapter.PLATFORM.id, service, site: out.snapshot.site, photoOrigins: out.photoOrigins, lastScan: result.res.fetchedAt, lastError: null, auto: Boolean(s.autoRescan) });
+  return { ok: true, settings: s, site, service, adapterId: adapter.PLATFORM.id, snapshot: result.snapshot, diff: result.diff, boilerplate: result.boilerplate, vehicles: result.vehicles, res: result.res, photoOrigins: out.photoOrigins };
 }
 
 // Sites the extension knows, for background rescans:
-// { [origin]: { name, adapter, service, site, auto, lastScan, lastError, lastNotifiedCount } }
+// { [origin]: { name, adapter, service, site, photoOrigins, auto, lastScan, lastError, lastNotifiedCount } }
+// `service` is the adapter's own data, stored as its probe returned it and
+// read only through that adapter (origins, scanOptions, makeDirectSearch).
+// `photoOrigins` are the hosts the lot's photos come from: recorded only.
 export const SITES_KEY = 'sites';
 
 export async function rememberSite(origin, info) {

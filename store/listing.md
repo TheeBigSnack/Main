@@ -1,0 +1,121 @@
+# Chrome Web Store listing: draft
+
+The text and the answers for the Developer Dashboard, kept here so they are reviewed like code. `test/manifest.test.js` checks that the summary below is the manifest's description word for word, that every permission in `extension/manifest.json` is justified here, and that nothing here promises what Lot Sync cannot promise. The submission itself is Milestone 5 (PLAN.md): unlisted first.
+
+Placeholders in [brackets] and the `lotsync.example` addresses are filled in when the website and the support inbox exist. The addresses are the same as in `extension/src/legalLinks.js`, which the set-up wizard and Settings link to; change both together.
+
+## Item name
+
+Lot Sync
+
+## Summary
+
+Up to 132 characters. It is the manifest's `description`, the one source; edit `extension/manifest.json` and paste it here (the test fails when they differ).
+
+Pre-fills Marketplace listings from your dealership's pre-owned inventory for you to publish, and flags sold cars and price changes.
+
+## Detailed description
+
+Lot Sync is for car dealership salespeople who list their store's used cars on Facebook Marketplace from their own accounts. It reads your dealership website's used inventory, checks that every car is really pre-owned, pre-fills a Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
+
+You click Publish. Lot Sync never does. It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. The one thing it does on its own, and only if you allow it, is re-read your dealership's website every 3 hours while Chrome is open to keep your to-do count current; it never touches Facebook then.
+
+What it does
+
+- Scans the dealership website's used inventory and shows the cars at your store that are pre-owned, priced and photographed as ready to post.
+- Pre-fills the Marketplace vehicle listing: year, make, model, mileage, price, body style, colors, fuel type, transmission, location, a description written from the website's own facts, and the car's photos. You check every field and click Publish yourself.
+- Writes the description from the website's data only, names the dealership and your role, and checks every number against the website before you see it.
+- Rescans the website, by hand or every 3 hours while Chrome is open, and shows which of your listings to take down (sold, or sale-pending), which to reprice, and what's new. A button opens the right listing with the new price ready for you to apply; you click Update, Mark as sold or Delete.
+- Keeps a daily post cap per salesperson that your dealership sets (10 by default). Meta doesn't publish its limits; this is a safety setting, not a guarantee.
+
+What it won't do
+
+- Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it and a test that fails if any appears.
+- Post new, demo or loaner cars, or anything the pre-owned check can't confirm.
+- Invent prices or price drops. The listed price is the website price, and price changes only mirror the website.
+- Make claims the website's data doesn't support, or hide that the car is at a dealership.
+- Ask for, read or store your Facebook password, cookies or tokens; use fake delays, proxies or spoofing; or run more than your one account.
+
+What it needs
+
+- Chrome 116 or newer.
+- A dealership website Lot Sync can read. Today that is Dealer Inspire websites that use the Cars Commerce inventory search; other platforms come later.
+- Your own Facebook account, signed in as usual. Lot Sync never sees the login.
+- A dealership that has signed up for Lot Sync, and your manager's go-ahead. Your dealership stands behind every listing: the price, the fees and the dealer identification are its responsibility under advertising law.
+
+Meta's Terms prohibit accessing its products "using automated means" without permission. Having a person click Publish is the most careful design available, but it is not a guarantee: we make no promise about how Meta treats any account or listing, and if Facebook ever warns you about your listings, stop and tell your manager. Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.
+
+Support: [support email]. Terms of Service and Privacy Policy: [links, same as below].
+
+## Category
+
+Productivity. Lot Sync is a work tool for people who sell cars: it prepares listings and keeps them accurate. Shopping is the other candidate because the listings end up on Marketplace, but that category is for extensions that help people buy (price comparison, coupons), and a reviewer landing there would expect one. If the dashboard asks for a subcategory, choose the one nearest to workflow tools.
+
+## Language
+
+English (United States).
+
+## Screenshots
+
+Five, 1280 x 800 pixels, PNG or JPEG. The end-to-end flows write reference screenshots to `test/e2e/screenshots/` (`npm run test:e2e`; the folder is not in git). They show what each store screenshot must show, but they are taken at the popup's and the side panel's own sizes against the mock dealer site and the mock Marketplace form, with the pilot fixtures as data, so they are not the store images. The owner takes the real ones at 1280 x 800 on a real dealership website with a real listing, with that dealership's OK, and blurs anything personal: the salesperson's name and Facebook profile, the listing address, and any customer detail on the page. No Meta logo or brand colour beyond what the page itself shows.
+
+| # | Shows | Reference from the e2e flows | Caption |
+|---|---|---|---|
+| 1 | The popup's Ready to post tab after a scan: pre-owned cars at the store with a Post button each, the counts on the tabs | `post-1-ready-post.png` (post flow) | Scan your website. Only pre-owned cars at your store are ready to post. |
+| 2 | The side panel's review screen: the car re-checked on the website, the description drafted from the website's facts, the fields it will fill, condition and title from the dealership's defaults | `post-2-review.png` (post flow) | Read the description, then open the Marketplace form. |
+| 3 | The Marketplace vehicle-listing form filled in, photos attached, Publish untouched | `post-4-mock-form.png` (post flow; the store image comes from a live run on the real form, with the account details blurred) | Every field filled in. You check it and click Publish. |
+| 4 | The popup's To do tab after a rescan: a sold car to take down, a price change with the website's price next to the listing price, a new arrival | `5-rescan-todo.png` (popup flow) or `upkeep-1-todo.png` (upkeep flow) | Rescans flag sold cars and price changes on your listings. |
+| 5 | The Pilot tab (to be renamed Numbers in Milestone 5): time per post, fields that could not be filled, hours until to-do items were fixed, the CSV button | `post-7-pilot.png` (post flow) or `upkeep-4-pilot.png` (upkeep flow) | The numbers your manager sees, kept in your browser. |
+
+## Promo tile
+
+Small promo tile, 440 x 280 (the dashboard says which sizes it takes at submission; the 1400 x 560 marquee is optional): the Lot Sync icon and name on a plain background with the one line "You click Publish. Lot Sync never does." No Facebook or Meta logo, wordmark, brand colour or screenshot in the tile (`legal/trademark-note.md`).
+
+## Single purpose
+
+Lot Sync helps a car dealership salesperson prepare Facebook Marketplace listings for the dealership's pre-owned vehicles from the dealership's own website inventory, and tells them when a listed car sold or changed price. The person publishes every listing.
+
+## Permission justifications
+
+From `extension/manifest.json`; this file follows the manifest, never the other way round. The longer answers are in `legal/chrome-web-store-privacy.md`; `test/manifest.test.js` checks every pattern is named in both.
+
+- Permissions: `activeTab`, `scripting`, `storage`, `sidePanel`, `alarms`, `notifications`
+- Host permissions: `https://www.facebook.com/marketplace/*`, `https://vehicle-images.carscommerce.inc/*`
+- Optional host permissions: `https://vpic.nhtsa.dot.gov/*`, `https://*/*`
+
+| Pattern | One line for the dashboard |
+|---|---|
+| `activeTab` | Reads the inventory search on the dealership website tab the person is looking at when they click Scan. |
+| `scripting` | Runs the read-only scan in that tab, and fills the Marketplace create-listing form the person opened when they click Post. |
+| `storage` | Scans, settings, the posted list and the usage numbers, per website, in the person's browser; the profile (name, role, dealership details, listing defaults, the Terms acceptance) in Chrome's sync storage under their own Google account, removable in Settings. |
+| `sidePanel` | The guided post flow and the set-up wizard run in the side panel so they stay open while the person moves between the dealership tab and the Marketplace tab. |
+| `alarms` | Re-reads a dealership website the person allowed every 3 hours while Chrome is open, to keep the to-do count on the icon current; it never touches Facebook. |
+| `notifications` | One desktop notification when a background rescan adds to the person's to-do list; off in Settings if they prefer. |
+| `https://www.facebook.com/marketplace/*` | Fills the vehicle listing form on the create-listing page the person opened, fills the new price on the edit page they opened, and notices when the tab shows the published listing's address. No other Facebook page is read. |
+| `https://vehicle-images.carscommerce.inc/*` | Downloads the car's own photos from the dealership's image host so they can be attached to the form. (PLAN.md: asking for the photo host at post time instead, and dropping this static host, needs the owner's OK before the submission.) |
+| `https://vpic.nhtsa.dot.gov/*` (optional) | Requested when the person clicks "Check with NHTSA": the free government VIN decode, compared with what the website says. |
+| `https://*/*` (optional) | Never requested as such: the set-up wizard requests only the chosen dealership's website origin and its inventory-service origin, for background rescans. |
+
+## Privacy practices
+
+The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, the data-use ticks, the Limited Use certifications and "no remote code". In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); authentication information, personal communications, location, web history, health, financial and user-activity tracking, no. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotsync.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
+
+## Support and homepage
+
+- Homepage: `https://lotsync.example/` [the landing page, Milestone 5]
+- Support: [support email], [support page URL]
+- Privacy Policy: `https://lotsync.example/privacy`
+- Terms of Service: `https://lotsync.example/terms`
+- Posting rules: `https://lotsync.example/posting-rules`
+
+The three document addresses must equal `LEGAL` in `extension/src/legalLinks.js`.
+
+## Before submitting
+
+- [ ] Attorney sign-off on `legal/terms-of-service.md`, `legal/privacy-policy.md`, `legal/posting-rules.md` and `legal/chrome-web-store-privacy.md`; the texts hosted at their real addresses; `extension/src/legalLinks.js` updated (the three addresses and `version`, which re-asks every salesperson to accept).
+- [ ] Real screenshots: five at 1280 x 800, taken by the owner on a real dealership website with a real listing, personal data blurred, per the table above.
+- [ ] The photo-host permission question in PLAN.md ("Needs the owner's OK"): decide whether `https://vehicle-images.carscommerce.inc/*` stays in the manifest or is requested at post time; change the manifest, `legal/chrome-web-store-privacy.md` and this file together.
+- [ ] `npm test` and `npm run test:e2e` green, then `npm run pack`: the zip in `dist/` is what the dashboard takes, and the version in `manifest.json`, `package.json` and `package-lock.json` is one and the same (tested).
+- [ ] Visibility: Unlisted for the pilot and the design partners; Public only after the review passes and the owner says so.
+- [ ] The summary above still equals the manifest description (tested), and the detailed description says who publishes, that Lot Sync is not affiliated with Meta Platforms, Inc., and nothing about what will happen to anyone's account.
+- [ ] Every [bracketed] placeholder filled in, and no Meta logo, wordmark or brand colour in the icon, the tile or the screenshots.

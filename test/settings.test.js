@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
+import { LEGAL, acceptLegal, legalIsCurrent } from '../extension/src/legalLinks.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
 test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () => {
@@ -116,4 +117,35 @@ test('first-run defaults: the store matching the site name; the price note is on
   assert.equal(s.dealer.city, 'Waynesburg');
   assert.equal(s.priceNote, '', 'a person decides what the price gap means');
   assert.match(suggestedPriceNote(feeGap(lot).gap, s.basis), /\$490 doc fee/);
+});
+
+test('the Terms and Privacy acceptance: blank by default, garbage becomes blank, and it follows the person to any website', () => {
+  const blank = { version: '', acceptedAt: '' };
+  assert.deepEqual(withDefaults({}).legal, blank);
+  assert.deepEqual(withDefaults({ legal: 'yes' }).legal, blank);
+  assert.deepEqual(withDefaults({ legal: 42 }).legal, blank);
+  assert.deepEqual(withDefaults({ legal: { version: 42, acceptedAt: null } }).legal, blank);
+  assert.deepEqual(withDefaults({ legal: { version: LEGAL.version, acceptedAt: ['x'] } }).legal, { version: LEGAL.version, acceptedAt: '' });
+  assert.equal(legalIsCurrent(blank), false);
+  // the placeholders and the edition
+  assert.ok(Object.isFrozen(LEGAL));
+  assert.match(LEGAL.version, /^\d{4}-\d{2}-\d{2}/);
+  for (const k of ['termsUrl', 'privacyUrl', 'rulesUrl']) assert.match(LEGAL[k], /^https:\/\//, `${k} is an https address`);
+  // what the wizard's Terms step and the Settings tick record
+  const accepted = acceptLegal('2026-09-28T12:00:00.000Z');
+  assert.deepEqual(accepted, { version: LEGAL.version, acceptedAt: '2026-09-28T12:00:00.000Z' });
+  assert.match(acceptLegal().acceptedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(legalIsCurrent(accepted), true);
+  assert.equal(legalIsCurrent({ version: 'older', acceptedAt: '2026-01-01T00:00:00.000Z' }), false, 'an older edition re-asks');
+  // the round trip through the synced profile: it is the person's, so it carries over to another dealership's website too
+  const s = withDefaults({ salesperson: { name: 'Roger' }, legal: accepted });
+  assert.deepEqual(s.legal, accepted);
+  const HOME = 'https://www.example-dealer.test';
+  const p = profileFrom(s, HOME);
+  assert.deepEqual(p.legal, accepted);
+  assert.deepEqual(settingsFromProfile(p, { origin: HOME, name: 'Home Dealer' }).legal, accepted);
+  assert.deepEqual(settingsFromProfile(p, { origin: 'https://www.some-other-dealer.test', name: 'Some Other Dealer' }).legal, accepted);
+  // a profile saved before the Terms step existed
+  const { legal, ...older } = p;
+  assert.deepEqual(settingsFromProfile(older, { origin: HOME }).legal, blank);
 });

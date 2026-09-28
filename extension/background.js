@@ -17,6 +17,17 @@ import { recordFlags } from './src/pilot.js';
 
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
+// The host a photo lives on, for the error text: the manifest names one
+// image host; a lot whose photos sit elsewhere fails here, and the site
+// registry's photoOrigins (recorded by the scan) says where they are.
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch (e) {
+    return String(url || '').slice(0, 60);
+  }
+}
+
 function toBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -28,10 +39,10 @@ function toBase64(buffer) {
 async function downloadPhoto(url, index) {
   try {
     const res = await fetch(url, { credentials: 'omit' });
-    if (!res.ok) return { url, ok: false, error: 'HTTP ' + res.status };
+    if (!res.ok) return { url, ok: false, error: `HTTP ${res.status} from ${hostOf(url)}` };
     const type = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
     const buffer = await res.arrayBuffer();
-    if (buffer.byteLength > MAX_PHOTO_BYTES) return { url, ok: false, error: 'too large' };
+    if (buffer.byteLength > MAX_PHOTO_BYTES) return { url, ok: false, error: `too large (${hostOf(url)})` };
     const ext = /png/i.test(type) ? 'png' : /webp/i.test(type) ? 'webp' : 'jpg';
     return {
       url,
@@ -42,7 +53,7 @@ async function downloadPhoto(url, index) {
       dataUrl: `data:${type};base64,${toBase64(buffer)}`,
     };
   } catch (e) {
-    return { url, ok: false, error: String((e && e.message) || e) };
+    return { url, ok: false, error: `${hostOf(url)}: ${String((e && e.message) || e)}` };
   }
 }
 
@@ -66,8 +77,9 @@ export async function updateBadge() {
   return count;
 }
 
-async function hasPermission(info) {
-  const origins = originsFor(info.site || { origin: info.origin }, info.service);
+// The service is the adapter's own data: only the adapter says which hosts it needs.
+async function hasPermission(info, adapter) {
+  const origins = originsFor(info.site || { origin: info.origin }, adapter.origins(info.service));
   if (!origins.length) return false;
   try {
     return await chrome.permissions.contains({ origins });
@@ -96,7 +108,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   if (!info || !info.service) return { ok: false, error: 'This website has not been scanned from the popup yet.' };
   const adapter = adapterById(info.adapter);
   if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`);
-  if (!(await hasPermission({ ...info, origin }))) return noteFailure(origin, info, NO_PERMISSION);
+  if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION);
   const k = keysFor(origin);
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff]);
   if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS);
@@ -105,7 +117,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   const now = new Date().toISOString();
   let out;
   try {
-    out = await scanWithSearch({ adapter, search: adapter.makeDirectSearch(info.service), site, settings, prevSnapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, status: info.service.visibleStatusValues || null });
+    out = await scanWithSearch({ adapter, search: adapter.makeDirectSearch(info.service), site, settings, prevSnapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, options: adapter.scanOptions(info.service) });
   } catch (e) {
     out = { ok: false, message: String((e && e.message) || e) };
   }
@@ -119,7 +131,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   // popup and upkeep trim as items are handled), not with the last rescan's count.
   const note = notificationFor(todoCountFor(data[k.diff]), count);
   const fresh = await loadSites();
-  fresh[origin] = { ...(fresh[origin] || info), lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count };
+  fresh[origin] = { ...(fresh[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count };
   await chrome.storage.local.set({ [SITES_KEY]: fresh });
   await updateBadge();
   if (note && settings.notify !== false && reason === 'alarm') {

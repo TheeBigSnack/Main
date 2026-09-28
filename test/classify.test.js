@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { websitePrice, conditionWordFromUrl, shortLocation, normalizeVehicle } from '../extension/src/normalize.js';
+import { shortLocation } from '../extension/src/normalize.js';
+import { websitePrice, conditionWordFromUrl, normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { assessVehicle, readCondition, titleConditionWords, DECISION } from '../extension/src/classify.js';
 import { fixtures, vehicle, raw, MY_STORE } from './helpers.js';
 

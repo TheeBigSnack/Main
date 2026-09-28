@@ -8,6 +8,7 @@ import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
+import { LEGAL, acceptLegal, legalIsCurrent } from './src/legalLinks.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -16,6 +17,7 @@ const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.r
 const signedMoney = (n) => (n < 0 ? '−' : '+') + money(Math.abs(n));
 const miles = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') + ' mi' : 'no mileage');
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+const dateOnly = (iso) => (iso ? new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 
 const state = {
   tab: null,
@@ -293,7 +295,7 @@ function setupBanner() {
   const active = state.wizardActive;
   const text = active
     ? '<b>Set-up is not finished.</b> Pick up where you left off in the side panel.'
-    : "<b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, automatic rescans and the posting rules.";
+    : "<b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, automatic rescans, the posting rules and the Terms of Service.";
   const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields">Not now</button>' : '';
   return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Sync'}</button>${later}</div></div>`;
 }
@@ -594,11 +596,18 @@ function viewSettings() {
       ${field('Service key', 'rewriteKey', s.rewrite.key, 'type="password" autocomplete="off"')}
       <p class="hint">Off by default: descriptions come from a built-in template. Either way every draft is checked against the website's facts, and you review it before posting.</p>
     </fieldset>
+    <fieldset><legend>Terms and privacy</legend>
+      <p class="hint" id="legalLinks"><a href="${esc(LEGAL.termsUrl)}" target="_blank" rel="noopener">Terms of Service</a> · <a href="${esc(LEGAL.privacyUrl)}" target="_blank" rel="noopener">Privacy Policy</a></p>
+      ${legalIsCurrent(s.legal)
+        ? `<p class="hint" id="legalStatus">Accepted ${esc(dateOnly(s.legal.acceptedAt))} (version ${esc(s.legal.version)}).</p>`
+        : `<p class="hint" id="legalStatus">${s.legal.acceptedAt ? `You accepted version ${esc(s.legal.version || 'unknown')} on ${esc(dateOnly(s.legal.acceptedAt))}; the current version is ${esc(LEGAL.version)}` : 'Not accepted yet'}: run Set up Lot Sync, or tick here.</p>
+      <label><input type="checkbox" name="legalAccept" /> <span>I have read and accept the Terms of Service and the Privacy Policy</span></label>`}
+    </fieldset>
     <div class="actions"><button type="submit" class="plain">Save settings</button><span class="hint" id="saved"></span></div>
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
       <p class="hint">Scans and your posted list are kept only in this browser, separately for each website.</p>
       <button type="button" class="danger" data-action="clear">Clear everything for this website</button>
-      <p class="hint">Your profile (name, role, dealership, price basis, note, cap, listing defaults) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
+      <p class="hint">Your profile (name, role, dealership, price basis, note, cap, listing defaults, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
       <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>
     </fieldset>
   </form>`;
@@ -764,7 +773,7 @@ async function onPanelClick(ev) {
     case 'unpost':
       state.posted = markTakenDown(state.posted, vin);
       await save('posted');
-      await notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' }));
+      notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
       break;
     case 'takenDown':
       state.posted = markTakenDown(state.posted, vin);
@@ -772,13 +781,13 @@ async function onPanelClick(ev) {
       dropFromDiff('priceUpdates');
       dropFromDiff('needsALook');
       await save('posted', 'diff');
-      await notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
+      notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
       break;
     case 'priceUpdated':
       state.posted = markPriceUpdated(state.posted, vin, Number(btn.dataset.price));
       dropFromDiff('priceUpdates');
       await save('posted', 'diff');
-      await notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
+      notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
       break;
     case 'pilotCsv': {
       // A file for the manager, saved by the browser like any download.
@@ -866,6 +875,7 @@ async function onSettingsSubmit(ev) {
       defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },
       autoRescan: form.get('autoRescan') === 'on',
       notify: form.get('notify') === 'on',
+      legal: form.get('legalAccept') === 'on' ? acceptLegal() : prev.legal, // the tick is the same acceptance the wizard's Terms step records
     },
     { name: state.siteName }
   );

@@ -1,5 +1,8 @@
 // The automatic rescan's small pure pieces: how often, what the badge says,
-// when to notify. The service worker (background.js) does the work.
+// when to notify, which hosts it needs. The service worker (background.js)
+// does the work.
+
+import { adapterById, adapterForService } from '../adapters/index.js';
 
 export const RESCAN_ALARM = 'lot-sync-rescan';
 export const RESCAN_PERIOD_MINUTES = 180; // every 3 hours while Chrome is open
@@ -46,12 +49,25 @@ export function latestOf(...isos) {
   return best;
 }
 
-// The host-permission patterns a site needs for background rescans: its own
-// origin (for the page probe) and its inventory service's origin.
-export function originsFor(site, service) {
+/**
+ * The host-permission patterns a site needs for background rescans: its own
+ * origin (for the page probe) plus what its adapter needs to reach the
+ * inventory service (adapter.origins(service)).
+ * @param site  { origin, adapter? }
+ * @param needs either the adapter's list (adapter.origins(service)) or, as
+ *   the wizard and the popup pass it, the site's stored service: then the
+ *   adapter named on the site (or the one that recognises the service) is
+ *   asked, so nothing here reads the service itself.
+ */
+export function originsFor(site, needs) {
   const out = new Set();
   const add = (u) => { try { out.add(new URL(u).origin + '/*'); } catch (e) { /* skip */ } };
   if (site && site.origin) add(site.origin);
-  if (service && service.search) add(service.search);
+  let list = needs;
+  if (list && !Array.isArray(list) && typeof list === 'object') {
+    const adapter = (site && site.adapter && adapterById(site.adapter)) || adapterForService(list);
+    list = adapter ? adapter.origins(list) : [];
+  }
+  for (const pattern of Array.isArray(list) ? list : []) add(pattern);
   return [...out];
 }

@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  Lot Sync manager view (Milestone 4): who posted what, sold cars still
+  listed and for how long, price changes not yet updated. Plain HTML, CSS and
+  ES modules; every path is relative, so the folder can be hosted as static
+  files or opened straight from disk.
+
+  Not set up yet? Open index.html?mock=1 (or click "Try with sample data") for
+  a made-up dealership. Chrome and Safari refuse to load ES modules from a
+  file:// address, so for the sample data on disk either open the file in
+  Firefox or run `node manager/serve.mjs` and open the address it prints.
+  The live data needs manager/config.js filled in (see the comment there).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lot Sync manager view</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="title">Lot Sync</div>
+      <div class="site" id="dealer">Manager view</div>
+    </div>
+    <div class="top-actions" id="actions"></div>
+  </header>
+  <div class="status" id="status" role="status"></div>
+  <main class="wrap" id="main">
+    <p class="empty">Loading…</p>
+    <noscript><p class="empty">This page needs JavaScript.</p></noscript>
+  </main>
+  <footer class="foot">Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places salespeople post.</footer>
+  <script type="module" src="manager.js"></script>
+</body>
+</html>
