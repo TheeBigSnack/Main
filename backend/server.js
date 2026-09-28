@@ -3,10 +3,12 @@
 // the same guardrails the extension uses, and returns it. The Anthropic API
 // key lives here, in backend/.env, never in the extension.
 //
-// Run:  npm install && npm start   (Node 20+). See backend/README.md.
+// Run:  npm ci && npm start   (Node 20+). See backend/README.md.
 //
-// Protection: an optional shared key the extension must send, a per-minute
-// rate limit per caller, and a monthly cost cap (tracked in usage.json).
+// Protection: it listens on 127.0.0.1 unless HOST says otherwise (any other
+// address requires REWRITE_KEY), an optional shared key the extension must
+// send, a per-minute rate limit per caller, and a monthly cost cap (tracked
+// in usage.json).
 
 import http from 'node:http';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -210,6 +212,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(config.port, () => {
-  console.log(`Lot Sync rewrite service on http://localhost:${config.port} (model ${config.model}, cap $${config.monthlyCapUsd}/month${config.key ? ', key required' : ', NO KEY: local use only'})`);
+// Loopback only unless HOST says otherwise. Any other address puts the service
+// on the network, so it must then have the shared key.
+const host = process.env.HOST || '127.0.0.1';
+if (host !== '127.0.0.1' && host !== 'localhost' && !config.key) {
+  console.error('REWRITE_KEY is required when HOST is not 127.0.0.1');
+  process.exit(1);
+}
+server.listen(config.port, host, () => {
+  console.log(`Lot Sync rewrite service on http://${host}:${config.port} (model ${config.model}, cap $${config.monthlyCapUsd}/month${config.key ? ', key required' : ', NO KEY: local use only'})`);
 });

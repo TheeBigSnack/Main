@@ -9,7 +9,9 @@
 //     change on the listing or the person ticked the item off.
 // No customer or buyer data, and nothing from Facebook beyond what the posted
 // registry already holds. Everything here is pure; updatePilot at the end is
-// the one storage helper the popup, the side panel and the worker share.
+// the one storage helper the popup, the side panel and the worker share, and
+// it holds a lock so those three never overwrite each other's writes. Times
+// are stored as ISO; only the CSV and the file name show them in local time.
 
 export const PILOT_VERSION = 1;
 export const pilotKey = (origin) => `pilot:${origin}`;
@@ -99,7 +101,7 @@ export function endPost(pilot, vin, outcome, { at = nowIso(), reason } = {}) {
 // need a click, which couldn't be filled, which the form changed afterwards.
 // Field keys only (formMap.js), so nothing about the car or the description
 // is kept here.
-export function noteFill(pilot, { vin, fill, at = nowIso(), mapVersion = '' }) {
+export function noteFill(pilot, { vin, fill, at = nowIso(), mapVersion = '', version = '' }) {
   const p = withPilotDefaults(pilot);
   const f = fill && typeof fill === 'object' ? fill : {};
   const keysOf = (list) => [...new Set((Array.isArray(list) ? list : []).map((x) => x && x.key).filter((k) => typeof k === 'string'))];
@@ -107,6 +109,7 @@ export function noteFill(pilot, { vin, fill, at = nowIso(), mapVersion = '' }) {
     at,
     vin: String(vin || '').toUpperCase(),
     mapVersion: clean(mapVersion, 40),
+    version: clean(version, 20), // the Lot Sync build that did the fill
     filled: keysOf(f.filled),
     partial: keysOf(f.partial),
     blocked: keysOf(f.blocked),
@@ -264,7 +267,42 @@ export function summarizePilot(pilot, { now = nowIso(), labels = {} } = {}) {
 
 const fmtSeconds = (s) => (typeof s === 'number' ? `${s} s` : '—');
 const fmtHours = (h) => (typeof h === 'number' ? `${h} h` : '—');
-const day = (iso) => (iso ? String(iso).slice(0, 10) : '');
+
+// Local time for the spreadsheet and the file name (storage keeps ISO). The
+// sv-SE locale is the one whose short style reads 2026-10-26 09:15.
+const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const formatters = new Map();
+function formatterFor(timeZone) {
+  let f = formatters.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'short' });
+    formatters.set(timeZone, f);
+  }
+  return f;
+}
+// The zone the export is written in: the caller's when Intl knows it, else
+// this computer's (a bad zone in Settings must not break the download).
+export function resolveTimeZone(timeZone) {
+  if (timeZone) {
+    try { formatterFor(timeZone); return timeZone; } catch { /* not a zone Intl knows */ }
+  }
+  return localTimeZone();
+}
+export function fmtLocal(iso, timeZone) {
+  if (!iso) return '';
+  const t = ms(iso);
+  return t === null ? String(iso) : formatterFor(resolveTimeZone(timeZone)).format(t);
+}
+
+// What each number means, in the words the manager reads; the CSV and the
+// text summary both carry them (PILOT.md says the same at more length).
+export const DEFINITIONS = Object.freeze([
+  'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
+  'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
+  'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Sync sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
+  'A price change\'s flag starts and ends the same way.',
+  'Hours run from the flagging scan, and rescans happen every 3 hours while Chrome is open.',
+]);
 
 // A plain-text summary for the clipboard (the weekly check-in).
 export function pilotText(summary, { site = '' } = {}) {
@@ -282,6 +320,7 @@ export function pilotText(summary, { site = '' } = {}) {
   for (const o of s.takeDowns.openItems) lines.push(`  open: ${o.name} (${fmtHours(o.hoursOpen)})`);
   lines.push(flagLine('Price changes', s.priceUpdates));
   for (const o of s.priceUpdates.openItems) lines.push(`  open: ${o.name} (${fmtHours(o.hoursOpen)})`);
+  lines.push('', ...DEFINITIONS);
   return lines.join('\n');
 }
 
@@ -291,14 +330,33 @@ const csvCell = (v) => {
 };
 const csvRow = (cells) => cells.map(csvCell).join(',');
 
-// The spreadsheet the manager gets: a summary, the per-field table, then every
-// post and every to-do item as a row. Field keys only; no descriptions, no
-// buyer data, nothing from Facebook beyond the listing outcome.
-export function pilotCsv(pilot, { now = nowIso(), labels = {}, site = '' } = {}) {
+// The spreadsheet the manager gets: who and where it is from, a summary that
+// adds up, the definitions, the per-field table, then every post and every
+// to-do item as a row, in the given time zone. Field keys only; no
+// descriptions, no buyer data, nothing from Facebook beyond the listing outcome.
+/**
+ * @param {object} pilot
+ * @param {object} options
+ *   now:         ISO time of the export (the age of open items counts from it)
+ *   labels:      { fieldKey: label } from formMap.js
+ *   site:        the website's name (the scan's site.name)
+ *   origin:      the website's origin, the key the numbers live under
+ *   dealer:      the dealership's name from Settings
+ *   salesperson: the salesperson's name from Settings
+ *   timeZone:    IANA zone for every time in the file; default: this computer's
+ */
+export function pilotCsv(pilot, { now = nowIso(), labels = {}, site = '', origin = '', dealer = '', salesperson = '', timeZone, version = '' } = {}) {
+  const zone = resolveTimeZone(timeZone);
+  const local = (iso) => fmtLocal(iso, zone);
   const p = withPilotDefaults(pilot);
   const s = summarizePilot(p, { now, labels });
   const rows = [];
-  rows.push(csvRow(['Lot Sync pilot numbers', site, `exported ${now}`]));
+  rows.push(csvRow(['Lot Sync pilot numbers', site, `exported ${local(now)}`]));
+  rows.push(csvRow(['Dealership', dealer]));
+  rows.push(csvRow(['Website', origin]));
+  rows.push(csvRow(['Salesperson (from Settings)', salesperson]));
+  rows.push(csvRow(['Time zone', zone]));
+  rows.push(csvRow(['Lot Sync version', version]));
   rows.push('');
   rows.push(csvRow(['Summary', 'Value']));
   rows.push(csvRow(['Posts started', s.posts.started]));
@@ -313,14 +371,19 @@ export function pilotCsv(pilot, { now = nowIso(), labels = {}, site = '' } = {})
   rows.push(csvRow(['Form fills', s.fills.attempts]));
   rows.push(csvRow(['Fills with nothing to fix by hand', s.fills.clean]));
   rows.push(csvRow(['Fills where the form already held another car', s.fills.withDraft]));
-  rows.push(csvRow(['Sold cars flagged', s.takeDowns.flagged]));
+  rows.push(csvRow(['Sold cars flagged', s.takeDowns.flagged])); // = taken down + still listed + cleared
   rows.push(csvRow(['Sold cars taken down', s.takeDowns.done]));
   rows.push(csvRow(['Sold cars still listed', s.takeDowns.open]));
-  rows.push(csvRow(['Median hours until taken down', s.takeDowns.medianHours]));
-  rows.push(csvRow(['Price changes flagged', s.priceUpdates.flagged]));
+  rows.push(csvRow(['Sold cars cleared by the website', s.takeDowns.cleared]));
+  rows.push(csvRow(['Median hours from the flagging scan until taken down', s.takeDowns.medianHours]));
+  rows.push(csvRow(['Price changes flagged', s.priceUpdates.flagged])); // = updated + still open + cleared
   rows.push(csvRow(['Price changes updated', s.priceUpdates.done]));
   rows.push(csvRow(['Price changes still open', s.priceUpdates.open]));
-  rows.push(csvRow(['Median hours until updated', s.priceUpdates.medianHours]));
+  rows.push(csvRow(['Price changes cleared by the website', s.priceUpdates.cleared]));
+  rows.push(csvRow(['Median hours from the flagging scan until updated', s.priceUpdates.medianHours]));
+  rows.push('');
+  rows.push(csvRow(['Definitions']));
+  for (const d of DEFINITIONS) rows.push(csvRow([d]));
   rows.push('');
   rows.push(csvRow(['Salesperson', 'Posted', 'Median seconds per post']));
   for (const sp of s.salespeople) rows.push(csvRow([sp.name, sp.posted, sp.medianSeconds]));
@@ -330,29 +393,44 @@ export function pilotCsv(pilot, { now = nowIso(), labels = {}, site = '' } = {})
   rows.push('');
   rows.push(csvRow(['Post started', 'Salesperson', 'Car', 'VIN', 'Outcome', 'Seconds', 'In a queue', 'Seconds to review', 'Seconds to form open', 'Seconds to filled', 'Reason']));
   for (const a of p.posts) {
-    rows.push(csvRow([a.startedAt, a.salesperson, a.name, a.vin, a.outcome || 'in progress', a.seconds, a.queue ? 'yes' : 'no', secondsBetween(a.startedAt, a.reviewedAt), secondsBetween(a.startedAt, a.formOpenedAt), secondsBetween(a.startedAt, a.filledAt), a.reason || '']));
+    rows.push(csvRow([local(a.startedAt), a.salesperson, a.name, a.vin, a.outcome || 'in progress', a.seconds, a.queue ? 'yes' : 'no', secondsBetween(a.startedAt, a.reviewedAt), secondsBetween(a.startedAt, a.formOpenedAt), secondsBetween(a.startedAt, a.filledAt), a.reason || '']));
   }
   rows.push('');
   rows.push(csvRow(['Flagged', 'Kind', 'Car', 'VIN', 'Done', 'How', 'Hours', 'Price from', 'Price to']));
   for (const f of p.flags) {
-    rows.push(csvRow([f.flaggedAt, f.kind === 'price' ? 'price change' : 'sold / take down', f.name, f.vin, f.doneAt || '', f.doneAt ? f.how : 'open', f.doneAt ? f.hours : hoursBetween(f.flaggedAt, now), f.from ?? '', f.to ?? '']));
+    rows.push(csvRow([local(f.flaggedAt), f.kind === 'price' ? 'price change' : 'sold / take down', f.name, f.vin, local(f.doneAt), f.doneAt ? f.how : 'open', f.doneAt ? f.hours : hoursBetween(f.flaggedAt, now), f.from ?? '', f.to ?? '']));
   }
   return rows.join('\r\n') + '\r\n';
 }
 
-export const pilotFileName = (now = nowIso()) => `lot-sync-pilot-${day(now)}.csv`;
+// lot-sync-pilot-<site>-<salesperson>-<local day>.csv, so one CSV per person
+// per website stays tellable apart on the owner's disk.
+const slug = (s) => String(s ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unnamed';
+export function pilotFileName(now = nowIso(), { site = '', salesperson = '', timeZone } = {}) {
+  return `lot-sync-pilot-${slug(site)}-${slug(salesperson)}-${fmtLocal(now, timeZone).slice(0, 10)}.csv`;
+}
 
 // ---------- storage ----------
 
 // Read, change, write: the popup, the side panel and the service worker all
-// use this. A failure here must never stop a post, so callers catch.
+// use this, sometimes at the same moment (a rescan lands while a post is being
+// recorded). chrome.storage has no transactions, so two callers that both read
+// before either writes lose one write; the get/change/set runs under a Web
+// Lock named after the key, which the three share since they share the
+// extension's origin. An injected storage may bring its own lock(name, fn)
+// (tests); without either the call runs unlocked. A failure here must never
+// stop a post, so callers catch.
 export async function updatePilot(origin, change, storage) {
   const area = storage || chrome.storage.local;
   const key = pilotKey(origin);
-  const data = await area.get(key);
-  const next = change(withPilotDefaults(data[key]));
-  await area.set({ [key]: next });
-  return next;
+  const run = async () => {
+    const data = await area.get(key);
+    const next = change(withPilotDefaults(data[key]));
+    await area.set({ [key]: next });
+    return next;
+  };
+  if (typeof area.lock === 'function') return area.lock(key, run);
+  return globalThis.navigator && navigator.locks ? navigator.locks.request(key, run) : run();
 }
 
 export const recordFlags = (origin, diff, at, storage) => updatePilot(origin, (p) => noteFlags(p, diff, { at }), storage);

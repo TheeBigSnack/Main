@@ -9,7 +9,7 @@
 //
 // This file never clicks anything on the Facebook page.
 
-import { markPosted } from './src/rescan.js';
+import { markPosted, basisPrice } from './src/rescan.js';
 import { fetchVehicleDetails, recheck } from './src/vehicleDetails.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails } from './src/rewriteTemplate.js';
@@ -20,7 +20,7 @@ import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, descri
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
-import { FORM_MAP } from './facebook/formMap.js';
+import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
@@ -31,6 +31,12 @@ const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.r
 const miles = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') + ' mi' : 'no mileage');
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Which build produced a report: shown in the dry-run report and the pilot numbers.
+const VERSION = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
+// Facebook draws its form in the account's language; the form map is English.
+const languageHint = (lang, nothingFound) => (lang && !/^en\b/i.test(lang) && nothingFound
+  ? `<div class="banner warn" id="languageHint">Your Facebook is set to "${esc(lang)}". Lot Sync's form map is English only for now: switch Facebook to English (Settings > Language), then try again.</div>`
+  : '');
 
 const state = {
   origin: null, vin: null, dealerTabId: null, windowId: null,
@@ -67,7 +73,7 @@ async function loadSaved() {
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts]);
   state.siteName = data[k.snapshot]?.site?.name || state.origin;
   const site = data[k.snapshot]?.site || { name: state.siteName };
-  state.settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), site) || withDefaults({}, site);
+  state.settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), { ...site, origin: state.origin }) || withDefaults({}, site);
   state.posted = data[k.posted] || {};
   state.boilerplate = data[k.boilerplate] || [];
   state.queue = data[k.queue] || null;
@@ -77,7 +83,7 @@ async function loadSaved() {
 
 const saveQueue = () => (state.queue ? chrome.storage.local.set({ [keys(state.origin).queue]: state.queue }) : chrome.storage.local.remove(keys(state.origin).queue));
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'queueMode', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'queueMode', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -103,7 +109,11 @@ function setStatus(text, kind = '') {
   el.className = 'status' + (kind ? ' ' + kind : '');
 }
 
-const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: state.settings.priceNote, price: state.price });
+// The price note describes the chosen basis. When the basis is the lower
+// second price and this car has none (the main price is used), the note
+// would be untrue for it, so it is left out and the car card says so.
+const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
+const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: noteFor(), price: state.price });
 
 // Pilot numbers (src/pilot.js): when each post started and ended, and what
 // each fill could not do. Bookkeeping only; a failure here never stops a post.
@@ -127,13 +137,14 @@ async function startFlow(req) {
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
 
   const fresh = await fetchVehicleDetails(state.dealerTabId, state.vin);
-  if (!fresh.ok) return block(fresh.message);
+  if (!fresh.ok) return block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
   const check = recheck(fresh.vehicle, state.settings);
-  if (!check.ok) return block(check.message);
+  if (!check.ok) return block(check.message, 'check-' + check.assessment.decision);
   state.vehicle = fresh.vehicle;
   state.vinCheck = { local: localVinCheck(fresh.vehicle), online: null };
-  state.price = state.settings.basis === 'beforeFees' ? fresh.vehicle.priceBeforeFees : fresh.vehicle.price;
-  if (!state.price) return block("The website shows no price for this car right now, so it can't be posted.");
+  state.price = basisPrice(fresh.vehicle, state.settings.basis); // the lower second price only when this car shows one
+  state.noteApplies = !(state.settings.basis === 'beforeFees' && state.price === fresh.vehicle.price);
+  if (!state.price) return block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
 
   state.message = 'Writing the description…';
   render();
@@ -178,22 +189,46 @@ async function startNextInQueue() {
 }
 
 // Records how this car ended and moves on: the next car, a pause, or the end.
+// The queue is re-read first: the popup may have stopped it (or paused it)
+// while this car was on the form, and a stale copy must not bring it back.
+let advancing = false;
 async function afterQueueStep(outcome) {
-  if (watcher) watcher.cancel();
-  if (state.vin) await pilotNote((p) => endPost(p, state.vin, outcome)); // a no-op for a car already recorded as posted or drafted
-  state.queue = advance(state.queue, outcome);
-  await saveQueue();
-  const next = currentVin(state.queue);
-  if (next && state.queue.status === 'running') return startNextInQueue();
-  await clearFlow();
-  state.step = state.queue && state.queue.status === 'done' ? 'queueDone' : 'idle';
-  setStatus('');
-  render();
+  if (advancing) return; // the watcher and a click on the same car advance once
+  advancing = true;
+  let startNext = false;
+  try {
+    if (watcher) watcher.cancel();
+    if (state.vin) await pilotNote((p) => endPost(p, state.vin, outcome)); // a no-op for a car already recorded as posted or drafted
+    const stored = (await chrome.storage.local.get(keys(state.origin).queue))[keys(state.origin).queue];
+    if (!stored) {
+      state.queue = null;
+      await clearFlow();
+      state.step = 'idle';
+      setStatus('The queue was stopped from the popup. Posted cars stay recorded.');
+      render();
+      return;
+    }
+    state.queue = advance(stored, outcome);
+    await saveQueue();
+    const next = currentVin(state.queue);
+    startNext = Boolean(next && state.queue.status === 'running');
+    if (!startNext) {
+      await clearFlow();
+      state.step = state.queue && state.queue.status === 'done' ? 'queueDone' : 'idle';
+      setStatus('');
+      render();
+    }
+  } finally {
+    advancing = false; // released before the next car's flow, whose own end must be able to advance
+  }
+  if (startNext) return startNextInQueue();
 }
 
 async function savedDraft() {
-  state.drafts = { ...state.drafts, [state.vin]: { name: state.vehicle.name, savedAt: new Date().toISOString() } };
-  await chrome.storage.local.set({ [keys(state.origin).drafts]: state.drafts });
+  const k = keys(state.origin).drafts;
+  const fresh = (await chrome.storage.local.get(k))[k] || {}; // the popup may have changed the list meanwhile
+  state.drafts = { ...fresh, [state.vin]: { name: state.vehicle.name, savedAt: new Date().toISOString() } };
+  await chrome.storage.local.set({ [k]: state.drafts });
   await pilotNote((p) => endPost(p, state.vin, 'draft'));
   return afterQueueStep('draft');
 }
@@ -219,12 +254,13 @@ function viewQueueDone() {
   return `<div class="banner good" id="queueDone">${esc(describeQueue(state.queue))}. Posted cars are under <b>My listings</b> in the popup; drafts are on Facebook under your listings, and show as "Draft on Facebook" on the Ready tab until you mark them posted.</div>`;
 }
 
-async function block(message) {
+// code: a short reason for the pilot numbers (the message is for the person).
+async function block(message, code = 'blocked') {
   state.step = 'blocked';
   state.message = message;
   render();
   await saveFlow();
-  await pilotNote((p) => endPost(p, state.vin, 'blocked', { reason: message }));
+  await pilotNote((p) => endPost(p, state.vin, 'blocked', { reason: code }));
 }
 
 async function resumeFlow(origin, flow) {
@@ -275,7 +311,7 @@ function vehicleForText() {
 async function generate({ useClaude } = {}) {
   const s = state.settings;
   const settings = useClaude === undefined ? s : { ...s, rewrite: { ...s.rewrite, enabled: useClaude } };
-  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: s.priceNote, price: state.price, boilerplate: state.boilerplate, settings });
+  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings });
   state.description = r.text;
   state.descriptionSource = r.source;
   state.note = r.note || '';
@@ -299,6 +335,8 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
 async function openForm({ probeOnly = false } = {}) {
+  const pk = keys(state.origin).posted;
+  state.posted = (await chrome.storage.local.get(pk))[pk] || state.posted; // as it is now: the popup may have marked cars meanwhile
   const cap = capStatus(state.posted, state.settings.dailyCap);
   if (cap.reached) {
     setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
@@ -315,8 +353,8 @@ async function openForm({ probeOnly = false } = {}) {
   await saveFlow();
   await pilotNote((p) => notePostStep(p, state.vin, 'formOpenedAt'));
   try {
-    const { devOverrides } = await chrome.storage.local.get('devOverrides'); // test hook, see formMap.js
-    state.map = { ...FORM_MAP, ...(devOverrides || {}) };
+    const { devOverrides } = await chrome.storage.local.get('devOverrides'); // test hook: addresses and timings only, see formMap.js
+    state.map = applyOverrides(FORM_MAP, devOverrides);
     const tab = await chrome.tabs.create({ url: state.map.createUrl, active: true });
     state.fbTabId = tab.id;
     await waitForTabLoad(tab.id);
@@ -351,7 +389,7 @@ async function runFill() {
   state.message = '';
   render();
   await saveFlow();
-  await pilotNote((p) => notePostStep(noteFill(p, { vin: state.vin, fill: state.fill, mapVersion: state.map.version }), state.vin, 'filledAt'));
+  await pilotNote((p) => notePostStep(noteFill(p, { vin: state.vin, fill: state.fill, mapVersion: state.map.version, version: VERSION }), state.vin, 'filledAt'));
   startWatcher();
   await attachPhotos();
 }
@@ -363,7 +401,7 @@ async function runProbe() {
   render();
   try {
     const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: probeFormInPage, args: [state.map] });
-    state.probe = (inj && inj.result) || { error: 'no result came back', found: [], missing: [], controls: [] };
+    state.probe = { ...((inj && inj.result) || { error: 'no result came back', found: [], missing: [], controls: [] }), extensionVersion: VERSION };
   } catch (e) {
     state.probe = {
       error: "couldn't run on this page: " + ((e && e.message) || e),
@@ -432,8 +470,10 @@ async function confirmPosted() {
   const now = new Date().toISOString();
   const extra = { postedWith: 'lotsync', salesperson: state.settings.salesperson.name || '' };
   if (listingUrl) extra.listingUrl = listingUrl;
-  state.posted = markPosted(state.posted, state.vehicle, state.settings.basis, now, extra);
-  await chrome.storage.local.set({ [keys(state.origin).posted]: state.posted });
+  const pk = keys(state.origin).posted;
+  const fresh = (await chrome.storage.local.get(pk))[pk] || {}; // the popup may have marked or unmarked cars while this one was on the form
+  state.posted = markPosted(fresh, state.vehicle, state.settings.basis, now, extra);
+  await chrome.storage.local.set({ [pk]: state.posted });
   await pilotNote((p) => endPost(p, state.vin, 'posted', { at: now }));
   if (watcher) watcher.cancel();
   if (state.queueMode) return afterQueueStep('posted');
@@ -601,7 +641,10 @@ function assumptionsHtml() {
 
 function carCard() {
   const v = state.vehicle;
-  const basis = state.settings.basis === 'beforeFees' ? 'price before fees' : `website's main price${v.priceLabel ? ', "' + esc(v.priceLabel) + '"' : ''}`;
+  const mainText = `website's main price${v.priceLabel ? ', "' + esc(v.priceLabel) + '"' : ''}`;
+  const basis = state.settings.basis === 'beforeFees'
+    ? (state.noteApplies === false ? `${mainText}; this car shows no lower second price, so the price note is left out` : 'the lower second price the website shows')
+    : mainText;
   return `<section class="car" id="vehicle">
     <div class="name">${esc(v.name)}</div>
     <div class="facts">${[v.stock && 'Stock ' + esc(v.stock), miles(v.mileage), v.carfaxOneOwner ? 'Carfax one owner' : v.carfaxUrl ? 'Carfax' : 'No Carfax', esc(v.locationShort || v.location || '')].filter(Boolean).join(' · ')}</div>
@@ -644,8 +687,9 @@ function viewProbe() {
   const controls = p.controls || [];
   const limit = p.photoLimit ? `${p.photoLimit.value}${p.photoLimit.verified ? '' : ' (unverified)'}` : '?';
   return `${carCard()}
-  <div class="banner info">Nothing was filled. This is what Lot Sync can see on the form (map ${esc(p.mapVersion || state.map.version)}).</div>
+  <div class="banner info">Nothing was filled. This is what Lot Sync can see on the form (map ${esc(p.mapVersion || state.map.version)}, Lot Sync ${esc(p.extensionVersion || VERSION)}).</div>
   ${p.error ? `<div class="banner bad">${esc(p.error)}</div>` : ''}
+  ${languageHint(p.language, !found.some((f) => f.tag))}
   <section id="probeResults">
     <h3>Found <span class="pill good">${found.length}</span></h3>
     ${found.length ? `<ul class="list">${found.map((f) => `<li>${esc(f.label)} <span class="why">${esc(f.tag)}${f.role ? '[' + esc(f.role) + ']' : ''}: "${esc(f.name)}"</span></li>`).join('')}</ul>` : '<p class="hint">None of the fields were found.</p>'}
@@ -704,6 +748,7 @@ function viewPublish() {
     : `<button type="button" class="primary" id="confirmPosted">It's posted, record it</button><button type="button" class="plain" id="notPosted">It didn't post</button>`;
   return `${carCard()}
   ${preexisting}${changedBanner}
+  ${languageHint(f.language, !f.filled.length && !f.partial.length)}
   <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When it posts, the next car loads by itself.' : ''}</div>
   <section id="fillResults">
     <h3>Filled in <span class="pill good">${f.filled.length}</span> <span class="why">as the form shows them</span></h3>
@@ -772,8 +817,8 @@ async function openUpkeep(req) {
   state.dealerTabId = req.dealerTabId || state.dealerTabId;
   await chrome.storage.local.set({ lastPostOrigin: req.origin });
   await loadSaved();
-  const { devOverrides } = await chrome.storage.local.get('devOverrides');
-  state.map = { ...FORM_MAP, ...(devOverrides || {}) };
+  const { devOverrides } = await chrome.storage.local.get('devOverrides'); // test hook: addresses and timings only
+  state.map = applyOverrides(FORM_MAP, devOverrides);
   state.step = 'upkeep';
   await startUpkeep(req, upkeepCtx);
 }

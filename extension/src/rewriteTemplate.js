@@ -12,6 +12,8 @@
 //     nothing about protected characteristics, never posing as a private seller
 // The template is the final fallback, so it is built to pass its own checks.
 
+import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
+
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
 // Phrases that never belong in a listing. Matched on word boundaries,
@@ -131,14 +133,14 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   vehicle:     normalised vehicle (normalize.js)
  *   dealer:      { name, city }
  *   salesperson: { name, title }
- *   priceNote:   dealer wording about fees, e.g. "Price includes the $490 doc fee; tax and tags extra."
+ *   priceNote:   the dealer's wording about fees, typed in Settings (a suggested sentence is offered from the website's price gap)
  *   narrative:   car-specific sentences from description.js (cleanDescription)
  */
 export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [] }) {
   const dealerName = String(dealer.name || '').trim();
   const city = String(dealer.city || '').trim();
   const person = String(salesperson.name || '').trim();
-  const title = String(salesperson.title || 'sales consultant').trim();
+  const title = String(salesperson.title || DEFAULT_SALESPERSON_TITLE).trim();
   const name = [v.year, v.make, v.model, v.trim].filter(Boolean).join(' ');
   const milesText = typeof v.mileage === 'number' ? `${v.mileage.toLocaleString('en-US')} miles` : '';
   const features = pickFeatures(v.features);
@@ -216,6 +218,23 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '',
   const src = sourceNumbers({ vehicle, dealer, priceNote, price });
   for (const n of numbersIn(prose)) {
     if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
+  }
+  // The price note is the dealer's wording. When it quotes a dollar amount and
+  // the website shows two prices for this car, the amount must be their
+  // difference; a note written for one fee must not ride on a car with another.
+  const gap = typeof vehicle.price === 'number' && typeof vehicle.priceBeforeFees === 'number' && vehicle.priceBeforeFees > 0 && vehicle.priceBeforeFees < vehicle.price ? vehicle.price - vehicle.priceBeforeFees : null;
+  if (gap !== null) {
+    const note = String(priceNote || '');
+    const amounts = [...note.matchAll(/\$\s?(\d[\d,]*)/g)].map((m) => ({ text: m[0], value: Number(m[1].replace(/,/g, '')), at: m.index }));
+    // the amount the note ties to the fee: "$490 doc fee" or "doc fee of $490"; a lone amount counts too
+    const FEE = '(doc|documentation|dealer|processing|conveyance)';
+    const tiedAfter = new RegExp('^\\s*(?:\\w+\\s+){0,2}' + FEE + '\\b', 'i');
+    const tiedBefore = new RegExp('\\b' + FEE + '\\s+fees?\\s*(?:of|is|:|at)?\\s*$', 'i');
+    let tied = amounts.filter((a) => tiedAfter.test(note.slice(a.at + a.text.length)) || tiedBefore.test(note.slice(0, a.at)));
+    if (!tied.length && amounts.length === 1) tied = amounts;
+    for (const a of tied) {
+      if (a.value !== gap && t.includes(a.text.replace(/\s/g, ''))) problems.push({ code: 'price-note-amount', text: `The price note says $${a.value.toLocaleString('en-US')}, but the website's two prices for this car differ by $${gap.toLocaleString('en-US')}; check the note in Settings` });
+    }
   }
   const vin = String(vehicle.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (vin && !t.toUpperCase().includes(vin)) problems.push({ code: 'no-vin', text: "Doesn't include the VIN" });

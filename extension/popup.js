@@ -1,9 +1,8 @@
-import { normalizeVehicle } from './src/normalize.js';
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
@@ -52,6 +51,7 @@ const storageKeys = (origin) => ({
   wizardDone: `wizardDone:${origin}`,
   wizard: `wizard:${origin}`,
   pilot: `pilot:${origin}`,
+  flow: `postFlow:${origin}`, // the side panel's in-progress post; cleared with everything else
 });
 
 const rescanOrigins = () => (state.site ? originsFor(state.site.site || { origin: state.origin }, state.site.service) : []);
@@ -78,7 +78,7 @@ async function loadSaved() {
     state.settingsFromProfile = false;
   } else {
     // a website without settings yet: start from the person's synced profile
-    state.settings = settingsFromProfile(await loadProfile(), site);
+    state.settings = settingsFromProfile(await loadProfile(), { ...site, origin: state.origin });
     state.settingsFromProfile = Boolean(state.settings);
   }
   state.boilerplate = data[k.boilerplate] || [];
@@ -129,7 +129,7 @@ async function save(...names) {
   const out = {};
   for (const name of names) out[k[name]] = state[name];
   await ownSet(out);
-  if (names.includes('settings') && state.settings) await saveProfile(state.settings);
+  if (names.includes('settings') && state.settings) await saveProfile(state.settings, undefined, state.origin);
   if (names.includes('diff') || names.includes('posted')) chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
 }
 
@@ -539,11 +539,13 @@ function viewSettings() {
         .join('')
     : '<p class="hint">Scan once to see the stores.</p>';
   const feeNote = example
-    ? `<p class="hint">On this website the main price is usually ${money(fee.gap)} higher than the price before fees, most likely the doc fee. Posting the website's main price keeps Marketplace and the website matching.</p>`
+    ? `<p class="hint">On this website the main price is usually ${money(fee.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>`
     : '';
+  const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
   return `<form id="settings" class="settings">
+    <p class="hint" id="version">Lot Sync ${esc(version)} · form map ${esc(FORM_MAP.version)}</p>
     <fieldset><legend>You</legend>
-      ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="e.g. Roger"')}
+      ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name"')}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
       <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
     </fieldset>
@@ -554,13 +556,16 @@ function viewSettings() {
     <fieldset><legend>Dealership, named on every listing</legend>
       ${field('Dealership name', 'dealerName', s.dealer.name)}
       ${field('City', 'dealerCity', s.dealer.city)}
-      ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="PA" maxlength="2"')}
-      ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="15370" inputmode="numeric"')}
+      ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="e.g. OH" maxlength="2"')}
+      ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="e.g. 43215" inputmode="numeric"')}
       <p class="hint">Marketplace asks for a location. The ZIP is used when it's set, otherwise the city.</p>
     </fieldset>
     <fieldset><legend>Price to post</legend>
       <label><input type="radio" name="basis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> <span>The website's main price${example ? ` (e.g. ${money(example.price)} "${esc(example.priceLabel)}")` : ''}</span></label>
-      <label><input type="radio" name="basis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> <span>Price before fees${example ? ` (e.g. ${money(example.priceBeforeFees)})` : ''}</span></label>
+      ${!state.snapshot || showsLowerPrice(entries)
+        ? `<label><input type="radio" name="basis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> <span>The lower second price the website shows${example ? ` (e.g. ${money(example.priceBeforeFees)}; usually the price before the doc fee)` : ''}</span></label>
+      <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>`
+        : ''}
       ${feeNote}
       ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}
       <p class="hint">Honest prices: the listed price always equals the website price. This note explains what it includes.${suggested ? ` Suggested: "${esc(suggested)}"` : ''}</p>
@@ -593,6 +598,8 @@ function viewSettings() {
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
       <p class="hint">Scans and your posted list are kept only in this browser, separately for each website.</p>
       <button type="button" class="danger" data-action="clear">Clear everything for this website</button>
+      <p class="hint">Your profile (name, role, dealership, price basis, note, cap, listing defaults) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
+      <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>
     </fieldset>
   </form>`;
 }
@@ -775,9 +782,11 @@ async function onPanelClick(ev) {
       break;
     case 'pilotCsv': {
       // A file for the manager, saved by the browser like any download.
+      const who = { site: state.siteName, salesperson: state.settings?.salesperson?.name || '' };
+      const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([pilotCsv(state.pilot, { labels: FIELD_LABELS, site: state.siteName })], { type: 'text/csv' }));
-      a.download = pilotFileName();
+      a.href = URL.createObjectURL(new Blob([pilotCsv(state.pilot, { labels: FIELD_LABELS, ...who, origin: state.origin, dealer: state.settings?.dealer?.name || '', version })], { type: 'text/csv' }));
+      a.download = pilotFileName(undefined, who);
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -791,6 +800,14 @@ async function onPanelClick(ev) {
         setStatus('Copied.');
       } catch (e) {
         setStatus("Couldn't copy: " + ((e && e.message) || e), 'error');
+      }
+      return;
+    case 'forgetProfile':
+      try {
+        await chrome.storage.sync.remove(PROFILE_KEY);
+        setStatus('Your synced profile was removed from Chrome\'s sync storage. The settings on this computer are unchanged; saving them again re-creates the profile.');
+      } catch (e) {
+        setStatus("Couldn't reach Chrome's sync storage: " + ((e && e.message) || e), 'error');
       }
       return;
     case 'pilotClear':
@@ -840,8 +857,8 @@ async function onSettingsSubmit(ev) {
     {
       ...prev,
       myStores: form.getAll('store').map(String),
-      basis: form.get('basis') === 'beforeFees' ? 'beforeFees' : 'website',
-      salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || 'sales consultant' },
+      basis: chooseBasis(form.get('basis'), prev.basis, state.snapshot ? Object.values(state.snapshot.vehicles || {}) : null), // the lower price only when this website shows one; without a scan the previous choice stands
+      salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || DEFAULT_SALESPERSON_TITLE },
       dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },
       priceNote: str('priceNote'),
       dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),

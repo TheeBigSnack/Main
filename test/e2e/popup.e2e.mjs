@@ -2,10 +2,10 @@
 // mock dealer site, and walks through scan -> mark posted -> car sells and a
 // price drops -> rescan. Saves screenshots to test/e2e/screenshots/.
 //
-// Run: npm run test:e2e   (needs Playwright + Chromium installed)
+// Run: npm run test:e2e:popup   (needs Playwright + Chromium installed; npm run test:e2e runs every flow)
 
 import { chromium } from 'playwright';
-import { cpSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +18,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension that may script the local mock site without a
 // click on the toolbar icon (the real one relies on that click via activeTab).
-const extDir = join(tmpdir(), 'lot-sync-ext-under-test');
-rmSync(extDir, { recursive: true, force: true });
+const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -33,7 +32,7 @@ const siteUrl = `http://127.0.0.1:${server.address().port}/used-vehicles/`;
 // unpacked extensions. LOTSYNC_E2E_CHANNEL can point at another Chromium
 // build, but note that branded Google Chrome and Edge 137+ ignore
 // --load-extension, so they can't run this test.
-const profileDir = join(tmpdir(), 'lot-sync-profile-' + Date.now());
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-popup-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
@@ -120,7 +119,7 @@ try {
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '0');
 
   await popup.click('#settingsBtn');
-  assert.match(await popup.textContent('.settings'), /usually \$490 higher than the price before fees/);
+  assert.match(await popup.textContent('.settings'), /usually \$490 higher than/);
   // the store's city, state and ZIP came from the website's structured data
   assert.equal(await popup.inputValue('input[name="dealerCity"]'), 'Waynesburg');
   assert.equal(await popup.inputValue('input[name="dealerState"]'), 'PA');
@@ -150,6 +149,6 @@ try {
 } finally {
   await context.close();
   // leave nothing behind: the throwaway profile and the extension copy
-  for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* still locked by the closing browser; the next run overwrites it */ } }
+  for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* still locked by the closing browser; every run makes its own folders, so a leftover does no harm */ } }
   server.close();
 }

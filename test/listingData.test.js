@@ -148,8 +148,11 @@ test('location: only a suggestion in the right state may be picked (there are se
   assert.deepEqual(locationExpect({ city: 'Waynesburg', state: 'pennsylvania', zip: '15370' }), { alternatives: [['Waynesburg', 'Pennsylvania'], ['Waynesburg', 'PA']], strict: true });
   assert.deepEqual(locationExpect({ city: 'Waynesburg' }), { alternatives: [['Waynesburg']], strict: false });
   assert.deepEqual(locationExpect({ zip: '15370' }), { alternatives: [], strict: true });
+  // territories count as states for the guard
+  assert.deepEqual(locationExpect({ city: 'San Juan', state: 'PR', zip: '00907' }), { alternatives: [['San Juan', 'Puerto Rico'], ['San Juan', 'PR']], strict: true });
+  assert.equal(STATE_NAMES.GU, 'Guam');
   assert.deepEqual(locationExpect({}), { alternatives: [], strict: false });
   assert.equal(STATE_NAMES.PA, 'Pennsylvania');
-  assert.equal(Object.keys(STATE_NAMES).length, 51);
+  assert.equal(Object.keys(STATE_NAMES).length, 56); // 50 states, DC, five territories
   assert.equal(buildListingData(vehicle('usedNormal'), { dealer: DEALER }).match.location.strict, true);
 });

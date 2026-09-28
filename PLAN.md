@@ -118,6 +118,14 @@ Demo: the partner list with usage numbers, and the chosen next platform.
 - Launch plan: Waynesburg (manager sign-off first), then Cranberry and Pleasant Hills, then nearby western Pennsylvania dealers. Channels: in-person demos, the DealerRefresh forum, LinkedIn outreach to used car managers, local dealer association events. Track demos to pilots to paid customers, time per post, and how long sold cars stay listed.
 - `legal/`: drafted in M1 (this repo), attorney review in parallel, updated in M5.
 
+## Wider use (audit of 2026-09-28)
+
+The owner wants Lot Sync built for any dealership. An audit for single-dealer, single-platform and single-machine assumptions found 44 items; 21 were fixed in 0.4.0 (CHANGELOG). The rest ride with their milestone:
+- M4: the daily cap per salesperson rather than per browser profile (needs accounts); one storage-key module with an account namespace; local retention once the registry is server-side; the shared rewrite key replaced by sign-in; a pilot runbook for a second dealer once one CSV per person is gone.
+- M5: the Web Store answers and legal drafts rewritten with the attorney; blank Schedule A; the pilot agreement's rooftop table; the Pilot tab renamed "Numbers"; onboarding emails for the store install; the wizard's Price step; the Terms and Privacy acceptance.
+- M6: the adapter contract completed with the second platform (probe and search per adapter, normalise inside the adapter, opaque service, photo hosts); the store-name and brand-list heuristics; the boilerplate floor for tiny lots; a Spanish form map with a Spanish-speaking partner.
+- Needs the owner's OK (a permission change): asking for the photo host's permission at post time and dropping the static image host before the Web Store submission.
+
 ## Open risks
 
 - Facebook's form is a custom React UI; `formMap.js` was written from public knowledge and is verified only against the mock. Expect to adjust a few name patterns on the first live run. The design makes that a minutes-long fix.

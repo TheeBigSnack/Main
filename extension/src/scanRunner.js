@@ -74,6 +74,8 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   let result = out;
   if (!s || settingsFromProfile) {
     if (s && settingsFromProfile) {
+      // (whether the profile's dealership part applies here was decided by
+      // settingsFromProfile from the website it was saved on)
       const here = new Set(out.vehicles.map((v) => v.location).filter(Boolean));
       const kept = s.myStores.filter((st) => here.has(st));
       s = withDefaults({ ...s, myStores: kept.length ? kept : defaultSettings(site, out.vehicles).myStores }, site);

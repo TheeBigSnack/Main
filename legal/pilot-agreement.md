@@ -12,7 +12,7 @@ Lot Sync will provide the Lot Sync Service to the Dealer's [Waynesburg] rooftop 
 
 - The used car manager (or general manager) approves the Pilot in writing before it starts and designates the participating salespeople.
 - Participants read and follow the Posting Rules (legal/posting-rules.md), publish every listing personally, post only pre-owned vehicles at the website price, and keep listings updated when Lot Sync flags a sale or price change.
-- The Dealer gives Lot Sync honest feedback at least weekly, and lets Lot Sync record: time per post, which form fields could not be filled, how long sold cars stayed listed, and the number of posts per participant. No customer or buyer data is collected.
+- The Dealer gives Lot Sync honest feedback at least weekly, and lets Lot Sync record: time per post, which form fields could not be filled, how long sold cars stayed listed and price changes stayed unfixed, the outcome of each post attempt (posted, draft, not posted), and the number of posts per participant. No customer or buyer data is collected.
 - The Dealer tells Lot Sync promptly of any message from Facebook about the participants' listings or accounts.
 
 ## 3. What Lot Sync agrees to

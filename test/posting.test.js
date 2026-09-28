@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { capStatus, postsToday, DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { markPosted } from '../extension/src/rescan.js';
-import { FORM_MAP } from '../extension/facebook/formMap.js';
+import { FORM_MAP, DEV_OVERRIDE_KEYS, applyOverrides } from '../extension/facebook/formMap.js';
 import { snapshot, fixtures } from './helpers.js';
 
 const VIN = fixtures.usedNormal.vin;
@@ -59,6 +59,22 @@ test('the form map has no selector, name or option that could reach Publish, Upd
   }
   assert.ok(!FORM_MAP.fields.some((f) => /publish|submit|delete|sold/i.test(f.key + f.label)));
   assert.ok(!Object.keys(FORM_MAP).some((k) => /selector|button/i.test(k) && k !== 'fileInput'), 'no button selectors at all');
+});
+
+test('the test hook can only move addresses and timings, never the fields the fill code may touch', () => {
+  assert.deepEqual([...DEV_OVERRIDE_KEYS], ['createUrl', 'listingUrlPattern', 'afterPublishPatterns', 'yourListingsUrl', 'settleMs', 'recheckMs']);
+  const hostile = { createUrl: 'http://127.0.0.1:1/create', fields: [{ key: 'publish', label: 'Publish', kind: 'choice', name: ['^publish'] }], neverFill: [], fileInput: 'button', settleMs: 1 };
+  const map = applyOverrides(FORM_MAP, hostile);
+  assert.equal(map.createUrl, 'http://127.0.0.1:1/create');
+  assert.equal(map.settleMs, 1);
+  assert.equal(map.fields, FORM_MAP.fields, 'the fields stay the frozen map\'s');
+  assert.equal(map.neverFill, FORM_MAP.neverFill);
+  assert.equal(map.fileInput, FORM_MAP.fileInput);
+  assert.equal(applyOverrides(FORM_MAP, null), FORM_MAP);
+  // the panel never spreads storage over the map any other way
+  const panel = read('../extension/sidepanel.js');
+  assert.ok(!/\.\.\.FORM_MAP/.test(panel), 'sidepanel.js must build its map with applyOverrides only');
+  assert.equal((panel.match(/applyOverrides\(FORM_MAP, devOverrides\)/g) || []).length, 2);
 });
 
 test('the fill code never submits a form or clicks anything but a dropdown option', () => {

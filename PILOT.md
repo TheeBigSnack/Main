@@ -1,4 +1,6 @@
-# The Waynesburg pilot: runbook (Milestone 3)
+# Pilot runbook (Milestone 3): the first pilot at Waynesburg
+
+Written for the first pilot; the bracketed values and the checklist apply to any dealer.
 
 Two weeks of real posting by 2 or 3 salespeople at Ron Lewis CDJR Waynesburg, with the used car manager's sign-off, weekly fixes, and numbers the manager can confirm. The plan and acceptance criteria are in `PLAN.md` (M3); the rules in `CLAUDE.md` apply throughout. This file is the checklist and the definitions.
 
@@ -12,13 +14,18 @@ Demo at the end: the pilot numbers (the Pilot tab's CSV, even if it ends up in a
 
 ## Before the pilot starts
 
-Owner's list, in order. Nothing below runs until the first three are done.
+Owner's list, in order. Nothing under "Before every pilot" runs until the one-time items and the manager's sign-off are done.
+
+### Once, before the first pilot
 
 - [ ] **Live checks of Milestone 2** on the Waynesburg site (HANDOFF.md section 9): the wizard with "Allow automatic rescans", a background rescan and the badge, one price update and one take-down on real listings. Fix `listingSigns.js` / `formMap.js` from what the pages show.
 - [ ] **Attorney answers**, at least on section 1 (Meta's Terms, how to describe the risk) and section 2 (the founder's employment at the pilot dealer) of `legal/questions-for-attorney.md`, before the pilot agreement is signed.
-- [ ] **Manager's sign-off**: `legal/pilot-agreement.md` filled in and signed, participating salespeople named in it. Send `marketing/pilot-offer-email.md` first; demo with `marketing/demo-script.md`.
-- [ ] Each salesperson gets the extension folder (a zip of `extension/`), runs the wizard including the rescan permission and the posting rules, and deletes old Marketplace drafts. `marketing/onboarding-emails.md` days 0, 2 and 7 cover this.
-- [ ] Settings on each machine: name and role, Waynesburg ticked, address from the website, defaults Clean / Very good, cap 10 unless the manager wants otherwise, rescans on.
+
+### Before every pilot
+
+- [ ] **Manager's sign-off** at [dealer]: `legal/pilot-agreement.md` filled in and signed, the [N salespeople] named in it. Send `marketing/pilot-offer-email.md` first; demo with `marketing/demo-script.md`.
+- [ ] Each of the [N salespeople] gets `lot-sync-extension-<version>.zip` (`npm run pack`) and the Install steps (in `README.md`, and written out in the day-0 email, since the README is not in the zip; later zips come with the Update steps), runs the wizard including the rescan permission and the posting rules, and deletes old Marketplace drafts. `marketing/onboarding-emails.md` days 0, 2 and 7 cover this.
+- [ ] Settings on each machine: name and role, [dealer]'s store ticked, address from the website (check it), the price note (Settings suggests wording from the website's price gap; accept it, or the manager's wording, and save before the first post: a new machine starts with none), defaults Clean / Very good, cap [10] unless the manager wants otherwise, rescans on.
 - [ ] Optional: the rewrite service (`backend/README.md`) with an Anthropic API key, if the owner wants Claude-drafted descriptions in the pilot. Off by default; the template writer is the fallback either way.
 
 ## During the pilot
@@ -28,7 +35,7 @@ Owner's list, in order. Nothing below runs until the first three are done.
 **Weekly (owner, with the manager):**
 1. Collect the numbers: each salesperson clicks **Pilot → Download CSV** (or **Copy summary** for the chat). The numbers live in each salesperson's own browser, per website; there is no shared view until Milestone 4, so it is one CSV per person.
 2. Fill in the log below.
-3. Fix the top prefill failure that week (one line in `formMap.js` when Facebook changed a name; `listingSigns.js` when a listing page reads differently), re-run `npm test` and the e2e flows, and send the new `extension/` folder.
+3. Fix the top prefill failure that week (one line in `formMap.js` when Facebook changed a name; `listingSigns.js` when a listing page reads differently), re-run `npm test` and the e2e flows, and send the new `lot-sync-extension-<version>.zip` (`npm run pack`) and the Update steps in `README.md`.
 4. Ask the manager to confirm sold cars against the store's own records: did every one show up on To do within 3 hours of leaving the website?
 
 **Pilot log** (copy a row per week into this file or a spreadsheet):
@@ -43,6 +50,7 @@ Owner's list, in order. Nothing below runs until the first three are done.
 Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser, under `pilot:<origin>`. The Pilot tab shows them; the CSV has every row.
 
 - **Time per post:** from the click on **Post** in the popup (or the queue loading the car) to **It's posted** in the side panel. That includes the website re-check, the description, the salesperson's review, the form filling, their own check of the form and their click on Publish. A car left open (the panel closed on it, Back, Stop queue) is recorded as abandoned and is not in the median. **Saved as draft** and **It didn't post** are recorded as such.
+- **Reason (blocked posts):** why the panel stopped before the form opened: `not-on-website` (the car was no longer on the site at post time), `site-unreachable` (the website could not be read), `check-not-ready`, `check-review` or `check-skip` (the post-time re-check found something missing, signs that disagree, or a car the website now calls new), `no-price` (the website showed no price).
 - **Fields:** one entry per fill of the Marketplace form (a "check fields only" dry run is not a fill). Per field: filled, needed a click, couldn't fill, and changed by the form afterwards (a restored draft). Field keys only; no values, no description, nothing about the car.
 - **Sold cars and price changes:** a flag starts at the scan (popup, wizard or background) that first put the item on To do for one of the salesperson's own listings. It ends when Lot Sync sees the listing page show the change (upkeep, "detected"), when the person clicks Taken down / Updated ("manual"), or when a complete, confirmed scan no longer lists it ("cleared": the car came back or the price went back; not counted in the medians). A scan with a warning (incomplete, or the VIN double-check failed) never clears a flag. The hours are from the flagging scan, so with rescans every 3 hours a car sold at 9:00 and flagged at 11:50 reads from 11:50; the acceptance criterion is about the flag arriving within one cycle, which the manager confirms from the store's records.
 - **What is not recorded:** anything about buyers, messages, or the Facebook account; listing links beyond what the posted registry already keeps; the description text.
@@ -54,7 +62,7 @@ Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser,
 1. A **Couldn't fill** report arrives (pasted from the panel). Reproduce it in `test/e2e/mock-marketplace.mjs` if the mock doesn't already behave that way.
 2. Fix it in `extension/facebook/formMap.js` (a name pattern) or `fillForm.js` (a behaviour), never anywhere else on the Facebook side.
 3. `npm test`, then the e2e flow that covers it (`npm run test:e2e:post` for a fill, `:upkeep` for a listing page).
-4. Commit, note it in `CHANGELOG.md` under the pilot week, send the new `extension/` folder to the salespeople.
+4. Commit, note it in `CHANGELOG.md` under the pilot week, send the new `lot-sync-extension-<version>.zip` (`npm run pack`) and the Update steps in `README.md` to the salespeople.
 
 ## After two weeks
 

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateDescription, rewriteFacts, rewriteWithBackend, guessColorsWithBackend } from '../extension/src/rewriter.js';
+import { SYSTEM_PROMPT, buildRewritePrompt } from '../backend/rewritePrompt.js';
 import { vehicle } from './helpers.js';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
@@ -85,6 +86,24 @@ test('only facts leave the browser: no VIN, no Facebook data', () => {
   assert.equal(f.carfaxOneOwner, true);
   assert.deepEqual(f.dealer, { name: DEALER.name, city: 'Waynesburg' });
   assert.deepEqual(f.salesperson, ME);
+});
+
+test('the service system prompt names no real person or dealer', () => {
+  assert.doesNotMatch(SYSTEM_PROMPT, /Ron Lewis|Waynesburg|Roger/);
+});
+
+test('the service user prompt tells Claude the exact sign-off, built from the facts', () => {
+  const facts = rewriteFacts({ vehicle: vehicle('usedNormal'), dealer: { name: 'Test Motors', city: 'Testville' }, salesperson: { name: 'Dana', title: 'sales consultant' }, priceNote: NOTE });
+  const { system, user } = buildRewritePrompt(facts);
+  assert.equal(system, SYSTEM_PROMPT);
+  assert.match(user, /Sign off with exactly: "I'm Dana, sales consultant at Test Motors\."/);
+  // no name: the same form the template writer uses
+  const anon = buildRewritePrompt({ ...facts, salesperson: { name: '', title: 'sales consultant' } });
+  assert.match(anon.user, /Sign off with exactly: "Sales consultant at Test Motors\."/);
+  // the line survives a regeneration with fixes
+  const again = buildRewritePrompt(facts, ['too long']);
+  assert.match(again.user, /I'm Dana, sales consultant at Test Motors\./);
+  assert.match(again.user, /too long/);
 });
 
 test('the request goes to /rewrite with the service key', async () => {

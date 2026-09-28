@@ -5,6 +5,7 @@
 // comes back is checked against the website's facts; if it fails, the
 // template is used.
 
+import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { cleanDescription } from './description.js';
 import { buildTemplateDescription, runGuardrails, ensureVinLine } from './rewriteTemplate.js';
 
@@ -46,7 +47,7 @@ export function rewriteFacts({ vehicle: v, dealer = {}, salesperson = {}, priceN
     engine: v.engine, transmission: v.transmission, drivetrain: v.drivetrain, fuelType: v.fuelType,
     narrative,
     dealer: { name: dealer.name || '', city: dealer.city || '' },
-    salesperson: { name: salesperson.name || '', title: salesperson.title || 'sales consultant' },
+    salesperson: { name: salesperson.name || '', title: salesperson.title || DEFAULT_SALESPERSON_TITLE },
     priceNote,
   };
 }

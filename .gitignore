@@ -5,3 +5,4 @@ test/e2e/screenshots/
 .DS_Store
 Thumbs.db
 *.zip
+dist/

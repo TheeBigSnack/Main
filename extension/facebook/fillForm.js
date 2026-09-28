@@ -424,7 +424,7 @@ export async function fillFormInPage(map, data) {
 
   // skipped: things that are not failures (a checkbox left as it is, an
   // optional field this form doesn't have)
-  const result = { url: location.href, filled: [], partial: [], blocked: [], skipped: [], preexisting: [], changedAfterFill: [], photoLimit: readPhotoLimit() };
+  const result = { url: location.href, language: document.documentElement.lang || '', filled: [], partial: [], blocked: [], skipped: [], preexisting: [], changedAfterFill: [], photoLimit: readPhotoLimit() };
   const fields = (data && data.fields) || {};
   const match = (data && data.match) || {};
 
@@ -682,7 +682,7 @@ export function probeFormInPage(map) {
     const around = input && (input.closest('section, form, div') || input.parentElement);
     return around ? (around.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   })();
-  return { url: location.href, title: document.title, found, missing, controls, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
+  return { url: location.href, language: document.documentElement.lang || '', title: document.title, found, missing, controls, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
 }
 
 // Upkeep, step 1: once the salesperson has opened the listing's edit form,

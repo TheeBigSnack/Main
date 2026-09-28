@@ -6,9 +6,12 @@ import { DEFAULT_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 
 export const SETTINGS_VERSION = 2;
+export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 
-// The usual gap between the main price and the price before fees (the doc
-// fee on most sites), taken from what most cars agree on.
+// The usual gap between the main price and the lower second price a website
+// shows (on some sites that is the doc fee), taken from what most cars agree
+// on. It is only ever a suggestion: what the gap means is for the dealer to
+// say, in the price note, and a person types that note.
 export function feeGap(entries) {
   const priced = (entries || []).filter((e) => e && e.price && e.priceBeforeFees);
   const gaps = new Map();
@@ -37,7 +40,7 @@ export function withDefaults(settings, site = {}) {
     version: SETTINGS_VERSION,
     myStores,
     basis: s.basis === 'beforeFees' ? 'beforeFees' : 'website',
-    salesperson: { name: String(sp.name || ''), title: String(sp.title || 'sales consultant') },
+    salesperson: { name: String(sp.name || ''), title: String(sp.title || DEFAULT_SALESPERSON_TITLE) },
     // blanks are filled from the website's own address (site.address, read by the scan)
     dealer: {
       name: String(d.name || site.name || ''),
@@ -67,9 +70,10 @@ export function withDefaults(settings, site = {}) {
 // across a team) is Milestone 4.
 export const PROFILE_KEY = 'profile';
 
-export function profileFrom(settings) {
+export function profileFrom(settings, origin = '') {
   const s = withDefaults(settings);
   return {
+    origin: String(origin || ''), // the website this profile was saved from (0.4.0); decides whether the dealership part carries over
     salesperson: s.salesperson,
     dealer: s.dealer,
     myStores: s.myStores,
@@ -83,12 +87,32 @@ export function profileFrom(settings) {
 }
 
 // Settings for a website that has none yet, taken from the saved profile.
-// Store names belong to a website, so they only carry over when the dealer
-// name matches; otherwise the first scan picks them.
+// The person's own fields (name, role, listing defaults, the rewrite service
+// address) follow them anywhere. The dealership's fields (name, address,
+// stores, price basis, price note, daily cap) belong to that dealership's
+// website: on another dealer's site they are dropped and the website fills
+// them. While the site is still unknown (before the first scan) the whole
+// profile is kept; performScan settles it once the site name is read.
 export function settingsFromProfile(profile, site = {}) {
   if (!profile || typeof profile !== 'object') return null;
-  const sameDealer = !site.name || !profile.dealer || !profile.dealer.name || profile.dealer.name === site.name;
-  return withDefaults({ ...profile, myStores: sameDealer ? profile.myStores : [], rewrite: { ...(profile.rewrite || {}), key: '' } }, site);
+  // The website the profile was saved from decides, never the editable dealer
+  // name. A profile saved before that was recorded (0.4.0) is kept whole, as
+  // before, until it is saved again.
+  const sameDealer = !profile.origin || !site.origin || profile.origin === site.origin;
+  const person = { salesperson: profile.salesperson, defaults: profile.defaults, rewrite: { ...(profile.rewrite || {}), key: '' } };
+  return withDefaults(sameDealer ? { ...profile, ...person } : person, site);
+}
+
+// Does this website show, for at least one car, a second price below its main
+// price? Only then can "the lower second price" be a basis at all.
+export const showsLowerPrice = (entries) => (entries || []).some((e) => e && typeof e.priceBeforeFees === 'number' && e.priceBeforeFees > 0 && typeof e.price === 'number' && e.priceBeforeFees < e.price);
+
+// The basis to store from a Settings save. Without a scan to judge by
+// (entries null) the previous choice stands; with one, the lower price is
+// accepted only when the website shows it.
+export function chooseBasis(requested, previous, entries) {
+  if (!entries) return previous === 'beforeFees' ? 'beforeFees' : 'website';
+  return requested === 'beforeFees' && showsLowerPrice(entries) ? 'beforeFees' : 'website';
 }
 
 export async function loadProfile(storage) {
@@ -100,18 +124,21 @@ export async function loadProfile(storage) {
   }
 }
 
-export async function saveProfile(settings, storage) {
+export async function saveProfile(settings, storage, origin = '') {
   try {
     const area = storage || chrome.storage.sync;
-    await area.set({ [PROFILE_KEY]: profileFrom(settings) });
+    await area.set({ [PROFILE_KEY]: profileFrom(settings, origin) });
     return true;
   } catch (e) {
     return false; // sync storage can be unavailable; the per-website copy still works
   }
 }
 
+// First-run defaults: the store matching the site name, the address from the
+// website. The price note stays empty: Settings shows the suggested wording
+// from the price gap, and a person decides whether it is true for this store.
 export function defaultSettings(site, vehicles) {
   const locations = [...new Set((vehicles || []).map((v) => v.location).filter(Boolean))];
   const mine = locations.filter((l) => l === site.name || (site.title || '').includes(l));
-  return withDefaults({ myStores: mine, priceNote: suggestedPriceNote(feeGap(vehicles).gap, 'website') }, site);
+  return withDefaults({ myStores: mine }, site);
 }

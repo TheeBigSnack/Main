@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   withPilotDefaults, hasPilotData, beginPost, notePostStep, endPost, noteFill, noteFlags, resolveFlag,
   summarizePilot, pilotText, pilotCsv, pilotFileName, updatePilot, recordFlags, median, secondsBetween, hoursBetween, pilotKey,
+  DEFINITIONS, fmtLocal,
 } from '../extension/src/pilot.js';
 import { diffScans } from '../extension/src/rescan.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
@@ -81,9 +82,9 @@ test('a fill keeps field keys only: never the values, the description or the car
     skipped: [{ key: 'titleStatus', reason: 'not on this form' }],
   };
   const p = noteFill(null, { vin: RAM, fill, at: T(1), mapVersion: FORM_MAP.version });
-  assert.deepEqual(p.fills, [{ at: T(1), vin: RAM, mapVersion: FORM_MAP.version, filled: ['year', 'description'], partial: ['location'], blocked: ['make'], changed: ['year'], preexisting: true }]);
+  assert.deepEqual(p.fills, [{ at: T(1), vin: RAM, mapVersion: FORM_MAP.version, version: '', filled: ['year', 'description'], partial: ['location'], blocked: ['make'], changed: ['year'], preexisting: true }]);
   assert.doesNotMatch(JSON.stringify(p), /Honda|Accord|Waynesburg|long description|2019/);
-  assert.deepEqual(noteFill(p, { vin: RAM, fill: null, at: T(2) }).fills[1], { at: T(2), vin: RAM, mapVersion: '', filled: [], partial: [], blocked: [], changed: [], preexisting: false });
+  assert.deepEqual(noteFill(p, { vin: RAM, fill: null, at: T(2) }).fills[1], { at: T(2), vin: RAM, mapVersion: '', version: '', filled: [], partial: [], blocked: [], changed: [], preexisting: false });
 });
 
 test('a rescan flags your sold cars and price changes once, with the scan time, using the real diff shape', () => {
@@ -200,28 +201,87 @@ test('the text summary and the CSV say the same numbers; the CSV quotes what nee
   assert.match(text, /Sold cars to take down: 2 flagged, 1 done \(1 seen on the listing\), 1 still open, 0 cleared by the website; median 1 h/);
   assert.match(text, /open: Car 2 \(5 h\)/);
   assert.match(text, /Price changes: 1 flagged, 1 done \(0 seen on the listing\), 0 still open/);
+  assert.ok(text.endsWith('\n\n' + DEFINITIONS.join('\n')), 'the definitions close the summary');
   const clean = pilotText(summarizePilot(null, { labels }));
   assert.match(clean, /every field filled every time/);
   assert.match(clean, /median —, fastest —/);
 
+  // the CSV shows every time in the given zone (Oct 26 2026, New York: UTC-4); storage keeps ISO
   const withComma = endPost(beginPost(p, { vin: 'VIN00007', name: 'Car "7", the odd one', salesperson: 'Lee, Jr.', at: T(20) }), 'VIN00007', 'blocked', { at: T(21), reason: 'no price' });
-  const csv = pilotCsv(withComma, { now: T(310), labels, site: 'Test' });
+  const csv = pilotCsv(withComma, { now: T(310), labels, site: 'Test', origin: 'https://example-dealer.test', dealer: 'Ron Lewis CDJR Waynesburg', salesperson: 'Roger', timeZone: 'America/New_York', version: '0.4.0' });
   const lines = csv.split('\r\n');
-  assert.equal(lines[0], 'Lot Sync pilot numbers,Test,exported ' + T(310));
+  assert.equal(lines[0], 'Lot Sync pilot numbers,Test,exported 2026-10-26 10:10');
+  assert.equal(lines[1], 'Dealership,Ron Lewis CDJR Waynesburg');
+  assert.equal(lines[2], 'Website,https://example-dealer.test');
+  assert.equal(lines[3], 'Salesperson (from Settings),Roger');
+  assert.equal(lines[4], 'Time zone,America/New_York');
+  assert.equal(lines[5], 'Lot Sync version,0.4.0');
+  assert.equal(lines[6], '');
   assert.ok(lines.includes('Posted,3'));
   assert.ok(lines.includes('Median seconds per post,50'));
   assert.ok(lines.includes('Sold cars still listed,1'));
   assert.ok(lines.includes('Roger,2,45'));
   assert.ok(lines.includes("Field,Attempts,Filled,Needed a click,Couldn't fill,Changed by the form afterwards,Failure rate %"));
   assert.ok(lines.includes('Make,3,1,0,2,0,67'));
-  assert.ok(lines.includes(`${T(0)},Roger,Car 1,VIN00001,posted,40,no,0,,,`));
-  assert.ok(lines.includes(`${T(6)},Roger,Car 6,VIN00006,in progress,,no,,,,`));
-  assert.ok(lines.includes(`${T(20)},"Lee, Jr.","Car ""7"", the odd one",VIN00007,blocked,60,no,,,,no price`));
-  assert.ok(lines.includes(`${T(10)},sold / take down,Car 1,VIN00001,${T(70)},detected,1,,`));
-  assert.ok(lines.includes(`${T(10)},sold / take down,Car 2,VIN00002,,open,5,,`));
-  assert.ok(lines.includes(`${T(10)},price change,Car 3,VIN00003,${T(190)},manual,3,20000,19000`));
+  assert.ok(lines.includes('2026-10-26 05:00,Roger,Car 1,VIN00001,posted,40,no,0,,,'));
+  assert.ok(lines.includes('2026-10-26 05:06,Roger,Car 6,VIN00006,in progress,,no,,,,'));
+  assert.ok(lines.includes('2026-10-26 05:20,"Lee, Jr.","Car ""7"", the odd one",VIN00007,blocked,60,no,,,,no price'));
+  assert.ok(lines.includes('2026-10-26 05:10,sold / take down,Car 1,VIN00001,2026-10-26 06:10,detected,1,,'));
+  assert.ok(lines.includes('2026-10-26 05:10,sold / take down,Car 2,VIN00002,,open,5,,'));
+  assert.ok(lines.includes('2026-10-26 05:10,price change,Car 3,VIN00003,2026-10-26 08:10,manual,3,20000,19000'));
+  assert.doesNotMatch(csv, /\d\dT\d\d:\d\d/, 'no ISO timestamps reach the spreadsheet');
   assert.ok(csv.endsWith('\r\n'));
-  assert.equal(pilotFileName(T(0)), 'lot-sync-pilot-2026-10-26.csv');
+  assert.equal(withComma.posts[0].startedAt, T(0), 'storage keeps ISO');
+  // the same export in another zone, and the local zone when none is given
+  assert.equal(pilotCsv(withComma, { now: T(310), labels, timeZone: 'Asia/Tokyo' }).split('\r\n')[0], 'Lot Sync pilot numbers,,exported 2026-10-26 23:10');
+  const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  assert.equal(pilotCsv(withComma, { now: T(310), labels }).split('\r\n')[4], `Time zone,${here}`);
+  assert.equal(pilotCsv(withComma, { now: T(310), labels, timeZone: 'Not/AZone' }).split('\r\n')[4], `Time zone,${here}`, 'a zone Intl does not know falls back to this computer\'s instead of failing the download');
+  assert.equal(fmtLocal(T(0), 'America/New_York'), '2026-10-26 05:00');
+  assert.equal(fmtLocal(undefined, 'UTC'), '');
+});
+
+test('the CSV summary adds up (flagged = done + still open + cleared by the website) and carries the definitions', () => {
+  let p = samplePilot();
+  // a clean scan at T(200): Car 2 still gone, Car 4's price down; at T(260) the price is back, so the website cleared that flag
+  const car2 = { vin: 'VIN00002', yours: true, name: 'Car 2', why: 'gone' };
+  p = noteFlags(p, { warnings: [], takeDown: [car2], priceUpdates: [{ vin: 'VIN00004', yours: true, name: 'Car 4', from: 21000, to: 20500 }], takenAt: T(200) });
+  p = noteFlags(p, { warnings: [], takeDown: [car2], priceUpdates: [], takenAt: T(260) });
+  const lines = pilotCsv(p, { now: T(310), labels, timeZone: 'UTC' }).split('\r\n');
+  const value = (label) => {
+    const line = lines.find((l) => l.startsWith(label + ','));
+    assert.ok(line, `a "${label}" row`);
+    return Number(line.slice(label.length + 1));
+  };
+  assert.deepEqual([value('Sold cars flagged'), value('Sold cars taken down'), value('Sold cars still listed'), value('Sold cars cleared by the website')], [2, 1, 1, 0]);
+  assert.deepEqual([value('Price changes flagged'), value('Price changes updated'), value('Price changes still open'), value('Price changes cleared by the website')], [2, 1, 0, 1]);
+  assert.equal(value('Sold cars flagged'), value('Sold cars taken down') + value('Sold cars still listed') + value('Sold cars cleared by the website'));
+  assert.equal(value('Price changes flagged'), value('Price changes updated') + value('Price changes still open') + value('Price changes cleared by the website'));
+  assert.equal(value('Median hours from the flagging scan until taken down'), 1);
+  assert.equal(value('Median hours from the flagging scan until updated'), 3, 'a cleared flag is not in the median');
+  assert.ok(!lines.some((l) => l.startsWith('Median hours until')), 'the old, vaguer labels are gone');
+  // the Definitions block: a header row, then one row per sentence, right after the summary
+  const at = lines.indexOf('Definitions');
+  assert.ok(at > 0);
+  assert.equal(lines[at - 1], '');
+  assert.equal(lines[at - 2], `Median hours from the flagging scan until updated,3`);
+  const unquote = (l) => (l.startsWith('"') ? l.slice(1, -1).replace(/""/g, '"') : l);
+  assert.deepEqual(lines.slice(at + 1, at + 1 + DEFINITIONS.length).map(unquote), [...DEFINITIONS]);
+  assert.equal(lines[at + 1 + DEFINITIONS.length], '');
+  assert.equal(DEFINITIONS.length, 5);
+  for (const d of DEFINITIONS) assert.match(d, /^[A-Z].*\.$/, 'one plain sentence each');
+  assert.ok(lines.includes('2026-10-26 12:20,price change,Car 4,VIN00004,2026-10-26 13:20,cleared,1,21000,20500'));
+});
+
+test('the file name says whose numbers they are: site, salesperson and the local day', () => {
+  assert.equal(pilotFileName(T(0), { site: 'Ron Lewis CDJR Waynesburg', salesperson: 'Lee, Jr.', timeZone: 'America/New_York' }), 'lot-sync-pilot-ron-lewis-cdjr-waynesburg-lee-jr-2026-10-26.csv');
+  assert.equal(pilotFileName(T(0), { site: '  --Dealer #1!  ', salesperson: 'José Álvarez', timeZone: 'UTC' }), 'lot-sync-pilot-dealer-1-jose-alvarez-2026-10-26.csv');
+  assert.equal(pilotFileName(T(0), { timeZone: 'UTC' }), 'lot-sync-pilot-unnamed-unnamed-2026-10-26.csv');
+  // the day is the local one, not UTC's: 02:30 UTC is still the evening before in New York and already the next morning in Tokyo
+  const smallHours = new Date(Date.UTC(2026, 9, 26, 2, 30)).toISOString();
+  assert.equal(pilotFileName(smallHours, { site: 'Test', salesperson: 'Roger', timeZone: 'America/New_York' }), 'lot-sync-pilot-test-roger-2026-10-25.csv');
+  assert.equal(pilotFileName(smallHours, { site: 'Test', salesperson: 'Roger', timeZone: 'Asia/Tokyo' }), 'lot-sync-pilot-test-roger-2026-10-26.csv');
+  assert.match(pilotFileName(), /^lot-sync-pilot-unnamed-unnamed-\d{4}-\d{2}-\d{2}\.csv$/, 'no arguments: today, this computer\'s zone');
 });
 
 test('the storage helper reads, changes and writes one key; a failure is the caller\'s to catch', async () => {
@@ -237,6 +297,67 @@ test('the storage helper reads, changes and writes one key; a failure is the cal
   assert.equal(store[pilotKey(origin)].flags[0].flaggedAt, T(5));
   const broken = { get: async () => { throw new Error('storage is gone'); }, set: async () => {} };
   await assert.rejects(updatePilot(origin, (p) => p, broken), /storage is gone/);
+});
+
+// chrome.storage answers a tick later, in the order the calls were made: two
+// gets sent before either set both see the same old record, and the second
+// set then wipes out the first. That is the lost update updatePilot's lock
+// exists for (a background rescan recording a flag while the side panel
+// records a post).
+function tickStorage() {
+  const store = {};
+  const later = (fn) => new Promise((resolve) => setTimeout(() => resolve(fn()), 0));
+  return { store, get: (key) => later(() => ({ [key]: store[key] })), set: (obj) => later(() => { Object.assign(store, obj); }) };
+}
+
+test('two callers at once: without a lock one write is lost; with storage.lock both survive', async () => {
+  const origin = 'https://example-dealer.test';
+  const key = pilotKey(origin);
+  const diff = { warnings: [], takeDown: [{ vin: RAM, yours: true, name: 'Ram', why: 'gone' }], priceUpdates: [], takenAt: T(5) };
+  const post = (storage) => updatePilot(origin, (p) => beginPost(p, { vin: 'A', at: T(0) }), storage);
+
+  const bare = tickStorage();
+  await Promise.all([post(bare), recordFlags(origin, diff, T(5), bare)]);
+  const lost = bare.store[key];
+  assert.equal(lost.posts.length + lost.flags.length, 1, 'unlocked, the second set overwrites the first: one of the two is gone');
+  assert.equal(lost.posts.length, 0, 'the post (recorded first) is the one lost');
+
+  const locked = tickStorage();
+  const chains = new Map(); // a promise-chain mutex per name, the shape navigator.locks.request has
+  const names = [];
+  locked.lock = (name, fn) => {
+    names.push(name);
+    const run = (chains.get(name) || Promise.resolve()).then(fn);
+    chains.set(name, run.catch(() => null));
+    return run;
+  };
+  const [afterPost, afterFlags] = await Promise.all([post(locked), recordFlags(origin, diff, T(5), locked)]);
+  assert.deepEqual(names, [key, key], 'locked on the pilot key');
+  assert.equal(locked.store[key].posts.length, 1);
+  assert.equal(locked.store[key].flags.length, 1);
+  assert.deepEqual([afterPost.posts.length, afterPost.flags.length], [1, 0]);
+  assert.deepEqual([afterFlags.posts.length, afterFlags.flags.length], [1, 1], 'the second caller read the first one\'s write');
+  const failing = { ...tickStorage(), lock: locked.lock, get: async () => { throw new Error('storage is gone'); } };
+  await assert.rejects(updatePilot(origin, (p) => p, failing), /storage is gone/, 'a failure still reaches the caller through the lock');
+});
+
+test('in the browser the lock is a Web Lock on the pilot key', async () => {
+  const origin = 'https://example-dealer.test';
+  const requested = [];
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: async (name, fn) => { requested.push(name); return fn(); } } } });
+  try {
+    const storage = tickStorage();
+    const after = await updatePilot(origin, (p) => beginPost(p, { vin: 'A', at: T(0) }), storage);
+    assert.deepEqual(requested, [pilotKey(origin)]);
+    assert.equal(after.posts.length, 1);
+    assert.equal(storage.store[pilotKey(origin)].posts.length, 1);
+    const own = { ...tickStorage(), lock: async (name, fn) => fn() };
+    await updatePilot(origin, (p) => p, own);
+    assert.equal(requested.length, 1, 'an injected storage.lock is used before navigator.locks');
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator;
+  }
 });
 
 test('the lists stay bounded', () => {

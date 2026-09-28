@@ -3,13 +3,14 @@
 // -> "Open the Marketplace form" fills a MOCK create-listing page and attaches
 // photos -> the test clicks Publish as the salesperson would (the extension
 // never does) -> the panel notices the listing address -> the post is
-// recorded -> the popup shows it under My listings.
+// recorded -> the popup shows it under My listings. Last, the same form in
+// Spanish: the dry run says the form map is English only, not just "not found".
 //
 // The real facebook.com is never automated. Screenshots go to test/e2e/screenshots/.
 // Run: npm run test:e2e:post   (needs Playwright + Chromium installed)
 
 import { chromium } from 'playwright';
-import { cpSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,8 +24,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension: it may script the two local mock servers and
 // nothing else (the real facebook.com and image host permissions are removed).
-const extDir = join(tmpdir(), 'lot-sync-ext-under-test-post');
-rmSync(extDir, { recursive: true, force: true });
+const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -40,7 +40,7 @@ const siteUrl = `http://127.0.0.1:${site.address().port}/used-vehicles/`;
 const origin = new URL(siteUrl).origin;
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
 // See popup.e2e.mjs about LOTSYNC_E2E_CHANNEL.
-const profileDir = join(tmpdir(), 'lot-sync-profile-post-' + Date.now());
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-post-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
@@ -237,12 +237,51 @@ try {
   await popup.close();
   await panel.close();
 
+  // ---- 8. Facebook in another language: the dry run says so, instead of leaving a list of missing fields to puzzle over ----
+  // The salesperson now covers every store, so a second car (the Wagoneer,
+  // at Cranberry) is ready and not yet posted; the mock form opens in Spanish.
+  popup = await openPopup();
+  await popup.evaluate(async ({ o, url }) => {
+    const k = `settings:${o}`;
+    const data = await chrome.storage.local.get([k, 'devOverrides']);
+    await chrome.storage.local.set({ [k]: { ...data[k], myStores: [] }, devOverrides: { ...data.devOverrides, createUrl: url } });
+  }, { o: origin, url: `${marketOrigin}/marketplace/create/vehicle?lang=es` });
+  await popup.close();
+  popup = await openPopup();
+  await popup.click('#scan'); // the store choice changes what is ready, so rescan
+  await popup.waitForFunction(() => /2 ready to post/.test(document.querySelector('.meta')?.textContent || ''));
+  await tab(popup, 'ready').click();
+  const postButtons = popup.locator('button[data-action="openPost"]');
+  assert.equal(await postButtons.count(), 1, 'the posted Ram offers no Post button, the Wagoneer does');
+  await postButtons.first().click();
+  await popup.waitForFunction(() => /side panel/i.test(document.querySelector('#status').textContent));
+  await popup.close();
+  const panelEs = watch(await context.newPage());
+  await panelEs.goto(extUrl('sidepanel.html'));
+  await panelEs.waitForSelector('#openForm', { timeout: 20000 });
+  assert.match(await panelEs.textContent('#vehicle'), /2022 Jeep Wagoneer Series III/);
+  const [fbEs] = await Promise.all([context.waitForEvent('page'), panelEs.click('#checkForm')]);
+  watch(fbEs);
+  await panelEs.waitForSelector('#probeResults', { timeout: 30000 });
+  assert.equal(await fbEs.evaluate(() => document.documentElement.lang), 'es', 'the mock form is in Spanish');
+  const panelText = await panelEs.textContent('#panel');
+  assert.match(panelText, /form map is English only for now/);
+  assert.match(panelText, /set to "es"/);
+  const probeEs = await panelEs.textContent('#probeResults');
+  const notFound = Number((/Not found\s*(\d+)/.exec(probeEs) || [])[1]);
+  assert.ok(notFound >= 10, `nearly every field is missing on a Spanish form, but Not found says ${notFound}`);
+  assert.match(probeEs, /Not found[\s\S]*Vehicle type[\s\S]*VIN[\s\S]*Price[\s\S]*Description/);
+  assert.equal(await fbEs.inputValue('#vin'), '', 'the dry run fills nothing');
+  await panelEs.screenshot({ path: join(shots, 'post-8-spanish-form.png'), fullPage: true });
+  await fbEs.close();
+  await panelEs.close();
+
   assert.deepEqual(errors, [], 'no console errors');
   console.log('Post E2E passed. Screenshots in test/e2e/screenshots/');
 } finally {
   await context.close();
   // leave nothing behind: the throwaway profile and the extension copy
-  for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* still locked by the closing browser; the next run overwrites it */ } }
+  for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* still locked by the closing browser; every run makes its own folders, so a leftover does no harm */ } }
   site.close();
   market.close();
 }

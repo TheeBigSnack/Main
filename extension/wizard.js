@@ -5,7 +5,7 @@
 // panel can be closed and reopened.
 
 import { performScan, rememberSite } from './src/scanRunner.js';
-import { withDefaults, saveProfile } from './src/settings.js';
+import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -136,7 +136,7 @@ export function wizardHtml() {
     }
     case 'you':
       return `${progress}<h3>You</h3>
-        <label class="block">Your name <input type="text" id="wizName" value="${esc(s.salesperson.name)}" placeholder="e.g. Roger" /></label>
+        <label class="block">Your name <input type="text" id="wizName" value="${esc(s.salesperson.name)}" placeholder="Your first name" /></label>
         <label class="block">Your role <input type="text" id="wizTitle" value="${esc(s.salesperson.title)}" /></label>
         <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
         ${nav()}`;
@@ -145,8 +145,8 @@ export function wizardHtml() {
         <p class="hint">Read from the website${wiz.site && wiz.site.address && wiz.site.address.source ? ` (${esc(wiz.site.address.source)})` : ''}. Marketplace asks for a location; the ZIP is what gets typed.</p>
         <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" /></label>
         <label class="block">City <input type="text" id="wizCity" value="${esc(s.dealer.city)}" /></label>
-        <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="PA" /></label>
-        <label class="block">ZIP <input type="text" id="wizZip" value="${esc(s.dealer.zip)}" placeholder="15370" inputmode="numeric" /></label>
+        <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="e.g. OH" /></label>
+        <label class="block">ZIP <input type="text" id="wizZip" value="${esc(s.dealer.zip)}" placeholder="e.g. 43215" inputmode="numeric" /></label>
         ${nav()}`;
     case 'permission': {
       const origins = originsFor(wiz.site, wiz.service);
@@ -178,7 +178,7 @@ function readInputs() {
   const val = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : undefined; };
   const next = { ...s };
   if (wiz.step === 'store') next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
-  if (wiz.step === 'you') next.salesperson = { name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || 'sales consultant' };
+  if (wiz.step === 'you') next.salesperson = { name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE };
   if (wiz.step === 'address') next.dealer = { name: val('wizDealer') || s.dealer.name, city: val('wizCity') ?? s.dealer.city, state: (val('wizState') ?? s.dealer.state).toUpperCase(), zip: val('wizZip') ?? s.dealer.zip };
   if (wiz.step === 'permission') { const n = document.getElementById('wizNotify'); if (n) next.notify = n.checked; }
   if (wiz.step === 'rules') { const r = document.getElementById('wizRulesRead'); if (r) wiz.rulesRead = r.checked; }
@@ -193,7 +193,7 @@ async function finish(ctx) {
   wiz.settings = settings;
   const k = (name) => `${name}:${wiz.origin}`;
   await chrome.storage.local.set({ [k('settings')]: settings });
-  await saveProfile(settings);
+  await saveProfile(settings, undefined, wiz.origin);
   // the site registry must agree with the settings even if the final read below fails
   await rememberSite(wiz.origin, { auto: Boolean(settings.autoRescan) });
   // one more read with the final settings, so Ready to post is right from the start

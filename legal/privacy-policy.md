@@ -9,9 +9,10 @@ Last updated: [date]. [Lot Sync entity name] ("we") makes the Lot Sync browser e
 | Data | Where it lives | Why |
 |---|---|---|
 | Dealership website inventory (vehicle records: VIN, year/make/model, price, mileage, photos, features, description, location, status) | In the User's own browser (`chrome.storage.local`), read from the dealership's public website each scan | To check each car is pre-owned and ready, to prepare listings, and to detect sold cars and price changes |
-| Settings (salesperson name and role, dealership name, city, state, ZIP, price basis, price note, daily cap, rewrite-service address and key) | In the User's browser | To fill the listing and sign the description |
+| Settings (salesperson name and role, dealership name, city, state, ZIP, price basis, price note, daily cap, listing defaults for title status and condition, rewrite-service address and key) | In the User's browser. The profile (name, role, dealership, price basis, note, cap, listing defaults) is also kept in Chrome's sync storage under the User's own Google account, so it follows the User's Chrome sign-in; the rewrite-service key never leaves the computer | To fill the listing and sign the description |
 | Posted-listing registry (VIN, listing link the User saved or Lot Sync detected, posted price, times, salesperson name) | In the User's browser; from Milestone 4, also in our database, per dealership | To keep listings accurate and, for managers, to see who posted what |
 | Scan summaries (counts and change lists) | In the User's browser; later, per-dealership in our database | Rescans and the manager view |
+| Usage numbers: when a post started and ended and its outcome, which form fields could not be filled, hours until a flagged sold car or price change was fixed, and the salesperson name from Settings | Kept in the User's browser; leaves it only as the CSV the User chooses to export | Pilot check-ins and, from Milestone 4, the manager view |
 | Account details (from Milestone 4: email for magic-link sign-in, dealership membership, role) | Our database (Supabase) | Sign-in and access control |
 | Billing details (from Milestone 5: dealership billing contact, subscription status) | Our payment processor (Stripe); we do not store card numbers | Billing |
 | Rewrite requests (vehicle facts, dealership name and city, salesperson name and role, price note) | Sent to our rewrite service and on to Anthropic's API only when the dealership turns the feature on | To draft a description |
@@ -31,7 +32,7 @@ We do not sell personal data and do not use it for advertising.
 
 ## Retention
 
-Browser data stays until the User clears it (Settings, "Clear everything for this website") or uninstalls. Database records for a dealership are deleted within 30 days of the subscription ending unless the law requires longer. Rewrite logs keep the vehicle's year, make and model and a cost figure, not the description. Support and billing records are kept as required for accounting and legal purposes.
+Browser data stays until the User clears it (Settings, "Clear everything for this website") or uninstalls. The usage numbers are deleted by "Clear pilot numbers" in the Pilot tab and by "Clear everything for this website" in Settings. The profile in Chrome's sync storage (name, role, dealership, price basis, note, cap, listing defaults) is not removed by "Clear everything for this website"; "Forget my synced profile" in Settings removes it, and it also goes when the User clears their Chrome sync data. Saving Settings re-creates it. Database records for a dealership are deleted within 30 days of the subscription ending unless the law requires longer. Rewrite logs keep the vehicle's year, make and model and a cost figure, not the description. Support and billing records are kept as required for accounting and legal purposes.
 
 ## Security
 

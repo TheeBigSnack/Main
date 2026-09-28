@@ -17,11 +17,11 @@ The extension works without it: descriptions then come from the built-in templat
 3. Install and start (Node 20 or newer):
 
    ```
-   npm install
+   npm ci
    npm start
    ```
 
-   You should see `Lot Sync rewrite service on http://localhost:8787`. Check it with `http://localhost:8787/health`.
+   You should see `Lot Sync rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`.
 4. In the extension: click the Lot Sync icon, **Settings**, **Description writer**. Tick "Use the Lot Sync rewrite service", enter `http://localhost:8787` as the address and your `REWRITE_KEY` as the key. Save.
 
 From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, banned phrases, dealer name, length); a draft that fails is regenerated once, then the template is used.
@@ -47,7 +47,9 @@ Current model names and prices: https://docs.claude.com/en/docs/about-claude/mod
 
 ## Running it for a whole store
 
-For a pilot it can run on one PC (`npm start` in a terminal) with the extension pointed at `http://localhost:8787`. To share it, run it on any small Node host (Railway, Fly.io, Render, a VPS), set `REWRITE_KEY`, use https, and give the salespeople the address and key. Milestone 4 replaces this with a Supabase Edge Function behind real sign-in.
+For a pilot it can run on one PC (`npm start` in a terminal) with the extension pointed at `http://localhost:8787`. By default it listens on `127.0.0.1` only, so nothing else on the network can reach it.
+
+To share it, run it on any small Node host (Railway, Fly.io, Render, a VPS) with `HOST=0.0.0.0` and `REWRITE_KEY` set in `.env` (the service refuses to start on any address other than `127.0.0.1` without a key), use https, and give the salespeople the address and key. The key is a pilot-only shared secret: every salesperson has the same one, so if a salesperson leaves, change it in `.env` and on every machine that still has the old one. Milestone 4 replaces it with per-user sign-in (a Supabase Edge Function behind real accounts).
 
 ## What it stores
 

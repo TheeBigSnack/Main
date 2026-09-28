@@ -9,6 +9,7 @@ For a used car manager, at their desk, on their own website. One laptop with Chr
 - Pick the car you will post: pre-owned, at this store, with photos and a price, and with a real write-up on the website if possible. Have a second one in mind.
 - Decide with the manager beforehand whether the demo post gets published. Default: **no**. You close the Facebook tab without publishing and nothing is recorded. If they want a real listing, one of their salespeople clicks Publish, not you.
 - Settings: name, role, store ticked, address filled from the website, defaults Clean / Very good, cap 10.
+- At Waynesburg the other rooftops are Cranberry and Pleasant Hills.
 
 ## 0:00 The problem, in one breath
 
@@ -18,7 +19,7 @@ For a used car manager, at their desk, on their own website. One laptop with Chr
 
 Click the Lot Sync icon, then **Rescan website**.
 
-Show: the count of used cars read, **Ready to post**, **Other stores** (cars at Cranberry and Pleasant Hills kept off this list), **Needs a look** (anything the website doesn't add up on, like a used car showing 0 miles).
+Show: the count of used cars read, **Ready to post**, **Other stores** (group websites only: cars at the group's other rooftops, kept off this list; the tab is hidden on a single-store site), **Needs a look** (anything the website doesn't add up on, like a used car showing 0 miles).
 
 Say: "It only lets through cars your website itself says are pre-owned, at this store, with photos and a price. New, demo and loaner cars can't get in."
 

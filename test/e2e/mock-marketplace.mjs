@@ -5,6 +5,10 @@
 // current page matches (that needs a real, signed-in check; see README).
 // The real facebook.com is never automated in tests.
 //
+// With ?lang=es the same page is drawn in Spanish, <html lang="es"> and all,
+// for the test of a Facebook account set to another language: none of its
+// accessible names matches an English pattern in formMap.js.
+//
 // It mimics what the first live run (2026-09-27) showed about the real form:
 //   - dropdowns are custom comboboxes whose option list is drawn late
 //     (the Year list here takes 2.5 s), and only one popup is open at a time:
@@ -26,48 +30,92 @@ const PREFILLS = {
 };
 let prefill = null;
 
-const opts = (list) => '<option value=""></option>' + list.map((o) => `<option>${o}</option>`).join('');
 const COLORS = ['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Grey', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white', 'Other'];
 const YEARS = [];
 for (let y = 2027; y >= 1990; y -= 1) YEARS.push(String(y));
 
-// A custom dropdown: a combobox control plus a listbox drawn `delay` ms after the click.
-const combo = (id, label, options, delay) =>
-  `<div>${label}
-    <div id="${id}" role="combobox" aria-label="${label}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${id}List" tabindex="0" data-value="" data-delay="${delay}">Select</div>
-    <div id="${id}List" role="listbox" hidden></div>
-    <template id="${id}Options">${options.map((o) => `<div role="option">${o}</div>`).join('')}</template>
-  </div>`;
+// Spanish, for ?lang=es: the field names, the options of the native selects
+// (a select's option text is part of its accessible name as the probe reads
+// it, so "Automatic transmission" would otherwise still match "Transmission")
+// and the page's own wording. Nothing here matches an English pattern in
+// formMap.js, not even the fallback on a field's English label.
+const ES = {
+  'Create vehicle listing (mock)': 'Crear publicación de vehículo (simulado)',
+  'Add up to 20 photos.': 'Añade hasta 20 fotos.',
+  'Add photos': 'Añadir fotos',
+  photos: 'fotos',
+  Select: 'Seleccionar',
+  'Vehicle type': 'Tipo de vehículo',
+  VIN: 'Número de identificación',
+  Year: 'Año',
+  Make: 'Marca',
+  Model: 'Modelo',
+  Mileage: 'Kilometraje',
+  Price: 'Precio',
+  'Body style': 'Tipo de carrocería',
+  'Exterior color': 'Color exterior',
+  'Interior color': 'Color interior',
+  'Fuel type': 'Tipo de combustible',
+  Transmission: 'Transmisión',
+  Location: 'Ubicación',
+  Description: 'Descripción',
+  'Vehicle condition': 'Estado del vehículo',
+  'Title status': 'Estado del título',
+  'Vehicle details': 'Detalles del vehículo',
+  'Include more details to help connect interested buyers to your vehicle.': 'Incluye más detalles para ayudar a los compradores interesados a encontrar tu vehículo.',
+  'This vehicle has a clean title.': 'Este vehículo tiene el título limpio.',
+  'This vehicle has no significant damage or persistent problems.': 'Este vehículo no tiene daños importantes ni problemas persistentes.',
+  Publish: 'Publicar',
+  // the options
+  'Car/Truck': 'Coche/Camioneta', Motorcycle: 'Motocicleta', Powersport: 'Vehículo recreativo', 'RV/Camper': 'Autocaravana', Trailer: 'Remolque', Boat: 'Barco', 'Commercial/Industrial': 'Comercial/Industrial', Other: 'Otro',
+  Black: 'Negro', Blue: 'Azul', Brown: 'Marrón', Gold: 'Dorado', Green: 'Verde', Grey: 'Gris', Pink: 'Rosa', Purple: 'Morado', Red: 'Rojo', Silver: 'Plateado', Orange: 'Naranja', White: 'Blanco', Yellow: 'Amarillo', Charcoal: 'Carbón', Tan: 'Canela', Burgundy: 'Burdeos', Turquoise: 'Turquesa', 'Off white': 'Blanco roto',
+  Convertible: 'Descapotable', Coupe: 'Cupé', Hatchback: 'Compacto', Minivan: 'Monovolumen', Truck: 'Camioneta', SUV: 'Todoterreno', Sedan: 'Sedán', Van: 'Furgoneta', Wagon: 'Familiar',
+  Excellent: 'Excelente', 'Very good': 'Muy bueno', Good: 'Bueno', Fair: 'Regular', Poor: 'Malo',
+  Diesel: 'Diésel', Electric: 'Eléctrico', Gasoline: 'Gasolina', Hybrid: 'Híbrido', Petrol: 'Nafta', 'Plug-in hybrid': 'Híbrido enchufable',
+  'Automatic transmission': 'Transmisión automática', 'Manual transmission': 'Transmisión manual',
+  Clean: 'Limpio', Rebuilt: 'Reconstruido', Salvage: 'Siniestrado', Lien: 'Con gravamen', Missing: 'Sin título',
+};
 
-const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create vehicle listing (mock)</title>
+// The create-listing page in one language ('en' or 'es'): `t` translates every word it knows.
+function page(lang) {
+  const t = lang === 'es' ? (s) => ES[s] || s : (s) => s;
+  const opts = (list) => '<option value=""></option>' + list.map((o) => `<option>${t(o)}</option>`).join('');
+  // A custom dropdown: a combobox control plus a listbox drawn `delay` ms after the click.
+  const combo = (id, label, options, delay) =>
+    `<div>${t(label)}
+    <div id="${id}" role="combobox" aria-label="${t(label)}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${id}List" tabindex="0" data-value="" data-delay="${delay}">${t('Select')}</div>
+    <div id="${id}List" role="listbox" hidden></div>
+    <template id="${id}Options">${options.map((o) => `<div role="option">${t(o)}</div>`).join('')}</template>
+  </div>`;
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${t('Create vehicle listing (mock)')}</title>
 <style>body{font:14px system-ui;max-width:640px;margin:20px auto}label{display:block;margin:8px 0}[role=listbox]{border:1px solid #999;padding:4px;width:200px;max-height:160px;overflow:auto}[role=option]{padding:2px 6px;cursor:pointer}[hidden]{display:none}[role=combobox]{border:1px solid #999;padding:4px 8px;width:200px;cursor:pointer}</style>
 </head><body>
-<h1>Create vehicle listing (mock)</h1>
-<p>Add up to 20 photos.</p>
+<h1>${t('Create vehicle listing (mock)')}</h1>
+<p>${t('Add up to 20 photos.')}</p>
 <form onsubmit="return false">
-  <label for="photos">Add photos</label>
-  <input id="photos" type="file" multiple accept="image/*"> <span id="photoCount">0 photos</span>
+  <label for="photos">${t('Add photos')}</label>
+  <input id="photos" type="file" multiple accept="image/*"> <span id="photoCount">0 ${t('photos')}</span>
   ${combo('vehicleType', 'Vehicle type', ['Car/Truck', 'Motorcycle', 'Powersport', 'RV/Camper', 'Trailer', 'Boat', 'Commercial/Industrial', 'Other'], 0)}
   ${combo('year', 'Year', YEARS, 2500)}
-  <div id="makeWrap" hidden><label>Make <input id="make" role="combobox" aria-autocomplete="list" aria-controls="makeList" autocomplete="off"></label><div id="makeList" role="listbox" hidden></div></div>
-  <label>Model <input id="model" role="combobox" aria-autocomplete="list" aria-controls="modelList" autocomplete="off"></label><div id="modelList" role="listbox" hidden></div>
-  <label>VIN <input id="vin"></label>
-  <label>Mileage <input id="mileage"></label>
-  <label>Price <input id="price"></label>
-  <label>Body style <select id="bodyStyle">${opts(['Convertible', 'Coupe', 'Hatchback', 'Minivan', 'Truck', 'SUV', 'Sedan', 'Van', 'Wagon', 'Other'])}</select></label>
+  <div id="makeWrap" hidden><label>${t('Make')} <input id="make" role="combobox" aria-autocomplete="list" aria-controls="makeList" autocomplete="off"></label><div id="makeList" role="listbox" hidden></div></div>
+  <label>${t('Model')} <input id="model" role="combobox" aria-autocomplete="list" aria-controls="modelList" autocomplete="off"></label><div id="modelList" role="listbox" hidden></div>
+  <label>${t('VIN')} <input id="vin"></label>
+  <label>${t('Mileage')} <input id="mileage"></label>
+  <label>${t('Price')} <input id="price"></label>
+  <label>${t('Body style')} <select id="bodyStyle">${opts(['Convertible', 'Coupe', 'Hatchback', 'Minivan', 'Truck', 'SUV', 'Sedan', 'Van', 'Wagon', 'Other'])}</select></label>
   ${combo('exteriorColor', 'Exterior color', COLORS, 300)}
-  <label>Interior color <select id="interiorColor">${opts(COLORS)}</select></label>
-  <label>Vehicle condition <select id="condition">${opts(['Excellent', 'Very good', 'Good', 'Fair', 'Poor'])}</select></label>
-  <label>Fuel type <select id="fuelType">${opts(['Diesel', 'Electric', 'Gasoline', 'Flex', 'Hybrid', 'Petrol', 'Plug-in hybrid', 'Other'])}</select></label>
-  <label>Transmission <select id="transmission">${opts(['Automatic transmission', 'Manual transmission'])}</select></label>
-  <label>Title status <select id="titleStatus">${opts(['Clean', 'Rebuilt', 'Salvage', 'Lien', 'Missing'])}</select></label>
-  <div><b>Vehicle details</b><div>Include more details to help connect interested buyers to your vehicle.</div>
-    <div><div><b>This vehicle has a clean title.</b><div>This vehicle has no significant damage or persistent problems.</div></div><input type="checkbox" id="cleanTitle"></div>
+  <label>${t('Interior color')} <select id="interiorColor">${opts(COLORS)}</select></label>
+  <label>${t('Vehicle condition')} <select id="condition">${opts(['Excellent', 'Very good', 'Good', 'Fair', 'Poor'])}</select></label>
+  <label>${t('Fuel type')} <select id="fuelType">${opts(['Diesel', 'Electric', 'Gasoline', 'Flex', 'Hybrid', 'Petrol', 'Plug-in hybrid', 'Other'])}</select></label>
+  <label>${t('Transmission')} <select id="transmission">${opts(['Automatic transmission', 'Manual transmission'])}</select></label>
+  <label>${t('Title status')} <select id="titleStatus">${opts(['Clean', 'Rebuilt', 'Salvage', 'Lien', 'Missing'])}</select></label>
+  <div><b>${t('Vehicle details')}</b><div>${t('Include more details to help connect interested buyers to your vehicle.')}</div>
+    <div><div><b>${t('This vehicle has a clean title.')}</b><div>${t('This vehicle has no significant damage or persistent problems.')}</div></div><input type="checkbox" id="cleanTitle"></div>
   </div>
-  <label>Location <input id="location" role="combobox" aria-autocomplete="list" aria-controls="locationList" autocomplete="off"></label>
+  <label>${t('Location')} <input id="location" role="combobox" aria-autocomplete="list" aria-controls="locationList" autocomplete="off"></label>
   <div id="locationList" role="listbox" hidden></div>
-  <label>Description <textarea id="description" rows="10" cols="60"></textarea></label>
-  <button type="button" id="publish">Publish</button>
+  <label>${t('Description')} <textarea id="description" rows="10" cols="60"></textarea></label>
+  <button type="button" id="publish">${t('Publish')}</button>
 </form>
 <script>
   // One popup at a time, like the real page: clicking a control while another
@@ -173,7 +221,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
   let photos = 0;
   document.getElementById('photos').addEventListener('change', (e) => {
     photos += e.target.files.length;
-    document.getElementById('photoCount').textContent = photos + ' photos';
+    document.getElementById('photoCount').textContent = photos + ' ' + ${JSON.stringify(t('photos'))};
   });
   // Only a person clicks this. The extension has no code path to it.
   document.getElementById('publish').addEventListener('click', async () => {
@@ -181,6 +229,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Create veh
     location.href = '/marketplace/item/424242/';
   });
 </script></body></html>`;
+}
 
 // Listings the person has published, for the upkeep pages: id -> { title, price, sold, deleted }.
 const listings = {
@@ -271,7 +320,7 @@ export function startMockMarketplace(port = 0) {
       return res.end('<!doctype html><html><head><meta charset="utf-8"><title>Your listing (mock)</title></head><body><h1>Listing 424242 is live (mock)</h1></body></html>');
     }
     res.writeHead(200, { 'content-type': 'text/html' });
-    res.end(PAGE.replace('__PREFILL__', JSON.stringify(prefill)));
+    res.end(page(url.searchParams.get('lang') === 'es' ? 'es' : 'en').replace('__PREFILL__', JSON.stringify(prefill)));
   });
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
 }

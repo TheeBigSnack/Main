@@ -18,7 +18,7 @@ The Dealer authorises the Users it designates (Schedule B, or as managed in the 
 
 ## 4. Dealer responsibilities
 
-The Dealer is responsible for: the accuracy of its website inventory and prices; compliance of every listing with federal and Pennsylvania advertising law (price display, fee disclosure, dealer identification) and with Meta's Terms and Commerce Policies; ensuring only pre-owned vehicles are listed; the daily cap it sets for its staff; and reviewing every description before it is published. Lot Sync provides checks that help, and does not replace the Dealer's judgment.
+The Dealer is responsible for: the accuracy of its website inventory and prices; compliance of every listing with federal law and the vehicle-advertising law of every state where the Dealer is located or advertises (for a Pennsylvania dealer, the Automotive Industry Trade Practices regulations), including price display, fee disclosure and dealer identification, and with Meta's Terms and Commerce Policies; ensuring only pre-owned vehicles are listed; the daily cap it sets for its staff; and reviewing every description before it is published. Lot Sync provides checks that help, and does not replace the Dealer's judgment.
 
 ## 5. Fees
 

@@ -13,15 +13,28 @@ Rules, all of them strict:
 - Mention the mileage and 4 to 6 of the most useful features. Navigation, Apple CarPlay/Android Auto, heated seats, leather, sunroof, backup camera, remote start, blind spot monitoring, towing, AWD/4WD, Bluetooth and keyless entry rank highest.
 - If "narrative" has text, you may use its facts and tone, but write it in your own words.
 - Include the priceNote exactly as given, if it is not empty.
-- End with a sign-off that names the salesperson (if given), their title and the dealership name exactly as given, for example: "I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg." Never pose as a private seller.
+- End with a sign-off that names the salesperson (if given), their title and the dealership name exactly as given, for example: "I'm <salesperson name>, <title> at <dealership name>." Never pose as a private seller.
 - No ALL CAPS words except abbreviations like HEMI, AWD, 4WD, SRT. No emoji. Nothing about the race, religion, national origin, sex, family status, disability or age of any buyer.
 - Do not mention Facebook, Meta or Marketplace.
 - Output only the description text, nothing else.`;
+
+const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+// The same sign-off the template writer builds (extension/src/rewriteTemplate.js),
+// so both writers agree and no name is baked into the system prompt.
+function signOff(facts) {
+  const who = (facts && facts.salesperson) || {};
+  const name = String(who.name || '').trim();
+  const title = String(who.title || 'sales consultant').trim();
+  const dealer = String((facts && facts.dealer && facts.dealer.name) || '').trim();
+  return name ? `I'm ${name}, ${title} at ${dealer}.` : `${capitalize(title)} at ${dealer}.`;
+}
 
 export function buildRewritePrompt(facts, fixes = []) {
   const user = [
     'Facts (JSON):',
     JSON.stringify(facts, null, 2),
+    `\nSign off with exactly: "${signOff(facts)}"`,
     fixes.length ? `\nYour previous draft failed these checks. Write a new one that fixes every one of them:\n- ${fixes.join('\n- ')}` : '',
     '\nWrite the description now.',
   ]

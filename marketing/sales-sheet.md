@@ -39,4 +39,4 @@ Planned at **$149 per rooftop per month**, five salespeople included, $20 a mont
 
 ---
 
-Lot Sync · [contact name] · [phone] · [email] · Waynesburg, PA
+Lot Sync · [contact name] · [phone] · [email] · [city, state]

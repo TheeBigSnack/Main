@@ -16,9 +16,16 @@ import { DECISION } from './classify.js';
 
 export const MASS_DISAPPEARANCE_SHARE = 0.5;
 
+// The price to post. 'beforeFees' means the lower second price the website
+// shows; when this car has none below its main price, the main price is used
+// (a price that is not on the website is never posted).
 export function basisPrice(v, basis = 'website') {
   if (!v) return null;
-  return basis === 'beforeFees' ? v.priceBeforeFees ?? null : v.price ?? null;
+  const main = typeof v.price === 'number' ? v.price : null;
+  const lower = typeof v.priceBeforeFees === 'number' && v.priceBeforeFees > 0 ? v.priceBeforeFees : null;
+  if (basis !== 'beforeFees') return main;
+  if (lower !== null && (main === null || lower < main)) return lower;
+  return main;
 }
 
 // The compact per-car record kept between scans.

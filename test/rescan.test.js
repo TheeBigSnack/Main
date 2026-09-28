@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
-import { snapshot, fixtures } from './helpers.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from '../extension/src/rescan.js';
+import { snapshot, fixtures, vehicle } from './helpers.js';
 
 const VIN = {
   ram: fixtures.usedNormal.vin, // ready, $27,163
@@ -11,6 +11,18 @@ const VIN = {
 };
 const LOT = [['usedNormal'], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']];
 const confirmed = (...vins) => ({ checked: vins, notFound: vins, error: null });
+
+test('the price to post: the lower second price only when this car shows one below its main price', () => {
+  const car = vehicle('usedNormal'); // 27163 main, 26673 before fees
+  assert.equal(basisPrice(car), 27163);
+  assert.equal(basisPrice(car, 'beforeFees'), 26673);
+  assert.equal(basisPrice({ price: 20000 }, 'beforeFees'), 20000, 'no second price: the main price');
+  assert.equal(basisPrice({ price: 20000, priceBeforeFees: 21000 }, 'beforeFees'), 20000, 'a higher second number is not a price before fees');
+  assert.equal(basisPrice({ price: 20000, priceBeforeFees: 0 }, 'beforeFees'), 20000);
+  assert.equal(basisPrice({ priceBeforeFees: 19000 }, 'beforeFees'), 19000);
+  assert.equal(basisPrice({}, 'beforeFees'), null);
+  assert.equal(basisPrice(null), null);
+});
 
 test('first scan: nothing to do yet', () => {
   const d = diffScans(null, snapshot(LOT));

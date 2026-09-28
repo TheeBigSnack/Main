@@ -1,0 +1,40 @@
+// CLAUDE.md, "Build for any dealer": the pilot dealer is a fixture, not a
+// default. No value that belongs to one store may sit in the code that ships
+// (comments may still record what the live runs taught).
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`])\/\/[^\n]*$/gm, '$1');
+const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
+
+function walk(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (/\.(js|html|json)$/.test(name)) out.push(full);
+  }
+  return out;
+}
+
+test('the shipped code and the rewrite service carry no pilot-dealer value', () => {
+  const files = [...walk(join(root, 'extension')), ...walk(join(root, 'backend')).filter((f) => !/package(-lock)?\.json$/.test(f))];
+  assert.ok(files.length > 30);
+  for (const file of files) {
+    const src = readFileSync(file, 'utf8');
+    const code = /\.js$/.test(file) ? stripComments(src) : src;
+    const hit = code.match(PILOT);
+    assert.equal(hit, null, `${file.slice(root.length)} contains "${hit && hit[0]}" outside a comment`);
+  }
+});
+
+test('the manifest and the popup speak to any dealership', () => {
+  const manifest = readFileSync(join(root, 'extension/manifest.json'), 'utf8');
+  assert.doesNotMatch(manifest, /Waynesburg|Ron Lewis/);
+  const popup = readFileSync(join(root, 'extension/popup.js'), 'utf8');
+  assert.doesNotMatch(popup, /placeholder="(e\.g\. )?(Roger|PA|15370)"/);
+});

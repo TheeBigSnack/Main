@@ -106,3 +106,17 @@ export const FORM_MAP = Object.freeze({
   // added; kept so a field can be fenced off again in one line.
   neverFill: [],
 });
+
+// Test hook. The end-to-end flows point the side panel at the mock
+// Marketplace by putting `devOverrides` in chrome.storage.local. Only these
+// keys can be overridden (addresses and timings), never the fields, their
+// options or neverFill, so nothing written to storage can change what the
+// fill code may touch (non-negotiable 1; test/posting.test.js checks it).
+export const DEV_OVERRIDE_KEYS = Object.freeze(['createUrl', 'listingUrlPattern', 'afterPublishPatterns', 'yourListingsUrl', 'settleMs', 'recheckMs']);
+
+export function applyOverrides(map, overrides) {
+  if (!overrides || typeof overrides !== 'object') return map;
+  const out = { ...map };
+  for (const key of DEV_OVERRIDE_KEYS) if (key in overrides) out[key] = overrides[key];
+  return out;
+}

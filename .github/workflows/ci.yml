@@ -1,0 +1,58 @@
+# Lot Sync CI: the unit tests, then each end-to-end flow in its own job.
+# The e2e flows load the real extension into Playwright's Chromium against
+# the two mock servers in test/e2e/ (never facebook.com); one flow per job
+# because the queue flow has 60-second waits that time out when two
+# Chromiums compete for one runner (see HANDOFF.md section 3.4).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm test
+
+  e2e:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        flow: [popup, post, queue, wizard, upkeep]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:${{ matrix.flow }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.flow }}
+          path: test/e2e/screenshots/
+          if-no-files-found: ignore
+
+  pack:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm run pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip
+          path: dist/*.zip

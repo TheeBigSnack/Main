@@ -6,7 +6,9 @@
   "description": "Scans a dealership website's used inventory, checks each car is really pre-owned, pre-fills Marketplace listings for a person to publish, and rescans for sold cars and price changes.",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "test:e2e": "node test/e2e/popup.e2e.mjs && node test/e2e/post.e2e.mjs && node test/e2e/queue.e2e.mjs && node test/e2e/wizard.e2e.mjs && node test/e2e/upkeep.e2e.mjs",
+    "pack": "node scripts/pack.mjs",
+    "test:e2e": "node scripts/e2e-all.mjs",
+    "test:e2e:parallel": "node scripts/e2e-all.mjs --parallel 2",
     "test:e2e:popup": "node test/e2e/popup.e2e.mjs",
     "test:e2e:post": "node test/e2e/post.e2e.mjs",
     "test:e2e:queue": "node test/e2e/queue.e2e.mjs",
@@ -15,5 +17,8 @@
   },
   "devDependencies": {
     "playwright": "^1.56.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

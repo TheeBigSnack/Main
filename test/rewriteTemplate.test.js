@@ -91,6 +91,27 @@ test('guardrails catch numbers that are not in the source', () => {
   assert.ok(g.problems.some((p) => p.code === 'unknown-number' && p.text.includes('12000')));
 });
 
+test('a price note quoting a fee amount must match the gap between the two prices this car shows', () => {
+  const v = vehicle('usedNormal'); // 27163 main, 26673 before fees: a $490 gap
+  const ok = runGuardrails(buildTemplateDescription(ctx(v)), ctx(v));
+  assert.equal(ok.ok, true);
+  const stale = ctx(v, { priceNote: 'Price includes the $500 doc fee; tax and tags extra.' });
+  const g = runGuardrails(buildTemplateDescription(stale), stale);
+  assert.ok(g.problems.some((p) => p.code === 'price-note-amount' && /\$500/.test(p.text) && /\$490/.test(p.text)), JSON.stringify(g.problems));
+  // only the amount tied to the fee is compared: another fee in the same note is the dealer's business
+  const two = ctx(v, { priceNote: 'Price includes the $490 doc fee; tax, tags and a $55 title fee extra.' });
+  const t2 = runGuardrails(buildTemplateDescription(two), two);
+  assert.ok(!t2.problems.some((p) => p.code === 'price-note-amount'), JSON.stringify(t2.problems));
+  const wrongTied = ctx(v, { priceNote: 'Price includes the $500 doc fee; tax, tags and a $55 title fee extra.' });
+  const t3 = runGuardrails(buildTemplateDescription(wrongTied), wrongTied);
+  assert.ok(t3.problems.some((p) => p.code === 'price-note-amount' && /\$500/.test(p.text)), JSON.stringify(t3.problems));
+  // no second price on this car: nothing to compare the note with, so it passes
+  const single = vehicle('usedNormal', { pricing: { internet_price: null, price: null } });
+  const c = ctx(single, { priceNote: 'Price includes the $500 doc fee; tax and tags extra.' });
+  const h = runGuardrails(buildTemplateDescription(c), c);
+  assert.ok(!h.problems.some((p) => p.code === 'price-note-amount'), JSON.stringify(h.problems));
+});
+
 test('guardrails catch banned phrases, fake one-owner claims, a missing dealer name and shouting', () => {
   const v = vehicle('usedNoCarfax');
   const base = buildTemplateDescription(ctx(v));
