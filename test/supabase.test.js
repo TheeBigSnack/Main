@@ -167,10 +167,62 @@ test('supabase/README.md names today, postsToday, plan, the 402 rule and the Bil
 });
 
 test('supabase/README.md says what the code does: the code folding, the created_at rule, the rewrite origin rule, in-place migrations', () => {
-  assert.match(readme, /any text works as a code \(matched ignoring case and surrounding spaces\)/);
+  assert.match(readme, /a code works once and for 7 days/);
   assert.match(readme, /`listings\.created_at`, stamped by the server when the row arrived/);
   assert.match(readme, /the client's `postedAt` is never compared with `since`/);
   assert.match(readme, /matches none of their dealerships gets 403/);
   assert.match(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/);
   assert.match(readme, /The pilot lists are the one place a client clock still meets `since`/);
+});
+
+// Security audit (2026-09-29): invite codes expire, die with their maker, give one answer and are throttled;
+// managers list and revoke them; the website origin is not a manager's to change; the deployment steps never
+// leave a guessable code, a localhost Site URL or the default email budget behind.
+test('invite codes: 7-day expiry, one answer for every bad code, a throttle, list and revoke for managers, gone with their maker', () => {
+  assert.match(schema, /expires_at timestamptz not null default \(now\(\) \+ interval '7 days'\)/);
+  assert.match(schema, /create table public\.invite_misses/);
+  assert.match(rls, /revoke all on public\.invite_misses from anon, authenticated, service_role;/);
+  assert.match(rls, /alter table public\.invite_misses enable row level security;/);
+  const redeem = rls.slice(rls.indexOf('create or replace function public.redeem_invite'), rls.indexOf('comment on function public.redeem_invite'));
+  assert.ok(redeem.indexOf('invite_misses') < redeem.indexOf('from public.invites'), 'the throttle runs before the code is looked up');
+  assert.match(redeem, /if misses >= 10 then\s+raise exception 'too many attempts; try again in an hour' using errcode = 'P0005'/);
+  assert.match(redeem, /inv\.expires_at <= now\(\)/);
+  assert.match(redeem, /m\.role = 'manager'/, 'a code dies with its maker\'s manager role');
+  assert.match(redeem, /'code', 'P0002', 'message', 'that invite code is not valid'/);
+  assert.doesNotMatch(redeem, /P0003|already used|was not found/, 'no second answer that tells a used code from an unknown one');
+  for (const fn of ['list_invites(uuid)', 'revoke_invite(text)']) {
+    assert.ok(rls.includes(`revoke execute on function public.${fn} from public, anon;`), fn);
+    assert.ok(rls.includes(`grant execute on function public.${fn} to authenticated, service_role;`), fn);
+  }
+  assert.match(rls, /not public\.is_manager\(list_invites\.dealership_id\)[\s\S]*?errcode = '42501'/);
+  assert.match(rls, /and public\.is_manager\(i\.dealership_id\);\s+get diagnostics n = row_count;\s+return n > 0;/);
+  assert.match(rls, /create trigger memberships_forget_invites\s+after delete on public\.memberships/);
+  assert.match(rls, /grant select on public\.dealerships to authenticated;\s[\s\S]*?grant update \(name\) on public\.dealerships to authenticated;/);
+  assert.doesNotMatch(rls, /grant select, update on public\.dealerships/);
+  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was looked up', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice']) {
+    assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
+  }
+});
+
+test('the deployment steps leave no guessable first code, no localhost sign-in and no open email budget', () => {
+  assert.doesNotMatch(readme, /any text works/);
+  assert.match(readme, /values \(upper\(substr\(md5\(gen_random_uuid\(\)::text \|\| clock_timestamp\(\)::text\), 1, 12\)\), '<the id returned above>', 'manager'\)\s+returning code;/);
+  assert.ok(rls.includes("upper(substr(md5(gen_random_uuid()::text || clock_timestamp()::text), 1, 12))"), 'the README mints the first code the way create_invite does');
+  assert.doesNotMatch(readme, /signin\.html/);
+  assert.match(readme, /set \*\*Site URL\*\* to the manager page's own address/);
+  assert.match(readme, /Never leave the Site URL at the `http:\/\/localhost:3000` default/);
+  assert.doesNotMatch(readme, /defaults are fine/);
+  assert.match(readme, /Rate limits: lower them/);
+  const config = read('../supabase/config.toml');
+  assert.doesNotMatch(config, /site_url = "http:\/\/localhost:3000"/);
+  assert.match(config, /\[auth\.rate_limit\]\s+email_sent = 30\s+sign_in_sign_ups = 30/);
+  assert.match(config, /\[functions\.billing\]\s+verify_jwt = false/);
+  // the sync limits and the billing rules are written down with the code's numbers
+  assert.match(readme, /more than 12 calls by one user in a minute get 429/);
+  assert.match(sync, /const PER_MINUTE = 12;/);
+  assert.match(readme, /a body over 512 KiB, or more than 2,000 listings/);
+  assert.match(sync, /const BODY_LIMIT = 512 \* 1024;/);
+  assert.match(sync, /const MAX_ROWS = 2000;/);
+  assert.match(readme, /`counts\.conflicts`/);
+  assert.match(readme, /code: "open-subscription"/);
 });

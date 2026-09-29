@@ -408,3 +408,22 @@ test('a take-down right after the post\'s own sync counts at the very next sync 
   sync(server, desktop);
   assert.equal(ram.status, 'taken_down');
 });
+
+// Security audit S4/S7: a colleague's post of a VIN the caller has up must never push the caller's entry out of
+// their own upload, or the sync function would take the caller's live row down.
+test('mergeRegistry: a colleague\'s newer post never takes over the caller\'s own entry, which still goes up whole', () => {
+  const mine = { name: 'A', price: 20000, postedAt: T(0), listingUrl: 'https://www.facebook.com/marketplace/item/1/' };
+  const remote = { listings: [row(VIN_A, { user_id: U1, posted_at: T(0), listing_url: mine.listingUrl }), row(VIN_A, { user_id: U2, posted_at: T(30) })] };
+  const out = mergeRegistry({ [VIN_A]: mine }, remote, { userId: U1 });
+  assert.equal(out[VIN_A].postedAt, T(0), 'judged by the caller\'s own row, not the colleague\'s newer one');
+  assert.notEqual(out[VIN_A].mine, false);
+  const up = syncPayload({ origin: ORIGIN, posted: out, userId: U1 });
+  assert.ok(up.posted[VIN_A], 'the entry is still in the next upload, so the server keeps the caller\'s row listed');
+  assert.equal(up.posted[VIN_A].postedAt, T(0));
+  // with no row of the caller's on the server at all, the entry stays exactly as it was
+  const alone = mergeRegistry({ [VIN_A]: mine }, { listings: [row(VIN_A, { user_id: U2, posted_at: T(30) })] }, { userId: U1 });
+  assert.deepEqual(alone[VIN_A], mine);
+  // the caller's own take-down on another machine still removes the entry
+  const down = mergeRegistry({ [VIN_A]: mine }, { listings: [row(VIN_A, { user_id: U1, posted_at: T(0), status: 'taken_down', taken_down_at: T(20) }), row(VIN_A, { user_id: U2, posted_at: T(30) })] }, { userId: U1 });
+  assert.notEqual(down[VIN_A] && down[VIN_A].postedAt, T(0), 'a taken-down own row is not kept as the caller\'s live entry');
+});

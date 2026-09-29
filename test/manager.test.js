@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -393,10 +393,11 @@ test('inviteCard: a manager gets the two buttons in the SQL\'s two roles; a sale
     assert.ok(b.does.length > 10, 'each button says what it does');
   }
   assert.deepEqual(c.codes, []);
-  assert.equal(c.line, 'A code puts one person into this dealership, as a salesperson or as a manager, and works once.');
+  assert.equal(c.line, 'A code puts one person into this dealership, as a salesperson or as a manager. It works once and for 7 days.');
   assert.equal(c.hint, INVITE_HINT);
-  assert.match(c.hint, /never lists codes/, 'honest about the table having no read policy');
-  assert.match(c.hint, /until it is reloaded/);
+  assert.match(c.hint, /open codes: not used yet and not expired/);
+  assert.match(c.hint, /stops working when the manager who made it leaves/, 'the rule redeem_invite and the trigger enforce');
+  assert.match(read('supabase/migrations/0001_schema.sql'), new RegExp(`expires_at timestamptz not null default \\(now\\(\\) \\+ interval '${INVITE_DAYS} days'\\)`), 'INVITE_DAYS is the schema\'s');
   const invites = [{ code: 'ABCDEF012345', role: 'salesperson', created_at: NOW }];
   for (const role of ['salesperson', '', undefined, 'owner']) {
     const sp = inviteCard(invites, { role, now: NOW, timeZone: 'UTC' });
@@ -423,7 +424,8 @@ test('inviteCard: codes render as create_invite typed them (upper case, trimmed)
   assert.deepEqual(c.codes.map((x) => x.role), ['salesperson', 'manager', 'salesperson']);
   assert.deepEqual(c.codes.map((x) => x.when), ['2026-11-16 15:00', '2026-11-16 14:30', '2026-11-16 13:00']);
   assert.equal(c.codes[0].createdAt, NOW, 'a code without a time is dated now');
-  assert.equal(c.codes[1].line, '2026-11-16 14:30 · for a manager');
+  assert.equal(c.codes[1].line, '2026-11-16 14:30 · for a manager · expires 2026-11-23');
+  assert.ok(c.codes.every((x) => x.revoke === true), 'every open code has Revoke');
   for (const x of c.codes) {
     assert.match(x.code, /^[0-9A-F]{12}$/, 'as the function types it: 12 upper-case hex characters');
     assert.equal(x.copyText, x.code, 'Copy puts the code alone on the clipboard');
@@ -434,6 +436,20 @@ test('inviteCard: codes render as create_invite typed them (upper case, trimmed)
   assert.equal(inviteCard('nope', { role: 'manager' }).codes.length, 0);
   assert.doesNotThrow(() => inviteCard([{ code: 'x', created_at: 'garbage' }], { role: 'manager', now: 'not a time', timeZone: 'Not/AZone' }));
   assert.equal(inviteCard([{ code: 'x', created_at: 'garbage' }], { role: 'manager', now: NOW, timeZone: 'UTC' }).codes[0].createdAt, NOW);
+});
+
+test('inviteCard: the server\'s expiry is shown, an expired code is left out even when sent, and a code made here expires in 7 days', () => {
+  const invites = [
+    { code: 'AAAAAAAAAAA1', role: 'salesperson', created_at: ago(24), expires_at: ago(-6 * 24) },
+    { code: 'AAAAAAAAAAA2', role: 'salesperson', created_at: ago(8 * 24), expires_at: ago(24) }, // expired yesterday
+    { code: 'AAAAAAAAAAA3', role: 'manager', created_at: ago(8 * 24) }, // no expiry sent: 7 days after it was made, so gone
+    { code: 'AAAAAAAAAAA4', role: 'manager', created_at: ago(1) }, // made on this page an hour ago
+    { code: 'aaaaaaaaaaa4', role: 'manager', created_at: ago(1) }, // the same code twice (listed, then made): shown once
+  ];
+  const c = inviteCard(invites, { role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(c.codes.map((x) => x.code), ['AAAAAAAAAAA4', 'AAAAAAAAAAA1']);
+  assert.equal(c.codes[0].expiresAt, new Date(Date.parse(ago(1)) + INVITE_DAYS * DAY_MS).toISOString());
+  assert.equal(c.codes[1].expires, '2026-11-22');
 });
 
 test('inviteSentence: what the invited person does, in the words the extension\'s Settings uses', () => {
@@ -459,17 +475,17 @@ test('memberRole: the signed-in person\'s role from the memberships rows, nothin
   assert.equal(memberRole(undefined, 'u1'), '');
 });
 
-test('the sample dealership carries one made-up unused invite code, shown to its manager with the same layout', () => {
+test('the sample dealership carries two made-up open invite codes, shown to its manager with the same layout', () => {
   const d = mockData(NOW);
-  assert.equal(d.invites.length, 1);
-  const [inv] = d.invites;
-  assert.match(inv.code, /^[0-9A-F]{12}$/, 'shaped as create_invite types a code');
-  assert.equal(inv.role, 'salesperson');
-  assert.equal(inv.dealership_id, d.dealership.id);
-  assert.equal(inv.created_at, ago(0.25));
+  assert.equal(d.invites.length, 2);
+  for (const inv of d.invites) {
+    assert.match(inv.code, /^[0-9A-F]{12}$/, 'shaped as create_invite types a code');
+    assert.equal(inv.dealership_id, d.dealership.id);
+    assert.ok(Date.parse(inv.expires_at) > Date.parse(NOW), 'still open');
+  }
   const c = inviteCard(d.invites, { role: d.billing.role, dealershipId: d.dealership.id, now: NOW, timeZone: 'UTC' });
   assert.deepEqual(c.buttons.map((b) => b.label), ['Invite a salesperson', 'Invite a manager']);
-  assert.deepEqual(c.codes.map((x) => [x.code, x.when, x.copyText]), [['ABCDEF012345', '2026-11-16 14:45', 'ABCDEF012345']]);
+  assert.deepEqual(c.codes.map((x) => [x.code, x.when, x.copyText, x.role]), [['ABCDEF012345', '2026-11-16 14:45', 'ABCDEF012345', 'salesperson'], ['0123456789AB', '2026-11-15 13:00', '0123456789AB', 'manager']]);
 });
 
 // ---------- the page ----------
@@ -552,8 +568,34 @@ test('the page makes invite codes through the client, for managers only, and nev
   assert.match(rls, /return jsonb_build_object\('code', new_code, 'dealership_id', create_invite\.dealership_id, 'role', wanted\)/);
   assert.match(rls, /if wanted not in \('salesperson', 'manager'\)/);
   assert.match(rls, /new_code := upper\(substr\(md5\(/, 'codes are typed in upper case, as the card renders them');
-  assert.doesNotMatch(rls, /on public\.invites for/, 'no policy on invites, so the card lists only this page\'s codes');
+  assert.doesNotMatch(rls, /on public\.invites for/, 'no policy on invites: the list comes from list_invites()');
   assert.match(read('manager/manager.css'), /\.codes \{/);
+  // the open codes and Revoke, through the two manager-only functions
+  assert.match(js, /rpc\('list_invites', \{ dealership_id: dealershipId \}\)/);
+  assert.match(js, /if \(role !== 'manager'\) return \[\];/, 'a salesperson never calls list_invites');
+  assert.match(js, /rpc\('revoke_invite', \{ code \}\)/);
+  assert.match(js, />Revoke</);
+  assert.match(js, /state\.inviteNote = `Sample data: "Revoke" would cancel/);
+  assert.match(rls, /create or replace function public\.list_invites\(dealership_id uuid\)\s+returns table \(code text, role text, created_at timestamptz, expires_at timestamptz\)/);
+  assert.match(rls, /create or replace function public\.revoke_invite\(code text\)\s+returns boolean/);
+});
+
+test('sign-in comes back as a PKCE code to the page\'s own address, and the page runs under a Content-Security-Policy', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /createClient\(CONFIG\.supabaseUrl, CONFIG\.supabaseAnonKey, \{ auth: \{ flowType: 'pkce' \} \}\)/);
+  assert.match(js, /emailRedirectTo: pageUrl\(\)/);
+  assert.match(js, /url\.search = '';\s+url\.hash = '';/, 'the redirect carries no query and no fragment');
+  const html = read('manager/index.html');
+  const csp = (html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
+  assert.ok(csp, 'index.html carries a CSP');
+  const script = (csp.match(/script-src ([^;]+)/) || [])[1] || '';
+  assert.match(script, /'self'/);
+  assert.doesNotMatch(script, /\*|'unsafe-inline'|'unsafe-eval'|data:/, 'no wildcard or inline script source');
+  assert.ok(script.includes(new URL(CONFIG.supabaseJs).origin), 'the CDN the client loads from is the one script host allowed');
+  assert.match(csp, /connect-src 'self' https:\/\/\*\.supabase\.co/);
+  assert.match(csp, /object-src 'none'/);
+  assert.match(csp, /base-uri 'none'/);
+  assert.doesNotMatch(read('manager/manager.js') + read('manager/data.js'), /style="/, 'no inline style: style-src is \'self\'');
 });
 
 test('config.js: four fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {

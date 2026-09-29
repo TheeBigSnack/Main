@@ -20,11 +20,21 @@ major_version = 17
 enabled = true
 # Magic links only: no passwords anywhere in Lot Sync.
 enable_signup = true
-# Where the sign-in email may send people. The extension's sign-in page and
-# the manager page go here once they have addresses (chrome-extension://<id>/*
-# and the page's https origin); the README says how.
-site_url = "http://localhost:3000"
-additional_redirect_urls = []
+# Where the sign-in email may send people. Local stack only: on the hosted
+# project this is Authentication, URL configuration, and there the Site URL
+# and the one redirect URL are the manager page's own address (README step
+# 3). Never leave a hosted project on a localhost Site URL: a manager's
+# magic link would go to whatever listens on that port of their computer.
+# The extension needs no redirect: it signs in with the emailed code.
+site_url = "http://127.0.0.1:8787/"
+additional_redirect_urls = ["http://127.0.0.1:8787/"]
+
+# Anyone holding the public anon key can ask for sign-in emails; keep the
+# budget small (README step 3). The hosted project's limits live in the
+# Dashboard, Authentication, Rate limits; these are the local stack's.
+[auth.rate_limit]
+email_sent = 30
+sign_in_sign_ups = 30
 
 [auth.email]
 enable_signup = true

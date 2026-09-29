@@ -9,6 +9,11 @@ on:
   push:
   pull_request:
 
+# The jobs only read the checkout and upload their own artifacts; no job
+# needs to write to the repository, so the token gets nothing more.
+permissions:
+  contents: read
+
 jobs:
   unit:
     runs-on: ubuntu-latest

@@ -9,7 +9,10 @@
 -- lets it.
 --
 -- PLAN.md M4 acceptance 3: a user from dealership A cannot read dealership B.
--- supabase/tests/rls.sql proves it against a running database.
+-- supabase/tests/rls.sql proves it against a running database, along with
+-- the invite rules at the end of this file (one answer for every bad code,
+-- the throttle, codes that die with their maker, list and revoke for
+-- managers only).
 
 -- ---------------------------------------------------------------------------
 -- Helpers. Both are SECURITY DEFINER so a policy can consult memberships even
@@ -67,6 +70,7 @@ alter table public.scan_summaries enable row level security;
 alter table public.post_attempts enable row level security;
 alter table public.rewrite_usage enable row level security;
 alter table public.invites enable row level security;
+alter table public.invite_misses enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- Table privileges. Supabase grants the API roles broad privileges on new
@@ -78,16 +82,26 @@ alter table public.invites enable row level security;
 grant usage on schema public to anon, authenticated, service_role;
 revoke all on all tables in schema public from anon;
 revoke all on all tables in schema public from authenticated;
-grant select, update on public.dealerships to authenticated;
+grant select on public.dealerships to authenticated;
+-- the rename only: website_origin is unique and the key /sync matches on, so
+-- an update right on it would let a manager probe which other dealer
+-- websites are customers (the unique index says so) and break their own
+-- salespeople's sync meanwhile; the owner changes an origin in SQL, as they
+-- create the row. A PATCH that names any other column fails with 42501
+-- before the policy or a constraint is consulted.
+grant update (name) on public.dealerships to authenticated;
 grant select, update, delete on public.memberships to authenticated;
 grant select, insert, update, delete on public.listings to authenticated;
 grant select, insert, update, delete on public.todo_items to authenticated;
 grant select, insert, update, delete on public.scan_summaries to authenticated;
 grant select, insert, update, delete on public.post_attempts to authenticated;
 grant select on public.rewrite_usage to authenticated;
--- invites: no privileges for any API role; redeem_invite() reads them as its owner.
+-- invites: no privileges for any API role; redeem_invite() and list_invites() read them as their owner.
 grant all on all tables in schema public to service_role;
 grant usage, select on all sequences in schema public to service_role; -- rewrite_usage.id
+-- invite_misses: nothing for anyone, the service role included; only
+-- redeem_invite() (SECURITY DEFINER, below) writes and reads it.
+revoke all on public.invite_misses from anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- dealerships: members read their own dealership; managers may rename it.
@@ -241,8 +255,11 @@ create policy "members read their dealership's rewrite usage"
 
 -- ---------------------------------------------------------------------------
 -- invites: no policy at all. A code is a secret handed to one person; the
--- table is read only inside redeem_invite() (below), which runs as its owner.
--- Managers get new codes from create_invite(), also below.
+-- table is read only inside redeem_invite() and list_invites() (below),
+-- which run as their owner. Managers get new codes from create_invite() and
+-- cancel one with revoke_invite(), also below.
+-- invite_misses: no policy and no privilege either; redeem_invite() alone
+-- writes and reads it.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------
@@ -256,6 +273,20 @@ create policy "members read their dealership's rewrite usage"
 -- create_invite() stores upper-case codes and the extension sends upper
 -- case, but the first manager's code is typed by the owner in SQL
 -- (supabase/README.md) in whatever case they chose.
+-- A code that is unknown, already used, expired, or whose maker
+-- (created_by, when set) no longer holds a manager membership of the
+-- dealership gets one answer for all four, 'that invite code is not valid'
+-- with code P0002, so a guess learns nothing, not even that a code once
+-- existed. Every miss is counted in invite_misses, and after 10 misses
+-- inside an hour the function raises 'too many attempts; try again in an
+-- hour' (P0005) before it looks anything up.
+-- The miss is answered, not raised: PostgREST runs the call in one
+-- transaction and rolls it back on an error, which would take the row that
+-- counts the miss with it. So the function sets response.status to 400 and
+-- returns the { code, message, details, hint } object PostgREST builds for
+-- a raised error; on the wire, to the extension and to the manager page, a
+-- miss looks exactly like a raise, and the count survives. The throttle is
+-- a plain raise because nothing has been written by then.
 -- Parameters are referenced as redeem_invite.code to avoid the PL/pgSQL
 -- name clash with the column of the same name.
 -- ---------------------------------------------------------------------------
@@ -269,20 +300,36 @@ declare
   inv public.invites%rowtype;
   dealer public.dealerships%rowtype;
   member public.memberships%rowtype;
+  misses bigint;
 begin
   if uid is null then
     raise exception 'not signed in' using errcode = '42501';
   end if;
+
+  -- the throttle, before anything is looked up; misses older than an hour
+  -- no longer count and are dropped
+  delete from public.invite_misses where invite_misses.user_id = uid and invite_misses.at < now() - interval '1 hour';
+  select count(*) into misses from public.invite_misses where invite_misses.user_id = uid;
+  if misses >= 10 then
+    raise exception 'too many attempts; try again in an hour' using errcode = 'P0005';
+  end if;
+
   -- both sides folded (changed in place: no project has applied this file yet)
   select * into inv
   from public.invites i
   where upper(trim(i.code)) = upper(trim(redeem_invite.code))
   for update;
-  if not found then
-    raise exception 'that invite code was not found' using errcode = 'P0002';
-  end if;
-  if inv.used_at is not null then
-    raise exception 'that invite code was already used' using errcode = 'P0003';
+  if not found
+     or inv.used_at is not null
+     or inv.expires_at <= now()
+     or (inv.created_by is not null and not exists (
+           select 1 from public.memberships m
+           where m.user_id = inv.created_by
+             and m.dealership_id = inv.dealership_id
+             and m.role = 'manager')) then
+    insert into public.invite_misses (user_id) values (uid);
+    perform set_config('response.status', '400', true);
+    return jsonb_build_object('code', 'P0002', 'message', 'that invite code is not valid', 'details', null::text, 'hint', null::text);
   end if;
 
   insert into public.memberships as m (user_id, dealership_id, role, name)
@@ -306,13 +353,15 @@ begin
   );
 end;
 $$;
-comment on function public.redeem_invite(text, text) is 'Makes the signed-in caller a member of the invite''s dealership and marks the code used. The only way in through the API.';
+comment on function public.redeem_invite(text, text) is 'Makes the signed-in caller a member of the invite''s dealership and marks the code used. The only way in through the API. One answer (P0002) for an unknown, used, expired or cancelled code; P0005 after 10 misses in an hour.';
 
 -- ---------------------------------------------------------------------------
 -- create_invite(dealership_id, role): a manager of that dealership gets a
 -- fresh single-use code for a salesperson or another manager. The code is
 -- 12 hex characters taken from the hash of a random uuid (48 bits): short
--- enough to read out over the phone, single use, and never listed anywhere.
+-- enough to read out over the phone, single use, good for 7 days
+-- (invites.expires_at), and listed only to the dealership's managers
+-- (list_invites, below).
 -- ---------------------------------------------------------------------------
 create or replace function public.create_invite(dealership_id uuid, role text default 'salesperson')
 returns jsonb
@@ -336,11 +385,106 @@ begin
   return jsonb_build_object('code', new_code, 'dealership_id', create_invite.dealership_id, 'role', wanted);
 end;
 $$;
-comment on function public.create_invite(uuid, text) is 'A manager creates a single-use invite code for their dealership.';
+comment on function public.create_invite(uuid, text) is 'A manager creates a single-use invite code for their dealership, good for 7 days.';
 
--- Only signed-in users may call the two functions (PostgREST exposes them as
--- /rest/v1/rpc/redeem_invite and /rest/v1/rpc/create_invite).
+-- ---------------------------------------------------------------------------
+-- list_invites(dealership_id): the dealership's open codes (unused, not yet
+-- expired, made by someone who is still a manager there), newest first, for the manager view's Invite codes card. Only a
+-- manager of that dealership; anyone else gets 42501 and learns nothing.
+-- SECURITY DEFINER because nobody may read invites directly; the manager
+-- check is the first line and the query names the dealership, so the answer
+-- never crosses the wall. The parameter is referenced as
+-- list_invites.dealership_id, as in the other functions.
+-- ---------------------------------------------------------------------------
+create or replace function public.list_invites(dealership_id uuid)
+returns table (code text, role text, created_at timestamptz, expires_at timestamptz)
+language plpgsql stable security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null or not public.is_manager(list_invites.dealership_id) then
+    raise exception 'only a manager of this dealership can list its invites' using errcode = '42501';
+  end if;
+  return query
+    select i.code, i.role, i.created_at, i.expires_at
+    from public.invites i
+    where i.dealership_id = list_invites.dealership_id
+      and i.used_at is null
+      and i.expires_at > now()
+      -- a code whose maker is no longer a manager here cannot be redeemed (redeem_invite's maker check), so it is not open
+      and (i.created_by is null or exists (
+            select 1 from public.memberships m
+            where m.user_id = i.created_by and m.dealership_id = i.dealership_id and m.role = 'manager'))
+    order by i.created_at desc;
+end;
+$$;
+comment on function public.list_invites(uuid) is 'A manager lists their dealership''s open invite codes (unused, unexpired), newest first. 42501 for anyone else.';
+
+-- ---------------------------------------------------------------------------
+-- revoke_invite(code): a manager cancels an unused code of their dealership
+-- (the person it was meant for left before using it, or it went to the
+-- wrong inbox). True when a row went; false when nothing matched, and never
+-- why: an unknown code, a used one and another dealership's all read the
+-- same, so the function is no oracle. Matched the way redeem_invite()
+-- matches. SECURITY DEFINER because nobody may delete from invites
+-- directly; is_manager() on the row's own dealership is the gate.
+-- ---------------------------------------------------------------------------
+create or replace function public.revoke_invite(code text)
+returns boolean
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  n integer;
+begin
+  delete from public.invites i
+  where upper(trim(i.code)) = upper(trim(revoke_invite.code))
+    and i.used_at is null
+    and public.is_manager(i.dealership_id);
+  get diagnostics n = row_count;
+  return n > 0;
+end;
+$$;
+comment on function public.revoke_invite(text) is 'A manager deletes an unused invite code of their dealership. True when one went, false otherwise, never why.';
+
+-- ---------------------------------------------------------------------------
+-- Removing a member deletes the unused invite codes that person made for
+-- that dealership, so a code a departing manager kept for themselves, or
+-- handed out and never saw used, cannot bring anyone back in. Used codes
+-- stay: they are the record of who joined how. SECURITY DEFINER because the
+-- manager doing the removing has no privilege on invites; the function only
+-- ever touches rows of the deleted membership's own dealership. (A demoted
+-- manager keeps their row, so the trigger does not fire for them; their
+-- codes are refused by redeem_invite()'s maker check instead.)
+-- ---------------------------------------------------------------------------
+create or replace function public.forget_invites_of_removed_member()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  delete from public.invites i
+  where i.created_by = old.user_id
+    and i.dealership_id = old.dealership_id
+    and i.used_at is null;
+  return old;
+end;
+$$;
+comment on function public.forget_invites_of_removed_member() is 'After a membership is deleted: drops the unused invite codes that person made for that dealership.';
+
+create trigger memberships_forget_invites
+  after delete on public.memberships
+  for each row execute function public.forget_invites_of_removed_member();
+
+-- Only signed-in users may call the four functions (PostgREST exposes them
+-- as /rest/v1/rpc/redeem_invite, create_invite, list_invites and
+-- revoke_invite); the trigger function is the database's alone.
 revoke execute on function public.redeem_invite(text, text) from public, anon;
 revoke execute on function public.create_invite(uuid, text) from public, anon;
+revoke execute on function public.list_invites(uuid) from public, anon;
+revoke execute on function public.revoke_invite(text) from public, anon;
+revoke execute on function public.forget_invites_of_removed_member() from public, anon, authenticated;
 grant execute on function public.redeem_invite(text, text) to authenticated, service_role;
 grant execute on function public.create_invite(uuid, text) to authenticated, service_role;
+grant execute on function public.list_invites(uuid) to authenticated, service_role;
+grant execute on function public.revoke_invite(text) to authenticated, service_role;

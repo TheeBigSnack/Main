@@ -12,14 +12,19 @@
 // address and the page goes there. Stripe sends the manager back to this
 // page with ?billing=success or ?billing=canceled, which becomes one note.
 //
-// The Invite codes card (managers only) calls the create_invite() function
-// in the database and shows the code it answers with a Copy button. The
-// invites table has no read policy, so the codes made here live in
-// state.invites until the page reloads; nothing can list a dealership's
-// open codes, and the card says so.
+// The Invite codes card (managers only) lists the dealership's open codes
+// through list_invites(), makes new ones with create_invite() and cancels one
+// with revoke_invite(), all functions in the database that check the caller
+// is a manager (the invites table itself has no read policy). Each code has
+// Copy and Revoke; a code works once and for 7 days.
+//
+// Sign-in is a magic link in the PKCE flow: the link carries a one-time code
+// that supabase-js exchanges on this page (the code verifier waits in this
+// browser's storage), so the tokens never travel in a URL, and the link only
+// works in the browser that asked for it.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, memberRole, OVERDUE_HOURS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, memberRole, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,7 +47,7 @@ const state = {
   data: null, // { dealership, memberships, listings, todoItems, postAttempts, scans }
   billing: null, // { status, error }: GET .../billing/status's answer for the chosen dealership (the sample data carries its own)
   billingNote: '', // one line in the Billing card: back from Stripe, the pilot just started, or what a sample button would do
-  invites: [], // create_invite()'s answers this page session, newest first: { code, role, dealership_id, created_at }
+  invites: [], // the dealership's open codes (list_invites) and the ones made since: { code, role, dealership_id?, created_at, expires_at? }
   inviteNote: '', // one line in the Invite codes card: what a sample button would do
   inviteError: '', // the last failed create_invite or copy, shown in the card
 };
@@ -122,7 +127,7 @@ function viewSent(email) {
   $('main').innerHTML = `
     <div class="signin">
       <h2>Check your email</h2>
-      <p class="lead">A sign-in link is on its way to <b>${esc(email)}</b>. Open it on this device; it signs you in here.</p>
+      <p class="lead">A sign-in link is on its way to <b>${esc(email)}</b>. Open it in this browser on this device; it signs you in here, and it will not work in another browser.</p>
       <div class="toolbar"><button type="button" class="ghost" data-action="signin">Use another address</button></div>
     </div>`;
 }
@@ -180,9 +185,9 @@ function invitesHtml() {
   const error = state.inviteError ? `<p class="banner warn">${esc(state.inviteError)}</p>` : '';
   const buttons = card.buttons.map((b) => `<button type="button" class="ghost" data-action="invite" data-role="${esc(b.role)}" data-does="${esc(b.does)}">${esc(b.label)}</button>`).join('');
   const codes = card.codes.length
-    ? `<ul class="codes">${card.codes.map((c) => `<li><div class="row"><span class="code">${esc(c.code)}</span><button type="button" class="ghost" data-action="copy" data-copy="${esc(c.copyText)}">Copy</button><span class="meta">${esc(c.line)}</span></div><p class="hint">${esc(c.sentence)}</p></li>`).join('')}</ul>`
-    : '';
-  return `<section class="card" id="invites"><h2>Invite codes${card.codes.length ? ` ${pill('', `${card.codes.length} made on this page`)}` : ''}</h2>${note}${error}<p class="plan">${esc(card.line)}</p><div class="toolbar">${buttons}</div>${codes}<p class="hint">${esc(card.hint)}</p></section>`;
+    ? `<ul class="codes">${card.codes.map((c) => `<li><div class="row"><span class="code">${esc(c.code)}</span><button type="button" class="ghost" data-action="copy" data-copy="${esc(c.copyText)}">Copy</button><button type="button" class="ghost" data-action="revoke" data-code="${esc(c.code)}">Revoke</button><span class="meta">${esc(c.line)}</span></div><p class="hint">${esc(c.sentence)}</p></li>`).join('')}</ul>`
+    : '<p class="empty">No open codes.</p>';
+  return `<section class="card" id="invites"><h2>Invite codes${card.codes.length ? ` ${pill('', `${card.codes.length} open`)}` : ''}</h2>${note}${error}<p class="plan">${esc(card.line)}</p><div class="toolbar">${buttons}</div>${codes}<p class="hint">${esc(card.hint)}</p></section>`;
 }
 
 function renderInvites() {
@@ -260,6 +265,7 @@ document.addEventListener('click', (ev) => {
     case 'billing': onBilling(btn.dataset.billing, btn); break;
     case 'invite': onInvite(btn.dataset.role, btn); break;
     case 'copy': copyCode(btn.dataset.copy, btn); break;
+    case 'revoke': onRevoke(btn.dataset.code, btn); break;
     default: break;
   }
 });
@@ -335,12 +341,47 @@ async function onInvite(role, btn) {
     if (error) throw new Error(error.message);
     const answer = data && typeof data === 'object' ? data : {};
     if (!answer.code) throw new Error('the server answered without a code');
-    state.invites.unshift({ code: answer.code, role: answer.role || role, dealership_id: answer.dealership_id || state.dealershipId, created_at: new Date().toISOString() });
+    const made = new Date();
+    state.invites.unshift({ code: answer.code, role: answer.role || role, dealership_id: answer.dealership_id || state.dealershipId, created_at: made.toISOString(), expires_at: answer.expires_at || new Date(made.getTime() + INVITE_DAYS * DAY_MS).toISOString() });
     state.inviteNote = '';
   } catch (e) {
     state.inviteError = `Couldn't ${label.toLowerCase()}: ${(e && e.message) || e}`;
   }
   renderInvites();
+}
+
+// Revoke: revoke_invite() deletes an unused code of a dealership the caller
+// manages and answers true, or false without saying why (an unknown code, a
+// used one and another dealership's read the same). Either way the code
+// leaves the card: false means it was not open anyway.
+async function onRevoke(code, btn) {
+  state.inviteError = '';
+  if (state.mock) {
+    state.inviteNote = `Sample data: "Revoke" would cancel ${code} so nobody can use it. Nothing is called here.`;
+    return renderInvites();
+  }
+  btn.disabled = true;
+  try {
+    const { data, error } = await state.supabase.rpc('revoke_invite', { code });
+    if (error) throw new Error(error.message);
+    state.invites = state.invites.filter((i) => String(i.code).toUpperCase() !== String(code).toUpperCase());
+    state.inviteNote = data === true ? `${code} is revoked; nobody can use it now.` : `${code} was no longer open (used, expired or revoked already).`;
+  } catch (e) {
+    state.inviteError = `Couldn't revoke ${code}: ${(e && e.message) || e}`;
+  }
+  renderInvites();
+}
+
+// The dealership's open codes, for a manager; anyone else gets an empty list
+// without asking (the function would answer 42501).
+async function loadInvites(dealershipId, role) {
+  if (role !== 'manager') return [];
+  const { data, error } = await state.supabase.rpc('list_invites', { dealership_id: dealershipId });
+  if (error) {
+    state.inviteError = `Couldn't read the open codes: ${error.message}`;
+    return [];
+  }
+  return (Array.isArray(data) ? data : []).map((i) => ({ ...i, dealership_id: dealershipId }));
 }
 
 // Copy puts the code alone on the clipboard (the install email has a
@@ -457,7 +498,8 @@ async function onSendLink(ev) {
 async function connect() {
   if (state.supabase) return state.supabase;
   const mod = await import(CONFIG.supabaseJs);
-  state.supabase = mod.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey);
+  // PKCE: the magic link brings back a one-time code, which supabase-js exchanges here (detectSessionInUrl)
+  state.supabase = mod.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, { auth: { flowType: 'pkce' } });
   state.supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN' && !state.session) {
       state.session = session;
@@ -504,6 +546,8 @@ async function loadLive() {
   ]);
   state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };
   state.billing = billing;
+  state.inviteError = '';
+  state.invites = await loadInvites(dealership.id, myRole());
   viewData();
 }
 

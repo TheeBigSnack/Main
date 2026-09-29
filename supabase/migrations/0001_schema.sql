@@ -3,7 +3,8 @@
 -- One row per dealership (a rooftop), its members, and only what the
 -- extension already keeps per browser: the posted registry (listings), the
 -- pilot numbers (post_attempts, todo_items), scan summaries, the rewrite
--- service's cost log and invite codes. Nothing from Facebook beyond the
+-- service's cost log, invite codes and the count of failed attempts at
+-- redeeming one. Nothing from Facebook beyond the
 -- listing link the salesperson saved (legal/privacy-policy.md, "What we
 -- collect"). No descriptions, no photos, no buyers.
 --
@@ -171,7 +172,14 @@ comment on table public.rewrite_usage is 'One row per Anthropic API call from th
 -- ---------------------------------------------------------------------------
 -- invites: single-use codes that put a signed-in person into a dealership.
 -- Created by a manager (create_invite) or by the owner in SQL for the first
--- manager; redeemed once (redeem_invite). Never readable through the API.
+-- manager; redeemed once (redeem_invite). A code lives 7 days (expires_at,
+-- added in place: no project has applied this file yet) and dies with its
+-- maker: redeem_invite() refuses a code whose maker (created_by, when set)
+-- no longer holds a manager membership of the dealership, and removing a
+-- membership deletes that person's unused codes (a trigger in 0002_rls.sql).
+-- The table itself is never readable through the API: a manager sees the
+-- dealership's open codes through list_invites() and cancels one with
+-- revoke_invite(), both in 0002_rls.sql.
 -- ---------------------------------------------------------------------------
 create table public.invites (
   code text primary key,
@@ -179,6 +187,7 @@ create table public.invites (
   role text not null default 'salesperson' check (role in ('salesperson', 'manager')),
   created_by uuid,
   created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '7 days'),
   used_by uuid,
   used_at timestamptz
 );
@@ -188,4 +197,20 @@ create index invites_dealership_idx on public.invites (dealership_id);
 -- codes may not differ only in those; the index also serves that lookup.
 -- (Added in place: no project has applied this file yet.)
 create unique index invites_code_folded_idx on public.invites (upper(trim(code)));
-comment on table public.invites is 'Single-use invite codes. Read only inside redeem_invite(); the API never lists them.';
+comment on table public.invites is 'Single-use invite codes, good for 7 days. Read only inside redeem_invite() and list_invites(); the API never reads the table.';
+comment on column public.invites.expires_at is 'After this the code is refused. 7 days from creation; the owner may set it shorter in SQL.';
+
+-- ---------------------------------------------------------------------------
+-- invite_misses: one row per failed redeem_invite() call, per account, kept
+-- for an hour. The throttle: after 10 misses inside an hour the function
+-- refuses every further call from that account before looking anything up,
+-- so a guessed code cannot be tried without limit. Written and read only
+-- inside redeem_invite(); 0002_rls.sql gives no API role, the service role
+-- included, any privilege on it.
+-- ---------------------------------------------------------------------------
+create table public.invite_misses (
+  user_id uuid not null,
+  at timestamptz not null default now()
+);
+create index invite_misses_user_at_idx on public.invite_misses (user_id, at);
+comment on table public.invite_misses is 'Failed redeem_invite() calls per account, kept an hour: the throttle. No API role reads or writes it.';

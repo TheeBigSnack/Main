@@ -17,7 +17,10 @@
 // their userId and `mine: false`; the person's own entries carry no flag, so
 // a machine that never synced is unchanged. cap.js and rescan.js read the
 // flag: a colleague's car never counts toward this salesperson's daily cap
-// and is never flagged as theirs to take down or update.
+// and is never flagged as theirs to take down or update. The other way
+// round, a colleague's row never takes over an entry this person owns: their
+// own entry stays theirs, goes up again whole, and the sync function keeps
+// their row listed (it refuses a colleague's post of a VIN they have up).
 //
 // What travels: the salesperson's own entries of posted:<origin> (VIN, name,
 // price, times, the listing link they saved, their name), the post attempts
@@ -69,6 +72,8 @@ const changedAfter = (since, ...stamps) => {
 };
 // An entry merged in from a colleague carries their userId and `mine: false`; it is theirs to sync.
 const isOwn = (entry, userId) => entry.mine !== false && (!entry.userId || !userId || entry.userId === userId);
+// A server row of somebody else than the caller (with both known).
+const isTheirs = (r, userId) => Boolean(r.user_id && userId && String(r.user_id) !== String(userId));
 
 // ---------- the day the cap counts ----------
 
@@ -245,6 +250,14 @@ const rowsOf = (remote, key) => (Array.isArray(remote) ? remote : isObject(remot
  *     postedAt) wins for the price; a change made here after `since` is
  *     therefore kept unless the server's is newer still; a listing link or a
  *     name that is missing on one side is filled from the other.
+ * Before all of that, with the caller's `userId` given: a colleague's newer
+ * post is never the row an entry the caller owns is judged by. The caller's
+ * own latest row for the VIN stands in for it (so their own take-down
+ * elsewhere still removes the entry), and with none the entry is kept as it
+ * is and goes up again, so the server never marks the caller's row taken
+ * down over a colleague's post of the same car. The same post (VIN and
+ * posting time) is one row on the server, so for it the server's user
+ * decides, as the same-post rule says.
  * Every entry the server knows gets its row's userId; with the caller's
  * `userId` given, a colleague's entry also gets `mine: false` (own entries
  * carry no flag). `remote` is the sync answer ({ listings: [...] }) or a
@@ -254,6 +267,7 @@ export function mergeRegistry(local, remote, { since = null, userId = '' } = {})
   void since; // the newest-change rule covers it; kept in the signature so callers can say when they last synced
   const base = isObject(local) ? local : {};
   const current = new Map(); // vin -> the latest post the server knows for it
+  const own = new Map(); // vin -> the caller's own latest post there
   for (const r of rowsOf(remote, 'listings')) {
     if (!isObject(r)) continue;
     const vin = vinOf(r.vin);
@@ -261,6 +275,10 @@ export function mergeRegistry(local, remote, { since = null, userId = '' } = {})
     if (!vin || at === null) continue;
     const have = current.get(vin);
     if (!have || at > ms(have.posted_at)) current.set(vin, r);
+    if (userId && r.user_id && String(r.user_id) === String(userId)) {
+      const mine = own.get(vin);
+      if (!mine || at > ms(mine.posted_at)) own.set(vin, r);
+    }
   }
   const out = {};
   const seen = new Set();
@@ -268,7 +286,18 @@ export function mergeRegistry(local, remote, { since = null, userId = '' } = {})
     const vin = vinOf(key);
     seen.add(vin);
     if (!isObject(e)) continue;
-    const r = current.get(vin);
+    let r = current.get(vin);
+    if (r && isTheirs(r, userId) && isOwn(e, userId) && !sameMoment(e.postedAt, r.posted_at)) {
+      // a colleague's newer post never takes over the caller's own entry:
+      // their own row decides, and with none the entry stays as it is (every
+      // rule below then sees a row of the caller's, so ownership is never
+      // reassigned to a colleague over a different post)
+      r = own.get(vin);
+      if (!r) {
+        out[key] = e;
+        continue;
+      }
+    }
     if (!r) {
       out[key] = e;
       continue;

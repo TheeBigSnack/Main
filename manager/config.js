@@ -17,6 +17,12 @@
 //
 // supabaseJs is the supabase-js client, loaded on demand from a CDN only when
 // the page is configured; the sample-data mode never touches the network.
+// The client runs with the manager's session, so pin it before going live:
+// either an exact version (`@supabase/supabase-js@2.x.y/+esm`, the version
+// checked in the npm registry) or, better, the built file copied next to
+// this page and named relatively (`./vendor/supabase-js-2.x.y.js`; the same
+// import() loads it). index.html's Content-Security-Policy allows scripts
+// from this folder and cdn.jsdelivr.net only; change it with this line.
 export const CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',

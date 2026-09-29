@@ -18,6 +18,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Scripts only from this folder and the one CDN config.js names; calls only to this origin and Supabase.
+       Change the CDN host here too if config.js's supabaseJs moves, and add a functionsUrl host to connect-src. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; img-src 'self' data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <title>Lot Sync manager view</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="manager.css">

@@ -6,6 +6,8 @@
 // webhook, and the function copies the status into public.subscriptions.
 //
 //   POST …/billing/checkout  { returnUrl, seats?, dealershipId? | origin? } -> { ok, url }   (managers)
+//                            -> 409 { ok: false, error, code: 'open-subscription' } while Stripe still holds the
+//                               dealership's subscription open (checkoutRefusal): the card is changed in the portal
 //   POST …/billing/portal    { returnUrl, dealershipId? | origin? }         -> { ok, url }   (managers)
 //   GET  …/billing/status    ?dealershipId= | ?origin=                       -> { ok, dealership, role, state, subscription, canStartPilot, canSubscribe, canManageBilling, pilotDays, includedSalespeople }   (members)
 //   POST …/billing/webhook   Stripe's event with its Stripe-Signature header -> { ok }        (Stripe)
@@ -29,7 +31,7 @@ import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin 
 import { requireUser, membershipsOf, serviceClient, env, type Membership, type Dealership } from '../_shared/auth.ts';
 import {
   PRICING, HANDLED_EVENTS,
-  subscriptionState, statusAnswer, normalizeSeats, checkoutLineItems, checkoutSessionParams, trialEndFor,
+  subscriptionState, statusAnswer, checkoutRefusal, normalizeSeats, checkoutLineItems, checkoutSessionParams, trialEndFor,
   allowedReturnUrl, parseAllowedOrigins, formEncode, applyStripeEvent, verifyStripeSignature,
 } from '../_shared/billing.mjs';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
@@ -340,9 +342,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(req, 200, { ok: true, url: String(session.url || '') });
     }
 
-    // checkout
+    // checkout: never a second subscription next to one Stripe still holds
+    // open (a lapsed card is updated in the portal, and Stripe retries)
+    const refusal = checkoutRefusal(row);
+    if (refusal) return json(req, refusal.status, { ok: false, error: refusal.error, ...(refusal.code ? { code: refusal.code } : {}) });
     const state = subscriptionState(row);
-    if (state === 'active') return json(req, 409, { ok: false, error: 'this dealership already has a subscription; use the billing portal to change it' });
     const seats = normalizeSeats(body.seats !== undefined ? body.seats : row ? row.seats : undefined, PRICING.includedSalespeople);
     const lineItems = checkoutLineItems({ seats, included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
     const customerId = await ensureCustomer(service, dealership, row, caller.user.email);

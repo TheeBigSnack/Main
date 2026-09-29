@@ -64,8 +64,11 @@ insert into public.rewrite_usage (dealership_id, user_id, model, input_tokens, o
   (:'dealer_b', :'b_sales', 'claude-haiku-4-5', 1500, 200, 0.0025, 'rewrite');
 
 insert into public.invites (code, dealership_id, role, created_by) values
-  ('NEWCOMERB001', :'dealer_b', 'salesperson', :'b_sales'),
-  ('made-up-b002', :'dealer_b', 'manager',     null); -- as the owner types the first code in SQL: any case
+  ('NEWCOMERB001', :'dealer_b', 'salesperson', null),
+  ('made-up-b002', :'dealer_b', 'manager',     null); -- as an owner typed codes before the README minted them: any case
+insert into public.invites (code, dealership_id, role, created_by, expires_at) values
+  ('EXPIREDB0003', :'dealer_b', 'salesperson', null,       now() - interval '1 minute'), -- past its 7 days
+  ('ORPHANA00004', :'dealer_a', 'salesperson', :'a_sales', now() + interval '7 days');   -- its maker is no manager of A
 
 -- ---------------------------------------------------------------------------
 -- a_sales: a salesperson of A
@@ -258,6 +261,13 @@ begin
   update public.dealerships set name = 'Dealership A (renamed)' where id = a;
   get diagnostics n = row_count;
   if n <> 1 then raise exception 'a_mgr could not rename A'; end if;
+  -- but not change its website (the key /sync matches on, and unique: an oracle for other customers)
+  begin
+    update public.dealerships set website_origin = 'https://www.dealership-b.test' where id = a;
+    raise exception 'a_mgr changed the website of A';
+  exception when insufficient_privilege then
+    raise notice 'ok: a_mgr renames A but cannot change its website';
+  end;
 
   -- creates invites for A, not for B
   inv := public.create_invite(a, 'salesperson');
@@ -268,6 +278,31 @@ begin
   exception when insufficient_privilege then
     raise notice 'ok: a_mgr creates invites for A only';
   end;
+
+  -- lists A's open codes: the one just made, good for 7 days; not the one a salesperson's id is on (it could
+  -- never be redeemed), and never B's
+  if exists (select 1 from public.list_invites(a) l where l.code = 'ORPHANA00004') then
+    raise exception 'list_invites shows a code whose maker is no manager';
+  end if;
+  if not exists (select 1 from public.list_invites(a) l where l.code = inv ->> 'code' and l.role = 'salesperson' and l.expires_at > now() + interval '6 days') then
+    raise exception 'list_invites does not show the code a_mgr just made, good for 7 days';
+  end if;
+  begin
+    perform * from public.list_invites(b);
+    raise exception 'a_mgr listed B''s invites';
+  exception when insufficient_privilege then
+    raise notice 'ok: a_mgr lists A''s open codes only';
+  end;
+
+  -- revokes A's code once; B's codes and unknown ones read the same: false
+  if not public.revoke_invite(lower(inv ->> 'code')) then raise exception 'a_mgr could not revoke A''s code'; end if;
+  if public.revoke_invite(inv ->> 'code') then raise exception 'a revoked code was revoked twice'; end if;
+  if public.revoke_invite('EXPIREDB0003') then raise exception 'a_mgr revoked a code of B'; end if;
+  if public.revoke_invite('NOSUCHCODE00') then raise exception 'revoke_invite said true for an unknown code'; end if;
+  if exists (select 1 from public.list_invites(a) l where l.code = inv ->> 'code') then
+    raise exception 'a revoked code is still listed';
+  end if;
+  raise notice 'ok: a_mgr revokes A''s codes, and nothing else, with one answer';
 
   -- the views show A only
   select count(*) into n from public.v_salesperson_summary;
@@ -284,6 +319,22 @@ begin
     raise exception 'v_open_todo should join the open item to the listing it belongs to';
   end if;
   raise notice 'ok: the views show A only';
+end;
+$$;
+
+-- a salesperson cannot list A's codes
+reset role;
+select set_config('request.jwt.claims', '{"sub":"' || :'a_sales' || '","role":"authenticated"}', true) as claims \gset
+set local role authenticated;
+do $$
+begin
+  begin
+    perform * from public.list_invites('00000000-0000-4000-8000-0000000000d1');
+    raise exception 'a salesperson listed their dealership''s invites';
+  exception when insufficient_privilege then
+    raise notice 'ok: only a manager lists invite codes';
+  end;
+  if public.revoke_invite('ORPHANA00004') then raise exception 'a salesperson revoked a code'; end if;
 end;
 $$;
 
@@ -323,6 +374,7 @@ declare
   b uuid := '00000000-0000-4000-8000-0000000000d2';
   got jsonb;
   code text;
+  i integer;
 begin
   select count(*) into n from public.listings;
   if n <> 0 then raise exception 'a user with no membership sees % listings', n; end if;
@@ -330,13 +382,17 @@ begin
   if n <> 0 then raise exception 'a user with no membership sees % memberships', n; end if;
   raise notice 'ok: without a membership nothing is visible';
 
-  -- an unknown code
-  begin
-    perform public.redeem_invite('NOPE', 'Nobody');
-    raise exception 'an unknown invite code was accepted';
-  exception when others then
-    if sqlstate <> 'P0002' then raise; end if;
-  end;
+  -- an unknown code: answered, not raised (PostgREST sends it as a 400), so the miss it counts is kept
+  got := public.redeem_invite('NOPE', 'Nobody');
+  if got ->> 'code' <> 'P0002' or got ->> 'message' <> 'that invite code is not valid' then
+    raise exception 'an unknown invite code was answered with %', got;
+  end if;
+  -- an expired code and one whose maker is no manager get the very same answer
+  if public.redeem_invite('EXPIREDB0003', 'Nobody') <> got then raise exception 'an expired code was not refused the same way'; end if;
+  if public.redeem_invite('ORPHANA00004', 'Nobody') <> got then raise exception 'a code whose maker is no manager was not refused the same way'; end if;
+  select count(*) into n from public.memberships where user_id = auth.uid();
+  if n <> 0 then raise exception 'a refused code made the newcomer a member'; end if;
+  raise notice 'ok: unknown, expired and orphaned codes get one answer and let nobody in';
 
   -- the real one (lower case and spaces are tolerated)
   got := public.redeem_invite(' newcomerb001 ', 'Riley');
@@ -349,13 +405,11 @@ begin
   if n <> 1 then raise exception 'redeem_invite did not create the membership'; end if;
   raise notice 'ok: redeem_invite makes the newcomer a member of B';
 
-  -- single use
-  begin
-    perform public.redeem_invite('NEWCOMERB001', 'Riley');
-    raise exception 'a used invite code was accepted again';
-  exception when others then
-    if sqlstate <> 'P0003' then raise; end if;
-  end;
+  -- single use, and a used code reads like an unknown one
+  got := public.redeem_invite('NEWCOMERB001', 'Riley');
+  if got ->> 'code' <> 'P0002' or got ->> 'message' <> 'that invite code is not valid' then
+    raise exception 'a used invite code was answered with %', got;
+  end if;
   raise notice 'ok: an invite code works once';
 
   -- an owner-made lower-case code, typed the way the extension sends it
@@ -368,6 +422,20 @@ begin
   select count(*) into n from public.memberships where user_id = auth.uid() and dealership_id = b and role = 'manager';
   if n <> 1 then raise exception 'redeeming the second invite did not update the membership'; end if;
   raise notice 'ok: an invite code is matched ignoring case and surrounding spaces';
+
+  -- the throttle: four misses so far (NOPE, expired, orphaned, used); six more make ten, and then the
+  -- function refuses before looking anything up, even a good code
+  for i in 1..6 loop
+    got := public.redeem_invite('GUESS' || i, null);
+    if got ->> 'code' <> 'P0002' then raise exception 'miss % was answered with %', i, got; end if;
+  end loop;
+  begin
+    perform public.redeem_invite('NOPE', null);
+    raise exception 'the eleventh try inside an hour was looked up';
+  exception when others then
+    if sqlstate <> 'P0005' then raise; end if;
+  end;
+  raise notice 'ok: after 10 misses in an hour redeem_invite refuses with P0005';
 end;
 $$;
 
@@ -382,6 +450,20 @@ begin
     raise exception 'the redeemed lower-case invite was not marked used (it is stored as typed)';
   end if;
   raise notice 'ok: the redeemed invite is marked used';
+
+  -- the failed tries are counted where nobody else can see them
+  if (select count(*) from public.invite_misses where user_id = '00000000-0000-4000-8000-0000000000c1') <> 10 then
+    raise exception 'invite_misses should hold the newcomer''s 10 misses';
+  end if;
+  raise notice 'ok: each miss is counted';
+
+  -- a removed manager's unused codes go with them; used ones stay as the record
+  insert into public.invites (code, dealership_id, role, created_by) values ('KEPTBYAMGR05', '00000000-0000-4000-8000-0000000000d1', 'manager', '00000000-0000-4000-8000-0000000000a2');
+  delete from public.memberships where user_id = '00000000-0000-4000-8000-0000000000a2' and dealership_id = '00000000-0000-4000-8000-0000000000d1';
+  if exists (select 1 from public.invites where created_by = '00000000-0000-4000-8000-0000000000a2' and used_at is null) then
+    raise exception 'a removed manager''s unused codes survived their removal';
+  end if;
+  raise notice 'ok: removing a member deletes the codes they made and nobody used';
 end;
 $$;
 

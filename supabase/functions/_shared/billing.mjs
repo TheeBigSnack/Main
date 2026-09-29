@@ -56,6 +56,15 @@ const idOf = (x) => (typeof x === 'string' ? x : isRecord(x) && typeof x.id === 
 
 // ---------- the state machine ----------
 
+// Stripe keeps a subscription open in these statuses (a trial or a paid
+// period running, an invoice in dunning, a first payment not finished, a
+// pause): the card is changed in the Billing Portal and Stripe retries the
+// open invoice. Everything else (canceled, incomplete_expired, no
+// subscription at all) is over, and a new Checkout is how to pay again.
+export const OPEN_STATUSES = Object.freeze(['trialing', 'active', 'past_due', 'unpaid', 'incomplete', 'paused']);
+export const OPEN_SUBSCRIPTION_CODE = 'open-subscription';
+export const OPEN_SUBSCRIPTION_MESSAGE = 'update the card in Manage billing; the subscription is still open';
+
 // The row (or null) and the moment to judge it at (milliseconds or ISO).
 export function subscriptionState(row, now = Date.now()) {
   if (!isRecord(row)) return 'none';
@@ -66,6 +75,23 @@ export function subscriptionState(row, now = Date.now()) {
   if (pilotEnds !== null && pilotEnds > at) return 'pilot';
   if (status === null && pilotEnds === null) return 'none';
   return 'lapsed';
+}
+
+// Whether Stripe still holds a subscription open for the row.
+export function hasOpenSubscription(row) {
+  return isRecord(row) && typeof row.stripe_subscription_id === 'string' && row.stripe_subscription_id !== '' && OPEN_STATUSES.includes(String(row.status));
+}
+
+// Why POST /billing/checkout must not open a new Checkout for this row, as
+// { status, error, code? } for the answer, or null when it may. An active
+// dealership changes its plan in the portal; one whose subscription Stripe
+// still holds open updates the card there (a second Checkout would open a
+// second subscription on the same customer, and the old one's dunning
+// events would then keep flipping the row back to lapsed).
+export function checkoutRefusal(row, now = Date.now()) {
+  if (subscriptionState(row, now) === 'active') return { status: 409, error: 'this dealership already has a subscription; use the billing portal to change it' };
+  if (hasOpenSubscription(row)) return { status: 409, error: OPEN_SUBSCRIPTION_MESSAGE, code: OPEN_SUBSCRIPTION_CODE };
+  return null;
 }
 
 // A pilot can start when there is no row, or only the shell of one (a Stripe
@@ -330,11 +356,24 @@ export function normalizeStatus(status) {
   return typeof status === 'string' && status !== 'pilot' && STATUSES.includes(status) ? status : 'unpaid';
 }
 
-// Stripe does not deliver events in order. An event older than the row's
-// last change for the same subscription is stale and must not win.
-function isStale(row, subscriptionId, eventMs) {
-  if (!isRecord(row) || !subscriptionId || row.stripe_subscription_id !== subscriptionId) return false;
+// Stripe does not deliver events in order, and a customer's old subscription
+// goes on sending events (dunning retries, the final delete) after the row
+// has moved to a new one. An event is stale, and must not win, when it is
+// older than the row's last change for the same subscription, or when it is
+// about another subscription than the row's; the one exception is
+// customer.subscription.created, newer than the row's last change, on a row
+// whose subscription is over (canceled, incomplete_expired) or that never
+// had one: the replacement a manager just paid for.
+const OVER_STATUSES = Object.freeze(['canceled', 'incomplete_expired']);
+function isStale(row, subscriptionId, eventMs, eventType = '') {
+  if (!isRecord(row)) return false;
   const last = ms(row.updated_at);
+  const have = typeof row.stripe_subscription_id === 'string' && row.stripe_subscription_id !== '' ? row.stripe_subscription_id : '';
+  if (!have) return false; // a row with no subscription yet (a pilot, a customer shell) takes the first one whatever its stamp
+  if (subscriptionId !== have) {
+    const over = row.status === null || row.status === undefined || OVER_STATUSES.includes(String(row.status));
+    return !(eventType === 'customer.subscription.created' && over && (last === null || eventMs > last));
+  }
   return last !== null && last > eventMs;
 }
 
@@ -353,7 +392,7 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
 
   if (event.type.startsWith('customer.subscription.')) {
     const subscriptionId = idOf(obj);
-    if (isStale(row, subscriptionId, at)) return null;
+    if (isStale(row, subscriptionId, at, event.type)) return null;
     if (subscriptionId) patch.stripe_subscription_id = subscriptionId;
     patch.status = event.type === 'customer.subscription.deleted' ? 'canceled' : normalizeStatus(obj.status);
     const end = periodEndOf(obj);
@@ -363,10 +402,11 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
     return patch;
   }
 
-  // invoices: only ever adjust a row the subscription events created
-  if (!isRecord(row)) return null;
+  // invoices: only ever adjust a row the subscription events created, and
+  // only when they name the row's own subscription
+  if (!isRecord(row) || typeof row.stripe_subscription_id !== 'string' || row.stripe_subscription_id === '') return null;
   const subscriptionId = invoiceSubscriptionOf(obj);
-  if (isStale(row, subscriptionId, at)) return null;
+  if (isStale(row, subscriptionId, at, event.type)) return null;
   if (subscriptionId) patch.stripe_subscription_id = subscriptionId;
   if (event.type === 'invoice.payment_failed') {
     patch.status = 'past_due';

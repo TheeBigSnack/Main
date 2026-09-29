@@ -60,10 +60,11 @@ test('mergeRegistry without a caller id marks nothing (a machine that cannot tel
   assert.equal(own[VIN_A].userId, U1);
   const theirs = mergeRegistry({ [VIN_A]: { name: 'A', price: 20000, postedAt: today(0) } }, { listings: [row(VIN_A, U2)] }, { userId: U1 });
   assert.equal(theirs[VIN_A].mine, false);
-  // a newer post of the same car by a colleague replaces the local entry, marked
-  const replaced = mergeRegistry({ [VIN_A]: { name: 'A', price: 20000, postedAt: today(0) } }, { listings: [row(VIN_A, U2, { posted_at: today(5) })] }, { userId: U1 });
-  assert.equal(replaced[VIN_A].mine, false);
-  assert.equal(replaced[VIN_A].postedAt, today(5));
+  // a newer post of the same car by a colleague never takes over the caller's own entry (it would drop out of
+  // their next upload and the server would take their row down): the entry stays as it is and still counts
+  const kept = mergeRegistry({ [VIN_A]: { name: 'A', price: 20000, postedAt: today(0) } }, { listings: [row(VIN_A, U2, { posted_at: today(5) })] }, { userId: U1 });
+  assert.deepEqual(kept[VIN_A], { name: 'A', price: 20000, postedAt: today(0) });
+  assert.equal(postsToday(kept, now), 1);
 });
 
 // The cap across the salesperson's machines: the sync function counts their

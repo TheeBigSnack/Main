@@ -14,6 +14,7 @@ import { createHmac } from 'node:crypto';
 import {
   PRICING, STATUSES, STATES, HANDLED_EVENTS, MAX_SEATS, MIN_TRIAL_SECONDS,
   ms, subscriptionState, pilotAvailable, statusAnswer,
+  OPEN_STATUSES, OPEN_SUBSCRIPTION_CODE, OPEN_SUBSCRIPTION_MESSAGE, hasOpenSubscription, checkoutRefusal,
   planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
   formEncode, applyStripeEvent, normalizeStatus,
@@ -99,6 +100,46 @@ test('pilotAvailable and statusAnswer: what the manager page may offer', () => {
   assert.equal(lapsed.canSubscribe, true);
   assert.equal(lapsed.canStartPilot, false);
   assert.equal(lapsed.canManageBilling, true);
+});
+
+// ---------- the checkout gate ----------
+
+test('checkoutRefusal: no second Checkout while Stripe still holds a subscription open; a canceled or expired one, or none, may pay again', () => {
+  assert.deepEqual(OPEN_STATUSES, ['trialing', 'active', 'past_due', 'unpaid', 'incomplete', 'paused']);
+  assert.equal(OPEN_SUBSCRIPTION_CODE, 'open-subscription');
+  assert.equal(OPEN_SUBSCRIPTION_MESSAGE, 'update the card in Manage billing; the subscription is still open');
+  // nothing yet, a pilot, a customer shell: a Checkout may open
+  assert.equal(checkoutRefusal(null, NOW), null);
+  assert.equal(checkoutRefusal(row({ status: 'pilot', pilot_ends_at: iso(NOW + 10 * DAY) }), NOW), null);
+  assert.equal(checkoutRefusal(row({ stripe_customer_id: 'cus_1' }), NOW), null);
+  assert.equal(checkoutRefusal(row({ status: 'pilot', pilot_ends_at: iso(NOW - DAY), stripe_customer_id: 'cus_1' }), NOW), null, 'a pilot that ended unpaid');
+  // over in Stripe: a new subscription is the way back
+  for (const s of ['canceled', 'incomplete_expired']) {
+    assert.equal(checkoutRefusal(row({ status: s, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }), NOW), null, s);
+    assert.equal(hasOpenSubscription(row({ status: s, stripe_subscription_id: 'sub_1' })), false, s);
+  }
+  assert.equal(checkoutRefusal(row({ status: null, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }), NOW), null, 'a subscription id with no status');
+  // open in Stripe: 409, and the manager goes to the portal (Stripe retries the open invoice once the card is changed)
+  for (const s of OPEN_STATUSES) {
+    const r = row({ status: s, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' });
+    assert.equal(hasOpenSubscription(r), true, s);
+    const refusal = checkoutRefusal(r, NOW);
+    assert.equal(refusal.status, 409, s);
+    if (subscriptionState(r, NOW) === 'active') {
+      assert.deepEqual(refusal, { status: 409, error: 'this dealership already has a subscription; use the billing portal to change it' }, s + ': the active gate stays');
+    } else {
+      assert.deepEqual(refusal, { status: 409, error: OPEN_SUBSCRIPTION_MESSAGE, code: OPEN_SUBSCRIPTION_CODE }, s);
+    }
+  }
+  // a first payment still pending while the pilot runs is open too: the state is pilot, the gate still holds
+  const pending = row({ status: 'incomplete', pilot_ends_at: iso(NOW + 3 * DAY), stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' });
+  assert.equal(subscriptionState(pending, NOW), 'pilot');
+  assert.equal(checkoutRefusal(pending, NOW).code, OPEN_SUBSCRIPTION_CODE);
+  // an open status without a subscription id is not a subscription Stripe holds (nothing to update in the portal)
+  assert.equal(hasOpenSubscription(row({ status: 'past_due' })), false);
+  assert.equal(checkoutRefusal(row({ status: 'past_due', stripe_customer_id: 'cus_1' }), NOW), null);
+  assert.equal(checkoutRefusal(row({ status: 'past_due', stripe_subscription_id: '' }), NOW), null);
+  assert.equal(hasOpenSubscription(null), false);
 });
 
 test('ms reads ISO text, Postgres microseconds, Dates and numbers', () => {
@@ -329,9 +370,23 @@ test('applyStripeEvent: deleted is canceled; a stale event never wins; unrelated
   assert.equal(subscriptionState({ ...active, ...deleted }, NOW + 60_000), 'lapsed');
   // Stripe delivers out of order: an older event for the same subscription is dropped
   assert.equal(applyStripeEvent(active, event('customer.subscription.updated', sub({ status: 'past_due' }), T - 60), opts), null);
-  // but an older event for another subscription (a new one after a cancel) is applied
-  const other = applyStripeEvent(active, event('customer.subscription.created', sub({ id: 'sub_2', status: 'active' }), T - 60), opts);
-  assert.equal(other.stripe_subscription_id, 'sub_2');
+  // an event about another subscription than the row's is dropped while the row's is open, whatever its age
+  for (const type of ['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted']) {
+    assert.equal(applyStripeEvent(active, event(type, sub({ id: 'sub_2', status: 'active' }), T - 60), opts), null, type + ', older');
+    assert.equal(applyStripeEvent(active, event(type, sub({ id: 'sub_2', status: 'active' }), T + 60), opts), null, type + ', newer');
+  }
+  // the new subscription after a cancel is adopted: created, newer than the row's last change, on a row whose subscription is over
+  for (const status of ['canceled', 'incomplete_expired', null]) {
+    const over = row({ status, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', updated_at: iso(NOW) });
+    const other = applyStripeEvent(over, event('customer.subscription.created', sub({ id: 'sub_2', status: 'active' }), T + 60), opts);
+    assert.equal(other.stripe_subscription_id, 'sub_2', String(status));
+    assert.equal(other.status, 'active', String(status));
+    assert.equal(subscriptionState({ ...over, ...other }, NOW + 60_000), 'active', String(status));
+    // not by an update or a delete of it, and not by a created older than the row's last change
+    assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2' }), T + 60), opts), null, String(status));
+    assert.equal(applyStripeEvent(over, event('customer.subscription.deleted', sub({ id: 'sub_2' }), T + 60), opts), null, String(status));
+    assert.equal(applyStripeEvent(over, event('customer.subscription.created', sub({ id: 'sub_2' }), T - 60), opts), null, String(status));
+  }
   // and a row that never had a subscription (a pilot) takes whatever comes
   const pilot = row({ status: 'pilot', pilot_ends_at: iso(NOW + 5 * DAY), updated_at: iso(NOW) });
   assert.equal(applyStripeEvent(pilot, event('customer.subscription.created', sub(), T - 60), opts).status, 'active');
@@ -372,6 +427,33 @@ test('applyStripeEvent: invoices mark a failed payment past due and a paid one p
   assert.equal(applyStripeEvent(null, event('invoice.paid', oldShape), opts), null);
   // a stale invoice event is dropped like a stale subscription event
   assert.equal(applyStripeEvent({ ...active, updated_at: iso(NOW + DAY) }, event('invoice.payment_failed', oldShape), opts), null);
+  // an invoice must name the row's subscription: another one's, none, or a row without a subscription yet changes nothing
+  assert.equal(applyStripeEvent(active, event('invoice.payment_failed', { ...oldShape, subscription: 'sub_2' }), opts), null);
+  assert.equal(applyStripeEvent(active, event('invoice.paid', { ...newShape, parent: { type: 'subscription_details', subscription_details: { subscription: 'sub_2' } } }), opts), null);
+  assert.equal(applyStripeEvent(active, event('invoice.payment_failed', { id: 'in_3', object: 'invoice', customer: 'cus_1' }), opts), null, 'a one-off invoice of the customer is not the subscription');
+  assert.equal(applyStripeEvent({ ...active, stripe_subscription_id: null }, event('invoice.paid', oldShape), opts), null);
+});
+
+test('applyStripeEvent: after a new subscription replaces a canceled one, the old one\'s dunning and its final delete change nothing', () => {
+  // sub_1 was canceled; the manager paid again and the row moved to sub_2
+  const canceled = row({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', updated_at: iso(NOW - 2 * DAY) });
+  const adopted = applyStripeEvent(canceled, event('customer.subscription.created', sub({ id: 'sub_2', status: 'active' }), T - 86400), opts);
+  const current = { ...canceled, ...adopted };
+  assert.equal(current.stripe_subscription_id, 'sub_2');
+  assert.equal(subscriptionState(current, NOW), 'active');
+  // Stripe goes on about sub_1: a retried invoice fails, dunning gives up, the subscription is deleted
+  const sub1Invoice = { id: 'in_9', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [{ period: { start: T, end: T + 30 * 86400 } }] } };
+  assert.equal(applyStripeEvent(current, event('invoice.payment_failed', sub1Invoice, T), opts), null);
+  assert.equal(applyStripeEvent(current, event('customer.subscription.updated', sub({ id: 'sub_1', status: 'unpaid' }), T), opts), null);
+  assert.equal(applyStripeEvent(current, event('customer.subscription.deleted', sub({ id: 'sub_1', status: 'canceled' }), T), opts), null);
+  assert.equal(applyStripeEvent(current, event('invoice.paid', sub1Invoice, T), opts), null, 'a late success of the old one does not move the paid-through date either');
+  assert.equal(subscriptionState(current, NOW), 'active', 'the store that just paid stays active');
+  // sub_2's own events still land
+  const paid = applyStripeEvent(current, event('invoice.paid', { ...sub1Invoice, id: 'in_10', subscription: 'sub_2' }, T), opts);
+  assert.equal(paid.current_period_end, iso(NOW + 30 * DAY));
+  assert.equal(applyStripeEvent(current, event('customer.subscription.updated', sub({ id: 'sub_2', status: 'past_due' }), T), opts).status, 'past_due');
+  // and with the row on sub_2 and open, the checkout gate sends the manager to the portal instead of a third subscription
+  assert.equal(checkoutRefusal({ ...current, status: 'past_due' }, NOW).code, OPEN_SUBSCRIPTION_CODE);
 });
 
 // ---------- the signature ----------
@@ -496,5 +578,12 @@ test('billing/index.ts: the four routes, fetch not an SDK, the secret key only i
   assert.match(src, /from '\.\.\/_shared\/billing\.mjs'/);
   // managers only for checkout and portal; the webhook needs no user token
   assert.match(src, /pick\(caller\.client, caller\.user\.id, wanted, !isStatus\)/);
+  // the checkout gate is the shared rule, before a customer or a session is made
+  assert.match(src, /import \{[^}]*\bcheckoutRefusal\b[^}]*\} from '\.\.\/_shared\/billing\.mjs'/);
+  const gate = src.indexOf('const refusal = checkoutRefusal(row);');
+  assert.ok(gate > 0);
+  assert.match(src, /if \(refusal\) return json\(req, refusal\.status, \{ ok: false, error: refusal\.error, \.\.\.\(refusal\.code \? \{ code: refusal\.code \} : \{\}\) \}\);/);
+  assert.ok(gate < src.indexOf('await ensureCustomer(service, dealership, row, caller.user.email)'), 'before a customer is made');
+  assert.ok(gate < src.indexOf("'/v1/checkout/sessions'"), 'before a Checkout is opened');
   assert.match(src, /if \(route === 'webhook'\) \{\s*if \(req\.method !== 'POST'\)[^]*?return webhook\(req\);/);
 });

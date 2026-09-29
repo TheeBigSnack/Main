@@ -273,8 +273,10 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
     if (thePlan.state === 'lapsed') return { status: 402, body: { ok: false, error: "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view", code: 'lapsed', plan: { ...thePlan } } };
     const now = tick();
     const rows = toServerRows({ origin: body.origin, posted: body.posted, pilot: body.pilot, dealershipId: D, userId });
-    const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, attempts: rows.postAttempts.length, todoItems: 0, scans: body.scan ? 1 : 0 };
-    const sent = new Set(rows.listings.map((r) => `${r.vin}@${r.posted_at}`));
+    // a listing stamped more than five minutes ahead of the server's clock is rejected, not written
+    const accepted = rows.listings.filter((r) => Date.parse(r.posted_at) <= clock.t + 5 * 60 * 1000);
+    const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: rows.listings.length - accepted.length, conflicts: 0, attempts: rows.postAttempts.length, todoItems: 0, scans: body.scan ? 1 : 0 };
+    const sent = new Set(accepted.map((r) => `${r.vin}@${r.posted_at}`));
     for (const r of listings) {
       if (r.user_id === userId && r.status === 'listed' && !sent.has(`${r.vin}@${r.posted_at}`) && body.since && Date.parse(r.created_at) <= Date.parse(body.since)) {
         r.status = 'taken_down';
@@ -282,9 +284,14 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
         counts.takenDown += 1;
       }
     }
-    for (const incoming of rows.listings) {
+    const listedByOthers = new Set(listings.filter((r) => r.status === 'listed' && r.user_id !== userId).map((r) => r.vin));
+    for (const incoming of accepted) {
       const have = listings.find((r) => r.vin === incoming.vin && r.posted_at === incoming.posted_at);
       if (!have) {
+        if (listedByOthers.has(incoming.vin)) {
+          counts.conflicts += 1; // a VIN another member has up is theirs until their row is taken down
+          continue;
+        }
         listings.push({ id: `${incoming.vin}@${incoming.posted_at}`, ...incoming, created_at: now });
         counts.listingsInserted += 1;
         continue;
