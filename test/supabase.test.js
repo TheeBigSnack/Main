@@ -208,7 +208,7 @@ test('supabase/README.md names today, postsToday, plan, the 402 rule and the Bil
   for (const state of ['none', 'pilot', 'active', 'lapsed']) assert.match(card, new RegExp(`^\\| \`${state}\` \\|`, 'm'), `a row for ${state}`);
   assert.match(card, /`GET \/billing\/status\?dealershipId=/);
   assert.match(card, /\*\*Start the free pilot\*\* runs `supabase\.rpc\('start_pilot', \{ dealership_id \}\)`/);
-  assert.match(card, /\*\*Subscribe\*\* POSTs `\{ returnUrl, dealershipId \}` to `\/billing\/checkout`/);
+  assert.match(card, /\*\*Subscribe\*\* POSTs `\{ returnUrl, dealershipId, seats \}` to `\/billing\/checkout`/);
   assert.match(card, /\*\*Manage billing\*\* POSTs `\{ returnUrl, dealershipId \}` to `\/billing\/portal`/);
   assert.match(card, /salespeople see the line and no buttons/);
   assert.doesNotMatch(readme, /not wired in this step/, 'the card is wired now');
