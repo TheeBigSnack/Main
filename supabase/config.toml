@@ -54,3 +54,9 @@ verify_jwt = false
 # Stripe-Signature header itself (functions/billing/index.ts).
 [functions.billing]
 verify_jwt = false
+
+# The landing page's visitors are anonymous: the lead function checks the
+# page's Origin against LEAD_ORIGINS, a honeypot and its own rate limits
+# instead of a token (functions/lead/index.ts).
+[functions.lead]
+verify_jwt = false

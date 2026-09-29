@@ -44,7 +44,7 @@ function fields(form) {
 }
 
 function mailtoFor(data) {
-  const lines = Object.entries(data).map(([k, v]) => `${k}: ${v}`);
+  const lines = Object.entries(data).filter(([k]) => k !== 'company_url').map(([k, v]) => `${k}: ${v}`);
   const sep = SITE.demoMailto.includes('?') ? '&' : '?';
   return `${SITE.demoMailto}${sep}subject=${encodeURIComponent('Lot Sync demo request')}&body=${encodeURIComponent(lines.join('\n'))}`;
 }
@@ -67,8 +67,8 @@ function wireForm() {
       say('Your email app should open with the request filled in. If it did not, email ' + SITE.demoMailto.replace(/^mailto:/, '') + '.', 'ok');
       return;
     }
-    // SITE.demoEndpoint will be a Supabase Edge Function (Milestone 4/5) that
-    // stores the request per PLAN.md M5. The form is sent there and nowhere else.
+    // SITE.demoEndpoint is the lead Edge Function, which stores the request in
+    // demo_requests (PLAN.md M5). The form is sent there and nowhere else.
     const button = form.querySelector('button[type="submit"]');
     if (button) button.disabled = true;
     say('Sending…');
@@ -78,7 +78,15 @@ function wireForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        // 400 names the field that needs fixing; 429 says to wait or email. Both are sentences meant for the visitor.
+        const answer = await res.json().catch(() => ({}));
+        const field = answer && answer.field ? form.elements.namedItem(answer.field) : null;
+        if (field && typeof field.focus === 'function') field.focus();
+        const why = answer && typeof answer.error === 'string' && (res.status === 400 || res.status === 429) ? answer.error.charAt(0).toUpperCase() + answer.error.slice(1) + '. ' : '';
+        say(why + 'You can also email ' + SITE.demoMailto.replace(/^mailto:/, '') + '.', 'error');
+        return;
+      }
       form.reset();
       say('Thank you. We have your request and will reply by email.', 'ok');
     } catch {

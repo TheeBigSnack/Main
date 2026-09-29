@@ -164,3 +164,6 @@ footer a { color: var(--text); }
 @media (min-width: 960px) {
   .cards { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* the demo form's honeypot: off screen, never shown to people */
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }

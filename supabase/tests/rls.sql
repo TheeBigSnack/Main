@@ -200,6 +200,12 @@ begin
     raise exception 'a_sales wrote to rewrite_usage';
   exception when insufficient_privilege then
     raise notice 'ok: a_sales cannot write rewrite_usage';
+  begin
+    perform 1 from public.demo_requests;
+    raise exception 'a signed-in dealer can read demo requests';
+  exception when insufficient_privilege then
+    raise notice 'ok: a_sales cannot read demo requests';
+  end;
   end;
 end;
 $$;
@@ -528,6 +534,18 @@ begin
   begin
     perform public.redeem_invite('NEWCOMERB001', 'Nobody');
     raise exception 'anon could call redeem_invite';
+  exception when insufficient_privilege then
+    null;
+  end;
+  begin
+    select count(*) into n from public.demo_requests;
+    raise exception 'anon can read demo requests';
+  exception when insufficient_privilege then
+    null;
+  end;
+  begin
+    insert into public.demo_requests (name, dealership, website, email) values ('x', 'x', 'x.test', 'x@x.test');
+    raise exception 'anon can write a demo request past the lead function';
   exception when insufficient_privilege then
     null;
   end;

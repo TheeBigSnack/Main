@@ -254,6 +254,12 @@
             <label for="f-message">Message (optional)</label>
             <textarea id="f-message" name="message"></textarea>
           </div>
+          <!-- Left empty by people: it is off screen and out of the tab order. A form-filling bot fills it, and the
+               lead function then stores nothing (supabase/functions/_shared/lead.mjs, HONEYPOT). -->
+          <div class="hp" aria-hidden="true">
+            <label for="f-company-url">Company URL</label>
+            <input id="f-company-url" name="company_url" type="text" tabindex="-1" autocomplete="off">
+          </div>
           <div class="full">
             <button type="submit" class="button">Send the request</button>
             <p id="demo-status" class="status" role="status" aria-live="polite"></p>

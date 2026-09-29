@@ -14,6 +14,8 @@ What is here:
 | `migrations/0001_schema.sql` | The tables: dealerships, memberships, listings (the posted registry), todo_items, scan_summaries, post_attempts, rewrite_usage, invites. |
 | `migrations/0002_rls.sql` | Row-level security on every table, the `is_member` / `is_manager` helpers, `redeem_invite` and `create_invite`. |
 | `migrations/0003_views.sql` | `v_salesperson_summary` and `v_open_todo` for the manager page. |
+| `migrations/0005_leads.sql` | `demo_requests`, the landing page's demo requests; no API role reads it. |
+| `functions/lead/` | `/lead`: the landing page's demo form, anonymous, behind its origin, a honeypot and rate limits. |
 | `functions/rewrite/` | The rewrite service (replaces `backend/`): `/rewrite` and `/color` behind sign-in, a rate limit and a monthly cost cap. |
 | `functions/sync/` | `/sync`: the posted registry and the pilot numbers up, the dealership's current state down. |
 | `functions/_shared/` | The prompt and the guardrails, copied from `backend/rewritePrompt.js` and `extension/src/rewriteTemplate.js`; CORS, JSON and sign-in helpers. |
@@ -37,7 +39,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    supabase db push
    ```
 
-   `db push` applies the four migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
+   `db push` applies the five migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
 
 3. **Sign-in settings** (Dashboard, Authentication):
    - Providers, Email: keep it on; passwords are never used, so "Confirm email" can stay off (the magic link is the confirmation).
@@ -137,10 +139,13 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
   -f supabase/migrations/0001_schema.sql \
   -f supabase/migrations/0002_rls.sql \
   -f supabase/migrations/0003_views.sql \
-  -f supabase/tests/rls.sql
+  -f supabase/migrations/0004_billing.sql \
+  -f supabase/migrations/0005_leads.sql \
+  -f supabase/tests/rls.sql \
+  -f supabase/tests/billing.sql
 ```
 
-Either way the last line is `rls.sql: every check passed` and psql exits 0; a failed check prints the reason and exits non-zero. Never run the shim against a Supabase database; it only exists for Postgres without Supabase.
+Either way each file ends with `every check passed` and psql exits 0; a failed check prints the reason and exits non-zero. Never run the shim against a Supabase database; it only exists for Postgres without Supabase.
 
 The two copies in `functions/_shared/` (the prompt and the guardrails) are checked against their originals with
 
@@ -153,6 +158,20 @@ and `npm test` covers `extension/src/account.js` and `extension/src/sync.js`.
 ## What is stored
 
 Only what the extension already keeps in the browser and the privacy policy names (`legal/privacy-policy.md`): the dealership, who belongs to it and as what, the posted registry (VIN, name, price, times, when the server first received the row, the listing link the salesperson saved, who posted), the to-do items, the post attempts (times and outcomes), scan counts, and one row per rewrite call with its token counts and cost. No descriptions, no photos, no buyers, nothing from the Facebook account beyond the listing link. The fill records (which form fields could not be filled) stay in the browser. Deleting a dealership row deletes everything it owns.
+
+## Demo requests (the landing page's form)
+
+The landing page's **Request a demo** form posts to the `lead` function, which stores the request in `demo_requests` (PLAN.md M5, acceptance 2). Until it is set up the form opens the visitor's own mail app instead, so nothing is lost.
+
+```
+supabase secrets set LEAD_ORIGINS=https://<where site/ is hosted>
+supabase db push                              # applies 0005_leads.sql
+supabase functions deploy lead --no-verify-jwt
+```
+
+Then put `https://<ref>.supabase.co/functions/v1/lead` in `site/config.js` as `demoEndpoint`. Visitors are anonymous, so the function checks no token; instead the browser's Origin must be one of `LEAD_ORIGINS` (anything else gets 403 and no CORS header), a hidden honeypot field makes a bot's request look accepted while storing nothing, one address may send 5 requests an hour (hashed in the function's memory and forgotten, never stored), and the whole table takes at most 200 an hour. Fields are trimmed and capped (`functions/_shared/lead.mjs`; the table's checks carry the same limits). A request keeps only what the visitor typed, the time and the page's origin: no address, no cookie, no tracking.
+
+Reading them: Dashboard, Table editor, `demo_requests`, newest first; set `handled_at` when you have answered one. To get an email for each new request, add a database webhook (Database, Webhooks) on inserts into `demo_requests` pointing at your mail service; no API role, the anon key included, can read the table, so the page itself never shows one back.
 
 ## What replaces backend/ and when
 
@@ -263,7 +282,7 @@ stripe listen --forward-to https://<ref>.supabase.co/functions/v1/billing/webhoo
 
 `listen` prints a signing secret of its own (`whsec_...`); while it runs, set that as `STRIPE_WEBHOOK_SECRET` (and set the endpoint's own secret back afterwards). Then `stripe trigger customer.subscription.created` and the other four event names send test events through; the function's log (Dashboard, Edge Functions, billing, Logs) shows each one recorded and, when the customer belongs to a dealership, applied. A triggered event's customer belongs to no dealership, so it is recorded and not applied; to see a row change, complete a real test-mode checkout from the manager page (or from `curl` with a manager's token) and watch `subscriptions` in the Table editor.
 
-To run the SQL checks, add `0004_billing.sql` after `0003_views.sql` and `tests/billing.sql` after `tests/rls.sql` in the `psql` command under "Run the RLS test"; the last line is `billing.sql: every check passed`.
+The `psql` command under "Run the RLS test" runs `tests/billing.sql` too; its last line is `billing.sql: every check passed`.
 
 ### What is stored
 
