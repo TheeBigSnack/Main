@@ -123,3 +123,7 @@ h3 .pill { font-weight: 600; }
 .stats th { color: var(--muted); font-weight: 600; }
 .stats td.n, .stats th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .stats td .hint { color: var(--muted); }
+
+/* A focus ring on everything a keyboard reaches (the side panel reuses this file). */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tabs button:focus-visible { outline-offset: -2px; }

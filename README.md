@@ -106,6 +106,7 @@ npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep
 npm run screenshots   # the landing page's product images, taken from the sandbox with sample data (site/screenshots/)
+npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (landing page, manager view, popup, side panel)
 npm run check-deploy  # after the Supabase deploy: a checklist of what the live project lets a stranger do (supabase/README.md step 6)
 ```
 

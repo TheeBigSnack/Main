@@ -139,3 +139,6 @@ h2 .pill { font-weight: 600; }
 /* the Team card: one row per member */
 .team .name { font-weight: 600; min-width: 140px; }
 button.ghost.danger { border-color: var(--bad); color: var(--bad); }
+
+/* A focus ring on everything a keyboard reaches. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

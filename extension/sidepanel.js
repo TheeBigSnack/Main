@@ -745,9 +745,9 @@ function viewReview() {
   const rw = state.settings.rewrite;
   return `${carCard()}
   <section>
-    <h3>Description ${sourcePill()}</h3>
+    <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
     ${state.note ? `<div class="banner warn">${esc(state.note)}</div>` : ''}
-    <textarea id="description" spellcheck="true">${esc(state.description)}</textarea>
+    <textarea id="description" spellcheck="true" aria-labelledby="descriptionLabel">${esc(state.description)}</textarea>
     ${checksHtml(state.guardrails)}
     <div class="actions">
       <button type="button" class="plain" id="rewrite" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>Rewrite with Claude</button>

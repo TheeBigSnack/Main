@@ -1,0 +1,258 @@
+#!/usr/bin/env node
+// Lot Sync accessibility check (`npm run test:a11y`): opens the landing page,
+// the manager view (sample data) and, through the in-browser sandbox, the
+// real popup and side panel, and checks each for the failures a keyboard or
+// screen-reader user meets first. No dependency beyond Playwright: the rules
+// are plain DOM checks run inside each page (auditPage, below).
+//
+//   - every form control has a name (a label, aria-label or aria-labelledby);
+//   - every button and link has a name, every image an alt attribute;
+//   - ids are unique; aria-selected only on roles that take it, and a tab
+//     sits in a tablist;
+//   - headings do not skip a level; the page has a language and a title;
+//   - every focusable control shows a focus ring (outline or box-shadow);
+//   - text meets WCAG AA contrast (4.5:1, 3:1 for large text) against the
+//     colour behind it.
+//
+// Exit code 1 when any page has a finding; each finding names the page, the
+// rule and the element.
+
+import { chromium } from 'playwright';
+import { existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { startServer } from '../demo/serve.mjs';
+
+// Runs inside the page: must be self-contained.
+export function auditPage() {
+  const out = [];
+  const add = (rule, el, detail = '') => {
+    const tag = el ? el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + (el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : '') : '';
+    const text = el ? (el.textContent || el.value || '').trim().replace(/\s+/g, ' ').slice(0, 40) : '';
+    out.push({ rule, el: tag, text, detail });
+  };
+  const visible = (el) => {
+    if (!el || el.closest('[aria-hidden="true"],[hidden],template')) return false;
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const byId = (id) => document.getElementById(id);
+  const nameOf = (el) => {
+    const labelled = el.getAttribute('aria-labelledby');
+    if (labelled) return labelled.split(/\s+/).map((id) => (byId(id) ? byId(id).textContent : '')).join(' ').trim();
+    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').trim();
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) {
+      if (el.id) {
+        const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (l && l.textContent.trim()) return l.textContent.trim();
+      }
+      const wrap = el.closest('label');
+      if (wrap && wrap.textContent.trim()) return wrap.textContent.trim();
+      if (el.type === 'submit' || el.type === 'button') return (el.value || '').trim();
+      return (el.getAttribute('title') || '').trim();
+    }
+    const imgs = [...el.querySelectorAll('img[alt]')].map((i) => i.alt).join(' ');
+    return ((el.textContent || '') + ' ' + imgs + ' ' + (el.getAttribute('title') || '')).trim();
+  };
+
+  // language and title
+  if (!document.documentElement.getAttribute('lang')) add('the page has no lang attribute', null);
+  if (!document.title.trim()) add('the page has no title', null);
+
+  // controls, buttons, links, images
+  for (const el of document.querySelectorAll('input:not([type=hidden]), select, textarea')) {
+    if (visible(el) && !nameOf(el)) add('a form control has no label', el);
+  }
+  for (const el of document.querySelectorAll('button, [role=button], a[href]')) {
+    if (visible(el) && !nameOf(el)) add('a button or link has no name', el);
+  }
+  for (const el of document.querySelectorAll('img')) {
+    if (!el.hasAttribute('alt')) add('an image has no alt attribute', el);
+  }
+
+  // ids, ARIA
+  const seen = new Map();
+  for (const el of document.querySelectorAll('[id]')) seen.set(el.id, (seen.get(el.id) || 0) + 1);
+  for (const [id, n] of seen) if (n > 1) add('an id is used more than once', byId(id), `${id} x${n}`);
+  const SELECTABLE = ['tab', 'option', 'gridcell', 'row', 'columnheader', 'rowheader', 'treeitem'];
+  for (const el of document.querySelectorAll('[aria-selected]')) {
+    if (!SELECTABLE.includes(el.getAttribute('role'))) add('aria-selected on an element whose role does not take it', el, el.getAttribute('role') || 'no role');
+  }
+  for (const el of document.querySelectorAll('[role=tab]')) {
+    if (!el.closest('[role=tablist]')) add('a tab outside a tablist', el);
+  }
+  for (const el of document.querySelectorAll('[aria-controls],[aria-labelledby],[aria-describedby]')) {
+    for (const attr of ['aria-controls', 'aria-labelledby', 'aria-describedby']) {
+      const v = el.getAttribute(attr);
+      if (v && v.split(/\s+/).some((id) => !byId(id))) add(`${attr} names an id that is not on the page`, el, v);
+    }
+  }
+
+  // headings
+  let last = 0;
+  for (const h of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    if (!visible(h)) continue;
+    const level = Number(h.tagName[1]);
+    if (last && level > last + 1) add('a heading skips a level', h, `h${last} then h${level}`);
+    last = level;
+  }
+
+  // focus rings are checked from outside with the real Tab key (focusWalk below):
+  // Chrome draws :focus-visible for keyboard focus, not for a script's focus()
+
+  // contrast
+  const rgba = (c) => {
+    const m = String(c).match(/rgba?\(([^)]+)\)/);
+    if (!m) return null;
+    const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+    return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+  };
+  const lum = ({ r, g, b }) => {
+    const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const behind = (el) => {
+    let color = { r: 255, g: 255, b: 255, a: 1 };
+    const stack = [];
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const bg = rgba(getComputedStyle(n).backgroundColor);
+      if (getComputedStyle(n).backgroundImage !== 'none') return null; // a picture or gradient: not judged
+      if (bg && bg.a > 0) { stack.push(bg); if (bg.a >= 1) break; }
+    }
+    for (const bg of stack.reverse()) color = { r: bg.r * bg.a + color.r * (1 - bg.a), g: bg.g * bg.a + color.g * (1 - bg.a), b: bg.b * bg.a + color.b * (1 - bg.a), a: 1 };
+    return color;
+  };
+  const judged = new Set();
+  for (const node of document.querySelectorAll('body *')) {
+    if (!visible(node) || judged.size > 400) continue;
+    const own = [...node.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim());
+    if (!own) continue;
+    const s = getComputedStyle(node);
+    const fg = rgba(s.color);
+    const bg = behind(node);
+    if (!fg || !bg) continue;
+    const text = { r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a) };
+    const [hi, lo] = [lum(text), lum(bg)].sort((a, b) => b - a);
+    const ratio = (hi + 0.05) / (lo + 0.05);
+    const size = parseFloat(s.fontSize);
+    const bold = Number(s.fontWeight) >= 700;
+    const large = size >= 24 || (bold && size >= 18.66);
+    const need = large ? 3 : 4.5;
+    if (node.closest('button[disabled], input[disabled], [aria-disabled="true"]')) continue; // WCAG exempts inactive controls
+    const key = `${s.color}|${bg.r},${bg.g},${bg.b}|${need}`;
+    if (ratio < need && !judged.has(key)) {
+      judged.add(key);
+      add('text contrast is below WCAG AA', node, `${ratio.toFixed(2)}:1, needs ${need}:1 (${s.color} on rgb(${Math.round(bg.r)}, ${Math.round(bg.g)}, ${Math.round(bg.b)}))`);
+    }
+  }
+  return out;
+}
+
+// Presses Tab through the page (or frame) the way a keyboard user does and
+// reports each control that shows no focus ring. Up to `limit` stops; stops
+// early when focus comes back round or leaves the frame.
+export async function focusWalk(page, target, limit = 60) {
+  const found = [];
+  await target.evaluate(() => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); window.focus(); });
+  const seen = new Set();
+  for (let i = 0; i < limit; i += 1) {
+    await page.keyboard.press('Tab');
+    const info = await target.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || el === document.body || !document.hasFocus()) return null;
+      const s = getComputedStyle(el);
+      const ring = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0) || (s.boxShadow && s.boxShadow !== 'none');
+      const key = el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + '|' + (el.textContent || el.value || '').trim().slice(0, 30);
+      return { key, ring, type: el.type || '', tag: el.tagName.toLowerCase() + (el.id ? `#${el.id}` : ''), text: (el.textContent || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 40) };
+    });
+    if (!info || seen.has(info.key)) break;
+    seen.add(info.key);
+    if (!info.ring && info.type !== 'radio' && info.type !== 'checkbox') found.push({ rule: 'no visible focus ring', el: info.tag, text: info.text, detail: '' });
+  }
+  if (seen.size === 0) {
+    // a page with controls the keyboard never reached; a page with none (the idle side panel) is fine
+    const controls = await target.evaluate(() => [...document.querySelectorAll('a[href], button:not([disabled]), input:not([type=hidden]):not([disabled]), select, textarea')].filter((el) => el.getBoundingClientRect().width > 0).length);
+    if (controls) found.push({ rule: 'the keyboard cannot reach any control', el: '', text: '', detail: `${controls} control(s) on the page` });
+  }
+  return found;
+}
+
+const DEFAULT_CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+
+async function main() {
+  const executablePath = process.env.LOTSYNC_CHROME || (existsSync(DEFAULT_CHROME) ? DEFAULT_CHROME : undefined);
+  const server = await startServer({ port: 0 });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ executablePath, headless: true });
+  const results = [];
+  let current = null; // the page the frames belong to, for the keyboard
+  const audit = async (name, target) => {
+    const found = await target.evaluate(`(${auditPage.toString()})()`);
+    found.push(...(await focusWalk(current, target)));
+    results.push(...found.map((f) => ({ page: name, ...f })));
+  };
+  try {
+    for (const scheme of ['light', 'dark']) {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: scheme });
+      current = page;
+      await page.goto(`${base}/site/index.html`);
+      await audit(`landing page (${scheme})`, page);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await audit(`landing page, phone (${scheme})`, page);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`${base}/manager/index.html?mock=1`);
+      await page.locator('#invites').waitFor({ timeout: 15000 });
+      await audit(`manager view, sample data (${scheme})`, page);
+      await page.close();
+    }
+
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    current = page;
+    await page.goto(`${base}/demo/`);
+    await page.waitForFunction(() => Boolean(document.body.dataset.ready), null, { timeout: 30000 });
+    const openPopup = async () => {
+      if (await page.locator('#popupHost').isHidden()) await page.click('#lotSyncButton');
+      await page.locator('#popupHost').waitFor({ state: 'visible' });
+    };
+    await openPopup();
+    await page.check('#pinPopup'); // keep the popup open while the keyboard walks in and out of it
+    const popupFrame = await (await page.waitForSelector('#popupFrame', { state: 'attached' })).contentFrame();
+    await popupFrame.locator('#scan').click();
+    await popupFrame.locator('.banner.info').waitFor({ timeout: 20000 });
+    for (const view of ['ready', 'todo', 'pilot', 'mine']) {
+      const tab = popupFrame.locator(`.tabs button[data-view="${view}"]`);
+      if (await tab.count()) {
+        await openPopup();
+        await tab.click();
+        await audit(`popup, ${view} tab`, popupFrame);
+      }
+    }
+    const settings = popupFrame.locator('#settingsBtn');
+    if (await settings.count()) {
+      await settings.click();
+      await audit('popup, Settings', popupFrame);
+    }
+    const panelFrame = await (await page.waitForSelector('#panelFrame', { state: 'attached' })).contentFrame();
+    await audit('side panel, idle', panelFrame);
+    await openPopup();
+    if (await popupFrame.locator('#settingsBtn[aria-pressed="true"]').count()) await popupFrame.locator('#settingsBtn').click();
+    await popupFrame.locator('.tabs button[data-view="ready"]').click();
+    await popupFrame.locator('button[data-action="openPost"]').first().click();
+    await panelFrame.locator('#description, textarea').first().waitFor({ timeout: 30000 });
+    await audit('side panel, reviewing a car', panelFrame);
+    await page.close();
+  } finally {
+    await browser.close();
+    server.close();
+  }
+  const byPage = new Map();
+  for (const r of results) byPage.set(r.page, [...(byPage.get(r.page) || []), r]);
+  for (const [page, list] of byPage) {
+    console.log(`\n${page}: ${list.length} finding(s)`);
+    for (const f of list) console.log(`  - ${f.rule}: ${f.el}${f.text ? ` "${f.text}"` : ''}${f.detail ? ` (${f.detail})` : ''}`);
+  }
+  console.log(results.length ? `\n${results.length} accessibility finding(s).` : '\nNo accessibility findings.');
+  process.exitCode = results.length ? 1 : 0;
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) main();
