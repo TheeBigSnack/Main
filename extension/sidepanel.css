@@ -44,3 +44,6 @@ label.block input[type="checkbox"], label.block input[type="radio"] { width: aut
 ol.rules { padding-left: 20px; }
 ol.rules li { margin: 6px 0; }
 .queuebar .actions { margin-top: 6px; }
+/* the wizard's Account step: each button sits under its own box */
+.wizAccount .actions { margin: 0 0 6px; }
+.wizAccount .banner { margin: 8px 0; }

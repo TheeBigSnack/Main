@@ -44,6 +44,8 @@ Context: Lot Sync is a Chrome extension that reads a car dealership's own websit
 
 - Dealers will ask salespeople to post from personal Facebook accounts (Meta no longer allows dealer Pages to list vehicles). Any employment-law, wage-and-hour or privacy concerns with that, and what should the dealer's policy and the Posting Rules say? Does the dealer need a written policy on what happens to listings when a salesperson leaves?
 
+- `forget_person` (the owner's tool for one person's deletion request) keeps a departed salesperson's listing link on listings still marked up (the dealership needs it to see the car come down) and keeps the Stripe webhook events, which carry a billing email; confirm both fit the deletion right in the privacy policy.
+
 ## After review
 
 Once the attorney approves the Terms and Privacy Policy, the first-run wizard will require acceptance of both (Milestone 5 in PLAN.md).

@@ -14,6 +14,7 @@ What is here:
 | `migrations/0001_schema.sql` | The tables: dealerships, memberships, listings (the posted registry), todo_items, scan_summaries, post_attempts, rewrite_usage, invites. |
 | `migrations/0002_rls.sql` | Row-level security on every table, the `is_member` / `is_manager` helpers, `redeem_invite` and `create_invite`. |
 | `migrations/0003_views.sql` | `v_salesperson_summary` and `v_open_todo` for the manager page. |
+| `migrations/0006_privacy.sql` | The owner's privacy tools: `export_dealership`, `delete_dealership`, `forget_person`; no API role may call them (below, "Export or delete a dealership's data"). |
 | `migrations/0005_leads.sql` | `demo_requests`, the landing page's demo requests; no API role reads it. |
 | `functions/lead/` | `/lead`: the landing page's demo form, anonymous, behind its origin, a honeypot and rate limits. |
 | `functions/rewrite/` | The rewrite service (replaces `backend/`): `/rewrite` and `/color` behind sign-in, a rate limit and a monthly cost cap. |
@@ -39,7 +40,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    supabase db push
    ```
 
-   `db push` applies the five migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
+   `db push` applies the six migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
 
 3. **Sign-in settings** (Dashboard, Authentication):
    - Providers, Email: keep it on; passwords are never used, so "Confirm email" can stay off (the magic link is the confirmation).
@@ -149,8 +150,10 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
   -f supabase/migrations/0003_views.sql \
   -f supabase/migrations/0004_billing.sql \
   -f supabase/migrations/0005_leads.sql \
+  -f supabase/migrations/0006_privacy.sql \
   -f supabase/tests/rls.sql \
-  -f supabase/tests/billing.sql
+  -f supabase/tests/billing.sql \
+  -f supabase/tests/privacy.sql
 ```
 
 Either way each file ends with `every check passed` and psql exits 0; a failed check prints the reason and exits non-zero. Never run the shim against a Supabase database; it only exists for Postgres without Supabase.
@@ -297,3 +300,104 @@ The `psql` command under "Run the RLS test" runs `tests/billing.sql` too; its la
 `subscriptions`: the ids Stripe gave the dealership's customer and subscription, the status, the dates and the seat count. `billing_events`: each webhook event as Stripe sent it (ids, statuses, amounts, the billing email; Stripe never sends a card number). The privacy policy already names billing details and Stripe as the processor. Deleting a dealership row deletes its subscription row; `billing_events` keeps the accounting trail, which is what the retention line of the privacy policy allows.
 
 Pricing is a hypothesis until a dealer pays: the amounts in Stripe are copied from `marketing/pricing.json` by hand, and the first paying dealer is the moment to revisit that file, the sales sheet and the prices in Stripe together.
+
+## Export or delete a dealership's data
+
+The privacy policy (`legal/privacy-policy.md`) says a customer can ask for its dealership's records to be exported or deleted, that a person can ask for their own data to be deleted, and that a dealership's records are deleted within 30 days of its subscription ending. `migrations/0006_privacy.sql` gives the owner three functions for it. Who may ask for what, and how a request is verified, is in `docs/support.md` ("Privacy requests"); this section is what to run once it is.
+
+| Path | What it is |
+|---|---|
+| `migrations/0006_privacy.sql` | `export_dealership`, `delete_dealership`, `forget_person` and their helper `billing_events_of`, each with a comment saying what it reads, deletes and keeps. |
+| `tests/privacy.sql` | Proves them against a running database: the export holds every row of one dealership and nothing of another, no API role can call them, a wrong confirm changes nothing, the right one deletes only what it should. |
+| `test/privacy.test.js` | Holds the source to those rules and this section to the functions, in `npm test`. |
+
+The functions run only as the owner, in the Dashboard's SQL editor (it connects as `postgres`). Execute is revoked from `public`, `anon`, `authenticated` and `service_role`, so no key, no signed-in user and no Edge Function can call them. They are `SECURITY INVOKER`: they can do only what the caller's own role may do.
+
+**One number: 30 days.** Finish every request within 30 days of verifying it, the same 30 days the policy gives for deleting a dealership's records after its subscription ends. The first reply still goes out within one business day, like every support request.
+
+### Find the dealership and its people
+
+```sql
+select d.id, d.name, d.website_origin, m.role, m.name as member_name, m.user_id, u.email
+from public.dealerships d
+left join public.memberships m on m.dealership_id = d.id
+left join auth.users u on u.id = m.user_id
+where d.website_origin = 'https://www.<the dealer website>'
+order by m.role, m.name;
+```
+
+This is also how a manager's request is verified: the address it came from must be the `email` on a `manager` row of that dealership.
+
+### Export: a manager asked for a copy
+
+```sql
+select jsonb_pretty(public.export_dealership('<dealership id>'));
+```
+
+The answer is one JSON document: `dealership`, then one list per table (`memberships` with each member's account email, `listings`, `todo_items`, `scan_summaries`, `post_attempts`, `rewrite_usage`, `invites`, `subscriptions`, `billing_events`), `counts` per list, and `notes` that say what is in it. Left out on purpose: the code of an unused invite (it may still let someone join, and a file gets forwarded; managers see their open codes in the manager view), the emails of people who are no longer members, `invite_misses` (per account, not per dealership) and `demo_requests` (a visitor's, not the dealership's). What lives only in the salespeople's browsers (Settings, the Numbers tab, which form fields could not be filled) is not in the database, so it is not in the export.
+
+To hand it over, save the answer as `<dealership>-export-<yyyy-mm-dd>.json`: copy the cell from the SQL editor, or write the file with `psql` and the connection string the Dashboard's **Connect** button shows:
+
+```
+psql "<connection string>" -At -c "select jsonb_pretty(public.export_dealership('<dealership id>'))" > export.json
+```
+
+Send it as a reply to the verified manager's address and to no one else, then delete your copy. The support log records that it was sent and its `counts`, never the file.
+
+### Delete: a manager asked, or 30 days after the subscription ended
+
+1. If they asked for a copy too, export first: the delete cannot be undone.
+2. Run it with the id and the website origin from the lookup above:
+
+   ```sql
+   select public.delete_dealership('<dealership id>', 'https://www.<the dealer website>');
+   ```
+
+   The second argument must be the dealership's `website_origin` exactly as stored (scheme, host, same case, no trailing slash). Anything else is refused with `P0007` and nothing is deleted, so an id pasted from the wrong row cannot take the wrong dealership. The dealership row goes, and the foreign keys' `on delete cascade` takes every row it owns: memberships (the last manager's too: `keep_a_manager` lets a dealership's own deletion through), listings, to-do items, scan summaries, post attempts, rewrite usage, invites and the subscription row. The answer counts what went (`removed`) and names what stayed: the `billing_events` kept as the accounting record (the policy keeps billing records for accounting), the `stripe_customer_id`, and `accounts_without_a_dealership`, the members who now belong to no dealership.
+3. **Stripe, separately.** Nothing in the database reaches Stripe. In the Stripe Dashboard (live mode for a real dealership), open Customers, find the `stripe_customer_id` from the answer and delete the customer. Deleting a customer also cancels any subscription still open on it, so the dealership is not charged again.
+4. **The people.** The accounts in `accounts_without_a_dealership` can still sign in and see nothing. When the request covers the dealership's people (a store that leaves usually means it does; ask when the request does not say), forget each one with `forget_person` below, with the email the answer gives as the confirm. Someone who also belongs to another Lot Sync dealership is not in the list and stays.
+
+**The retention line.** Once a month, list the dealerships whose subscription has ended:
+
+```sql
+select d.id, d.name, d.website_origin, s.status, greatest(s.pilot_ends_at, s.updated_at) as ended_about
+from public.dealerships d
+join public.subscriptions s on s.dealership_id = d.id
+where public.subscription_state(d.id) = 'lapsed'
+  and coalesce(s.status, 'pilot') in ('pilot', 'canceled', 'incomplete_expired')
+order by ended_about;
+```
+
+Each row is a dealership whose free pilot ended unpaid or whose Stripe subscription was cancelled or expired. `past_due`, `unpaid` and `paused` are left out: those have not ended, Stripe is still collecting. Offer each one's managers an export, delete it within 30 days of `ended_about`, and forget the accounts its answer lists in `accounts_without_a_dealership` (step 4): with no dealership they serve no purpose.
+
+### Forget a person: the person asked
+
+```sql
+select id, email from auth.users where lower(email) = lower('<their email>');
+select public.forget_person('<user id>', '<their email>');
+```
+
+The second argument must be that account's email (case does not matter); anything else is refused with `P0007` and nothing changes. What it does:
+
+- **Removes** their memberships (with the unused invite codes they made), any other unused code they made, their invite misses, the demo requests sent from their email, their entries in Supabase's auth audit log when the project keeps it in the database (`auth.audit_log_entries`: sign-ins, with email and IP address), and last their `auth.users` row, which takes their sessions and sign-in identities with it.
+- **Clears** their name from `listings.salesperson` and `post_attempts.salesperson` on every row they made, and the listing link from their listings already taken down.
+- **Keeps** those rows, their rewrite usage and the invite codes they used or made that were used, as the dealership's numbers: VIN, price, times, outcome, under a user id that points at no one once the account is gone. The policy puts those records in the dealership's hands (a customer asks for its dealership's records to be exported or deleted); what is the person's own is their name, their email and their account, and those go. The link on a listing still marked up stays: the car is still advertised on their profile, only they can take it down (Lot Sync never does), and the dealership needs the link to see it come down. `billing_events` that carry their email (the manager who opened Checkout is the billing email) stay as the accounting record; the answer counts them. When they were the billing contact, ask the dealership for a new one and change the customer's email in the Stripe Dashboard.
+
+When they are the last manager of a dealership, it refuses with `P0006` and names the dealership. Ask that dealership who takes over, make that member a manager, then run it again:
+
+```sql
+update public.memberships set role = 'manager'
+where dealership_id = '<dealership id>' and user_id = '<user id of the next manager>';
+```
+
+When nobody is left to take over, or the dealership is leaving too, delete the dealership first (above).
+
+What the database cannot reach: copies in browsers and in files. Tell the person to clear their own browser (Settings, **Clear everything for this website** and **Forget my synced profile**, then remove the extension) and to delete their Marketplace listings on Facebook themselves. Copies the dealership already holds (colleagues' extensions, a CSV a manager downloaded) are the dealership's; say so in the reply rather than promise otherwise.
+
+A person with no account, who only sent a demo request:
+
+```sql
+delete from public.demo_requests where lower(trim(email)) = lower('<their email>');
+```
+
+`tests/privacy.sql` runs with the other SQL tests (the `psql` command under "Run the RLS test"); its last line is `privacy.sql: every check passed`.

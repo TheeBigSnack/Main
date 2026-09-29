@@ -14,6 +14,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { PILOT_RETENTION_DAYS } from '../extension/src/pilot.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
+import { wizardSteps } from '../extension/src/wizardSteps.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -282,8 +283,9 @@ test('README.md carries the shipped version in its title and the queue controls 
 
 test('the CHANGELOG entry for the shipped version names what support and the help doc send people to', () => {
   const changelog = read('../CHANGELOG.md');
-  const start = changelog.indexOf('## ' + manifest().version);
-  assert.ok(start >= 0, `CHANGELOG.md has no ${manifest().version} section`);
+  // 0.5.0 is the release these shipped in; later entries need not repeat them
+  const start = changelog.indexOf('## 0.5.0 (');
+  assert.ok(start >= 0, 'CHANGELOG.md has no 0.5.0 section');
   const end = changelog.indexOf('\n## ', start + 1);
   const section = changelog.slice(start, end > 0 ? end : undefined);
   assert.match(section, /Copy problem report/, 'the button support.md asks for in every report');
@@ -320,8 +322,8 @@ test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 list
   assert.doesNotMatch(profile, /dealer name matches/, 'the rule 0.4.0 removed');
   assert.match(profile, /`origin`/);
   assert.match(profile, /never the key/);
-  const steps = read('../extension/wizard.js').match(/^const STEPS = \[([^\]]+)\]/m)[1].split(',').map((s) => s.trim().replace(/^'|'$/g, ''));
+  const steps = wizardSteps(true); // every step; the Account step shows only when accounts are configured
   const heading = handoff.match(/^### 5\.7 .*steps `([^`]+)`/m);
   assert.ok(heading, 'HANDOFF.md 5.7 lists the steps');
-  assert.deepEqual(heading[1].split(',').map((s) => s.trim()), steps, 'HANDOFF.md 5.7 step list differs from wizard.js STEPS');
+  assert.deepEqual(heading[1].split(',').map((s) => s.trim()), steps, 'HANDOFF.md 5.7 step list differs from src/wizardSteps.js wizardSteps(true)');
 });

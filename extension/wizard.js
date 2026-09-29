@@ -1,9 +1,11 @@
 // The first-run wizard, shown in the side panel for a website that has no
-// settings yet: read the website, choose the store, name and role, the
-// store's address, the price to post, permission for automatic rescans, the
-// posting rules, the Terms of Service and Privacy Policy, and a first scan
-// with the final settings. Progress is kept in storage so the panel can be
-// closed and reopened.
+// settings yet: read the website, choose the store, name and role, sign in
+// and join the dealership (only when accounts are configured, and never
+// required), the store's address, the price to post, permission for
+// automatic rescans, the posting rules, the Terms of Service and Privacy
+// Policy, and a first scan with the final settings. Progress is kept in
+// storage so the panel can be closed and reopened; the sign-in session is
+// not part of it (src/account.js keeps it).
 
 import { performScan, rememberSite } from './src/scanRunner.js';
 import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
@@ -13,8 +15,18 @@ import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
+import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
+import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
+import { loadSession, redeemInvite } from './src/account.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount } from './src/wizardSteps.js';
 
-const STEPS = ['welcome', 'scan', 'store', 'you', 'address', 'price', 'permission', 'rules', 'terms', 'done'];
+const steps = () => wizardSteps(accountsConfigured());
+// The Account step's own state: what was typed and answered, never a token.
+const freshAccount = () => ({ email: '', note: '', error: '', joined: null });
+const accountFrom = (saved) => {
+  const a = saved && typeof saved === 'object' ? saved : {};
+  return { email: String(a.email || ''), note: String(a.note || ''), error: '', joined: a.joined && typeof a.joined === 'object' ? a.joined : null };
+};
 
 export const wiz = {
   active: false,
@@ -24,7 +36,19 @@ export const wiz = {
   settings: null, // built up as the person goes
   service: null, site: null,
   granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '',
+  account: freshAccount(),
 };
+
+// The stored session, read where src/account.js keeps it, only to say who is
+// signed in; it is never copied into the wizard's saved state.
+let accountSession = null;
+let accountBusy = false; // an account request is under way; Next and Quit still work
+const accountDeps = () => ({ config: ACCOUNT, storage: chrome.storage.local });
+async function loadAccount() {
+  accountSession = accountsConfigured() ? await loadSession(chrome.storage.local) : null;
+}
+// A step saved by a copy with accounts that this copy does not have.
+const knownStep = (step) => (step === 'account' && !steps().includes(step) ? 'address' : step);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
@@ -37,20 +61,23 @@ const priceHint = (suggested) => `Honest prices: the listed price always equals 
 async function persist() {
   if (!wiz.origin) return;
   const { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead, termsAccepted } = wiz;
-  await chrome.storage.local.set({ [key(origin)]: { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead, termsAccepted } });
+  const account = { email: wiz.account.email, note: wiz.account.note, joined: wiz.account.joined };
+  await chrome.storage.local.set({ [key(origin)]: { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead, termsAccepted, account } });
 }
 
 export async function startWizard(req) {
-  Object.assign(wiz, { active: true, origin: req.origin, dealerTabId: req.dealerTabId, windowId: req.windowId || null, step: 'welcome', scan: null, settings: null, service: null, site: null, granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '' });
+  Object.assign(wiz, { active: true, origin: req.origin, dealerTabId: req.dealerTabId, windowId: req.windowId || null, step: 'welcome', scan: null, settings: null, service: null, site: null, granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '', account: freshAccount() });
   const saved = (await chrome.storage.local.get(key(req.origin)))[key(req.origin)];
-  if (saved && saved.active && saved.step !== 'done') Object.assign(wiz, saved, { dealerTabId: req.dealerTabId || saved.dealerTabId, busy: false, error: '' });
+  if (saved && saved.active && saved.step !== 'done') Object.assign(wiz, saved, { dealerTabId: req.dealerTabId || saved.dealerTabId, step: knownStep(saved.step), busy: false, error: '', account: accountFrom(saved.account) });
+  await loadAccount();
   await persist();
 }
 
 export async function resumeWizard(origin) {
   const saved = (await chrome.storage.local.get(key(origin)))[key(origin)];
   if (!saved || !saved.active || saved.step === 'done') return false;
-  Object.assign(wiz, saved, { busy: false, error: '' });
+  Object.assign(wiz, saved, { step: knownStep(saved.step), busy: false, error: '', account: accountFrom(saved.account) });
+  await loadAccount();
   return true;
 }
 
@@ -115,7 +142,7 @@ async function runScan(ctx) {
 }
 
 function stepIndex() {
-  return STEPS.indexOf(wiz.step);
+  return steps().indexOf(wiz.step);
 }
 
 function nav(back = true, nextLabel = 'Next', nextId = 'wizNext', nextDisabled = false) {
@@ -124,12 +151,12 @@ function nav(back = true, nextLabel = 'Next', nextId = 'wizNext', nextDisabled =
 
 export function wizardHtml() {
   const s = wiz.settings || withDefaults({}, wiz.site || {});
-  const progress = `<p class="hint">Set-up · step ${stepIndex() + 1} of ${STEPS.length}${wiz.scan ? ` · ${esc(wiz.scan.siteName)}` : ''}</p>`;
+  const progress = `<p class="hint">Set-up · step ${stepIndex() + 1} of ${steps().length}${wiz.scan ? ` · ${esc(wiz.scan.siteName)}` : ''}</p>`;
   const error = wiz.error ? `<div class="banner bad">${esc(wiz.error)}</div>` : '';
   switch (wiz.step) {
     case 'welcome':
       return `${progress}<h3>Set up Lot Sync for this dealership</h3>
-        <p>In a few steps: read the website, pick your store, your name, the store's address, the price to post, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy. About two minutes.</p>
+        <p>In a few steps: read the website, pick your store, your name,${accountsConfigured() ? " your dealership's account (optional)," : ''} the store's address, the price to post, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy. About two minutes.</p>
         <p class="hint">Keep the dealership's used inventory page open in this window while you do this.</p>
         ${nav(false, 'Start')}`;
     case 'scan':
@@ -154,6 +181,32 @@ export function wizardHtml() {
         <label class="block">Your role <input type="text" id="wizTitle" value="${esc(s.salesperson.title)}" /></label>
         <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
         ${nav()}`;
+    case 'account': {
+      // Settings' Account section in the wizard; Next ("Skip for now" until
+      // signed in) always goes on, and the account buttons wait while one works.
+      const a = wiz.account;
+      const m = accountStepModel({ configured: accountsConfigured(), session: accountSession, joined: a.joined, email: a.email, note: a.note, error: a.error, origin: wiz.origin });
+      const off = accountBusy ? 'disabled' : '';
+      const note = m.note ? `<p class="hint" id="wizAccountNote">${esc(m.note)}</p>` : '';
+      const failed = m.error ? `<div class="banner bad" id="wizAccountError" role="alert">${esc(m.error)}</div>` : '';
+      const body = m.signIn
+        ? `<p class="hint">${esc(m.intro)}</p>
+        <label class="block">${esc(m.signIn.emailLabel)} <input type="text" id="wizEmail" value="${esc(m.signIn.email)}" inputmode="email" autocomplete="email" placeholder="you@example.com" /></label>
+        <div class="actions"><button type="button" class="plain" id="wizSendCode" ${off}>${esc(m.signIn.sendCode)}</button></div>
+        ${note}
+        <label class="block">${esc(m.signIn.codeLabel)} <input type="text" id="wizCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 digits" /></label>
+        <div class="actions"><button type="button" class="plain" id="wizSignIn" ${off}>${esc(m.signIn.signIn)}</button></div>`
+        : `<div class="banner good" id="wizSignedIn">${esc(m.status)}</div>
+        ${m.joined ? `<div class="banner good" id="wizJoined">${esc(m.joined)}</div>` : ''}
+        ${m.invite ? `<p class="hint"><b>${esc(m.invite.heading)}</b> ${esc(m.invite.hint)}</p>
+        <label class="block">${esc(m.invite.label)} <input type="text" id="wizInvite" autocomplete="off" /></label>
+        <div class="actions"><button type="button" class="plain" id="wizJoin" ${off}>${esc(m.invite.join)}</button></div>` : ''}`;
+      return `${progress}<h3>${esc(m.heading)}</h3>
+        <div class="wizAccount">${body}</div>
+        ${failed}
+        ${m.later ? `<p class="hint">${esc(m.later)}</p>` : ''}
+        ${nav(true, m.next)}`;
+    }
     case 'address':
       return `${progress}<h3>The store's address</h3>
         <p class="hint">Read from the website${wiz.site && wiz.site.address && wiz.site.address.source ? ` (${esc(wiz.site.address.source)})` : ''}. Marketplace asks for a location; the ZIP is what gets typed.</p>
@@ -222,9 +275,13 @@ function readInputs() {
   // Before the first read there are no settings yet: the read computes the
   // defaults (store from the site name, address from the page), so don't
   // invent an empty settings object here.
-  if (!wiz.settings && !['store', 'you', 'address', 'price', 'permission', 'rules', 'terms'].includes(wiz.step)) return;
+  if (!wiz.settings && !['store', 'you', 'account', 'address', 'price', 'permission', 'rules', 'terms'].includes(wiz.step)) return;
   const s = wiz.settings || withDefaults({}, wiz.site || {});
   const val = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : undefined; };
+  if (wiz.step === 'account') {
+    wiz.account.email = val('wizEmail') ?? wiz.account.email; // the typed address survives Back and Next
+    wiz.account.error = ''; // a failed try is not news on the way back
+  }
   const next = { ...s };
   if (wiz.step === 'store') next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
   if (wiz.step === 'you') next.salesperson = { name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE };
@@ -258,9 +315,84 @@ async function finish(ctx) {
   if (!ok) { ctx.render(); return; }
   await chrome.storage.local.set({ [k.wizardDone]: new Date().toISOString() });
   chrome.runtime.sendMessage({ type: 'ensureAlarm' }).catch(() => {});
+  // signed in: the worker runs the first sync with the final read (fire and forget; Settings shows how it went)
+  if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin: wiz.origin }).catch(() => {});
   wiz.step = 'done';
   await persist();
   ctx.render();
+}
+
+// On sign-in the rewrite address becomes the account's function in the
+// settings being built; finish() saves them (Settings does the same at once).
+function pointRewriteAtAccount() {
+  const s = wiz.settings || withDefaults({}, wiz.site || {});
+  const rewrite = rewriteAtAccount(s.rewrite, rewriteEndpointFor(ACCOUNT));
+  if (rewrite !== s.rewrite) wiz.settings = withDefaults({ ...s, rewrite }, wiz.site || {});
+}
+
+// The Account step's three buttons, with the functions and messages
+// Settings uses (popup.js accountAction). A failure is shown in the
+// server's words and the step stays open for another try or Skip for now.
+async function accountAction(id, ctx) {
+  if (!accountsConfigured() || accountBusy) return;
+  const a = wiz.account;
+  const val = (elId) => { const el = document.getElementById(elId); return el ? String(el.value || '').trim() : ''; };
+  const email = val('wizEmail') || a.email;
+  const code = val(id === 'wizJoin' ? 'wizInvite' : 'wizCode');
+  a.email = email;
+  a.error = '';
+  accountBusy = true;
+  ctx.render();
+  try {
+    if (id === 'wizSendCode') {
+      a.note = '';
+      ctx.setStatus('Sending the code…');
+      const r = await signInStart(email, accountDeps());
+      ctx.setStatus('');
+      if (r.ok) {
+        a.email = r.email;
+        a.note = r.message;
+      } else a.error = r.error;
+    } else if (id === 'wizSignIn') {
+      ctx.setStatus('Signing in…');
+      const r = await signInFinish(email, code, accountDeps());
+      if (!r.ok) {
+        ctx.setStatus('');
+        a.error = r.error;
+      } else {
+        accountSession = r.session;
+        a.note = '';
+        a.joined = null; // a membership answered to an earlier sign-in is not this one's
+        ctx.setStatus(`Signed in as ${(r.session.user && r.session.user.email) || email}.`);
+        pointRewriteAtAccount();
+      }
+    } else if (id === 'wizJoin') {
+      const s = await currentSession(accountDeps());
+      if (!s.ok) {
+        if (s.signedOut) accountSession = null;
+        a.error = s.error;
+      } else {
+        accountSession = s.session;
+        ctx.setStatus('Joining…');
+        let r;
+        try {
+          r = await redeemInvite(code, (wiz.settings && wiz.settings.salesperson && wiz.settings.salesperson.name) || '', { url: ACCOUNT.url, anonKey: ACCOUNT.anonKey, session: s.session });
+        } catch (e) {
+          r = { ok: false, error: `couldn't reach the account server (${(e && e.message) || e})` };
+        }
+        ctx.setStatus('');
+        if (!r.ok) {
+          if (r.signedOut) accountSession = null;
+          a.error = r.error;
+        } else a.joined = joinedFrom(r.membership);
+      }
+    }
+  } finally {
+    accountBusy = false;
+  }
+  if (!wiz.active) return; // set-up was quit while the request was out
+  await persist();
+  if (wiz.step === 'account') ctx.render(); // the person may have moved on meanwhile: never redraw over another step's typing
 }
 
 // Returns true when the click was the wizard's.
@@ -269,8 +401,9 @@ export async function handleWizardClick(id, ctx) {
   switch (id) {
     case 'wizNext': {
       readInputs();
-      const i = stepIndex();
-      wiz.step = STEPS[Math.min(i + 1, STEPS.length - 1)];
+      const list = steps();
+      wiz.step = list[Math.min(stepIndex() + 1, list.length - 1)];
+      if (wiz.step === 'account') await loadAccount(); // signed in or out in Settings since
       await persist();
       ctx.render();
       if (wiz.step === 'scan' && !wiz.scan) await runScan(ctx);
@@ -278,9 +411,15 @@ export async function handleWizardClick(id, ctx) {
     }
     case 'wizBack':
       readInputs();
-      wiz.step = STEPS[Math.max(stepIndex() - 1, 0)];
+      wiz.step = steps()[Math.max(stepIndex() - 1, 0)];
+      if (wiz.step === 'account') await loadAccount();
       await persist();
       ctx.render();
+      return true;
+    case 'wizSendCode':
+    case 'wizSignIn':
+    case 'wizJoin':
+      await accountAction(id, ctx);
       return true;
     case 'wizScan':
       await runScan(ctx);

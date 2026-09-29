@@ -9,7 +9,13 @@
 --     -f supabase/migrations/0001_schema.sql \
 --     -f supabase/migrations/0002_rls.sql \
 --     -f supabase/migrations/0003_views.sql \
---     -f supabase/tests/rls.sql
+--     -f supabase/migrations/0004_billing.sql \
+--     -f supabase/migrations/0005_leads.sql \
+--     -f supabase/migrations/0006_privacy.sql \
+--     -f supabase/tests/rls.sql \
+--     -f supabase/tests/billing.sql \
+--     -f supabase/tests/privacy.sql
+-- (or: node scripts/sql-test.mjs, which applies them all and runs every test file)
 
 create schema if not exists auth;
 
@@ -75,3 +81,7 @@ $$;
 
 grant usage on schema auth to anon, authenticated, service_role;
 grant execute on function auth.uid(), auth.role(), auth.jwt() to anon, authenticated, service_role;
+
+-- Supabase's default privileges: every function a migration creates in public
+-- is executable by the three API roles until that migration revokes it.
+alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;

@@ -101,13 +101,15 @@ A demo or loaner flag always means "sold as new". A Carfax report counts as a su
 ## For development
 
 ```
-npm test              # 355 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 402 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep
 npm run screenshots   # the landing page's product images, taken from the sandbox with sample data (site/screenshots/)
 npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (landing page, manager view, popup, side panel)
+npm run test:sql      # the Supabase SQL checks on a local Postgres (PGHOST etc.; CI runs them on Postgres 16)
 npm run check-deploy  # after the Supabase deploy: a checklist of what the live project lets a stranger do (supabase/README.md step 6)
+npm run release -- 0.6.0  # stamp a new version in the three files, test and pack; prints the commit, tag and upload steps (docs/release.md)
 ```
 
 Never run tests against the real facebook.com. The post, queue and upkeep e2es use `test/e2e/mock-marketplace.mjs`, a stand-in form (and listing and edit pages) with the same field names, and the test itself clicks Publish, Update and Mark as sold in place of the salesperson.

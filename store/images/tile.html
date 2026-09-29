@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Lot Sync promo tile</title>
+<!--
+  The Web Store promo images (store/listing.md, Promo tile). scripts/store-images.mjs
+  draws this page at 440 x 280 (the small tile) and 1400 x 560 (the marquee); the
+  media query below picks the size. It holds the extension's own icon, the name and
+  the listing's one line on the product's green (site/site.css), and nothing else.
+  To see a change, open it in a browser window of either size, or run the script.
+-->
+<style>
+  :root {
+    --green: #14532d;
+    --white: #ffffff;
+    --soft: #e8f5ec;
+    --icon: 64px;
+    --pad: 8px;
+    --corner: 20px;
+    --name: 46px;
+    --line: 23px;
+    --gap: 16px;
+    --stack: 22px;
+  }
+  /* The marquee */
+  @media (min-width: 1000px) {
+    :root {
+      --icon: 128px;
+      --pad: 16px;
+      --corner: 38px;
+      --name: 112px;
+      --line: 46px;
+      --gap: 36px;
+      --stack: 40px;
+    }
+  }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--green);
+    color: var(--white);
+    font-family: BlinkMacSystemFont, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  main { display: flex; flex-direction: column; align-items: center; gap: var(--stack); text-align: center; }
+  .brand { display: flex; align-items: center; gap: var(--gap); }
+  /* The icon is the same green as the background: a white plate keeps its edge. */
+  .plate { display: flex; padding: var(--pad); background: var(--white); border-radius: var(--corner); }
+  .plate img { display: block; width: var(--icon); height: var(--icon); }
+  h1 { margin: 0; font-size: var(--name); font-weight: 700; line-height: 1; letter-spacing: -0.01em; }
+  p { margin: 0; font-size: var(--line); font-weight: 600; line-height: 1.25; color: var(--soft); }
+  /* Two lines on the small tile so the text stays large enough at half size */
+  p span { display: block; }
+  @media (min-width: 1000px) { p span { display: inline; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <div class="plate"><img src="../../extension/icons/icon128.png" width="128" height="128" alt=""></div>
+    <h1>Lot Sync</h1>
+  </div>
+  <p><span>You click Publish.</span> <span>Lot Sync never does.</span></p>
+</main>
+</body>
+</html>

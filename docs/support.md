@@ -51,6 +51,25 @@ Kept as a table, one row per request, in a spreadsheet or in this file. Every ro
 
 Once a week the log is read top to bottom: the top field failure goes into the pilot loop (`PILOT.md`), and anything asked twice goes into `docs/help.md`.
 
+## Privacy requests
+
+The privacy policy (`legal/privacy-policy.md`, "Your choices and rights") lets a dealership ask for its records to be exported or deleted, and a person ask for their own data to be deleted. There are three request types. The owner answers each with one function; the SQL, what each function removes and keeps, and how to hand over an export are in `supabase/README.md`, "Export or delete a dealership's data".
+
+| Request | Who may ask | How to verify | What the owner runs |
+|---|---|---|---|
+| **Export a dealership's records** | A manager of that dealership | The request comes from, or is confirmed by a reply from, the email of an account that holds a manager membership of that dealership (the lookup query in the README shows each member's role and email). | `export_dealership`; the file goes to that address and nowhere else. |
+| **Delete a dealership** | A manager of that dealership | As for an export, and then a phone call to the dealership's main number, taken from its own website, asking for that manager by name, to confirm before anything is deleted. A delete cannot be undone. | `delete_dealership` with the dealership's exact website origin as the confirm, then the Stripe customer by hand, then `forget_person` for its people when the request covers them. |
+| **Forget a person** | The person themself | The request comes from, or is confirmed by a reply from, the email of their own Lot Sync account. Signing in is a link or code sent to that inbox, so control of it is control of the account. | `forget_person` with that email as the confirm. |
+
+- Reply to the address on the account, never to a new address the request gives. A request that cannot be verified gets a reply saying what is needed, and nothing is run until it is.
+- A salesperson who asks for the dealership's export or deletion is told that a manager must ask. A manager who asks to forget someone else is pointed at the manager view's Team card, where they can remove the member; the person's name stays on the dealership's records until the person asks themself.
+- When the person is the last manager of a dealership, `forget_person` refuses. Write to the dealership to name a new manager first; if nobody is left, or the dealership is leaving too, the dealership is deleted first. The person's request is still finished within 30 days.
+- The first reply goes out within one business day, like every request. The request is finished within 30 days of being verified: the same 30 days the policy gives for deleting a dealership's records after its subscription ends.
+- Tell the person what the database cannot reach: their own browser (Settings, **Clear everything for this website** and **Forget my synced profile**), their listings on Facebook (theirs to delete; Lot Sync never does), and copies the dealership already holds.
+- A request to correct data: a person corrects their own name and role in Settings (what their listings are signed with), and a manager corrects a member's name or role in the Team card. Anything else is corrected by the owner in SQL, after the same verification as an export.
+- A person asking for a copy of their own data is answered by hand, within the same 30 days: their account email, their memberships and the rows that carry their user id, taken from `export_dealership` for each of their dealerships, and nobody else's rows.
+- Log each request like any other: the request type in **What happened**, no severity (it is not a fault), and in **Fix commit** the function that was run and the counts it answered. Never the export itself, and nothing from it.
+
 ## Fixing
 
 The weekly loop in `PILOT.md` applies to every dealer, not only the pilot:
@@ -68,5 +87,6 @@ The weekly loop in `PILOT.md` applies to every dealer, not only the pilot:
 - Never tell a person their account is safe, that a listing is allowed, or that Meta has signed off on anything. The honest line is in `docs/help.md`: a person clicking Publish is the safest design available, not a guarantee.
 - Never put a dealer's name, address, fee, a person's name or a listing link into code, tests, prompts or user-facing copy. Worked examples go in `test/fixtures/` with the dealer's agreement, or nowhere.
 - Never install anything on a salesperson's computer other than the zip, and never change their Chrome settings for them beyond the install steps.
+- Never send a dealership's export to anyone but the verified manager who asked, and never run `delete_dealership` or `forget_person` for a request that has not been verified.
 
 Lot Sync is not affiliated with Meta Platforms, Inc. Support speaks for Lot Sync only.

@@ -7,8 +7,11 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "pack": "node scripts/pack.mjs",
+    "release": "node scripts/release.mjs",
     "demo": "node demo/serve.mjs",
     "screenshots": "node scripts/screenshots.mjs",
+    "store-images": "node scripts/store-images.mjs",
+    "test:sql": "node scripts/sql-test.mjs",
     "check-deploy": "node scripts/check-deploy.mjs",
     "test:demo": "node demo/drive.mjs",
     "test:a11y": "node scripts/a11y.mjs",
