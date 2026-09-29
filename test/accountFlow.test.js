@@ -416,20 +416,23 @@ test('syncOnce: a token the function rejects signs the person out; not a member 
   assert.deepEqual(stranger.data[K.posted], posted);
 
   const elsewhere = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  const before2 = structuredClone(elsewhere.data);
   const r2 = await syncOnce({ origin: 'https://www.other-dealer.test', deps: deps({ fetchImpl, storage: elsewhere }) });
   assert.equal(r2.ok, false);
   assert.equal(r2.status, 403);
   assert.equal(r2.notMember, true);
   assert.match(r2.error, /not a member of the dealership for https:\/\/www\.other-dealer\.test/);
   assert.equal(ACCOUNT_KEY in elsewhere.data, true, 'not a member is not signed out');
-  assert.equal(elsewhere.writes.length, 0);
+  assert.deepEqual(elsewhere.data, before2, 'a refused sync leaves the storage as it found it (its first-sync placeholder removed)');
   assert.equal(describeSync(r2), `Sync failed: ${r2.error}`);
 
   const offline = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  const before3 = structuredClone(offline.data);
   const r3 = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl: async () => { throw new TypeError('Failed to fetch'); }, storage: offline }) });
   assert.equal(r3.ok, false);
   assert.match(r3.error, /couldn't reach the sync service \(Failed to fetch\)/);
-  assert.equal(offline.writes.length, 0);
+  assert.deepEqual(offline.data, before3, 'a sync that never reached the service leaves the storage as it found it');
+  assert.equal(K.sync in offline.data, false);
 
   const noOrigin = await syncOnce({ origin: '', deps: deps({ fetchImpl, storage: offline }) });
   assert.equal(noOrigin.ok, false);

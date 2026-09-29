@@ -331,6 +331,9 @@ test('a colour guess sends the photo addresses, the colour words and the origin,
   const what = rewrite[column(store, 'What')];
   assert.match(what, /for a colour guess, up to four photo addresses and the list of colour words/);
   assert.match(what, /the dealership's website address/, 'the description writer and the colour guess send the website address, and the Web Store answers do not say so');
+  // and the help a salesperson reads
+  const help = read('docs/help.md');
+  assert.match(help, /for a colour guess, up to four photo addresses and the list of colour words, sent to the rewrite service with your dealership website's address/, 'docs/help.md: what leaves the browser for a draft or a colour guess');
 });
 
 test('the sync row names every part of the sync payload', () => {

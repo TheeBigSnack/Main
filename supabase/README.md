@@ -420,7 +420,7 @@ select d.id, d.name, d.website_origin, m.role, m.name as member_name, m.user_id,
 from public.dealerships d
 left join public.memberships m on m.dealership_id = d.id
 left join auth.users u on u.id = m.user_id
-where d.website_origin = 'https://www.<the dealer website>'
+where public.website_origin_of(d.website_origin) = public.website_origin_of('<the dealer website''s address>')
 order by m.role, m.name;
 ```
 
@@ -451,7 +451,7 @@ Send it as a reply to the verified manager's address and to no one else, then de
    select public.delete_dealership('<dealership id>', 'https://www.<the dealer website>');
    ```
 
-   The second argument must be the dealership's `website_origin` exactly as stored (scheme, host, same case, no trailing slash). Anything else is refused with `P0007` and nothing is deleted, so an id pasted from the wrong row cannot take the wrong dealership. The dealership row goes, and the foreign keys' `on delete cascade` takes every row it owns: memberships (the last manager's too: `keep_a_manager` lets a dealership's own deletion through), listings, to-do items, scan summaries, post attempts, rewrite usage, invites and the subscription row. The sign-up attempt that created the dealership, if it was started through self-serve sign-up, stays with its account without the dealership's id, so that account's `per_account` still counts it. The answer counts what went (`removed`) and names what stayed: the `billing_events` kept as the accounting record (the policy keeps billing records for accounting), the `stripe_customer_id`, and `accounts_without_a_dealership`, the members who now belong to no dealership.
+   The second argument must be the dealership's `website_origin` exactly as stored: copy it from the lookup above, which shows it as it is. Anything else is refused with `P0007` and nothing is deleted, so an id pasted from the wrong row cannot take the wrong dealership. The dealership row goes, and the foreign keys' `on delete cascade` takes every row it owns: memberships (the last manager's too: `keep_a_manager` lets a dealership's own deletion through), listings, to-do items, scan summaries, post attempts, rewrite usage, invites and the subscription row. The sign-up attempt that created the dealership, if it was started through self-serve sign-up, stays with its account without the dealership's id, so that account's `per_account` still counts it. The answer counts what went (`removed`) and names what stayed: the `billing_events` kept as the accounting record (the policy keeps billing records for accounting), the `stripe_customer_id`, and `accounts_without_a_dealership`, the members who now belong to no dealership.
 3. **Stripe, separately.** Nothing in the database reaches Stripe. In the Stripe Dashboard (live mode for a real dealership), open Customers, find the `stripe_customer_id` from the answer and delete the customer. Deleting a customer also cancels any subscription still open on it, so the dealership is not charged again.
 4. **The people.** The accounts in `accounts_without_a_dealership` can still sign in and see nothing. When the request covers the dealership's people (a store that leaves usually means it does; ask when the request does not say), forget each one with `forget_person` below, with the email the answer gives as the confirm. Someone who also belongs to another Lot Sync dealership is not in the list and stays.
 
