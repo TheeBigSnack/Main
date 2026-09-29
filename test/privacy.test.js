@@ -67,6 +67,10 @@ test('delete_dealership: the exact website_origin guard comes first, then the ca
   assert.deepEqual(deletes, ['public.dealerships'], 'only the dealership row is deleted; the foreign keys take the rest (and let keep_a_manager through)');
   assert.ok(guard < fn.indexOf('delete from public.dealerships'), 'the guard comes before the delete');
   assert.match(fn, /where x\.id = delete_dealership\.dealership_id for update;/, 'the row is locked before the counts');
+  // the membership rows before the dealership row, the order a manager's step-down takes them (the row,
+  // then keep_a_manager's lock on the dealership): the other order deadlocks the two
+  const members = fn.indexOf('perform 1 from public.memberships m where m.dealership_id = delete_dealership.dealership_id for update;');
+  assert.ok(members > 0 && members < fn.indexOf('from public.dealerships x where x.id = delete_dealership.dealership_id for update;'), 'memberships are locked before the dealership');
   assert.match(fn, /'stripe_customer_id', sub\.stripe_customer_id/, 'the answer names the Stripe customer');
   assert.match(fn, /'accounts_without_a_dealership', orphans/);
   assert.match(fn, /'kept', jsonb_build_object\('billing_events', kept_events\)/, 'billing events are kept and counted');

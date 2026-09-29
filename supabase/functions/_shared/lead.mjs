@@ -94,8 +94,11 @@ export const BRAKE_MAX_KEYS = 5000; // addresses one instance remembers, at most
 // Which of these headers Supabase's gateway sets itself (and whether it
 // appends its own hop to X-Forwarded-For, which would make the rightmost entry
 // the gateway's and not the visitor's) is not documented, so it is confirmed on
-// the first deploy (supabase/README.md, "Demo requests"); if a header turns
-// out to carry what the client sent, change the order here.
+// the first deploy (supabase/README.md, "Demo requests"): six requests from
+// one machine, each claiming a new address, show a header the client wrote
+// does not reach the brake, and one more from another network shows the key
+// is not one every visitor shares. Both are needed; if either fails, change
+// the order here.
 // `headers` is anything with get(name): the function passes the Request's.
 export function clientAddress(headers) {
   const get = (name) => {
