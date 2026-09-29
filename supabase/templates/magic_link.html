@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!--
+  Lot Sync's sign-in email: Supabase's "Magic link or OTP" template. Every
+  sign-in sends it while "Confirm email" is off (config.toml's
+  enable_confirmations = false), a person's first one included, and a
+  returning person gets it either way. The extension signs in with the code,
+  the manager view with the link, so the email carries both. config.toml
+  points the local stack at this file; the hosted project needs it pasted in
+  (supabase/README.md, "Sign-in emails").
+  No colours are set anywhere, so each mail app shows it in its own light or
+  dark theme, and nothing is loaded from elsewhere: no images, fonts or
+  scripts, no tracking, inline styles only. The address is printed as text
+  too, so a mail app that shows plain text still shows every part.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>Your Lot Sync sign-in code</title>
+</head>
+<body style="margin:0;padding:24px 16px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;">
+<div style="max-width:480px;margin:0 auto;">
+<h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;">Sign in to Lot Sync</h1>
+
+<p style="margin:0 0 8px;">Signing in to the Lot Sync extension? Type this code into "Code from the email":</p>
+<p style="margin:0 0 24px;padding:12px 16px;border:1px solid #8c8c8c;border-radius:6px;font-family:Menlo,Consolas,monospace;font-size:32px;font-weight:bold;letter-spacing:6px;text-align:center;-webkit-user-select:all;user-select:all;">{{ .Token }}</p>
+
+<p style="margin:0 0 8px;">Signing in to the manager view? Open this link in the same browser you asked from:</p>
+<p style="margin:0 0 8px;font-size:18px;font-weight:bold;"><a href="{{ .ConfirmationURL }}">Sign in to the manager view</a></p>
+<p style="margin:0 0 24px;font-size:13px;word-break:break-all;">If the link does not open, paste this address into that browser: {{ .ConfirmationURL }}</p>
+
+<p style="margin:0 0 16px;">The code and the link work once, for one hour. If you ask for another email, only the newest one works.</p>
+<p style="margin:0;">If you did not ask to sign in, ignore this email: nobody can sign in without it.</p>
+</div>
+</body>
+</html>

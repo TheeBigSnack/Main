@@ -114,3 +114,133 @@ jobs:
         with:
           name: extension-zip
           path: dist/*.zip
+
+  # Lot Sync against a real local Supabase stack (docs/stack-test.md): the
+  # migrations as `supabase start` applies them, PostgREST, GoTrue, the mail
+  # catcher and the four functions served with a test env file, driven by
+  # scripts/stack-test.mjs through the extension's own account and sync
+  # modules. It proves what the unit tests only fake, before the owner's
+  # first deploy. Docker is on the runner; nothing here reaches Stripe or
+  # the model API.
+  stack:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Until this job has passed once in CI, its failure does not fail the
+    # workflow; the integrator removes this line after that first pass.
+    continue-on-error: true
+    env:
+      # The landing page's origin: LEAD_ORIGINS in the functions' env file,
+      # and what the stack test sends as Origin to the lead function.
+      LOTSYNC_STACK_SITE_ORIGIN: https://site.lotsync-stack.test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      # A pinned CLI (npm's supabase package), so a new release cannot change the stack under the test.
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.117.0
+      - name: Tool versions
+        run: |
+          supabase --version
+          docker --version
+          psql --version || echo "no psql on this runner: the stack test runs its SQL through docker exec"
+      # Only what Lot Sync uses: Postgres, GoTrue, PostgREST, the gateway, the
+      # mail catcher and the Edge Runtime. start applies supabase/migrations
+      # in order; a failed start is retried once with --debug, whose log says why.
+      - name: Start the local stack
+        run: |
+          skip=studio,storage-api,imgproxy,realtime,logflare,vector,supavisor,postgres-meta
+          supabase start -x "$skip" || {
+            echo "::warning::supabase start failed; once more with --debug"
+            supabase stop --no-backup || true
+            supabase start --debug -x "$skip"
+          }
+      - name: Read the stack's addresses and keys
+        run: |
+          supabase status -o env > "$RUNNER_TEMP/status.env"
+          val() { { grep -E "^$1=" "$RUNNER_TEMP/status.env" || true; } | head -n 1 | cut -d= -f2- | tr -d '"'; }
+          # The keys are the local stack's own; they still stay out of the log.
+          for name in ANON_KEY SERVICE_ROLE_KEY; do
+            if [ -n "$(val "$name")" ]; then echo "::add-mask::$(val "$name")"; fi
+          done
+          mail="$(val MAILPIT_URL)"
+          if [ -z "$mail" ]; then mail="$(val INBUCKET_URL)"; fi
+          {
+            echo "LOTSYNC_STACK_URL=$(val API_URL)"
+            echo "LOTSYNC_STACK_ANON_KEY=$(val ANON_KEY)"
+            echo "LOTSYNC_STACK_SERVICE_KEY=$(val SERVICE_ROLE_KEY)"
+            echo "LOTSYNC_STACK_DB_URL=$(val DB_URL)"
+            echo "LOTSYNC_STACK_MAIL_URL=$mail"
+          } >> "$GITHUB_ENV"
+          echo "API $(val API_URL), database $(val DB_URL), mail catcher $mail"
+          if [ -z "$(val API_URL)" ] || [ -z "$(val ANON_KEY)" ] || [ -z "$(val SERVICE_ROLE_KEY)" ]; then
+            echo "::error::supabase status -o env gave no API_URL, ANON_KEY or SERVICE_ROLE_KEY; it printed these names:"
+            cut -d= -f1 "$RUNNER_TEMP/status.env"
+            exit 1
+          fi
+      # Every variable supabase/README.md lists for the functions, except
+      # SUPABASE_URL and the two keys, which the CLI sets itself. Left out on
+      # purpose: ANTHROPIC_API_KEY and STRIPE_SECRET_KEY. Both services'
+      # addresses are fixed in the functions' code, so no fake server can
+      # stand in; without a key /rewrite, /color, /checkout and /portal answer
+      # 500 and never call out, and the stack test leaves those routes out.
+      # REWRITE_MODEL keeps the function's default. The webhook's signing
+      # secret is made up for this run, so its signature check runs.
+      - name: Write the functions' env file
+        run: |
+          umask 077
+          cat > "$RUNNER_TEMP/functions.env" <<EOF
+          MONTHLY_COST_CAP_USD=25
+          RATE_LIMIT_PER_MINUTE=20
+          ALLOWED_ORIGINS=http://127.0.0.1:8787
+          STRIPE_WEBHOOK_SECRET=whsec_$(openssl rand -hex 24)
+          STRIPE_PRICE_ROOFTOP=price_local_rooftop
+          STRIPE_PRICE_SEAT=price_local_seat
+          ALLOWED_RETURN_ORIGINS=http://127.0.0.1:8787
+          LEAD_ORIGINS=$LOTSYNC_STACK_SITE_ORIGIN
+          EOF
+          cut -d= -f1 "$RUNNER_TEMP/functions.env" | tr '\n' ' '; echo
+      # In the background for the rest of the job. Its stdin is a pipe that
+      # stays open, so serve never takes a closed stdin for the end of the session.
+      - name: Serve the functions with that env file
+        run: |
+          nohup sh -c 'sleep infinity | supabase functions serve --env-file "$RUNNER_TEMP/functions.env"' > "$RUNNER_TEMP/functions.log" 2>&1 &
+          echo "supabase functions serve started (pid $!); its log is printed if a later step fails"
+      # An unsigned webhook is refused for its signature (400) only once
+      # STRIPE_WEBHOOK_SECRET is set, so a 400 means the container serve made
+      # from the env file answers, not the one start began with (500). Then
+      # sync and rewrite each answer a call that reaches their code. (Not a
+      # CORS preflight: the local gateway answers those itself.)
+      - name: Wait until the functions answer
+        run: |
+          base="$LOTSYNC_STACK_URL/functions/v1"
+          for i in $(seq 1 90); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/billing/webhook" -H 'Content-Type: application/json' -d '{}' || true)"
+            if [ "$code" = 400 ]; then echo "billing refuses an unsigned webhook with 400: the env file is loaded (try $i)"; break; fi
+            if [ "$i" = 90 ]; then echo "::error::the functions did not come up with the env file in 3 minutes (billing's last status $code)"; tail -n 200 "$RUNNER_TEMP/functions.log"; exit 1; fi
+            sleep 2
+          done
+          for fn in sync rewrite/rewrite; do
+            for i in $(seq 1 60); do
+              code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/$fn" -H 'Content-Type: application/json' -d '{}' || true)"
+              if [ "$code" = 401 ]; then echo "$fn refuses a call with no token with 401 (try $i)"; break; fi
+              if [ "$i" = 60 ]; then echo "::error::$fn did not answer in 2 minutes (last status $code)"; tail -n 200 "$RUNNER_TEMP/functions.log"; exit 1; fi
+              sleep 2
+            done
+          done
+      - name: Run the stack test
+        run: npm run test:stack
+      - name: What the stack logged
+        if: failure()
+        run: |
+          echo "::group::supabase functions serve"; tail -n 400 "$RUNNER_TEMP/functions.log" || true; echo "::endgroup::"
+          docker ps -a --format '{{.Names}}  {{.Status}}  {{.Image}}' || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^supabase_' || true); do
+            echo "::group::$c"; docker logs --tail 150 "$c" 2>&1 || true; echo "::endgroup::"
+          done
+      - name: Stop the stack
+        if: always()
+        run: supabase stop --no-backup

@@ -9,7 +9,8 @@
 //                            -> 409 { ok: false, error, code: 'open-subscription' } while Stripe still holds the
 //                               dealership's subscription open (checkoutRefusal): the card is changed in the portal
 //   POST …/billing/portal    { returnUrl, dealershipId? | origin? }         -> { ok, url }   (managers)
-//   GET  …/billing/status    ?dealershipId= | ?origin=                       -> { ok, dealership, role, state, subscription, canStartPilot, canSubscribe, canManageBilling, pilotDays, includedSalespeople }   (members)
+//   GET  …/billing/status    ?dealershipId= | ?origin=                       -> { ok, dealership, role, state, subscription, canStartPilot, canSubscribe, canManageBilling, pilotDays, includedSalespeople, salespeople }   (members)
+//                            salespeople is the seat count now (seatCount), for a manager's call; null for anyone else's
 //   POST …/billing/webhook   Stripe's event with its Stripe-Signature header -> { ok }        (Stripe)
 //
 // Stripe is called with fetch against its REST API (form-encoded, bearer
@@ -31,7 +32,7 @@ import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin 
 import { requireUser, membershipsOf, serviceClient, env, type Membership, type Dealership } from '../_shared/auth.ts';
 import {
   PRICING, HANDLED_EVENTS,
-  subscriptionState, statusAnswer, checkoutRefusal, normalizeSeats, checkoutLineItems, checkoutSessionParams, trialEndFor,
+  subscriptionState, statusAnswer, seatCount, checkoutRefusal, normalizeSeats, checkoutLineItems, checkoutSessionParams, trialEndFor,
   allowedReturnUrl, parseAllowedOrigins, formEncode, applyStripeEvent, verifyStripeSignature,
 } from '../_shared/billing.mjs';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
@@ -185,6 +186,25 @@ async function pick(client: SupabaseClient, userId: string, wanted: { dealership
   return { ok: true, membership, dealership: membership.dealership, service: serviceClient() };
 }
 
+// ---------- the seat count ----------
+
+// How many of the dealership's members take a seat now (seatCount in
+// ../_shared/billing.mjs), read with the caller's own client, so row-level
+// security decides what it sees: a manager reads every membership of their
+// dealership (0002_rls.sql, "managers read their dealership's memberships"),
+// while a salesperson reads only their own row and would count themselves
+// alone, so a salesperson's call is not counted and gets null. A failed
+// read is null too: the rest of the status does not depend on it.
+async function salespeopleOf(client: SupabaseClient, dealershipId: string, role: string): Promise<number | null> {
+  if (role !== 'manager') return null;
+  const { data, error } = await client.from('memberships').select('user_id, dealership_id, role').eq('dealership_id', dealershipId);
+  if (error) {
+    console.error('could not count the seats: ' + error.message);
+    return null;
+  }
+  return seatCount(Array.isArray(data) ? data : [], dealershipId);
+}
+
 // ---------- the webhook ----------
 
 // Which dealership a Stripe object belongs to: the row that already carries
@@ -323,11 +343,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const row = await readRow(service, dealership.id);
 
     if (isStatus) {
+      const salespeople = await salespeopleOf(caller.client, dealership.id, membership.role);
       return json(req, 200, {
         ok: true,
         dealership: { id: dealership.id, name: dealership.name, websiteOrigin: dealership.website_origin },
         role: membership.role,
-        ...statusAnswer(row, { role: membership.role }),
+        ...statusAnswer(row, { role: membership.role, salespeople }),
       });
     }
 
@@ -347,6 +368,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const refusal = checkoutRefusal(row);
     if (refusal) return json(req, refusal.status, { ok: false, error: refusal.error, ...(refusal.code ? { code: refusal.code } : {}) });
     const state = subscriptionState(row);
+    // the manager page sends a seat for every salesperson it showed the
+    // manager (manager/data.js billingBody); a request without seats keeps
+    // the row's count, or the included one
     const seats = normalizeSeats(body.seats !== undefined ? body.seats : row ? row.seats : undefined, PRICING.includedSalespeople);
     const lineItems = checkoutLineItems({ seats, included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
     const customerId = await ensureCustomer(service, dealership, row, caller.user.email);

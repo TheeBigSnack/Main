@@ -21,10 +21,12 @@
 // The Billing card (Milestone 5) is drawn from GET .../billing/status's
 // answer instead of rows: { role, state 'none' | 'pilot' | 'active' |
 // 'lapsed', subscription (the subscriptions row or null), canStartPilot,
-// canSubscribe, canManageBilling, pilotDays, includedSalespeople }.
-// billingCard() turns it into one sentence and the buttons a manager may
-// press; the numbers in the sentence come from the answer (or, in tests,
-// from marketing/pricing.json), never from this file.
+// canSubscribe, canManageBilling, pilotDays, includedSalespeople,
+// salespeople (the seat count now, for a manager; null for a salesperson) }.
+// billingCard() turns it into one sentence, the seat line and the buttons a
+// manager may press, and billingBody() is what Subscribe and Manage billing
+// send; the numbers come from the answer (or, in tests, from
+// marketing/pricing.json), never from this file.
 //
 // The Invite codes card is drawn from list_invites(), the dealership's open
 // codes (unused, unexpired, made by a manager who still is one), plus the
@@ -291,6 +293,66 @@ export const BILLING_BUTTONS = Object.freeze({
   portal: Object.freeze({ action: 'portal', label: 'Manage billing', does: 'opens Stripe\'s billing portal to change the card, see invoices or cancel' }),
 });
 
+// Who takes a seat: a copy of supabase/functions/_shared/billing.mjs, word
+// for word, because this page is hosted on its own and cannot import it
+// (test/billing.test.js holds the two equal). The billing function counts
+// with it for the status answer; the sample data counts its own members.
+export const SEAT_ROLE = 'salesperson';
+export function seatCount(memberships, dealershipId = '') {
+  const people = new Set();
+  for (const m of Array.isArray(memberships) ? memberships : []) {
+    if (!m || typeof m !== 'object' || m.role !== SEAT_ROLE || typeof m.user_id !== 'string' || !m.user_id) continue;
+    if (dealershipId && m.dealership_id && m.dealership_id !== dealershipId) continue;
+    people.add(m.user_id);
+  }
+  return people.size;
+}
+
+// A count as the answer should carry it: a whole number, else null.
+const count = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
+
+// The seat count in a status answer, a manager's only: a salesperson's
+// call is not counted (row-level security shows them their own row alone),
+// so a number there would be wrong.
+const salespeopleIn = (s) => (s.role === 'manager' ? count(s.salespeople) : null);
+
+/**
+ * The seats Subscribe asks Checkout for: one per salesperson now, never
+ * fewer than the plan includes (the rooftop price covers those, and the
+ * billing function bills only the seats above them). Null when the answer
+ * has no count; Subscribe then sends none and the function keeps the
+ * included count, or the seats the row already had.
+ * @param {object} status   GET .../billing/status's answer
+ * @param {object} options  pricing: { includedSalespeople } fallback, as billingCard takes it
+ * @returns {number|null}
+ */
+export function subscribeSeats(status, { pricing } = {}) {
+  const s = status && typeof status === 'object' ? status : {};
+  const p = pricing && typeof pricing === 'object' ? pricing : {};
+  const n = salespeopleIn(s);
+  if (n === null) return null;
+  const included = count(num(s.includedSalespeople) ?? num(p.includedSalespeople));
+  const seats = included === null ? n : Math.max(n, included);
+  return seats >= 1 ? seats : null;
+}
+
+/**
+ * What Manage billing (route 'portal') and Subscribe (route 'checkout') POST
+ * to the billing function: the page to come back to and the dealership, and
+ * for Checkout the seats from subscribeSeats(), left out when there are none.
+ * @param {string} route    'checkout' | 'portal'
+ * @param {object} status   GET .../billing/status's answer
+ * @param {object} options  returnUrl, dealershipId
+ * @returns {{ returnUrl, dealershipId, seats? }}
+ */
+export function billingBody(route, status, { returnUrl = '', dealershipId = '' } = {}) {
+  const body = { returnUrl, dealershipId };
+  if (route !== 'checkout') return body;
+  const seats = subscribeSeats(status);
+  if (seats !== null) body.seats = seats;
+  return body;
+}
+
 // Why a plan has lapsed, from the Stripe status on the row; a pilot that
 // ran out is worded from its end date instead.
 const LAPSED_WHY = Object.freeze({
@@ -309,18 +371,26 @@ export function fmtLocalDate(iso, timeZone) {
 
 /**
  * The Billing card from the status answer: the plan state in one sentence
- * a manager understands, a pill, a detail line, and the buttons the answer
- * allows. Buttons are for managers only, whatever the flags say; a
- * salesperson gets the sentence and nothing to press. The pilot length and
- * the included seats are read from the answer (pilotDays,
+ * a manager understands, a pill, a detail line, the seat line, and the
+ * buttons the answer allows. Buttons are for managers only, whatever the
+ * flags say; a salesperson gets the sentence and nothing to press. The
+ * pilot length and the included seats are read from the answer (pilotDays,
  * includedSalespeople), else from `pricing` (marketing/pricing.json, which
  * the tests read); with neither the sentence leaves the numbers out.
+ *
+ * The seat line is a manager's: "N salespeople; the plan includes M." from
+ * the answer's count. While subscribed the main line carries the seats paid
+ * for (the row's seats), and when there are more salespeople than that,
+ * seatNote says so and that Lot Sync changes nothing on its own (seatTone
+ * 'warn'). Otherwise, next to Subscribe, seatNote says how many seats
+ * Subscribe asks for (subscribeSeats). No price: the answer carries none,
+ * and Checkout shows it before the manager pays.
  * @param {object} status   GET .../billing/status's answer (or the sample's)
  * @param {object} options
  *   now:      ISO time the days left count from (default: the clock)
  *   timeZone: IANA zone for the dates (default: this computer's)
  *   pricing:  { pilotDays, includedSalespeople } fallback
- * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, buttons: { action, label, does }[] }}
+ * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, salespeople, seatsPaid, seatLine, seatNote, seatTone, subscribeSeats, buttons: { action, label, does }[] }}
  */
 export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) {
   const s = status && typeof status === 'object' ? status : {};
@@ -333,6 +403,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
   const state = PLAN_STATES.includes(s.state) ? s.state : 'unknown';
   const pilotDays = num(s.pilotDays) ?? num(p.pilotDays);
   const includedSalespeople = num(s.includedSalespeople) ?? num(p.includedSalespeople);
+  const salespeople = salespeopleIn(s);
 
   // buttons only for a manager and a state this page knows: a word the page
   // cannot read is a page and a function that disagree, and nothing to press
@@ -369,8 +440,8 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
   } else if (state === 'active') {
     label = 'Subscribed';
     tone = 'good';
-    const seats = num(sub.seats);
-    const who = seats !== null ? `: ${plural(seats, 'salesperson', 'salespeople')}` : '';
+    const seats = seatsPaid(sub);
+    const who = seats !== null ? `: ${plural(seats, 'seat')}` : '';
     const when = sub.current_period_end ? `, ${sub.status === 'trialing' ? 'first charge' : 'renews'} ${date(sub.current_period_end)}` : '';
     line = `Subscribed${who}${when}.`;
   } else if (state === 'lapsed') {
@@ -381,7 +452,39 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     detail = LAPSED_WHY[sub.status] || (pilotEnd !== null && pilotEnd <= t ? `The free pilot ended ${date(sub.pilot_ends_at)}.` : '');
   }
 
-  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, buttons };
+  const seatInfo = seatLines({ state, salespeople, includedSalespeople, paid: state === 'active' ? seatsPaid(sub) : null, subscribing: buttons.some((b) => b.action === 'subscribe'), toBuy: subscribeSeats(s, { pricing: p }) });
+  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, buttons };
+}
+
+// What the card says when there are more salespeople than paid seats, in
+// one place so docs/help.md can quote it word for word.
+export const SEATS_NOT_ADDED = 'Lot Sync never adds seats or changes what you pay on its own: to add seats, ask your Lot Sync contact.';
+
+// The seats the row says are paid for (the included count plus the seat
+// price's quantity, copied from Stripe by the webhook), or null.
+const seatsPaid = (sub) => {
+  const n = count(num(sub.seats));
+  return n !== null && n >= 1 ? n : null;
+};
+
+// The seat line and its note, for a manager whose answer carries the count
+// and a state the page knows; empty otherwise.
+function seatLines({ state, salespeople: n, includedSalespeople: m, paid, subscribing, toBuy }) {
+  const none = { salespeople: n, seatsPaid: paid, seatLine: '', seatNote: '', seatTone: '', subscribeSeats: subscribing ? toBuy : null };
+  if (n === null || state === 'unknown') return none;
+  const included = count(m);
+  const seatLine = `${plural(n, 'salesperson', 'salespeople')}${included !== null ? `; the plan includes ${included}` : ''}.`;
+  if (paid !== null && n > paid) {
+    // Adding a seat changes what the dealership pays, so a person asks for it; nothing here or in the billing function changes a subscription
+    return { ...none, seatLine, seatTone: 'warn', seatNote: `${plural(n, 'salesperson', 'salespeople')} and ${plural(paid, 'seat')} paid for. ${SEATS_NOT_ADDED}` };
+  }
+  let seatNote = '';
+  if (subscribing && toBuy !== null && included !== null) {
+    seatNote = toBuy > included
+      ? `Subscribe asks for ${plural(toBuy, 'seat')}, ${toBuy - included} more than the plan includes; Checkout shows the price before you pay.`
+      : `Subscribe asks for the ${plural(toBuy, 'seat')} the plan includes.`;
+  }
+  return { ...none, seatLine, seatNote };
 }
 
 // The one line the page shows when Stripe sends the manager back with
@@ -891,6 +994,7 @@ export function mockData(now = nowIso()) {
     canManageBilling: false,
     pilotDays: null,
     includedSalespeople: null,
+    salespeople: seatCount(memberships, D), // counted from the sample's members, as the function counts a real dealership's
   };
 
   // One unused code the manager made a quarter of an hour ago, in the shape
@@ -931,6 +1035,7 @@ export function mockNewDealership(answer, { yourName = '', now = nowIso() } = {}
   const createdAt = new Date(ms(now) ?? Date.now()).toISOString();
   const dealership = { id, name: text(a.name) || 'Your dealership', website_origin: text(a.website_origin, 300), created_at: createdAt };
   const YOU = '00000000-0000-4000-8000-000000000104';
+  const memberships = [{ user_id: YOU, dealership_id: id, role: 'manager', name: text(yourName, 60) }];
   const pilotEndsAt = text(a.pilot_ends_at) || new Date(Date.parse(createdAt) + SAMPLE_PILOT_DAYS * DAY_MS).toISOString();
   const billing = {
     ok: true,
@@ -943,10 +1048,11 @@ export function mockNewDealership(answer, { yourName = '', now = nowIso() } = {}
     canManageBilling: false,
     pilotDays: null, // as in mockData(): the real answer carries these from marketing/pricing.json
     includedSalespeople: null,
+    salespeople: seatCount(memberships, id), // nobody has joined yet: the person who started it is its manager
   };
   return {
     dealership,
-    memberships: [{ user_id: YOU, dealership_id: id, role: 'manager', name: text(yourName, 60) }],
+    memberships,
     listings: [],
     todoItems: [],
     postAttempts: [],

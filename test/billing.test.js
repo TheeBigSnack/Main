@@ -5,7 +5,9 @@
 // independent HMAC from node:crypto. Then the migration and the function's
 // source are held to the rules: the numbers match marketing/pricing.json,
 // every policy has a comment, nobody but the service role writes, no SDK,
-// the secret key only ever reaches the Authorization header.
+// the secret key only ever reaches the Authorization header. Who takes a
+// seat (seatCount) is checked against the documents that price seats, and
+// the manager page's copy of it is held to this one.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,13 +15,14 @@ import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import {
   PRICING, STATUSES, STATES, HANDLED_EVENTS, MAX_SEATS, MIN_TRIAL_SECONDS,
-  ms, subscriptionState, pilotAvailable, statusAnswer,
+  ms, subscriptionState, pilotAvailable, statusAnswer, SEAT_ROLE, seatCount,
   OPEN_STATUSES, OPEN_SUBSCRIPTION_CODE, OPEN_SUBSCRIPTION_MESSAGE, hasOpenSubscription, checkoutRefusal,
   planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
   formEncode, applyStripeEvent, normalizeStatus,
   parseStripeSignature, hmacSha256Hex, timingSafeEqualHex, verifyStripeSignature,
 } from '../supabase/functions/_shared/billing.mjs';
+import * as page from '../manager/data.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
@@ -84,7 +87,11 @@ test('pilotAvailable and statusAnswer: what the manager page may offer', () => {
   assert.equal(pilotAvailable(row({ status: null, pilot_ends_at: iso(NOW - DAY) })), false, 'a pilot never restarts');
 
   const none = statusAnswer(null, { role: 'manager', now: NOW });
-  assert.deepEqual(none, { state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: pricing.pilotDays, includedSalespeople: pricing.includedSalespeople });
+  assert.deepEqual(none, { state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: pricing.pilotDays, includedSalespeople: pricing.includedSalespeople, salespeople: null });
+  // the seat count the function passes in, as a whole number or not at all
+  assert.equal(statusAnswer(null, { role: 'manager', now: NOW, salespeople: 7 }).salespeople, 7);
+  assert.equal(statusAnswer(null, { role: 'manager', now: NOW, salespeople: 0 }).salespeople, 0, 'no salesperson yet is a count');
+  for (const bad of [-1, 2.5, '7', NaN, undefined, null]) assert.equal(statusAnswer(null, { role: 'manager', now: NOW, salespeople: bad }).salespeople, null, String(bad));
   const salesperson = statusAnswer(row({ status: 'pilot', pilot_ends_at: iso(NOW + DAY) }), { role: 'salesperson', now: NOW });
   assert.equal(salesperson.state, 'pilot');
   assert.equal(salesperson.canStartPilot, false);
@@ -100,6 +107,46 @@ test('pilotAvailable and statusAnswer: what the manager page may offer', () => {
   assert.equal(lapsed.canSubscribe, true);
   assert.equal(lapsed.canStartPilot, false);
   assert.equal(lapsed.canManageBilling, true);
+});
+
+// ---------- seats ----------
+
+test('seatCount: a seat is a member with the salesperson role, each person once; managers and other dealerships do not count', () => {
+  assert.equal(SEAT_ROLE, 'salesperson');
+  const other = '00000000-0000-4000-8000-0000000000d2';
+  const m = (user_id, role, dealership_id = DEALER) => ({ user_id, dealership_id, role });
+  const team = [m('u1', 'salesperson'), m('u2', 'salesperson'), m('u3', 'manager'), m('u4', 'salesperson', other)];
+  assert.equal(seatCount(team, DEALER), 2, 'the manager and the other store\'s salesperson are left out');
+  assert.equal(seatCount(team), 3, 'without a dealership every salesperson row counts');
+  assert.equal(seatCount([m('u1', 'salesperson'), m('u1', 'salesperson')], DEALER), 1, 'one person is one seat');
+  assert.equal(seatCount([{ user_id: 'u1', role: 'salesperson' }], DEALER), 1, 'a row without its dealership id is the caller\'s own read, filtered already');
+  assert.equal(seatCount([m('u1', 'Salesperson'), m('', 'salesperson'), { role: 'salesperson' }, null, 'x', 7], DEALER), 0, 'a role in another case, no user id, junk');
+  for (const bad of [null, undefined, 'x', {}, 3]) assert.equal(seatCount(bad), 0, String(bad));
+  // the rule is where the prices are written: salespeople included and each extra one priced, no price for a manager
+  assert.ok(Number.isInteger(pricing.includedSalespeople) && Number.isFinite(pricing.extraSalespersonMonthly));
+  assert.deepEqual(Object.keys(pricing).filter((k) => /manager/i.test(k)), [], 'marketing/pricing.json prices no manager');
+  const agreement = read('../legal/dealer-subscription-agreement.md');
+  assert.match(agreement, /`perRooftopMonthly` \(which includes `includedSalespeople` salespeople\) plus `extraSalespersonMonthly` for each extra seat/);
+  assert.match(agreement, /\| Included salespeople \| Extra seats \|/);
+  assert.match(read('../marketing/onboarding-store.md'), /\*\*\d+\. Seats\.\*\* The subscription includes \w+ salespeople; each one beyond that is /);
+});
+
+test('the manager page\'s copy of the seat rule is this one, word for word, and counts the same on every case', () => {
+  const block = (src, file) => {
+    const found = src.match(/export const SEAT_ROLE = [^\n]+\nexport function seatCount\([\s\S]*?\n\}\n/);
+    assert.ok(found, `${file} has SEAT_ROLE and seatCount`);
+    return found[0];
+  };
+  assert.equal(block(read('../manager/data.js'), 'manager/data.js'), block(read('../supabase/functions/_shared/billing.mjs'), '_shared/billing.mjs'));
+  assert.equal(page.SEAT_ROLE, SEAT_ROLE);
+  const cases = [
+    [[]], [null], [[{ user_id: 'a', role: 'salesperson' }]], [[{ user_id: 'a', role: 'manager' }]],
+    [[{ user_id: 'a', role: 'salesperson', dealership_id: 'd1' }, { user_id: 'b', role: 'salesperson', dealership_id: 'd2' }], 'd1'],
+    [[{ user_id: 'a', role: 'salesperson' }, { user_id: 'a', role: 'salesperson' }, { user_id: 'b', role: 'salesperson' }]],
+    [page.mockData('2026-11-16T15:00:00.000Z').memberships],
+  ];
+  for (const args of cases) assert.equal(page.seatCount(...args), seatCount(...args), JSON.stringify(args));
+  assert.doesNotMatch(read('../manager/data.js'), /from ['"][^'"]*supabase/, 'the page does not import the function\'s file (it is hosted on its own)');
 });
 
 // ---------- the checkout gate ----------

@@ -1,6 +1,8 @@
 // The manager view (Milestone 4): the numbers in manager/data.js on the
 // sample dealership and on hand-built rows, the definitions kept equal to
-// the pilot's, the Billing card (Milestone 5) in each plan state, the Invite
+// the pilot's, the Billing card (Milestone 5) in each plan state with its
+// seat line (under, at and over the included count, short of the seats paid
+// for) and what Subscribe sends, the Invite
 // codes card (a manager's two buttons, the codes as create_invite types
 // them, the sample's one code), self-serve sign-up (the website origin rule
 // on every case of test/fixtures/website-origins.json, the form's lines, the
@@ -13,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -309,11 +311,11 @@ test('billingCard: subscribed shows the seats and the renewal date; a trial says
   assert.equal(c.state, 'active');
   assert.equal(c.label, 'Subscribed');
   assert.equal(c.tone, 'good');
-  assert.equal(c.line, 'Subscribed: 7 salespeople, renews 2026-12-16.');
+  assert.equal(c.line, 'Subscribed: 7 seats, renews 2026-12-16.');
   assert.deepEqual(c.buttons.map((b) => b.label), ['Manage billing']);
   assert.equal(c.buttons[0].action, 'portal');
   const trial = card(status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'trialing', stripe_customer_id: 'cus_1', seats: 1, current_period_end: inDays(12), pilot_ends_at: inDays(12) }) }));
-  assert.equal(trial.line, 'Subscribed: 1 salesperson, first charge 2026-11-28.');
+  assert.equal(trial.line, 'Subscribed: 1 seat, first charge 2026-11-28.');
   assert.equal(card(status({ state: 'active', subscription: subRow({ status: 'active', seats: null, current_period_end: null }) })).line, 'Subscribed.');
   assert.deepEqual(card(status({ state: 'active', role: 'salesperson', canManageBilling: true, subscription: subRow({ status: 'active' }) })).buttons, [], 'a salesperson never gets a button, whatever the flags say');
 });
@@ -352,6 +354,105 @@ test('billingCard: no answer, a broken one, or an unknown state gives a card tha
   assert.deepEqual(Object.keys(BILLING_BUTTONS), ['pilot', 'subscribe', 'portal']);
   assert.ok(Object.isFrozen(BILLING_BUTTONS.pilot));
   assert.doesNotMatch(JSON.stringify(BILLING_BUTTONS), /\$|\d/);
+});
+
+// ---------- the seat line ----------
+
+const INC = pricing.includedSalespeople;
+
+test('billingCard: the seat line reads "N salespeople; the plan includes M" under, at and over the included count, and says what Subscribe asks for', () => {
+  const pilot = (n, over = {}) => card(status({ state: 'pilot', canSubscribe: true, salespeople: n, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(10) }), ...over }));
+  const under = pilot(INC - 2);
+  assert.equal(under.seatLine, `${INC - 2} salespeople; the plan includes ${INC}.`);
+  assert.equal(under.seatNote, `Subscribe asks for the ${INC} seats the plan includes.`);
+  assert.deepEqual([under.salespeople, under.subscribeSeats, under.seatTone, under.seatsPaid], [INC - 2, INC, '', null]);
+  const at = pilot(INC);
+  assert.equal(at.seatLine, `${INC} salespeople; the plan includes ${INC}.`);
+  assert.equal(at.seatNote, `Subscribe asks for the ${INC} seats the plan includes.`);
+  assert.equal(at.subscribeSeats, INC);
+  const over = pilot(INC + 2);
+  assert.equal(over.seatLine, `${INC + 2} salespeople; the plan includes ${INC}.`);
+  assert.equal(over.seatNote, `Subscribe asks for ${INC + 2} seats, 2 more than the plan includes; Checkout shows the price before you pay.`);
+  assert.equal(over.subscribeSeats, INC + 2);
+  assert.equal(over.seatTone, '', 'nothing is wrong before a subscription');
+  assert.equal(over.line, 'Free pilot: 10 days left (ends 2026-11-26).', 'the plan line is unchanged');
+  // one salesperson, none yet; the same line with no plan and after a lapse
+  assert.equal(pilot(1).seatLine, `1 salesperson; the plan includes ${INC}.`);
+  assert.equal(pilot(0).seatLine, `0 salespeople; the plan includes ${INC}.`);
+  assert.equal(card(status({ state: 'none', canStartPilot: true, canSubscribe: true, salespeople: INC + 1 })).seatNote, `Subscribe asks for ${INC + 1} seats, 1 more than the plan includes; Checkout shows the price before you pay.`);
+  assert.equal(card(status({ state: 'lapsed', canSubscribe: true, salespeople: INC + 1, subscription: subRow({ status: 'canceled', seats: INC }) })).seatLine, `${INC + 1} salespeople; the plan includes ${INC}.`);
+  // M only from the answer (or the tests' pricing): with neither, the line gives N alone and makes no claim about Subscribe
+  const noM = pilot(3, { includedSalespeople: null });
+  assert.deepEqual([noM.seatLine, noM.seatNote], ['3 salespeople.', '']);
+  assert.equal(pilot(3, { includedSalespeople: null }).includedSalespeople, null);
+  assert.equal(card(status({ state: 'pilot', canSubscribe: true, salespeople: 3, includedSalespeople: null, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(10) }) }), { pricing }).seatLine, `3 salespeople; the plan includes ${INC}.`);
+  // no price anywhere: the answer carries none
+  for (const c of [under, at, over]) assert.doesNotMatch(c.seatLine + c.seatNote, /\$|\d+\s*(a|per)\s*month/);
+});
+
+test('billingCard: no seat line without a manager\'s count, for a salesperson, or for a plan the page cannot read', () => {
+  for (const n of [null, undefined, -1, 2.5, '7']) {
+    const c = card(status({ state: 'pilot', canSubscribe: true, salespeople: n, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(10) }) }));
+    assert.deepEqual([c.seatLine, c.seatNote, c.salespeople, c.subscribeSeats], ['', '', null, null], String(n));
+  }
+  // a salesperson's answer has null; a number there would be their own row alone, so it is never shown
+  const sp = card(status({ state: 'active', role: 'salesperson', salespeople: 1, subscription: subRow({ status: 'active', seats: INC }) }));
+  assert.deepEqual([sp.seatLine, sp.seatNote, sp.salespeople], ['', '', null]);
+  assert.equal(card({ state: 'gold', role: 'manager', salespeople: 3, includedSalespeople: INC }).seatLine, '');
+});
+
+test('billingCard: subscribed with fewer seats paid for than salespeople says so, and that Lot Sync adds none on its own; at or under the seats paid for it says nothing more', () => {
+  const active = (n, seats) => card(status({ state: 'active', canManageBilling: true, salespeople: n, subscription: subRow({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', seats, current_period_end: inDays(30) }) }));
+  const short = active(INC + 3, INC + 1);
+  assert.equal(short.line, `Subscribed: ${INC + 1} seats, renews 2026-12-16.`, 'the seats paid for, from subscriptions.seats');
+  assert.equal(short.seatLine, `${INC + 3} salespeople; the plan includes ${INC}.`);
+  assert.equal(short.seatNote, `${INC + 3} salespeople and ${INC + 1} seats paid for. ${SEATS_NOT_ADDED}`);
+  assert.equal(SEATS_NOT_ADDED, 'Lot Sync never adds seats or changes what you pay on its own: to add seats, ask your Lot Sync contact.');
+  assert.deepEqual([short.seatTone, short.seatsPaid, short.salespeople, short.subscribeSeats], ['warn', INC + 1, INC + 3, null]);
+  assert.deepEqual(short.buttons.map((b) => b.action), ['portal'], 'nothing on the card buys a seat');
+  assert.equal(active(2, 1).seatNote, `2 salespeople and 1 seat paid for. ${SEATS_NOT_ADDED}`);
+  for (const [n, seats] of [[INC + 1, INC + 1], [INC - 1, INC], [0, INC]]) {
+    const c = active(n, seats);
+    assert.deepEqual([c.seatNote, c.seatTone], ['', ''], `${n} of ${seats}`);
+    assert.equal(c.seatLine, `${n} ${n === 1 ? 'salesperson' : 'salespeople'}; the plan includes ${INC}.`);
+  }
+  // a row without a usable seat count compares nothing
+  const unknown = active(INC + 3, null);
+  assert.deepEqual([unknown.line, unknown.seatNote, unknown.seatsPaid], ['Subscribed, renews 2026-12-16.', '', null]);
+});
+
+test('billingBody: Subscribe sends a seat per salesperson, never fewer than included; Manage billing sends no seats; no count sends none', () => {
+  const at = { returnUrl: 'https://manage.example.test/', dealershipId: DEALER };
+  const answer = (over) => status({ state: 'pilot', canSubscribe: true, ...over });
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: INC + 4 }), at), { ...at, seats: INC + 4 });
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: INC }), at), { ...at, seats: INC });
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: 2 }), at), { ...at, seats: INC }, 'never fewer than the plan includes');
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: 0 }), at), { ...at, seats: INC });
+  assert.deepEqual(billingBody('portal', answer({ salespeople: INC + 4 }), at), at);
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: null }), at), at, 'no count: the function keeps the row\'s seats or the included count');
+  assert.deepEqual(billingBody('checkout', null, at), at);
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: 3, role: 'salesperson' }), at), at);
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: 3, includedSalespeople: null }), at), { ...at, seats: 3 }, 'no included count in the answer: the count as it is (the function still bills at least the included seats)');
+  assert.deepEqual(billingBody('checkout', answer({ salespeople: 0, includedSalespeople: null }), at), at);
+  // the card's number and the one sent are the same function
+  assert.equal(subscribeSeats(answer({ salespeople: INC + 4 })), card(answer({ salespeople: INC + 4 })).subscribeSeats);
+  // the page posts billingBody's answer to billing/checkout or billing/portal, and draws the seat line and its note
+  const js = read('manager/manager.js');
+  assert.match(js, /callFunction\('POST', `billing\/\$\{route\}`, billingBody\(route, state\.billing\?\.status, \{ returnUrl: pageUrl\(\), dealershipId: state\.dealershipId \}\)\)/);
+  assert.match(js, /card\.seatLine \? `<p class="plan">\$\{esc\(card\.seatLine\)\}<\/p>`/);
+  assert.match(js, /card\.seatTone === 'warn' \? 'banner warn' : 'hint'/);
+  assert.match(js, /`<p class="plan">\$\{esc\(card\.line\)\}<\/p>\$\{seatLine\}\$\{card\.detail \? [^`]*`<p class="hint">\$\{esc\(card\.detail\)\}<\/p>` : ''\}\$\{seatNote\}`/, 'the card draws the seat line under the plan line, and its note after the detail');
+});
+
+test('the sample counts its own salespeople with the seat rule; a new sample dealership has none', () => {
+  const d = mockData(NOW);
+  assert.equal(d.billing.salespeople, seatCount(d.memberships, d.dealership.id));
+  assert.equal(d.billing.salespeople, 2, 'Alex and Sam; Jamie is the manager');
+  const c = card(d.billing);
+  assert.deepEqual([c.seatLine, c.seatNote], ['2 salespeople.', ''], 'the sample types no included count, so the line gives the count alone');
+  const fresh = mockNewDealership({ dealership_id: SAMPLE_NEW_DEALERSHIP_ID, name: 'New Motors', website_origin: 'https://www.new-motors.test' }, { yourName: 'Pat', now: NOW });
+  assert.equal(fresh.billing.salespeople, 0);
+  assert.equal(card(fresh.billing).seatLine, '0 salespeople.');
 });
 
 test('billingReturnNote: one honest line back from Stripe, nothing for anything else', () => {
@@ -973,5 +1074,9 @@ test('help.md names the Start your dealership form and the Getting started card 
     assert.ok(section.includes(words), `the manager view section does not name "${words}"`);
   }
   assert.match(section, /www included/, 'the address must match the address bar');
+  // the Billing card's seat line and the sentence it shows when there are more salespeople than paid seats
+  assert.ok(section.includes('the plan includes'), 'the manager view section does not quote the seat line');
+  assert.ok(section.includes(SEATS_NOT_ADDED), 'the manager view section does not quote SEATS_NOT_ADDED word for word');
+  assert.match(section, /managers don't/i, 'it says who takes a seat');
   assert.match(section, /invite code/i, 'a store that already uses Lot Sync asks its manager for a code');
 });

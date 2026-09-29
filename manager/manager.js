@@ -9,8 +9,10 @@
 // person's own token, starts the free pilot through the start_pilot()
 // function in the database, and opens Stripe Checkout or the billing portal
 // through POST .../billing/checkout and /portal: the function answers an
-// address and the page goes there. Stripe sends the manager back to this
-// page with ?billing=success or ?billing=canceled, which becomes one note.
+// address and the page goes there. Subscribe asks for a seat per salesperson
+// the card shows, never fewer than the plan includes (data.js billingBody).
+// Stripe sends the manager back to this page with ?billing=success or
+// ?billing=canceled, which becomes one note.
 //
 // The Invite codes card (managers only) lists the dealership's open codes
 // through list_invites(), makes new ones with create_invite() and cancels one
@@ -36,7 +38,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -235,18 +237,22 @@ function goToCard(id) {
   el.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
 }
 
-// The Billing card: the plan in one sentence and the buttons the status
-// answer allows (managers only; data.js decides). In sample-data mode the
-// buttons only explain themselves. A status that could not be read gets a
-// Try again button and leaves the rest of the page alone.
+// The Billing card: the plan in one sentence, the seat line (a manager's:
+// the salespeople against the seats included or paid for, and a warning
+// when there are more salespeople than paid seats) and the buttons the
+// status answer allows (managers only; data.js decides). In sample-data mode
+// the buttons only explain themselves. A status that could not be read gets
+// a Try again button and leaves the rest of the page alone.
 function billingHtml() {
   const status = state.mock ? state.data?.billing : state.billing?.status;
   const error = state.mock ? '' : (state.billing && state.billing.error) || '';
   const card = billingCard(status, { now: new Date().toISOString() });
   const note = state.billingNote ? `<p class="banner info">${esc(state.billingNote)}</p>` : '';
+  const seatLine = card.seatLine ? `<p class="plan">${esc(card.seatLine)}</p>` : '';
+  const seatNote = card.seatNote ? `<p class="${card.seatTone === 'warn' ? 'banner warn' : 'hint'}">${esc(card.seatNote)}</p>` : '';
   const body = error
     ? `<p class="plan">Couldn't read the plan: ${esc(error)}</p><p class="hint">The rest of the page does not depend on it.</p>`
-    : `<p class="plan">${esc(card.line)}</p>${card.detail ? `<p class="hint">${esc(card.detail)}</p>` : ''}`;
+    : `<p class="plan">${esc(card.line)}</p>${seatLine}${card.detail ? `<p class="hint">${esc(card.detail)}</p>` : ''}${seatNote}`;
   const buttons = error
     ? '<button type="button" class="ghost" data-action="billing" data-billing="reload">Try again</button>'
     : card.buttons.map((b, i) => `<button type="button" class="${i === 0 ? 'primary' : 'ghost'}" data-action="billing" data-billing="${esc(b.action)}" data-does="${esc(b.does)}">${esc(b.label)}</button>`).join('');
@@ -670,7 +676,7 @@ async function onBilling(kind, btn) {
       return reloadBilling();
     }
     const route = kind === 'portal' ? 'portal' : 'checkout';
-    const answer = await callFunction('POST', `billing/${route}`, { returnUrl: pageUrl(), dealershipId: state.dealershipId });
+    const answer = await callFunction('POST', `billing/${route}`, billingBody(route, state.billing?.status, { returnUrl: pageUrl(), dealershipId: state.dealershipId }));
     if (!answer.url) throw new Error('the server returned no address to open');
     setStatus(route === 'portal' ? 'Opening the billing portal…' : 'Opening Checkout…');
     location.assign(answer.url);

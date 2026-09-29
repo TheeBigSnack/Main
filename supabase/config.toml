@@ -40,6 +40,24 @@ sign_in_sign_ups = 30
 enable_signup = true
 enable_confirmations = false
 
+# The sign-in emails in Lot Sync's own words (templates/). While
+# enable_confirmations is false every sign-in sends magic_link, a person's
+# first one included; confirmation goes only to an address that has never
+# signed in, and only while confirmations are on (a new hosted project's
+# default), so both carry the code and the link. The paths start at the
+# folder that holds supabase/, as the CLI reads them. otp_length and
+# otp_expiry stay at the CLI's defaults, 6 digits and 3600 seconds: the
+# extension's code box takes six digits and the emails say one hour
+# (test/emailTemplates.test.js). The hosted project needs the templates
+# pasted in (README, "Sign-in emails").
+[auth.email.template.magic_link]
+subject = "Your Lot Sync sign-in code"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.confirmation]
+subject = "Your Lot Sync sign-in code"
+content_path = "./supabase/templates/confirmation.html"
+
 # The two Edge Functions check the caller's token themselves (a bad token gets
 # a plain 401 with a message the extension shows), so the gateway's own check
 # is off. That also lets the browser's CORS preflight through, which carries

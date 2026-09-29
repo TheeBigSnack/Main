@@ -6,8 +6,9 @@
 // webhook event does to the subscription row, and the webhook signature
 // check (HMAC-SHA256 through Web Crypto, which Deno and Node 22 both offer
 // on globalThis.crypto.subtle), plus what /sync and /rewrite tell a member
-// about the plan (planOf, and the 402 for a lapsed dealership) and the
-// calendar day the daily cap counts (todayRange). No Stripe SDK anywhere.
+// about the plan (planOf, and the 402 for a lapsed dealership), the
+// calendar day the daily cap counts (todayRange) and who takes a seat
+// (seatCount). No Stripe SDK anywhere.
 //
 // The row is public.subscriptions from migrations/0004_billing.sql:
 //   dealership_id, stripe_customer_id, stripe_subscription_id, status,
@@ -103,8 +104,11 @@ export function pilotAvailable(row) {
 }
 
 // What GET /billing/status answers, from the row and the caller's role: the
-// state, the row, and which buttons the manager page may show.
-export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICING } = {}) {
+// state, the row, which buttons the manager page may show, and the
+// dealership's seat count now (`salespeople`, from seatCount below), which
+// the function counts for a manager only and passes in; null when it was
+// not counted.
+export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICING, salespeople = null } = {}) {
   const state = subscriptionState(row, now);
   const manager = role === 'manager';
   return {
@@ -115,7 +119,31 @@ export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICI
     canManageBilling: manager && isRecord(row) && typeof row.stripe_customer_id === 'string' && row.stripe_customer_id !== '',
     pilotDays: pricing.pilotDays,
     includedSalespeople: pricing.includedSalespeople,
+    salespeople: Number.isInteger(salespeople) && salespeople >= 0 ? salespeople : null,
   };
+}
+
+// ---------- seats ----------
+
+// Who takes a seat. marketing/pricing.json prices a rooftop with
+// includedSalespeople salespeople in it and extraSalespersonMonthly for each
+// salesperson beyond them; the sales sheet, marketing/positioning.md, the
+// Seats step of marketing/onboarding-store.md and Schedule A of
+// legal/dealer-subscription-agreement.md ("Included salespeople", "Extra
+// seats") say the same, and none of them prices a manager. So a seat is a
+// membership with the salesperson role, each person once. The manager page
+// cannot import this file (it is hosted on its own), so manager/data.js keeps
+// a copy of these lines, word for word; test/billing.test.js holds the two
+// equal.
+export const SEAT_ROLE = 'salesperson';
+export function seatCount(memberships, dealershipId = '') {
+  const people = new Set();
+  for (const m of Array.isArray(memberships) ? memberships : []) {
+    if (!m || typeof m !== 'object' || m.role !== SEAT_ROLE || typeof m.user_id !== 'string' || !m.user_id) continue;
+    if (dealershipId && m.dealership_id && m.dealership_id !== dealershipId) continue;
+    people.add(m.user_id);
+  }
+  return people.size;
 }
 
 // ---------- the plan the product reads ----------

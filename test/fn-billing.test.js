@@ -4,7 +4,10 @@
 // the trial rule, the portal, the status the manager page's Billing card
 // reads) and the webhook, with a real HMAC signature over the raw body (a bad
 // or stale one refused, an event applied and stored once, a redelivery
-// ignored, the row it lands on). The pure parts are in test/billing.test.js.
+// ignored, the row it lands on), and the seat count: counted for a manager
+// with their own client, sent back by the card's Subscribe, billed above the
+// included count, and never changed in Stripe by the status. The pure parts
+// are in test/billing.test.js.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +15,7 @@ import { createHmac } from 'node:crypto';
 import { loadFunction, invoke, fake, net, logs, hermetic, functionsFetch, uuid, keysOf, NETWORK_ERROR, SUPABASE_URL, ANON_KEY, SERVICE_KEY, EXTENSION_ORIGIN } from './functions/harness.mjs';
 import { pgTime } from './functions/fake-supabase.mjs';
 import { PRICING, OPEN_SUBSCRIPTION_MESSAGE, OPEN_SUBSCRIPTION_CODE } from '../supabase/functions/_shared/billing.mjs';
-import { billingCard } from '../manager/data.js';
+import { billingCard, billingBody, SEATS_NOT_ADDED } from '../manager/data.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -38,7 +41,10 @@ const RETURN_URL = `${MANAGER_PAGE}/?view=billing`;
 const DAY = 24 * 3600 * 1000;
 const iso = (t) => new Date(t).toISOString();
 
-function world({ subscriptions = [] } = {}) {
+// `salespeople`: how many salespeople D1 has in all, U1 among them (and then
+// two at D2, which D1's count must not see); left out, U1 is the only one
+function world({ subscriptions = [], salespeople = null } = {}) {
+  const more = Array.from({ length: salespeople === null ? 0 : salespeople - 1 }, (_, i) => ({ user_id: uuid(100 + i), dealership_id: D1, role: 'salesperson' }));
   fake.reset({
     users: {
       [TOKEN.u1]: { id: U1, email: 'sam@example-motors.test' },
@@ -53,6 +59,8 @@ function world({ subscriptions = [] } = {}) {
         { user_id: U2, dealership_id: D1, role: 'manager' },
         { user_id: U5, dealership_id: D1, role: 'manager' },
         { user_id: U5, dealership_id: D2, role: 'manager' },
+        ...more,
+        ...(salespeople !== null ? [{ user_id: uuid(90), dealership_id: D2, role: 'salesperson' }, { user_id: uuid(91), dealership_id: D2, role: 'salesperson' }] : []),
       ],
       subscriptions,
     },
@@ -149,22 +157,99 @@ test('billing: status answers the documented shape for the dealership asked for,
   const handler = await load();
   const none = await status(handler, TOKEN.u2);
   assert.equal(none.status, 200);
-  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'state', 'subscription']);
-  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople });
+  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'salespeople', 'state', 'subscription']);
+  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople, salespeople: 1 });
   const card = billingCard(none.body);
   assert.deepEqual([card.label, card.buttons.map((b) => b.action)], ['No plan yet', ['pilot', 'subscribe']]);
 
   for (const query of [`?dealershipId=${D2}`, `?origin=${encodeURIComponent(SISTER + '/')}`]) {
     const paid = await status(handler, TOKEN.u5, query);
-    assert.deepEqual([paid.status, paid.body.dealership.id, paid.body.state, paid.body.canManageBilling, paid.body.canSubscribe], [200, D2, 'active', true, false], query);
+    assert.deepEqual([paid.status, paid.body.dealership.id, paid.body.state, paid.body.canManageBilling, paid.body.canSubscribe, paid.body.salespeople], [200, D2, 'active', true, false, 0], query);
     assert.equal(paid.body.subscription.stripe_customer_id, 'cus_2');
     const c = billingCard(paid.body, { now: iso(Date.now()) });
     assert.deepEqual([c.label, c.buttons.map((b) => b.action)], ['Subscribed', ['portal']]);
-    assert.match(c.line, /^Subscribed: 7 salespeople, renews /);
+    assert.match(c.line, /^Subscribed: 7 seats, renews /);
   }
   for (const read of fake.queries('subscriptions')) assert.equal(read.key, SERVICE_KEY, 'the billing function reads the row with the service role');
   // no brake on the status
   for (let i = 0; i < 15; i += 1) assert.equal((await status(handler, TOKEN.u2)).status, 200);
+});
+
+// ---------- the seat count ----------
+
+const countQueries = () => fake.queries('memberships', 'select').filter((q) => q.filters.some((f) => f.column === 'dealership_id'));
+
+test('billing: status counts the salespeople with the manager\'s own client, filtered to the dealership; a salesperson\'s call is not counted; a failed count leaves the rest of the answer', async () => {
+  world({ salespeople: 7 });
+  const handler = await load();
+  const manager = await status(handler, TOKEN.u2);
+  assert.deepEqual([manager.status, manager.body.salespeople, manager.body.includedSalespeople], [200, 7, PRICING.includedSalespeople], 'seven salespeople; the two managers and the sister store\'s two are not seats');
+  const [q] = countQueries();
+  assert.ok(q, 'the memberships are read for the count');
+  assert.deepEqual([q.key, q.token], [ANON_KEY, TOKEN.u2], 'with the caller\'s own token, so row-level security decides what it sees');
+  assert.deepEqual(q.filters, [{ op: 'eq', column: 'dealership_id', value: D1 }]);
+  assert.equal(fake.queries('memberships').filter((c) => c.key === SERVICE_KEY).length, 0, 'never the service role');
+
+  // a manager of two stores asking about the other one gets that one's count
+  assert.equal((await status(handler, TOKEN.u5, `?dealershipId=${D2}`)).body.salespeople, 2);
+
+  // a salesperson sees only their own membership row: nothing is counted, and the answer says null
+  fake.calls = [];
+  const seller = await status(handler, TOKEN.u1);
+  assert.deepEqual([seller.status, seller.body.role, seller.body.salespeople], [200, 'salesperson', null]);
+  assert.deepEqual(countQueries(), [], 'no count read for a salesperson');
+
+  // the read fails: the status still answers, with no count
+  fake.script = (c) => (c.table === 'memberships' && c.filters.some((f) => f.column === 'dealership_id') ? { error: { message: 'permission denied for table memberships', code: '42501' } } : undefined);
+  const failed = await status(handler, TOKEN.u2);
+  assert.deepEqual([failed.status, failed.body.ok, failed.body.state, failed.body.canSubscribe, failed.body.salespeople], [200, true, 'none', true, null]);
+  assert.ok(logs.some((l) => /could not count the seats: permission denied/.test(l)));
+  assert.equal(billingCard(failed.body).seatLine, '', 'and the card leaves the seat line out');
+});
+
+test('billing: Subscribe on the card sends the salespeople it shows, and checkout bills those above the included count; under the included count it asks for the included seats', async () => {
+  const inc = PRICING.includedSalespeople;
+  for (const [extra, seats, seatLine] of [[2, inc + 2, 'over'], [0, inc, 'at'], [-2, inc, 'under']]) {
+    const n = inc + extra;
+    world({ salespeople: n, subscriptions: [{ dealership_id: D1, status: 'pilot', pilot_ends_at: iso(Date.now() + 10 * DAY), stripe_customer_id: 'cus_1' }] });
+    stripe({ customers: { cus_1: {} } });
+    net.calls = [];
+    logs.length = 0;
+    const handler = await load();
+    const answer = (await status(handler, TOKEN.u2)).body;
+    assert.equal(answer.salespeople, n, seatLine);
+    const card = billingCard(answer);
+    assert.equal(card.seatLine, `${n} salespeople; the plan includes ${inc}.`, seatLine);
+    assert.equal(card.subscribeSeats, seats, seatLine);
+    const body = billingBody('checkout', answer, { returnUrl: RETURN_URL, dealershipId: D1 });
+    assert.deepEqual(body, { returnUrl: RETURN_URL, dealershipId: D1, seats }, seatLine);
+    const r = await invoke(handler, { path: 'billing/checkout', token: TOKEN.u2, body });
+    assert.equal(r.status, 200, seatLine);
+    const session = stripeCalls().find((c) => c.path === '/v1/checkout/sessions');
+    const lines = [[session.form['line_items[0][price]'], session.form['line_items[0][quantity]']]];
+    if (session.form['line_items[1][price]']) lines.push([session.form['line_items[1][price]'], session.form['line_items[1][quantity]']]);
+    assert.deepEqual(lines, extra > 0 ? [['price_rooftop_test', '1'], ['price_seat_test', String(extra)]] : [['price_rooftop_test', '1']], seatLine);
+    assert.match(logs.join('\n'), new RegExp(`checkout ${D1} seats ${seats}`));
+  }
+  // Manage billing sends no seats: the portal changes nothing about them
+  assert.deepEqual(billingBody('portal', { role: 'manager', salespeople: 9, includedSalespeople: inc }, { returnUrl: RETURN_URL, dealershipId: D1 }), { returnUrl: RETURN_URL, dealershipId: D1 });
+});
+
+test('billing: a subscribed store with more salespeople than seats paid for is told so, and the status asks Stripe nothing and changes nothing', async () => {
+  world({ salespeople: 8, subscriptions: [{ dealership_id: D1, status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: iso(Date.now() + 20 * DAY), seats: 7 }] });
+  stripe({ customers: { cus_1: {} } });
+  const handler = await load();
+  const before = fake.rows('subscriptions');
+  const answer = (await status(handler, TOKEN.u2)).body;
+  assert.deepEqual([answer.state, answer.salespeople, answer.subscription.seats], ['active', 8, 7]);
+  const card = billingCard(answer);
+  assert.match(card.line, /^Subscribed: 7 seats, renews /);
+  assert.equal(card.seatNote, `8 salespeople and 7 seats paid for. ${SEATS_NOT_ADDED}`);
+  assert.equal(card.seatTone, 'warn');
+  assert.deepEqual(card.buttons.map((b) => b.action), ['portal'], 'no Subscribe: the card offers nothing that buys seats');
+  assert.equal(net.calls.length, 0, 'the status never calls Stripe');
+  assert.deepEqual(fake.writes(), [], 'and writes nothing');
+  assert.deepEqual(fake.rows('subscriptions'), before);
 });
 
 test('billing: checkout for a store with no plan makes a Stripe customer carrying the dealership id, keeps it on the row, and answers the Checkout address', async () => {
