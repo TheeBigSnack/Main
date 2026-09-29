@@ -209,6 +209,11 @@ declare
   orphans jsonb;
   steps jsonb := '[]'::jsonb;
 begin
+  -- The membership rows first, then the dealership row: the order a manager's
+  -- step-down or removal takes them (the row being changed, then
+  -- keep_a_manager's lock on the dealership), so the two wait for each other
+  -- instead of deadlocking.
+  perform 1 from public.memberships m where m.dealership_id = delete_dealership.dealership_id for update;
   select * into d from public.dealerships x where x.id = delete_dealership.dealership_id for update;
   if not found then
     raise exception 'no dealership has the id %', delete_dealership.dealership_id using errcode = 'P0002';

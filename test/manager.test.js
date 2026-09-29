@@ -668,7 +668,7 @@ test('teamCard: a manager sees everyone with the right actions, the last manager
   assert.equal(teamCard(ms, { role: 'salesperson' }).manager, false);
   assert.doesNotThrow(() => teamCard('junk', { role: 'manager' }));
   assert.match(TEAM_HINT, /always keeps at least one manager/);
-  assert.match(TEAM_HINT, /Making a manager a salesperson stops the codes they made from working\./, 'Make salesperson says what it does to their codes');
+  assert.match(TEAM_HINT, /Making a manager a salesperson cancels the unused codes they made, too\./, 'Make salesperson says what it does to their codes (the memberships_forget_invites_on_demote trigger)');
 });
 
 test('teamChangeNote: the Team card claims a change only when the database answered the changed row', () => {

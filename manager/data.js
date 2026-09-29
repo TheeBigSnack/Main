@@ -469,7 +469,7 @@ export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZo
 // ---------- the Team card ----------
 
 export const TEAM_LINE = 'Everyone in this dealership\'s Lot Sync account. A manager can invite, bill and change the team; a salesperson posts.';
-export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. Making a manager a salesperson stops the codes they made from working. A dealership always keeps at least one manager.';
+export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
 export const TEAM_UNCHANGED = 'Nothing changed: the team was changed elsewhere.';
 
 // The Team card's line after Make manager, Make salesperson or Remove, from

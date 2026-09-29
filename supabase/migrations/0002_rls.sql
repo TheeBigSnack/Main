@@ -242,6 +242,33 @@ create policy "managers delete post attempts of their dealership"
   on public.post_attempts for delete to authenticated
   using (public.is_manager(dealership_id));
 
+-- A salesperson name, once stored on a listing or a post attempt, is changed
+-- only by the owner in SQL (docs/support.md, a name correction). Through the
+-- API it stays as stored: a browser keeps the name each attempt was made
+-- under and uploads its attempts again on a full sync (after signing out and
+-- back in), which would otherwise write a corrected name back to the old
+-- one. An empty name may still be filled (sync does that for listings).
+create or replace function public.keep_stored_salesperson()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user in ('anon', 'authenticated') and old.salesperson is not null then
+    new.salesperson := old.salesperson;
+  end if;
+  return new;
+end;
+$$;
+comment on function public.keep_stored_salesperson() is 'Before an update through the API: keeps a stored salesperson name; only the owner (SQL) changes one.';
+revoke execute on function public.keep_stored_salesperson() from public, anon, authenticated;
+create trigger listings_keep_salesperson
+  before update of salesperson on public.listings
+  for each row execute function public.keep_stored_salesperson();
+create trigger post_attempts_keep_salesperson
+  before update of salesperson on public.post_attempts
+  for each row execute function public.keep_stored_salesperson();
+
 -- ---------------------------------------------------------------------------
 -- todo_items (sold cars to take down, prices to update): an item belongs to
 -- the dealership, not to a person (the listing with the same VIN says who
@@ -492,14 +519,15 @@ $$;
 comment on function public.revoke_invite(text) is 'A manager deletes an unused invite code of their dealership. True when one went, false otherwise, never why.';
 
 -- ---------------------------------------------------------------------------
--- Removing a member deletes the unused invite codes that person made for
--- that dealership, so a code a departing manager kept for themselves, or
--- handed out and never saw used, cannot bring anyone back in. Used codes
--- stay: they are the record of who joined how. SECURITY DEFINER because the
--- manager doing the removing has no privilege on invites; the function only
--- ever touches rows of the deleted membership's own dealership. (A demoted
--- manager keeps their row, so the trigger does not fire for them; their
--- codes are refused by redeem_invite()'s maker check instead.)
+-- Removing a member, or making a manager a salesperson, deletes the unused
+-- invite codes that person made for that dealership, so a code a departing
+-- or demoted manager kept for themselves, or handed out and never saw used,
+-- cannot bring anyone in later (a demoted manager's code would otherwise
+-- work again the day they were made a manager again). Used codes stay: they
+-- are the record of who joined how. SECURITY DEFINER because the manager
+-- doing the change has no privilege on invites; the function only ever
+-- touches rows of the changed membership's own dealership. redeem_invite()'s
+-- maker check stays as the second guard.
 -- ---------------------------------------------------------------------------
 create or replace function public.forget_invites_of_removed_member()
 returns trigger
@@ -514,11 +542,16 @@ begin
   return old;
 end;
 $$;
-comment on function public.forget_invites_of_removed_member() is 'After a membership is deleted: drops the unused invite codes that person made for that dealership.';
+comment on function public.forget_invites_of_removed_member() is 'After a membership is deleted, or a manager is made a salesperson: drops the unused invite codes that person made for that dealership.';
 
 create trigger memberships_forget_invites
   after delete on public.memberships
   for each row execute function public.forget_invites_of_removed_member();
+
+create trigger memberships_forget_invites_on_demote
+  after update of role on public.memberships
+  for each row when (old.role = 'manager' and new.role is distinct from 'manager')
+  execute function public.forget_invites_of_removed_member();
 
 -- Only signed-in users may call the four functions (PostgREST exposes them
 -- as /rest/v1/rpc/redeem_invite, create_invite, list_invites and

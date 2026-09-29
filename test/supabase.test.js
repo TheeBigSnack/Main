@@ -48,7 +48,7 @@ test('0002_rls.sql: redeem_invite folds both sides of the code; invites have no 
   assert.doesNotMatch(rls, /grant [^;]*on public\.invites to (anon|authenticated)/);
   const definers = (rls.match(/security definer/g) || []).length;
   assert.ok(definers >= 4, 'is_member, is_manager, redeem_invite, create_invite');
-  assert.equal((rls.match(/set search_path = ''/g) || []).length, definers, 'every security definer function pins search_path');
+  assert.equal((rls.match(/security definer\s*\n\s*set search_path = ''/g) || []).length, definers, 'every security definer function pins search_path');
   assert.match(rls, /revoke execute on function public\.redeem_invite\(text, text\) from public, anon;/);
   assert.match(rls, /revoke execute on function public\.create_invite\(uuid, text\) from public, anon;/);
 });
@@ -241,9 +241,18 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   assert.match(rls, /not public\.is_manager\(list_invites\.dealership_id\)[\s\S]*?errcode = '42501'/);
   assert.match(rls, /and public\.is_manager\(i\.dealership_id\);\s+get diagnostics n = row_count;\s+return n > 0;/);
   assert.match(rls, /create trigger memberships_forget_invites\s+after delete on public\.memberships/);
+  // making a manager a salesperson cancels their unused codes too, or one would work again the day they were promoted back
+  assert.match(rls, /create trigger memberships_forget_invites_on_demote\s+after update of role on public\.memberships\s+for each row when \(old\.role = 'manager' and new\.role is distinct from 'manager'\)\s+execute function public\.forget_invites_of_removed_member\(\);/);
+  // a stored salesperson name is changed only by the owner, so a full sync cannot write an old name back
+  const keep = rls.slice(rls.indexOf('create or replace function public.keep_stored_salesperson()'), rls.indexOf('comment on function public.keep_stored_salesperson()'));
+  assert.match(keep, /if current_user in \('anon', 'authenticated'\) and old\.salesperson is not null then\s+new\.salesperson := old\.salesperson;/);
+  assert.doesNotMatch(keep, /security definer/, 'current_user must be the caller');
+  for (const table of ['listings', 'post_attempts']) {
+    assert.match(rls, new RegExp(`create trigger ${table}_keep_salesperson\\s+before update of salesperson on public\\.${table}\\s+for each row execute function public\\.keep_stored_salesperson\\(\\);`), table);
+  }
   assert.match(rls, /grant select on public\.dealerships to authenticated;\s[\s\S]*?grant update \(name\) on public\.dealerships to authenticated;/);
   assert.doesNotMatch(rls, /grant select, update on public\.dealerships/);
-  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was looked up', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice']) {
+  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was looked up', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice', 'making a manager a salesperson kept the unused code they made', 'a salesperson changed a stored salesperson name through the API']) {
     assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
   }
 });

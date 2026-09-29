@@ -151,7 +151,8 @@ insert into public.invites (code, dealership_id, role, created_by) values
   ('made-up-b002', :'dealer_b', 'manager',     null); -- as an owner typed codes before the README minted them: any case
 insert into public.invites (code, dealership_id, role, created_by, expires_at) values
   ('EXPIREDB0003', :'dealer_b', 'salesperson', null,       now() - interval '1 minute'), -- past its 7 days
-  ('ORPHANA00004', :'dealer_a', 'salesperson', :'a_sales', now() + interval '7 days'),   -- its maker is no manager of A
+  ('ORPHANA00004', :'dealer_a', 'salesperson', :'b_sales', now() + interval '7 days'),   -- its maker is no manager of A (B's salesperson)
+  ('DEMOTEA00006', :'dealer_a', 'salesperson', :'a_sales', now() + interval '7 days'),   -- live only while a_sales is a manager of A
   ('OPENC0000005', :'dealer_c', 'salesperson', null,       now() + interval '7 days');   -- C's, out of a_mgr's reach
 
 -- ---------------------------------------------------------------------------
@@ -214,9 +215,9 @@ begin
     raise notice 'ok: a_sales cannot post as another user';
   end;
 
-  -- can insert their own listing in A
-  insert into public.listings (dealership_id, user_id, vin, name, price, posted_at, salesperson)
-  values (a, me, 'TESTVINA00000004', 'Car A4', 22000, now(), 'Alex');
+  -- can insert their own listing in A (no salesperson name yet: filled below)
+  insert into public.listings (dealership_id, user_id, vin, name, price, posted_at)
+  values (a, me, 'TESTVINA00000004', 'Car A4', 22000, now());
   raise notice 'ok: a_sales inserted their own listing';
 
   -- can update their own listing, cannot touch the manager's (RLS filters it out: 0 rows)
@@ -227,6 +228,26 @@ begin
   get diagnostics n = row_count;
   if n <> 0 then raise exception 'a_sales updated the manager''s listing'; end if;
   raise notice 'ok: a_sales updates only their own listings';
+
+  -- a stored salesperson name stays as stored through the API (keep_stored_salesperson), by update or by
+  -- the upsert sync sends; an empty one may be filled
+  update public.post_attempts set salesperson = 'Alex Old' where user_id = me and vin = 'TESTVINA00000001';
+  insert into public.post_attempts (dealership_id, user_id, vin, name, salesperson, started_at, outcome, seconds)
+  select a, me, vin, name, 'Alex Old', started_at, outcome, seconds from public.post_attempts
+  where user_id = me and vin = 'TESTVINA00000003'
+  on conflict (dealership_id, user_id, vin, started_at) do update set salesperson = excluded.salesperson;
+  update public.listings set salesperson = 'Alex Old' where id = '00000000-0000-4000-8000-0000000000e1';
+  if exists (select 1 from public.post_attempts where user_id = me and salesperson <> 'Alex')
+     or (select salesperson from public.listings where id = '00000000-0000-4000-8000-0000000000e1') <> 'Alex' then
+    raise exception 'a salesperson changed a stored salesperson name through the API';
+  end if;
+  update public.listings set salesperson = null where id = '00000000-0000-4000-8000-0000000000e1';
+  update public.listings set salesperson = 'Alex' where user_id = me and vin = 'TESTVINA00000004';
+  if (select salesperson from public.listings where user_id = me and vin = 'TESTVINA00000004') is distinct from 'Alex'
+     or (select salesperson from public.listings where id = '00000000-0000-4000-8000-0000000000e1') is distinct from 'Alex' then
+    raise exception 'an empty salesperson name could not be filled, or a stored one was emptied';
+  end if;
+  raise notice 'ok: a stored salesperson name stays as stored through the API; an empty one is filled';
 
   -- cannot delete anything (only managers delete)
   delete from public.listings where id = '00000000-0000-4000-8000-0000000000e1';
@@ -419,6 +440,9 @@ begin
   update public.memberships set role = 'manager' where user_id = a_sales and dealership_id = a;
   get diagnostics n = row_count;
   if n <> 1 then raise exception 'a_mgr could not make a_sales a manager'; end if;
+  if not exists (select 1 from public.list_invites(a) l where l.code = 'DEMOTEA00006') then
+    raise exception 'the code a_sales made is not listed while they are a manager';
+  end if;
   update public.memberships set role = 'salesperson', name = 'Alex R.' where user_id = a_sales and dealership_id = a;
   get diagnostics n = row_count;
   if n <> 1 then raise exception 'a_mgr could not make a_sales a salesperson again'; end if;
@@ -474,8 +498,23 @@ begin
 end;
 $$;
 
--- a salesperson cannot list A's codes
+-- as the owner: making a_sales a salesperson again deleted the unused code they made as a manager, and
+-- the owner (SQL) is the one who can correct a stored salesperson name
 reset role;
+do $$
+begin
+  if exists (select 1 from public.invites where code = 'DEMOTEA00006') then
+    raise exception 'making a manager a salesperson kept the unused code they made';
+  end if;
+  update public.post_attempts set salesperson = 'Alex R.' where user_id = '00000000-0000-4000-8000-0000000000a1' and salesperson = 'Alex';
+  if exists (select 1 from public.post_attempts where user_id = '00000000-0000-4000-8000-0000000000a1' and salesperson <> 'Alex R.') then
+    raise exception 'the owner could not correct a stored salesperson name';
+  end if;
+  raise notice 'ok: a demoted manager''s unused codes are gone; the owner corrects a stored name';
+end;
+$$;
+
+-- a salesperson cannot list A's codes
 select set_config('request.jwt.claims', '{"sub":"' || :'a_sales' || '","role":"authenticated"}', true) as claims \gset
 set local role authenticated;
 do $$

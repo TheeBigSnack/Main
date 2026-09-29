@@ -168,6 +168,10 @@ test('the lead function: origin first, then the address brake, the fields, the h
     'const read = await readJson(req, BODY_LIMIT);',
     'const checked = validateLead(',
     'if (checked.bot) return answer(200, { ok: true }, headers);',
+    // the cap counts the past hour only: without the window it would count every request ever stored,
+    // and after the 200th the form would refuse everyone for good
+    'const since = new Date(Date.now() - HOUR_MS).toISOString();',
+    ".select('id', { count: 'exact', head: true }).gte('received_at', since);",
     "if (hourlyCapReached(count)) return answer(429, { ok: false, error:",
     ".from('demo_requests').insert({",
   ];
