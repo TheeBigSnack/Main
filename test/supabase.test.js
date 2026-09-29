@@ -104,8 +104,11 @@ test('tests/rls.sql: an owner-made lower-case code is stored as typed and redeem
 
 // ---------- the sync function ----------
 
-test('sync/index.ts: the take-down window is decided by created_at, never posted_at; serverTime is taken after the writes and before the reads', () => {
-  assert.match(sync, /\.eq\('user_id', me\)\.eq\('status', 'listed'\)\.lte\('created_at', since\)/);
+test('sync/index.ts: take-downs are the known keys missing from the registry, no time compared; take-downs and closed to-do items come back from a margin before since', () => {
+  assert.match(sync, /const known = knownKeys\(body\.known\);/);
+  assert.match(sync, /const dropped = \[\.\.\.known\.keys\]\.filter\(\(k\) => !inRegistry\.has\(k\)\);/);
+  assert.match(sync, /\.eq\('user_id', me\)\.eq\('status', 'listed'\)\.in\('vin', part\)/, 'only the caller\'s own listed rows');
+  assert.doesNotMatch(sync, /'created_at'/, 'created_at is never read: the database\'s clock never meets the function\'s');
   assert.doesNotMatch(sync, /lte\('posted_at'/, 'the client\'s stamp is never compared with since');
   assert.doesNotMatch(sync, /created_at:/, 'the function never stamps created_at itself: the database does');
   assert.equal((sync.match(/const serverTime = /g) || []).length, 1);
@@ -113,7 +116,8 @@ test('sync/index.ts: the take-down window is decided by created_at, never posted
   assert.ok(at > sync.indexOf("// 5. this scan's counts"), 'after the last write');
   assert.ok(at < sync.indexOf("// 6. the dealership's current state"), 'before the state that goes back is read');
   assert.match(sync, /taken_down_at: new Date\(\)\.toISOString\(\)/, 'a take-down carries its own stamp');
-  assert.match(sync, /const cutoff = since \?\? /);
+  assert.match(sync, /const CUTOFF_MARGIN_MS = 10 \* 60 \* 1000;/);
+  assert.match(sync, /const cutoff = since \? new Date\(Date\.parse\(since\) - CUTOFF_MARGIN_MS\)\.toISOString\(\) : /);
 });
 
 // ---------- the origin both functions pick the dealership by ----------
@@ -210,10 +214,11 @@ test('supabase/README.md names today, postsToday, plan, the 402 rule and the Bil
   assert.doesNotMatch(readme, /not wired in this step/, 'the card is wired now');
 });
 
-test('supabase/README.md says what the code does: the code folding, the created_at rule, the rewrite origin rule, in-place migrations', () => {
+test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule, in-place migrations', () => {
   assert.match(readme, /a code works once and for 7 days/);
-  assert.match(readme, /`listings\.created_at`, stamped by the server when the row arrived/);
-  assert.match(readme, /the client's `postedAt` is never compared with `since`/);
+  assert.match(readme, /marks as taken down the caller's listed rows whose key is in `known` and missing from `posted` \(no time decides it/);
+  assert.match(readme, /a request without `known` takes nothing down/);
+  assert.match(readme, /the answer looks back 10 minutes before `since`/);
   assert.match(readme, /matches none of their dealerships gets 403/);
   assert.match(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/);
   assert.match(readme, /The pilot lists are the one place a client clock still meets `since`/);
@@ -230,6 +235,11 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   const redeem = rls.slice(rls.indexOf('create or replace function public.redeem_invite'), rls.indexOf('comment on function public.redeem_invite'));
   assert.ok(redeem.indexOf('invite_misses') < redeem.indexOf('from public.invites'), 'the throttle runs before the code is looked up');
   assert.match(redeem, /if misses >= 10 then\s+raise exception 'too many attempts; try again in an hour' using errcode = 'P0005'/);
+  // round H review: misses older than an hour go at anyone's call (docs/data-inventory.md's retention line), which rls.sql proves
+  assert.match(rlsTest, /insert into public\.invite_misses \(user_id, at\) values\s+\(:'b_sales', now\(\) - interval '2 hours'\),\s+\(:'c_sales', now\(\) - interval '5 minutes'\);/);
+  for (const words of ['another account\'\'s miss from two hours ago survived the newcomer\'\'s redeem_invite', 'another account\'\'s miss from five minutes ago was dropped']) {
+    assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
+  }
   assert.match(redeem, /inv\.expires_at <= now\(\)/);
   assert.match(redeem, /m\.role = 'manager'/, 'a code dies with its maker\'s manager role');
   assert.match(redeem, /'code', 'P0002', 'message', 'that invite code is not valid'/);

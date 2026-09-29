@@ -6,7 +6,8 @@
 // every table that belongs to a dealership is exported and counted. Nothing
 // here runs SQL; supabase/tests/privacy.sql proves the behaviour against a
 // database. The second half holds supabase/README.md and docs/support.md to
-// the functions and to the privacy policy's promise and its one number.
+// the functions and to the privacy policy's promise and its one number, and
+// the copy of a person's own data to every table that carries their user id.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -217,4 +218,21 @@ test('docs/support.md: the three request types, who may ask for each and how it 
   }
   assert.match(s, /`supabase\/README\.md`, "Export or delete a dealership's data"/, 'points at the SQL');
   assert.match(support, /Never send a dealership's export to anyone but the verified manager who asked/);
+});
+
+// round H review: the policy lists sign-up attempts as a person's account data, and the copy left them out
+test('docs/support.md: the copy of a person\'s own data reads every table that carries a user_id', () => {
+  const start = support.indexOf('A person asking for a copy of their own data');
+  assert.ok(start >= 0, 'support.md has no recipe for a copy of a person\'s own data');
+  const open = support.indexOf('```sql', start);
+  assert.ok(open > start, 'the recipe has no SQL block');
+  const recipe = support.slice(open, support.indexOf('```\n', open + '```sql'.length));
+  const withUser = TABLES.filter((t) => /^\s*user_id uuid\b/m.test(t.columns));
+  assert.ok(withUser.length >= 6, withUser.map((t) => t.name).join(', '));
+  for (const t of withUser) {
+    assert.match(recipe, new RegExp(`\\bfrom public\\.${t.name}\\b[^;]*\\bwhere (\\w+\\.)?user_id = '<user id>'`), `the copy leaves out ${t.name} (${t.file})`);
+  }
+  assert.match(recipe, /from public\.invites i\b[^;]*where '<user id>' in \(i\.created_by, i\.used_by\)/, 'the codes they made or used');
+  assert.match(recipe, /from auth\.users where id = '<user id>'/, 'their account');
+  assert.match(support, /it leaves out their invite misses, sign-up attempts and demo requests/, 'what export_dealership leaves out');
 });

@@ -72,7 +72,7 @@ jobs:
   # The Supabase SQL checks (supabase/tests/*.sql) against a plain Postgres 16:
   # every migration applied in order, then each test file, each of which must
   # leave the database as it found it (the script checks). concurrency.sql runs
-  # two real sessions through dblink, which the postgres:16 image ships; they
+  # real sessions through dblink, which the postgres:16 image ships; they
   # connect back over the container's own unix socket as the superuser.
   sql:
     runs-on: ubuntu-latest

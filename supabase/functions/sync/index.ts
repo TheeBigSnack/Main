@@ -6,11 +6,11 @@
 // open to-do items, so every machine of the dealership converges
 // (extension/src/sync.js merges the answer).
 //
-//   POST …/sync  { origin, posted, pilot: { posts, flags }, scan | null, since | null, today: { from, to } | null }
+//   POST …/sync  { origin, posted, known, pilot: { posts, flags }, scan | null, since | null, today: { from, to } | null }
 //     -> { ok, serverTime, dealership: { id, name, websiteOrigin }, role, plan, postsToday, counts, listings, todoItems }
 //     -> 402 { ok: false, error, code: 'lapsed', plan } when the dealership's plan has lapsed; nothing is written
 //     -> 429 { ok: false, error } beyond PER_MINUTE requests by one user in a minute; nothing is read or written
-//     -> 400 { ok: false, error } for a body over BODY_LIMIT, or more than MAX_ROWS listings, post attempts or to-do flags
+//     -> 400 { ok: false, error } for a body over BODY_LIMIT, or more than MAX_ROWS listings, known keys, post attempts or to-do flags
 //
 // Everything is written with the caller's own token, so row-level security
 // (migrations/0002_rls.sql) is the guard: a salesperson can only ever write
@@ -31,12 +31,14 @@
 //     the server's. No `today`, or one that is not a day, gives null;
 //   - a listing row of another user, or one already taken down, is never
 //     changed by an upload (a stale machine cannot relist a sold car);
-//   - the caller's listed rows that are missing from their registry, among
-//     those the server already held at `since` (created_at, the server's
-//     stamp; the client's posted_at is never compared with since), are
-//     marked taken down (a machine that never synced, since null, takes
-//     nothing down);
-//   - a to-do item is closed by an upload but never reopened.
+//   - the caller's listed rows whose key (VIN@postedAt) is in `known` (the
+//     keys of their own posts that machine sent or received at its last
+//     sync) and missing from `posted` are marked taken down. No time decides
+//     it: a row that machine never received is never in `known`. A request
+//     without `known` (a machine that never synced) takes nothing down;
+//   - a to-do item is closed by an upload but never reopened;
+//   - take-downs and closed to-do items come back from CUTOFF_MARGIN_MS
+//     before `since`, not from `since` itself (below, step 6).
 // The rows are built the way extension/src/sync.js toServerRows() builds
 // them; keep the two mappings the same. The per-user brake and the row caps
 // are for one member flooding the dealership's tables (a real registry is a
@@ -49,9 +51,11 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 const BODY_LIMIT = 512 * 1024; // a registry of a whole lot is a few tens of KiB
 const PER_MINUTE = 12; // syncs per user per minute (the extension syncs after a scan, a post, a price update or a take-down)
-const MAX_ROWS = 2000; // listings, post attempts or to-do flags in one request
+const MAX_ROWS = 2000; // listings, known keys, post attempts or to-do flags in one request
 const FUTURE_SKEW_MS = 5 * 60 * 1000; // how far ahead of the server's clock a posted_at may be
 const TAKEN_DOWN_WINDOW_DAYS = 90; // how far back taken-down rows go to a machine that never synced
+const CUTOFF_MARGIN_MS = 10 * 60 * 1000; // take-downs and closed to-do items this long before `since` come back again (step 6)
+const KEY_MAX = 80; // a known key is a VIN, an @ and a time; anything longer is not one
 const CHUNK = 100; // VINs per `in` filter, to keep the request URL short
 const PAGE = 1000; // the API answers at most this many rows per request
 const FLAG_KINDS = ['takeDown', 'price'];
@@ -185,6 +189,22 @@ function attemptRows(posts: unknown, dealershipId: string, userId: string): Atte
   return out;
 }
 
+// `known` as the set of keys step 2 compares: vin@ms(posted_at), the same
+// form byPost uses. A key that does not parse is left out, which can only
+// miss a take-down, never make one. Not a list: no keys at all.
+function knownKeys(known: unknown): { keys: Set<string>; count: number } {
+  const list = Array.isArray(known) ? known : [];
+  const keys = new Set<string>();
+  for (const k of list) {
+    if (typeof k !== 'string' || k.length > KEY_MAX) continue;
+    const at = k.lastIndexOf('@');
+    const vin = at > 0 ? vinOf(k.slice(0, at)) : '';
+    const t = at > 0 ? ms(k.slice(at + 1)) : null;
+    if (vin && t !== null) keys.add(`${vin}@${t}`);
+  }
+  return { keys, count: list.length };
+}
+
 function todoRows(flags: unknown, dealershipId: string): TodoRow[] {
   const out: TodoRow[] = [];
   for (const f of Array.isArray(flags) ? flags : []) {
@@ -247,15 +267,6 @@ function rowsOf(res: DbResult, what: string): Row[] {
   return out;
 }
 
-async function selectByVin(client: SupabaseClient, table: string, columns: string, dealershipId: string, vins: string[]): Promise<Row[]> {
-  const out: Row[] = [];
-  for (const part of chunk([...new Set(vins)], CHUNK)) {
-    const res = await client.from(table).select(columns).eq('dealership_id', dealershipId).in('vin', part);
-    out.push(...rowsOf(res, `could not read ${table}`));
-  }
-  return out;
-}
-
 // Every row of a query, page by page.
 async function selectAll(what: string, query: (from: number, to: number) => PromiseLike<DbResult>): Promise<Row[]> {
   const out: Row[] = [];
@@ -263,6 +274,17 @@ async function selectAll(what: string, query: (from: number, to: number) => Prom
     const rows = rowsOf(await query(from, from + PAGE - 1), what);
     out.push(...rows);
     if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
+// Every row for these VINs, CHUNK VINs a request and paged: a car posted
+// again and again, or flagged week after week, has a row each time, so a
+// chunk can hold more rows than one answer carries.
+async function selectByVin(client: SupabaseClient, table: string, columns: string, dealershipId: string, vins: string[]): Promise<Row[]> {
+  const out: Row[] = [];
+  for (const part of chunk([...new Set(vins)], CHUNK)) {
+    out.push(...(await selectAll(`could not read ${table}`, (from, to) => client.from(table).select(columns).eq('dealership_id', dealershipId).in('vin', part).order('id').range(from, to))));
   }
   return out;
 }
@@ -347,9 +369,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // MAX_ROWS of any kind is refused whole, and a listing stamped further
   // ahead of this clock than FUTURE_SKEW_MS is set aside and counted.
   const sentListings = listingRows(body.posted, dealershipId, me);
+  const known = knownKeys(body.known);
   const attempts = attemptRows(pilot.posts, dealershipId, me);
   const todos = todoRows(pilot.flags, dealershipId);
-  if (sentListings.length > MAX_ROWS || attempts.length > MAX_ROWS || todos.length > MAX_ROWS) {
+  if (sentListings.length > MAX_ROWS || known.count > MAX_ROWS || attempts.length > MAX_ROWS || todos.length > MAX_ROWS) {
     return json(req, 400, { ok: false, error: `too many entries in one request (at most ${MAX_ROWS} listings, post attempts or to-do flags)` });
   }
   const latest = Date.now() + FUTURE_SKEW_MS;
@@ -399,20 +422,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
       counts.listingsInserted = inserts.length;
     }
 
-    // 2. take-downs: the caller's listed rows the registry no longer has,
-    //    among those the server already held at the caller's last sync
-    //    (created_at <= since: both stamps are the server's). The client's
-    //    posted_at is never compared with since: a post uploaded late from
-    //    another of the caller's machines, or stamped by a slow clock, looks
-    //    older than the last sync although the caller never received it,
-    //    and a row marked taken down is never relisted.
-    if (since) {
-      const mine = rowsOf(await client.from('listings').select('id, vin, posted_at').eq('dealership_id', dealershipId).eq('user_id', me).eq('status', 'listed').lte('created_at', since), 'could not read listings');
-      const sent = new Set(incoming.map((r) => `${r.vin}@${ms(r.posted_at)}`));
-      const gone = mine.filter((r) => !sent.has(`${vinOf(r.vin)}@${ms(r.posted_at)}`)).map((r) => String(r.id));
-      if (gone.length) {
-        must(await client.from('listings').update({ status: 'taken_down', taken_down_at: new Date().toISOString() }).in('id', gone), 'could not mark listings taken down');
-        counts.takenDown = gone.length;
+    // 2. take-downs: the caller's listed rows that this machine knew at its
+    //    last sync (`known`: the keys it sent or received then) and that its
+    //    registry no longer has. Knowing is what counts, not time: a post
+    //    that reached the server from the caller's other machine during or
+    //    after that sync was never received here, so it is not in `known`
+    //    and stays up, whatever its created_at or posted_at say. A request
+    //    without `known` takes nothing down: a missed take-down shows up
+    //    again in the registry and can be done again, while a wrong one is
+    //    final (a row marked taken down is never relisted). An entry still in
+    //    the registry is never taken down, even one set aside above as
+    //    stamped in the future.
+    const inRegistry = new Set(sentListings.map((r) => `${r.vin}@${ms(r.posted_at)}`));
+    const dropped = [...known.keys].filter((k) => !inRegistry.has(k));
+    if (dropped.length) {
+      const wanted = new Set(dropped);
+      const vins = [...new Set(dropped.map((k) => k.slice(0, k.lastIndexOf('@'))))];
+      const gone: string[] = [];
+      for (const part of chunk(vins, CHUNK)) {
+        const mine = await selectAll('could not read listings', (from, to) => client.from('listings').select('id, vin, posted_at').eq('dealership_id', dealershipId).eq('user_id', me).eq('status', 'listed').in('vin', part).order('id').range(from, to));
+        for (const r of mine) if (wanted.has(`${vinOf(r.vin)}@${ms(r.posted_at)}`)) gone.push(String(r.id));
+      }
+      for (const part of chunk(gone, CHUNK)) {
+        must(await client.from('listings').update({ status: 'taken_down', taken_down_at: new Date().toISOString() }).in('id', part), 'could not mark listings taken down');
+        counts.takenDown += part.length;
       }
     }
 
@@ -462,16 +495,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
       counts.scans = 1;
     }
 
-    // The next call's `since`: taken after the writes above, so a row this
-    // call inserted has created_at <= serverTime and the caller's own
-    // take-down of it counts at the very next sync, and before the reads
-    // below, so nothing the caller receives now was stamped after it.
+    // The next call's `since`, which only picks the take-downs and closed
+    // to-do items it gets back (step 6); take-downs are decided by `known`.
+    // It is this function's clock, taken before the reads below, but those
+    // reads are separate requests and other calls write in between: a
+    // take-down stamped just before this moment (by another call's clock)
+    // can commit only after the reads, and a closed to-do item carries the
+    // closing machine's clock. So the next call looks back from
+    // CUTOFF_MARGIN_MS before `since`, well past any request's run and any
+    // host's clock error; a take-down or a closed item sent twice changes
+    // nothing on the machine (mergeRegistry, mergeFlags).
     const serverTime = new Date().toISOString();
 
     // 6. the dealership's current state: every listing that is up, the
-    //    take-downs since the last sync (the last 90 days for a machine that
-    //    never synced), every open to-do item and the ones closed since
-    const cutoff = since ?? new Date(Date.now() - TAKEN_DOWN_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+    //    take-downs since the last sync, less the margin (the last 90 days
+    //    for a machine that never synced), every open to-do item and the
+    //    ones closed since then
+    const cutoff = since ? new Date(Date.parse(since) - CUTOFF_MARGIN_MS).toISOString() : new Date(Date.now() - TAKEN_DOWN_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
     const listed = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'listed').order('posted_at', { ascending: false }).range(from, to));
     const down = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'taken_down').gte('taken_down_at', cutoff).order('taken_down_at', { ascending: false }).range(from, to));
     const open = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).is('done_at', null).order('flagged_at', { ascending: false }).range(from, to));

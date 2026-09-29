@@ -3,8 +3,12 @@
 // keep the page true as the code grows: each fails when the code gains
 // something the page does not name (a chrome.storage key or area, a table or
 // a column, an Edge Function, an outside host, a field sent to the rewrite
-// service), when the page names something the code no longer has, and when a
-// recipient the page names is missing from a privacy text that must name it.
+// service, a file the extension or the manager view saves), when a table's
+// API access in the migrations differs from what the page, supabase/README.md
+// or the functions' auth.ts header says of it, when the page names something
+// the code no longer has, and when a recipient the page names is missing from
+// a privacy text that must name it. The privacy policy is also held to what
+// the sync sends of a rescan and to what Download photos keeps.
 // The pending marks in those texts must each point at a question that exists
 // in legal/questions-for-attorney.md, and every question there must be
 // waited on somewhere, so an answered question cannot leave a stale mark.
@@ -18,11 +22,13 @@ import { SITE_KEY_NAMES, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
 import { PROFILE_KEY } from '../extension/src/settings.js';
 import { generateDescription, guessColorsWithBackend } from '../extension/src/rewriter.js';
 import { syncPayload } from '../extension/src/sync.js';
+import { noteFlags } from '../extension/src/pilot.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
 const inventory = read('docs/data-inventory.md');
 const policy = read('legal/privacy-policy.md');
+const storeTexts = read('legal/chrome-web-store-privacy.md');
 const questions = read('legal/questions-for-attorney.md');
 const sorted = (xs) => [...new Set(xs)].sort();
 
@@ -159,6 +165,59 @@ test('every table the migrations create has a row, with every column, and every 
   }
 });
 
+// The tables and views a caller's token can read through the API: each
+// table-level grant of select (or all) to anon, authenticated or public, less
+// what a later revoke takes back, in migration order. Column grants of other
+// rights (update (name)) and grants to service_role do not count.
+function apiReadable() {
+  const pairs = new Set();
+  const created = [];
+  for (const f of MIGRATIONS) {
+    const sql = read('supabase/migrations/' + f);
+    created.push(...[...sql.matchAll(/^create table public\.(\w+) \(/gm)].map((m) => m[1]));
+    for (const m of sql.matchAll(/^(grant|revoke) ([^;]+?) on (?!function\b|sequence\b|schema\b|all sequences\b)(?:table )?(all tables in schema public|public\.\w+(?:, public\.\w+)*) (?:to|from) ([^;]+);/gm)) {
+      if (!/\b(select|all)\b/.test(m[2])) continue;
+      const targets = m[3] === 'all tables in schema public' ? [...created] : m[3].split(/,\s*/).map((t) => t.replace(/^public\./, ''));
+      const roles = m[4].split(/,\s*/).flatMap((r) => (r === 'public' ? ['anon', 'authenticated'] : [r])).filter((r) => r === 'anon' || r === 'authenticated');
+      for (const t of targets) for (const r of roles) pairs[m[1] === 'grant' ? 'add' : 'delete'](`${t}/${r}`);
+    }
+  }
+  return new Set([...pairs].map((p) => p.split('/')[0]));
+}
+
+test('"Who can read it through the API" says "No API" exactly for the tables no caller\'s token may read', () => {
+  const readable = apiReadable();
+  assert.ok(readable.has('listings') && readable.size < Object.keys(schema()).length, 'the grant scan no longer finds the grants and the revokes: fix this test');
+  const t = onlyTable(section(inventory, '### Tables'), 'the database section');
+  const who = column(t, 'Who can read it through the API');
+  for (const r of t.rows) {
+    const name = firstCode(r[0]);
+    assert.equal(!/^No API\b/.test(r[who]), readable.has(name), `${name}: the migrations ${readable.has(name) ? 'grant' : 'grant no'} API read, and the inventory says "${r[who].slice(0, 40)}"`);
+  }
+});
+
+test('supabase/README.md and the auth.ts header name every table the functions reach with the service-role key, and which of them a member may still read', () => {
+  const readable = apiReadable();
+  const used = new Set();
+  for (const f of walk('supabase/functions').filter((x) => /\.(ts|mjs|js)$/.test(x))) {
+    for (const m of source(f).matchAll(/\b(?:service|serviceClient\(\))\.from\('(\w+)'\)/g)) used.add(m[1]);
+  }
+  assert.ok(used.has('rewrite_usage') && used.has('demo_requests') && used.has('billing_events'), 'the scan no longer finds the service-role reads and writes: fix this test');
+  const cell = read('supabase/README.md').split('\n').find((l) => l.startsWith('| `SUPABASE_URL`, '));
+  assert.ok(cell, 'supabase/README.md has no SUPABASE_URL row');
+  const header = read('supabase/functions/_shared/auth.ts').split('\nimport ')[0].replace(/^\/\/ ?/gm, '').replace(/\s+/g, ' ');
+  const named = (text) => sorted((text.match(/\b\w+\b/g) || []).filter((w) => used.has(w)));
+  for (const [where, text] of [['supabase/README.md', cell], ['supabase/functions/_shared/auth.ts', header]]) {
+    assert.doesNotMatch(text, /no API role may touch/i, `${where}: members read some of these tables through the API`);
+    for (const t of used) assert.match(text, new RegExp(`\\b${t}\\b`), `${where} does not name ${t}, which the functions reach with the service-role key`);
+    const members = text.match(/a member may still read their own dealership's rows of ([^;.]+)/);
+    const nobody = text.match(/no caller's token reaches ([^;.]+) at all/);
+    assert.ok(members && nobody, `${where} no longer says which of these tables a member may read and which no caller may`);
+    assert.deepEqual(named(members[1]), sorted([...used].filter((t) => readable.has(t))), `${where}: the tables a member may read are not the ones the migrations grant`);
+    assert.deepEqual(named(nobody[1]), sorted([...used].filter((t) => !readable.has(t))), `${where}: the tables no caller may read are not the ones the migrations keep closed`);
+  }
+});
+
 test('every view the migrations create is named in the database section', () => {
   const db = section(inventory, "## Lot Sync's database (Supabase)");
   const views = MIGRATIONS.flatMap((f) => [...read('supabase/migrations/' + f).matchAll(/^create (?:or replace )?view public\.(\w+)/gm)].map((m) => m[1]));
@@ -229,6 +288,13 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   const body = await sentToRewrite();
   assert.equal(body.origin, 'https://www.example-motors.test', 'the origin goes with the facts');
   assert.ok(read('supabase/functions/rewrite/index.ts').includes('delete facts.origin;'), 'the rewrite function no longer removes origin before the facts reach Anthropic: update the inventory');
+  // the self-hosted backend/ takes the same body, so it must drop origin too
+  const server = stripComments(read('backend/server.js'));
+  const strip = server.indexOf('delete facts.origin;');
+  assert.ok(strip > 0 && strip < server.indexOf('await rewrite(facts)'), 'backend/server.js no longer removes origin before the facts reach Anthropic: update the inventory and the privacy policy');
+  const t = tables(section(inventory, '## What leaves the browser'))[0];
+  const row = t.rows.find((r) => r[0].startsWith('Description writer'));
+  assert.ok(row && row[column(t, 'What is sent')].includes('`origin`'), 'the Description writer row does not name origin');
   const sent = [];
   for (const [k, v] of Object.entries(body)) {
     if (k === 'origin') continue;
@@ -250,8 +316,21 @@ test('a colour guess sends the photo addresses, the colour words and the origin,
     return { ok: true, status: 200, json: async () => ({ ok: true, exterior: 'Gray' }) };
   };
   await guessColorsWithBackend({ endpoint: 'https://rewrite.test', photos: CAR.photos, options: ['Gray', 'Black'], origin: 'https://www.example-motors.test', fetchImpl });
-  assert.deepEqual(Object.keys(body).sort(), ['options', 'origin', 'photos'], 'the colour guess sends more than the inventory says: update "Exactly what reaches Anthropic"');
+  assert.deepEqual(Object.keys(body).sort(), ['options', 'origin', 'photos'], 'the colour guess sends something new: update the Colour guess row and "Exactly what reaches Anthropic"');
   assert.match(section(inventory, '### Exactly what reaches Anthropic'), /up to four photo addresses[^.]*and the list of colour words\. Nothing else\./);
+  // the network row names every key the extension sends
+  const t = tables(section(inventory, '## What leaves the browser'))[0];
+  const row = t.rows.find((r) => r[0].startsWith('Colour guess'));
+  assert.ok(row, 'the network table has no Colour guess row');
+  const sent = row[column(t, 'What is sent')];
+  for (const k of Object.keys(body)) assert.ok(sent.includes('`' + k + '`'), `the colour guess sends ${k}, and the Colour guess row does not name it`);
+  // and so does the Web Store answer for the rewrite service, in words
+  const store = onlyTable(section(storeTexts, '## What the extension sends, and to whom (mirrors `docs/data-inventory.md`)'), 'the Web Store sends section');
+  const rewrite = store.rows.find((r) => /rewrite service/.test(r[column(store, 'To')]));
+  assert.ok(rewrite, 'the Web Store answers have no row for the rewrite service');
+  const what = rewrite[column(store, 'What')];
+  assert.match(what, /for a colour guess, up to four photo addresses and the list of colour words/);
+  assert.match(what, /the dealership's website address/, 'the description writer and the colour guess send the website address, and the Web Store answers do not say so');
 });
 
 test('the sync row names every part of the sync payload', () => {
@@ -261,6 +340,51 @@ test('the sync row names every part of the sync payload', () => {
   assert.ok(row, 'the network table has no Sync row');
   const sent = row[column(t, 'What is sent')];
   for (const k of Object.keys(body)) assert.ok(sent.includes('`' + k + '`'), `the sync payload carries ${k}, and the Sync row does not name it`);
+});
+
+test('the privacy texts say the take-downs and price changes on the person\'s own listings leave the browser as to-do items, with both prices', () => {
+  const [MINE, REPRICED, THEIRS] = ['1C4RJFBG5KC000001', '1C4RJFBG5KC000002', '1C4RJFBG5KC000003'];
+  const diff = {
+    takeDown: [{ vin: MINE, name: '2019 Jeep Grand Cherokee', why: 'sold', yours: true }, { vin: THEIRS, name: '2020 Ram 1500', why: 'sold', yours: false }],
+    priceUpdates: [{ vin: REPRICED, name: '2018 Jeep Wrangler', from: 25990, to: 24990, yours: true }],
+  };
+  const pilot = noteFlags(null, diff, { at: '2026-09-01T12:00:00.000Z' });
+  const up = syncPayload({ origin: 'https://www.example-motors.test', posted: {}, pilot, scan: null, since: null, userId: 'u' }).pilot.flags;
+  assert.deepEqual(up.map((f) => f.vin).sort(), [MINE, REPRICED].sort(), 'the person\'s own take-downs and price changes go up, a colleague\'s do not');
+  const price = up.find((f) => f.kind === 'price');
+  assert.deepEqual([price.name, price.from, price.to], ['2018 Jeep Wrangler', 25990, 24990], 'a price change goes up with the car\'s name and both prices');
+  const todo = schema().todo_items;
+  assert.ok(todo.includes('from_price') && todo.includes('to_price'), 'todo_items keeps both prices');
+  const t = tables(section(policy, '## What we collect and why'))[0];
+  const row = (label) => t.rows.find((r) => r[0].startsWith(label));
+  const scans = row('Scan results')[1];
+  assert.match(scans, /except the cars to take down and the price changes on the User's own listings, which become to-do items/, 'the policy says the lists of changes all stay in the browser');
+  assert.doesNotMatch(scans, /gets only/);
+  assert.match(row('Usage numbers')[0], /to-do items \([^)]*VIN and name[^)]*old and new price\)/, 'the policy\'s Usage numbers row does not say the to-do items carry the VIN, the name and both prices');
+  const usage = onlyTable(section(storeTexts, '## Usage numbers (mirrors the Privacy Policy)'), 'the Web Store usage section');
+  assert.match(usage.rows[0][0], /to-do items \([^)]*VIN and name[^)]*old and new price\)/, 'the Web Store usage row does not mirror the policy');
+});
+
+test('every file the extension or the manager view saves is listed where that part\'s files are, and the policy says the photos can be kept', () => {
+  const where = { extension: section(inventory, '### Files and the clipboard'), manager: section(inventory, '## The manager view (`manager/`)') };
+  const saves = [];
+  for (const f of SHIPPED.filter((x) => /^(extension|manager)\/.*\.js$/.test(x))) {
+    const src = source(f);
+    for (const m of src.matchAll(/\.download\s*=(?!=)|chrome\.downloads\./g)) {
+      // the function or the click case the save happens in names it
+      const names = [...src.slice(0, m.index).matchAll(/function\s+(\w+)\s*\(|case\s+'(\w+)'\s*:/g)];
+      const last = names[names.length - 1];
+      const name = last && (last[1] || last[2]);
+      assert.ok(name, `${f} saves a file outside any named function or click case`);
+      assert.ok(where[f.split('/')[0]].includes('`' + name + '`'), `${f} saves a file in ${name}, and docs/data-inventory.md does not name it with that part's files`);
+      saves.push(name);
+    }
+  }
+  assert.ok(['pilotCsv', 'downloadPhotos', 'downloadCsv'].every((n) => saves.includes(n)), `the scan no longer finds the known saves (${saves.join(', ')}): fix this test`);
+  const t = tables(section(inventory, '## What leaves the browser'))[0];
+  const photos = t.rows.find((r) => r[0].startsWith('Photos '));
+  assert.match(photos[column(t, 'Kept afterwards')], /\*\*Download photos\*\* saves/, 'the Photos row says nothing is kept');
+  assert.match(policy, /photos themselves[^|]*not kept, unless the User clicks Download photos, which saves them as files in the User's Downloads folder/, 'the privacy policy says the photos are never kept');
 });
 
 // ---------- who receives it, and the privacy texts ----------

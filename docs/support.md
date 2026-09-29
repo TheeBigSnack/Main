@@ -62,7 +62,7 @@ A person who starts a dealership in the manager view is told "that website alrea
    from public.dealerships d
    left join public.memberships m on m.dealership_id = d.id
    left join auth.users u on u.id = m.user_id
-   where d.website_origin = public.website_origin_of('<the address they typed>');
+   where public.website_origin_of(d.website_origin) = public.website_origin_of('<the address they typed>');
 
    select a.at, a.user_id, u.email
    from public.signup_attempts a
@@ -70,7 +70,7 @@ A person who starts a dealership in the manager view is told "that website alrea
    where a.dealership_id = '<dealership id>' and a.outcome = 'created';
    ```
 
-   The second statement says whether the dealership was started through sign-up, when and by which account. No row means Lot Sync set it up.
+   Both sides of the first statement go through `website_origin_of`, so it also finds a dealership stored by hand with a capital letter or a trailing slash, which sign-up counts as taken too. The second statement says whether the dealership was started through sign-up, when and by which account. No row means Lot Sync set it up.
 
 2. **Verify who runs the store.** Open the dealership's website yourself and call the main phone number it shows. Never call a number the requester gives: anyone can type a website, and the store's own line is what ties a person to it. Ask for the requester by name, and ask whether they work there as a manager and want the store on Lot Sync. If the managers the first statement lists still work there, access is theirs to give: ask them to send the requester an invite code, and change nothing.
 
@@ -121,7 +121,7 @@ The privacy policy (`legal/privacy-policy.md`, "Your choices and rights") lets a
 
   A later sync does not undo it: through the API a stored salesperson name stays as stored (`keep_stored_salesperson` in `supabase/migrations/0002_rls.sql`), so the old name a browser still holds for past posts is not written back. Ask the person to correct their name in Settings too, so new posts carry it.
 
-- A person asking for a copy of their own data is answered by hand, within the same 30 days, verified as for **Forget a person**. The copy is every row that carries their user id, in every dealership they belong to or have left (a member who was removed keeps their listings and post attempts under that id), plus the demo requests sent from their email, and nobody else's rows. `export_dealership` is not the tool: it covers one dealership they are still in, and it leaves out their invite misses and demo requests. In the SQL editor, find the id, then run one statement per table (each only reads) and save each result:
+- A person asking for a copy of their own data is answered by hand, within the same 30 days, verified as for **Forget a person**. The copy is every row that carries their user id, in every dealership they belong to or have left (a member who was removed keeps their listings and post attempts under that id), plus the demo requests sent from their email, and nobody else's rows. `export_dealership` is not the tool: it covers one dealership they are still in, and it leaves out their invite misses, sign-up attempts and demo requests. In the SQL editor, find the id, then run one statement per table (each only reads) and save each result:
 
   ```sql
   select id, email from auth.users where lower(email) = lower('<their email>');
@@ -134,6 +134,7 @@ The privacy policy (`legal/privacy-policy.md`, "Your choices and rights") lets a
   select d.name as dealership, case when i.used_at is null then '(unused: left out)' else i.code end as code, i.role, i.created_by, i.created_at, i.expires_at, i.used_by, i.used_at
     from public.invites i join public.dealerships d on d.id = i.dealership_id where '<user id>' in (i.created_by, i.used_by);
   select * from public.invite_misses where user_id = '<user id>';
+  select d.name as dealership, a.at, a.outcome, a.dealership_id from public.signup_attempts a left join public.dealerships d on d.id = a.dealership_id where a.user_id = '<user id>';
   select * from public.demo_requests where lower(trim(email)) = lower('<their email>');
   select created_at, ip_address, payload from auth.audit_log_entries where payload ->> 'actor_id' = '<user id>';
   ```

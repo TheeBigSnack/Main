@@ -2,10 +2,13 @@
 // Node, against the fake database (test/functions/): the order of its checks
 // (401, the per-user brake, the body, 403, 402), the upload rules
 // supabase/README.md states (another member's row and a taken-down row are
-// never changed, a VIN a colleague has up is theirs, take-downs follow the
-// server's created_at against `since`, postsToday counts the caller's own
-// rows in their day), the answer's shape, and the extension's own
-// syncOnce (extension/src/accountFlow.js) run against it end to end.
+// never changed, a VIN a colleague has up is theirs, take-downs are the
+// posts in `known` missing from the registry, take-downs and closed to-do
+// items come back from a margin before `since`, postsToday counts the
+// caller's own rows in their day), the answer's shape, every read paged
+// past the API's 1,000 rows, and the extension's own syncOnce
+// (extension/src/accountFlow.js) run against it end to end. The races
+// between two requests are in test/fn-sync-race.test.js.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -171,7 +174,8 @@ test('sync: a body over 512 KiB, bad JSON, or more than 2,000 listings, attempts
     assert.deepEqual([r.status, r.body], [400, { ok: false, error }]);
   }
   const handler = await load();
-  const declared = await sync(handler, TOKEN.u1, {}, { headers: { 'content-length': String(512 * 1024 + 1) }, raw: '{}'.padEnd(512 * 1024 + 1, ' ') });
+  // a small body declared too large is refused on the declaration, before it is read
+  const declared = await sync(handler, TOKEN.u1, {}, { headers: { 'content-length': String(512 * 1024 + 1) }, raw: '{}' });
   assert.deepEqual([declared.status, declared.body.error], [400, 'request too large']);
   const notJson = await sync(handler, TOKEN.u1, {}, { raw: '{"origin":' });
   assert.equal(notJson.status, 400);
@@ -213,7 +217,6 @@ test('sync: a first sync writes the registry, the attempts, the flags and the sc
   assert.deepEqual([two.user_id, two.dealership_id, two.price, two.listing_url, two.status], [U1, D1, 31500, null, 'listed'], 'a price given as text is a number; an http link is dropped');
   assert.equal(a.todoItems.length, 1);
   assert.match(a.serverTime, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-  for (const row of fake.rows('listings')) assert.ok(Date.parse(row.created_at) <= Date.parse(a.serverTime), 'serverTime is taken after the rows arrived');
 
   const [attempt] = fake.rows('post_attempts');
   assert.deepEqual([attempt.user_id, attempt.vin, attempt.outcome, attempt.seconds], [U1, VIN(1), 'posted', 42]);
@@ -274,47 +277,99 @@ test('sync: the caller\'s own row takes a newer price and stamp, and a link, nam
   assert.equal(same.body.counts.listingsUpdated, 0, 'nothing new, nothing written');
 });
 
-test('sync: take-downs are the caller\'s listed rows missing from the registry that the server held at `since` (created_at), never judged by posted_at', async () => {
+test('sync: take-downs are the caller\'s listed rows in `known` and missing from the registry, whatever their times; without `known` nothing is taken down', async () => {
   const since = at(-60);
   const rows = [
-    listing({ vin: VIN(1), posted_at: at(-3000), created_at: at(-3000) }), // held before since, gone from the registry: down
-    listing({ vin: VIN(2), posted_at: at(-4000), created_at: at(-30) }), // an old stamp that reached the server after since (another machine): kept
-    listing({ vin: VIN(3), posted_at: at(-2000), created_at: at(-2000) }), // still in the registry: kept
-    listing({ vin: VIN(4), user_id: U2, posted_at: at(-3000), created_at: at(-3000) }), // a colleague's: never the caller's to take down
-    listing({ vin: VIN(5), posted_at: at(-1000), created_at: since }), // arrived exactly at since: held then, so down
-    listing({ vin: VIN(6), posted_at: at(-3000), created_at: at(-3000), status: 'taken_down', taken_down_at: at(-2000) }), // already down: left as it was
+    listing({ vin: VIN(1), posted_at: at(-3000), created_at: at(-3000) }), // known, gone from the registry: down
+    listing({ vin: VIN(2), posted_at: at(-4000), created_at: at(-4000) }), // gone but never known here (another machine's post): kept
+    listing({ vin: VIN(3), posted_at: at(-2000), created_at: at(-2000) }), // known, still in the registry: kept
+    listing({ vin: VIN(4), user_id: U2, posted_at: at(-3000) }), // a colleague's: never the caller's to take down
+    listing({ vin: VIN(5), posted_at: at(-1000), created_at: at(10) }), // known, gone, stamped after since by the database's clock: down all the same
+    listing({ vin: VIN(6), posted_at: at(-3000), status: 'taken_down', taken_down_at: at(-2000) }), // already down: left as it was
+    listing({ vin: VIN(7), posted_at: at(-500) }), // its VIN known under another posting time: another post, kept
+    listing({ vin: VIN(8), posted_at: at(24 * 60) }), // known and still in the registry, though set aside as stamped in the future: kept
   ];
   world({ rows: { listings: rows } });
   const before = fake.rows('listings');
   const handler = await load();
-  const registry = { [VIN(3)]: { price: 20000, postedAt: rows[2].posted_at } };
-  const r = await sync(handler, TOKEN.u1, { posted: registry, since });
+  const registry = { [VIN(3)]: { price: 20000, postedAt: rows[2].posted_at }, [VIN(8)]: { price: 1, postedAt: rows[7].posted_at } };
+  const known = [VIN(1), VIN(3), VIN(4), VIN(5), VIN(6), VIN(8)].map((v) => `${v}@${rows.find((r) => r.vin === v).posted_at}`).concat(`${VIN(7)}@${at(-400)}`);
+  const r = await sync(handler, TOKEN.u1, { posted: registry, known, since });
   assert.equal(r.status, 200);
   assert.equal(r.body.counts.takenDown, 2);
+  assert.equal(r.body.counts.rejected, 1, 'the entry from the future was not written');
   const byVin = Object.fromEntries(fake.rows('listings').map((l) => [l.vin, l]));
-  assert.deepEqual(Object.values(byVin).map((l) => [l.vin, l.status]), [[VIN(1), 'taken_down'], [VIN(2), 'listed'], [VIN(3), 'listed'], [VIN(4), 'listed'], [VIN(5), 'taken_down'], [VIN(6), 'taken_down']]);
+  assert.deepEqual(Object.values(byVin).map((l) => [l.vin, l.status]), [[VIN(1), 'taken_down'], [VIN(2), 'listed'], [VIN(3), 'listed'], [VIN(4), 'listed'], [VIN(5), 'taken_down'], [VIN(6), 'taken_down'], [VIN(7), 'listed'], [VIN(8), 'listed']]);
   assert.ok(Date.parse(byVin[VIN(1)].taken_down_at) >= Date.parse(since), 'stamped now');
   assert.equal(byVin[VIN(6)].taken_down_at, before[5].taken_down_at, 'an old take-down keeps its time');
-  // the answer carries the dealership's listed rows and the take-downs since `since`
-  assert.deepEqual(r.body.listings.map((l) => [l.vin, l.status]).sort(), [[VIN(1), 'taken_down'], [VIN(2), 'listed'], [VIN(3), 'listed'], [VIN(4), 'listed'], [VIN(5), 'taken_down']]);
+  const [lookup] = fake.queries('listings', 'select').filter((c) => c.filters.some((f) => f.column === 'user_id'));
+  assert.deepEqual(lookup.filters.map((f) => [f.op, f.column]), [['eq', 'dealership_id'], ['eq', 'user_id'], ['eq', 'status'], ['in', 'vin']], 'only the caller\'s listed rows, only for the VINs of the keys to drop, and no time filter');
+  // the answer carries the dealership's listed rows and the take-downs since `since`, less the margin
+  assert.deepEqual(r.body.listings.map((l) => [l.vin, l.status]).sort(), [[VIN(1), 'taken_down'], [VIN(2), 'listed'], [VIN(3), 'listed'], [VIN(4), 'listed'], [VIN(5), 'taken_down'], [VIN(7), 'listed'], [VIN(8), 'listed']]);
 
-  // a machine that never synced (since null) takes nothing down
-  world({ rows: { listings: rows } });
-  const first = await sync(handler, TOKEN.u1, { posted: registry, since: null });
-  assert.equal(first.body.counts.takenDown, 0);
-  assert.deepEqual(fake.writes('listings'), []);
+  // no `known`, or one that is not a list, takes nothing down, `since` or not: a missed take-down
+  // comes back in the registry and can be done again, a wrong one could not be undone
+  for (const none of [undefined, null, 'a key', { [VIN(1)]: true }]) {
+    world({ rows: { listings: rows } });
+    const n = await sync(handler, TOKEN.u1, { posted: registry, since, known: none });
+    assert.equal(n.body.counts.takenDown, 0, JSON.stringify(none));
+    assert.deepEqual(fake.writes('listings'), []);
+  }
 });
 
-test('sync: a row the last sync inserted is taken down at the very next sync when the registry drops it (serverTime is the right `since`)', async () => {
-  world();
-  fake.latencyMs = 3; // each query a real trip, so a serverTime taken before the writes would be earlier than their created_at
+test('sync: `known` holds at most 2,000 keys; a key is VIN@time, in any case, and anything else in the list is left out', async () => {
+  world({ rows: { listings: [listing({ vin: VIN(1), posted_at: '2026-09-01T10:00:00.000Z' }), listing({ vin: VIN(2), posted_at: '2026-09-02T10:00:00.000Z' })] } });
   const handler = await load();
-  const posted = { [VIN(1)]: { price: 20000, postedAt: at(-10) }, [VIN(2)]: { price: 30000, postedAt: at(-5) } };
-  const first = await sync(handler, TOKEN.u1, { posted });
-  assert.equal(first.body.counts.listingsInserted, 2);
-  const second = await sync(handler, TOKEN.u1, { posted: { [VIN(2)]: posted[VIN(2)] }, since: first.body.serverTime });
-  assert.equal(second.body.counts.takenDown, 1);
+  const tooMany = await sync(handler, TOKEN.u1, { known: Array.from({ length: 2001 }, (_, i) => `${VIN(i)}@${at(-60)}`) });
+  assert.deepEqual([tooMany.status, tooMany.body], [400, { ok: false, error: 'too many entries in one request (at most 2000 listings, post attempts or to-do flags)' }]);
+  assert.equal(fake.writes().length, 0);
+  const odd = [`${VIN(1).toLowerCase()}@2026-09-01T10:00:00+00:00`, `${VIN(2)}@not a time`, 'no key at all', 42, null, '@2026-09-02T10:00:00.000Z', `${VIN(2)}@2026-09-02T10:00:00.000Z${' '.repeat(80)}`];
+  const r = await sync(handler, TOKEN.u1, { known: odd });
+  assert.equal(r.body.counts.takenDown, 1);
   assert.deepEqual(fake.rows('listings').map((l) => [l.vin, l.status]), [[VIN(1), 'taken_down'], [VIN(2), 'listed']]);
+  const full = await sync(handler, TOKEN.u1, { known: Array.from({ length: 2000 }, (_, i) => `${VIN(i)}@${at(-60)}`) });
+  assert.equal(full.status, 200, 'exactly 2,000 is taken');
+});
+
+test('sync: dropping more than 100 known posts looks them up and takes them down 100 at a time', async () => {
+  const rows = Array.from({ length: 150 }, (_, i) => listing({ vin: VIN(i), posted_at: at(-100 - i) }));
+  world({ rows: { listings: rows } });
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1, { known: rows.map((l) => `${l.vin}@${l.posted_at}`) });
+  assert.equal(r.body.counts.takenDown, 150);
+  assert.ok(fake.rows('listings').every((l) => l.status === 'taken_down'));
+  const lookups = fake.queries('listings', 'select').filter((c) => c.filters.some((f) => f.column === 'user_id'));
+  assert.deepEqual(lookups.map((c) => c.filters.find((f) => f.op === 'in').value.length), [100, 50]);
+  assert.deepEqual(fake.writes('listings').map((w) => w.filters.find((f) => f.op === 'in').value.length), [100, 50]);
+});
+
+test('sync: take-downs and closed to-do items come back from 10 minutes before `since`, so one that committed after the last sync\'s reads still arrives', async () => {
+  const since = at(-60);
+  world({
+    rows: {
+      listings: [
+        listing({ vin: VIN(1), user_id: U2, status: 'taken_down', taken_down_at: at(-55) }), // after since
+        listing({ vin: VIN(2), user_id: U2, status: 'taken_down', taken_down_at: at(-65) }), // 5 minutes before: sent again
+        listing({ vin: VIN(3), user_id: U2, status: 'taken_down', taken_down_at: at(-75) }), // 15 minutes before: the last sync had it
+      ],
+      todo_items: [
+        { dealership_id: D1, vin: VIN(4), kind: 'takeDown', flagged_at: at(-200), done_at: at(-65), how: 'manual' },
+        { dealership_id: D1, vin: VIN(5), kind: 'takeDown', flagged_at: at(-200), done_at: at(-75), how: 'manual' },
+      ],
+    },
+  });
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1, { since });
+  assert.deepEqual(r.body.listings.map((l) => l.vin).sort(), [VIN(1), VIN(2)]);
+  assert.deepEqual(r.body.todoItems.map((t) => t.vin), [VIN(4)]);
+  const cutoff = new Date(Date.parse(since) - 10 * 60 * 1000).toISOString();
+  const down = fake.queries('listings', 'select').find((c) => c.filters.some((f) => f.value === 'taken_down'));
+  assert.deepEqual(down.filters.find((f) => f.op === 'gte'), { op: 'gte', column: 'taken_down_at', value: cutoff });
+  const closed = fake.queries('todo_items', 'select').find((c) => c.filters.some((f) => f.op === 'not.is'));
+  assert.deepEqual(closed.filters.find((f) => f.op === 'gte'), { op: 'gte', column: 'done_at', value: cutoff });
+  // a first sync gets the last 90 days
+  world({ rows: { listings: [listing({ vin: VIN(1), user_id: U2, status: 'taken_down', taken_down_at: at(-89 * 24 * 60) }), listing({ vin: VIN(2), user_id: U2, status: 'taken_down', taken_down_at: at(-91 * 24 * 60) })] } });
+  assert.deepEqual((await sync(handler, TOKEN.u1)).body.listings.map((l) => l.vin), [VIN(1)]);
 });
 
 test('sync: a listing stamped more than 5 minutes ahead of the server is not written and is counted; 4 minutes ahead is taken', async () => {
@@ -382,6 +437,10 @@ test('sync: to-do items: a new flag goes in, an upload closes an open one, a clo
   assert.deepEqual(r.body.todoItems.map((t) => t.vin).sort(), [VIN(1), VIN(2), VIN(3), VIN(4)]);
 });
 
+// The API answers at most 1,000 rows a request (the fake too: fake.maxRows),
+// so a read that does not page loses rows without an error.
+const ranges = (table, match) => fake.queries(table, 'select').filter((c) => c.columns === '*' && c.filters.some(match)).map((c) => c.range);
+
 test('sync: every listed row and every page comes back past 1,000 rows; VINs are looked up 100 at a time and found again on the next upload', async () => {
   world({ rows: { listings: Array.from({ length: 1001 }, (_, i) => listing({ vin: `OTHER${String(i).padStart(12, '0')}`, user_id: U2 })) } });
   const handler = await load();
@@ -390,10 +449,40 @@ test('sync: every listed row and every page comes back past 1,000 rows; VINs are
   assert.equal(r.status, 200);
   assert.equal(r.body.counts.listingsInserted, 150);
   assert.equal(r.body.listings.length, 1151);
+  assert.deepEqual(ranges('listings', (f) => f.value === 'listed'), [[0, 999], [1000, 1999]], 'two pages of listed rows');
   const lookups = fake.queries('listings', 'select').filter((c) => c.filters.some((f) => f.op === 'in'));
   assert.deepEqual(lookups.map((c) => c.filters.find((f) => f.op === 'in').value.length), [100, 50]);
   const again = await sync(handler, TOKEN.u1, { posted });
   assert.deepEqual([again.status, again.body.counts.listingsInserted], [200, 0], 'every VIN was found, none inserted twice');
+});
+
+test('sync: take-downs, open and closed to-do items past 1,000 rows come back whole, page by page', async () => {
+  const id = (prefix, i) => `${prefix}${String(i).padStart(13, '0')}`;
+  const down = Array.from({ length: 1001 }, (_, i) => listing({ vin: id('DOWN', i), user_id: U2, status: 'taken_down', taken_down_at: at(-30) }));
+  const open = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('OPEN', i), kind: 'price', flagged_at: at(-30), from_price: 2, to_price: 1 }));
+  const closed = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('DONE', i), kind: 'takeDown', flagged_at: at(-40), done_at: at(-30), how: 'manual' }));
+  world({ rows: { listings: down, todo_items: [...open, ...closed] } });
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1, { since: at(-35) });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.listings.length, 1001);
+  assert.equal(r.body.todoItems.length, 2002);
+  assert.deepEqual(ranges('listings', (f) => f.value === 'taken_down'), [[0, 999], [1000, 1999]]);
+  assert.deepEqual(ranges('todo_items', (f) => f.op === 'is'), [[0, 999], [1000, 1999]]);
+  assert.deepEqual(ranges('todo_items', (f) => f.op === 'not.is'), [[0, 999], [1000, 1999]]);
+});
+
+test('sync: 100 VINs with more than 1,000 to-do rows between them are all found, so an upload of every flag adds none twice', async () => {
+  // a car whose price the website moved week after week has a flag each time
+  const flags = Array.from({ length: 1100 }, (_, i) => ({ vin: VIN(i % 100), kind: 'price', flaggedAt: at(-1000 - i), from: 2, to: 1 }));
+  world({ rows: { todo_items: flags.map((f) => ({ dealership_id: D1, vin: f.vin, kind: f.kind, flagged_at: f.flaggedAt, from_price: 2, to_price: 1 })) } });
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1, { pilot: { posts: [], flags } });
+  assert.equal(r.status, 200, r.body.error);
+  assert.equal(r.body.counts.todoItems, 0, 'every flag was found and none changed');
+  assert.equal(fake.rows('todo_items').length, 1100);
+  const lookups = fake.queries('todo_items', 'select').filter((c) => c.filters.some((f) => f.op === 'in'));
+  assert.deepEqual(lookups.map((c) => c.range), [[0, 999], [1000, 1999]], 'one chunk of 100 VINs, two pages');
 });
 
 test('sync: a refusal from row-level security (42501) is 403 with the reason; any other database error is 500', async () => {

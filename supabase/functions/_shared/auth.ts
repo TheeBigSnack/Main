@@ -4,12 +4,16 @@
 //
 // The caller's own client (anon key + their token) is what /sync and the
 // membership and plan checks read and write with, so row-level security
-// decides what they can touch. The service-role client is for the tables no
-// API role may touch: the rewrite function's usage log (rewrite_usage), the
-// billing function's subscriptions, billing_events and its dealership
-// lookup, and the lead function's demo_requests. It is created only inside
-// the function process; the key is a function secret and never reaches a
-// browser.
+// decides what they can touch. The service-role client is for the writes a
+// caller's own token may not make, with the reads that go with them: the
+// rewrite function's usage log (rewrite_usage), the billing function's
+// subscriptions and billing_events, with its lookup in dealerships for a
+// Stripe event, which comes with no caller, and the lead function's
+// demo_requests. With their own token a member may still read their own
+// dealership's rows of dealerships, subscriptions and rewrite_usage; no
+// caller's token reaches billing_events or demo_requests at all. The client
+// is created only inside the function process; the key is a function secret
+// and never reaches a browser.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { isRecord } from './http.ts';

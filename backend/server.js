@@ -197,8 +197,13 @@ const server = http.createServer(async (req, res) => {
       console.log(`${new Date().toISOString()} color ${photos.length} photo(s) -> ${out.ok ? `${out.exterior || '?'} / ${out.interior || '?'} (${out.confidence})` : out.error} $${out.costUsd} (month $${usage.usd.toFixed(2)})`);
       return send(200, out);
     }
-    const facts = body;
-    if (!facts || typeof facts !== 'object' || !facts.make || !facts.model) return send(400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
+    // The extension sends the dealer website's origin with the facts. It is
+    // not a fact about the car, and the privacy policy promises it goes no
+    // further than the rewrite service, so it comes out before the prompt is
+    // built, as in the Supabase rewrite function.
+    const facts = body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : null;
+    if (facts) delete facts.origin;
+    if (!facts || !facts.make || !facts.model) return send(400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
     const out = await rewrite(facts);
     console.log(`${new Date().toISOString()} rewrite ${facts.year} ${facts.make} ${facts.model} -> ${out.ok ? 'ok' : 'failed checks'} $${out.costUsd} (month $${usage.usd.toFixed(2)})`);
     return send(200, out);
