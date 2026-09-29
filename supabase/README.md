@@ -114,7 +114,7 @@ The pilot lists are the one place a client clock still meets `since`: `posts` an
 
 ## Who can see and do what
 
-Every table has row-level security on. In one line: a signed-in person sees their own dealership and nothing else; salespeople write their own rows; managers can change any row of their dealership; only managers delete; the anon key alone gets nothing. The full list is in `migrations/0002_rls.sql`, each policy with a comment saying what it is for. The service role (inside the functions only) bypasses these, as it always does on Supabase.
+Every table has row-level security on. In one line: a signed-in person sees their own dealership and nothing else; salespeople write their own rows; managers can change any row of their dealership; only managers delete; the anon key alone gets nothing. Managers change a member's name and role (a column-level grant: never who or which dealership) and remove members, from the manager view's Team card; a dealership always keeps at least one manager (the `keep_a_manager` trigger answers `P0006` to anything that would leave none; deleting the dealership itself still cascades). The full list is in `migrations/0002_rls.sql`, each policy with a comment saying what it is for. The service role (inside the functions only) bypasses these, as it always does on Supabase.
 
 ## Run the RLS test
 

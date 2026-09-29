@@ -24,7 +24,7 @@
 // works in the browser that asked for it.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, memberRole, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, teamCard, memberRole, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -50,6 +50,9 @@ const state = {
   invites: [], // the dealership's open codes (list_invites) and the ones made since: { code, role, dealership_id?, created_at, expires_at? }
   inviteNote: '', // one line in the Invite codes card: what a sample button would do
   inviteError: '', // the last failed create_invite or copy, shown in the card
+  teamNote: '', // one line in the Team card: a change made, or what a sample button would do
+  teamError: '', // the last refused change (the database's own sentence)
+  teamConfirm: '', // the user id whose Remove was clicked once; the second click removes
 };
 
 // ---------- the page frame ----------
@@ -190,6 +193,55 @@ function invitesHtml() {
   return `<section class="card" id="invites"><h2>Invite codes${card.codes.length ? ` ${pill('', `${card.codes.length} open`)}` : ''}</h2>${note}${error}<p class="plan">${esc(card.line)}</p><div class="toolbar">${buttons}</div>${codes}<p class="hint">${esc(card.hint)}</p></section>`;
 }
 
+// The Team card (managers only): each member with their role, Make manager or
+// Make salesperson, and Remove (two clicks). The database refuses to leave the
+// dealership without a manager; its sentence is shown as it comes.
+function teamHtml() {
+  const card = teamCard(state.data?.memberships, { role: myRole(), userId: state.mock ? '' : state.session?.user?.id, dealershipId: state.dealershipId, confirm: state.teamConfirm });
+  if (!card.manager) return '';
+  const note = state.teamNote ? `<p class="banner info">${esc(state.teamNote)}</p>` : '';
+  const error = state.teamError ? `<p class="banner warn">${esc(state.teamError)}</p>` : '';
+  const rowsHtml = card.members.map((m) => `<li><div class="row"><span class="name">${esc(m.name)}${m.you ? ' <span class="meta">(you)</span>' : ''}</span>${pill(m.role === 'manager' ? 'good' : '', m.role)}${m.roleAction ? `<button type="button" class="ghost" data-action="role" data-user="${esc(m.userId)}" data-to="${esc(m.roleAction.to)}">${esc(m.roleAction.label)}</button>` : ''}${m.remove ? `<button type="button" class="ghost${m.remove.armed ? ' danger' : ''}" data-action="remove" data-user="${esc(m.userId)}">${esc(m.remove.label)}</button>` : ''}${m.note ? `<span class="meta">${esc(m.note)}</span>` : ''}</div></li>`).join('');
+  return `<section class="card" id="team"><h2>Team ${pill('', `${card.members.length}`)}</h2>${note}${error}<p class="plan">${esc(card.line)}</p><ul class="codes team">${rowsHtml}</ul><p class="hint">${esc(card.hint)}</p></section>`;
+}
+
+function renderTeam() {
+  const el = $('team');
+  if (el) el.outerHTML = teamHtml();
+}
+
+// Make manager / Make salesperson: an update of the member's role, which RLS
+// allows a manager of the dealership and the column grant limits to role and
+// name. Remove: the first click arms the button, the second deletes the
+// membership (the trigger then cancels the invite codes they made).
+async function onTeam(kind, userId, to) {
+  state.teamError = '';
+  const member = (state.data?.memberships || []).find((m) => m.user_id === userId);
+  const who = (member && member.name) || 'this person';
+  if (kind === 'remove' && state.teamConfirm !== userId) {
+    state.teamConfirm = userId;
+    state.teamNote = '';
+    return renderTeam();
+  }
+  state.teamConfirm = '';
+  if (state.mock) {
+    state.teamNote = kind === 'remove' ? `Sample data: "Remove" would take ${who} out of the dealership and cancel the codes they made. Nothing is called here.` : `Sample data: this would make ${who} a ${to}. Nothing is called here.`;
+    return renderTeam();
+  }
+  try {
+    const q = state.supabase.from('memberships');
+    const { error } = kind === 'remove'
+      ? await q.delete().eq('user_id', userId).eq('dealership_id', state.dealershipId)
+      : await q.update({ role: to }).eq('user_id', userId).eq('dealership_id', state.dealershipId);
+    if (error) throw new Error(error.message);
+    state.teamNote = kind === 'remove' ? `${who} is no longer in the dealership.` : `${who} is now a ${to}.`;
+    await loadLive();
+  } catch (e) {
+    state.teamError = `Couldn't change the team: ${(e && e.message) || e}`;
+    renderTeam();
+  }
+}
+
 function renderInvites() {
   const el = $('invites');
   if (el) el.outerHTML = invitesHtml();
@@ -246,9 +298,9 @@ function viewData() {
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  $('main').innerHTML = scan + billingHtml() + invitesHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
+  $('main').innerHTML = scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
   const sel = $('pickDealer');
-  if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; loadLive().catch((e) => viewError(e.message)); });
+  if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; state.teamNote = ''; state.teamError = ''; state.teamConfirm = ''; loadLive().catch((e) => viewError(e.message)); });
 }
 
 // ---------- actions ----------
@@ -266,6 +318,8 @@ document.addEventListener('click', (ev) => {
     case 'invite': onInvite(btn.dataset.role, btn); break;
     case 'copy': copyCode(btn.dataset.copy, btn); break;
     case 'revoke': onRevoke(btn.dataset.code, btn); break;
+    case 'role': onTeam('role', btn.dataset.user, btn.dataset.to); break;
+    case 'remove': onTeam('remove', btn.dataset.user); break;
     default: break;
   }
 });

@@ -203,6 +203,16 @@ Each salesperson may record a set number of posts a day, 10 by default. Your dea
 - It counts posts recorded in this browser for this website today.
 - It is a safety setting, not a guarantee of anything from Facebook. Meta does not publish its limits.
 
+## The manager view (for managers)
+
+A web page your Lot Sync contact gives you the address of. It shows your whole dealership once your salespeople sign in to their extensions (Settings, Account).
+
+- **Sign in**: type your work email and click **Send me a sign-in link**. Open the link in the same browser on the same computer; it will not work in another browser. There is no password.
+- **Billing**: where the dealership's plan stands (no plan yet, free pilot with the days left, subscribed, or lapsed) and, for managers, **Start the free pilot**, **Subscribe** and **Manage billing** (Stripe's own pages, for the card and the invoices). When the plan has lapsed, salespeople can still post by hand, but nothing syncs and the description writer is off until it is renewed.
+- **Invite codes**: **Invite a salesperson** or **Invite a manager** makes a code that works once and for 7 days; **Copy** puts it on the clipboard. The card lists every open code with the day it expires; **Revoke** cancels one that went to the wrong person. A code stops working when the manager who made it leaves the dealership.
+- **Team**: everyone in the dealership's account. **Make manager** and **Make salesperson** change a role; **Remove** takes two clicks and stops that person's extension from syncing (the cars they posted stay in the numbers). A dealership always keeps at least one manager, so make someone else a manager before you step down or leave.
+- **Salespeople**, **Sold cars still listed** and **Price changes not yet updated**: the same numbers the salespeople's Numbers tabs keep, for the whole store, with **Download CSV** for the spreadsheet.
+
 ## What Lot Sync never does
 
 - Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it, and a test that fails if any appears.

@@ -90,7 +90,10 @@ grant select on public.dealerships to authenticated;
 -- create the row. A PATCH that names any other column fails with 42501
 -- before the policy or a constraint is consulted.
 grant update (name) on public.dealerships to authenticated;
-grant select, update, delete on public.memberships to authenticated;
+grant select, delete on public.memberships to authenticated;
+-- a member's name and role only: user_id and dealership_id are who and where,
+-- and a manager of two stores must not move people between them
+grant update (name, role) on public.memberships to authenticated;
 grant select, insert, update, delete on public.listings to authenticated;
 grant select, insert, update, delete on public.todo_items to authenticated;
 grant select, insert, update, delete on public.scan_summaries to authenticated;
@@ -140,6 +143,33 @@ create policy "managers update their dealership's memberships"
 create policy "managers remove members of their dealership"
   on public.memberships for delete to authenticated
   using (public.is_manager(dealership_id));
+
+-- A dealership keeps at least one manager: removing or demoting the last one
+-- would leave nobody who can invite, bill or fix a mistake, and only the
+-- owner in SQL could recover it. Deleting the dealership itself (which
+-- cascades to its memberships) is not stopped: by then its row is gone.
+create or replace function public.keep_a_manager()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if old.role = 'manager'
+     and (tg_op = 'DELETE' or new.role is distinct from 'manager')
+     and exists (select 1 from public.dealerships d where d.id = old.dealership_id)
+     and not exists (
+       select 1 from public.memberships m
+       where m.dealership_id = old.dealership_id and m.role = 'manager' and m.user_id <> old.user_id) then
+    raise exception 'a dealership keeps at least one manager: make someone else a manager first' using errcode = 'P0006';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+comment on function public.keep_a_manager() is 'Before a membership is deleted or changed: refuses to leave a dealership with no manager.';
+revoke execute on function public.keep_a_manager() from public, anon, authenticated;
+create trigger memberships_keep_a_manager
+  before update or delete on public.memberships
+  for each row execute function public.keep_a_manager();
 
 -- ---------------------------------------------------------------------------
 -- listings (the posted registry): every member sees the dealership's whole

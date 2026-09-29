@@ -304,6 +304,38 @@ begin
   end if;
   raise notice 'ok: a_mgr revokes A''s codes, and nothing else, with one answer';
 
+  -- the team: a manager changes a member's role and name, never who or where they are
+  update public.memberships set role = 'manager' where user_id = '00000000-0000-4000-8000-0000000000a1' and dealership_id = a;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'a_mgr could not make a_sales a manager'; end if;
+  update public.memberships set role = 'salesperson', name = 'Alex R.' where user_id = '00000000-0000-4000-8000-0000000000a1' and dealership_id = a;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'a_mgr could not make a_sales a salesperson again'; end if;
+  begin
+    update public.memberships set dealership_id = b where user_id = '00000000-0000-4000-8000-0000000000a1' and dealership_id = a;
+    raise exception 'a_mgr moved a member to another dealership';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update public.memberships set user_id = '00000000-0000-4000-8000-0000000000c1' where user_id = '00000000-0000-4000-8000-0000000000a1' and dealership_id = a;
+    raise exception 'a_mgr rewrote a member''s user id';
+  exception when insufficient_privilege then null;
+  end;
+  -- and A keeps a manager: the last one can neither step down nor leave
+  begin
+    update public.memberships set role = 'salesperson' where user_id = auth.uid() and dealership_id = a;
+    raise exception 'the last manager of A stepped down';
+  exception when others then
+    if sqlstate <> 'P0006' then raise; end if;
+  end;
+  begin
+    delete from public.memberships where user_id = auth.uid() and dealership_id = a;
+    raise exception 'the last manager of A removed themselves';
+  exception when others then
+    if sqlstate <> 'P0006' then raise; end if;
+  end;
+  raise notice 'ok: a_mgr changes roles and names only, and A always keeps a manager';
+
   -- the views show A only
   select count(*) into n from public.v_salesperson_summary;
   if n <> 2 then raise exception 'v_salesperson_summary should have 2 rows for A, has %', n; end if;
@@ -458,12 +490,21 @@ begin
   raise notice 'ok: each miss is counted';
 
   -- a removed manager's unused codes go with them; used ones stay as the record
+  -- (a_sales becomes a manager first: A must keep one)
+  update public.memberships set role = 'manager' where user_id = '00000000-0000-4000-8000-0000000000a1' and dealership_id = '00000000-0000-4000-8000-0000000000d1';
   insert into public.invites (code, dealership_id, role, created_by) values ('KEPTBYAMGR05', '00000000-0000-4000-8000-0000000000d1', 'manager', '00000000-0000-4000-8000-0000000000a2');
   delete from public.memberships where user_id = '00000000-0000-4000-8000-0000000000a2' and dealership_id = '00000000-0000-4000-8000-0000000000d1';
   if exists (select 1 from public.invites where created_by = '00000000-0000-4000-8000-0000000000a2' and used_at is null) then
     raise exception 'a removed manager''s unused codes survived their removal';
   end if;
   raise notice 'ok: removing a member deletes the codes they made and nobody used';
+
+  -- deleting a dealership still cascades to its memberships, last manager included
+  delete from public.dealerships where id = '00000000-0000-4000-8000-0000000000d1';
+  if exists (select 1 from public.memberships where dealership_id = '00000000-0000-4000-8000-0000000000d1') then
+    raise exception 'deleting A left memberships behind';
+  end if;
+  raise notice 'ok: deleting a dealership removes its members';
 end;
 $$;
 

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, TEAM_HINT, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -628,4 +628,52 @@ test('the CSV never hands a spreadsheet a formula typed as a name', () => {
   assert.ok(/(^|,)"'=HYPERLINK\(""https:\/\/x\.test"";""/m.test(csv), 'a typed formula is neutralised with a leading apostrophe');
   assert.ok(/(^|,)"'@SUM\(1\)"/m.test(csv));
   assert.ok(!/(^|,)[=@+\-][^,\r\n]*HYPERLINK|(^|,)@SUM/m.test(csv), 'no cell starts with a formula character');
+});
+
+test('teamCard: a manager sees everyone with the right actions, the last manager can neither step down nor leave, a salesperson sees nothing', () => {
+  const D = 'd1';
+  const ms = [
+    { user_id: 'u1', dealership_id: D, role: 'salesperson', name: 'Sam' },
+    { user_id: 'u2', dealership_id: D, role: 'manager', name: 'Jamie' },
+    { user_id: 'u3', dealership_id: D, role: 'salesperson', name: '' },
+    { user_id: 'u9', dealership_id: 'other', role: 'manager', name: 'Elsewhere' },
+    { user_id: 'u4', dealership_id: D, role: 'owner', name: 'Not a role the SQL knows' },
+  ];
+  const c = teamCard(ms, { role: 'manager', userId: 'u2', dealershipId: D });
+  assert.equal(c.manager, true);
+  assert.equal(c.managers, 1);
+  assert.deepEqual(c.members.map((m) => [m.name, m.role, m.you]), [['Jamie', 'manager', true], ['No name yet', 'salesperson', false], ['Sam', 'salesperson', false]]);
+  const [jamie, , sam] = c.members;
+  assert.equal(jamie.roleAction, null, 'the only manager cannot step down');
+  assert.equal(jamie.remove, null, 'the only manager cannot leave');
+  assert.match(jamie.note, /only manager/);
+  assert.deepEqual(sam.roleAction, { to: 'manager', label: 'Make manager' });
+  assert.deepEqual(sam.remove, { label: 'Remove', armed: false });
+  // the first Remove click arms the button
+  assert.deepEqual(teamCard(ms, { role: 'manager', userId: 'u2', dealershipId: D, confirm: 'u1' }).members.find((m) => m.userId === 'u1').remove, { label: 'Click again to remove', armed: true });
+  // with two managers, either may step down or leave, in their own words
+  const two = teamCard([...ms, { user_id: 'u5', dealership_id: D, role: 'manager', name: 'Riley' }], { role: 'manager', userId: 'u2', dealershipId: D });
+  const me = two.members.find((m) => m.userId === 'u2');
+  assert.deepEqual(me.roleAction, { to: 'salesperson', label: 'Step down to salesperson' });
+  assert.equal(me.remove.label, 'Leave the dealership');
+  assert.equal(two.members.find((m) => m.userId === 'u5').roleAction.label, 'Make salesperson');
+  // a salesperson reads only their own row: no card
+  assert.deepEqual(teamCard(ms, { role: 'salesperson', userId: 'u1' }).members, []);
+  assert.equal(teamCard(ms, { role: 'salesperson' }).manager, false);
+  assert.doesNotThrow(() => teamCard('junk', { role: 'manager' }));
+  assert.match(TEAM_HINT, /always keeps at least one manager/);
+});
+
+test('the Team card changes only a member\'s role or removes them, through the rows RLS lets a manager touch', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /from\('memberships'\)/);
+  assert.match(js, /q\.update\(\{ role: to \}\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)/);
+  assert.match(js, /q\.delete\(\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)/);
+  assert.match(js, /if \(kind === 'remove' && state\.teamConfirm !== userId\)/, 'Remove takes two clicks');
+  assert.match(js, /state\.teamNote = kind === 'remove' \? `Sample data: /, 'sample data calls nothing');
+  const rls = read('supabase/migrations/0002_rls.sql');
+  assert.match(rls, /grant update \(name, role\) on public\.memberships to authenticated;/);
+  assert.doesNotMatch(rls, /grant select, update, delete on public\.memberships/);
+  assert.match(rls, /create trigger memberships_keep_a_manager\s+before update or delete on public\.memberships/);
+  assert.match(rls, /errcode = 'P0006'/);
 });

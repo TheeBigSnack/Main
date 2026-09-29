@@ -135,3 +135,7 @@ h2 .pill { font-weight: 600; }
 .signin input[type="email"] { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); flex: 1; min-width: 200px; }
 
 .foot { color: var(--muted); font-size: 12px; padding: 14px 16px; border-top: 1px solid var(--line); text-align: center; }
+
+/* the Team card: one row per member */
+.team .name { font-weight: 600; min-width: 140px; }
+button.ghost.danger { border-color: var(--bad); color: var(--bad); }

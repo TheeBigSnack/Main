@@ -460,6 +460,42 @@ export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZo
   };
 }
 
+// ---------- the Team card ----------
+
+export const TEAM_LINE = 'Everyone in this dealership\'s Lot Sync account. A manager can invite, bill and change the team; a salesperson posts.';
+export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. A dealership always keeps at least one manager.';
+
+/**
+ * The Team card: every member of the dealership with their role, and what a
+ * manager may do to each (the database enforces the same: managers change a
+ * member's name and role or remove them, and the last manager can neither
+ * step down nor leave, 0002_rls.sql keep_a_manager). A salesperson reads
+ * only their own membership row, so the card is a manager's only.
+ * @param {object[]} memberships  { user_id, dealership_id, role, name }
+ * @param {object} options  role (the viewer's), userId (the viewer's), dealershipId, confirm (the user id whose Remove was clicked once)
+ * @returns {{ manager, managers, members: { userId, name, role, you, roleAction, remove, note }[], line, hint }}
+ */
+export function teamCard(memberships, { role, userId = '', dealershipId = '', confirm = '' } = {}) {
+  const manager = role === 'manager';
+  const all = !manager ? [] : rows(memberships)
+    .filter((m) => m && m.user_id && INVITE_ROLES.includes(m.role) && (!dealershipId || !m.dealership_id || m.dealership_id === dealershipId));
+  const managers = all.filter((m) => m.role === 'manager').length;
+  const members = all
+    .map((m) => {
+      const you = Boolean(userId) && m.user_id === userId;
+      const name = text(m.name, 80) || 'No name yet';
+      const last = m.role === 'manager' && managers <= 1;
+      const roleAction = last ? null : m.role === 'manager'
+        ? { to: 'salesperson', label: you ? 'Step down to salesperson' : 'Make salesperson' }
+        : { to: 'manager', label: 'Make manager' };
+      const armed = confirm === m.user_id;
+      const remove = last ? null : { label: armed ? (you ? 'Click again to leave' : 'Click again to remove') : (you ? 'Leave the dealership' : 'Remove'), armed };
+      return { userId: m.user_id, name, role: m.role, you, roleAction, remove, note: last ? 'The only manager: make someone else a manager first.' : '' };
+    })
+    .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'manager' ? -1 : 1));
+  return { manager, managers, members, line: TEAM_LINE, hint: TEAM_HINT };
+}
+
 // ---------- the spreadsheet ----------
 
 const csvCell = (v) => {
