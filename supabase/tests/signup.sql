@@ -11,7 +11,8 @@
 --   p3       asks for Existing Motors' website five times, then is throttled
 --   p4       five attempts two hours ago, which no longer count; signs up Fourth Motors
 --   p5       signs up the third dealership of the past 24 hours, with the longest names and host allowed
---   p6       refused by per_day; then loses a race for a website to the owner's own insert
+--   p6       refused by per_day; then loses a race for a website to the owner's own insert; then
+--            asks for a website the owner stored as https://www.Stored-Motors.test/
 --
 -- What it proves: website_origin_of() holds every case of
 -- test/fixtures/website-origins.json; the settings row is one row, closed,
@@ -22,7 +23,10 @@
 -- the pilot and read the Billing card's rows, and whose invite a second
 -- person can redeem; per_account, per_day and the hourly throttle hold, the
 -- throttle counting the answered P0009s; a website that is taken, or taken
--- between the check and the insert, gets P0009 and nothing else.
+-- between the check and the insert, gets P0009 and nothing else, and so
+-- does one whose stored origin differs only in case or a trailing slash.
+-- (Calls from one account sent at the same moment need real sessions:
+-- concurrency.sql.)
 
 \set ON_ERROR_STOP on
 \encoding UTF8
@@ -619,6 +623,38 @@ begin
     raise exception 'p6''s attempts are %, not one taken (the P0011 wrote nothing)', (select array_agg(outcome) from public.signup_attempts where user_id = '00000000-0000-4000-8000-0000000000a6');
   end if;
   raise notice 'ok: the race leaves the first dealership alone and records p6''s attempt as taken';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- A website the owner stored by hand with a capital letter and a trailing
+-- slash, as pasted from the address bar. /sync serves that row to the
+-- extension on https://www.stored-motors.test (sameOrigin() folds both), so
+-- the website is taken: p6 gets P0009, and no second dealership is made.
+-- ---------------------------------------------------------------------------
+insert into public.dealerships (name, website_origin) values ('Stored Motors', 'https://www.Stored-Motors.test/');
+set local role authenticated;
+do $$
+declare
+  got jsonb := pg_temp.sign_up('Copy Motors', 'www.stored-motors.test', 'Sky');
+begin
+  if got ->> 'code' is distinct from 'P0009' or got ->> 'status' is distinct from '400' then
+    raise exception 'a website the owner stored with a capital letter and a trailing slash was answered with %', got;
+  end if;
+  if exists (select 1 from public.memberships) then raise exception 'p6 joined a dealership'; end if;
+  raise notice 'ok: a website stored with a capital letter and a trailing slash is taken, as /sync matches it';
+end;
+$$;
+reset role;
+do $$
+begin
+  if (select array_agg(name) from public.dealerships where lower(rtrim(website_origin, '/')) = 'https://www.stored-motors.test') is distinct from array['Stored Motors'] then
+    raise exception 'the website the owner stored as https://www.Stored-Motors.test/ now has %', (select array_agg(name) from public.dealerships where lower(rtrim(website_origin, '/')) = 'https://www.stored-motors.test');
+  end if;
+  if (select array_agg(outcome order by id) from public.signup_attempts where user_id = '00000000-0000-4000-8000-0000000000a6') is distinct from array['taken', 'taken'] then
+    raise exception 'p6''s attempts are %, not two taken', (select array_agg(outcome order by id) from public.signup_attempts where user_id = '00000000-0000-4000-8000-0000000000a6');
+  end if;
+  raise notice 'ok: the owner''s row is the only one for its website, and p6''s attempt is recorded as taken';
 end;
 $$;
 

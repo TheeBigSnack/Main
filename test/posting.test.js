@@ -148,6 +148,19 @@ test('the side panel reaches the Facebook tab only through the known fill functi
   assert.match(src, /a\.download = /);
 });
 
+// The rewrite service bills and caps the store whose website origin comes
+// with the request; without it, a person in two sister stores is charged to
+// whichever membership comes first. The handler's side is in
+// test/fn-rewrite.test.js; this holds the panel to sending it.
+test('the side panel sends the dealer website\'s origin with every draft and colour guess it asks the rewrite service for', () => {
+  const src = read('../extension/sidepanel.js');
+  for (const name of ['generateDescription', 'guessColorsWithBackend']) {
+    const calls = src.split(`${name}(`).length - 1;
+    const withOrigin = (src.match(new RegExp(`${name}\\(\\{[^}]*\\borigin: state\\.origin\\b[^}]*\\}\\)`, 'g')) || []).length;
+    assert.ok(calls >= 1 && withOrigin === calls, `every ${name} call in sidepanel.js must pass origin: state.origin (${withOrigin} of ${calls})`);
+  }
+});
+
 test('the dealer-site scan reaches the dealer tab only through the neutral probe and each adapter\'s own read-only probe and search', () => {
   // the wizard, the popup and the post-time re-check all go through scanRunner.js
   const runner = read('../extension/src/scanRunner.js');

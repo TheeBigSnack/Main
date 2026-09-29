@@ -170,19 +170,23 @@ comment on function public.website_origin_of(text) is 'The origin kept for a typ
 --   b. sign-up is open, or P0008 (the invite code is the way in meanwhile)
 --   c. fewer than 5 attempts by the caller in the past hour, or P0005
 --   d. the three fields are usable, or 22023 naming the field
---   e. with the signup_settings row locked: the caller's created dealerships
---      are under per_account (P0010) and everyone's in the past 24 hours
---      under per_day (P0011)
+--   e. with the signup_settings row locked: the caller's attempts in the
+--      past hour again (P0005), the caller's created dealerships under
+--      per_account (P0010) and everyone's in the past 24 hours under
+--      per_day (P0011)
 --   f. no dealership has that website yet, or P0009 (recorded as taken)
 --   g. the dealership, the caller's manager membership, a created attempt
 --      and its free pilot (start_pilot(), 0004_billing.sql), all at once
 -- The lock in e is taken on the one settings row, so sign-ups are counted
 -- one at a time: two at the same moment cannot both pass a limit that has
 -- room for one, and the second sees the first one's website in f. It is
--- held until the call's transaction ends. The owner's own insert takes no
--- such lock, so a dealership with the same website can still appear
--- between f and g; the insert in g then does nothing and the caller gets
--- f's answer.
+-- held until the call's transaction ends. c counts without the lock, so
+-- calls from one account sent together all pass it before any of them has
+-- written its attempt; the second count in e is what holds them to 5
+-- lookups an hour. The owner's own insert takes no such lock, so a
+-- dealership with the same website can still appear between f and g; when
+-- its origin is stored as website_origin_of() gives it, the insert in g
+-- then does nothing and the caller gets f's answer.
 -- P0005 and P0009 are answered, not raised, the way redeem_invite()
 -- answers a miss (0002_rls.sql): response.status 400 and the { code,
 -- message, details, hint } body PostgREST gives a raised error, so the
@@ -191,8 +195,9 @@ comment on function public.website_origin_of(text) is 'The origin kept for a typ
 -- P0009 tells anyone signed in that a website already has a Lot Sync
 -- dealership. That is accepted: the person needs to know to ask its manager
 -- for an invite, and the throttle (5 an hour per account, counted before
--- anything is looked up) and per_account (an account that has started a
--- dealership is refused at e, before any lookup) limit the probing.
+-- anything is looked up and again under the lock) and per_account (an
+-- account that has started a dealership is refused at e, before any
+-- lookup) limit the probing.
 -- The pilot starts with the dealership. A dealership the owner creates may
 -- sit in the none state, which /sync and /rewrite serve as onboarding with no
 -- end; one that signed itself up is on the pilot's clock from its first day
@@ -261,6 +266,13 @@ begin
   if not found or not settings.open then
     raise exception '%', closed using errcode = 'P0008';
   end if;
+  -- the throttle again: calls sent together all passed c before any of
+  -- them wrote its attempt, and here each one sees those ahead of it
+  select count(*) into n from public.signup_attempts a where a.user_id = uid and a.at > now() - interval '1 hour';
+  if n >= 5 then
+    perform set_config('response.status', '400', true);
+    return jsonb_build_object('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text);
+  end if;
   select count(*) into n from public.signup_attempts a where a.user_id = uid and a.outcome = 'created';
   if n >= settings.per_account then
     raise exception 'this account has already started a dealership; a second one is set up by Lot Sync: write to Lot Sync support' using errcode = 'P0010';
@@ -270,8 +282,13 @@ begin
     raise exception 'no more new dealerships can start today; try again tomorrow, or write to Lot Sync support' using errcode = 'P0011';
   end if;
 
-  -- f. a website that already has a dealership
-  if exists (select 1 from public.dealerships d where d.website_origin = origin) then
+  -- f. a website that already has a dealership. The stored origin is
+  -- folded the way sameOrigin() in functions/_shared/http.ts folds it
+  -- (trimmed, trailing slashes dropped, lower case): the owner types it by
+  -- hand, and /sync serves a row stored as https://www.Example.com/ to the
+  -- extension on https://www.example.com, so that website is taken.
+  if exists (select 1 from public.dealerships d
+             where lower(rtrim(regexp_replace(d.website_origin, '^' || ws || '|' || ws || '$', '', 'g'), '/')) = origin) then
     insert into public.signup_attempts (user_id, outcome) values (uid, 'taken');
     perform set_config('response.status', '400', true);
     return jsonb_build_object('code', 'P0009', 'message', taken, 'details', null::text, 'hint', null::text);

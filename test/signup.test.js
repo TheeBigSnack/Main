@@ -2,9 +2,10 @@
 // rules a Node test can read off its source: nobody but the owner touches
 // the two tables, create_dealership runs as its owner with a pinned
 // search_path and only for signed-in people, its checks run in the order
-// the README gives (signed in, open, throttle, fields, limits under a lock,
-// website, then the insert), and the two answers that must survive the
-// call are answered rather than raised. Nothing here runs SQL:
+// the README gives (signed in, open, throttle, fields, the throttle again
+// and the limits under a lock, website, then the insert), the website is
+// looked up the way /sync matches it, and the two answers that must survive
+// the call are answered rather than raised. Nothing here runs SQL:
 // supabase/tests/signup.sql proves the behaviour against a database, and
 // this file holds it to every case of test/fixtures/website-origins.json.
 // The last part holds supabase/README.md and docs/support.md to the code.
@@ -40,6 +41,10 @@ const literal = (s) => `'${s.replace(/'/g, "''")}'`;
 const said = (s) => s.replace(/''/g, "'");
 
 const API_ROLES = 'public, anon, authenticated, service_role';
+
+// round H review: the stored origin is folded as sameOrigin() in functions/_shared/http.ts folds it (JavaScript's
+// trim, trailing slashes, case), so a row the owner typed as https://www.Example.com/, which /sync serves, is taken
+const FOLDED_LOOKUP = "if exists (select 1 from public.dealerships d\n             where lower(rtrim(regexp_replace(d.website_origin, '^' || ws || '|' || ws || '$', '', 'g'), '/')) = origin) then";
 
 test('0007_signup.sql: one settings row, closed, with the two limits; attempts per account, created or taken', () => {
   assert.match(sql, /create table public\.signup_settings \(\n  id boolean primary key default true check \(id\),\n  open boolean not null default false,\n  per_account int not null default 1,\n  per_day int not null default 10\n\);/);
@@ -80,23 +85,27 @@ test('create_dealership runs as its owner with a pinned search_path, and only a 
   assert.ok(code.includes(`revoke execute on function public.website_origin_of(text) from ${API_ROLES};`), 'no API role calls website_origin_of');
 });
 
-test('create_dealership: the checks run in order a to g, and the limits are counted under the settings row\'s lock', () => {
+test('create_dealership: the checks run in order a to g, and the throttle and the limits are counted under the settings row\'s lock', () => {
   const fn = body('create_dealership');
-  const at = (what) => {
-    const i = typeof what === 'string' ? fn.indexOf(what) : fn.search(what);
-    assert.ok(i >= 0, `create_dealership has no ${what}`);
+  const at = (what, from = 0) => {
+    const i = typeof what === 'string' ? fn.indexOf(what, from) : from + fn.slice(from).search(what);
+    assert.ok(i >= from, `create_dealership has no ${what}`);
     return i;
   };
+  const throttle = /select count\(\*\) into n from public\.signup_attempts a where a\.user_id = uid and a\.at > now\(\) - interval '1 hour';\s+if n >= 5 then/;
   const a = at("if uid is null then\n    raise exception 'sign in first' using errcode = '42501';");
   const b = at("if not coalesce((select s.open from public.signup_settings s where s.id), false) then\n    raise exception '%', closed using errcode = 'P0008';");
-  const c = at(/select count\(\*\) into n from public\.signup_attempts a where a\.user_id = uid and a\.at > now\(\) - interval '1 hour';\s+if n >= 5 then/);
+  const c = at(throttle);
   const d = at("errcode = '22023'");
   const lock = at('select * into settings from public.signup_settings s where s.id for update;');
+  // round H review: c runs without the lock, so calls from one account sent together all pass it; counted
+  // again under the lock, before any lookup, they get 5 lookups an hour between them
+  const throttleAgain = at(throttle, lock);
   const perAccount = at(/select count\(\*\) into n from public\.signup_attempts a where a\.user_id = uid and a\.outcome = 'created';\s+if n >= settings\.per_account then\s+raise exception '[^']*(''[^']*)*' using errcode = 'P0010';/);
   const perDay = at(/select count\(\*\) into n from public\.signup_attempts a where a\.outcome = 'created' and a\.at > now\(\) - interval '24 hours';\s+if n >= settings\.per_day then\s+raise exception '[^']*(''[^']*)*' using errcode = 'P0011';/);
-  const f = at('if exists (select 1 from public.dealerships d where d.website_origin = origin) then');
+  const f = at(FOLDED_LOOKUP);
   const g = at('insert into public.dealerships as d (name, website_origin)');
-  const order = { a, b, c, d, lock, perAccount, perDay, f, g };
+  const order = { a, b, c, d, lock, throttleAgain, perAccount, perDay, f, g };
   const names = Object.keys(order);
   for (let i = 1; i < names.length; i += 1) assert.ok(order[names[i - 1]] < order[names[i]], `${names[i - 1]} comes before ${names[i]}`);
 
@@ -117,10 +126,21 @@ test('create_dealership: the checks run in order a to g, and the limits are coun
   assert.match(fn, /return jsonb_build_object\('dealership_id', new_id, 'name', dealer_name, 'website_origin', origin, 'pilot_ends_at', pilot -> 'pilot_ends_at'\);/);
 });
 
+test('create_dealership: a website is taken when a stored origin matches it the way /sync matches one', () => {
+  const fn = body('create_dealership');
+  assert.ok(fn.includes(FOLDED_LOOKUP), 'the lookup folds the stored origin');
+  assert.doesNotMatch(fn, /d\.website_origin = origin/, 'never the stored text as it is');
+  const http = read('../supabase/functions/_shared/http.ts');
+  assert.match(http, /s\.trim\(\)\.replace\(\/\\\/\+\$\/, ''\)\.toLowerCase\(\)/, 'the fold this copies: trim, then trailing slashes, then case');
+  assert.match(sqlTest, /values \('Stored Motors', 'https:\/\/www\.Stored-Motors\.test\/'\)/, 'signup.sql stores one with a capital letter and a trailing slash');
+  assert.ok(sqlTest.includes("pg_temp.sign_up('Copy Motors', 'www.stored-motors.test', 'Sky')"), 'and signs up for it in lower case');
+});
+
 test('create_dealership: P0005 and P0009 are answered, not raised, and a taken website is recorded before the answer', () => {
   const fn = body('create_dealership');
   assert.doesNotMatch(fn, /raise exception[^;]*'P000[59]'/, 'P0005 and P0009 are never raised: the attempt row must survive the call');
-  assert.match(fn, /if n >= 5 then\s+perform set_config\('response\.status', '400', true\);\s+return jsonb_build_object\('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text\);/);
+  const throttled = /if n >= 5 then\s+perform set_config\('response\.status', '400', true\);\s+return jsonb_build_object\('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text\);/g;
+  assert.equal((fn.match(throttled) || []).length, 2, 'the throttle answers the same way before the lock and under it');
   const taken = /insert into public\.signup_attempts \(user_id, outcome\) values \(uid, 'taken'\);\s+perform set_config\('response\.status', '400', true\);\s+return jsonb_build_object\('code', 'P0009', 'message', taken, 'details', null::text, 'hint', null::text\);/g;
   assert.equal((fn.match(taken) || []).length, 2, 'both the website check and a lost race record the attempt, set 400 and answer P0009');
   assert.match(fn, /if new_id is null then\s+insert into public\.signup_attempts \(user_id, outcome\) values \(uid, 'taken'\);/, 'a website taken between the check and the insert is answered as the check answers');
@@ -162,6 +182,7 @@ test('tests/signup.sql checks the order, both limits, the throttle, the privileg
     'a taken website was answered with %', 'the sixth attempt in an hour was answered with %', 'a throttled bad call was answered with %',
     'a throttled account was not told sign-up is closed first', 'p4, with five attempts two hours ago, was answered with %',
     'the fourth sign-up in 24 hours with per_day 3 was answered with %', 'a website taken between the check and the insert was answered with %',
+    'a website the owner stored with a capital letter and a trailing slash was answered with %',
   ]) {
     assert.ok(sqlTest.includes(words), `signup.sql does not check: ${words}`);
   }
@@ -201,6 +222,19 @@ test('supabase/README.md: the Self-serve sign-up section says what the code does
   assert.ok(s.split('\n').some((l) => l.startsWith('| `22023` |') && /names the field/.test(l)));
   assert.match(s, /\*\*What `P0009` gives away\.\*\*[^\n]*a stranger can learn whether a store is a customer[^\n]*throttle/);
   assert.match(s, /`MONTHLY_COST_CAP_USD` caps that per dealership/, 'why per_day');
+  // The cap starts again each UTC calendar month and a pilot runs a fixed
+  // number of days, so one pilot can spend the cap once in every month it
+  // touches. The README gives the most that can be, counted here from the code.
+  const pilotDays = Number(read('../supabase/migrations/0004_billing.sql').match(/'pilot', now\(\) \+ interval '(\d+) days'/)[1]);
+  assert.match(read('../supabase/functions/rewrite/index.ts'), /Date\.UTC\(d\.getUTCFullYear\(\), d\.getUTCMonth\(\), 1\)/, 'the cap no longer starts again on the first of the UTC month: update the README and this test');
+  let months = 0;
+  for (let from = Date.UTC(2027, 0, 1); from < Date.UTC(2029, 0, 1); from += 3600e3) {
+    const [a, b] = [new Date(from), new Date(from + pilotDays * 86400e3 - 1)];
+    months = Math.max(months, (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + b.getUTCMonth() - a.getUTCMonth() + 1);
+  }
+  assert.match(s, new RegExp(`its ${pilotDays}-day pilot touches`), 'the README gives the pilot\'s length');
+  assert.match(s, new RegExp(`${['', 'once', 'twice', 'three times', 'four times'][months]} \`MONTHLY_COST_CAP_USD\``), `a ${pilotDays}-day pilot can touch ${months} calendar months, and the README does not give that multiple of the cap`);
+  assert.doesNotMatch(s, /at most its cap for the pilot's length/, 'one pilot can spend the cap in more than one month');
   assert.match(s, /step 5 \(a dealership row and a first-manager code\) is how a dealership starts/, 'the owner\'s SQL stays the way in');
   // the file table, the step 5 wording and the plain-Postgres recipe
   assert.match(readme, /^\| `migrations\/0007_signup\.sql` \| /m);
@@ -214,7 +248,8 @@ test('supabase/README.md: the Self-serve sign-up section says what the code does
 test('docs/support.md: a taken website is settled by the store\'s own phone number, then SQL', () => {
   const s = section(support, '## A website is already taken');
   assert.match(s, /call the main phone number it shows\. Never call a number the requester gives/);
-  assert.match(s, /where d\.website_origin = public\.website_origin_of\('<the address they typed>'\);/);
+  // both sides through website_origin_of, so a row the owner typed with a capital letter or a trailing slash is found
+  assert.match(s, /where public\.website_origin_of\(d\.website_origin\) = public\.website_origin_of\('<the address they typed>'\);/);
   assert.match(s, /from public\.signup_attempts a[^;]*a\.outcome = 'created';/, 'whether it was started through sign-up, and by whom');
   assert.match(s, /insert into public\.memberships \(user_id, dealership_id, role, name\)\s+values \('<their user id>', '<dealership id>', 'manager', '<their name>'\)\s+on conflict \(user_id, dealership_id\) do update set role = 'manager';/);
   assert.match(s, /select public\.delete_dealership\('<dealership id>', /, 'a squatted row is deleted, the owner\'s tool with its confirm');

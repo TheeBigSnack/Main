@@ -183,7 +183,7 @@ export function hermetic() {
   });
 }
 
-// ---------- small helpers the four files share ----------
+// ---------- small helpers the fn-*.test.js files share ----------
 
 // Stable ids that look like Postgres's (the fake checks uuid columns).
 export const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

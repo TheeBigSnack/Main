@@ -20,15 +20,27 @@
 // `dealerships ( ... )` is joined through dealership_id), and timestamps are
 // kept to the microsecond and come back in Postgres's text form
 // (2026-09-29T12:00:00.123+00:00), so a handler that compares them as text
-// shows it. Row-level security is not modelled: every client may read and
-// write everything (supabase/tests/rls.sql proves the policies); a test
-// that needs a refusal scripts it.
+// shows it. A select answers at most fake.maxRows rows (1,000, the API's
+// max-rows on a Supabase project) whatever range it asks for, so a read
+// that does not page loses rows here as it would there. Row-level security
+// is not modelled: every client may read and write everything
+// (supabase/tests/rls.sql proves the policies); a test that needs a refusal
+// scripts it.
+//
+// Two clocks and two transactions, for the sync races: fake.now is the
+// database's clock (now() defaults), apart from the Date the functions read,
+// so a test can set it ahead or behind. fake.hold(match) keeps the next
+// query `match` accepts open like a transaction another request holds: a
+// write takes its now() defaults when it arrives (Postgres's now() is the
+// transaction's start) but reaches the tables, and its caller hears back,
+// only at commit(); a read waits until then. Everything else goes on
+// meanwhile.
 //
 // A test resets the fake (fake.reset), reads what happened (fake.calls: one
-// entry per query or auth call, with the client's key and token), reads the
-// tables (fake.rows), and may answer any call itself (fake.script: return
-// { data, error, count } to answer in place of the tables, or nothing to
-// let the tables answer).
+// entry per query or auth call, with the client's key and token, in the
+// order they ran), reads the tables (fake.rows), and may answer any call
+// itself (fake.script: return { data, error, count } to answer in place of
+// the tables, or nothing to let the tables answer).
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -234,7 +246,7 @@ function newRow(table, given, listed) {
 function defaultOf(table, column) {
   const d = SCHEMA[table].defaults?.[column];
   if (d === NEW_UUID) return globalThis.crypto.randomUUID();
-  if (d === NOW) return pgText(fake.now() * 1000);
+  if (d === NOW) return pgText((startedAt ?? fake.now()) * 1000);
   if (d === SERIAL) {
     serials[table] = (serials[table] || 0) + 1;
     return serials[table];
@@ -373,7 +385,7 @@ function runSelect(q) {
   for (const o of q.order) columnOf(q.table, o.column);
   const hits = ordered(q.table, rows.filter((r) => matches(q.table, r, filters)), q.order);
   const count = q.count === 'exact' ? hits.length : null;
-  const page = q.range ? hits.slice(q.range[0], q.range[1] + 1) : hits;
+  const page = (q.range ? hits.slice(q.range[0], q.range[1] + 1) : hits).slice(0, fake.maxRows);
   const data = page.map((r) => project(q.table, r, q.columns));
   if (q.head) return { data: null, error: null, count, status: 200 };
   if (q.single) {
@@ -435,12 +447,35 @@ function runWrite(q) {
   return { data: null, error: null, count: null, status: 201 };
 }
 
+const entryOf = (q) => ({
+  kind: 'query', table: q.table, op: q.op, columns: q.columns ?? null, count: q.count ?? null, head: Boolean(q.head),
+  filters: q.filters.map((f) => ({ ...f, value: clone(f.value) })), order: [...q.order], range: q.range, single: Boolean(q.single),
+  payload: clone(q.payload), options: clone(q.options), key: q.client.key, token: q.client.token,
+});
+
+let holds = [];
+let startedAt = null; // while a held query runs: the database's clock when it arrived
+
+// A query that arrived: run now, or, when a hold takes it, at its commit,
+// with now() read as it was on arrival: Postgres's now() is the time the
+// transaction started, however long it stays open.
+async function arrive(q) {
+  const at = holds.findIndex((h) => h.match(entryOf(q)));
+  if (at < 0) return execute(q);
+  const [hold] = holds.splice(at, 1);
+  const arrivedAt = fake.now();
+  hold.reached(entryOf(q));
+  await hold.committed;
+  startedAt = arrivedAt;
+  try {
+    return execute(q);
+  } finally {
+    startedAt = null;
+  }
+}
+
 function execute(q) {
-  const entry = {
-    kind: 'query', table: q.table, op: q.op, columns: q.columns ?? null, count: q.count ?? null, head: Boolean(q.head),
-    filters: q.filters.map((f) => ({ ...f, value: clone(f.value) })), order: [...q.order], range: q.range, single: Boolean(q.single),
-    payload: clone(q.payload), options: clone(q.options), key: q.client.key, token: q.client.token,
-  };
+  const entry = entryOf(q);
   const scripted = record(entry);
   if (scripted) return scripted;
   try {
@@ -458,7 +493,7 @@ function builder(client, table, op, init) {
   const b = {
     then(resolve, reject) {
       const trip = fake.latencyMs > 0 ? new Promise((r) => setTimeout(r, fake.latencyMs)) : Promise.resolve();
-      return trip.then(() => execute(q)).then(resolve, reject);
+      return trip.then(() => arrive(q)).then(resolve, reject);
     },
   };
   if (op === 'insert' || op === 'upsert') return b;
@@ -536,20 +571,36 @@ export const fake = {
   script: null,
   now: () => Date.now(), // the database's clock, for now() defaults
   latencyMs: 0, // how long each query waits before it runs, like a trip to a real database
+  maxRows: 1000, // the most rows one select answers, like the API's max-rows
 
   // An empty database, the users by token, and rows to start from (written
   // the way an insert writes them: defaults filled, types checked, not
   // recorded as calls).
-  reset({ users = {}, rows = {}, script = null, now = () => Date.now(), latencyMs = 0 } = {}) {
+  reset({ users = {}, rows = {}, script = null, now = () => Date.now(), latencyMs = 0, maxRows = 1000 } = {}) {
     tables = {};
     serials = {};
+    holds = [];
     this.calls = [];
     this.clients = [];
     this.users = new Map(Object.entries(users));
     this.script = script;
     this.now = now;
     this.latencyMs = latencyMs;
+    this.maxRows = maxRows;
     for (const [table, list] of Object.entries(rows)) this.seed(table, list);
+  },
+
+  // Keeps the next query that match(entry) accepts open until commit() (the
+  // entry is the one fake.calls records). `arrived` resolves with that entry
+  // when the query reaches the database, which for a write is when its now()
+  // defaults are taken.
+  hold(match) {
+    let reached;
+    let commit;
+    const arrived = new Promise((r) => { reached = r; });
+    const committed = new Promise((r) => { commit = r; });
+    holds.push({ match, reached, committed });
+    return { arrived, commit: () => commit() };
   },
 
   seed(table, list) {
