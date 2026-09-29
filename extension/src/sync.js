@@ -309,6 +309,10 @@ const rowsOf = (remote, key) => (Array.isArray(remote) ? remote : isObject(remot
  * The same post twice in one answer (read listed, then taken down, while a
  * take-down landed between the function's reads) counts as taken down: a
  * taken-down row is never listed again.
+ * A take-down of another post of the same car never removes one of the
+ * caller's own posts the server holds as listed: the answer looks back 10
+ * minutes (the function's margin), so it can carry a take-down whose
+ * posted_at is later than a re-post from a machine with a slow clock.
  */
 export function mergeRegistry(local, remote, { since = null, userId = '', sent = null } = {}) {
   void since; // the newest-change rule covers it; kept in the signature so callers can say when they last synced
@@ -325,6 +329,7 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
     if (later(r, current.get(vin))) current.set(vin, r);
     if (userId && r.user_id && String(r.user_id) === String(userId) && later(r, own.get(vin))) own.set(vin, r);
   }
+  const listedOwn = new Set(rowsOf(remote, 'listings').filter((r) => isObject(r) && r.status === 'listed' && !isTheirs(r, userId)).map((r) => postKey(r.vin, r.posted_at)));
   const out = {};
   const seen = new Set();
   for (const [key, e] of Object.entries(base)) {
@@ -356,6 +361,7 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
     if (localPosted === null || remotePosted > localPosted + 999) {
       // the server knows a newer post of this car (from another machine)
       if (r.status === 'listed') out[key] = entryFromRow(r, e, userId);
+      else if (isOwn(e, userId) && listedOwn.has(postKey(e.vin || key, e.postedAt))) out[key] = e; // still listed on the server: a take-down of another post of the car does not remove it
       continue;
     }
     if (r.status !== 'listed') continue; // taken down elsewhere
@@ -432,16 +438,22 @@ export function planFrom(plan) {
 // count is good for the day and the moment it was made, so an answer
 // without one leaves null rather than an old number.
 // `known` is the keys of the caller's own posts this sync sent (`sent`, the
-// request's `posted`) or received as their own listed rows (`userId`), for
-// the next request (syncPayload). Only an answer that synced (it carries a
-// serverTime) replaces it; a 402 keeps the last one.
-export function nextSyncState(previous, response, { today = null, sent = null, userId = '' } = {}) {
+// request's `posted`) and those the machine holds after the merge (`held`,
+// the registry mergeRegistry wrote), for the next request (syncPayload). A
+// row the answer carried but the merge did not keep (a colleague's newer
+// take-down of the same car shadowed it) is not held here, so it is not
+// known and never taken down from here. Without `held` (direct callers), the
+// caller's own listed rows in the answer stand in. Only an answer that
+// synced (it carries a serverTime) replaces it; a 402 keeps the last one.
+export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null } = {}) {
   const prev = isObject(previous) ? previous : {};
   const r = isObject(response) ? response : {};
   const d = isObject(r.dealership) ? r.dealership : {};
   const day = isObject(today) && isoOrNull(today.from) && isoOrNull(today.to) ? { from: isoOrNull(today.from), to: isoOrNull(today.to) } : null;
   const synced = Boolean(isoOrNull(r.serverTime));
-  const received = rowsOf(r, 'listings').filter((row) => isObject(row) && row.status === 'listed' && userId && String(row.user_id) === String(userId)).map((row) => postKey(row.vin, row.posted_at));
+  const received = isObject(held)
+    ? [...sentKeys(Object.fromEntries(Object.entries(held).filter(([, e]) => isObject(e) && isOwn(e, userId))))]
+    : rowsOf(r, 'listings').filter((row) => isObject(row) && row.status === 'listed' && userId && String(row.user_id) === String(userId)).map((row) => postKey(row.vin, row.posted_at));
   return {
     version: SYNC_VERSION,
     since: isoOrNull(r.serverTime) || prev.since || null,

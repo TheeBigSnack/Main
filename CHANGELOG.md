@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Added
+- **Self-serve sign-up, off until the owner opens it** (`supabase/migrations/0007_signup.sql`): a signed-in person creates a dealership from the manager view's **Start your dealership** form (`manager/config.js` `selfServeSignup`) and becomes its manager; its free pilot starts with it, so it never sits in the no-plan state. Limits per account (1), per day (10, the owner's brake on what made-up sign-ups could cost) and 5 attempts an hour, counted under a lock; a website that already has a dealership is refused and pointed at its manager. `test/fixtures/website-origins.json` holds the one address rule for the SQL and the page.
+- **Getting started** on the manager view: start the pilot or subscribe, invite salespeople, the first car synced, two salespeople posting.
+- **The owner's usage report** (`0008_usage.sql`, `usage_report(since)`): one row per dealership with its plan and activity, owner only.
+- **The Edge Functions' real handlers run in `npm test`** (`test/fn-*.test.js`, `test/functions/`): a fake supabase-js (with the API's 1,000-row cap), Stripe and Anthropic; every route's statuses, order of checks and answer.
+- **A data inventory** (`docs/data-inventory.md`) built from the code, with a test that fails when a table, a storage key or a function goes undocumented; the privacy texts corrected against it, and the questions only an attorney can answer marked pending.
+- **The legal texts as site pages** (`npm run legal-pages`, `site/legal/`), marked draft until `legal/legal-status.json` says otherwise; the landing page links them, runs under a Content-Security-Policy, and shows **Start a free pilot** once `signupUrl` is set.
+
+Changed
+- **Sync take-downs are decided by what a machine knew, not by time**: the request carries `known`, the keys of the salesperson's own posts that machine sent or holds; only those missing from its registry are taken down, and nothing without `known`. Taken down clicked during a sync stays down; a Clear everything during a sync is never read as a take-down; take-downs and closed to-do items come back from 10 minutes before the last sync; every `/sync` read pages past 1,000 rows. `test/fn-sync-race.test.js` and `test/fn-sync-edges.test.js` reproduce each race against the real handler.
+- The colour guess sends the website's origin, so a person in two dealerships is billed and capped against the right one; the account's rewrite function never receives a self-hosted service's key; the self-hosted writer keeps the origin out of its prompt.
+- Old failed invite-code attempts are cleaned up for everyone.
+
 ## 0.5.0 (2026-09-28, toward a sellable product)
 
 Ten tasks were chosen for the three months to a sellable product (PLAN.md M4 to M6). This release carries the first of them; every piece runs against sample data or a mock until the owner creates the accounts.
