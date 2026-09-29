@@ -9,6 +9,7 @@
     "pack": "node scripts/pack.mjs",
     "demo": "node demo/serve.mjs",
     "screenshots": "node scripts/screenshots.mjs",
+    "check-deploy": "node scripts/check-deploy.mjs",
     "test:demo": "node demo/drive.mjs",
     "test:e2e": "node scripts/e2e-all.mjs",
     "test:e2e:parallel": "node scripts/e2e-all.mjs --parallel 2",

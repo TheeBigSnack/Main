@@ -29,7 +29,7 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 
 ## Accounts and billing
 
-- [ ] **Supabase project live** (`PLAN.md` M4). Done when: magic-link sign-in works for two people at one dealership, row-level security tests show one dealership cannot read another's rows, and the rewrite endpoint refuses unauthenticated calls and stops at the monthly cap.
+- [ ] **Supabase project live** (`PLAN.md` M4). Done when: magic-link sign-in works for two people at one dealership, row-level security tests show one dealership cannot read another's rows, and the rewrite endpoint refuses unauthenticated calls and stops at the monthly cap. `npm run check-deploy` passes with `LOTSYNC_TEST_TOKEN` set (`supabase/README.md` step 6).
 - [ ] **The posted registry syncs.** Done when: two salespeople on two machines see the same posted registry, and a car posted on one shows on the other after its next scan.
 - [ ] **The manager view works** (`manager/`). Done when: a manager at the pilot dealer signs in and sees posts per salesperson, sold cars still listed and for how long, and price mismatches, with the numbers matching the salespeople's Numbers tabs for the same week.
 - [ ] **Stripe set up** (`PLAN.md` M5). Done when: a per-rooftop subscription with the free pilot period and the customer portal exist, a test-mode dealer can subscribe, start the pilot period and manage billing without help, and the prices are the ones in `marketing/pricing.json`.

@@ -78,6 +78,14 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
 
    Managers may rename their dealership but not change its `website_origin` (a column-level grant): the origin is the key `/sync` matches on and it is unique, so changing it is the owner's job in SQL, as creating the row is.
 
+6. **Check the deploy.** Fill `extension/src/accountConfig.js` and `manager/config.js` with the project URL and anon key, then from the repository root:
+
+   ```
+   npm run check-deploy
+   ```
+
+   It looks at the project from the outside and prints a checklist: the config files name the same project, the anon key reads nothing from any table and cannot redeem a code, each function answers the extension's CORS preflight and refuses a call with no token, the billing webhook refuses an unsigned event, and the lead function refuses any page but the landing page (`LOTSYNC_SITE_ORIGIN=https://<where site/ is hosted>` checks its preflight too). With `LOTSYNC_TEST_TOKEN` set to the access token of a signed-in test account that belongs to no dealership (sign in once in the manager view and copy `access_token` from the browser's local storage), it also checks that `/sync` answers 403 and that eleven wrong invite codes end in `P0005`, which proves the throttle counts misses on the real PostgREST. It changes nothing but that test account's miss count, keeps nothing and prints no key; exit code 0 means every check passed.
+
 ## Environment variables
 
 | Name | Where | Meaning |
