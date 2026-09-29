@@ -1,0 +1,133 @@
+{
+  "about": "The website address a new dealership types, and the origin Lot Sync keeps for it (dealerships.website_origin, the key the extension syncs under), or null when the address is refused. One table for both copies of the rule: create_dealership's SQL (supabase/migrations/0007_signup.sql, checked by supabase/tests/signup.sql) and websiteOrigin() in manager/data.js (checked by test/manager.test.js). Rules: trim; no scheme means https; only http and https; host lower-cased, one trailing dot dropped; path, query and fragment dropped; the scheme's default port dropped and any other port refused; refused: user info, IP addresses, localhost, a host without a dot, a label that is empty, longer than 63 characters, starts or ends with a hyphen, or holds anything but a-z, 0-9 and hyphens (so a non-ASCII host is refused: the browser's address bar shows it, but the origin the extension sees is the xn-- form).",
+  "cases": [
+    {
+      "input": "smithford.com",
+      "origin": "https://smithford.com"
+    },
+    {
+      "input": "www.smithford.com",
+      "origin": "https://www.smithford.com"
+    },
+    {
+      "input": "https://www.smithford.com/",
+      "origin": "https://www.smithford.com"
+    },
+    {
+      "input": "  HTTPS://WWW.SmithFord.COM/used-inventory/index.htm?x=1#top  ",
+      "origin": "https://www.smithford.com"
+    },
+    {
+      "input": "smithford.com/inventory",
+      "origin": "https://smithford.com"
+    },
+    {
+      "input": "https://www.smithford.com/?",
+      "origin": "https://www.smithford.com"
+    },
+    {
+      "input": "http://www.smithford.com",
+      "origin": "http://www.smithford.com"
+    },
+    {
+      "input": "https://www.smithford.com:443/",
+      "origin": "https://www.smithford.com"
+    },
+    {
+      "input": "http://www.smithford.com:80",
+      "origin": "http://www.smithford.com"
+    },
+    {
+      "input": "www.smithford.com.",
+      "origin": "https://www.smithford.com"
+    },
+    {
+      "input": "https://used.dealer-group.example.co.uk/path",
+      "origin": "https://used.dealer-group.example.co.uk"
+    },
+    {
+      "input": "https://xn--bcher-kva.de",
+      "origin": "https://xn--bcher-kva.de"
+    },
+    {
+      "input": "https://www.smithford.com:8443",
+      "origin": null
+    },
+    {
+      "input": "https://smithford.com:abc",
+      "origin": null
+    },
+    {
+      "input": "",
+      "origin": null
+    },
+    {
+      "input": "   ",
+      "origin": null
+    },
+    {
+      "input": "smithford",
+      "origin": null
+    },
+    {
+      "input": "localhost",
+      "origin": null
+    },
+    {
+      "input": "http://localhost:3000",
+      "origin": null
+    },
+    {
+      "input": "192.168.1.10",
+      "origin": null
+    },
+    {
+      "input": "https://10.0.0.1/",
+      "origin": null
+    },
+    {
+      "input": "https://[::1]/",
+      "origin": null
+    },
+    {
+      "input": "ftp://smithford.com",
+      "origin": null
+    },
+    {
+      "input": "javascript:alert(1)",
+      "origin": null
+    },
+    {
+      "input": "https://user:pass@smithford.com",
+      "origin": null
+    },
+    {
+      "input": "https://smith ford.com",
+      "origin": null
+    },
+    {
+      "input": "https://smithford..com",
+      "origin": null
+    },
+    {
+      "input": "https://-smithford.com",
+      "origin": null
+    },
+    {
+      "input": "https://smithford-.com",
+      "origin": null
+    },
+    {
+      "input": "https://smith_ford.com",
+      "origin": null
+    },
+    {
+      "input": "https://bücher.de",
+      "origin": null
+    },
+    {
+      "input": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+      "origin": null
+    }
+  ]
+}

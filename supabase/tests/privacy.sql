@@ -12,14 +12,16 @@
 --   b_sales   B           salesperson
 --
 -- What it proves: export_dealership(A) holds every row of A in every table,
--- member emails included, and nothing of B; no API role, the service role
--- included, can execute any of the functions; forget_person refuses a wrong
--- email and the last manager, then removes a_sales's account, memberships,
--- codes, misses and demo request, clears their name and leaves every other
--- row as it was; delete_dealership refuses anything but A's exact
--- website_origin, then takes A and everything it owns, keeps the billing
--- events and the accounts, says which accounts belong to no dealership now,
--- and leaves B as it was.
+-- member emails included, and the time A was signed up (not by whom), and
+-- nothing of B; no API role, the service role included, can execute any of
+-- the functions; forget_person refuses a wrong email and the last manager,
+-- then removes a_sales's account, memberships, codes, misses, sign-up
+-- attempt and demo request, clears their name and leaves every other row as
+-- it was; delete_dealership refuses anything but A's exact website_origin,
+-- then takes A and everything it owns, keeps the billing events, the
+-- accounts and a_mgr's sign-up attempt (without A, so a_mgr's per_account
+-- still counts it), says which accounts belong to no dealership now, and
+-- leaves B as it was.
 
 \set ON_ERROR_STOP on
 \set a_mgr     '00000000-0000-4000-8000-0000000000a2'
@@ -122,6 +124,12 @@ insert into public.demo_requests (name, dealership, website, email) values
   ('Alex', 'Dealership A', 'https://www.dealership-a.test', ' A-Sales@Example.test '),
   ('Sam',  'Dealership B', 'https://www.dealership-b.test', 'b-mgr@example.test');
 
+-- a_mgr signed A up and b_mgr B (0007_signup.sql); a_sales once asked for a website that was taken
+insert into public.signup_attempts (user_id, at, outcome, dealership_id) values
+  (:'a_mgr',   now() - interval '40 days', 'created', :'dealer_a'),
+  (:'b_mgr',   now() - interval '30 days', 'created', :'dealer_b'),
+  (:'a_sales', now() - interval '20 days', 'taken',   null);
+
 insert into auth.audit_log_entries (id, payload, created_at) values
   ('00000000-0000-4000-8000-0000000000f1', json_build_object('action', 'login', 'actor_id', :'a_sales', 'actor_username', 'a-sales@example.test'), now()),
   ('00000000-0000-4000-8000-0000000000f2', json_build_object('action', 'token_refreshed', 'actor_id', :'a_sales', 'actor_username', 'a-sales@example.test'), now()),
@@ -146,6 +154,9 @@ language sql stable as $$
     union all select 'billing_events ' || to_jsonb(x)::text from public.billing_events x
     union all select 'invite_misses ' || to_jsonb(x)::text from public.invite_misses x where x.user_id <> '00000000-0000-4000-8000-0000000000a1'
     union all select 'demo_requests ' || to_jsonb(x)::text from public.demo_requests x where lower(trim(x.email)) <> 'a-sales@example.test'
+    -- a_mgr's is A's (it created A; checked by name after the delete)
+    union all select 'signup_attempts ' || to_jsonb(x)::text from public.signup_attempts x
+      where x.user_id not in ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2')
     union all select 'auth.users ' || to_jsonb(x)::text from auth.users x where x.id <> '00000000-0000-4000-8000-0000000000a1'
     union all select 'audit ' || x.id::text || x.payload::text from auth.audit_log_entries x where x.payload ->> 'actor_id' <> '00000000-0000-4000-8000-0000000000a1'
   ) s;
@@ -324,13 +335,23 @@ begin
   end if;
   raise notice 'ok: the export holds A''s billing events, matched by customer and by metadata';
 
+  -- the time A was signed up and the outcome, and not who did it: that is a_mgr's account's record
+  if e -> 'signup_attempts' is distinct from (select jsonb_agg(jsonb_build_object('at', x.at, 'outcome', 'created')) from public.signup_attempts x where x.dealership_id = a)
+     or (e -> 'counts' ->> 'signup_attempts')::int is distinct from 1 then
+    raise exception 'the export''s signup_attempts is %, not the time A was signed up', e -> 'signup_attempts';
+  end if;
+  if position('00000000-0000-4000-8000-0000000000a2' in (e -> 'signup_attempts')::text) > 0 then
+    raise exception 'the export says which account signed A up';
+  end if;
+  raise notice 'ok: the export says when A was signed up, and not by whom';
+
   -- nothing of B anywhere in the document, and nothing that is not the dealership's
   txt := e::text;
   foreach t in array array[b::text, 'Dealership B', 'dealership-b.test', 'TESTVINB', 'Robin', 'Sam', 'b-mgr@example.test', 'b-sales@example.test',
                            'BUNUSED00001', 'AUNUSED00001', 'ASALES000003', 'cus_b', 'sub_b', 'evt_b1', 'evt_x1'] loop
     if position(t in txt) > 0 then raise exception 'the export of A contains "%"', t; end if;
   end loop;
-  foreach t in array array['memberships', 'listings', 'todo_items', 'scan_summaries', 'post_attempts', 'rewrite_usage', 'invites', 'subscriptions', 'billing_events'] loop
+  foreach t in array array['memberships', 'listings', 'todo_items', 'scan_summaries', 'post_attempts', 'rewrite_usage', 'invites', 'subscriptions', 'billing_events', 'signup_attempts'] loop
     if not e ? t then raise exception 'the export has no % list', t; end if;
   end loop;
   if e ? 'invite_misses' or e ? 'demo_requests' then raise exception 'the export holds rows that are not the dealership''s'; end if;
@@ -428,7 +449,7 @@ begin
   -- the person's own request (their email, in another case)
   got := public.forget_person(a_sales, 'A-Sales@Example.TEST');
   if (got ->> 'forgotten')::boolean is not true
-     or got -> 'removed' <> jsonb_build_object('memberships', 1, 'unused_invites', 1, 'invite_misses', 2, 'demo_requests', 1, 'auth_audit_log_entries', 2, 'auth_users', 1)
+     or got -> 'removed' <> jsonb_build_object('memberships', 1, 'unused_invites', 1, 'invite_misses', 2, 'demo_requests', 1, 'signup_attempts', 1, 'auth_audit_log_entries', 2, 'auth_users', 1)
      or got -> 'cleared' <> jsonb_build_object('listings_salesperson', 2, 'listings_link_taken_down', 1, 'post_attempts_salesperson', 2)
      or got -> 'kept' <> jsonb_build_object('listings', 2, 'listing_links_still_listed', 1, 'post_attempts', 2, 'rewrite_usage', 1, 'used_invites', 1, 'billing_events_with_their_email', 1) then
     raise exception 'forget_person answered %', got;
@@ -439,6 +460,7 @@ begin
   if exists (select 1 from public.memberships where user_id = a_sales) then raise exception 'a membership survived'; end if;
   if exists (select 1 from public.invites where code = 'ASALES000003') then raise exception 'their unused code survived'; end if;
   if exists (select 1 from public.invite_misses where user_id = a_sales) then raise exception 'their invite misses survived'; end if;
+  if exists (select 1 from public.signup_attempts where user_id = a_sales) then raise exception 'their sign-up attempt survived'; end if;
   if exists (select 1 from public.demo_requests where lower(trim(email)) = 'a-sales@example.test') then raise exception 'their demo request survived'; end if;
   if exists (select 1 from auth.audit_log_entries where payload ->> 'actor_id' = a_sales::text) then raise exception 'their audit entries survived'; end if;
 
@@ -544,6 +566,9 @@ begin
   -- kept: the accounting record and the accounts
   if (select count(*) from public.billing_events where stripe_event_id in ('evt_a1', 'evt_a2', 'evt_a3')) <> 3 then raise exception 'A''s billing events were deleted'; end if;
   if not exists (select 1 from auth.users where id = '00000000-0000-4000-8000-0000000000a2') then raise exception 'a_mgr''s account was deleted'; end if;
+  if (select array_agg(outcome || ' ' || coalesce(dealership_id::text, 'none')) from public.signup_attempts where user_id = '00000000-0000-4000-8000-0000000000a2') is distinct from array['created none'] then
+    raise exception 'a_mgr''s sign-up attempt did not stay, without A: it is what per_account counts';
+  end if;
 
   -- B, and everything else, exactly as before
   if (select others from snapshot) <> pg_temp.others() then raise exception 'deleting A changed a row of B or of another person'; end if;

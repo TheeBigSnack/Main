@@ -61,6 +61,9 @@ p, ul, ol { margin: 0 0 12px; }
 ul, ol { padding-left: 22px; }
 li { margin-bottom: 6px; }
 .muted { color: var(--muted); }
+/* The hidden attribute wins over any display rule below (.button is inline-block), so a
+   hidden link stays hidden until site.js shows it. */
+[hidden] { display: none !important; }
 .wrap { width: 100%; max-width: 960px; margin: 0 auto; padding: 0 16px; }
 .narrow { max-width: 720px; }
 
@@ -76,6 +79,7 @@ li { margin-bottom: 6px; }
 .top nav ul { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 0; font-size: 0.95rem; }
 .top nav a { color: var(--text); text-decoration: none; padding: 4px 0; display: inline-block; }
 .top nav a:hover { text-decoration: underline; }
+.top nav a[aria-current="page"] { font-weight: 600; text-decoration: underline; }
 
 /* Sections */
 section { padding: 36px 0; border-top: 1px solid var(--line); }
@@ -89,6 +93,9 @@ section:first-of-type { border-top: 0; }
 .button { display: inline-block; background: var(--accent); color: var(--accent-text); border: 0; border-radius: var(--radius); padding: 12px 20px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
 .button:hover { filter: brightness(1.08); }
 .button:disabled { opacity: 0.55; cursor: default; }
+/* the second choice next to a button: the same size, outlined */
+.button.alt { background: transparent; color: var(--accent); border: 2px solid var(--accent); padding: 10px 18px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 
 /* How it works: numbered steps */
 .steps { list-style: none; padding: 0; counter-reset: step; display: grid; gap: 16px; }
@@ -163,6 +170,25 @@ footer a { color: var(--text); }
 }
 @media (min-width: 960px) {
   .cards { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Legal pages (site/legal/, written by scripts/legal-pages.mjs from legal/*.md) */
+.legal { padding-top: 28px; padding-bottom: 40px; }
+.legal h2 { font-size: 1.3rem; margin-top: 32px; }
+.legal h3 { margin-top: 20px; }
+.legal li > ul, .legal li > ol { margin: 6px 0 0; }
+.legal code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.draft { background: var(--warn-bg); border-left: 4px solid var(--warn); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 24px; }
+/* a blank the attorney or the owner still fills in: "[date]", "[Attorney: ...]" */
+.blank { background: var(--warn-bg); color: var(--warn); border-radius: 4px; padding: 0 3px; }
+/* a wide table scrolls inside its own box on a phone, never the page */
+.table { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--line); border-radius: var(--radius); }
+.table table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.95rem; overflow-wrap: break-word; }
+.table th, .table td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.table th { background: var(--surface); }
+.table tr:last-child td { border-bottom: 0; }
+@media (min-width: 720px) {
+  .legal { padding-top: 40px; padding-bottom: 56px; }
 }
 
 /* the demo form's honeypot: off screen, never shown to people */

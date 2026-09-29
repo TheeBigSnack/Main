@@ -37,7 +37,12 @@ const body = (name) => {
 
 // every table the migrations create, and whether it carries a dealership_id
 const TABLES = MIGRATIONS.flatMap((f) => [...read('../supabase/migrations/' + f).matchAll(/^create table public\.(\w+) \(([^]*?)\n\);/gm)].map((m) => ({ name: m[1], columns: m[2], file: f })));
-const OWNED = TABLES.filter((t) => /^\s*dealership_id uuid\b/m.test(t.columns));
+// signup_attempts (0007_signup.sql) names a dealership without belonging to
+// it: a created row is the account's record of the dealership it started,
+// which per_account keeps counting after that dealership is deleted, so its
+// foreign key sets null instead of cascading. It is exported all the same.
+const REFERS = ['signup_attempts'];
+const OWNED = TABLES.filter((t) => /^\s*dealership_id uuid\b/m.test(t.columns) && !REFERS.includes(t.name));
 
 test('0006_privacy.sql creates the three tools and their helper, and no API role may execute any of them', () => {
   assert.deepEqual(FUNCTIONS.map((f) => f.signature).sort(), [
@@ -88,6 +93,9 @@ test('forget_person: the email guard and the last-manager check come before any 
   assert.doesNotMatch(fn, /delete from public\.(listings|post_attempts|rewrite_usage)\b/, 'the dealership\'s rows stay');
   assert.match(fn, /delete from public\.invites i where i\.created_by = uid and i\.used_at is null;/, 'unused codes they made');
   assert.match(fn, /delete from public\.invite_misses x where x\.user_id = uid;/);
+  // their sign-up attempts go with the auth row (on delete cascade), counted first so the answer says so
+  assert.match(fn, /select count\(\*\) into n_signups from public\.signup_attempts a where a\.user_id = uid;\n\s+delete from auth\.users u where u\.id = uid;/);
+  assert.match(fn, /'signup_attempts', n_signups,/);
   const lastDelete = [...fn.matchAll(/\n\s+delete from ([\w.]+)/g)].pop();
   assert.equal(lastDelete[1], 'auth.users', 'the account is the last thing deleted');
 });
@@ -108,6 +116,19 @@ test('every table that belongs to a dealership cascades from it, is exported and
   assert.ok(exportFn.includes("People who are no longer members have no email here; the rows they made keep their user_id and the salesperson name they posted under, unless they asked to be forgotten."), 'the note on former members');
   assert.match(exportFn, /'billing_events', coalesce\(\(\s+select jsonb_agg\(to_jsonb\(e\)[^)]*\)\s+from public\.billing_events_of\(d\.id\) e\)/);
   assert.match(exportFn, /left join auth\.users u on u\.id = m\.user_id/, 'member emails');
+  // a table that names a dealership without belonging to it: set null, not cascaded, and still exported
+  for (const name of REFERS) {
+    const t = TABLES.find((x) => x.name === name);
+    assert.ok(t, `no migration creates ${name}: drop it from REFERS`);
+    assert.match(t.columns, /dealership_id uuid[^,\n]*references public\.dealerships \(id\) on delete set null/, `${name} (${t.file}) keeps its row when the dealership goes`);
+    assert.match(exportFn, new RegExp(`from public\\.${name} (\\w+)\\b[^;]{0,120}?where \\1\\.dealership_id = d\\.id`), `export_dealership leaves out ${name}`);
+    assert.doesNotMatch(deleteFn, new RegExp(`'${name}'`), `delete_dealership does not count ${name} as removed: its rows stay`);
+  }
+  // the time and outcome of the sign-up, never which account made it
+  const signup = exportFn.match(/'signup_attempts', coalesce\(\(([^]*?)\), '\[\]'::jsonb\)/);
+  assert.ok(signup, 'the export has a signup_attempts list');
+  assert.match(signup[1], /select jsonb_agg\(jsonb_build_object\('at', a\.at, 'outcome', a\.outcome\) order by a\.at, a\.id\)\s+from public\.signup_attempts a where a\.dealership_id = d\.id and a\.outcome = 'created'$/);
+  assert.doesNotMatch(signup[1], /to_jsonb|user_id/, 'not the row as stored: which account signed up is the account\'s record');
   // every other table is named in the header with what happens to it
   const header = sql.slice(sql.indexOf('-- Tables without a dealership_id'), sql.indexOf('-- Error codes'));
   for (const t of TABLES.filter((x) => !OWNED.includes(x) && x.name !== 'dealerships')) {
@@ -124,6 +145,7 @@ test('tests/privacy.sql checks the export, the API roles, both guards and that B
     'deleting A changed a row of B or of another person', 'A\'\'s billing events were deleted',
     'the export still lists a removed member, or their email', 'a removed member\'\'s rows lost their user_id or name',
     'the export\'\'s notes do not say that a former member\'\'s rows keep their name',
+    'the export says which account signed A up', 'their sign-up attempt survived', 'a_mgr\'\'s sign-up attempt did not stay, without A',
   ]) {
     assert.ok(sqlTest.includes(words), `privacy.sql does not check: ${words}`);
   }

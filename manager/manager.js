@@ -22,9 +22,21 @@
 // that supabase-js exchanges on this page (the code verifier waits in this
 // browser's storage), so the tokens never travel in a URL, and the link only
 // works in the browser that asked for it.
+//
+// Self-serve sign-up: a signed-in person in no dealership sees the Start your
+// dealership form when config.js's selfServeSignup is on (otherwise the old
+// "ask whoever set Lot Sync up" line). It calls create_dealership() in the
+// database, which is the real gate: it refuses while the owner has sign-up
+// switched off, and its refusal is a sentence the form shows as it comes.
+// ?mock=signup shows the form with create_dealership answered in this page.
+//
+// The Getting started card (managers only) sits above the other cards: four
+// steps from a new dealership to two salespeople posting, from rows the page
+// already reads (data.js gettingStarted), each with a button to the card that
+// does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -38,7 +50,7 @@ const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
 const functionsUrl = () => trimSlash(CONFIG.functionsUrl) || trimSlash(CONFIG.supabaseUrl) + '/functions/v1';
 
 const state = {
-  mode: 'loading', // loading | unconfigured | signin | sent | view | error
+  mode: 'loading', // loading | unconfigured | signin | sent | signup | view | error
   mock: false,
   supabase: null,
   session: null,
@@ -141,8 +153,86 @@ function viewError(message) {
   $('main').innerHTML = `<p class="empty">${esc(message)}</p><div class="toolbar"><button type="button" class="ghost" data-action="retry">Try again</button>${state.session ? '<button type="button" class="ghost" data-action="signout">Sign out</button>' : ''}</div>`;
 }
 
+// The Start your dealership form, for a signed-in person in no dealership.
+// The line under the address box follows the typing: the origin Lot Sync will
+// keep, or why the address cannot be used. #signupError is the form's live
+// region, on the page from the start so a screen reader announces what lands
+// in it; the boxes keep what was typed whatever the answer.
+function viewSignup() {
+  state.mode = 'signup';
+  setDealer('Manager view');
+  const who = state.mock ? 'Sample data' : esc(state.session?.user?.email || '');
+  setActions(`<span class="who">${who}</span><button type="button" class="ghost" data-action="signout">${state.mock ? 'Leave sample data' : 'Sign out'}</button>`);
+  setStatus(state.mock ? 'Sample data: an account that is signed in and in no dealership yet. Starting one here calls nothing; it opens a new, empty sample dealership.' : '');
+  const W = SIGNUP_WORDS;
+  $('main').innerHTML = `
+    <section class="card signup" id="startDealership">
+      <h2>${esc(W.heading)}</h2>
+      <p class="plan">${esc(W.lead)}</p>
+      <form id="signup" novalidate>
+        <label for="suName">${esc(W.name)}</label>
+        <input type="text" id="suName" name="name" required autocomplete="organization">
+        <label for="suWebsite">${esc(W.website)}</label>
+        <input type="text" id="suWebsite" name="website" required inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="${esc(SIGNUP_EXAMPLE)}" aria-describedby="suOrigin">
+        <p class="hint origin" id="suOrigin">${originNoteHtml('')}</p>
+        <label for="suYou">${esc(W.yourName)}</label>
+        <input type="text" id="suYou" name="your_name" required autocomplete="name">
+        <div class="toolbar"><button type="submit" class="primary">${esc(W.submit)}</button></div>
+        <p class="banner warn error" id="signupError" role="alert"></p>
+      </form>
+      <p class="hint">${esc(W.already)}</p>
+    </section>`;
+  $('signup').addEventListener('submit', onSignup);
+  $('suWebsite').addEventListener('input', (ev) => {
+    const el = $('suOrigin');
+    el.innerHTML = originNoteHtml(ev.currentTarget.value);
+    el.classList.toggle('unusable', Boolean(ev.currentTarget.value.trim()) && !signupOriginNote(ev.currentTarget.value).usable);
+  });
+}
+
+function originNoteHtml(value) {
+  const n = signupOriginNote(value);
+  return `${n.keep ? `<b>${esc(n.keep)}</b> ` : ''}${esc(n.line)}`;
+}
+
 function pill(cls, text) {
   return `<span class="pill ${cls}">${esc(text)}</span>`;
+}
+
+// The Getting started card, for a manager: the four steps as a numbered list,
+// each Done or To do in words, with one sentence and, for a step done on this
+// page, a button to the card that does it. Once all four are done it is one
+// line. The data is what the page already read: the plan, the open codes, the
+// members and the listings.
+function gettingStartedHtml() {
+  if (!state.data || myRole() !== 'manager') return '';
+  const g = gettingStarted({
+    billing: state.mock ? state.data.billing : state.billing?.status,
+    invites: state.invites,
+    memberships: state.data.memberships,
+    listings: state.data.listings,
+    dealershipId: state.dealershipId,
+    now: new Date().toISOString(),
+  });
+  if (g.allDone) return `<section class="card slim" id="gettingStarted"><h2>Getting started ${pill('good', g.line)}</h2></section>`;
+  const steps = g.steps.map((s) => `<li><div class="row"><span class="name">${esc(s.title)}</span>${pill(s.done ? 'good' : '', s.done ? 'Done' : 'To do')}${s.action ? `<button type="button" class="ghost" data-action="goto" data-target="${esc(s.action.target)}">${esc(s.action.label)}</button>` : ''}</div><p class="hint">${esc(s.line)}</p></li>`).join('');
+  return `<section class="card" id="gettingStarted"><h2>Getting started ${pill('', g.line)}</h2><ol class="steps">${steps}</ol></section>`;
+}
+
+function renderGettingStarted() {
+  const el = $('gettingStarted');
+  if (el) el.outerHTML = gettingStartedHtml();
+}
+
+// A Getting started button: the card that does the step comes into view and
+// takes the keyboard focus, so Tab goes on from that card's first button.
+function goToCard(id) {
+  const el = $(id);
+  if (!el) return;
+  el.setAttribute('tabindex', '-1');
+  el.focus({ preventScroll: true });
+  const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
 }
 
 // The Billing card: the plan in one sentence and the buttons the status
@@ -166,6 +256,7 @@ function billingHtml() {
 function renderBilling() {
   const el = $('billing');
   if (el) el.outerHTML = billingHtml();
+  renderGettingStarted(); // the plan is step 1
 }
 
 // The signed-in person's role in the chosen dealership: the memberships rows
@@ -255,6 +346,7 @@ async function onTeam(kind, userId, to) {
 function renderInvites() {
   const el = $('invites');
   if (el) el.outerHTML = invitesHtml();
+  renderGettingStarted(); // an open code is step 2
 }
 
 function viewData() {
@@ -308,7 +400,7 @@ function viewData() {
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  $('main').innerHTML = scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
+  $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
   const sel = $('pickDealer');
   if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; state.teamNote = ''; state.teamError = ''; state.teamConfirm = ''; loadLive().catch((e) => viewError(e.message)); });
 }
@@ -330,6 +422,7 @@ document.addEventListener('click', (ev) => {
     case 'revoke': onRevoke(btn.dataset.code, btn); break;
     case 'role': onTeam('role', btn.dataset.user, btn.dataset.to); break;
     case 'remove': onTeam('remove', btn.dataset.user); break;
+    case 'goto': goToCard(btn.dataset.target); break;
     default: break;
   }
 });
@@ -344,6 +437,98 @@ function showMock() {
   state.inviteError = '';
   setUrlMock(true);
   viewData();
+}
+
+// ?mock=signup: an account that is signed in and in no dealership, shown the
+// Start your dealership form whatever config.js says. mockClient answers
+// create_dealership, and the form lands in a new, empty sample dealership.
+function showMockSignup() {
+  state.mock = true;
+  state.data = null;
+  state.dealerships = [];
+  state.dealershipId = null;
+  state.invites = [];
+  state.inviteNote = '';
+  state.inviteError = '';
+  viewSignup();
+}
+
+// ---------- sign-up ----------
+
+// The sample-data stand-in for the Supabase client: create_dealership is
+// answered in the page (data.js mockCreateDealership) and nothing else is
+// called. No network.
+const mockClient = {
+  rpc: async (fn, args) => (fn === 'create_dealership' ? mockCreateDealership(args) : { data: null, error: { message: 'sample data: nothing is called here' } }),
+};
+
+// One line in the form's live region. It is emptied first and filled a
+// moment later, so the same sentence twice in a row is announced twice.
+function signupSay(text) {
+  const el = $('signupError');
+  if (!el) return;
+  el.textContent = '';
+  if (text) setTimeout(() => { el.textContent = text; }, 50);
+}
+
+// Start the dealership: the form's own checks first (the three boxes and a
+// usable address), then create_dealership(name, website, your_name) in the
+// database, which becomes this person's dealership with them as its manager
+// and answers { dealership_id, name, website_origin }. A refusal is the
+// database's sentence in the live region, and every box keeps what was
+// typed. Success reads the page again, into the new dealership.
+async function onSignup(ev) {
+  ev.preventDefault();
+  const form = ev.currentTarget;
+  const box = (n) => form.elements.namedItem(n);
+  const name = box('name').value.trim();
+  const website = box('website').value.trim();
+  const yourName = box('your_name').value.trim();
+  const problem = signupProblem({ name, website, yourName });
+  if (problem) {
+    signupSay(problem.message);
+    box(problem.field).focus();
+    return;
+  }
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  signupSay('');
+  setStatus('Starting the dealership…');
+  let answer;
+  try {
+    const client = state.mock ? mockClient : state.supabase;
+    answer = await client.rpc('create_dealership', { name, website, your_name: yourName });
+  } catch (e) {
+    answer = { data: null, error: { message: (e && e.message) || String(e) } };
+  }
+  setStatus('');
+  if (!answer || answer.error) {
+    button.disabled = false;
+    if (!document.activeElement || document.activeElement === document.body) button.focus(); // a disabled button drops the focus
+    return signupSay(signupRefusal(answer && answer.error));
+  }
+  const made = answer.data && typeof answer.data === 'object' ? answer.data : {};
+  state.billingNote = '';
+  state.inviteNote = '';
+  state.inviteError = '';
+  state.teamNote = '';
+  state.teamError = '';
+  state.teamConfirm = '';
+  if (state.mock) {
+    state.data = mockNewDealership(made, { yourName, now: new Date().toISOString() });
+    state.dealerships = [state.data.dealership];
+    state.dealershipId = state.data.dealership.id;
+    state.invites = [];
+    viewData();
+  } else {
+    state.dealershipId = made.dealership_id || null;
+    try {
+      await loadLive();
+    } catch (e) {
+      return viewError(`The dealership is started, but the page couldn't read it: ${(e && e.message) || e}`);
+    }
+  }
+  if (state.mode === 'view') goToCard('gettingStarted'); // the whole page changed: the keyboard starts at the first step
 }
 
 function downloadCsv() {
@@ -591,6 +776,10 @@ async function loadLive() {
   const dealerships = await read('dealerships', (q) => q.order('name'));
   if (!dealerships.length) {
     setStatus('');
+    state.dealerships = [];
+    state.data = null;
+    // the flag only shows the form; create_dealership refuses while the owner's switch in the database is off
+    if (CONFIG.selfServeSignup) return viewSignup();
     $('main').innerHTML = '<p class="empty">Your account is not a member of any dealership yet. Ask whoever set Lot Sync up for your store to add you.</p><div class="toolbar"><button type="button" class="ghost" data-action="signout">Sign out</button></div>';
     setActions(`<span class="who">${esc(state.session?.user?.email || '')}</span>`);
     state.mode = 'view';
@@ -625,6 +814,7 @@ async function start() {
     setParam('billing', null);
   }
   if (params.get('mock') === '1') return showMock();
+  if (params.get('mock') === 'signup') return showMockSignup();
   if (!configured()) return viewUnconfigured();
   try {
     const supabase = await connect();

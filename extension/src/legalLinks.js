@@ -2,13 +2,21 @@
 // read, and which edition of them a person accepts.
 //
 // The documents are attorney drafts (legal/terms-of-service.md,
-// legal/privacy-policy.md, legal/posting-rules.md) and will be hosted on the
-// product website once it exists (Milestone 5). Until then these addresses
-// are placeholders: replace all three when the site is up. `version` is the
-// edition the wizard's Terms step and the tick in Settings record next to the
-// acceptance time (settings.legal); after a change Settings shows everyone's
-// acceptance as out of date (legalIsCurrent), so bump it whenever the texts
-// change in a way people must accept again.
+// legal/privacy-policy.md, legal/posting-rules.md). `npm run legal-pages`
+// writes them into the landing site as site/legal/terms.html, privacy.html
+// and posting-rules.html, each marked as a draft that is not in effect while
+// legal/legal-status.json says draft. Until site/ is deployed and those pages
+// are no longer drafts, these addresses stay placeholders: recording that a
+// person accepted a text marked "not in effect" would be a false record.
+// Then they become https://<the site's host>/legal/terms.html,
+// https://<the site's host>/legal/privacy.html and
+// https://<the site's host>/legal/posting-rules.html, and `version` must be
+// bumped in the same change.
+//
+// `version` is the edition the wizard's Terms step and the tick in Settings
+// record next to the acceptance time (settings.legal); after a change
+// Settings shows everyone's acceptance as out of date (legalIsCurrent), so
+// bump it whenever the texts change in a way people must accept again.
 
 export const LEGAL = Object.freeze({
   version: '2026-09-28-draft',

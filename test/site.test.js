@@ -3,6 +3,8 @@
 // copied here, not imported, so each file stays self-contained), quotes the one
 // pricing config, names no dealer, loads nothing from anywhere else, and shows
 // only the sandbox's screenshots (site/screenshots/, drawn by npm run screenshots).
+// Its footer links the legal pages (site/legal/, test/legalPages.test.js), and
+// its Start a free pilot links show only once config.js names the manager view.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,14 +40,18 @@ test('the page says who publishes, that Lot Sync never does, and that it is not 
   assert.match(text, /Is this allowed on Facebook\?/, 'the FAQ asks the question straight');
 });
 
+// copied from test/marketing.test.js: what no document may say
+const NEVER = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /(customers|dealers|salespeople) (say|love|report)/i, /\b(five|5) stars?\b/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /industry[- ]leading/i, /best[- ]in[- ]class/i, /\b#1\b/];
+// and what customer-facing copy may not say either
+const NOT_TO_CUSTOMERS = [/testimonial/i, /never (be|get) restricted/i, /your account is (safe|protected)/i, /\brisk[- ]free\b/i, /\bno risk\b/i, /\bbots?\b/i];
+function assertHonest(said, where) {
+  const rest = said.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
+  assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, `${where} makes a guarantee`);
+  for (const re of [...NEVER, ...NOT_TO_CUSTOMERS]) assert.doesNotMatch(said, re, `${where} matches ${re}`);
+}
+
 test('no claim we have not measured, and nothing that sounds like Meta approval', () => {
-  // copied from test/marketing.test.js: what no document may say
-  const never = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /(customers|dealers|salespeople) (say|love|report)/i, /\b(five|5) stars?\b/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /industry[- ]leading/i, /best[- ]in[- ]class/i, /\b#1\b/];
-  // and what customer-facing copy may not say either
-  const notToCustomers = [/testimonial/i, /never (be|get) restricted/i, /your account is (safe|protected)/i, /\brisk[- ]free\b/i, /\bno risk\b/i, /\bbots?\b/i];
-  const rest = text.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-  assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, 'the page makes a guarantee');
-  for (const re of [...never, ...notToCustomers]) assert.doesNotMatch(text, re, `the page matches ${re}`);
+  assertHonest(text, 'the page');
   // no logos, no review widgets, no invented proof: the only images are the sandbox screenshots
   for (const m of html.matchAll(/<img\b([^>]*)>/gi)) assert.match(m[1], /\bsrc="screenshots\/[\w-]+\.png"/, `an image that is not a sandbox screenshot: <img${m[1]}>`);
   assert.doesNotMatch(text, /\b(reviews?|rated|trusted by)\b/i, 'no review or trust claims');
@@ -113,15 +119,22 @@ test('every screenshot the page shows exists at 1280 x 800, has alt text and say
   assert.match(figures[4], new RegExp(`alt="The popup's ${label} tab`), `the fifth image's alt text names the ${label} tab`);
 });
 
-test('every link is an anchor or a legal placeholder, and nothing loads from a third party', () => {
-  const placeholders = new Set(['/terms', '/privacy', '/posting-rules']);
+// The page's Content-Security-Policy, the one place an outside host is named.
+const CSP_TAG = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/;
+
+test('every link is an anchor on the page or one of the legal pages, and nothing loads from a third party', () => {
+  const legal = ['legal/terms.html', 'legal/privacy.html', 'legal/posting-rules.html'];
   const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
   assert.ok(hrefs.length > 5);
   for (const href of hrefs) {
-    assert.ok(/^#[\w-]+$/.test(href) || placeholders.has(href) || href === 'site.css', `href ${href}`);
+    assert.ok(/^#[\w-]+$/.test(href) || legal.includes(href) || href === 'site.css', `href ${href}`);
+    if (href.startsWith('#')) assert.match(html, new RegExp(`id="${href.slice(1)}"`), `${href} is on the page`);
   }
-  for (const p of placeholders) assert.ok(hrefs.includes(p), `links to ${p}`);
-  assert.doesNotMatch(html, /https?:\/\//i, 'no absolute URLs in the page');
+  // the footer links the three pages npm run legal-pages writes, by relative address
+  const footer = html.match(/<footer>[\s\S]*?<\/footer>/)[0];
+  assert.deepEqual([...footer.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), legal);
+  for (const p of legal) assert.ok(existsSync(new URL('../site/' + p, import.meta.url)), `site/${p} exists (npm run legal-pages)`);
+  assert.doesNotMatch(html.replace(CSP_TAG, ''), /https?:\/\//i, 'no absolute URLs in the page');
   assert.doesNotMatch(css, /https?:\/\/|@import|url\(/i, 'no external assets in the stylesheet');
   assert.doesNotMatch(js, /https?:\/\//i, 'site.js names no address of its own');
   const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1]);
@@ -130,6 +143,28 @@ test('every link is an anchor or a legal placeholder, and nothing loads from a t
   assert.deepEqual(links, [' rel="stylesheet" href="site.css"'], 'one stylesheet, ours');
   assert.doesNotMatch(html, /<(iframe|embed|object)\b/i);
   assert.doesNotMatch(html, /font-face|fonts\./i);
+});
+
+test('the page runs under a Content-Security-Policy: its own files, the lead function, and the mailto form', async () => {
+  const csp = (html.match(CSP_TAG) || [])[1];
+  assert.ok(csp, 'the page has a Content-Security-Policy');
+  const rules = Object.fromEntries(csp.split(';').map((d) => d.trim().split(/\s+/)).map(([name, ...values]) => [name, values]));
+  assert.deepEqual(rules, {
+    'default-src': ["'self'"],
+    'script-src': ["'self'"],
+    'style-src': ["'self'"],
+    'img-src': ["'self'"],
+    'connect-src': ["'self'", 'https://*.supabase.co'],
+    'object-src': ["'none'"],
+    'base-uri': ["'none'"],
+    'form-action': ['mailto:'],
+  });
+  // nothing inline, which the policy would block: no inline script, style or handler
+  assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>|<style\b|\sstyle="|\son[a-z]+="/i);
+  // the form's action and the configured endpoint are allowed by it
+  const { SITE } = await import('../site/config.js');
+  assert.match(SITE.demoMailto, /^mailto:/, 'form-action allows the mailto form');
+  if (SITE.demoEndpoint) assert.match(new URL(SITE.demoEndpoint).hostname, /\.supabase\.co$/, 'connect-src allows demoEndpoint; change both together');
 });
 
 test('the demo form sends to the configured places only, and works without JavaScript', async () => {
@@ -187,4 +222,74 @@ test('semantic, labelled and reachable: skip link, landmarks, labels on every fi
   assert.match(css, /:focus-visible/);
   assert.match(css, /min-width: 720px/);
   assert.doesNotMatch(css, /width: \d{4,}px/, 'no fixed wide widths');
+});
+
+// site.js run against a stand-in page: the two Start a free pilot links, and pricing.json as the server
+// answers it (or not). Answers the links as site.js left them.
+let runs = 0;
+async function runSite({ signupUrl, pricing }) {
+  const configImport = "import { SITE } from './config.js';";
+  assert.ok(js.includes(configImport), 'site.js takes its addresses from config.js');
+  runs += 1;
+  const config = { demoEndpoint: '', demoMailto: 'mailto:demo@lotsync.example', signupUrl };
+  const code = js.replace(configImport, `const SITE = ${JSON.stringify(config)};`) + `\n// run ${runs}\n`;
+  const links = [0, 1].map(() => ({ hidden: true, href: '', textContent: 'Start a free pilot' }));
+  const stubs = {
+    document: { getElementById: () => null, querySelectorAll: (sel) => (sel === 'a[data-signup]' ? links : []) },
+    fetch: async (url) => (url === './pricing.json' && pricing ? { ok: true, status: 200, json: async () => pricing } : { ok: false, status: 404 }),
+  };
+  const saved = Object.fromEntries(Object.keys(stubs).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  Object.assign(globalThis, stubs);
+  try {
+    await import('data:text/javascript,' + encodeURIComponent(code));
+    await new Promise((done) => setTimeout(done, 0)); // pricing.json read, links shown
+  } finally {
+    for (const [k, d] of Object.entries(saved)) {
+      if (d) Object.defineProperty(globalThis, k, d);
+      else delete globalThis[k];
+    }
+  }
+  return links;
+}
+
+test('Start a free pilot: hidden in the page, shown only once config.js names the manager view, with the pilot length from pricing.json', async () => {
+  const { SITE } = await import('../site/config.js');
+  assert.equal(SITE.signupUrl, '', 'empty until the owner opens self-serve sign-up');
+  const config = read('../site/config.js');
+  assert.match(config, /"Self-serve\s+\/\/ sign-up"|"Self-serve sign-up"/, 'config.js points at the README section');
+  assert.match(config, /selfServeSignup in manager\/config\.js/, 'and at the manager view\'s switch');
+  // in the page: next to the demo request in the hero and under Pricing, hidden, with no address and no number
+  const pair = /<div class="actions">\s*<a class="button" href="#demo">Request a demo<\/a>\s*<a class="button alt" data-signup hidden>Start a free pilot<\/a>\s*<\/div>/;
+  const hero = html.match(/<section class="hero"[\s\S]*?<\/section>/)[0];
+  const pricingSection = html.match(/<section id="pricing"[\s\S]*?<\/section>/)[0];
+  assert.match(hero, pair, 'the hero: Request a demo, then Start a free pilot');
+  assert.match(pricingSection, pair, 'Pricing: Request a demo, then Start a free pilot');
+  const tags = [...html.matchAll(/<a\b[^>]*\bdata-signup\b[^>]*>([^<]*)<\/a>/g)];
+  assert.equal(tags.length, 2, 'two links, no more');
+  for (const [tag, label] of tags) {
+    assert.match(tag, /\shidden>/, 'hidden until site.js shows it');
+    assert.doesNotMatch(tag, /href=/, 'no address until config.js gives one');
+    assert.doesNotMatch(label, /\d/, 'no number written into the page');
+  }
+  assert.match(css, /\[hidden\] \{ display: none !important; \}/, 'the hidden attribute beats .button\'s display');
+
+  // signupUrl empty: nothing changes, whatever pricing.json says
+  for (const link of await runSite({ signupUrl: '', pricing })) assert.deepEqual(link, { hidden: true, href: '', textContent: 'Start a free pilot' });
+  // set: both links shown, to that address, with the pilot's length from pricing.json
+  const url = 'https://app.lotsync.example/manager/';
+  for (const link of await runSite({ signupUrl: url, pricing })) {
+    assert.deepEqual(link, { hidden: false, href: url, textContent: `Start a free ${pricing.pilotDays}-day pilot` });
+  }
+  for (const link of await runSite({ signupUrl: url, pricing: { ...pricing, pilotDays: 14 } })) assert.equal(link.textContent, 'Start a free 14-day pilot', 'the length is read, not written in');
+  // pricing.json unreadable: shown, with no length rather than a guessed one
+  for (const link of await runSite({ signupUrl: url, pricing: null })) assert.deepEqual(link, { hidden: false, href: url, textContent: 'Start a free pilot' });
+  // a path on this site works too; anything that is not https or a path shows nothing
+  for (const ok of ['../manager/', '/manager/index.html', './manager/']) assert.equal((await runSite({ signupUrl: ok, pricing }))[0].href, ok, ok);
+  for (const bad of ['javascript:alert(1)', 'http://app.lotsync.example/', 'app.lotsync.example/manager/', '//app.lotsync.example/', 'https://', ' ', 'https://app.lotsync.example/ x']) {
+    for (const link of await runSite({ signupUrl: bad, pricing })) assert.equal(link.hidden, true, `${JSON.stringify(bad)} shows nothing`);
+  }
+
+  // the page's honesty rules hold with the links shown
+  assertHonest(text.replaceAll('Start a free pilot', `Start a free ${pricing.pilotDays}-day pilot`), 'the page with sign-up open');
+  assert.doesNotMatch(js, /https?:\/\//i, 'site.js still names no address of its own');
 });

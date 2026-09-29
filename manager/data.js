@@ -32,6 +32,12 @@
 // policy; the function checks the caller is a manager. inviteCard() gives a
 // manager the two buttons and each open code with Copy and Revoke.
 //
+// Self-serve sign-up: websiteOrigin() is the origin create_dealership keeps
+// for a typed website address, signupOriginNote() and signupProblem() are
+// what the Start your dealership form says as the person types and before it
+// sends, and signupRefusal() words the database's refusal. gettingStarted()
+// is a manager's four first steps, from rows the page already reads.
+//
 // What the shape can and cannot say:
 //   - "Sold cars still listed" are the open take-down items (todo_items, kind
 //     takeDown, no done_at). A scan summary carries counts, not VINs, so
@@ -508,6 +514,170 @@ export function teamCard(memberships, { role, userId = '', dealershipId = '', co
   return { manager, managers, members, line: TEAM_LINE, hint: TEAM_HINT };
 }
 
+// ---------- self-serve sign-up ----------
+
+// The origin Lot Sync keeps for a typed website address: the key the
+// extension syncs under (dealerships.website_origin), so it has to be what
+// the browser shows on the dealership's inventory pages. The rule has two
+// copies, create_dealership's SQL (supabase/migrations/0007_signup.sql) and
+// this one, and test/fixtures/website-origins.json checks both. It is spelled
+// out by hand rather than left to new URL(), which accepts IP addresses and
+// turns a non-ASCII host into its xn-- form: the person would then read one
+// address here while the extension sees another. '' when refused.
+const DEFAULT_PORTS = Object.freeze({ http: 80, https: 443 });
+const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/; // 1 to 63 characters, no hyphen at either end
+export function websiteOrigin(input) {
+  let s = String(input ?? '').trim();
+  let scheme = 'https'; // no scheme typed means https
+  const typed = s.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  if (typed) {
+    scheme = typed[1].toLowerCase();
+    s = s.slice(typed[0].length);
+  }
+  if (!Object.hasOwn(DEFAULT_PORTS, scheme)) return '';
+  const authority = s.split(/[/?#]/, 1)[0];
+  if (authority.includes('@')) return ''; // a user name or password in the address is refused
+  const [hostPart, port = '', ...more] = authority.split(':');
+  if (more.length) return ''; // more than one colon: an IPv6 address, or worse
+  // the scheme's own port is dropped (an empty one is no port, as in a browser), any other refused
+  if (port !== '' && !(/^0*\d{1,5}$/.test(port) && Number(port) === DEFAULT_PORTS[scheme])) return '';
+  const host = hostPart.replace(/\.$/, '');
+  // the characters are checked before the case is folded, so no character whose lower case happens to be ASCII gets through
+  if (!/^[A-Za-z0-9.-]+$/.test(host)) return '';
+  const labels = host.toLowerCase().split('.');
+  if (labels.length < 2 || labels[labels.length - 1] === 'localhost' || !labels.every((l) => HOST_LABEL.test(l))) return '';
+  // an IP address: a browser reads a host whose last part is a number (or 0x...) as one
+  if (/^(\d+|0x[0-9a-f]*)$/.test(labels[labels.length - 1])) return '';
+  return `${scheme}://${labels.join('.')}`;
+}
+
+// The form's words, in one place so the help doc and its test can name them.
+export const SIGNUP_WORDS = Object.freeze({
+  heading: 'Start your dealership',
+  lead: 'Your account is not in a dealership yet. Start one here and you become its manager.',
+  name: 'Dealership name',
+  website: 'Website address',
+  yourName: 'Your name',
+  submit: 'Start the dealership',
+  already: 'Does your store already use Lot Sync? Then don\'t start another one: ask its manager for an invite code and enter it in the Lot Sync extension under Settings, Account, Invite code.',
+});
+export const SIGNUP_EXAMPLE = 'www.yourdealership.com';
+
+// The line under the address box, redrawn as the person types: the origin
+// Lot Sync will keep and why it matters, or why the address cannot be used.
+export function signupOriginNote(input) {
+  const origin = websiteOrigin(input);
+  if (origin) return { usable: true, origin, keep: `Lot Sync will keep ${origin}.`, line: 'It must match the address bar on the dealership\'s inventory pages, www included.' };
+  if (!String(input ?? '').trim()) return { usable: false, origin: '', keep: '', line: 'Copy it from the address bar on the dealership\'s inventory pages, www included.' };
+  return { usable: false, origin: '', keep: '', line: `That is not a website address Lot Sync can use: type it as the address bar shows it, for example ${SIGNUP_EXAMPLE}.` };
+}
+
+// What stops the form before it calls anything: the first box that is empty
+// or unusable, and one sentence for it; null when all three are filled in.
+// create_dealership checks the same again, and its word is the one that counts.
+export function signupProblem({ name = '', website = '', yourName = '' } = {}) {
+  if (!String(name ?? '').trim()) return { field: 'name', message: 'Type the dealership\'s name.' };
+  if (!String(website ?? '').trim()) return { field: 'website', message: 'Type the dealership\'s website address.' };
+  const note = signupOriginNote(website);
+  if (!note.usable) return { field: 'website', message: note.line };
+  if (!String(yourName ?? '').trim()) return { field: 'your_name', message: 'Type your name.' };
+  return null;
+}
+
+// The form's line when create_dealership refuses: the database's own
+// sentence (error.message is written for the person: sign in first, sign-up
+// is not open, too many attempts, a field is wrong, this account already
+// started one, no more today, the website already has a dealership), after
+// the same "Couldn't ..." the other cards use.
+export function signupRefusal(error) {
+  const e = error && typeof error === 'object' ? error : {};
+  const said = text(e.message, 300) || (typeof error === 'string' ? text(error, 300) : '') || 'no answer from the server';
+  return `Couldn't start the dealership: ${said}${/[.!?]$/.test(said) ? '' : '.'}`;
+}
+
+// ---------- getting started ----------
+
+// The Getting started card (managers only): four steps from a new
+// dealership to plan milestone M6's "at least two active salespeople", each
+// done or not from rows the page already reads. The first two are done on
+// this page, so each carries the id of the card that does it; the other two
+// happen in the salespeople's extensions.
+export const GETTING_STARTED = Object.freeze({
+  plan: Object.freeze({ title: 'Start the free pilot or subscribe', target: 'billing', button: 'Go to Billing' }),
+  invite: Object.freeze({ title: 'Invite your salespeople', target: 'invites', button: 'Go to Invite codes' }),
+  firstCar: Object.freeze({ title: 'First car posted and synced', target: '', button: '' }),
+  twoPosting: Object.freeze({ title: 'Two salespeople posting', target: '', button: '' }),
+});
+export const ACTIVE_SALESPEOPLE = 2; // PLAN.md M6: "at least two active salespeople"
+
+const PLAN_STEP_LINES = Object.freeze({
+  pilot: 'The free pilot is running.',
+  active: 'The dealership is subscribed.',
+  none: 'No plan yet: start the free pilot, or subscribe, in the Billing card.',
+  lapsed: 'The plan has lapsed: subscribe in the Billing card and syncing starts again.',
+  unknown: 'The plan could not be read just now; the Billing card says more.',
+});
+
+/**
+ * The Getting started card's four steps.
+ *   1. a plan: the billing state is pilot or active;
+ *   2. someone invited: an open invite code, or more than one member;
+ *   3. a car posted and synced: any listing;
+ *   4. two salespeople posting: at least two different people, not managers
+ *      of the dealership, with a listing posted in the past 7 days.
+ * @param {object} input
+ *   billing:      GET .../billing/status's answer (or the sample's); null when it could not be read
+ *   invites:      the open codes the page holds (list_invites plus the ones made since)
+ *   memberships:  the dealership's members (a manager reads every row)
+ *   listings:     the dealership's listings
+ *   dealershipId: the chosen dealership; rows of another one are left out
+ *   now:          ISO time "the past 7 days" counts back from (default: the clock)
+ * @returns {{ steps: { key, title, done, line, action: { target, label } | null }[], done, total, allDone, line }}
+ */
+export function gettingStarted({ billing, invites, memberships, listings, dealershipId = '', now = nowIso() } = {}) {
+  const t = ms(now) ?? Date.now();
+  const nowAt = new Date(t).toISOString();
+  const ours = (r) => !dealershipId || !r.dealership_id || r.dealership_id === dealershipId;
+  const M = rows(memberships).filter((m) => m.user_id && INVITE_ROLES.includes(m.role) && ours(m));
+  const L = rows(listings).filter(ours);
+  const step = (key, done, line) => {
+    const s = GETTING_STARTED[key];
+    return { key, title: s.title, done, line, action: !done && s.target ? { target: s.target, label: s.button } : null };
+  };
+
+  const plan = billing && typeof billing === 'object' && PLAN_STATES.includes(billing.state) ? billing.state : 'unknown';
+
+  const open = inviteCard(invites, { role: 'manager', dealershipId, now: nowAt }).codes.length;
+  const inviteLine = M.length > 1 ? `${M.length} people are in the dealership.`
+    : open === 1 ? 'An invite code is open, waiting to be used.'
+    : open > 1 ? `${open} invite codes are open, waiting to be used.`
+    : 'Nobody else is in the dealership yet: make an invite code for each salesperson in the Invite codes card.';
+
+  // who posted in the past 7 days, by account, else by the name the extension recorded; a manager's own posts do not count
+  const managers = new Set(M.filter((m) => m.role === 'manager').map((m) => m.user_id));
+  const posting = new Set();
+  for (const l of L) {
+    const at = ms(l.posted_at);
+    if (at === null || at < t - WEEK_MS || at > t) continue;
+    if (l.user_id && managers.has(l.user_id)) continue;
+    posting.add(l.user_id ? `id:${l.user_id}` : `name:${text(l.salesperson, 60).toLowerCase() || NO_NAME}`);
+  }
+  const n = posting.size;
+  const postingLine = n >= ACTIVE_SALESPEOPLE ? `${n} salespeople posted in the past 7 days.`
+    : n === 1 ? `One salesperson posted in the past 7 days; this step needs ${ACTIVE_SALESPEOPLE}.`
+    : 'No salesperson has posted in the past 7 days.';
+
+  const steps = [
+    step('plan', plan === 'pilot' || plan === 'active', PLAN_STEP_LINES[plan]),
+    step('invite', M.length > 1 || open > 0, inviteLine),
+    step('firstCar', L.length > 0, L.length ? `${plural(L.length, 'car')} posted and synced so far.` : 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs.'),
+    step('twoPosting', n >= ACTIVE_SALESPEOPLE, postingLine),
+  ];
+  const done = steps.filter((s) => s.done).length;
+  const allDone = done === steps.length;
+  return { steps, done, total: steps.length, allDone, line: allDone ? 'All four steps done' : `${done} of ${steps.length} done` };
+}
+
 // ---------- the spreadsheet ----------
 
 const csvCell = (v) => {
@@ -732,4 +902,50 @@ export function mockData(now = nowIso()) {
   ];
 
   return { dealership, memberships, listings, todoItems, postAttempts, scans, billing, invites };
+}
+
+// ?mock=signup: the page's stand-in for create_dealership, answered the way
+// supabase-js answers an rpc ({ data, error }). It refuses what the form's
+// own checks refuse, as the database would (22023), and otherwise answers a
+// made-up dealership id with the name and the origin websiteOrigin() keeps.
+export const SAMPLE_NEW_DEALERSHIP_ID = '00000000-0000-4000-8000-000000000002';
+export function mockCreateDealership(args = {}) {
+  const a = args && typeof args === 'object' ? args : {};
+  const problem = signupProblem({ name: a.name, website: a.website, yourName: a.your_name });
+  if (problem) return { data: null, error: { code: '22023', message: problem.message } };
+  return { data: { dealership_id: SAMPLE_NEW_DEALERSHIP_ID, name: text(a.name), website_origin: websiteOrigin(a.website) }, error: null };
+}
+
+// The new, empty sample dealership that answer lands in: the person as its
+// only member and manager, nothing posted or scanned, no invite code and no
+// plan yet, so Getting started shows every step still to do. Made up, like
+// mockData(); no network.
+export function mockNewDealership(answer, { yourName = '', now = nowIso() } = {}) {
+  const a = answer && typeof answer === 'object' ? answer : {};
+  const id = text(a.dealership_id) || SAMPLE_NEW_DEALERSHIP_ID;
+  const createdAt = new Date(ms(now) ?? Date.now()).toISOString();
+  const dealership = { id, name: text(a.name) || 'Your dealership', website_origin: text(a.website_origin, 300), created_at: createdAt };
+  const YOU = '00000000-0000-4000-8000-000000000104';
+  const billing = {
+    ok: true,
+    dealership: { id, name: dealership.name, websiteOrigin: dealership.website_origin },
+    role: 'manager',
+    state: 'none',
+    subscription: null,
+    canStartPilot: true,
+    canSubscribe: true,
+    canManageBilling: false,
+    pilotDays: null, // as in mockData(): the real answer carries these from marketing/pricing.json
+    includedSalespeople: null,
+  };
+  return {
+    dealership,
+    memberships: [{ user_id: YOU, dealership_id: id, role: 'manager', name: text(yourName, 60) }],
+    listings: [],
+    todoItems: [],
+    postAttempts: [],
+    scans: [],
+    billing,
+    invites: [],
+  };
 }

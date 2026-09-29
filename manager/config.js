@@ -23,9 +23,17 @@
 // this page and named relatively (`./vendor/supabase-js-2.x.y.js`; the same
 // import() loads it). index.html's Content-Security-Policy allows scripts
 // from this folder and cdn.jsdelivr.net only; change it with this line.
+//
+// selfServeSignup shows the "Start your dealership" form to a signed-in
+// person who is in no dealership yet. It only shows the form: the real gate
+// is the switch in the database (signup_settings.open, supabase/README.md
+// "Self-serve sign-up"), and create_dealership refuses everyone while that
+// is off, whatever this says. Turn both on together; with this false the
+// page keeps saying "ask whoever set Lot Sync up for your store".
 export const CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
   functionsUrl: '',
   supabaseJs: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+  selfServeSignup: false,
 };

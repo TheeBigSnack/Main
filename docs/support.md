@@ -51,6 +51,51 @@ Kept as a table, one row per request, in a spreadsheet or in this file. Every ro
 
 Once a week the log is read top to bottom: the top field failure goes into the pilot loop (`PILOT.md`), and anything asked twice goes into `docs/help.md`.
 
+## A website is already taken
+
+A person who starts a dealership in the manager view is told "that website already has a Lot Sync dealership" (`P0009`) when a dealership with the same website exists. Usually the store already uses Lot Sync and the answer is right: they ask their manager for an invite code. It reaches support when the person says nobody at the store uses Lot Sync, or that the store's managers have all left. The sign-up rules are in `supabase/README.md`, "Self-serve sign-up".
+
+1. **Find the dealership**, in the SQL editor, with the address they typed:
+
+   ```sql
+   select d.id, d.name, d.website_origin, d.created_at, m.role, m.name as member_name, m.user_id, u.email
+   from public.dealerships d
+   left join public.memberships m on m.dealership_id = d.id
+   left join auth.users u on u.id = m.user_id
+   where d.website_origin = public.website_origin_of('<the address they typed>');
+
+   select a.at, a.user_id, u.email
+   from public.signup_attempts a
+   left join auth.users u on u.id = a.user_id
+   where a.dealership_id = '<dealership id>' and a.outcome = 'created';
+   ```
+
+   The second statement says whether the dealership was started through sign-up, when and by which account. No row means Lot Sync set it up.
+
+2. **Verify who runs the store.** Open the dealership's website yourself and call the main phone number it shows. Never call a number the requester gives: anyone can type a website, and the store's own line is what ties a person to it. Ask for the requester by name, and ask whether they work there as a manager and want the store on Lot Sync. If the managers the first statement lists still work there, access is theirs to give: ask them to send the requester an invite code, and change nothing.
+
+3. **The store's own dealership, with its managers gone** (Lot Sync set it up, or someone the store knows started it): add the verified person as a manager of it. They already have an account (they were signed in when they tried):
+
+   ```sql
+   select id, email from auth.users where lower(email) = lower('<their email>');
+
+   insert into public.memberships (user_id, dealership_id, role, name)
+   values ('<their user id>', '<dealership id>', 'manager', '<their name>')
+   on conflict (user_id, dealership_id) do update set role = 'manager';
+   ```
+
+   They reload the manager view and see the dealership as its manager; from there they can remove members the store does not know (the Team card).
+
+4. **A squatted row**: the dealership was started through sign-up by an account the store does not know. Whatever that account made (members, listings, codes) is not the store's, so do not hand the row over: delete it and let the store start fresh.
+
+   ```sql
+   select public.delete_dealership('<dealership id>', '<its website_origin, exactly as the first statement shows it>');
+   ```
+
+   Its attempt row stays with the account that started it, without the dealership, so with `per_account` at 1 that account cannot start another dealership by itself. Write to that account's email to say the dealership was removed because the store did not start it. Then the store starts again: the verified person signs up with the same website (their account has started no dealership, so the limit lets them), or, while sign-up is closed, you create the dealership and a first-manager code as in step 5 of `supabase/README.md` and send the code to the verified person's own address.
+
+5. **Log it** like any other request: "website taken" and the store in **What happened**, no severity, and in **Fix commit** what was run.
+
 ## Privacy requests
 
 The privacy policy (`legal/privacy-policy.md`, "Your choices and rights") lets a dealership ask for its records to be exported or deleted, and a person ask for their own data to be deleted. There are three request types. The owner answers each with one function; the SQL, what each function removes and keeps, and how to hand over an export are in `supabase/README.md`, "Export or delete a dealership's data".

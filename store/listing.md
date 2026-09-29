@@ -91,7 +91,7 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 |---|---|
 | `activeTab` | Reads the inventory search on the dealership website tab the person is looking at when they click Scan. |
 | `scripting` | Runs the read-only scan in that tab, and fills the Marketplace create-listing form the person opened when they click Post. |
-| `storage` | Scans, settings, the posted list and the usage numbers, per website, in the person's browser; the profile (name, role, dealership details, listing defaults, the Terms acceptance) in Chrome's sync storage under their own Google account, removable in Settings. |
+| `storage` | Scans, settings, the posted list and the usage numbers, per website, and the Lot Sync sign-in session, in the person's browser; the profile (name, role, dealership details, listing defaults, the rewrite-service address, the Terms acceptance) in Chrome's sync storage under their own Google account, removable in Settings. |
 | `sidePanel` | The guided post flow and the set-up wizard run in the side panel so they stay open while the person moves between the dealership tab and the Marketplace tab. |
 | `alarms` | Re-reads a dealership website the person allowed every 3 hours while Chrome is open, to keep the to-do count on the icon current; it never touches Facebook. |
 | `notifications` | One desktop notification when a background rescan adds to the person's to-do list; off in Settings if they prefer. |
@@ -102,7 +102,7 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 
 ## Privacy practices
 
-The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, the data-use ticks, the Limited Use certifications and "no remote code". In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); authentication information, personal communications, location, web history, health, financial and user-activity tracking, no. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotsync.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
+The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, what the extension sends and to whom, the data-use ticks, the Limited Use certifications and "no remote code"; all of it follows `docs/data-inventory.md`. In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off, and, once Lot Sync accounts are set up, the email address they sign in with); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); personal communications, health and financial, no. Authentication information [Pending attorney answer: questions-for-attorney.md 8.1], location [Pending attorney answer: questions-for-attorney.md 8.2], web history [Pending attorney answer: questions-for-attorney.md 8.3] and user activity [Pending attorney answer: questions-for-attorney.md 8.4] wait for the attorney's answers, and so does the submission. What leaves the browser: reads of the dealership's website, the VIN to NHTSA when the person asks, the car's facts to Anthropic through our rewrite service only with the description writer on, and, when the person signs in, their posted list, post timings, to-do items and scan counts to their dealership's records. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotsync.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
 
 ## Support and homepage
 
@@ -116,6 +116,7 @@ The three document addresses must equal `LEGAL` in `extension/src/legalLinks.js`
 
 ## Before submitting
 
+- [ ] The questions in section 8 of `legal/questions-for-attorney.md` answered, and no "[Pending attorney answer" mark left in `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md`, this file or `docs/data-inventory.md`.
 - [ ] Attorney sign-off on `legal/terms-of-service.md`, `legal/privacy-policy.md`, `legal/posting-rules.md` and `legal/chrome-web-store-privacy.md`; the texts hosted at their real addresses; `extension/src/legalLinks.js` updated (the three addresses and `version`, which re-asks every salesperson to accept).
 - [ ] Real screenshots: five at 1280 x 800, taken by the owner on a real dealership website with a real listing, personal data blurred, per the table above.
 - [ ] Promo images: `store/images/promo-small-440x280.png` and, if the dashboard takes it, `store/images/promo-marquee-1400x560.png`; the drafts from `node scripts/store-images.mjs` regenerated after any change to the line or the icon, or the owner's replacements at the same sizes, per the Promo tile section above.

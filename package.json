@@ -11,6 +11,7 @@
     "demo": "node demo/serve.mjs",
     "screenshots": "node scripts/screenshots.mjs",
     "store-images": "node scripts/store-images.mjs",
+    "legal-pages": "node scripts/legal-pages.mjs",
     "test:sql": "node scripts/sql-test.mjs",
     "check-deploy": "node scripts/check-deploy.mjs",
     "test:demo": "node demo/drive.mjs",

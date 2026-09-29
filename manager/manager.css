@@ -134,6 +134,29 @@ h2 .pill { font-weight: 600; }
 .signin form { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
 .signin input[type="email"] { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); flex: 1; min-width: 200px; }
 
+/* The Start your dealership form: one column of labelled boxes as wide as
+   the sign-in box. The error line is the form's live region: it stays on the
+   page when empty (a live region that appears with its text is not always
+   announced), and takes no room until there is something to say. */
+.signup form { display: grid; gap: 4px; max-width: 520px; margin: 8px 0 0; }
+.signup label { font-weight: 600; margin-top: 8px; }
+.signup input[type="text"] { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); width: 100%; }
+.signup .origin { margin: 2px 0 0; overflow-wrap: anywhere; }
+.signup .origin.unusable { color: var(--warn); }
+.signup .banner.error { margin: 8px 0 0; }
+.signup .banner.error:empty { padding: 0; margin: 0; }
+.signup > .hint { margin: 12px 0 0; }
+
+/* The Getting started card: the four steps as a numbered list, each with
+   Done or To do in words and, for a step done on this page, a button to its
+   card. All four done, it is the heading alone. */
+.steps { margin: 4px 0 0; padding-left: 22px; display: grid; gap: 8px; }
+.steps .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.steps .name { font-weight: 600; }
+.steps .hint { margin: 2px 0 0; }
+.card.slim { padding: 8px 12px; }
+.card.slim h2 { margin: 0; }
+
 .foot { color: var(--muted); font-size: 12px; padding: 14px 16px; border-top: 1px solid var(--line); text-align: center; }
 
 /* the Team card: one row per member */

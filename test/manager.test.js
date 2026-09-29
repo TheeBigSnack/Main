@@ -2,15 +2,18 @@
 // sample dealership and on hand-built rows, the definitions kept equal to
 // the pilot's, the Billing card (Milestone 5) in each plan state, the Invite
 // codes card (a manager's two buttons, the codes as create_invite types
-// them, the sample's one code), and the page free of pilot-dealer values, of
-// typed prices and of anything that sounds like a Meta affiliation.
+// them, the sample's one code), self-serve sign-up (the website origin rule
+// on every case of test/fixtures/website-origins.json, the form's lines, the
+// ?mock=signup stand-in) and the Getting started card, and the page free of
+// pilot-dealer values, of typed prices and of anything that sounds like a
+// Meta affiliation.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -599,8 +602,10 @@ test('sign-in comes back as a PKCE code to the page\'s own address, and the page
   assert.doesNotMatch(read('manager/manager.js') + read('manager/data.js'), /style="/, 'no inline style: style-src is \'self\'');
 });
 
-test('config.js: four fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {
-  assert.deepEqual(Object.keys(CONFIG).sort(), ['functionsUrl', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
+test('config.js: five fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {
+  assert.deepEqual(Object.keys(CONFIG).sort(), ['functionsUrl', 'selfServeSignup', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
+  assert.equal(CONFIG.selfServeSignup, false, 'the form stays hidden until the owner opens sign-up');
+  assert.match(read('manager/config.js'), /signup_settings\.open[\s\S]*"Self-serve sign-up"/, 'the comment names the switch in the database that is the real gate');
   assert.equal(typeof CONFIG.supabaseUrl, 'string');
   assert.equal(typeof CONFIG.supabaseAnonKey, 'string');
   assert.equal(CONFIG.functionsUrl, '', 'empty: the project\'s own /functions/v1');
@@ -702,4 +707,266 @@ test('the Team card changes only a member\'s role or removes them, through the r
   assert.doesNotMatch(rls, /grant select, update, delete on public\.memberships/);
   assert.match(rls, /create trigger memberships_keep_a_manager\s+before update or delete on public\.memberships/);
   assert.match(rls, /errcode = 'P0006'/);
+});
+
+// ---------- self-serve sign-up ----------
+
+const ORIGINS = JSON.parse(read('test/fixtures/website-origins.json'));
+
+test('websiteOrigin: every case of test/fixtures/website-origins.json, the table create_dealership\'s SQL is checked against too', () => {
+  assert.ok(ORIGINS.cases.length >= 30, 'the fixture has its cases');
+  for (const { input, origin } of ORIGINS.cases) {
+    assert.equal(websiteOrigin(input), origin ?? '', `websiteOrigin(${JSON.stringify(input)})`);
+  }
+  // what it keeps is an origin a browser writes the same way, so the extension sees exactly this string
+  for (const { origin } of ORIGINS.cases.filter((c) => c.origin)) assert.equal(new URL(origin).origin, origin);
+  // why the rule is written out: new URL() takes these, and the extension would see an IP or an xn-- host
+  for (const input of ['https://192.168.1.10', 'https://bücher.de', 'https://[::1]/']) {
+    assert.doesNotThrow(() => new URL(input));
+    assert.equal(websiteOrigin(input), '', input);
+  }
+  // beyond the fixture, as create_dealership's SQL answers them today (0007_signup.sql website_origin_of)
+  assert.equal(websiteOrigin('https://0x7f.0x1'), '', 'a host a browser reads as an IP address in hex');
+  assert.equal(websiteOrigin('https://www.smithford.com:0443'), 'https://www.smithford.com', 'the default port, however it is written');
+  assert.equal(websiteOrigin('https://www.smithford.com:/used'), 'https://www.smithford.com', 'an empty port is no port');
+  assert.equal(websiteOrigin('https://app.localhost'), '', 'a localhost name');
+  assert.equal(websiteOrigin('https://\u212Aia.com'), '', 'a Kelvin sign, whose lower case is an ASCII k, is not a letter here');
+  assert.equal(new URL('https://\u212Aia.com').host, 'kia.com', 'while new URL() folds it into one');
+  assert.equal(websiteOrigin('\u00a0www.smithford.com\n'), 'https://www.smithford.com', 'trimmed as JavaScript trims');
+  assert.equal(websiteOrigin(undefined), '');
+  assert.equal(websiteOrigin(null), '');
+});
+
+test('signupOriginNote: the origin kept and the address-bar sentence, or the not-usable sentence, as the person types', () => {
+  const ok = signupOriginNote('WWW.SmithFord.com/used-inventory/');
+  assert.deepEqual(ok, { usable: true, origin: 'https://www.smithford.com', keep: 'Lot Sync will keep https://www.smithford.com.', line: 'It must match the address bar on the dealership\'s inventory pages, www included.' });
+  const empty = signupOriginNote('   ');
+  assert.equal(empty.usable, false);
+  assert.equal(empty.keep, '');
+  assert.match(empty.line, /address bar on the dealership's inventory pages, www included/);
+  const bad = signupOriginNote('192.168.1.10');
+  assert.equal(bad.usable, false);
+  assert.equal(bad.origin, '');
+  assert.match(bad.line, /^That is not a website address Lot Sync can use/);
+  assert.match(bad.line, /www\.yourdealership\.com/, 'an example with no dealer in it');
+});
+
+test('signupProblem: the first empty or unusable box, in the form\'s order, and nothing when all three are filled in', () => {
+  const good = { name: 'Example Motors', website: 'www.example-motors.test', yourName: 'Jamie' };
+  assert.equal(signupProblem(good), null);
+  assert.deepEqual(signupProblem({ ...good, name: '  ' }), { field: 'name', message: 'Type the dealership\'s name.' });
+  assert.deepEqual(signupProblem({ ...good, website: '' }), { field: 'website', message: 'Type the dealership\'s website address.' });
+  assert.deepEqual(signupProblem({ ...good, website: 'localhost' }), { field: 'website', message: signupOriginNote('localhost').line });
+  assert.deepEqual(signupProblem({ ...good, yourName: '' }), { field: 'your_name', message: 'Type your name.' });
+  assert.equal(signupProblem({}).field, 'name');
+  assert.equal(signupProblem().field, 'name');
+});
+
+test('signupRefusal: create_dealership\'s own sentence for every refusal the contract names, after "Couldn\'t start the dealership"', () => {
+  const refusals = [
+    ['42501', 'sign in first'],
+    ['P0008', 'sign-up is not open yet'],
+    ['P0005', 'too many attempts; try again in an hour'],
+    ['22023', 'the website address is not usable'],
+    ['P0010', 'this account already started a dealership'],
+    ['P0011', 'no more new dealerships today; try again tomorrow'],
+    ['P0009', 'that website already has a dealership: ask its manager for an invite code.'],
+  ];
+  for (const [code, message] of refusals) {
+    const line = signupRefusal({ code, message, details: null, hint: null });
+    assert.ok(line.startsWith('Couldn\'t start the dealership: '), code);
+    assert.ok(line.includes(message), `${code}: the database's words, as they come`);
+    assert.match(line, /[.!?]$/);
+  }
+  assert.equal(signupRefusal({ message: 'That website already has a dealership.' }), 'Couldn\'t start the dealership: That website already has a dealership.');
+  assert.equal(signupRefusal(null), 'Couldn\'t start the dealership: no answer from the server.');
+  assert.equal(signupRefusal({ code: 'P0008' }), 'Couldn\'t start the dealership: no answer from the server.');
+  assert.equal(signupRefusal('TypeError: Failed to fetch'), 'Couldn\'t start the dealership: TypeError: Failed to fetch.');
+});
+
+test('?mock=signup: create_dealership answered in the page, into a new, empty dealership whose first step is not done', () => {
+  const ok = mockCreateDealership({ name: ' Example Motors ', website: 'HTTPS://www.Example-Motors.test/used/', your_name: 'Jamie' });
+  assert.equal(ok.error, null);
+  assert.deepEqual(ok.data, { dealership_id: SAMPLE_NEW_DEALERSHIP_ID, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }, 'the shape create_dealership answers');
+  const refused = mockCreateDealership({ name: 'Example Motors', website: 'https://10.0.0.1/', your_name: 'Jamie' });
+  assert.equal(refused.data, null);
+  assert.equal(refused.error.code, '22023');
+  assert.match(refused.error.message, /not a website address/);
+  assert.equal(mockCreateDealership().error.code, '22023');
+  assert.notEqual(SAMPLE_NEW_DEALERSHIP_ID, mockData(NOW).dealership.id, 'not the ?mock=1 dealership');
+
+  const d = mockNewDealership(ok.data, { yourName: 'Jamie', now: NOW });
+  assert.deepEqual(d.dealership, { id: SAMPLE_NEW_DEALERSHIP_ID, name: 'Example Motors', website_origin: 'https://www.example-motors.test', created_at: NOW });
+  assert.deepEqual(d.memberships, [{ user_id: d.memberships[0].user_id, dealership_id: SAMPLE_NEW_DEALERSHIP_ID, role: 'manager', name: 'Jamie' }], 'the person, as its only manager');
+  for (const k of ['listings', 'todoItems', 'postAttempts', 'scans', 'invites']) assert.deepEqual(d[k], [], `${k} is empty`);
+  assert.equal(d.billing.role, 'manager');
+  assert.equal(d.billing.state, 'none');
+  assert.equal(d.billing.pilotDays, null, 'no price or pilot length typed into the sample');
+  assert.deepEqual(billingCard(d.billing, { now: NOW, timeZone: 'UTC' }).buttons.map((b) => b.label), ['Start the free pilot', 'Subscribe']);
+  const g = gettingStarted({ ...d, dealershipId: d.dealership.id, now: NOW });
+  assert.deepEqual(g.steps.map((s) => s.done), [false, false, false, false]);
+  assert.equal(g.line, '0 of 4 done');
+  assert.equal(summarize({ ...d, now: NOW }).totals.postedAllTime, 0);
+  assert.doesNotMatch(JSON.stringify(d), /Waynesburg|Ron Lewis|15370|\bRoger\b/i);
+});
+
+// ---------- the Getting started card ----------
+
+const D1 = 'd-1';
+const member = (id, role, name = id) => ({ user_id: id, dealership_id: D1, role, name });
+const listing = (who, hoursAgo, extra = {}) => ({ dealership_id: D1, user_id: who, vin: `V${who}${hoursAgo}`, posted_at: ago(hoursAgo), status: 'listed', ...extra });
+const started = (over = {}) => gettingStarted({ billing: { state: 'none', role: 'manager' }, invites: [], memberships: [member('m1', 'manager')], listings: [], dealershipId: D1, now: NOW, ...over });
+
+test('gettingStarted: a new dealership has four steps to do, the first two with a button to the card that does them', () => {
+  const g = started();
+  assert.deepEqual(g.steps.map((s) => s.key), ['plan', 'invite', 'firstCar', 'twoPosting']);
+  assert.deepEqual(g.steps.map((s) => s.title), ['Start the free pilot or subscribe', 'Invite your salespeople', 'First car posted and synced', 'Two salespeople posting']);
+  assert.deepEqual(g.steps.map((s) => s.done), [false, false, false, false]);
+  assert.deepEqual(g.steps.map((s) => s.action), [{ target: 'billing', label: 'Go to Billing' }, { target: 'invites', label: 'Go to Invite codes' }, null, null]);
+  for (const s of g.steps) assert.match(s.line, /^[A-Z][^]*\.$/, `${s.key}: one sentence`);
+  assert.equal(g.done, 0);
+  assert.equal(g.total, 4);
+  assert.equal(g.allDone, false);
+  assert.equal(g.line, '0 of 4 done');
+  assert.equal(ACTIVE_SALESPEOPLE, 2);
+  assert.ok(Object.isFrozen(GETTING_STARTED.plan));
+  // the buttons point at the ids the page gives the Billing and Invite codes cards
+  const js = read('manager/manager.js');
+  assert.match(js, /<section class="card" id="billing">/);
+  assert.match(js, /<section class="card" id="invites">/);
+});
+
+test('gettingStarted step 1: the free pilot or a subscription; none, lapsed or an unread plan is not done, each in its own words', () => {
+  const plan = (state) => started({ billing: state === undefined ? null : { state } }).steps[0];
+  assert.deepEqual([plan('pilot').done, plan('active').done], [true, true]);
+  assert.equal(plan('pilot').line, 'The free pilot is running.');
+  assert.equal(plan('active').line, 'The dealership is subscribed.');
+  assert.equal(plan('pilot').action, null, 'a done step has no button');
+  for (const s of ['none', 'lapsed', 'gold', undefined]) assert.equal(plan(s).done, false, String(s));
+  assert.match(plan('none').line, /start the free pilot, or subscribe, in the Billing card/);
+  assert.match(plan('lapsed').line, /lapsed/);
+  assert.match(plan(undefined).line, /could not be read/, 'a status that failed to load is not called "no plan"');
+  assert.match(plan('gold').line, /could not be read/);
+});
+
+test('gettingStarted step 2: an open invite code of this dealership, or a second member', () => {
+  const invite = (over) => started(over).steps[1];
+  assert.equal(invite({ invites: [{ code: 'ABCDEF012345', role: 'salesperson', dealership_id: D1, created_at: ago(1) }] }).done, true);
+  assert.equal(invite({ invites: [{ code: 'ABCDEF012345', role: 'salesperson', dealership_id: D1, created_at: ago(1) }] }).line, 'An invite code is open, waiting to be used.');
+  assert.equal(invite({ invites: [{ code: 'AAAAAAAAAAA1', dealership_id: D1, created_at: ago(1) }, { code: 'AAAAAAAAAAA2', dealership_id: D1, created_at: ago(2) }] }).line, '2 invite codes are open, waiting to be used.');
+  assert.equal(invite({ memberships: [member('m1', 'manager'), member('s1', 'salesperson')] }).done, true);
+  assert.equal(invite({ memberships: [member('m1', 'manager'), member('s1', 'salesperson'), member('s2', 'salesperson')] }).line, '3 people are in the dealership.');
+  // not done: an expired code, another dealership's code, another dealership's member, a row with no account
+  assert.equal(invite({ invites: [{ code: 'ABCDEF012345', dealership_id: D1, created_at: ago(8 * 24) }] }).done, false);
+  assert.equal(invite({ invites: [{ code: 'ABCDEF012345', dealership_id: 'd-2', created_at: ago(1) }] }).done, false);
+  assert.equal(invite({ memberships: [member('m1', 'manager'), { ...member('s1', 'salesperson'), dealership_id: 'd-2' }] }).done, false);
+  assert.equal(invite({ memberships: [member('m1', 'manager'), { role: 'salesperson', dealership_id: D1 }] }).done, false);
+  assert.match(invite({}).line, /Invite codes card/);
+});
+
+test('gettingStarted step 3: any listing of this dealership, taken down or not', () => {
+  assert.equal(started({ listings: [listing('s1', 500, { status: 'taken_down', taken_down_at: ago(400) })] }).steps[2].done, true);
+  assert.equal(started({ listings: [listing('s1', 500)] }).steps[2].line, '1 car posted and synced so far.');
+  assert.equal(started({ listings: [listing('s1', 5), listing('s2', 6)] }).steps[2].line, '2 cars posted and synced so far.');
+  assert.equal(started({ listings: [{ ...listing('s1', 5), dealership_id: 'd-2' }] }).steps[2].done, false, 'another dealership\'s row');
+  assert.match(started().steps[2].line, /^No car yet\./);
+});
+
+test('gettingStarted step 4: two different salespeople with a post in the past 7 days; a manager\'s own posts do not count', () => {
+  const people = [member('m1', 'manager'), member('s1', 'salesperson'), member('s2', 'salesperson')];
+  const four = (list) => started({ memberships: people, listings: list }).steps[3];
+  assert.equal(four([listing('s1', 5), listing('s2', 6 * 24)]).done, true);
+  assert.equal(four([listing('s1', 5), listing('s2', 6 * 24)]).line, '2 salespeople posted in the past 7 days.');
+  assert.equal(four([listing('s1', 5), listing('s1', 6)]).done, false, 'one person twice is one salesperson');
+  assert.equal(four([listing('s1', 5), listing('s1', 6)]).line, 'One salesperson posted in the past 7 days; this step needs 2.');
+  assert.equal(four([listing('s1', 5), listing('m1', 6)]).done, false, 'the manager posting is not a second salesperson');
+  assert.equal(four([listing('s1', 5), listing('s2', 7 * 24 + 1)]).done, false, 'older than 7 days');
+  assert.equal(four([listing('s1', 5), listing('s2', -2)]).done, false, 'stamped in the future');
+  assert.equal(four([]).line, 'No salesperson has posted in the past 7 days.');
+  // a row with no account counts by the name the extension recorded, as the Salespeople table does
+  assert.equal(four([listing('s1', 5), listing(null, 6, { salesperson: 'Pat' })]).done, true);
+  assert.equal(four([listing(null, 6, { salesperson: 'Pat' }), listing(null, 7, { salesperson: 'pat ' })]).done, false, 'the same name twice');
+});
+
+test('gettingStarted on the ?mock=1 sample: all four done, so the card is one line', () => {
+  const d = mockData(NOW);
+  const g = gettingStarted({ ...d, dealershipId: d.dealership.id, now: NOW });
+  assert.deepEqual(g.steps.map((s) => s.done), [true, true, true, true]);
+  assert.equal(g.allDone, true);
+  assert.equal(g.line, 'All four steps done');
+  assert.ok(g.steps.every((s) => s.action === null));
+  // and without a dealership id, or with junk, it neither throws nor counts anything
+  assert.doesNotThrow(() => gettingStarted());
+  assert.equal(gettingStarted({ billing: 'x', invites: 'x', memberships: 'x', listings: 'x', now: 'not a time' }).done, 0);
+});
+
+test('the page: the Start your dealership form behind the flag, the rpc with the three fields, a live region, and every box labelled', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /client\.rpc\('create_dealership', \{ name, website, your_name: yourName \}\)/, 'the database function, through the client, with the contract\'s three parameters');
+  assert.match(js, /if \(CONFIG\.selfServeSignup\) return viewSignup\(\);/, 'the flag only decides whether the form shows');
+  assert.match(js, /Your account is not a member of any dealership yet\. Ask whoever set Lot Sync up for your store to add you\./, 'with the flag off the page says what it said');
+  const view = js.slice(js.indexOf('function viewSignup()'), js.indexOf('function originNoteHtml('));
+  assert.ok(view.length > 500, 'viewSignup moved: update this test');
+  for (const [id, words] of [['suName', 'W.name'], ['suWebsite', 'W.website'], ['suYou', 'W.yourName']]) {
+    assert.ok(view.includes(`<label for="${id}">\${esc(${words})}</label>`), `${id} has a label`);
+    assert.match(view, new RegExp(`<input type="text" id="${id}" name="[a-z_]+" required`), `${id} is a text box`);
+  }
+  assert.match(view, /aria-describedby="suOrigin"/, 'the address box is described by the origin line');
+  assert.match(view, /<p class="banner warn error" id="signupError" role="alert"><\/p>/, 'the live region is on the page, empty, from the start');
+  assert.match(view, /\$\{esc\(W\.already\)\}/, 'the line for a store that already uses Lot Sync');
+  assert.match(SIGNUP_WORDS.already, /ask its manager for an invite code and enter it in the Lot Sync extension/);
+  // a refusal keeps what was typed: onSignup never redraws the form
+  const submit = js.slice(js.indexOf('async function onSignup('), js.indexOf('\nfunction downloadCsv('));
+  assert.ok(submit.length > 500, 'onSignup moved: update this test');
+  assert.doesNotMatch(submit, /viewSignup\(\)|\.reset\(\)/, 'nothing clears the boxes');
+  assert.match(submit, /return signupSay\(signupRefusal\(answer && answer\.error\)\);/);
+  assert.match(submit, /state\.dealershipId = made\.dealership_id \|\| null;\s+try \{\s+await loadLive\(\);/, 'success reads the page again into the new dealership');
+  assert.match(read('manager/manager.css'), /\.signup \.banner\.error:empty \{ padding: 0; margin: 0; \}/, 'the empty live region stays in the page');
+});
+
+test('?mock=signup: the form whatever the flag says, create_dealership answered in the page, and no network', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /if \(params\.get\('mock'\) === 'signup'\) return showMockSignup\(\);/);
+  const mock = js.slice(js.indexOf('function showMockSignup()'), js.indexOf('// One line in the form\'s live region.'));
+  assert.ok(mock.length > 200, 'showMockSignup moved: update this test');
+  assert.match(mock, /viewSignup\(\);/);
+  assert.doesNotMatch(mock, /CONFIG\.selfServeSignup/, 'the sample shows the form whatever the flag says');
+  assert.doesNotMatch(mock, /connect\(|loadLive\(|fetch\(|import\(/, 'no network in sample-data mode');
+  assert.match(mock, /fn === 'create_dealership' \? mockCreateDealership\(args\)/);
+  assert.match(js, /const client = state\.mock \? mockClient : state\.supabase;/);
+  assert.match(js, /state\.data = mockNewDealership\(made, \{ yourName, now: new Date\(\)\.toISOString\(\) \}\);/);
+  // ?mock=1 still opens the sample dealership as before
+  assert.match(js, /if \(params\.get\('mock'\) === '1'\) return showMock\(\);/);
+  assert.match(js, /state\.data = mockData\(new Date\(\)\.toISOString\(\)\);/);
+});
+
+test('the page: Getting started first, for managers only, redrawn with the cards it reads, and its buttons move the focus', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /\$\('main'\)\.innerHTML = gettingStartedHtml\(\) \+ scan \+ billingHtml\(\)/, 'above the other cards');
+  assert.match(js, /if \(!state\.data \|\| myRole\(\) !== 'manager'\) return '';/);
+  assert.match(js, /billing: state\.mock \? state\.data\.billing : state\.billing\?\.status,/, 'the plan the Billing card shows');
+  assert.match(js, /invites: state\.invites,/, 'the open codes the Invite codes card shows');
+  assert.match(js, /data-action="goto" data-target="\$\{esc\(s\.action\.target\)\}"/);
+  assert.match(js, /case 'goto': goToCard\(btn\.dataset\.target\); break;/);
+  assert.match(js, /el\.focus\(\{ preventScroll: true \}\);/);
+  assert.match(js, /prefers-reduced-motion: reduce/);
+  for (const fn of ['renderBilling', 'renderInvites']) {
+    const body = js.slice(js.indexOf(`function ${fn}()`), js.indexOf('\n}\n', js.indexOf(`function ${fn}()`)));
+    assert.match(body, /renderGettingStarted\(\);/, `${fn} redraws Getting started too`);
+  }
+  // no query was added for it: the page reads the same tables as before
+  const reads = [...js.matchAll(/read\('([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(reads, ['dealerships', 'memberships', 'listings', 'todo_items', 'post_attempts', 'scan_summaries']);
+  assert.match(read('manager/manager.css'), /\.steps \{/);
+});
+
+test('help.md names the Start your dealership form and the Getting started card as the page labels them', () => {
+  const help = read('docs/help.md');
+  const section = help.slice(help.indexOf('## The manager view'), help.indexOf('## What Lot Sync never does'));
+  assert.ok(section.length > 200, 'docs/help.md has a manager view section');
+  for (const words of [SIGNUP_WORDS.heading, SIGNUP_WORDS.submit, SIGNUP_WORDS.name, SIGNUP_WORDS.website, SIGNUP_WORDS.yourName, 'Getting started', ...Object.values(GETTING_STARTED).map((s) => s.title)]) {
+    assert.ok(section.includes(words), `the manager view section does not name "${words}"`);
+  }
+  assert.match(section, /www included/, 'the address must match the address bar');
+  assert.match(section, /invite code/i, 'a store that already uses Lot Sync asks its manager for a code');
 });

@@ -26,8 +26,9 @@
 --
 -- The foreign keys already do the deleting, and these functions let them:
 -- every dealership_id references dealerships with on delete cascade
--- (0001_schema.sql, 0004_billing.sql), and memberships.user_id references
--- auth.users with on delete cascade. Nothing here disables a trigger or
+-- (0001_schema.sql, 0004_billing.sql), save signup_attempts' (below), and
+-- memberships.user_id and signup_attempts.user_id reference auth.users with
+-- on delete cascade. Nothing here disables a trigger or
 -- deletes around one. keep_a_manager (0002_rls.sql) lets a dealership's own
 -- deletion take its last manager and refuses anything else that would leave
 -- a dealership with none; forget_person checks for that first and says
@@ -39,6 +40,13 @@
 --   invite_misses   per account, not per dealership: not exported; forget_person deletes the person's.
 --   demo_requests   a visitor's request, sent before any dealership exists: not exported; forget_person deletes
 --                   the ones sent from the person's email.
+--   signup_settings the owner's switch for self-serve sign-up and its limits: nobody's record; nothing here touches it.
+--   signup_attempts each create_dealership() call that looked up its website (0007_signup.sql), per account. It
+--                   has a dealership_id, on a created row only, and it is set null rather than cascaded when the
+--                   dealership is deleted: the row is the account's record that it started a dealership, which
+--                   per_account keeps counting. Exported with the dealership as the time and outcome of how it
+--                   was started, and deleted with the person's account by forget_person (the auth.users cascade).
+--                   0007 creates the table after this file; PL/pgSQL looks a table up when a function first runs.
 --
 -- Error codes: P0002 no such dealership or account; P0007 confirm does not
 -- match, nothing changed; P0006 the person is the last manager of a
@@ -79,12 +87,21 @@ comment on function public.billing_events_of(uuid) is 'Owner only. The Stripe we
 --   subscriptions   every row, as stored
 --   invites         every row; the code of an unused invite is left out (null)
 --   billing_events  billing_events_of(), payload included
+--   signup_attempts the created row, if the dealership was started through
+--                   self-serve sign-up: its time and outcome, not the account
 --   counts          rows per list; notes: what is in the file and what is not
 -- Left out on purpose: the code of an unused invite (it may still let
 -- someone join for up to 7 days, and an export is a file that gets
 -- forwarded; the manager view lists the open codes to managers), the emails
 -- of people who are no longer members (their email is theirs, not the
--- dealership's), invite_misses and demo_requests (not the dealership's).
+-- dealership's), invite_misses and demo_requests (not the dealership's),
+-- and the user_id of the account that signed the dealership up. The policy
+-- promises a customer an export of "their dealership's records", and this
+-- file says it holds every row kept for the dealership: the created
+-- attempt carries the dealership's id, so its time and outcome are here.
+-- Which account made the call is not the dealership's record but the
+-- account's (the policy's "Account details"): the row outlives the
+-- dealership under that account and goes when the person is forgotten.
 -- A former member's rows stay in the file under their user id and with the
 -- salesperson name they posted under: removing a member clears neither, and
 -- only forget_person (below) clears the name. The notes say so. Reads every
@@ -137,7 +154,10 @@ begin
       from public.subscriptions s where s.dealership_id = d.id), '[]'::jsonb),
     'billing_events', coalesce((
       select jsonb_agg(to_jsonb(e) order by e.received_at, e.id)
-      from public.billing_events_of(d.id) e), '[]'::jsonb)
+      from public.billing_events_of(d.id) e), '[]'::jsonb),
+    'signup_attempts', coalesce((
+      select jsonb_agg(jsonb_build_object('at', a.at, 'outcome', a.outcome) order by a.at, a.id)
+      from public.signup_attempts a where a.dealership_id = d.id and a.outcome = 'created'), '[]'::jsonb)
   );
 
   return doc || jsonb_build_object(
@@ -146,6 +166,7 @@ begin
       'Every row Lot Sync''s database holds for this dealership, one list per table, as stored.',
       'memberships carries each current member''s account email. People who are no longer members have no email here; the rows they made keep their user_id and the salesperson name they posted under, unless they asked to be forgotten.',
       'The code of an unused invite is left out (null): it may still let someone join. Managers see open codes in the manager view.',
+      'signup_attempts says when the dealership was started through self-serve sign-up (empty when Lot Sync set it up), with the time and outcome only: which account started it is that account''s record.',
       'Not in the database, so not here: what each salesperson''s browser keeps (Settings, the Numbers tab, which form fields could not be filled). Nothing from Facebook beyond the listing links saved in listings.'
     )
   );
@@ -164,6 +185,9 @@ comment on function public.export_dealership(uuid) is 'Owner only. Every row of 
 -- nothing is deleted. The row is locked first, so no new row can be added
 -- under the dealership (an insert must lock the key it references) between
 -- the counts and the delete.
+-- Clears, keeping the row: the dealership's id on the signup attempt that
+-- created it (on delete set null), so that account's per_account count
+-- still holds.
 -- Keeps billing_events (the accounting record) and every auth.users row:
 -- the answer lists the members who now belong to no dealership, for
 -- forget_person when the request covers its people, and names the Stripe
@@ -252,7 +276,8 @@ comment on function public.delete_dealership(uuid, text) is 'Owner only. Deletes
 -- entries in Supabase's auth audit log when the project keeps it in the
 -- database (auth.audit_log_entries: sign-ins with email and IP address),
 -- and finally their auth.users row (Supabase deletes their sessions and
--- identities with it).
+-- identities with it, and the cascade takes their signup_attempts, counted
+-- first).
 -- Clears, keeping the rows: their name from listings.salesperson and
 -- post_attempts.salesperson on every row they made, and the listing link
 -- from their listings already taken down. The rows themselves are the
@@ -282,6 +307,7 @@ declare
   n_names_attempts bigint;
   n_misses bigint;
   n_demo bigint;
+  n_signups bigint;
   n_audit bigint := 0;
   notes jsonb := '[]'::jsonb;
 begin
@@ -338,6 +364,8 @@ begin
     end;
   end if;
 
+  -- the account's sign-up attempts go with the auth.users row below (on delete cascade)
+  select count(*) into n_signups from public.signup_attempts a where a.user_id = uid;
   delete from auth.users u where u.id = uid;
 
   return jsonb_build_object(
@@ -348,6 +376,7 @@ begin
       'unused_invites', unused_invites,
       'invite_misses', n_misses,
       'demo_requests', n_demo,
+      'signup_attempts', n_signups,
       'auth_audit_log_entries', n_audit,
       'auth_users', 1),
     'cleared', jsonb_build_object(

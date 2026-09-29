@@ -8,15 +8,17 @@
 //   POST …/rewrite/color     { photos, options } -> { ok, exterior, interior, confidence, model, costUsd }
 //   GET  …/rewrite/health    -> { ok, model, month, usd, capUsd, perMinute, dealership }
 //
-// Protection, in order: a valid Supabase user token (401), a membership in
-// a dealership (403; the one for the `origin` sent with the facts, matched
-// the way /sync matches it), the dealership's plan (402 with code 'lapsed'
-// and the plan when its subscription has lapsed, the same answer /sync
-// gives, on every route: nothing is spent for a store that no longer
-// pays), a per-user per-minute rate limit (429; kept in this instance's
-// memory, so with several instances a burst can exceed it by that factor),
-// and the dealership's monthly cost cap summed from rewrite_usage (429 with
-// a plain message; the extension then uses its template). The Anthropic
+// Protection, in order: a valid Supabase user token (401), a per-user
+// per-minute rate limit on /rewrite and /color (429, before the body or the
+// database are read, as /sync's brake; kept in this instance's memory, so
+// with several instances a burst can exceed it by that factor), the body
+// (400), a membership in a dealership (403; the one for the `origin` sent
+// with the facts, matched the way /sync matches it), the dealership's plan
+// (402 with code 'lapsed' and the plan when its subscription has lapsed,
+// the same answer /sync gives, on every route: nothing is spent for a
+// store that no longer pays), and the dealership's monthly cost cap summed
+// from rewrite_usage (429 with a plain message; the extension then uses
+// its template). test/fn-rewrite.test.js holds the order. The Anthropic
 // API key is a function secret; the browser never sees it. Claude is
 // called with fetch, no SDK, through the Messages API.
 //

@@ -1,7 +1,8 @@
-// Lot Sync landing page. Two jobs: fill the pricing section from pricing.json
-// (the one pricing config, copied from marketing/) and send the demo request
-// form. Everything else on the page works with this file switched off; the
-// pricing numbers are already in the HTML as fallback text.
+// Lot Sync landing page. Three jobs: fill the pricing section from
+// pricing.json (the one pricing config, copied from marketing/), send the demo
+// request form, and show the Start a free pilot links once config.js names the
+// manager view. Everything else on the page works with this file switched off;
+// the pricing numbers are already in the HTML as fallback text.
 
 import { SITE } from './config.js';
 
@@ -20,20 +21,45 @@ const FORMAT = {
   foundingDealerTerm: (p) => (p.foundingDealerMonths === 12 ? 'first year' : `first ${p.foundingDealerMonths} months`)
 };
 
+// Answers the pricing it read, or null when the fallback text stays.
 async function fillPricing() {
   let pricing;
   try {
     const res = await fetch('./pricing.json', { cache: 'no-store' });
-    if (!res.ok) return;
+    if (!res.ok) return null;
     pricing = await res.json();
   } catch {
-    return; // the fallback text in the HTML stays
+    return null; // the fallback text in the HTML stays
   }
   for (const el of document.querySelectorAll('[data-pricing]')) {
     const key = el.dataset.pricing;
     const fmt = FORMAT[key];
     if (key === 'foundingDealerTerm') el.textContent = fmt(pricing);
     else if (pricing[key] !== undefined) el.textContent = fmt ? fmt(pricing[key]) : String(pricing[key]);
+  }
+  return pricing;
+}
+
+// SITE.signupUrl as a link target: an https address or a path on this site.
+// Anything else (a typo, a bare host, another scheme) shows nothing rather
+// than a link that goes nowhere or somewhere unintended.
+const signupTarget = (value) => {
+  const url = String(value || '').trim();
+  return /^(https:\/\/[^\s/]|\/(?!\/)|\.\.?\/)\S*$/i.test(url) ? url : '';
+};
+
+// The Start a free pilot links are hidden in the HTML, so a page whose
+// config.js has no signupUrl says nothing about sign-up. The pilot's length
+// is pricing.json's, like every other number here; when that could not be
+// read the link just says "Start a free pilot".
+function showSignup(pricing) {
+  const url = signupTarget(SITE.signupUrl);
+  if (!url) return;
+  const days = pricing && Number.isInteger(pricing.pilotDays) && pricing.pilotDays > 0 ? FORMAT.pilotDays(pricing.pilotDays) : '';
+  for (const link of document.querySelectorAll('a[data-signup]')) {
+    link.href = url;
+    link.textContent = days ? `Start a free ${days}-day pilot` : 'Start a free pilot';
+    link.hidden = false;
   }
 }
 
@@ -104,5 +130,5 @@ function wireForm() {
   });
 }
 
-fillPricing();
+fillPricing().then(showSignup);
 wireForm();

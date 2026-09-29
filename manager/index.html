@@ -4,12 +4,16 @@
   listed and for how long, price changes not yet updated; and, from
   Milestone 5, the Billing card (the free pilot, Subscribe and Manage
   billing through Stripe) and, for managers, the Invite codes card (Invite
-  a salesperson, Invite a manager). Plain HTML, CSS and ES modules; every path is
+  a salesperson, Invite a manager) and the Getting started card. Once the
+  owner opens self-serve sign-up, a signed-in person in no dealership gets
+  the Start your dealership form. Plain HTML, CSS and ES modules; every path is
   relative, so the folder can be hosted as static files or opened straight
   from disk.
 
   Not set up yet? Open index.html?mock=1 (or click "Try with sample data") for
-  a made-up dealership. Chrome and Safari refuse to load ES modules from a
+  a made-up dealership, or index.html?mock=signup for the Start your
+  dealership form, which lands in a new, empty sample dealership. Neither
+  touches the network. Chrome and Safari refuse to load ES modules from a
   file:// address, so for the sample data on disk either open the file in
   Firefox or run `node manager/serve.mjs` and open the address it prints.
   The live data needs manager/config.js filled in (see the comment there).

@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
+  <!-- Scripts, styles, images and data only from this site; calls only to this site and the lead function on
+       Supabase (config.js demoEndpoint); the form's own action is the mailto fallback. Change connect-src with
+       demoEndpoint if the function is ever served from another host. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action mailto:">
   <title>Lot Sync: your used cars on Marketplace, from your website</title>
   <meta name="description" content="Lot Sync is a Chrome extension for dealership salespeople. It fills in the Facebook Marketplace vehicle listing from your dealership website, photos included. You check it and click Publish; Lot Sync never does.">
   <link rel="stylesheet" href="site.css">
@@ -33,7 +37,12 @@
       <div class="wrap narrow">
         <h1 id="hero-h">Your used cars on Facebook Marketplace, from your website, in seconds.</h1>
         <p class="lead">Lot Sync reads your dealership website's used inventory, fills in the Marketplace vehicle listing, photos included, and tells you the same day when a car sells or its price changes.</p>
-        <a class="button" href="#demo">Request a demo</a>
+        <!-- The Start a free pilot links stay hidden, here and under Pricing, until config.js names the manager view
+             (signupUrl): site.js then shows them, with the pilot's length from pricing.json. -->
+        <div class="actions">
+          <a class="button" href="#demo">Request a demo</a>
+          <a class="button alt" data-signup hidden>Start a free pilot</a>
+        </div>
         <p class="you">You click Publish. Lot Sync never does.</p>
       </div>
     </section>
@@ -194,6 +203,10 @@
           </ul>
         </div>
         <p class="muted">These are planned prices. Pricing is confirmed with you before any paid subscription starts.</p>
+        <div class="actions">
+          <a class="button" href="#demo">Request a demo</a>
+          <a class="button alt" data-signup hidden>Start a free pilot</a>
+        </div>
       </div>
     </section>
 
@@ -276,9 +289,9 @@
   <footer>
     <div class="wrap">
       <ul>
-        <li><a href="/terms">Terms of service</a></li>
-        <li><a href="/privacy">Privacy policy</a></li>
-        <li><a href="/posting-rules">Posting rules</a></li>
+        <li><a href="legal/terms.html">Terms of service</a></li>
+        <li><a href="legal/privacy.html">Privacy policy</a></li>
+        <li><a href="legal/posting-rules.html">Posting rules</a></li>
       </ul>
       <p>Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.</p>
     </div>

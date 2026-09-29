@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Lot Sync accessibility check (`npm run test:a11y`): opens the landing page,
-// the manager view (sample data) and, through the in-browser sandbox, the
-// real popup and side panel, and checks each for the failures a keyboard or
-// screen-reader user meets first. No dependency beyond Playwright: the rules
+// Lot Sync accessibility check (`npm run test:a11y`): opens the landing page
+// (also as it looks once sign-up is open), the three legal pages
+// (site/legal/), the manager view (sample data) and, through the in-browser
+// sandbox, the real popup and side panel, and checks each for the failures a
+// keyboard or screen-reader user meets first. No dependency beyond Playwright: the rules
 // are plain DOM checks run inside each page (auditPage, below).
 //
 //   - every form control has a name (a label, aria-label or aria-labelledby);
@@ -18,9 +19,10 @@
 // rule and the element.
 
 import { chromium } from 'playwright';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { startServer } from '../demo/serve.mjs';
+import { PAGES as LEGAL_PAGES } from './legal-pages.mjs';
 
 // Runs inside the page: must be self-contained.
 export function auditPage() {
@@ -252,6 +254,25 @@ async function main() {
       await audit(`landing page (${scheme})`, page);
       await page.setViewportSize({ width: 390, height: 844 });
       await audit(`landing page, phone (${scheme})`, page);
+      // the Start a free pilot links show only once config.js names the manager view: audit the page as it
+      // will look then, from a config.js served with signupUrl set (the file on disk is not touched)
+      const config = readFileSync(new URL('../site/config.js', import.meta.url), 'utf8');
+      const open = config.replace(/signupUrl: '[^']*'/, "signupUrl: '../manager/index.html'");
+      if (open === config) results.push({ page: `landing page, sign-up open (${scheme})`, rule: 'site/config.js has no signupUrl to set for the audit', el: '', text: '', detail: '' });
+      await page.route('**/site/config.js', (route) => route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: open }));
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`${base}/site/index.html`);
+      await page.locator('a[data-signup]').first().waitFor({ state: 'visible', timeout: 15000 });
+      await audit(`landing page, sign-up open (${scheme})`, page);
+      await page.unroute('**/site/config.js');
+      for (const legal of LEGAL_PAGES) {
+        const name = `${legal.label} page (${scheme})`;
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.goto(`${base}/${legal.page}`);
+        await audit(name, page);
+        await page.setViewportSize({ width: 390, height: 844 });
+        await audit(name.replace(' (', ', phone ('), page);
+      }
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.goto(`${base}/manager/index.html?mock=1`);
       await page.locator('#invites').waitFor({ timeout: 15000 });

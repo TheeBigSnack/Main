@@ -2,11 +2,14 @@
 // dealerships they belong to, and where a dealership stands with billing
 // (its subscriptions row). Every function starts here.
 //
-// The caller's own client (anon key + their token) is what the functions
-// read and write with, so row-level security decides what they can touch.
-// The service-role client exists for one job, the rewrite function's usage
-// log, and is created only inside the function process; the key is a
-// function secret and never reaches a browser.
+// The caller's own client (anon key + their token) is what /sync and the
+// membership and plan checks read and write with, so row-level security
+// decides what they can touch. The service-role client is for the tables no
+// API role may touch: the rewrite function's usage log (rewrite_usage), the
+// billing function's subscriptions, billing_events and its dealership
+// lookup, and the lead function's demo_requests. It is created only inside
+// the function process; the key is a function secret and never reaches a
+// browser.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { isRecord } from './http.ts';
@@ -99,7 +102,7 @@ export async function subscriptionRowOf(client: SupabaseClient, dealershipId: st
   return isRecord(data) ? data : null;
 }
 
-// Bypasses row-level security. Only for the usage log, only in here.
+// Bypasses row-level security. Only for the tables above, only in here.
 export function serviceClient(): SupabaseClient {
   const url = env('SUPABASE_URL');
   const key = env('SUPABASE_SERVICE_ROLE_KEY');
