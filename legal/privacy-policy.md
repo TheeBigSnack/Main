@@ -16,7 +16,8 @@ Last updated: [date]. [Lot Sync entity name] ("we") makes the Lot Sync browser e
 | Account details (from Milestone 4: email for magic-link sign-in, dealership membership, role) | Our database (Supabase) | Sign-in and access control |
 | Billing details (from Milestone 5: dealership billing contact, subscription status) | Our payment processor (Stripe); we do not store card numbers | Billing |
 | Rewrite requests (vehicle facts, dealership name and city, salesperson name and role, price note) | Sent to our rewrite service and on to Anthropic's API only when the dealership turns the feature on | To draft a description |
-| Support messages and demo requests (name, dealership, role, email, phone) | Our inbox / database | To respond |
+| Support messages (name, dealership, role, email, phone, and what the message says) | Our inbox and the support log | To respond |
+| Demo requests from our website (name, dealership, dealership website, email, phone, message, and when and from which page it was sent) | Our database (Supabase), or our inbox when the form opens the visitor's own mail app instead | To respond |
 
 We do **not** collect: Facebook passwords, cookies, session tokens, messages, buyer information, or anything from Facebook beyond the listing address the User saves or Lot Sync detects on the User's own tab. We do not track browsing outside the dealership website and the Marketplace create-listing page while the User is posting.
 

@@ -398,7 +398,7 @@ export const INVITE_BUTTONS = Object.freeze({
 });
 export const INVITE_DAYS = 7; // invites.expires_at's default in 0001_schema.sql
 export const INVITE_LINE = `A code puts one person into this dealership, as a salesperson or as a manager. It works once and for ${INVITE_DAYS} days.`;
-export const INVITE_HINT = 'These are the dealership\'s open codes: not used yet and not expired. Revoke one that went to the wrong person. A code stops working when the manager who made it leaves the dealership. A code belongs to one person.';
+export const INVITE_HINT = 'These are the dealership\'s open codes: not used yet and not expired. Revoke one that went to the wrong person. A code stops working when the manager who made it leaves the dealership or stops being a manager. A code belongs to one person.';
 
 // The signed-in person's role in the dealership, from the memberships rows
 // the page read (a manager sees every row, a salesperson only their own).
@@ -463,7 +463,19 @@ export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZo
 // ---------- the Team card ----------
 
 export const TEAM_LINE = 'Everyone in this dealership\'s Lot Sync account. A manager can invite, bill and change the team; a salesperson posts.';
-export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. A dealership always keeps at least one manager.';
+export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. Making a manager a salesperson stops the codes they made from working. A dealership always keeps at least one manager.';
+export const TEAM_UNCHANGED = 'Nothing changed: the team was changed elsewhere.';
+
+// The Team card's line after Make manager, Make salesperson or Remove, from
+// the rows the database answered (the page asks for the changed row back).
+// Row-level security answers a row this person may no longer touch (removed
+// from another page, or they are no longer a manager) with no row and no
+// error, so an empty answer claims nothing.
+export function teamChangeNote(kind, who, to, changedRows) {
+  if (!Array.isArray(changedRows) || !changedRows.length) return TEAM_UNCHANGED;
+  const name = text(who, 80) || 'This person';
+  return kind === 'remove' ? `${name} is no longer in the dealership.` : `${name} is now a ${to}.`;
+}
 
 /**
  * The Team card: every member of the dealership with their role, and what a

@@ -23,7 +23,7 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 ## Use
 
 1. Open the dealership website's used inventory page, e.g. `ronlewischryslerdodgejeepramwaynesburg.com/used-vehicles/`.
-2. Click the Lot Sync icon. The first time it offers **Set up Lot Sync**: two minutes in the side panel to read the website, pick your store, enter your name, confirm the store's address (read from the website), allow automatic rescans, read the posting rules and, once the Terms of Service and Privacy Policy are published, accept them (the acceptance and its version are kept with your synced profile; Settings shows it and has the same tick). (Or skip it: **Settings** has the same fields.)
+2. Click the Lot Sync icon. The first time it offers **Set up Lot Sync**: a few steps in the side panel to read the website, pick your store, enter your name, confirm the store's address (read from the website), allow automatic rescans, read the posting rules and, once the Terms of Service and Privacy Policy are published, accept them (the acceptance and its version are kept with your synced profile; Settings shows it and has the same tick). (Or skip it: **Settings** has the same fields.)
 3. Click **Scan website** whenever you like. With automatic rescans on, Lot Sync also re-reads the website every 3 hours while Chrome is open and shows your to-do count on its icon.
 4. **Ready to post** lists pre-owned cars at your store that have photos and a price. Click **Post** on one. The side panel opens and:
    - re-checks the car on the website (still pre-owned, still on the lot, still priced),

@@ -4,11 +4,15 @@
 // the outside, the way a browser or a stranger would, and prints a checklist:
 //
 //   - the three config files name the same project and anon key;
-//   - with the anon key alone, every table reads as empty or refused, and
-//     redeem_invite is refused;
+//   - with the anon key alone, every table reads as empty or refused (a 404
+//     is a failure: the table is missing), and redeem_invite is refused;
 //   - each function answers a CORS preflight from the extension, refuses a
 //     call with no token (401), and the lead function refuses a page that is
-//     not the landing page (403);
+//     not the landing page (403). The README deploys billing and lead after
+//     step 6 (its Billing and Demo requests sections), so a 404 from either is
+//     a note, not a failure, and so is the webhook's 500 that says
+//     STRIPE_WEBHOOK_SECRET is not set yet; rerun it after those sections and
+//     their lines read ok;
 //   - with LOTSYNC_TEST_TOKEN (the access token of a signed-in test account
 //     that belongs to no dealership), /sync answers 403, and eleven wrong
 //     invite codes end in the throttle's P0005, which proves the misses are
@@ -21,7 +25,8 @@
 //
 // It reads and never writes: the only thing it changes is the test
 // account's own invite-miss count (only with LOTSYNC_TEST_TOKEN). It keeps
-// nothing and prints no key. Exit code 0 when nothing failed.
+// nothing and prints no key. Exit code 0 when nothing failed (notes do not
+// fail the run).
 
 import { pathToFileURL } from 'node:url';
 
@@ -38,13 +43,30 @@ export const FUNCTIONS = Object.freeze([
   { name: 'billing', method: 'GET', path: 'billing/status', body: null },
 ]);
 
+// The functions supabase/README.md deploys after step 6, and the section that
+// deploys each. Until then the gateway answers 404, which is a note.
+export const DEPLOYED_LATER = Object.freeze({
+  billing: 'supabase/README.md, Billing',
+  lead: 'supabase/README.md, Demo requests',
+});
+
 const trimUrl = (u) => String(u || '').trim().replace(/\/+$/, '');
 
-// A read the anon key must not get anything from: refused (401, 403, 404 for a
-// table the API does not expose) or an empty list.
+// A read the anon key must not get anything from: refused (401, 403) or an
+// empty list. Never a 404: every name in TABLES is a table in the schema the
+// API exposes, so a 404 means the table is missing (a migration not pushed),
+// and whatever needs it fails on its first real request.
 export function nothingRead(status, body) {
-  if ([401, 403, 404].includes(status)) return true;
+  if ([401, 403].includes(status)) return true;
   return status === 200 && Array.isArray(body) && body.length === 0;
+}
+
+// A 404 from a function in DEPLOYED_LATER turns its finding into a note that
+// says which section deploys it; anything else, and any other function, is
+// judged as it stands.
+export function notDeployedYet(name, status, finding) {
+  if (status !== 404 || !DEPLOYED_LATER[name]) return finding;
+  return { ...finding, ok: false, warnOnly: true, detail: `404, not deployed yet: ${DEPLOYED_LATER[name]}` };
 }
 
 // The three config files: filled, and naming the same project and key.
@@ -95,27 +117,37 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
   // the anon key reads nothing
   for (const table of TABLES) {
     const r = await call(fetchImpl, `${base}/rest/v1/${table}?select=*&limit=1`, { headers: anon });
-    out.push({ check: `anon reads nothing from ${table}`, ok: nothingRead(r.status, r.body), detail: `${r.status}${Array.isArray(r.body) ? `, ${r.body.length} row(s)` : ''}` });
+    const detail = r.status === 404 ? '404, table missing: is every migration pushed? (supabase db push)' : `${r.status}${Array.isArray(r.body) ? `, ${r.body.length} row(s)` : ''}`;
+    out.push({ check: `anon reads nothing from ${table}`, ok: nothingRead(r.status, r.body), detail });
   }
   const redeem = await call(fetchImpl, `${base}/rest/v1/rpc/redeem_invite`, { method: 'POST', headers: { ...anon, 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 'CHECKDEPLOY0', display_name: null }) });
   out.push({ check: 'anon cannot call redeem_invite', ok: [401, 403, 404].includes(redeem.status), detail: String(redeem.status) });
 
-  // the functions: CORS for the extension, 401 without a token
+  // the functions: CORS for the extension, 401 without a token (billing: a
+  // note until the README's Billing section has deployed it)
   for (const f of FUNCTIONS) {
     const pre = await call(fetchImpl, `${base}/functions/v1/${f.path}`, { method: 'OPTIONS', headers: { Origin: EXTENSION_ORIGIN, 'Access-Control-Request-Method': f.method, 'Access-Control-Request-Headers': 'authorization, apikey, content-type' } });
-    out.push({ check: `${f.name}: answers the extension's CORS preflight`, ok: pre.status >= 200 && pre.status < 300 && header(pre.headers, 'access-control-allow-origin') === EXTENSION_ORIGIN, detail: `${pre.status}, allow-origin ${header(pre.headers, 'access-control-allow-origin') || 'none'}` });
+    out.push(notDeployedYet(f.name, pre.status, { check: `${f.name}: answers the extension's CORS preflight`, ok: pre.status >= 200 && pre.status < 300 && header(pre.headers, 'access-control-allow-origin') === EXTENSION_ORIGIN, detail: `${pre.status}, allow-origin ${header(pre.headers, 'access-control-allow-origin') || 'none'}` }));
     const bare = await call(fetchImpl, `${base}/functions/v1/${f.path}`, { method: f.method, headers: { apikey: anonKey, 'Content-Type': 'application/json', Origin: EXTENSION_ORIGIN }, body: f.body ? JSON.stringify(f.body) : undefined });
-    out.push({ check: `${f.name}: refuses a call with no user token`, ok: bare.status === 401, detail: String(bare.status) });
+    out.push(notDeployedYet(f.name, bare.status, { check: `${f.name}: refuses a call with no user token`, ok: bare.status === 401, detail: String(bare.status) }));
   }
+  // An unsigned event gets 400 once the signing secret is set. Before that the
+  // function itself answers 500 naming STRIPE_WEBHOOK_SECRET (billing is
+  // deployed, Stripe is not set up yet): a note. Any other 500 is a failure.
   const webhook = await call(fetchImpl, `${base}/functions/v1/billing/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  out.push({ check: 'billing: the webhook refuses an unsigned event', ok: webhook.status === 400, detail: webhook.status === 500 ? '500: is STRIPE_WEBHOOK_SECRET set on the function?' : String(webhook.status) });
+  const webhookCheck = 'billing: the webhook refuses an unsigned event';
+  const noSecretYet = webhook.status === 500 && /STRIPE_WEBHOOK_SECRET/.test(String((webhook.body && webhook.body.error) || ''));
+  out.push(notDeployedYet('billing', webhook.status, noSecretYet
+    ? { check: webhookCheck, ok: false, warnOnly: true, detail: `500, STRIPE_WEBHOOK_SECRET is not set yet: ${DEPLOYED_LATER.billing}` }
+    : { check: webhookCheck, ok: webhook.status === 400, detail: String(webhook.status) }));
 
-  // the lead function: only the landing page
+  // the lead function: only the landing page (a note until the README's Demo
+  // requests section has deployed it)
   const stranger = await call(fetchImpl, `${base}/functions/v1/lead`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://not-the-landing-page.example' }, body: '{}' });
-  out.push({ check: 'lead: refuses a page that is not the landing page', ok: stranger.status === 403, detail: String(stranger.status) });
+  out.push(notDeployedYet('lead', stranger.status, { check: 'lead: refuses a page that is not the landing page', ok: stranger.status === 403, detail: String(stranger.status) }));
   if (siteOrigin) {
     const pre = await call(fetchImpl, `${base}/functions/v1/lead`, { method: 'OPTIONS', headers: { Origin: siteOrigin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } });
-    out.push({ check: 'lead: answers the landing page\'s CORS preflight', ok: header(pre.headers, 'access-control-allow-origin') === siteOrigin, detail: `allow-origin ${header(pre.headers, 'access-control-allow-origin') || 'none'} (is LEAD_ORIGINS set to ${siteOrigin}?)` });
+    out.push(notDeployedYet('lead', pre.status, { check: 'lead: answers the landing page\'s CORS preflight', ok: header(pre.headers, 'access-control-allow-origin') === siteOrigin, detail: `allow-origin ${header(pre.headers, 'access-control-allow-origin') || 'none'} (is LEAD_ORIGINS set to ${siteOrigin}?)` }));
   }
 
   // with a signed-in test account that belongs to no dealership
@@ -133,16 +165,20 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
     const throttled = last && last.body && last.body.code === 'P0005';
     out.push({ check: 'redeem_invite: wrong codes are counted and the throttle answers P0005', ok: Boolean(throttled), detail: throttled ? 'the misses survive the call (PostgREST commits the 400 answer)' : `last answer ${last && last.status} ${JSON.stringify(last && last.body)}: the misses may be rolled back; see supabase/README.md step 5` });
   } else {
-    out.push({ check: 'the signed-in checks (sync 403, the invite throttle)', ok: true, detail: 'skipped: set LOTSYNC_TEST_TOKEN to run them', warnOnly: true });
+    out.push({ check: 'the signed-in checks (sync 403, the invite throttle)', ok: false, detail: 'skipped: set LOTSYNC_TEST_TOKEN to run them', warnOnly: true });
   }
   return out;
 }
 
+// A note is a check that did not pass and does not fail the run: a function
+// not deployed yet, a skipped check, a config line that is optional. The last
+// line says "Every check passed." only when there is neither.
 export function report(findings) {
   const lines = findings.map((f) => `${f.ok ? 'ok  ' : f.warnOnly ? 'note' : 'FAIL'}  ${f.check}${f.detail ? ` (${f.detail})` : ''}`);
   const failed = findings.filter((f) => !f.ok && !f.warnOnly).length;
-  lines.push('', failed ? `${failed} check(s) failed.` : 'Every check passed.');
-  return { text: lines.join('\n'), failed };
+  const notes = findings.filter((f) => !f.ok && f.warnOnly).length;
+  lines.push('', failed ? `${failed} check(s) failed.` : notes ? `Nothing failed; ${notes} note(s) above.` : 'Every check passed.');
+  return { text: lines.join('\n'), failed, notes };
 }
 
 async function main() {

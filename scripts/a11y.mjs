@@ -149,32 +149,79 @@ export function auditPage() {
 }
 
 // Presses Tab through the page (or frame) the way a keyboard user does and
-// reports each control that shows no focus ring. Up to `limit` stops; stops
-// early when focus comes back round or leaves the frame.
-export async function focusWalk(page, target, limit = 60) {
+// reports each control that shows no focus ring. The walk ends when focus
+// comes back to an element it has already stopped on, or leaves the frame.
+// A repeat is the same element, never the same label: a page has many
+// id-less buttons called Copy or Remove, and each is its own stop. `limit`
+// is only a backstop, about four times the longest audited page (the
+// popup's Settings, 31 controls when this was written). A walk that reaches
+// it is a finding, so a page that outgrows it fails instead of passing
+// half-walked. Answers the findings and how many controls the walk reached.
+export async function focusWalk(page, target, limit = 120) {
   const found = [];
-  await target.evaluate(() => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); window.focus(); });
-  const seen = new Set();
+  await target.evaluate(() => {
+    // the elements this walk has stopped on, kept in the page (a set, not a mark on the
+    // element: the page's own elements are left as they were, and every walk starts empty)
+    window.__lotSyncA11yWalk = new WeakSet();
+    // start at the top: a click before the walk (a tab of the popup, say) leaves the
+    // browser's Tab starting point on that control, and blur() does not move it; a
+    // throwaway first element, focused and removed, puts it before everything else
+    const top = document.createElement('span');
+    top.tabIndex = -1;
+    document.body.prepend(top);
+    top.focus();
+    top.remove();
+    window.focus();
+  });
+  let reached = 0;
+  let ended = false;
   for (let i = 0; i < limit; i += 1) {
     await page.keyboard.press('Tab');
     const info = await target.evaluate(() => {
       const el = document.activeElement;
       if (!el || el === document.body || !document.hasFocus()) return null;
+      const visited = window.__lotSyncA11yWalk || (window.__lotSyncA11yWalk = new WeakSet());
+      if (visited.has(el)) return { repeat: true };
+      visited.add(el);
       const s = getComputedStyle(el);
       const ring = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0) || (s.boxShadow && s.boxShadow !== 'none');
-      const key = el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + '|' + (el.textContent || el.value || '').trim().slice(0, 30);
-      return { key, ring, type: el.type || '', tag: el.tagName.toLowerCase() + (el.id ? `#${el.id}` : ''), text: (el.textContent || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 40) };
+      const cls = typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : '';
+      return { ring, type: el.type || '', tag: el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + cls, text: (el.textContent || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 40) };
     });
-    if (!info || seen.has(info.key)) break;
-    seen.add(info.key);
+    if (!info || info.repeat) {
+      ended = true;
+      break;
+    }
+    reached += 1;
     if (!info.ring && info.type !== 'radio' && info.type !== 'checkbox') found.push({ rule: 'no visible focus ring', el: info.tag, text: info.text, detail: '' });
   }
-  if (seen.size === 0) {
+  if (!ended) found.push({ rule: 'the Tab walk reached its limit before focus came back round', el: '', text: '', detail: `${limit} controls; the rest of the page was not checked` });
+  if (reached === 0) {
     // a page with controls the keyboard never reached; a page with none (the idle side panel) is fine
     const controls = await target.evaluate(() => [...document.querySelectorAll('a[href], button:not([disabled]), input:not([type=hidden]):not([disabled]), select, textarea')].filter((el) => el.getBoundingClientRect().width > 0).length);
     if (controls) found.push({ rule: 'the keyboard cannot reach any control', el: '', text: '', detail: `${controls} control(s) on the page` });
   }
-  return found;
+  return { found, reached };
+}
+
+// The walk is checked before any real page, on a page made to fail: two
+// id-less buttons with the same label, the second with its focus ring
+// removed, then a link. A walk that took the second Copy for focus coming
+// back round would stop there and pass every real page unchecked; one that
+// started from the last click (the link, here) would miss both buttons.
+// Answers '' when the walk found exactly that one control, else what went
+// wrong.
+export async function checkTheWalk(browser) {
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<!doctype html><html lang="en"><head><title>Walk check</title><style>.bare:focus-visible { outline: none; box-shadow: none; }</style></head><body><button type="button">Copy</button><button type="button" class="bare">Copy</button><a href="#end">Copy</a></body></html>');
+    await page.click('a');
+    const { found, reached } = await focusWalk(page, page);
+    const ok = reached === 3 && found.length === 1 && found[0].rule === 'no visible focus ring' && found[0].el === 'button.bare';
+    return ok ? '' : `on a page of three controls, the second one without a focus ring, it reached ${reached} and reported ${JSON.stringify(found)}`;
+  } finally {
+    await page.close();
+  }
 }
 
 const DEFAULT_CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -185,13 +232,19 @@ async function main() {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ executablePath, headless: true });
   const results = [];
+  const reachedBy = new Map(); // page -> controls the Tab walk reached, printed so the coverage shows
   let current = null; // the page the frames belong to, for the keyboard
   const audit = async (name, target) => {
     const found = await target.evaluate(`(${auditPage.toString()})()`);
-    found.push(...(await focusWalk(current, target)));
+    const walk = await focusWalk(current, target);
+    found.push(...walk.found);
+    reachedBy.set(name, walk.reached);
     results.push(...found.map((f) => ({ page: name, ...f })));
   };
   try {
+    const broken = await checkTheWalk(browser);
+    if (broken) results.push({ page: 'the Tab walk itself', rule: 'the walk misses a control without a focus ring', el: '', text: '', detail: broken });
+
     for (const scheme of ['light', 'dark']) {
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: scheme });
       current = page;
@@ -245,6 +298,7 @@ async function main() {
     await browser.close();
     server.close();
   }
+  for (const [page, n] of reachedBy) console.log(`${page}: the Tab key reached ${n} control${n === 1 ? '' : 's'}`);
   const byPage = new Map();
   for (const r of results) byPage.set(r.page, [...(byPage.get(r.page) || []), r]);
   for (const [page, list] of byPage) {

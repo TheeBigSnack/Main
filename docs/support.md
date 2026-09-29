@@ -66,8 +66,32 @@ The privacy policy (`legal/privacy-policy.md`, "Your choices and rights") lets a
 - When the person is the last manager of a dealership, `forget_person` refuses. Write to the dealership to name a new manager first; if nobody is left, or the dealership is leaving too, the dealership is deleted first. The person's request is still finished within 30 days.
 - The first reply goes out within one business day, like every request. The request is finished within 30 days of being verified: the same 30 days the policy gives for deleting a dealership's records after its subscription ends.
 - Tell the person what the database cannot reach: their own browser (Settings, **Clear everything for this website** and **Forget my synced profile**), their listings on Facebook (theirs to delete; Lot Sync never does), and copies the dealership already holds.
-- A request to correct data: a person corrects their own name and role in Settings (what their listings are signed with), and a manager corrects a member's name or role in the Team card. Anything else is corrected by the owner in SQL, after the same verification as an export.
-- A person asking for a copy of their own data is answered by hand, within the same 30 days: their account email, their memberships and the rows that carry their user id, taken from `export_dealership` for each of their dealerships, and nobody else's rows.
+- A request to correct data: a person corrects their own name and role in Settings, which is what their listings are signed with from then on; it does not change the name already stored with the dealership. A manager corrects a member's role in the Team card, which has no way to rename anyone. The stored name (the one the Team card and the manager view show, taken from Settings when the person joined, and the one on the listings and post attempts they already uploaded), and anything else, is corrected by the owner in SQL, after the same verification as an export. For a name, with their user id (the first statement in the next item finds it):
+
+  ```sql
+  update public.memberships set name = '<the corrected name>' where user_id = '<user id>';
+  update public.listings set salesperson = '<the corrected name>' where user_id = '<user id>' and salesperson is not null;
+  update public.post_attempts set salesperson = '<the corrected name>' where user_id = '<user id>' and salesperson is not null;
+  ```
+
+- A person asking for a copy of their own data is answered by hand, within the same 30 days, verified as for **Forget a person**. The copy is every row that carries their user id, in every dealership they belong to or have left (a member who was removed keeps their listings and post attempts under that id), plus the demo requests sent from their email, and nobody else's rows. `export_dealership` is not the tool: it covers one dealership they are still in, and it leaves out their invite misses and demo requests. In the SQL editor, find the id, then run one statement per table (each only reads) and save each result:
+
+  ```sql
+  select id, email from auth.users where lower(email) = lower('<their email>');
+
+  select id, email, created_at, last_sign_in_at from auth.users where id = '<user id>';
+  select d.name as dealership, d.website_origin, m.* from public.memberships m join public.dealerships d on d.id = m.dealership_id where m.user_id = '<user id>';
+  select d.name as dealership, l.* from public.listings l join public.dealerships d on d.id = l.dealership_id where l.user_id = '<user id>';
+  select d.name as dealership, a.* from public.post_attempts a join public.dealerships d on d.id = a.dealership_id where a.user_id = '<user id>';
+  select d.name as dealership, r.* from public.rewrite_usage r join public.dealerships d on d.id = r.dealership_id where r.user_id = '<user id>';
+  select d.name as dealership, case when i.used_at is null then '(unused: left out)' else i.code end as code, i.role, i.created_by, i.created_at, i.expires_at, i.used_by, i.used_at
+    from public.invites i join public.dealerships d on d.id = i.dealership_id where '<user id>' in (i.created_by, i.used_by);
+  select * from public.invite_misses where user_id = '<user id>';
+  select * from public.demo_requests where lower(trim(email)) = lower('<their email>');
+  select created_at, ip_address, payload from auth.audit_log_entries where payload ->> 'actor_id' = '<user id>';
+  ```
+
+  The last one reads Supabase's auth audit log (their sign-ins, with IP address) and exists only when the project keeps that log in the database; skip it when the table is not there. An unused code stays out, as in the dealership export: it may still let someone join. A person with no account, who only sent a demo request, gets that statement's rows alone. Send the results as a reply to the address on the account (or the address the demo request came from), then delete your copy; the log records that it was sent, never the rows.
 - Log each request like any other: the request type in **What happened**, no severity (it is not a fault), and in **Fix commit** the function that was run and the counts it answered. Never the export itself, and nothing from it.
 
 ## Fixing

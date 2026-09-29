@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, TEAM_HINT, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -396,7 +396,8 @@ test('inviteCard: a manager gets the two buttons in the SQL\'s two roles; a sale
   assert.equal(c.line, 'A code puts one person into this dealership, as a salesperson or as a manager. It works once and for 7 days.');
   assert.equal(c.hint, INVITE_HINT);
   assert.match(c.hint, /open codes: not used yet and not expired/);
-  assert.match(c.hint, /stops working when the manager who made it leaves/, 'the rule redeem_invite and the trigger enforce');
+  assert.match(c.hint, /stops working when the manager who made it leaves the dealership or stops being a manager\./, 'the rule redeem_invite and the trigger enforce');
+  assert.match(read('supabase/migrations/0002_rls.sql'), /m\.user_id = inv\.created_by[\s\S]{0,160}m\.role = 'manager'/, 'redeem_invite refuses a code whose maker is no longer a manager, not only one who left');
   assert.match(read('supabase/migrations/0001_schema.sql'), new RegExp(`expires_at timestamptz not null default \\(now\\(\\) \\+ interval '${INVITE_DAYS} days'\\)`), 'INVITE_DAYS is the schema\'s');
   const invites = [{ code: 'ABCDEF012345', role: 'salesperson', created_at: NOW }];
   for (const role of ['salesperson', '', undefined, 'owner']) {
@@ -662,13 +663,38 @@ test('teamCard: a manager sees everyone with the right actions, the last manager
   assert.equal(teamCard(ms, { role: 'salesperson' }).manager, false);
   assert.doesNotThrow(() => teamCard('junk', { role: 'manager' }));
   assert.match(TEAM_HINT, /always keeps at least one manager/);
+  assert.match(TEAM_HINT, /Making a manager a salesperson stops the codes they made from working\./, 'Make salesperson says what it does to their codes');
+});
+
+test('teamChangeNote: the Team card claims a change only when the database answered the changed row', () => {
+  const row = [{ user_id: 'u1' }];
+  assert.equal(teamChangeNote('role', 'Sam', 'manager', row), 'Sam is now a manager.');
+  assert.equal(teamChangeNote('role', 'Jamie', 'salesperson', row), 'Jamie is now a salesperson.');
+  assert.equal(teamChangeNote('remove', 'Sam', undefined, row), 'Sam is no longer in the dealership.');
+  assert.equal(teamChangeNote('remove', '', undefined, row), 'This person is no longer in the dealership.');
+  // row-level security answers a row this person may no longer touch with no row and no error
+  for (const none of [[], null, undefined, {}, 'junk']) {
+    assert.equal(teamChangeNote('role', 'Sam', 'manager', none), TEAM_UNCHANGED);
+    assert.equal(teamChangeNote('remove', 'Sam', undefined, none), TEAM_UNCHANGED);
+  }
+  assert.equal(TEAM_UNCHANGED, 'Nothing changed: the team was changed elsewhere.');
 });
 
 test('the Team card changes only a member\'s role or removes them, through the rows RLS lets a manager touch', () => {
   const js = read('manager/manager.js');
   assert.match(js, /from\('memberships'\)/);
-  assert.match(js, /q\.update\(\{ role: to \}\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)/);
-  assert.match(js, /q\.delete\(\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)/);
+  assert.match(js, /q\.update\(\{ role: to \}\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)\.select\('user_id'\)/, 'the update answers the changed row');
+  assert.match(js, /q\.delete\(\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)\.select\('user_id'\)/, 'the delete answers the removed row');
+  assert.match(js, /const \{ data, error \} = kind === 'remove'/);
+  assert.match(js, /state\.teamNote = teamChangeNote\(kind, member && member\.name, to, data\);/, 'the sentence follows the rows that came back');
+  // the reload after a change is outside the change's try: a failed read has its own sentence
+  const onTeam = js.slice(js.indexOf('async function onTeam('), js.indexOf('\nfunction renderInvites('));
+  const failed = onTeam.indexOf("state.teamError = `Couldn't change the team:");
+  const reload = onTeam.indexOf('await loadLive();');
+  assert.ok(failed > 0 && reload > failed, 'loadLive runs after the change\'s catch, not inside its try');
+  assert.match(onTeam.slice(failed, reload), /return renderTeam\(\);\n {2}\}\n {2}try \{\n {4}$/, 'a refused change returns; the reload has a try of its own');
+  assert.match(onTeam.slice(reload), /catch \(e\) \{[\s\S]*state\.teamError = `Couldn't refresh the page afterwards: /);
+  assert.equal(onTeam.split("Couldn't change the team").length, 2, 'one place says the change failed');
   assert.match(js, /if \(kind === 'remove' && state\.teamConfirm !== userId\)/, 'Remove takes two clicks');
   assert.match(js, /state\.teamNote = kind === 'remove' \? `Sample data: /, 'sample data calls nothing');
   const rls = read('supabase/migrations/0002_rls.sql');

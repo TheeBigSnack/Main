@@ -2,7 +2,9 @@
 // Functions held to the rules a Node test can read off their source. Nothing
 // here runs SQL or Deno (supabase/README.md says how to run rls.sql against
 // a database); it keeps the rules from drifting: every table is under RLS,
-// an invite code is matched ignoring case and spaces on both sides, the sync
+// keep_a_manager locks the dealership before it looks for another manager,
+// the plain-Postgres shim grants what Supabase grants by default, an invite
+// code is matched ignoring case and spaces on both sides, the sync
 // function's take-down rule compares server stamps only, both functions
 // pick the dealership by the same origin comparison and refuse an unknown
 // one, both refuse a lapsed dealership with 402 before writing or spending
@@ -49,6 +51,48 @@ test('0002_rls.sql: redeem_invite folds both sides of the code; invites have no 
   assert.equal((rls.match(/set search_path = ''/g) || []).length, definers, 'every security definer function pins search_path');
   assert.match(rls, /revoke execute on function public\.redeem_invite\(text, text\) from public, anon;/);
   assert.match(rls, /revoke execute on function public\.create_invite\(uuid, text\) from public, anon;/);
+});
+
+// review 5 (G1): two managers stepping down or removing each other at the same moment must not both pass
+test('0002_rls.sql: keep_a_manager locks the dealership row, as its own statement, before it looks for another manager', () => {
+  const start = rls.indexOf('create or replace function public.keep_a_manager()');
+  const fn = rls.slice(start, rls.indexOf('comment on function public.keep_a_manager()', start)).replace(/--.*$/gm, '');
+  assert.ok(start >= 0 && fn.length > 0, 'keep_a_manager is defined with a comment after it');
+  const branch = fn.indexOf("if old.role = 'manager' and (tg_op = 'DELETE' or new.role is distinct from 'manager') then");
+  const lock = fn.indexOf('perform 1 from public.dealerships d where d.id = old.dealership_id for no key update;');
+  const check = fn.indexOf('not exists (');
+  assert.ok(branch > 0, 'only a change that removes or demotes a manager is checked (and locks)');
+  assert.ok(lock > branch, 'the lock is taken inside that branch');
+  assert.ok(check > lock, 'the lock comes before the check');
+  assert.doesNotMatch(fn.slice(lock, check), /;[^;]*;/, 'nothing but the lock statement between them');
+  assert.match(fn.slice(lock, check), /;\s+if found and $/, 'the check is a statement of its own, and is skipped when the dealership row is gone (the cascade)');
+  assert.equal((fn.match(/\bfor (no key )?update\b/g) || []).length, 1, 'one lock, and never FOR UPDATE (it would block the key-share locks of inserts that reference the dealership)');
+  assert.match(fn, /raise exception 'a dealership keeps at least one manager[^']*' using errcode = 'P0006';/);
+  assert.match(rls, /create trigger memberships_keep_a_manager\s+before update or delete on public\.memberships\s+for each row execute function public\.keep_a_manager\(\);/);
+});
+
+// review 5 (G25): the plain-Postgres shim grants what Supabase grants, so a forgotten revoke fails a test
+test('tests/local-shim.sql has Supabase\'s default privileges; 0002_rls.sql revokes tables and sequences from the API roles', () => {
+  const shim = read('../supabase/tests/local-shim.sql').replace(/--.*$/gm, '');
+  for (const kind of ['execute on functions', 'all on tables', 'all on sequences']) {
+    assert.ok(shim.includes(`alter default privileges in schema public grant ${kind} to anon, authenticated, service_role;`), `the shim grants ${kind} by default`);
+  }
+  const code = rls.replace(/--.*$/gm, '');
+  assert.match(code, /revoke all on all tables in schema public from anon;\s+revoke all on all tables in schema public from authenticated;/);
+  assert.match(code, /revoke all on all sequences in schema public from anon, authenticated;/, '"all tables" does not cover sequences');
+  // rls.sql holds every table and view to the privileges the policies use
+  for (const words of ['anon holds % on public.%', 'authenticated holds % on public.%, not %', "when 'memberships'    then 'DELETE, SELECT, UPDATE (name, role)'", "when 'dealerships'    then 'SELECT, UPDATE (name)'", 'public.rewrite_usage_id_seq']) {
+    assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
+  }
+});
+
+// review 5 (G24): only the column grant may stop a manager of two stores moving a member between them
+test('tests/rls.sql: a_mgr manages A and B, so the refused move proves the column grant; C is the wall a manager\'s checks run against', () => {
+  assert.match(rlsTest, /\(:'a_mgr',\s+:'dealer_a', 'manager',\s+'Jamie'\),\s+\(:'a_mgr',\s+:'dealer_b', 'manager',\s+'Jamie'\)/);
+  assert.match(rlsTest, /update public\.memberships set dealership_id = b where user_id = a_sales and dealership_id = a;\s+raise exception 'a_mgr moved a member to another dealership';\s+exception when insufficient_privilege then null;\s+end;\s+if not exists \(select 1 from public\.memberships where user_id = a_sales and dealership_id = a\)/);
+  for (const words of ['a_mgr can see a membership of C', 'a_mgr updated a listing of C', 'a_mgr created an invite for C', 'a_mgr listed C\'\'s invites', 'a_mgr revoked a code of C', 'removing a_mgr from A took the code they made for B']) {
+    assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
+  }
 });
 
 test('tests/rls.sql: an owner-made lower-case code is stored as typed and redeemed in upper case with spaces around it', () => {

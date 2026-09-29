@@ -74,14 +74,17 @@ alter table public.invite_misses enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- Table privileges. Supabase grants the API roles broad privileges on new
--- tables by default; this narrows them to what the policies below can ever
--- allow, and gives the anon key nothing at all (Lot Sync has no signed-out
--- reads). Stated explicitly so the same file also works on a plain Postgres
--- (supabase/tests/local-shim.sql).
+-- tables and sequences by default; this narrows them to what the policies
+-- below can ever allow, and gives the anon key nothing at all (Lot Sync has
+-- no signed-out reads). Stated explicitly so the same file also works on a
+-- plain Postgres (supabase/tests/local-shim.sql).
 -- ---------------------------------------------------------------------------
 grant usage on schema public to anon, authenticated, service_role;
 revoke all on all tables in schema public from anon;
 revoke all on all tables in schema public from authenticated;
+-- sequences too (rewrite_usage.id): "all tables" does not cover them, and no
+-- API role but the service role inserts a row that draws from one
+revoke all on all sequences in schema public from anon, authenticated;
 grant select on public.dealerships to authenticated;
 -- the rename only: website_origin is unique and the key /sync matches on, so
 -- an update right on it would let a manager probe which other dealer
@@ -148,24 +151,35 @@ create policy "managers remove members of their dealership"
 -- would leave nobody who can invite, bill or fix a mistake, and only the
 -- owner in SQL could recover it. Deleting the dealership itself (which
 -- cascades to its memberships) is not stopped: by then its row is gone.
+-- Two managers acting at the same moment (both step down, or each removes
+-- the other) must not both get through. Under READ COMMITTED each
+-- transaction would still see the other as a manager, because neither has
+-- committed. So every change that removes or demotes a manager first locks
+-- the dealership row, as a statement of its own. The second change waits
+-- there until the first commits. Its check then runs as a new statement,
+-- sees the first change and refuses. FOR NO KEY UPDATE does not block the
+-- key-share locks that inserts referencing the dealership take. In the
+-- cascade from a deleted dealership the row is already gone: nothing is
+-- locked and nothing is checked. (Changed in place: no project has applied
+-- this file yet. supabase/tests/concurrency.sql proves it with two sessions.)
 create or replace function public.keep_a_manager()
 returns trigger
 language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  if old.role = 'manager'
-     and (tg_op = 'DELETE' or new.role is distinct from 'manager')
-     and exists (select 1 from public.dealerships d where d.id = old.dealership_id)
-     and not exists (
-       select 1 from public.memberships m
-       where m.dealership_id = old.dealership_id and m.role = 'manager' and m.user_id <> old.user_id) then
-    raise exception 'a dealership keeps at least one manager: make someone else a manager first' using errcode = 'P0006';
+  if old.role = 'manager' and (tg_op = 'DELETE' or new.role is distinct from 'manager') then
+    perform 1 from public.dealerships d where d.id = old.dealership_id for no key update;
+    if found and not exists (
+         select 1 from public.memberships m
+         where m.dealership_id = old.dealership_id and m.role = 'manager' and m.user_id <> old.user_id) then
+      raise exception 'a dealership keeps at least one manager: make someone else a manager first' using errcode = 'P0006';
+    end if;
   end if;
   return case when tg_op = 'DELETE' then old else new end;
 end;
 $$;
-comment on function public.keep_a_manager() is 'Before a membership is deleted or changed: refuses to leave a dealership with no manager.';
+comment on function public.keep_a_manager() is 'Before a membership is deleted or changed: refuses to leave a dealership with no manager. Locks the dealership row first, so two such changes at once cannot both pass.';
 revoke execute on function public.keep_a_manager() from public, anon, authenticated;
 create trigger memberships_keep_a_manager
   before update or delete on public.memberships

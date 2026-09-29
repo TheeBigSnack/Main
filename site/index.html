@@ -228,31 +228,33 @@
       <div class="wrap narrow">
         <h2 id="demo-h">Request a demo</h2>
         <p class="lead">Ten minutes at your desk, on your own website. Tell us who you are and we will get in touch.</p>
+        <!-- Each field's maxlength is the lead function's limit for it (LEAD_LIMITS in supabase/functions/_shared/lead.mjs;
+             test/lead.test.js keeps them equal), so the page never says it has a request the function then cut short. -->
         <form id="demo-form" class="form-grid" action="mailto:demo@lotsync.example" method="post" enctype="text/plain">
           <div class="field">
             <label for="f-name">Your name</label>
-            <input id="f-name" name="name" type="text" required autocomplete="name">
+            <input id="f-name" name="name" type="text" required maxlength="80" autocomplete="name">
           </div>
           <div class="field">
             <label for="f-dealership">Dealership</label>
-            <input id="f-dealership" name="dealership" type="text" required autocomplete="organization">
+            <input id="f-dealership" name="dealership" type="text" required maxlength="120" autocomplete="organization">
           </div>
           <div class="field full">
             <label for="f-website">Dealership website</label>
-            <input id="f-website" name="website" type="text" required inputmode="url" autocomplete="url">
+            <input id="f-website" name="website" type="text" required maxlength="200" inputmode="url" autocomplete="url">
             <p class="hint">The address of your website, or of its used inventory page.</p>
           </div>
           <div class="field">
             <label for="f-email">Email</label>
-            <input id="f-email" name="email" type="email" required autocomplete="email">
+            <input id="f-email" name="email" type="email" required maxlength="200" autocomplete="email">
           </div>
           <div class="field">
             <label for="f-phone">Phone (optional)</label>
-            <input id="f-phone" name="phone" type="tel" autocomplete="tel">
+            <input id="f-phone" name="phone" type="tel" maxlength="40" autocomplete="tel">
           </div>
           <div class="field full">
             <label for="f-message">Message (optional)</label>
-            <textarea id="f-message" name="message"></textarea>
+            <textarea id="f-message" name="message" maxlength="2000"></textarea>
           </div>
           <!-- Left empty by people: it is off screen and out of the tab order. A form-filling bot fills it, and the
                lead function then stores nothing (supabase/functions/_shared/lead.mjs, HONEYPOT). -->

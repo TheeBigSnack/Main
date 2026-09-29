@@ -24,7 +24,7 @@
 // works in the browser that asked for it.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, teamCard, memberRole, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -214,6 +214,10 @@ function renderTeam() {
 // allows a manager of the dealership and the column grant limits to role and
 // name. Remove: the first click arms the button, the second deletes the
 // membership (the trigger then cancels the invite codes they made).
+// Both ask for the changed row back, and the card says what the answer
+// shows (data.js teamChangeNote): no row means nothing changed. The reload
+// after it has its own sentence, so a failed read never reads as a failed
+// change.
 async function onTeam(kind, userId, to) {
   state.teamError = '';
   const member = (state.data?.memberships || []).find((m) => m.user_id === userId);
@@ -230,14 +234,20 @@ async function onTeam(kind, userId, to) {
   }
   try {
     const q = state.supabase.from('memberships');
-    const { error } = kind === 'remove'
-      ? await q.delete().eq('user_id', userId).eq('dealership_id', state.dealershipId)
-      : await q.update({ role: to }).eq('user_id', userId).eq('dealership_id', state.dealershipId);
+    const { data, error } = kind === 'remove'
+      ? await q.delete().eq('user_id', userId).eq('dealership_id', state.dealershipId).select('user_id')
+      : await q.update({ role: to }).eq('user_id', userId).eq('dealership_id', state.dealershipId).select('user_id');
     if (error) throw new Error(error.message);
-    state.teamNote = kind === 'remove' ? `${who} is no longer in the dealership.` : `${who} is now a ${to}.`;
-    await loadLive();
+    state.teamNote = teamChangeNote(kind, member && member.name, to, data);
   } catch (e) {
     state.teamError = `Couldn't change the team: ${(e && e.message) || e}`;
+    return renderTeam();
+  }
+  try {
+    await loadLive();
+  } catch (e) {
+    setStatus('');
+    state.teamError = `Couldn't refresh the page afterwards: ${(e && e.message) || e}. Reload the page to see the team as it is now.`;
     renderTeam();
   }
 }

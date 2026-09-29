@@ -28,8 +28,9 @@ test('the step list: today\'s ten without accounts, the Account step right after
   assert.deepEqual(withAccounts.filter((s) => s !== 'account'), TODAY, 'nothing else moves');
   wizardSteps(false).push('x');
   assert.deepEqual(wizardSteps(false), TODAY, 'each call is a fresh list');
-  // the shipped config is empty, so the shipped wizard is exactly today's (test/e2e/wizard.e2e.mjs counts "of 10")
-  assert.equal(accountsConfigured(), false);
+  // the shipped wizard has the Account step exactly when src/accountConfig.js is filled in, as
+  // supabase/README.md step 6 does; test/e2e/wizard.e2e.mjs counts its steps from the same list
+  assert.equal(wizardSteps(accountsConfigured()).includes('account'), accountsConfigured());
 });
 
 test('without accounts the model says there is no step', () => {
@@ -123,6 +124,13 @@ test('the step\'s words are the ones Settings\' Account section uses', () => {
   // the join sentence and the other-website sentence are Settings' too (popup.js accountAction)
   assert.ok(popup.includes("`Joined ${m.dealershipName || 'the dealership'} as ${m.role || 'a member'}.`"), 'Settings words the join differently now');
   assert.ok(popup.includes('` Its website is ${m.websiteOrigin}: open it there to sync its listings.`'), 'Settings words the other website differently now');
+});
+
+test('the welcome names no set-up time: none has been measured', () => {
+  const wizard = read('../extension/wizard.js');
+  const welcome = wizard.slice(wizard.indexOf("case 'welcome':"), wizard.indexOf("case 'scan':"));
+  assert.match(welcome, /In a few steps: read the website/, 'the welcome moved: update this test');
+  assert.doesNotMatch(welcome, /\b(minutes?|seconds?)\b/i, 'an unmeasured figure (CLAUDE.md: no invented numbers)');
 });
 
 test('wizard.js: the step list from wizardSteps, the sign-in functions and messages Settings uses, and never a token', () => {

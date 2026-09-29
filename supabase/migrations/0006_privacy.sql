@@ -83,10 +83,12 @@ comment on function public.billing_events_of(uuid) is 'Owner only. The Stripe we
 -- Left out on purpose: the code of an unused invite (it may still let
 -- someone join for up to 7 days, and an export is a file that gets
 -- forwarded; the manager view lists the open codes to managers), the emails
--- of people who are no longer members (their rows stay under their user id;
--- their email is theirs, not the dealership's), invite_misses and
--- demo_requests (not the dealership's). Reads every table above and
--- auth.users; writes nothing.
+-- of people who are no longer members (their email is theirs, not the
+-- dealership's), invite_misses and demo_requests (not the dealership's).
+-- A former member's rows stay in the file under their user id and with the
+-- salesperson name they posted under: removing a member clears neither, and
+-- only forget_person (below) clears the name. The notes say so. Reads every
+-- table above and auth.users; writes nothing.
 -- ---------------------------------------------------------------------------
 create or replace function public.export_dealership(dealership_id uuid)
 returns jsonb
@@ -142,7 +144,7 @@ begin
     'counts', (select jsonb_object_agg(k.key, jsonb_array_length(k.value)) from jsonb_each(doc) k where jsonb_typeof(k.value) = 'array'),
     'notes', jsonb_build_array(
       'Every row Lot Sync''s database holds for this dealership, one list per table, as stored.',
-      'memberships carries each current member''s account email. People who are no longer members appear only as a user_id on the rows they made.',
+      'memberships carries each current member''s account email. People who are no longer members have no email here; the rows they made keep their user_id and the salesperson name they posted under, unless they asked to be forgotten.',
       'The code of an unused invite is left out (null): it may still let someone join. Managers see open codes in the manager view.',
       'Not in the database, so not here: what each salesperson''s browser keeps (Settings, the Numbers tab, which form fields could not be filled). Nothing from Facebook beyond the listing links saved in listings.'
     )

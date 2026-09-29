@@ -2,7 +2,8 @@
 // profile with no settings -> the popup offers set-up -> the side panel walks
 // the steps (read the website, store, name, address from the site's own
 // structured data, the price to post, permission for automatic rescans, the
-// posting rules, the Terms of Service and Privacy Policy) ->
+// posting rules, the Terms of Service and Privacy Policy; the Account step
+// after the name too when src/accountConfig.js is filled in, skipped here) ->
 // Ready to post is right -> the salesperson marks a car posted -> the mock
 // site "sells" it -> the service worker rescans it by calling the inventory
 // service directly (no tab) -> the badge shows 1 and the popup's To do agrees.
@@ -17,6 +18,17 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 import { LEGAL, legalHosted } from '../../extension/src/legalLinks.js';
+import { wizardSteps } from '../../extension/src/wizardSteps.js';
+import { accountsConfigured } from '../../extension/src/accountConfig.js';
+
+// The step numbers come from the wizard's own list, so filling in the
+// account config (supabase/README.md step 6) adds the Account step here too.
+const STEPS = wizardSteps(accountsConfigured());
+if (!accountsConfigured()) assert.equal(STEPS.length, 10, 'the shipped wizard without accounts has ten steps');
+const stepOf = (name) => {
+  assert.ok(STEPS.includes(name), `no ${name} step`);
+  return new RegExp(`step ${STEPS.indexOf(name) + 1} of ${STEPS.length}(?!\\d)`); // the heading follows with no space
+};
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -84,6 +96,7 @@ try {
   await panel.goto(extUrl('sidepanel.html'));
   await panel.waitForSelector('#wizNext');
   assert.match(await panel.textContent('#panel'), /Set up Lot Sync for this dealership/);
+  assert.match(await panel.textContent('#panel'), stepOf('welcome'));
   await panel.click('#wizNext'); // -> read the website (runs by itself)
   await panel.waitForSelector('.banner.good', { timeout: 30000 });
   assert.match(await panel.textContent('.banner.good'), /6 used cars read from Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\. 3 stores found\./);
@@ -93,14 +106,24 @@ try {
   assert.deepEqual(stores, ['Ron Lewis Chrysler Dodge Jeep Ram Cranberry=false', 'Ron Lewis Chrysler Dodge Jeep Ram Pleasant Hills=false', 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg=true'], 'the store matching the site name is pre-ticked');
   await panel.click('#wizNext'); // -> you
   await panel.fill('#wizName', 'Roger');
-  await panel.click('#wizNext'); // -> address
+  assert.match(await panel.textContent('#panel'), stepOf('you'));
+  await panel.click('#wizNext'); // -> account (when configured), then address
+  if (STEPS.includes('account')) {
+    await panel.waitForSelector('#wizEmail');
+    assert.match(await panel.textContent('h3'), /^Your account$/);
+    assert.match(await panel.textContent('#panel'), stepOf('account'));
+    assert.equal((await panel.textContent('#wizNext')).trim(), 'Skip for now', 'signing in is optional');
+    await panel.click('#wizNext'); // -> address, signed out
+  }
+  await panel.waitForSelector('#wizZip');
+  assert.match(await panel.textContent('#panel'), stepOf('address'));
   assert.equal(await panel.inputValue('#wizCity'), 'Waynesburg');
   assert.equal(await panel.inputValue('#wizState'), 'PA');
   assert.equal(await panel.inputValue('#wizZip'), '15370', "from the website's structured data");
   await panel.click('#wizNext'); // -> price
   await panel.waitForSelector('#wizPriceNote');
   assert.match(await panel.textContent('h3'), /^The price to post$/);
-  assert.match(await panel.textContent('#panel'), /step 6 of 10/);
+  assert.match(await panel.textContent('#panel'), stepOf('price'));
   // The mock site shows a lower second price on every priced car ($490 below the main one), so the
   // choice is offered with the main price first; on a site with one price per car there is no radio.
   const bases = await panel.$$eval('input[name="wizBasis"]', (rs) => rs.map((r) => `${r.value}=${r.checked}`));
@@ -126,12 +149,13 @@ try {
   await panel.screenshot({ path: join(shots, 'wizard-1a-price.png'), fullPage: true });
   await panel.click('#wizNext'); // -> permission
   assert.match(await panel.textContent('#panel'), /Automatic rescans/);
+  assert.match(await panel.textContent('#panel'), stepOf('permission'));
   await panel.click('#wizGrant'); // the test copy already has this host; Chrome answers without a prompt
   await panel.waitForSelector('.banner.good');
   assert.match(await panel.textContent('.banner.good'), /Permission granted/);
   await panel.click('#wizNext'); // -> rules
   assert.match(await panel.textContent('ol.rules'), /You publish every post\.[\s\S]*Ads law applies\./);
-  assert.match(await panel.textContent('#panel'), /step 8 of 10/);
+  assert.match(await panel.textContent('#panel'), stepOf('rules'));
   assert.equal(await panel.isDisabled('#wizNext'), true, 'the rules must be ticked before Next');
   await panel.check('#wizRulesRead');
   assert.equal(await panel.isDisabled('#wizNext'), false);
@@ -143,7 +167,7 @@ try {
   const termsReady = hosted ? '#wizTermsRead' : '#legalPending';
   await panel.click('#wizNext'); // -> terms
   await panel.waitForSelector(termsReady);
-  assert.match(await panel.textContent('#panel'), /step 9 of 10/);
+  assert.match(await panel.textContent('#panel'), stepOf('terms'));
   assert.match(await panel.textContent('#panel'), /Terms and privacy[\s\S]*never your Facebook login[\s\S]*not affiliated with Meta Platforms, Inc\./);
   if (!hosted) {
     assert.match(await panel.textContent('#legalPending'), /being finalised/);

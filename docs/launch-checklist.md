@@ -29,13 +29,13 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 
 ## Accounts and billing
 
-- [ ] **Supabase project live** (`PLAN.md` M4). Done when: magic-link sign-in works for two people at one dealership, row-level security tests show one dealership cannot read another's rows, and the rewrite endpoint refuses unauthenticated calls and stops at the monthly cap. `npm run check-deploy` passes with `LOTSYNC_TEST_TOKEN` set (`supabase/README.md` step 6).
+- [ ] **Supabase project live** (`PLAN.md` M4). Done when: magic-link sign-in works for two people at one dealership, row-level security tests show one dealership cannot read another's rows, and the rewrite endpoint refuses unauthenticated calls and stops at the monthly cap. `npm run check-deploy` passes with `LOTSYNC_TEST_TOKEN` set (`supabase/README.md` step 6): no line reads FAIL; the billing and lead lines may read note ("not deployed yet") until the Stripe and landing-page items below.
 - [ ] **The posted registry syncs.** Done when: two salespeople on two machines see the same posted registry, and a car posted on one shows on the other after its next scan.
 - [ ] **The manager view works** (`manager/`). Done when: a manager at the pilot dealer signs in and sees posts per salesperson, sold cars still listed and for how long, and price mismatches, with the numbers matching the salespeople's Numbers tabs for the same week.
-- [ ] **Stripe set up** (`PLAN.md` M5). Done when: a per-rooftop subscription with the free pilot period and the customer portal exist, a test-mode dealer can subscribe, start the pilot period and manage billing without help, and the prices are the ones in `marketing/pricing.json`.
+- [ ] **Stripe set up** (`PLAN.md` M5). Done when: a per-rooftop subscription with the free pilot period and the customer portal exist, a test-mode dealer can subscribe, start the pilot period and manage billing without help, the prices are the ones in `marketing/pricing.json`, and `npm run check-deploy` shows all three billing lines as ok, the webhook's included (none a note).
 - [ ] **Pricing confirmed.** Done when: a dealer has agreed to pay a price in writing, `marketing/pricing.json` has `"hypothesis": false` and the same numbers, and `test/marketing.test.js` still passes.
 - [ ] **The per-salesperson cap follows the account, not the browser** (`PLAN.md`, "Wider use", M4). Done when: the same person on two machines shares one day's count.
-- [ ] **Retention runs.** Done when: a dealership's records are deleted within the 30 days the agreements promise after a subscription or pilot ends, and the deletion was tried once on a test dealership.
+- [ ] **Retention runs.** Done when: the retention list (`supabase/README.md`, "The retention line") is run once a week, by a named person, from a recurring calendar entry; a dealership's records are deleted within the 30 days the agreements promise after a subscription or pilot ends; and the deletion was tried once on a test dealership.
 
 ## Sales
 
@@ -43,7 +43,7 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 - [ ] **The sales sheet carries only permitted numbers.** Done when: every number in `marketing/sales-sheet.md` comes from the pilot CSVs, the manager has confirmed it, the store has given written permission under pilot agreement section 3 (or the store is not named), and `test/marketing.test.js` passes.
 - [ ] **Demo script rehearsed.** Done when: the 10-minute demo in `marketing/demo-script.md` has been run end to end twice on a dealership website that is not the pilot's, without publishing, and the "If something goes wrong" section covers everything that went wrong in rehearsal.
 - [ ] **The pilot offer and onboarding emails updated.** Done when: `marketing/pilot-offer-email.md` and `marketing/onboarding-emails.md` describe the store install and the accounts, and every bracket is a field the sender fills.
-- [ ] **The landing page live** (`site/`, `PLAN.md` M5). Done when: the page is at the real address, the demo form lands in an inbox or the database, the legal links resolve, and the page says "Not affiliated with Meta Platforms, Inc."
+- [ ] **The landing page live** (`site/`, `PLAN.md` M5). Done when: the page is at the real address, the demo form lands in an inbox or the database (for the database, `LOTSYNC_SITE_ORIGIN=<the page's address> npm run check-deploy` shows both lead lines as ok), the legal links resolve, and the page says "Not affiliated with Meta Platforms, Inc."
 - [ ] **A pipeline sheet exists.** Done when: demos, pilots and paid dealers are tracked in one place with the source of each (in-person demo, forum, LinkedIn, association event), as `PLAN.md`'s launch plan asks.
 
 ## Support

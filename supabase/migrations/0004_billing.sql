@@ -159,6 +159,7 @@ alter table public.billing_events enable row level security;
 
 revoke all on public.subscriptions from anon, authenticated, public;
 revoke all on public.billing_events from anon, authenticated, public;
+revoke all on sequence public.billing_events_id_seq from anon, authenticated, public;
 grant select on public.subscriptions to authenticated;
 grant all on public.subscriptions, public.billing_events to service_role;
 grant usage, select on sequence public.billing_events_id_seq to service_role;

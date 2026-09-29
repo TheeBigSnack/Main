@@ -74,7 +74,8 @@ left join lateral (
 where t.done_at is null;
 comment on view public.v_open_todo is 'Open to-do items with hours open and the listing (who posted, link) they belong to. Runs under the caller''s RLS.';
 
--- Signed-in members only (through the tables' RLS); the anon key gets nothing,
--- stated here because Supabase's default privileges would otherwise grant it.
-revoke all on public.v_salesperson_summary, public.v_open_todo from anon, public;
+-- Signed-in members read them (through the tables' RLS) and do nothing else;
+-- the anon key gets nothing. Stated here because Supabase's default privileges
+-- would otherwise grant every privilege to both.
+revoke all on public.v_salesperson_summary, public.v_open_todo from anon, authenticated, public;
 grant select on public.v_salesperson_summary, public.v_open_todo to authenticated, service_role;

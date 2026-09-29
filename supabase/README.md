@@ -21,7 +21,8 @@ What is here:
 | `functions/sync/` | `/sync`: the posted registry and the pilot numbers up, the dealership's current state down. |
 | `functions/_shared/` | The prompt and the guardrails, copied from `backend/rewritePrompt.js` and `extension/src/rewriteTemplate.js`; CORS, JSON and sign-in helpers. |
 | `tests/rls.sql` | Proves the wall between dealerships against a running database (below). |
-| `tests/local-shim.sql` | Lets the migrations and the test run on a plain Postgres with no Supabase. |
+| `tests/concurrency.sql` | Proves with two real sessions (dblink) that two managers stepping down at once cannot leave a dealership with none. Plain Postgres only: it needs a superuser and commits rows, then removes them. |
+| `tests/local-shim.sql` | Lets the migrations and the test run on a plain Postgres with no Supabase. It grants what Supabase grants by default (execute on functions, all on tables and sequences), so a missing revoke fails a test. |
 | `tests/port-check.mjs` | Checks the two `_shared` copies against their originals in Node. |
 
 On the extension side, `extension/src/account.js` (sign-in, the session, invite codes) and `extension/src/sync.js` (what goes up, how the answer is merged) are pure and unit-tested; the Settings fields and the buttons that call them arrive with the UI wiring.
@@ -85,7 +86,9 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    npm run check-deploy
    ```
 
-   It looks at the project from the outside and prints a checklist: the config files name the same project, the anon key reads nothing from any table and cannot redeem a code, each function answers the extension's CORS preflight and refuses a call with no token, the billing webhook refuses an unsigned event, and the lead function refuses any page but the landing page (`LOTSYNC_SITE_ORIGIN=https://<where site/ is hosted>` checks its preflight too). With `LOTSYNC_TEST_TOKEN` set to the access token of a signed-in test account that belongs to no dealership (sign in once in the manager view and copy `access_token` from the browser's local storage), it also checks that `/sync` answers 403 and that eleven wrong invite codes end in `P0005`, which proves the throttle counts misses on the real PostgREST. It changes nothing but that test account's miss count, keeps nothing and prints no key; exit code 0 means every check passed.
+   It looks at the project from the outside and prints a checklist: the config files name the same project, the anon key reads nothing from any table and cannot redeem a code (a table that answers 404 is missing, a migration not pushed, and fails), each function answers the extension's CORS preflight and refuses a call with no token, the billing webhook refuses an unsigned event, and the lead function refuses any page but the landing page (`LOTSYNC_SITE_ORIGIN=https://<where site/ is hosted>` checks its preflight too). With `LOTSYNC_TEST_TOKEN` set to the access token of a signed-in test account that belongs to no dealership (sign in once in the manager view and copy `access_token` from the browser's local storage), it also checks that `/sync` answers 403 and that eleven wrong invite codes end in `P0005`, which proves the throttle counts misses on the real PostgREST. It changes nothing but that test account's miss count, keeps nothing and prints no key.
+
+   Each line reads `ok`, `FAIL` or `note`. At this step only `rewrite` and `sync` are deployed, so the lines of the two functions this README deploys later read `note` with `404, not deployed yet`: billing's preflight, no-token and webhook lines until "Billing" below, and the lead lines until "Demo requests" below. Run it again after each of those sections: its lines then read `ok`, except the webhook line, which stays a note (`500, STRIPE_WEBHOOK_SECRET is not set yet`) until that secret is set. A line still marked `note` after its section is done is a step missed there. Exit code 0 means nothing failed; notes do not fail the run, and the last line says "Every check passed." only when there is no note either.
 
 ## Environment variables
 
@@ -125,7 +128,7 @@ The pilot lists are the one place a client clock still meets `since`: `posts` an
 
 ## Who can see and do what
 
-Every table has row-level security on. In one line: a signed-in person sees their own dealership and nothing else; salespeople write their own rows; managers can change any row of their dealership; only managers delete; the anon key alone gets nothing. Managers change a member's name and role (a column-level grant: never who or which dealership) and remove members, from the manager view's Team card; a dealership always keeps at least one manager (the `keep_a_manager` trigger answers `P0006` to anything that would leave none; deleting the dealership itself still cascades). The full list is in `migrations/0002_rls.sql`, each policy with a comment saying what it is for. The service role (inside the functions only) bypasses these, as it always does on Supabase.
+Every table has row-level security on. In one line: a signed-in person sees their own dealership and nothing else; salespeople write their own rows; managers can change any row of their dealership; only managers delete; the anon key alone gets nothing. Managers change a member's role and remove members, from the manager view's Team card (a column-level grant: `name` and `role` only, never who or which dealership; the card has no rename, so a member's name is corrected by the owner in SQL, `docs/support.md`, "Privacy requests"); a dealership always keeps at least one manager (the `keep_a_manager` trigger answers `P0006` to anything that would leave none, even two managers stepping down at the same moment, because it locks the dealership row before it checks; deleting the dealership itself still cascades). The full list is in `migrations/0002_rls.sql`, each policy with a comment saying what it is for. The service role (inside the functions only) bypasses these, as it always does on Supabase.
 
 ## Run the RLS test
 
@@ -153,7 +156,8 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
   -f supabase/migrations/0006_privacy.sql \
   -f supabase/tests/rls.sql \
   -f supabase/tests/billing.sql \
-  -f supabase/tests/privacy.sql
+  -f supabase/tests/privacy.sql \
+  -f supabase/tests/concurrency.sql
 ```
 
 Either way each file ends with `every check passed` and psql exits 0; a failed check prints the reason and exits non-zero. Never run the shim against a Supabase database; it only exists for Postgres without Supabase.
@@ -180,7 +184,21 @@ supabase db push                              # applies 0005_leads.sql
 supabase functions deploy lead --no-verify-jwt
 ```
 
-Then put `https://<ref>.supabase.co/functions/v1/lead` in `site/config.js` as `demoEndpoint`. Visitors are anonymous, so the function checks no token; instead the browser's Origin must be one of `LEAD_ORIGINS` (anything else gets 403 and no CORS header), a hidden honeypot field makes a bot's request look accepted while storing nothing, one address may send 5 requests an hour (hashed in the function's memory and forgotten, never stored), and the whole table takes at most 200 an hour. Fields are trimmed and capped (`functions/_shared/lead.mjs`; the table's checks carry the same limits). A request keeps only what the visitor typed, the time and the page's origin: no address, no cookie, no tracking.
+Then put `https://<ref>.supabase.co/functions/v1/lead` in `site/config.js` as `demoEndpoint`. Visitors are anonymous, so the function checks no token; instead the browser's Origin must be one of `LEAD_ORIGINS` (anything else gets 403 and no CORS header), a hidden honeypot field makes a bot's request look accepted while storing nothing, and two brakes slow a flood: one sender may send about 5 requests an hour per function instance (the address is hashed in that instance's memory and forgotten, never stored; instances do not share it, so it is a brake, not a lock), and the function stops accepting at about 200 in the past hour across every instance (a count, then the insert, so a burst can pass it by a few). Fields are trimmed and capped (`functions/_shared/lead.mjs`; the table's checks carry the same limits). A request keeps only what the visitor typed, the time and the page's origin: no address, no cookie, no tracking.
+
+The per-sender brake trusts, in this order, `cf-connecting-ip`, then `x-real-ip`, then the rightmost `X-Forwarded-For` entry (the one the nearest proxy appended), and never the leftmost, which the client writes (`clientAddress` in `functions/_shared/lead.mjs`). Which of these Supabase's gateway overwrites is not documented, so confirm it on the first deploy: six requests from the landing page's origin, each claiming a different address in all three headers, with an empty form so nothing is stored,
+
+```
+for i in 1 2 3 4 5 6; do
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<ref>.supabase.co/functions/v1/lead \
+    -H 'Origin: https://<where site/ is hosted>' -H 'Content-Type: application/json' \
+    -H "cf-connecting-ip: 192.0.2.$i" -H "x-real-ip: 192.0.2.$i" -H "X-Forwarded-For: 192.0.2.$i" -d '{}'
+done
+```
+
+should print `400` five times and then `429`: the brake keyed on an address the platform wrote. A sixth `400` means a header the client wrote reached the brake (or the requests met two instances: run it once more); then vary one header at a time to find the one the platform overwrites, put it first in `clientAddress`, and pin that order in `test/lead.test.js`. The brake is per instance, so this uses up your own 5 for the hour on that instance only.
+
+Then `npm run check-deploy` with `LOTSYNC_SITE_ORIGIN` set (step 6): both lead lines now read `ok`.
 
 Reading them: Dashboard, Table editor, `demo_requests`, newest first; set `handled_at` when you have answered one. To get an email for each new request, add a database webhook (Database, Webhooks) on inserts into `demo_requests` pointing at your mail service; no API role, the anon key included, can read the table, so the page itself never shows one back.
 
@@ -229,6 +247,8 @@ supabase functions deploy billing --no-verify-jwt
 ```
 
 `--no-verify-jwt` (or a `[functions.billing]` block with `verify_jwt = false` in `config.toml`, like the other two functions) is required: Stripe's webhook carries no Supabase token, and the function checks the caller's token itself on the other three routes.
+
+Then `npm run check-deploy` again (step 6): the three billing lines now read `ok`, the webhook's included once `STRIPE_WEBHOOK_SECRET` is set.
 
 ### Environment variables
 
@@ -357,7 +377,7 @@ Send it as a reply to the verified manager's address and to no one else, then de
 3. **Stripe, separately.** Nothing in the database reaches Stripe. In the Stripe Dashboard (live mode for a real dealership), open Customers, find the `stripe_customer_id` from the answer and delete the customer. Deleting a customer also cancels any subscription still open on it, so the dealership is not charged again.
 4. **The people.** The accounts in `accounts_without_a_dealership` can still sign in and see nothing. When the request covers the dealership's people (a store that leaves usually means it does; ask when the request does not say), forget each one with `forget_person` below, with the email the answer gives as the confirm. Someone who also belongs to another Lot Sync dealership is not in the list and stays.
 
-**The retention line.** Once a month, list the dealerships whose subscription has ended:
+**The retention line.** Once a week, list the dealerships whose subscription has ended (weekly, so one that ended just after a run is on the next list within a week, with more than three weeks left to offer the export and delete it; a monthly run could first list it on or after the day it is due):
 
 ```sql
 select d.id, d.name, d.website_origin, s.status, greatest(s.pilot_ends_at, s.updated_at) as ended_about

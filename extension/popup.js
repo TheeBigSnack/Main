@@ -350,7 +350,7 @@ function setupBanner() {
   const active = state.wizardActive;
   const text = active
     ? '<b>Set-up is not finished.</b> Pick up where you left off in the side panel.'
-    : "<b>First time here?</b> Set-up takes two minutes in the side panel: your store, your name, the store's address, the price to post, automatic rescans, the posting rules and the Terms of Service.";
+    : "<b>First time here?</b> Set-up runs in the side panel: your store, your name, the store's address, the price to post, automatic rescans, the posting rules and the Terms of Service.";
   const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields">Not now</button>' : '';
   return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Sync'}</button>${later}</div></div>`;
 }

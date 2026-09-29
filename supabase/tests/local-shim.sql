@@ -83,5 +83,10 @@ grant usage on schema auth to anon, authenticated, service_role;
 grant execute on function auth.uid(), auth.role(), auth.jwt() to anon, authenticated, service_role;
 
 -- Supabase's default privileges: every function a migration creates in public
--- is executable by the three API roles until that migration revokes it.
+-- is executable by the three API roles until that migration revokes it, and
+-- every table, view and sequence is open to them (all privileges) until the
+-- migration revokes that. The same here, so a migration that forgets a revoke
+-- fails a test instead of passing unnoticed on a database that never granted.
 alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;

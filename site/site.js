@@ -57,6 +57,8 @@ function wireForm() {
     status.textContent = text;
     status.className = 'status ' + (kind || '');
   };
+  const mail = SITE.demoMailto.replace(/^mailto:/, '');
+  const failed = 'That did not send. Please try again, or email ' + mail + '.';
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -64,7 +66,7 @@ function wireForm() {
     if (!SITE.demoEndpoint) {
       // No endpoint yet: open the visitor's own mail app with the fields in the body.
       window.location.href = mailtoFor(data);
-      say('Your email app should open with the request filled in. If it did not, email ' + SITE.demoMailto.replace(/^mailto:/, '') + '.', 'ok');
+      say('Your email app should open with the request filled in. If it did not, email ' + mail + '.', 'ok');
       return;
     }
     // SITE.demoEndpoint is the lead Edge Function, which stores the request in
@@ -79,18 +81,23 @@ function wireForm() {
         body: JSON.stringify(data)
       });
       if (!res.ok) {
-        // 400 names the field that needs fixing; 429 says to wait or email. Both are sentences meant for the visitor.
+        // 400 names the field that needs fixing; 429 says to wait or email. Both are sentences meant for the
+        // visitor. Any other answer (403, 500, a gateway's error page) is a failure: say the request did not send.
         const answer = await res.json().catch(() => ({}));
-        const field = answer && answer.field ? form.elements.namedItem(answer.field) : null;
+        const own = (res.status === 400 || res.status === 429) && answer && typeof answer.error === 'string' && answer.error.trim() !== '';
+        if (!own) {
+          say(failed, 'error');
+          return;
+        }
+        const field = answer.field ? form.elements.namedItem(answer.field) : null;
         if (field && typeof field.focus === 'function') field.focus();
-        const why = answer && typeof answer.error === 'string' && (res.status === 400 || res.status === 429) ? answer.error.charAt(0).toUpperCase() + answer.error.slice(1) + '. ' : '';
-        say(why + 'You can also email ' + SITE.demoMailto.replace(/^mailto:/, '') + '.', 'error');
+        say(answer.error.charAt(0).toUpperCase() + answer.error.slice(1) + '. You can also email ' + mail + '.', 'error');
         return;
       }
       form.reset();
       say('Thank you. We have your request and will reply by email.', 'ok');
     } catch {
-      say('That did not send. Please try again, or email ' + SITE.demoMailto.replace(/^mailto:/, '') + '.', 'error');
+      say(failed, 'error');
     } finally {
       if (button) button.disabled = false;
     }

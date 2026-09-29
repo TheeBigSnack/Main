@@ -156,7 +156,7 @@ export function wizardHtml() {
   switch (wiz.step) {
     case 'welcome':
       return `${progress}<h3>Set up Lot Sync for this dealership</h3>
-        <p>In a few steps: read the website, pick your store, your name,${accountsConfigured() ? " your dealership's account (optional)," : ''} the store's address, the price to post, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy. About two minutes.</p>
+        <p>In a few steps: read the website, pick your store, your name,${accountsConfigured() ? " your dealership's account (optional)," : ''} the store's address, the price to post, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy.</p>
         <p class="hint">Keep the dealership's used inventory page open in this window while you do this.</p>
         ${nav(false, 'Start')}`;
     case 'scan':

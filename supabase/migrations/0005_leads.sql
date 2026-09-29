@@ -30,4 +30,5 @@ comment on column public.demo_requests.handled_at is 'Set by the owner when the 
 
 alter table public.demo_requests enable row level security;
 revoke all on public.demo_requests from anon, authenticated;
+revoke all on sequence public.demo_requests_id_seq from anon, authenticated;
 grant all on public.demo_requests to service_role;

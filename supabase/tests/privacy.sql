@@ -347,6 +347,33 @@ begin
 end;
 $$;
 
+-- A member a manager removes (the Team card's Remove) leaves the export's
+-- memberships, email and all, but the rows they made keep their user_id and
+-- their name, and the export's notes say so. Undone at once: the steps
+-- below need x_both in A.
+savepoint removed_member;
+delete from public.memberships where user_id = :'x_both' and dealership_id = :'dealer_a';
+do $$
+declare
+  x text := '00000000-0000-4000-8000-0000000000a3';
+  e jsonb := public.export_dealership('00000000-0000-4000-8000-0000000000d1');
+begin
+  if exists (select 1 from jsonb_array_elements(e -> 'memberships') m where m ->> 'user_id' = x) or position('x-both@example.test' in e::text) > 0 then
+    raise exception 'the export still lists a removed member, or their email';
+  end if;
+  if not exists (select 1 from jsonb_array_elements(e -> 'listings') l where l ->> 'user_id' = x and l ->> 'salesperson' = 'Casey')
+     or not exists (select 1 from jsonb_array_elements(e -> 'post_attempts') a where a ->> 'user_id' = x and a ->> 'salesperson' = 'Casey') then
+    raise exception 'a removed member''s rows lost their user_id or name';
+  end if;
+  if not exists (select 1 from jsonb_array_elements_text(e -> 'notes') n
+                 where n like '%no longer members have no email here; the rows they made keep their user_id and the salesperson name they posted under%') then
+    raise exception 'the export''s notes do not say that a former member''s rows keep their name: %', e -> 'notes';
+  end if;
+  raise notice 'ok: a removed member''s rows keep their user_id and name in the export, as its notes say';
+end;
+$$;
+rollback to savepoint removed_member;
+
 -- ---------------------------------------------------------------------------
 -- forget_person, as the owner
 -- ---------------------------------------------------------------------------

@@ -103,6 +103,9 @@ test('every table that belongs to a dealership cascades from it, is exported and
   }
   // an unused invite's code stays out of the export
   assert.match(exportFn, /case when i\.used_at is null then \(to_jsonb\(i\) - 'code'\)/);
+  // review 5 (G3): the notes do not claim less than the file holds: a former member's rows keep their name
+  assert.doesNotMatch(exportFn, /appear only as a user_id/);
+  assert.ok(exportFn.includes("People who are no longer members have no email here; the rows they made keep their user_id and the salesperson name they posted under, unless they asked to be forgotten."), 'the note on former members');
   assert.match(exportFn, /'billing_events', coalesce\(\(\s+select jsonb_agg\(to_jsonb\(e\)[^)]*\)\s+from public\.billing_events_of\(d\.id\) e\)/);
   assert.match(exportFn, /left join auth\.users u on u\.id = m\.user_id/, 'member emails');
   // every other table is named in the header with what happens to it
@@ -119,6 +122,8 @@ test('tests/privacy.sql checks the export, the API roles, both guards and that B
     'forget_person accepted "%" as a-sales@example.test', 'forget_person removed the last manager of A', 'the auth row survived',
     'forgetting a_sales changed a row of B or of another person', 'delete_dealership accepted "%" for A', 'rows of A survived',
     'deleting A changed a row of B or of another person', 'A\'\'s billing events were deleted',
+    'the export still lists a removed member, or their email', 'a removed member\'\'s rows lost their user_id or name',
+    'the export\'\'s notes do not say that a former member\'\'s rows keep their name',
   ]) {
     assert.ok(sqlTest.includes(words), `privacy.sql does not check: ${words}`);
   }
