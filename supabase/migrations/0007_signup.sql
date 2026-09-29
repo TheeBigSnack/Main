@@ -174,8 +174,8 @@ comment on function public.website_origin_of(text) is 'The origin kept for a typ
 --      are under per_account (P0010) and everyone's in the past 24 hours
 --      under per_day (P0011)
 --   f. no dealership has that website yet, or P0009 (recorded as taken)
---   g. the dealership, the caller's manager membership and a created
---      attempt, all at once
+--   g. the dealership, the caller's manager membership, a created attempt
+--      and its free pilot (start_pilot(), 0004_billing.sql), all at once
 -- The lock in e is taken on the one settings row, so sign-ups are counted
 -- one at a time: two at the same moment cannot both pass a limit that has
 -- room for one, and the second sees the first one's website in f. It is
@@ -193,6 +193,11 @@ comment on function public.website_origin_of(text) is 'The origin kept for a typ
 -- for an invite, and the throttle (5 an hour per account, counted before
 -- anything is looked up) and per_account (an account that has started a
 -- dealership is refused at e, before any lookup) limit the probing.
+-- The pilot starts with the dealership. A dealership the owner creates may
+-- sit in the none state, which /sync and /rewrite serve as onboarding with no
+-- end; one that signed itself up is on the pilot's clock from its first day
+-- and lapses at the pilot's end unless someone subscribes, so a made-up
+-- dealership can use the description writer for the pilot's length at most.
 -- SECURITY DEFINER because the caller may insert into none of these tables.
 -- Parameters are written create_dealership.name and so on: name is also a
 -- column of dealerships and memberships.
@@ -214,6 +219,7 @@ declare
   origin text;
   n bigint;
   new_id uuid;
+  pilot jsonb;
 begin
   -- a. signed in
   if uid is null then
@@ -283,11 +289,12 @@ begin
   end if;
   insert into public.memberships (user_id, dealership_id, role, name) values (uid, new_id, 'manager', person_name);
   insert into public.signup_attempts (user_id, outcome, dealership_id) values (uid, 'created', new_id);
+  pilot := public.start_pilot(new_id); -- the caller is its manager now, as start_pilot() requires
 
-  return jsonb_build_object('dealership_id', new_id, 'name', dealer_name, 'website_origin', origin);
+  return jsonb_build_object('dealership_id', new_id, 'name', dealer_name, 'website_origin', origin, 'pilot_ends_at', pilot -> 'pilot_ends_at');
 end;
 $$;
-comment on function public.create_dealership(text, text, text) is 'Self-serve sign-up: the signed-in caller creates a dealership and becomes its manager, when signup_settings.open and its limits allow. P0008 closed, P0005 throttled, 22023 a bad field, P0010 per account, P0011 per day, P0009 the website is taken.';
+comment on function public.create_dealership(text, text, text) is 'Self-serve sign-up: the signed-in caller creates a dealership, becomes its manager and its free pilot starts, when signup_settings.open and its limits allow. P0008 closed, P0005 throttled, 22023 a bad field, P0010 per account, P0011 per day, P0009 the website is taken.';
 
 -- Only a signed-in person may sign up (PostgREST: /rest/v1/rpc/create_dealership);
 -- the anon key and the service role may not. website_origin_of() is for

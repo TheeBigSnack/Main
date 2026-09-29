@@ -127,12 +127,9 @@ test('supabase/README.md lists the files and runs the test in its plain-Postgres
   assert.ok(recipe.includes('-f supabase/tests/usage.sql'), 'the recipe runs tests/usage.sql');
 });
 
-test('supabase/README.md, "Usage report": the three calls, who cannot call it, and every column', (t) => {
+test('supabase/README.md, "Usage report": the three calls, who cannot call it, and every column', () => {
   const s = section(readme, '## Usage report');
-  if (!s) {
-    t.skip('supabase/README.md has no "Usage report" section yet');
-    return;
-  }
+  assert.ok(s, 'supabase/README.md has no "Usage report" section');
   for (const line of [
     'select * from public.usage_report();',
     "select * from public.usage_report(now() - interval '30 days');",

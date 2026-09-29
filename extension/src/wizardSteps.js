@@ -31,7 +31,7 @@ export const ACCOUNT_WORDS = Object.freeze({
 // Signing in never holds up set-up: the step always says how to go on without it.
 export const LATER = Object.freeze({
   signIn: 'Signing in is optional here: click Skip for now and sign in later under Settings, Account.',
-  join: 'No code yet? Click Next and join later under Settings, Account.',
+  join: 'No code yet? Click Next. If you started your dealership in the manager view, you are in it already and need no code; otherwise join later under Settings, Account.',
 });
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');

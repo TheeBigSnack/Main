@@ -277,6 +277,20 @@ async function main() {
       await page.goto(`${base}/manager/index.html?mock=1`);
       await page.locator('#invites').waitFor({ timeout: 15000 });
       await audit(`manager view, sample data (${scheme})`, page);
+      // self-serve sign-up: the empty form, a refusal in its live region, then the new dealership's Getting started
+      await page.goto(`${base}/manager/index.html?mock=signup`);
+      await page.locator('#startDealership').waitFor({ timeout: 15000 });
+      await audit(`manager view, Start your dealership (${scheme})`, page);
+      await page.fill('#suName', 'Example Motors');
+      await page.fill('#suWebsite', '192.168.1.10');
+      await page.fill('#suYou', 'Jamie');
+      await page.click('#signup button[type="submit"]');
+      await page.waitForFunction(() => document.getElementById('signupError').textContent.length > 0);
+      await audit(`manager view, Start your dealership refused (${scheme})`, page);
+      await page.fill('#suWebsite', 'www.example-motors.test');
+      await page.click('#signup button[type="submit"]');
+      await page.locator('#gettingStarted ol.steps').waitFor({ timeout: 15000 });
+      await audit(`manager view, new dealership with Getting started (${scheme})`, page);
       await page.close();
     }
 

@@ -111,8 +111,9 @@ revoke all on public.invite_misses from anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- dealerships: members read their own dealership; managers may rename it.
--- Nobody creates or deletes a dealership through the API (the owner does, in
--- SQL, when a rooftop signs up or leaves).
+-- Nobody creates or deletes a dealership through the API directly: the owner
+-- does, in SQL, or create_dealership() (0007_signup.sql) does for a signed-in
+-- person once the owner opens self-serve sign-up.
 -- ---------------------------------------------------------------------------
 create policy "members read their dealership"
   on public.dealerships for select to authenticated
@@ -126,8 +127,9 @@ create policy "managers update their dealership"
 -- ---------------------------------------------------------------------------
 -- memberships: a person reads their own rows (which dealerships am I in, as
 -- what); a manager reads everyone in their dealership (the manager view's
--- list of salespeople). Rows are created only by redeem_invite() below or by
--- the owner in SQL, never by a plain insert. Managers may change a member's
+-- list of salespeople). Rows are created only by redeem_invite() below, by
+-- create_dealership() (0007_signup.sql) for a self-serve dealership's first
+-- manager, or by the owner in SQL, never by a plain insert. Managers may change a member's
 -- name or role and remove a member; nothing else is allowed.
 -- ---------------------------------------------------------------------------
 create policy "a user reads their own memberships"
@@ -378,8 +380,9 @@ begin
   end if;
 
   -- the throttle, before anything is looked up; misses older than an hour
-  -- no longer count and are dropped
-  delete from public.invite_misses where invite_misses.user_id = uid and invite_misses.at < now() - interval '1 hour';
+  -- no longer count and are dropped, everyone's, so an account that never
+  -- tries again does not keep its misses
+  delete from public.invite_misses where invite_misses.at < now() - interval '1 hour';
   select count(*) into misses from public.invite_misses where invite_misses.user_id = uid;
   if misses >= 10 then
     raise exception 'too many attempts; try again in an hour' using errcode = 'P0005';

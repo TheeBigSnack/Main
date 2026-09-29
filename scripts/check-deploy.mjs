@@ -34,7 +34,7 @@ import { pathToFileURL } from 'node:url';
 // nothing: an empty list, or a refusal.
 export const TABLES = Object.freeze([
   'dealerships', 'memberships', 'listings', 'todo_items', 'scan_summaries', 'post_attempts',
-  'rewrite_usage', 'invites', 'invite_misses', 'subscriptions', 'billing_events', 'demo_requests',
+  'rewrite_usage', 'invites', 'invite_misses', 'subscriptions', 'billing_events', 'demo_requests', 'signup_settings', 'signup_attempts',
 ]);
 export const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 export const FUNCTIONS = Object.freeze([

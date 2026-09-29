@@ -5,7 +5,7 @@
 // signed-in person's token.
 //
 //   POST …/rewrite/rewrite   facts JSON  -> { ok, text, model, guardrails, costUsd, error }
-//   POST …/rewrite/color     { photos, options } -> { ok, exterior, interior, confidence, model, costUsd }
+//   POST …/rewrite/color     { photos, options, origin } -> { ok, exterior, interior, confidence, model, costUsd }
 //   GET  …/rewrite/health    -> { ok, model, month, usd, capUsd, perMinute, dealership }
 //
 // Protection, in order: a valid Supabase user token (401), a per-user

@@ -44,7 +44,7 @@ create table public.memberships (
   primary key (user_id, dealership_id)
 );
 create index memberships_dealership_idx on public.memberships (dealership_id);
-comment on table public.memberships is 'Who belongs to which dealership and as what. Rows are created by redeem_invite() or by the owner in SQL.';
+comment on table public.memberships is 'Who belongs to which dealership and as what. Rows are created by redeem_invite(), by create_dealership() for a self-serve dealership''s first manager, or by the owner in SQL.';
 
 -- ---------------------------------------------------------------------------
 -- listings: the posted registry, one row per post. The extension's local

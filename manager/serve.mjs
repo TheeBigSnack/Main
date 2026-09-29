@@ -42,5 +42,5 @@ createServer(async (req, res) => {
     res.end('Not found');
   }
 }).listen(port, '127.0.0.1', () => {
-  console.log(`Lot Sync manager view: http://127.0.0.1:${port}/?mock=1 (sample data), http://127.0.0.1:${port}/ (live)`);
+  console.log(`Lot Sync manager view: http://127.0.0.1:${port}/?mock=1 (sample data), http://127.0.0.1:${port}/?mock=signup (sign-up, sample), http://127.0.0.1:${port}/ (live)`);
 });

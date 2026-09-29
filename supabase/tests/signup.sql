@@ -372,7 +372,8 @@ begin
 
   -- trimmed, the address reduced to its origin
   got := pg_temp.sign_up('  New Motors  ', '  HTTPS://WWW.New-Motors.test/used-inventory/?page=2  ', ' Pat ');
-  if got ? 'status' or got ? 'raised' or got - 'dealership_id' is distinct from jsonb_build_object('name', 'New Motors', 'website_origin', 'https://www.new-motors.test') then
+  if got ? 'status' or got ? 'raised' or got - 'dealership_id' - 'pilot_ends_at' is distinct from jsonb_build_object('name', 'New Motors', 'website_origin', 'https://www.new-motors.test')
+     or (got ->> 'pilot_ends_at')::timestamptz not between now() + interval '30 days' - interval '1 minute' and now() + interval '30 days' then
     raise exception 'the sign-up was answered with %', got;
   end if;
   d := (got ->> 'dealership_id')::uuid;
@@ -385,16 +386,19 @@ begin
   if not public.is_manager(d) then raise exception 'is_manager says no for the new manager'; end if;
   raise notice 'ok: the sign-up made New Motors with p1 as its manager';
 
-  -- and does what a manager does: invites (the Invite codes card), starts the pilot, reads the Billing card's rows
+  -- its free pilot started with it (a self-serve dealership never sits in the none state), and it
+  -- starts once: the Billing card's button then changes nothing
+  select count(*) into n from public.subscriptions s where s.dealership_id = d and s.status = 'pilot' and s.pilot_ends_at = (got ->> 'pilot_ends_at')::timestamptz;
+  if n <> 1 or public.subscription_state(d) is distinct from 'pilot' then raise exception 'the new dealership''s pilot did not start with it'; end if;
+  pilot := public.start_pilot(d);
+  if (pilot ->> 'started')::boolean is not false or pilot ->> 'state' is distinct from 'pilot' then raise exception 'start_pilot answered %', pilot; end if;
+
+  -- and does what a manager does: invites (the Invite codes card), reads the Billing card's rows
   inv := public.create_invite(d, 'salesperson');
   if length(inv ->> 'code') <> 12 then raise exception 'create_invite answered %', inv; end if;
   if not exists (select 1 from public.list_invites(d) l where l.code = inv ->> 'code') then raise exception 'list_invites does not show the new code'; end if;
-  pilot := public.start_pilot(d);
-  if (pilot ->> 'started')::boolean is not true or pilot ->> 'state' is distinct from 'pilot' then raise exception 'start_pilot answered %', pilot; end if;
-  select count(*) into n from public.subscriptions s where s.dealership_id = d and s.status = 'pilot' and s.pilot_ends_at > now();
-  if n <> 1 or public.subscription_state(d) is distinct from 'pilot' then raise exception 'the new manager does not read the pilot'; end if;
   perform set_config('signup_test.invite', inv ->> 'code', true);
-  raise notice 'ok: the new manager creates an invite, starts the pilot and reads it';
+  raise notice 'ok: the new dealership is on its pilot; its manager creates an invite and reads the plan';
 end;
 $$;
 

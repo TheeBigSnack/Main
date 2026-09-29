@@ -113,8 +113,8 @@ test('create_dealership: the checks run in order a to g, and the limits are coun
   // the insert makes the caller the manager and records the created attempt with the dealership
   assert.match(fn.slice(g), /^insert into public\.dealerships as d \(name, website_origin\)\s+values \(dealer_name, origin\)\s+on conflict \(website_origin\) do nothing\s+returning d\.id into new_id;/);
   assert.match(fn.slice(g), /insert into public\.memberships \(user_id, dealership_id, role, name\) values \(uid, new_id, 'manager', person_name\);/);
-  assert.match(fn.slice(g), /insert into public\.signup_attempts \(user_id, outcome, dealership_id\) values \(uid, 'created', new_id\);/);
-  assert.match(fn, /return jsonb_build_object\('dealership_id', new_id, 'name', dealer_name, 'website_origin', origin\);/);
+  assert.match(fn.slice(g), /insert into public\.signup_attempts \(user_id, outcome, dealership_id\) values \(uid, 'created', new_id\);\s+pilot := public\.start_pilot\(new_id\);/, 'the free pilot starts with the dealership, so a self-serve one never sits in the none state');
+  assert.match(fn, /return jsonb_build_object\('dealership_id', new_id, 'name', dealer_name, 'website_origin', origin, 'pilot_ends_at', pilot -> 'pilot_ends_at'\);/);
 });
 
 test('create_dealership: P0005 and P0009 are answered, not raised, and a taken website is recorded before the answer', () => {
@@ -157,7 +157,7 @@ test('tests/signup.sql checks the order, both limits, the throttle, the privileg
     'a call with no user was answered with %', 'a sign-up while closed was answered with %', 'anon called create_dealership',
     'a signed-in person read signup_settings', 'a signed-in person wrote signup_attempts', 'anon drew from signup_attempts_id_seq',
     '% holds % on %', 'execute on create_dealership for %: %', 'was answered with %, not 22023 naming the %',
-    'the sign-up was answered with %', 'p1 is not the manager of their new dealership, as Pat', 'create_invite answered %', 'start_pilot answered %',
+    'the sign-up was answered with %', 'p1 is not the manager of their new dealership, as Pat', 'create_invite answered %', 'start_pilot answered %', "the new dealership''s pilot did not start with it",
     'redeeming the new manager\'\'s invite answered %', 'a second sign-up by p1 was answered with %', 'a taken website from an account at its limit was answered with %',
     'a taken website was answered with %', 'the sixth attempt in an hour was answered with %', 'a throttled bad call was answered with %',
     'a throttled account was not told sign-up is closed first', 'p4, with five attempts two hours ago, was answered with %',

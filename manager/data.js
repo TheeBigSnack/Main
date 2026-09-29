@@ -907,32 +907,38 @@ export function mockData(now = nowIso()) {
 // ?mock=signup: the page's stand-in for create_dealership, answered the way
 // supabase-js answers an rpc ({ data, error }). It refuses what the form's
 // own checks refuse, as the database would (22023), and otherwise answers a
-// made-up dealership id with the name and the origin websiteOrigin() keeps.
+// made-up dealership id with the name, the origin websiteOrigin() keeps and
+// the end of the free pilot, which create_dealership() starts with the
+// dealership. SAMPLE_PILOT_DAYS is marketing/pricing.json's pilotDays (the
+// length start_pilot() gives), held equal by test/manager.test.js.
 export const SAMPLE_NEW_DEALERSHIP_ID = '00000000-0000-4000-8000-000000000002';
-export function mockCreateDealership(args = {}) {
+export const SAMPLE_PILOT_DAYS = 30;
+export function mockCreateDealership(args = {}, { now = nowIso() } = {}) {
   const a = args && typeof args === 'object' ? args : {};
   const problem = signupProblem({ name: a.name, website: a.website, yourName: a.your_name });
   if (problem) return { data: null, error: { code: '22023', message: problem.message } };
-  return { data: { dealership_id: SAMPLE_NEW_DEALERSHIP_ID, name: text(a.name), website_origin: websiteOrigin(a.website) }, error: null };
+  const pilotEndsAt = new Date((ms(now) ?? Date.now()) + SAMPLE_PILOT_DAYS * DAY_MS).toISOString();
+  return { data: { dealership_id: SAMPLE_NEW_DEALERSHIP_ID, name: text(a.name), website_origin: websiteOrigin(a.website), pilot_ends_at: pilotEndsAt }, error: null };
 }
 
 // The new, empty sample dealership that answer lands in: the person as its
-// only member and manager, nothing posted or scanned, no invite code and no
-// plan yet, so Getting started shows every step still to do. Made up, like
-// mockData(); no network.
+// only member and manager, its free pilot running from now, nothing posted
+// or scanned and no invite code, so Getting started shows its first step
+// done and the other three to do. Made up, like mockData(); no network.
 export function mockNewDealership(answer, { yourName = '', now = nowIso() } = {}) {
   const a = answer && typeof answer === 'object' ? answer : {};
   const id = text(a.dealership_id) || SAMPLE_NEW_DEALERSHIP_ID;
   const createdAt = new Date(ms(now) ?? Date.now()).toISOString();
   const dealership = { id, name: text(a.name) || 'Your dealership', website_origin: text(a.website_origin, 300), created_at: createdAt };
   const YOU = '00000000-0000-4000-8000-000000000104';
+  const pilotEndsAt = text(a.pilot_ends_at) || new Date(Date.parse(createdAt) + SAMPLE_PILOT_DAYS * DAY_MS).toISOString();
   const billing = {
     ok: true,
     dealership: { id, name: dealership.name, websiteOrigin: dealership.website_origin },
     role: 'manager',
-    state: 'none',
-    subscription: null,
-    canStartPilot: true,
+    state: 'pilot',
+    subscription: { dealership_id: id, stripe_customer_id: null, stripe_subscription_id: null, status: 'pilot', pilot_ends_at: pilotEndsAt, current_period_end: null, updated_at: createdAt },
+    canStartPilot: false,
     canSubscribe: true,
     canManageBilling: false,
     pilotDays: null, // as in mockData(): the real answer carries these from marketing/pricing.json

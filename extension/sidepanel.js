@@ -357,7 +357,7 @@ async function maybeGuessColors(force = false) {
   }
   const rw = await rewriteWithKey(base);
   try {
-    const r = await guessColorsWithBackend({ endpoint: rw.endpoint, key: rw.key, photos, options: COLORS });
+    const r = await guessColorsWithBackend({ endpoint: rw.endpoint, key: rw.key, photos, options: COLORS, origin: state.origin }); // the origin tells the service which store this is
     state.colorGuess = r.ok ? { exterior: need.exterior ? r.exterior : '', interior: need.interior ? r.interior : '', confidence: r.confidence, model: r.model } : { error: r.error };
   } catch (e) {
     state.colorGuess = { error: String((e && e.message) || e) };

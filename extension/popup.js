@@ -719,9 +719,9 @@ function viewSettings() {
     </fieldset>
     <div class="actions"><button type="submit" class="plain">Save settings</button><span class="hint" id="saved"></span></div>
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
-      <p class="hint">Scans and your posted list are kept only in this browser, separately for each website.</p>
+      <p class="hint">Scans and your posted list are kept in this browser, separately for each website. When you are signed in, your posted list, post timings, to-do items and scan counts also sync to your dealership's account.</p>
       <button type="button" class="danger" data-action="clear">Clear everything for this website</button>
-      <p class="hint">Your profile (name, role, dealership, price basis, note, cap, listing defaults, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
+      <p class="hint">Your profile (name, role, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
       <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>
     </fieldset>
     <fieldset><legend>Report a problem</legend>

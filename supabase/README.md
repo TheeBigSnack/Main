@@ -23,7 +23,7 @@ What is here:
 | `functions/sync/` | `/sync`: the posted registry and the pilot numbers up, the dealership's current state down. |
 | `functions/_shared/` | The prompt and the guardrails, copied from `backend/rewritePrompt.js` and `extension/src/rewriteTemplate.js`; CORS, JSON and sign-in helpers. |
 | `tests/rls.sql` | Proves the wall between dealerships against a running database (below). |
-| `tests/signup.sql` | Proves self-serve sign-up: every case of `test/fixtures/website-origins.json`, the switch, the order of the checks, both limits and the throttle, and that the new manager can invite and start the pilot. |
+| `tests/signup.sql` | Proves self-serve sign-up: every case of `test/fixtures/website-origins.json`, the switch, the order of the checks, both limits and the throttle, that the free pilot starts with the dealership, and that the new manager can invite. |
 | `tests/usage.sql` | Proves the usage report counts each dealership's own activity only and that no API role can call it. |
 | `tests/concurrency.sql` | Proves with two real sessions (dblink) that two managers stepping down at once cannot leave a dealership with none. Plain Postgres only: it needs a superuser and commits rows, then removes them. |
 | `tests/local-shim.sql` | Lets the migrations and the test run on a plain Postgres with no Supabase. It grants what Supabase grants by default (execute on functions, all on tables and sequences), so a missing revoke fails a test. |
@@ -103,7 +103,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
 | `MONTHLY_COST_CAP_USD` | function secret | Per dealership per calendar month (UTC), summed from `rewrite_usage`. Default 25. At the cap `/rewrite` and `/color` answer 429 with a plain sentence until the month turns. |
 | `RATE_LIMIT_PER_MINUTE` | function secret | Calls per signed-in user per minute. Default 20. Counted in each function instance's memory, so with several instances a burst can exceed it by that factor; it is a brake, not a ledger. |
 | `ALLOWED_ORIGINS` | function secret, optional | Comma-separated page origins allowed to call the functions from a browser besides the extension's own `chrome-extension://` origin (a local manager page during development, say). |
-| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | set by Supabase | The functions read them; nothing to do. The service-role key is used for exactly one thing, writing `rewrite_usage`, and only inside the rewrite function. |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | set by Supabase | The functions read them; nothing to do. The service-role key is used only inside the functions and only for the tables no API role may touch: `rewrite_usage` (the rewrite function's usage log and monthly cap), `subscriptions`, `billing_events` and the dealership lookup in the billing function, and `demo_requests` in the lead function. `/sync` and the membership and plan checks use the caller's own token. |
 
 ## How the extension is configured
 
@@ -120,7 +120,7 @@ Both take `Authorization: Bearer <the user's access token>` and a JSON body, and
 
 **`POST .../functions/v1/rewrite/rewrite`** (or the bare `/rewrite`): the body is the facts object `extension/src/rewriter.js` builds (`rewriteFacts`: year, make, model, trim, mileage, stock, features, carfaxOneOwner, carfax, colors, engine, transmission, drivetrain, fuelType, narrative, dealer { name, city }, salesperson { name, title }, priceNote). No VIN goes up; the extension adds the VIN line afterwards. The extension also sends the dealer website's `origin` with the facts (the function strips it before the prompt): it picks the dealership for a person who belongs to several, compared as `/sync` compares it (no trailing slash, no case), and an origin that matches none of their dealerships gets 403, so a sister store is never billed or capped for another store's cars; a body without an origin (an older extension) gets the first membership. A dealership whose plan has lapsed (the state machine under Billing, below) gets 402 `{ ok: false, error, code: "lapsed", plan }` on every route of the function, after the membership is picked and before the cost cap and the model call, so nothing is spent for a store that no longer pays; the row is read with the caller's own client, the way `/sync` reads it. Answer: `{ ok, text, model, guardrails: { ok, problems: [{ code, text }], words }, costUsd, error }`, the same as `backend/server.js`: `ok` is false when the draft failed the guardrails twice or the model declined, and the extension then shows its template.
 
-**`POST .../functions/v1/rewrite/color`**: `{ photos: [up to 4 https addresses], options: [Facebook's color words] }`. Answer: `{ ok: true, exterior, interior, confidence, model, costUsd }` or `{ ok: false, error, costUsd }`.
+**`POST .../functions/v1/rewrite/color`**: `{ photos: [up to 4 https addresses], options: [Facebook's color words], origin }`, the `origin` picking the store as it does for `/rewrite` (without it, a person in two dealerships would be billed and capped against whichever came first). Answer: `{ ok: true, exterior, interior, confidence, model, costUsd }` or `{ ok: false, error, costUsd }`.
 
 **`GET .../functions/v1/rewrite/health`** (signed in): `{ ok, model, month, usd, capUsd, perMinute, dealership }`, the caller's dealership's spend this month.
 
@@ -176,7 +176,7 @@ The two copies in `functions/_shared/` (the prompt and the guardrails) are check
 node --experimental-strip-types supabase/tests/port-check.mjs
 ```
 
-and `npm test` covers `extension/src/account.js` and `extension/src/sync.js`.
+and `npm test` covers `extension/src/account.js` and `extension/src/sync.js`, and runs the four functions' real handlers under Node against a fake database, a fake Stripe and a fake Anthropic API (`test/fn-*.test.js`, `test/functions/`): each route's status codes, the order of its checks and its answer's fields, with no network.
 
 ## What is stored
 
@@ -361,11 +361,11 @@ update public.signup_settings set per_account = 1;   -- dealerships one account 
 update public.signup_settings set per_day = 10;      -- new dealerships across everyone in the past 24 hours
 ```
 
-The values shown are the defaults. Then set `selfServeSignup: true` in `manager/config.js`, so the manager view shows the form. The page setting only shows or hides the form; the database switch is the real gate. With `open` false every call is refused, whatever the page shows, and with `open` true any signed-in person can call `create_dealership` through the API, form or no form. Turn both on together, and both off.
+The values shown are the defaults. Then set `selfServeSignup: true` in `manager/config.js`, so the manager view shows the form, and `signupUrl` in `site/config.js` to the manager view's address, so the landing page shows **Start a free pilot** (empty it again when you close sign-up). The page setting only shows or hides the form; the database switch is the real gate. With `open` false every call is refused, whatever the page shows, and with `open` true any signed-in person can call `create_dealership` through the API, form or no form. Turn both on together, and both off.
 
 ### What a person sees
 
-In the manager view, with `selfServeSignup` true, a signed-in person who belongs to no dealership gets a **Start your dealership** form: the dealership's name, its website and their own name. It calls `supabase.rpc('create_dealership', { name, website, your_name })` (PostgREST: `POST /rest/v1/rpc/create_dealership`). The names are trimmed; the website is kept as its origin, the key the extension syncs under: `https://` when no scheme is typed, the host in lower case, no path, no default port (`website_origin_of`, whose rules are in the fixture). The answer is `{ dealership_id, name, website_origin }`, and the person is now its manager, with everything a manager does: **Start the free pilot** in the Billing card (`start_pilot`), the invite codes for salespeople and other managers (`create_invite`), the Team card. Salespeople join as before, with a code.
+In the manager view, with `selfServeSignup` true, a signed-in person who belongs to no dealership gets a **Start your dealership** form: the dealership's name, its website and their own name. It calls `supabase.rpc('create_dealership', { name, website, your_name })` (PostgREST: `POST /rest/v1/rpc/create_dealership`). The names are trimmed; the website is kept as its origin, the key the extension syncs under: `https://` when no scheme is typed, the host in lower case, no path, no default port (`website_origin_of`, whose rules are in the fixture). The answer is `{ dealership_id, name, website_origin, pilot_ends_at }`: the person is now its manager, and its free pilot has started (`start_pilot`, called by `create_dealership` itself), so a dealership that signs itself up is on the pilot's clock from its first day and lapses at the pilot's end unless someone subscribes. The manager then does everything a manager does: **Subscribe** in the Billing card, the invite codes for salespeople and other managers (`create_invite`), the Team card. Salespeople join as before, with a code.
 
 ### The refusals
 
@@ -389,7 +389,7 @@ The two limits are counted with the `signup_settings` row locked, so sign-ups go
 
 ### Why per_day, and what it bounds
 
-Every new dealership can start a free pilot, and during it the description writer (`/rewrite`) calls the Anthropic API on Lot Sync's bill. `MONTHLY_COST_CAP_USD` caps that per dealership per calendar month, not in total, so the most an open sign-up can cost grows with the number of dealerships made, and a flood of made-up accounts would make many. `per_day` is what bounds that number: at most that many new dealerships in any 24 hours, however many accounts someone has. At the defaults, a month of sign-ups at the limit is 10 a day, about 300 dealerships, each able to spend up to its cap every month it is served. One gap to know about: a dealership that never starts its pilot stays in the `none` state, which `/sync` and `/rewrite` serve as onboarding with no end date. Read the usage report (the "Usage report" section) while sign-up is open, and lower `per_day` or close sign-up if it shows dealerships nobody runs.
+Every new dealership can start a free pilot, and during it the description writer (`/rewrite`) calls the Anthropic API on Lot Sync's bill. `MONTHLY_COST_CAP_USD` caps that per dealership per calendar month, not in total, so the most an open sign-up can cost grows with the number of dealerships made, and a flood of made-up accounts would make many. `per_day` is what bounds that number: at most that many new dealerships in any 24 hours, however many accounts someone has. At the defaults, a month of sign-ups at the limit is 10 a day, about 300 dealerships, each able to spend up to its cap every month it is served. Each of them is on its pilot from the day it is made, and when the pilot ends unpaid it lapses and `/rewrite` answers 402, so a made-up dealership can spend at most its cap for the pilot's length. (A dealership you create yourself in SQL can sit in the `none` state, which `/sync` and `/rewrite` serve as onboarding with no end date; that is yours to watch.) Read the usage report (the "Usage report" section) while sign-up is open, and lower `per_day` or close sign-up if it shows dealerships nobody runs.
 
 ### Your SQL stays the way in
 
@@ -499,3 +499,44 @@ delete from public.demo_requests where lower(trim(email)) = lower('<their email>
 ```
 
 `tests/privacy.sql` runs with the other SQL tests (the `psql` command under "Run the RLS test"); its last line is `privacy.sql: every check passed`.
+
+## Usage report
+
+PLAN.md M6 asks that each partner dealer has at least two active salespeople and one manager using the manager view, and its demo is the partner list with usage numbers. `migrations/0008_usage.sql` gives the owner one function for that list, `usage_report(since)`: one row per dealership, every column read from the tables as they are, and no score or estimate made from them. Run it once a week and keep the partner list from it (`docs/launch-checklist.md`, "Design partners").
+
+| Path | What it is |
+|---|---|
+| `migrations/0008_usage.sql` | `usage_report(since)`, with a comment saying where each column comes from. |
+| `tests/usage.sql` | Proves it against a running database: two dealerships with different activity each count only their own rows, `since` is inclusive to the microsecond, a dealership with no activity still has its row, with zeros, and no API role can call it. |
+| `test/usage.test.js` | Holds the source to the revoke, the pinned search path and the column list, and this section and the launch checklist to the columns, in `npm test`. |
+
+It runs only as the owner, in the Dashboard's SQL editor (it connects as `postgres`), like the privacy tools. Execute is revoked from `public`, `anon`, `authenticated` and `service_role`, so no key, no signed-in user and no Edge Function can call it, and no dealership sees another's numbers. It is `SECURITY INVOKER`: it can read only what the caller's own role may read.
+
+```sql
+select * from public.usage_report();                            -- the past 7 days
+select * from public.usage_report(now() - interval '30 days');  -- any other window
+select * from public.usage_report(null);                        -- everything, from the start
+```
+
+The window starts at `since`, a row stamped exactly then included, and has no end. The dealerships with the most active salespeople come first, then the rest by name. The columns:
+
+| Column | What it is |
+|---|---|
+| `dealership_id`, `name`, `website_origin`, `created_at` | The dealership's row. |
+| `plan_state` | `none`, `pilot`, `active` or `lapsed`: `subscription_state()`, the rule `/sync` and `/rewrite` go by (under Billing, "The state machine"). |
+| `pilot_ends_at`, `current_period_end` | From its `subscriptions` row; empty when it has none. |
+| `managers`, `salespeople` | Its members by role, today. |
+| `active_salespeople` | Members with the salesperson role who posted at least one listing in the window. A manager who posts is counted in `posts`, not here, and so is someone who is no longer a member: M6 asks for two salespeople and a manager, and a posting manager counted twice would meet it with one salesperson. |
+| `posts` | Listings posted in the window, by anyone, whatever their status now. The time is `posted_at`, when the salesperson's browser recorded the post. |
+| `cars_listed_now` | Cars (VINs) with a listing still marked listed. |
+| `open_take_downs` | Sold cars still listed: open to-do items of kind `takeDown`. |
+| `open_price_changes` | Website prices a listing does not show yet: open to-do items of kind `price`. |
+| `oldest_open_hours` | Hours since the oldest open to-do item of either kind was flagged; empty when none is open. |
+| `last_synced_scan_at` | When the newest scan to reach the database ran (`scan_summaries.taken_at`, on the clock of the machine that scanned). The database keeps no log of syncs, but every sync carries the counts of that machine's newest scan, so this is the nearest thing it holds to the dealership's last sync. It stops moving when nobody's extension syncs, and when the plan lapses (`/sync` then writes nothing). A sync with no newer scan to bring leaves it where it was. |
+| `rewrite_calls` | Description writer calls in the window: `rewrite_usage` rows of kind `rewrite`. The photo color guesses (kind `color`) are not counted. |
+
+**What it cannot say.** Nothing in the database records a manager opening the manager view, so `managers` counts people with the role, not people using the page: ask the manager at the weekly check-in. The numbers that stay in the salespeople's browsers (the Numbers tab's seconds per post, the fields that could not be filled) are not here either.
+
+**While self-serve sign-up is open**, look for rows in the `none` or `pilot` state with no `posts` and an empty `last_synced_scan_at` well after `created_at`: those are dealerships nobody runs (above, "Why per_day, and what it bounds").
+
+`tests/usage.sql` runs with the other SQL tests (the `psql` command under "Run the RLS test"); its last line is `usage.sql: every check passed`.

@@ -243,14 +243,14 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   assert.deepEqual(sorted(listed), sorted(sent), 'the fields the extension sends are not the fields docs/data-inventory.md lists');
 });
 
-test('a colour guess sends the photo addresses and the colour words, nothing else', async () => {
+test('a colour guess sends the photo addresses, the colour words and the origin, nothing else; Anthropic gets the first two', async () => {
   let body = null;
   const fetchImpl = async (url, init) => {
     body = JSON.parse(init.body);
     return { ok: true, status: 200, json: async () => ({ ok: true, exterior: 'Gray' }) };
   };
-  await guessColorsWithBackend({ endpoint: 'https://rewrite.test', photos: CAR.photos, options: ['Gray', 'Black'], fetchImpl });
-  assert.deepEqual(Object.keys(body).sort(), ['options', 'photos'], 'the colour guess sends more than the inventory says: update "Exactly what reaches Anthropic"');
+  await guessColorsWithBackend({ endpoint: 'https://rewrite.test', photos: CAR.photos, options: ['Gray', 'Black'], origin: 'https://www.example-motors.test', fetchImpl });
+  assert.deepEqual(Object.keys(body).sort(), ['options', 'origin', 'photos'], 'the colour guess sends more than the inventory says: update "Exactly what reaches Anthropic"');
   assert.match(section(inventory, '### Exactly what reaches Anthropic'), /up to four photo addresses[^.]*and the list of colour words\. Nothing else\./);
 });
 

@@ -13,9 +13,10 @@ export const REWRITE_TIMEOUT_MS = 25000;
 
 // Asks the service to look at the car's photos and pick colors from
 // Facebook's list. Only used when the website gives no usable color, and the
-// result is shown as a guess. Nothing but the photo addresses and the list
-// leaves the browser.
-export async function guessColorsWithBackend({ endpoint, key = '', photos, options, fetchImpl = globalThis.fetch, timeoutMs = REWRITE_TIMEOUT_MS }) {
+// result is shown as a guess. Nothing but the photo addresses, the list and
+// the dealer website's origin (which store to bill, as with the facts; the
+// service never passes it on) leaves the browser.
+export async function guessColorsWithBackend({ endpoint, key = '', photos, options, origin = '', fetchImpl = globalThis.fetch, timeoutMs = REWRITE_TIMEOUT_MS }) {
   const url = String(endpoint || '').replace(/\/+$/, '') + '/color';
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
@@ -23,7 +24,7 @@ export async function guessColorsWithBackend({ endpoint, key = '', photos, optio
     const res = await fetchImpl(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-      body: JSON.stringify({ photos: (photos || []).slice(0, 4), options }),
+      body: JSON.stringify({ photos: (photos || []).slice(0, 4), options, ...(origin ? { origin: String(origin) } : {}) }),
       signal: controller ? controller.signal : undefined,
     });
     const body = await res.json().catch(() => ({}));

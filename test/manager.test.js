@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -784,10 +784,13 @@ test('signupRefusal: create_dealership\'s own sentence for every refusal the con
   assert.equal(signupRefusal('TypeError: Failed to fetch'), 'Couldn\'t start the dealership: TypeError: Failed to fetch.');
 });
 
-test('?mock=signup: create_dealership answered in the page, into a new, empty dealership whose first step is not done', () => {
-  const ok = mockCreateDealership({ name: ' Example Motors ', website: 'HTTPS://www.Example-Motors.test/used/', your_name: 'Jamie' });
+test('?mock=signup: create_dealership answered in the page, into a new, empty dealership on its free pilot', () => {
+  const ok = mockCreateDealership({ name: ' Example Motors ', website: 'HTTPS://www.Example-Motors.test/used/', your_name: 'Jamie' }, { now: NOW });
   assert.equal(ok.error, null);
-  assert.deepEqual(ok.data, { dealership_id: SAMPLE_NEW_DEALERSHIP_ID, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }, 'the shape create_dealership answers');
+  const pilotEnds = new Date(Date.parse(NOW) + SAMPLE_PILOT_DAYS * DAY_MS).toISOString();
+  assert.deepEqual(ok.data, { dealership_id: SAMPLE_NEW_DEALERSHIP_ID, name: 'Example Motors', website_origin: 'https://www.example-motors.test', pilot_ends_at: pilotEnds }, 'the shape create_dealership answers: the pilot starts with the dealership');
+  const pricing = JSON.parse(readFileSync(new URL('../marketing/pricing.json', import.meta.url), 'utf8'));
+  assert.equal(SAMPLE_PILOT_DAYS, pricing.pilotDays, 'the sample pilot is as long as the real one (start_pilot() gives pricing.json\'s pilotDays)');
   const refused = mockCreateDealership({ name: 'Example Motors', website: 'https://10.0.0.1/', your_name: 'Jamie' });
   assert.equal(refused.data, null);
   assert.equal(refused.error.code, '22023');
@@ -800,12 +803,14 @@ test('?mock=signup: create_dealership answered in the page, into a new, empty de
   assert.deepEqual(d.memberships, [{ user_id: d.memberships[0].user_id, dealership_id: SAMPLE_NEW_DEALERSHIP_ID, role: 'manager', name: 'Jamie' }], 'the person, as its only manager');
   for (const k of ['listings', 'todoItems', 'postAttempts', 'scans', 'invites']) assert.deepEqual(d[k], [], `${k} is empty`);
   assert.equal(d.billing.role, 'manager');
-  assert.equal(d.billing.state, 'none');
-  assert.equal(d.billing.pilotDays, null, 'no price or pilot length typed into the sample');
-  assert.deepEqual(billingCard(d.billing, { now: NOW, timeZone: 'UTC' }).buttons.map((b) => b.label), ['Start the free pilot', 'Subscribe']);
+  assert.equal(d.billing.state, 'pilot', 'a self-serve dealership is on its pilot from the first day');
+  assert.equal(d.billing.subscription.pilot_ends_at, pilotEnds);
+  assert.equal(d.billing.canStartPilot, false);
+  assert.equal(d.billing.pilotDays, null, 'no price typed into the sample');
+  assert.deepEqual(billingCard(d.billing, { now: NOW, timeZone: 'UTC' }).buttons.map((b) => b.label), ['Subscribe']);
   const g = gettingStarted({ ...d, dealershipId: d.dealership.id, now: NOW });
-  assert.deepEqual(g.steps.map((s) => s.done), [false, false, false, false]);
-  assert.equal(g.line, '0 of 4 done');
+  assert.deepEqual(g.steps.map((s) => s.done), [true, false, false, false]);
+  assert.equal(g.line, '1 of 4 done');
   assert.equal(summarize({ ...d, now: NOW }).totals.postedAllTime, 0);
   assert.doesNotMatch(JSON.stringify(d), /Waynesburg|Ron Lewis|15370|\bRoger\b/i);
 });

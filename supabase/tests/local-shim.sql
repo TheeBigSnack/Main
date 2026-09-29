@@ -12,9 +12,13 @@
 --     -f supabase/migrations/0004_billing.sql \
 --     -f supabase/migrations/0005_leads.sql \
 --     -f supabase/migrations/0006_privacy.sql \
+--     -f supabase/migrations/0007_signup.sql \
+--     -f supabase/migrations/0008_usage.sql \
 --     -f supabase/tests/rls.sql \
 --     -f supabase/tests/billing.sql \
---     -f supabase/tests/privacy.sql
+--     -f supabase/tests/privacy.sql \
+--     -f supabase/tests/signup.sql \
+--     -f supabase/tests/usage.sql
 -- (or: node scripts/sql-test.mjs, which applies them all and runs every test file)
 
 create schema if not exists auth;
