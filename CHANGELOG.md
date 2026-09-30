@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Round J: reading websites beyond Dealer Inspire, and photos from any server. Everything new here was built and tested against sample pages written from public standards (schema.org's Car, Vehicle and Offer, Google's vehicle listing documentation). No dealer website other than the pilot's has been scanned, so none is claimed.
+Reading websites beyond Dealer Inspire, and photos from any server (round J): those entries were built and tested against sample pages written from public standards (schema.org's Car, Vehicle and Offer, Google's vehicle listing documentation). No dealer website other than the pilot's has been scanned, so none is claimed.
 
 Added
 - **The standard vehicle data reader** (`extension/adapters/schemaOrgParse.js`, `schemaOrgNormalize.js`): reads the schema.org vehicle markup (JSON-LD and microdata) a dealer website may publish for search engines into the flat vehicle, with the page's own visible text as the check on every price. A price range, another currency, a price the page doesn't show and kilometres are left out with a reason, never guessed. Built and tested from the public standard with synthetic pages (`test/fixtures/structured/`). The pre-owned gate now understands schema.org condition values and sends a car the website lists as damaged or refurbished to **Needs a look**; `test/classify.test.js` checks that every Dealer Inspire record and sandbox car is decided exactly as before.
