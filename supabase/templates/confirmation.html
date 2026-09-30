@@ -8,8 +8,8 @@
   the same things; this one adds that it also confirms the address.
   config.toml points the local stack at this file; the hosted project needs
   it pasted in (supabase/README.md, "Sign-in emails").
-  No colours are set anywhere, so each mail app shows it in its own light or
-  dark theme, and nothing is loaded from elsewhere: no images, fonts or
+  No text or background colour is set (the code box's mid-grey border shows
+  in light and dark), so each mail app shows it in its own light or dark theme, and nothing is loaded from elsewhere: no images, fonts or
   scripts, no tracking, inline styles only. The address is printed as text
   too, so a mail app that shows plain text still shows every part.
 -->
@@ -28,7 +28,7 @@
 <p style="margin:0 0 8px;">Signing in to the Lot Sync extension? Type this code into "Code from the email":</p>
 <p style="margin:0 0 24px;padding:12px 16px;border:1px solid #8c8c8c;border-radius:6px;font-family:Menlo,Consolas,monospace;font-size:32px;font-weight:bold;letter-spacing:6px;text-align:center;-webkit-user-select:all;user-select:all;">{{ .Token }}</p>
 
-<p style="margin:0 0 8px;">Signing in to the manager view? Open this link in the same browser you asked from:</p>
+<p style="margin:0 0 8px;">Asked for this email on the manager view? Open this link in that same browser. Asked from the extension? Use the code above instead: this link does not sign you in to the extension, and opening it uses the code up.</p>
 <p style="margin:0 0 8px;font-size:18px;font-weight:bold;"><a href="{{ .ConfirmationURL }}">Sign in to the manager view</a></p>
 <p style="margin:0 0 24px;font-size:13px;word-break:break-all;">If the link does not open, paste this address into that browser: {{ .ConfirmationURL }}</p>
 

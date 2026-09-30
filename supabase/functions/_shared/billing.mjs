@@ -90,7 +90,7 @@ export function hasOpenSubscription(row) {
 // second subscription on the same customer, and the old one's dunning
 // events would then keep flipping the row back to lapsed).
 export function checkoutRefusal(row, now = Date.now()) {
-  if (subscriptionState(row, now) === 'active') return { status: 409, error: 'this dealership already has a subscription; use the billing portal to change it' };
+  if (subscriptionState(row, now) === 'active') return { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' };
   if (hasOpenSubscription(row)) return { status: 409, error: OPEN_SUBSCRIPTION_MESSAGE, code: OPEN_SUBSCRIPTION_CODE };
   return null;
 }
@@ -115,7 +115,7 @@ export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICI
     state,
     subscription: isRecord(row) ? { ...row } : null,
     canStartPilot: manager && pilotAvailable(row),
-    canSubscribe: manager && state !== 'active',
+    canSubscribe: manager && state !== 'active' && !hasOpenSubscription(row), // checkout refuses a second subscription; the portal renews the open one
     canManageBilling: manager && isRecord(row) && typeof row.stripe_customer_id === 'string' && row.stripe_customer_id !== '',
     pilotDays: pricing.pilotDays,
     includedSalespeople: pricing.includedSalespeople,

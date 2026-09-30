@@ -162,7 +162,9 @@ jobs:
         run: |
           supabase status -o env > "$RUNNER_TEMP/status.env"
           val() { { grep -E "^$1=" "$RUNNER_TEMP/status.env" || true; } | head -n 1 | cut -d= -f2- | tr -d '"'; }
-          # The keys are the local stack's own; they still stay out of the log.
+          # `supabase start` has already printed the CLI's fixed default local keys
+          # (public, and good only for this job's stack); masking these keeps them
+          # out of the later steps' logs.
           for name in ANON_KEY SERVICE_ROLE_KEY; do
             if [ -n "$(val "$name")" ]; then echo "::add-mask::$(val "$name")"; fi
           done

@@ -369,9 +369,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (refusal) return json(req, refusal.status, { ok: false, error: refusal.error, ...(refusal.code ? { code: refusal.code } : {}) });
     const state = subscriptionState(row);
     // the manager page sends a seat for every salesperson it showed the
-    // manager (manager/data.js billingBody); a request without seats keeps
-    // the row's count, or the included one
-    const seats = normalizeSeats(body.seats !== undefined ? body.seats : row ? row.seats : undefined, PRICING.includedSalespeople);
+    // manager (manager/data.js billingBody); a request without seats gets
+    // the included count, never the row's old one: a subscription still open
+    // was refused above, so the row's count belongs to one that has ended
+    const seats = normalizeSeats(body.seats, PRICING.includedSalespeople);
     const lineItems = checkoutLineItems({ seats, included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
     const customerId = await ensureCustomer(service, dealership, row, caller.user.email);
     const trialEnd = state === 'pilot' && row ? trialEndFor(row.pilot_ends_at) : null;

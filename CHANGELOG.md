@@ -8,6 +8,9 @@ Added
 - **The owner's usage report** (`0008_usage.sql`, `usage_report(since)`): one row per dealership with its plan and activity, owner only.
 - **The Edge Functions' real handlers run in `npm test`** (`test/fn-*.test.js`, `test/functions/`): a fake supabase-js (with the API's 1,000-row cap), Stripe and Anthropic; every route's statuses, order of checks and answer.
 - **A data inventory** (`docs/data-inventory.md`) built from the code, with a test that fails when a table, a storage key or a function goes undocumented; the privacy texts corrected against it, and the questions only an attorney can answer marked pending.
+- **Lot Sync against a real local Supabase stack in CI** (job `stack`, `npm run test:stack`, `docs/stack-test.md`): the extension's account and sync modules against the real `/sync`, both throttles through the real PostgREST, the last-manager rule, sign-up, the lead function and `check-deploy`; marked continue-on-error until its first pass.
+- **Sign-in emails in Lot Sync's words** (`supabase/templates/`): the code for the extension and the link for the manager view (Supabase's default email has no code), how long they work, and which to use where.
+- **Seats on the Billing card**: "N salespeople; the plan includes M", the seats paid for while subscribed (or while Stripe still holds a subscription open) with a warning when there are more salespeople, and Subscribe asks Checkout for one seat per salesperson (never fewer than included, never more than Checkout bills). Lot Sync never changes a subscription's seats on its own.
 - **The legal texts as site pages** (`npm run legal-pages`, `site/legal/`), marked draft until `legal/legal-status.json` says otherwise; the landing page links them, runs under a Content-Security-Policy, and shows **Start a free pilot** once `signupUrl` is set.
 
 Changed
