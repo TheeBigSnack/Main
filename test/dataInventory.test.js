@@ -23,6 +23,8 @@ import { PROFILE_KEY } from '../extension/src/settings.js';
 import { generateDescription, guessColorsWithBackend } from '../extension/src/rewriter.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { noteFlags } from '../extension/src/pilot.js';
+import { neededPatterns } from '../extension/src/photoHosts.js';
+import schemaOrg from '../extension/adapters/schemaOrg.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -388,6 +390,73 @@ test('every file the extension or the manager view saves is listed where that pa
   const photos = t.rows.find((r) => r[0].startsWith('Photos '));
   assert.match(photos[column(t, 'Kept afterwards')], /\*\*Download photos\*\* saves/, 'the Photos row says nothing is kept');
   assert.match(policy, /photos themselves[^|]*not kept, unless the User clicks Download photos, which saves them as files in the User's Downloads folder/, 'the privacy policy says the photos are never kept');
+});
+
+// Round J's adapter reads plain pages where Dealer Inspire calls a keyed
+// search, and its photos can sit on any https server the markup names; the
+// requests table once described only Dealer Inspire and sent every photo to
+// "the dealership's website".
+test('the requests table names each adapter\'s own requests, with the key only where one is sent', async () => {
+  const t = tables(section(inventory, '## What leaves the browser'))[0];
+  const what = column(t, 'What is sent');
+  const row = (start) => {
+    const r = t.rows.find((x) => x[0].startsWith(start));
+    assert.ok(r, `the requests table has no "${start}" row`);
+    return r[what];
+  };
+  const scan = row('Scan ');
+  const record = row("The car's full record ");
+  const adapters = [...read('extension/adapters/index.js').matchAll(/^import \w+ from '\.\/(\w+\.js)';/gm)].map((m) => m[1]);
+  assert.ok(adapters.includes('dealerInspire.js') && adapters.includes('schemaOrg.js'), 'adapters/index.js no longer imports the known adapters: fix this test');
+  for (const file of adapters) {
+    for (const [name, cell] of [['Scan', scan], ["car's full record", record]]) {
+      assert.ok(cell.includes('`adapters/' + file + '`'), `the ${name} row does not say what adapters/${file} sends`);
+    }
+    if (/robots\.txt/.test(stripComments(read('extension/adapters/' + file)))) {
+      assert.ok(scan.includes('`/robots.txt`') && /sitemaps?\b/.test(scan), `adapters/${file} reads robots.txt and sitemaps, and the Scan row does not say so`);
+    }
+  }
+  // what the standard-data adapter's background read actually sends
+  let init = null;
+  const direct = schemaOrg.makeDirectSearch({ kind: 'schemaOrg', origin: 'https://www.example-motors.test' }, async (url, i) => {
+    init = i;
+    return { ok: true, status: 200, url, headers: { get: () => 'text/html' }, text: async () => '' };
+  });
+  await direct({ url: 'https://www.example-motors.test/used/' });
+  assert.equal(init.credentials, 'omit', 'the standard-data background read sends cookies now: update the inventory');
+  assert.equal(init.headers, undefined, 'the standard-data background read sends headers of its own now: update the inventory');
+  assert.match(scan, /with no key/, 'the Scan row says every scan carries a key');
+  assert.match(row('Background rescan '), /without cookies/, 'the Background rescan row does not say the standard-data reads go without cookies');
+  const site = onlyTable(section(inventory, '## Who receives data'), 'the recipients section').rows.find((r) => r[0] === "The dealership's website");
+  assert.ok(site, 'no "The dealership\'s website" recipient');
+  assert.match(site.join(' | '), /no key/, 'the recipients list says every request to the dealership\'s website carries its public key');
+});
+
+test('the photos go to whatever https server the website names, and the inventory and the privacy texts say so', () => {
+  // the code: a photo on another company's server is asked for, not refused
+  assert.deepEqual(neededPatterns(['https://photos.vendor-cdn.test/car/1.jpg'], { manifestHosts: [], granted: [] }), ['https://photos.vendor-cdn.test/*'], 'photoHosts.js no longer asks for any https photo server: update the inventory and the privacy texts');
+  const t = tables(section(inventory, '## What leaves the browser'))[0];
+  const photos = t.rows.find((r) => r[0].startsWith('Photos '));
+  assert.equal(photos[column(t, 'Recipient')], 'Photo servers', 'the Photos row does not send the photos to the servers the website names');
+  const list = onlyTable(section(inventory, '## Who receives data'), 'the recipients section');
+  const cells = (name) => list.rows.find((r) => r[0] === name).join(' | ');
+  assert.match(cells('Photo servers'), /the servers the dealership's website names[^|]*another company's[^|]*Chrome's own prompt/, 'the Photo servers row does not say any server the website names, asked for in Chrome');
+  assert.doesNotMatch(cells("The dealership's website"), /image host|photo/i, 'the dealership\'s website is still named as where the photos go');
+  assert.doesNotMatch(inventory, /the dealership's image host/, 'the inventory still sends photos (or Anthropic) to "the dealership\'s image host"');
+  // the Web Store answers: the photos row says when and to whom
+  const sends = onlyTable(section(storeTexts, '## What the extension sends, and to whom (mirrors `docs/data-inventory.md`)'), 'the Web Store sends section');
+  const [when, whatCol, to] = ['When', 'What', 'To'].map((c) => column(sends, c));
+  const photoRows = sends.rows.filter((r) => /\bphotos\b/.test(r[whatCol]) && !/photo addresses/.test(r[whatCol]));
+  assert.equal(photoRows.length, 1, 'the Web Store answers should send the photos in one row of their own');
+  assert.match(photoRows[0][when], /Download photos/, 'the Web Store answers say the photos go with each scan');
+  assert.doesNotMatch(photoRows[0][when], /scan/i, 'the Web Store answers say the photos go with each scan');
+  assert.match(photoRows[0][to], /photo servers the dealership's website names[^|]*another company[^|]*Chrome's own prompt, from the user's click/, 'the Web Store answers do not say the photos go to any server the website names, asked for from the click');
+  for (const r of sends.rows) assert.doesNotMatch(r[to], /image host/, 'a Web Store answer still names "the image host" as a recipient');
+  // the privacy policy's services that are not processors
+  const others = policy.split('\n').find((l) => l.startsWith('Lot Sync also reaches services that are not our processors'));
+  assert.ok(others, 'the privacy policy no longer names the services that are not processors');
+  assert.match(others, /photo servers the dealership's website names[^;]*another company[^;]*Download photos[^;]*Chrome's own prompt/, 'the privacy policy does not say the photos come from any server the website names, from the User\'s click');
+  assert.doesNotMatch(others, /image host/, 'the privacy policy still names one image host');
 });
 
 // ---------- who receives it, and the privacy texts ----------

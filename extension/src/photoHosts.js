@@ -9,15 +9,21 @@
 // Only https servers are ever asked for (the manifest's optional host
 // permissions offer https://<any host>/ and nothing wider), and never one of
 // Facebook's: Lot Sync fills Facebook's form, it doesn't read from Facebook.
+// That rule holds for downloads too, not only for the asking: the manifest
+// covers www.facebook.com/marketplace/ for the form, so the side panel and
+// the worker both check isFacebookServer before a photo is fetched.
 
-const NEVER_ASKED = ['facebook.com'];
+// Facebook's own domains, the image servers included: a dealer page that
+// reuses photos from its Facebook page points at scontent-*.fbcdn.net or
+// lookaside.fbsbx.com, not at facebook.com.
+const FACEBOOK_DOMAINS = ['facebook.com', 'facebook.net', 'fb.com', 'fbcdn.net', 'fbsbx.com'];
 
 // Written in two parts so no comment stripper mistakes it for a comment opener.
 const ANY_PATH = '/' + '*';
 
 // Chrome compares host names in lower case and without a trailing dot.
 const bareHost = (host) => String(host || '').toLowerCase().replace(/\.$/, '');
-const neverAsked = (host) => NEVER_ASKED.some((d) => host === d || host.endsWith('.' + d));
+const neverAsked = (host) => FACEBOOK_DOMAINS.some((d) => host === d || host.endsWith('.' + d));
 // The URL parser writes every IPv4 address as four decimal numbers and puts IPv6 in brackets.
 const isIpAddress = (host) => /^\[.*\]$/.test(host) || /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 const list = (x) => (Array.isArray(x) ? x : []);
@@ -28,6 +34,18 @@ function httpsUrl(value) {
     return url.protocol === 'https:' && url.hostname ? url : null;
   } catch (e) {
     return null;
+  }
+}
+
+/**
+ * Is this address on one of Facebook's servers, whatever its scheme? Lot Sync
+ * never downloads from those, even where a manifest permission would let it.
+ */
+export function isFacebookServer(address) {
+  try {
+    return neverAsked(bareHost(new URL(String(address)).hostname));
+  } catch (e) {
+    return false;
   }
 }
 

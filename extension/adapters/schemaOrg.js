@@ -15,11 +15,14 @@
 //     the page's own fetch would (the page's cookies, no header of Lot
 //     Sync's); makeDirectSearch makes it from the service worker, without
 //     cookies, with the permission for the website that the wizard already
-//     asks for. Both refuse any address off the website.
+//     asks for. Both refuse to ask for an address off the website. A
+//     redirect the website answers with is followed the way a browser follows
+//     it, but an answer that lands off the website is never used (judge).
 //   - scan() reads the list and the pages its rel=next links lead to, then
 //     each car's own page, two at a time, with no pauses and nothing random
-//     about its timing. The first 403, 429 or bot check stops the scan and
-//     says so: it never retries harder and never tries to get past one.
+//     about its timing. The first 403, 429, 503 or bot check stops the scan
+//     and says so, and so do three car pages in a row that fail: it never
+//     retries harder and never tries to get past a refusal.
 //   - A car is called gone only when its own page says so (confirmOne).
 // schemaOrgParse.js reads a page; schemaOrgNormalize.js makes the flat vehicle.
 
@@ -38,9 +41,14 @@ export const PAGE_TEXT_LIMIT = 3000000;
 // customers first, and nothing about the timing is varied.
 export const CONCURRENCY = 2;
 export const MAX_LIST_PAGES = 40;
-// A first scan of a very large lot reads this many car pages; the next scan
-// reads the rest as new addresses.
+// The most car pages one scan reads. On a larger lot the pages not read are
+// left for the next scans, oldest reading first (scan step 3), so every car's
+// page is read again within a few scans.
 export const MAX_CAR_PAGES = 600;
+// Car pages that fail one after another before the scan stops: a website
+// that keeps failing is struggling or turning Lot Sync away, and the rest
+// of the lot is not asked for.
+export const MAX_FAILED_IN_A_ROW = 3;
 export const MAX_SITEMAPS = 5;
 export const MAX_SITEMAP_ADDRESSES = 20000;
 export const REQUEST_TIMEOUT_MS = 30000;
@@ -151,7 +159,10 @@ export function probeInPage() {
 
 // One GET of a page on this website, made the way the page's own fetch makes
 // it: no header of Lot Sync's, the page's cookies as a same-site fetch sends
-// them. Any address off the website is refused before anything is sent.
+// them. An address off the website is refused before anything is sent. A
+// redirect the website answers with is followed as the browser follows any
+// redirect (cookies go only to the website's own origin); scan() never uses
+// an answer that landed off the website.
 export async function searchInPage(service, request) {
   const LIMIT = 3000000;
   try {
@@ -285,8 +296,10 @@ async function cappedText(res, limit) {
 // A search(request) from the service worker: one GET of a page on this
 // website, without the browser's cookies (a website that turns such a read
 // away fails the background rescan with its reason; the Scan button still
-// reads it from the tab). No header of Lot Sync's is added. Any address off
-// the website throws before anything is sent.
+// reads it from the tab). No header of Lot Sync's is added. An address off
+// the website throws before anything is sent. A redirect the website answers
+// with is followed as a browser follows it (still without cookies), and
+// scan() never uses an answer that landed off the website (judge).
 export function makeDirectSearch(service, fetchImpl = globalThis.fetch) {
   const origin = originOf(service && service.origin);
   return async (request) => {
@@ -419,15 +432,30 @@ const BOT_CHECK = /captcha|are you (?:a )?(?:human|robot)|verify(?:ing)? (?:that
 const STOPPED = {
   403: 'The website refused a page to Lot Sync (HTTP 403), so the scan stopped.',
   429: 'The website asked Lot Sync to slow down (HTTP 429), so the scan stopped. Nothing was retried; try again later.',
+  503: 'The website said it was too busy or unavailable (HTTP 503), so the scan stopped. Nothing was retried; try again later.',
   check: 'The website showed a bot check instead of its page, so the scan stopped. Lot Sync never tries to get past one.',
 };
 
+const isHtmlAnswer = (contentType, text) => /html/i.test(contentType) || (!contentType && /<(?:!doctype html|html|head|body)[\s>]/i.test(text));
+
+// A short page with no car on it whose words are a bot check's.
+const isBotCheck = (parsed) => !parsed.vehicles.length && parsed.facts.text.length < 3000 && BOT_CHECK.test(parsed.facts.title + ' ' + parsed.facts.text);
+
+// 503 is how an overloaded website answers, and the status some firewalls
+// give their "checking your browser" page: either way the scan stops. Any
+// other error page is read for a bot check too, since a firewall may send
+// one with a 5xx of its own. A 404 or 410 page is not: it is the car's page
+// gone, and a lead form's captcha notice on it must not stop every scan.
 function judge(answer, origin) {
   if (!answer || answer.failed !== undefined) return { kind: 'error', message: (answer && answer.failed) || 'no answer' };
   const status = Number(answer.status) || 0;
-  if (status === 403 || status === 429) return { kind: 'blocked', status, message: STOPPED[status] };
+  if (status === 403 || status === 429 || status === 503) return { kind: 'blocked', status, message: STOPPED[status] };
   if (status === 404 || status === 410) return { kind: 'gone', status };
-  if (!answer.ok) return { kind: 'error', status, message: `HTTP ${status || 'error'}` };
+  if (!answer.ok) {
+    const text = String(answer.text || '');
+    if (isHtmlAnswer(String(answer.contentType || ''), text) && isBotCheck(parseVehiclePage(text, String(answer.finalUrl || '')))) return { kind: 'blocked', status, message: STOPPED.check };
+    return { kind: 'error', status, message: `HTTP ${status || 'error'}` };
+  }
   if (!onSite(String(answer.finalUrl || ''), null, origin)) return { kind: 'error', status, message: 'it sent Lot Sync to another website' };
   return { kind: 'page', status, finalUrl: answer.finalUrl, redirected: Boolean(answer.redirected), contentType: String(answer.contentType || ''), text: String(answer.text || '') };
 }
@@ -437,12 +465,10 @@ function judge(answer, origin) {
 function pageOf(outcome) {
   if (outcome.kind !== 'page') return outcome;
   if (!outcome.read) {
-    const isHtml = /html/i.test(outcome.contentType) || (!outcome.contentType && /<(?:!doctype html|html|head|body)[\s>]/i.test(outcome.text));
-    if (!isHtml) outcome.read = { kind: 'error', message: `not a web page (${outcome.contentType || 'no type'})` };
+    if (!isHtmlAnswer(outcome.contentType, outcome.text)) outcome.read = { kind: 'error', message: `not a web page (${outcome.contentType || 'no type'})` };
     else {
       const parsed = parseVehiclePage(outcome.text, outcome.finalUrl);
-      const check = !parsed.vehicles.length && parsed.facts.text.length < 3000 && BOT_CHECK.test(parsed.facts.title + ' ' + parsed.facts.text);
-      outcome.read = check ? { kind: 'blocked', message: STOPPED.check } : { kind: 'html', parsed, truncated: outcome.text.length >= PAGE_TEXT_LIMIT };
+      outcome.read = isBotCheck(parsed) ? { kind: 'blocked', message: STOPPED.check } : { kind: 'html', parsed, truncated: outcome.text.length >= PAGE_TEXT_LIMIT };
     }
   }
   return outcome.read;
@@ -596,15 +622,17 @@ async function sitemapAddresses(site, origin, shape) {
 // ---------- confirming a missing car ----------
 
 // A car from the last scan that this scan did not find, checked at the page
-// it was last seen on. Gone only when that page says so: 404 or 410; a
-// redirect to a page with no node for this VIN; the page itself with the
-// website's own vehicle data and no node for this VIN; or the car's node
-// marked SoldOut. Anything else (403, 429, 5xx, a timeout, a bot check, a
-// file that isn't a web page, a page with no structured data at all) is an
-// error, and the rescan then marks nothing gone. A page with the website's
-// own structured data but no vehicle in it (a "no longer available" page)
-// is "unsure": it counts as gone only once this website's car pages are
-// known to carry their car's data (confirmMissing).
+// it was last seen on. Gone when that page says so: 404 or 410, or the car's
+// node marked SoldOut. Anything else that isn't the car's page (403, 429,
+// 5xx, a timeout, a bot check, a file that isn't a web page, a page with no
+// structured data at all) is an error, and the rescan then marks nothing
+// gone. A redirect to a page without a node for this VIN, or the page itself
+// with the website's own structured data and no node for this VIN (a "no
+// longer available" page, or one that shows only other cars) is "unsure":
+// it counts as gone only once this website's car pages are known to carry
+// their own car's VIN (confirmMissing). Until then it proves nothing, since
+// a car page that marks up only a "similar vehicles" carousel looks the same
+// while its car is still for sale.
 async function confirmOne(site, vin, href) {
   const got = await site.read(href);
   const page = pageOf(got);
@@ -613,9 +641,8 @@ async function confirmOne(site, vin, href) {
   if (page.kind === 'error') return { error: `one car's page gave ${page.message}` };
   const node = page.parsed.vehicles.find((n) => nodeVin(n) === vin);
   if (node) return soldOut(node) ? { gone: true } : { found: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts) } };
-  if (got.redirected && pathKey(got.finalUrl) !== pathKey(href)) return { gone: true };
-  if (page.parsed.vehicles.length) return { gone: true };
-  if (hasStructuredData(got.text)) return { unsure: true };
+  if (got.redirected && pathKey(got.finalUrl) !== pathKey(href)) return { unsure: true };
+  if (page.parsed.vehicles.length || hasStructuredData(got.text)) return { unsure: true };
   return { error: "one car's page had no structured data to check against" };
 }
 
@@ -648,7 +675,7 @@ async function confirmMissing(site, { vins, urls, records, origin, evidence, sam
     const sample = samples.find(Boolean);
     const got = sample ? pageOf(await site.read(sample.href)) : null;
     if (got && got.kind === 'html' && got.parsed.vehicles.some((n) => nodeVin(n) === sample.vin)) evidence.ownNode = true;
-    else confirm.error = got && got.kind !== 'html' ? `a car's page gave ${got.message || 'no answer'}` : "this website's car pages carry no vehicle data to check against";
+    else confirm.error = got && got.kind !== 'html' ? `a car's page gave ${got.message || 'no answer'}` : "this website's car pages don't mark up their own car, so there is nothing to check against";
   }
   if (confirm.error) return confirm;
   for (const item of items) {
@@ -670,14 +697,19 @@ async function confirmMissing(site, { vins, urls, records, origin, evidence, sam
  * last snapshot's entries) read a car's page only when it is new, posted
  * (options.postedVins), has no price in the list's data, or the list's data
  * no longer agrees with what its page said last time; the rest are taken
- * from the list's data (records marked carried). Cars from the last scan
- * that didn't come back are checked at their last page
+ * from the list's data (records marked carried). At most options.maxCarPages
+ * car pages are read: posted cars first, then the pages read longest ago
+ * (lastSeen entries' pageReadAt; never read counts as oldest). Cars from the
+ * last scan that didn't come back are checked at their last page
  * (options.confirmVins with options.confirmUrls).
  * @returns the contract's shape. total is the number of car addresses found;
  *   complete means the list ended cleanly and every page to read was read.
- *   records are { node, url, facts, carried? }. unread (only when there are
- *   some) lists the VINs of cars still on the list whose page was read
- *   before but could not be read this time.
+ *   records are { node, url, facts, carried? }. Only when there are some:
+ *   pagesRead lists the VINs of the cars whose own page this scan read
+ *   (scanRunner stamps their snapshot entries with pageReadAt); unread the
+ *   VINs of cars still on the list whose page was read before but not this
+ *   time; leftForLater the number of car pages the page limit left for the
+ *   next scan.
  */
 export async function scan(search, options = {}) {
   const opts = { listUrl: null, origin: null, confirmVins: [], confirmUrls: {}, postedVins: [], lastSeen: null, sitemap: undefined, maxListPages: MAX_LIST_PAGES, maxCarPages: MAX_CAR_PAGES, ...options };
@@ -776,7 +808,16 @@ export async function scan(search, options = {}) {
     }
     plan.push(item);
   }
-  const toRead = plan.filter((i) => !i.record).sort((a, b) => Number(posted.has(b.vin)) - Number(posted.has(a.vin)));
+  // Posted cars first: their listings must match the website. Then the
+  // page read longest ago, a car never read from its own page first, so on
+  // a lot larger than the page limit every car's page comes round in turn
+  // instead of the same cars being skipped on every scan. (sort is stable:
+  // otherwise the list's order.)
+  const readAt = (i) => {
+    const at = i.vin && lastSeen[i.vin] ? lastSeen[i.vin].pageReadAt : '';
+    return typeof at === 'string' ? at : '';
+  };
+  const toRead = plan.filter((i) => !i.record).sort((a, b) => Number(posted.has(b.vin)) - Number(posted.has(a.vin)) || (readAt(a) < readAt(b) ? -1 : readAt(a) > readAt(b) ? 1 : 0));
   const reading = toRead.slice(0, Math.max(0, opts.maxCarPages));
 
   // A car the list still names whose own page was not read this time. When
@@ -791,25 +832,38 @@ export async function scan(search, options = {}) {
     else if (item.listedCar && item.listedCar.vin) item.record = listRecord(item.listedCar, item.href, true);
   };
 
-  // 4. read them, two at a time; the first refusal stops everything
+  // 4. read them, two at a time; the first refusal stops everything, and so
+  // do MAX_FAILED_IN_A_ROW failures in a row (a timeout, a reset, a 500)
   let stopped = null;
   let readErrors = 0;
+  let failedInARow = 0;
+  const pagesRead = new Set();
   const evidence = { ownNode: false };
   await twoAtATime(reading, async (item) => {
     if (stopped) return false;
     const got = await site.read(item.href);
     const page = pageOf(got);
     if (page.kind === 'blocked') {
-      stopped = page.message;
+      stopped = { error: 'blocked', message: page.message };
       return false;
     }
-    if (page.kind === 'gone') return true; // its page is gone: a car from the last scan is checked below
+    if (page.kind === 'gone') {
+      failedInARow = 0;
+      return true; // its page is gone: a car from the last scan is checked below
+    }
     if (page.kind !== 'html') {
       // the scan is not complete, and the car is still on the list
       readErrors += 1;
       standIn(item);
+      failedInARow += 1;
+      if (failedInARow >= MAX_FAILED_IN_A_ROW && !stopped) {
+        stopped = { error: 'failing', message: `The website's car pages failed ${failedInARow} times in a row (the last: ${page.message}), so the scan stopped. Nothing was retried; try again later.` };
+        return false;
+      }
       return true;
     }
+    failedInARow = 0;
+    if (item.vin) pagesRead.add(item.vin);
     const node = carOnPage(page.parsed.vehicles, { vin: item.vin, pageUrl: got.finalUrl });
     if (node && nodeVin(node)) {
       evidence.ownNode = true;
@@ -819,8 +873,9 @@ export async function scan(search, options = {}) {
     } else if (page.truncated) readErrors += 1;
     return true;
   });
-  if (stopped) return fail('blocked', stopped);
-  // pages left unread by the cap: the same stand-ins
+  if (stopped) return fail(stopped.error, stopped.message);
+  // pages the limit left for the next scan: the same stand-ins
+  const leftForLater = toRead.length - reading.length;
   for (const item of toRead.slice(reading.length)) standIn(item);
 
   const records = new Map();
@@ -834,9 +889,15 @@ export async function scan(search, options = {}) {
   for (const vin of records.keys()) unread.delete(vin);
   const confirm = await confirmMissing(site, { vins: (Array.isArray(opts.confirmVins) ? opts.confirmVins : []).filter((v) => !unread.has(String(v || '').toUpperCase())), urls: opts.confirmUrls, records, origin, evidence, samples });
 
-  const complete = listClean && sitemapClean && readErrors === 0 && reading.length === toRead.length;
+  // a missing car found at its last page was read from that page too
+  for (const vin of confirm.checked) if (!confirm.notFound.includes(vin)) pagesRead.add(vin);
+
+  const complete = listClean && sitemapClean && readErrors === 0 && leftForLater === 0;
   const out = { ok: true, fetchedAt: new Date().toISOString(), total: cars.size, complete, requests: site.requests, records: [...records.values()], confirm };
   if (unread.size) out.unread = [...unread];
+  const readCars = [...pagesRead].filter((vin) => records.has(vin));
+  if (readCars.length) out.pagesRead = readCars;
+  if (leftForLater) out.leftForLater = leftForLater;
   return out;
 }
 
@@ -853,8 +914,10 @@ export function normalize(record) {
 
 // ---------- one car at post time ----------
 
-// A car's page: its record, "gone" (404, 410, or moved to a page without it),
-// an error to show, or "none" (the page is there but doesn't mark the car up).
+// A car's page: its record, "gone" (404 or 410), an error to show, or
+// "none": the page is there but doesn't mark the car up, or it moved to a
+// page without it. For "none" the list decides (getDetails), because a page
+// that marks up only other cars says nothing about this one.
 async function carFromPage(site, vin, href) {
   const got = await site.read(href);
   const page = pageOf(got);
@@ -863,7 +926,6 @@ async function carFromPage(site, vin, href) {
   if (page.kind !== 'html') return { error: `Couldn't read the car's page on the website (${page.message}).` };
   const node = page.parsed.vehicles.find((n) => nodeVin(n) === vin);
   if (node) return { record: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts) } };
-  if (got.redirected && pathKey(got.finalUrl) !== pathKey(href)) return { gone: true };
   return { none: true };
 }
 

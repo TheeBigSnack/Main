@@ -35,7 +35,8 @@ One row per pattern in `extension/manifest.json`.
 
 | When | What | To |
 |---|---|---|
-| Each scan, and the background rescans the user allowed | Inventory searches, the car's full record at post time, and the car's photos | The dealership's website: its inventory search and image host |
+| Each scan, the background rescans the user allowed, and the start of each post | Reads of the inventory: the website's own inventory search, or, on a website read through its standard vehicle data, its used-inventory pages, each car's page and, when the list holds more cars than it links, its robots.txt and sitemaps; at post time, the car's full record | The dealership's website and the inventory search it uses |
+| The user fills in a listing form or clicks Download photos | A request for each of the car's photos, without cookies | The photo servers the dealership's website names for the car's photos, which may belong to another company. An https server the extension may not read yet is asked for in Chrome's own prompt, from the user's click; after a no, its photos are not requested |
 | The user clicks "Check with NHTSA" | The VIN | NHTSA's free VIN decoder |
 | The user signs in and joins a dealership (only once Lot Sync accounts are set up) | The email address, the emailed code, the invite code and the name from Settings | Our database host, Supabase |
 | After a scan, a post, a price update or a take-down, while signed in | The user's posted list (VIN, car name, price, times, listing link, salesperson name), post attempts and to-do items (with, for a price change, the old and new price), and each scan's counts | Our database (Supabase), for the user's dealership |

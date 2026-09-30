@@ -95,15 +95,24 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   return { ok: true, res, vehicles, assessments, snapshot, diff, boilerplate, photoOrigins, carry };
 }
 
-// The snapshot a scan leaves for the next one. Two things come over from
-// the last one. A car the website still lists but whose details the adapter
-// could not read this time (res.unread) keeps its last entry, so a bad
-// server day neither drops the car nor changes it. And a car that is not in
-// this scan keeps the page it was last seen on (missingPages), so an adapter
-// that checks a missing car at its own page can check a posted car again
-// next time, even after the car has left the lot's list.
+// The snapshot a scan leaves for the next one. Three things come over from
+// the last one. When a car's own page was last read (pageReadAt: this scan's
+// time for the cars in res.pagesRead, else the last entry's), so an adapter
+// that can read only so many pages per scan reads the oldest first and gets
+// round the whole lot. A car the website still lists but whose details the
+// adapter could not read this time (res.unread) keeps its last entry, so a
+// bad server day neither drops the car nor changes it. And a car that is not
+// in this scan keeps the page it was last seen on (missingPages), so an
+// adapter that checks a missing car at its own page can check a posted car
+// again next time, even after the car has left the lot's list.
 function snapshotOf({ site, res, vehicles, assessments, carry }) {
   const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments });
+  const readNow = new Set(Array.isArray(res.pagesRead) ? res.pagesRead : []);
+  for (const [vin, entry] of Object.entries(snapshot.vehicles)) {
+    const before = carry.last[vin] && carry.last[vin].pageReadAt;
+    if (readNow.has(vin)) entry.pageReadAt = res.fetchedAt;
+    else if (typeof before === 'string') entry.pageReadAt = before;
+  }
   for (const vin of Array.isArray(carry.unread) ? carry.unread : []) {
     if (carry.last[vin] && !snapshot.vehicles[vin]) snapshot.vehicles[vin] = carry.last[vin];
   }
@@ -114,13 +123,26 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
 }
 
 // What a scan that did not read everything says, first on the to-do list.
+// Each sentence says only what happened: missing cars were double-checked
+// only when the adapter's check ran without an error and checked some (when
+// it failed, rescan.js says so on the next line), and pages the adapter's
+// page limit left for the next scan (res.leftForLater) were never asked
+// for, so they are not called unreadable.
 export function incompleteWarning(res) {
   const kept = Array.isArray(res.unread) ? res.unread.length : 0;
   const found = res.records.length + kept;
-  if (found < res.total) return `The website returned ${found} of ${res.total} cars. Missing cars were double-checked one by one.`;
+  const left = Number(res.leftForLater) || 0;
+  const c = res.confirm;
+  const doubleChecked = c && !c.error && Array.isArray(c.checked) && c.checked.length ? ' Missing cars were double-checked one by one.' : '';
+  if (left) {
+    const those = left === 1 ? "one car's page was" : `${left} cars' pages were`;
+    const shows = kept ? ' A car whose page was not read this time shows what the last scan read.' : '';
+    return `This lot has more car pages than one scan reads, so ${those} left for the next scan.${shows}${doubleChecked}`;
+  }
+  if (found < res.total) return `The website returned ${found} of ${res.total} cars.${doubleChecked}`;
   if (kept === 1) return "One car's page could not be read this time, so that car shows what the last scan read.";
   if (kept) return `${kept} cars' pages could not be read this time, so those cars show what the last scan read.`;
-  return 'Some of the website\'s pages could not be read this time. Missing cars were double-checked one by one.';
+  return `Some of the website's pages could not be read this time.${doubleChecked}`;
 }
 
 export const UNSUPPORTED_MESSAGE = unsupportedSiteMessage();

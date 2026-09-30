@@ -3,7 +3,8 @@
 //      permission for that server: the manifest's image host, or one Chrome
 //      granted when the side panel asked from the salesperson's click; the
 //      Facebook page itself has none) and hand them to the side panel as
-//      data URLs.
+//      data URLs. Never from Facebook's own servers, and each photo is
+//      capped in size and time (downloadPhoto).
 //   2. Open the side panel when the popup can't.
 //   3. Rescan every known dealer website every 3 hours while Chrome is open
 //      (chrome.alarms), reading it through its adapter's direct search (the
@@ -28,8 +29,13 @@ import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificat
 import { recordFlags } from './src/pilot.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
+import { isFacebookServer } from './src/photoHosts.js';
 
-const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
+export const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
+// A photo server the salesperson allowed can be slow, broken or hostile, and
+// the side panel waits on each batch of photos: after this long the photo
+// fails with its server named, and the others still come.
+export const PHOTO_TIMEOUT_MS = 30 * 1000;
 
 // The host a photo lives on, for the error text: a photo on a server Lot
 // Sync has no permission for fails here, and the error names that server
@@ -51,24 +57,77 @@ function toBase64(buffer) {
   return btoa(binary);
 }
 
-async function downloadPhoto(url, index) {
+class PhotoTooLarge extends Error {}
+
+// The body, read a chunk at a time and given up on as soon as it passes the
+// cap: a server that sends gigabytes never gets them into memory. Every read
+// races the timeout, so a body that stops arriving ends the download too.
+async function cappedBytes(res, deadline) {
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const buffer = await Promise.race([res.arrayBuffer(), deadline]);
+    if (buffer.byteLength > MAX_PHOTO_BYTES) throw new PhotoTooLarge();
+    return new Uint8Array(buffer);
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
   try {
-    const res = await fetch(url, { credentials: 'omit' });
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), deadline]);
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_PHOTO_BYTES) throw new PhotoTooLarge();
+      chunks.push(value);
+    }
+  } catch (e) {
+    reader.cancel().catch(() => {});
+    throw e;
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.byteLength;
+  }
+  return bytes;
+}
+
+// fetchImpl and timeoutMs are for the tests; the worker uses fetch and the 30 seconds.
+export async function downloadPhoto(url, index, { fetchImpl = globalThis.fetch, timeoutMs = PHOTO_TIMEOUT_MS } = {}) {
+  if (isFacebookServer(url)) return { url, ok: false, error: `on Facebook's servers (${hostOf(url)}); Lot Sync doesn't download from Facebook` };
+  const controller = new AbortController();
+  let timer;
+  const deadline = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`no complete answer in ${Math.round(timeoutMs / 1000)} seconds`));
+    }, timeoutMs);
+  });
+  deadline.catch(() => {}); // raced below; a photo that finished first leaves nothing waiting on it
+  try {
+    const res = await Promise.race([fetchImpl(url, { credentials: 'omit', signal: controller.signal }), deadline]);
     if (!res.ok) return { url, ok: false, error: `HTTP ${res.status} from ${hostOf(url)}` };
     const type = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
-    const buffer = await res.arrayBuffer();
-    if (buffer.byteLength > MAX_PHOTO_BYTES) return { url, ok: false, error: `too large (${hostOf(url)})` };
+    // A server that says up front the photo is too large is not read at all.
+    if (Number(res.headers.get('content-length')) > MAX_PHOTO_BYTES) {
+      if (res.body && typeof res.body.cancel === 'function') res.body.cancel().catch(() => {});
+      throw new PhotoTooLarge();
+    }
+    const bytes = await cappedBytes(res, deadline);
     const ext = /png/i.test(type) ? 'png' : /webp/i.test(type) ? 'webp' : 'jpg';
     return {
       url,
       ok: true,
       name: `photo-${String(index + 1).padStart(2, '0')}.${ext}`,
       type,
-      bytes: buffer.byteLength,
-      dataUrl: `data:${type};base64,${toBase64(buffer)}`,
+      bytes: bytes.byteLength,
+      dataUrl: `data:${type};base64,${toBase64(bytes)}`,
     };
   } catch (e) {
+    if (e instanceof PhotoTooLarge) return { url, ok: false, error: `too large (${hostOf(url)})` };
     return { url, ok: false, error: `${hostOf(url)}: ${String((e && e.message) || e)}` };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

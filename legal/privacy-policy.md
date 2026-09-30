@@ -33,7 +33,7 @@ We do **not** collect Facebook passwords, cookies, session tokens, messages, buy
 - **[hosting provider]**: serves our website and the manager view; its access logs see visitors' IP addresses and browsers.
 - **[email provider]**: sends the sign-in emails (our database host's own sender does until we set this up) and holds our inbox.
 
-Lot Sync also reaches services that are not our processors: the dealership's website (with the inventory search and image host it uses), which Lot Sync reads as the User's browser would, and NHTSA, when the User checks a VIN.
+Lot Sync also reaches services that are not our processors: the dealership's website (with the inventory search it uses, if any), which Lot Sync reads as the User's browser would; the photo servers the dealership's website names for its cars' photos, which may belong to another company, and from which Lot Sync downloads a car's photos, without cookies, only when the User fills in a listing form or clicks Download photos (an https server Lot Sync may not read yet is first asked for in Chrome's own prompt, from the User's click, and after a no its photos are not requested); and NHTSA, when the User checks a VIN.
 
 We do not sell personal data and do not use it for advertising. [Pending attorney answer: questions-for-attorney.md 8.7]
 

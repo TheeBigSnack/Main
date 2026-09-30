@@ -26,6 +26,20 @@ const UNSEEN = new Set(['head', 'script', 'style', 'noscript', 'template', 'titl
 // vehicle page's own text is far shorter than this.
 export const TEXT_LIMIT = 100000;
 const MAX_DEPTH = 32;
+// A microdata value is read from its element's whole subtree, and nested
+// itemprops each read their own subtree again, so a page of thousands of
+// nested elements would cost the square of its size. One value stops at
+// VALUE_LIMIT characters and elements (a real description is far shorter),
+// and all the values on one page share TEXT_BUDGET.
+const VALUE_LIMIT = 20000;
+const TEXT_BUDGET = 1000000;
+// Following @id references copies the node they point at, and a node that
+// points at itself thousands of times would be copied the square of that
+// many times. A real car with its offers, seller and a few hundred photos
+// is a few thousand objects and values; past the limit a reference stays as
+// written. A page's cars together share the larger one.
+const RESOLVE_LIMIT = 10000;
+const PAGE_RESOLVE_LIMIT = 1000000;
 
 const ENTITIES = new Map(Object.entries({
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', shy: '\u00ad',
@@ -154,16 +168,22 @@ function tokenize(html) {
 }
 
 // The element tree. An end tag closes the nearest open element of its name
-// and everything opened inside it; a stray end tag is ignored.
+// and everything opened inside it; a stray end tag is ignored. How many
+// elements of each name are open is counted, so a stray end tag is known
+// without searching the open elements: thousands of unclosed tags followed
+// by thousands of stray end tags cost one pass, not the square of it.
 function buildTree(tokens) {
   const root = { tag: '#document', attrs: Object.create(null), children: [] };
   const stack = [root];
+  const open = new Map();
   for (const t of tokens) {
     const parent = stack[stack.length - 1];
     if (t.text !== undefined) parent.children.push({ text: t.text });
     else if (t.close) {
+      if (!open.get(t.close)) continue;
       for (let k = stack.length - 1; k > 0; k -= 1) {
         if (stack[k].tag === t.close) {
+          for (let j = k; j < stack.length; j += 1) open.set(stack[j].tag, open.get(stack[j].tag) - 1);
           stack.length = k;
           break;
         }
@@ -171,7 +191,10 @@ function buildTree(tokens) {
     } else {
       const el = { tag: t.open, attrs: t.attrs, children: [], raw: t.raw };
       parent.children.push(el);
-      if (t.raw === undefined && !t.selfClosing && !VOID.has(t.open)) stack.push(el);
+      if (t.raw === undefined && !t.selfClosing && !VOID.has(t.open)) {
+        stack.push(el);
+        open.set(t.open, (open.get(t.open) || 0) + 1);
+      }
     }
   }
   return root;
@@ -194,14 +217,20 @@ function readDocument(html) {
   return { tokens, root: buildTree(tokens) };
 }
 
-function absolute(href, base) {
+// An http(s) address as a URL, or null.
+function urlOf(href, base) {
   if (typeof href !== 'string' || !href.trim()) return null;
   try {
     const u = new URL(href.trim(), base || undefined);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u : null;
   } catch {
     return null;
   }
+}
+
+function absolute(href, base) {
+  const u = urlOf(href, base);
+  return u ? u.href : null;
 }
 
 // The address relative links resolve against: the page's own, or its <base href>.
@@ -214,41 +243,44 @@ function baseOf(doc, pageUrl) {
 // ---------- JSON-LD ----------
 
 // XHTML habits and copy-paste leave wrappers around the JSON: a byte order
-// mark, an HTML comment, a CDATA section (often inside a JS comment).
+// mark, an HTML comment, a CDATA section (often inside a JS comment). The
+// closing "]]>" is found first and the comment mark in front of it taken
+// off after: a single pattern for both, anchored only at the end, would be
+// tried from every space in the block, and a block with a long run of
+// spaces would cost the square of its length.
 function unwrap(raw) {
-  return String(raw)
+  let s = String(raw)
     .replace(/\ufeff/g, '')
     .trim()
     .replace(/^<!--/, '')
     .replace(/-->$/, '')
     .trim()
-    .replace(/^(?:\/\/|\/\*)?\s*<!\[CDATA\[(?:\s*\*\/)?/, '')
-    .replace(/(?:\/\/|\/\*)?\s*\]\]>(?:\s*\*\/)?$/, '')
-    .trim();
+    .replace(/^(?:\/\/|\/\*)?\s*<!\[CDATA\[(?:\s*\*\/)?/, '');
+  const close = /\]\]>(?:\s*\*\/)?$/.exec(s);
+  if (close) s = s.slice(0, close.index).trimEnd().replace(/(?:\/\/|\/\*)$/, '');
+  return s.trim();
 }
 
 // A raw line break or tab inside a JSON string is invalid, but description
-// fields often carry them; escaping them is the only repair made.
+// fields often carry them; escaping them is the only repair made. The text
+// between repairs is copied in slices, not a character at a time, so a block
+// of megabytes costs no more than reading it.
 function escapeControls(s) {
   let out = '';
+  let from = 0;
   let inString = false;
   for (let i = 0; i < s.length; i += 1) {
-    const c = s[i];
+    const c = s.charCodeAt(i);
     if (inString) {
-      if (c === '\\') {
-        out += c + (s[i + 1] ?? '');
-        i += 1;
-        continue;
+      if (c === 92) i += 1; // a backslash: the next character is escaped already
+      else if (c === 34) inString = false;
+      else if (c < 32) {
+        out += s.slice(from, i) + '\\u' + c.toString(16).padStart(4, '0');
+        from = i + 1;
       }
-      if (c === '"') inString = false;
-      else if (c < ' ') {
-        out += '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
-        continue;
-      }
-    } else if (c === '"') inString = true;
-    out += c;
+    } else if (c === 34) inString = true;
   }
-  return out;
+  return out + s.slice(from);
 }
 
 // Websites HTML-escape text before putting it in their JSON ("Tow &amp;
@@ -268,10 +300,10 @@ function parseBlock(raw) {
   const decoded = decodeEntities(s);
   // as written, then with its line breaks escaped, then with the whole block
   // unescaped (some sites escape all of it, quotes included)
-  const attempts = [[s, true], [escapeControls(s), true], [decoded, false], [escapeControls(decoded), false]];
+  const attempts = [[() => s, true], [() => escapeControls(s), true], [() => decoded, false], [() => escapeControls(decoded), false]];
   for (const [text, decodeValues] of attempts) {
     try {
-      const value = JSON.parse(text);
+      const value = JSON.parse(text());
       if (value && typeof value === 'object') return decodeValues ? decodeStrings(value) : value;
       return undefined;
     } catch {
@@ -357,14 +389,25 @@ function target(value, ids) {
 
 // A copy of a node with its references followed a few levels down (an
 // offer by @id, that offer's seller by @id), so the normaliser reads one
-// self-contained object whatever the page's style.
-function resolved(value, ids, depth = 0) {
+// self-contained object whatever the page's style. Each object copied and
+// each value in it is taken from budget.left; once that runs out, what is
+// left stays as written (the node itself is always a copy, so the caller
+// can change it). The copies are never shared between places: a copy
+// that appears in many places would be written out in full at each of them
+// when the record is stored or sent.
+function resolved(value, ids, budget, depth = 0) {
   if (!value || typeof value !== 'object' || depth > 4) return value;
-  if (Array.isArray(value)) return value.map((v) => resolved(v, ids, depth + 1));
+  if (depth > 0 && budget.left <= 0) return value;
+  if (Array.isArray(value)) {
+    budget.left -= 1 + value.length;
+    return value.map((v) => resolved(v, ids, budget, depth + 1));
+  }
   const node = target(value, ids);
+  const entries = Object.entries(node);
+  budget.left -= 1 + entries.length;
   const out = {};
   // a "__proto__" key in a page's JSON would replace the copy's prototype
-  for (const [k, v] of Object.entries(node)) if (k !== '__proto__') out[k] = resolved(v, ids, depth + 1);
+  for (const [k, v] of entries) if (k !== '__proto__') out[k] = resolved(v, ids, budget, depth + 1);
   return out;
 }
 
@@ -399,6 +442,7 @@ export function vehicleNodes(blocks) {
 
   const out = [];
   const seen = new Set();
+  const page = { left: PAGE_RESOLVE_LIMIT };
   const stack = [[list, 0]];
   while (stack.length) {
     const [x, depth] = stack.pop();
@@ -411,12 +455,15 @@ export function vehicleNodes(blocks) {
     if (seen.has(node)) continue;
     seen.add(node);
     if (isVehicle(node)) {
-      const car = resolved(node, ids);
+      const start = Math.min(RESOLVE_LIMIT, page.left);
+      const budget = { left: start };
+      const car = resolved(node, ids, budget);
       const offer = offerFor.get(node);
       if (offer && car.offers === undefined) {
-        car.offers = resolved(offer, ids);
+        car.offers = resolved(offer, ids, budget);
         delete car.offers.itemOffered; // the offer without the car inside it
       }
+      page.left = Math.max(0, page.left - (start - budget.left));
       out.push(car);
       continue;
     }
@@ -427,19 +474,34 @@ export function vehicleNodes(blocks) {
 
 // ---------- microdata ----------
 
-function textOf(el) {
+// An element's text, at most VALUE_LIMIT characters and elements of it,
+// taken from the page's budget (see VALUE_LIMIT).
+function textOf(el, budget) {
+  const start = Math.min(VALUE_LIMIT, budget.left);
+  let left = start;
   const parts = [];
-  walk(el, (n) => {
-    if (n.text !== undefined) parts.push(n.text);
-    return n === el || !UNSEEN.has(n.tag);
-  });
+  const stack = [el];
+  while (stack.length && left > 0) {
+    const n = stack.pop();
+    left -= 1;
+    if (n.text !== undefined) {
+      parts.push(n.text.length > left ? n.text.slice(0, Math.max(0, left)) : n.text);
+      left -= n.text.length;
+      continue;
+    }
+    if (n !== el && UNSEEN.has(n.tag)) continue;
+    const count = Math.min(n.children.length, Math.max(0, left));
+    for (let k = count - 1; k >= 0; k -= 1) stack.push(n.children[k]);
+    left -= count;
+  }
+  budget.left = Math.max(0, budget.left - (start - left));
   return decodeEntities(parts.join(' ')).replace(/\s+/g, ' ').trim();
 }
 
 // An itemprop's value, as the microdata standard reads it: a meta's content,
 // a link's href, an image's src, a time's datetime, else the text. The
 // content attribute is read on any element, as search engines do.
-function propValue(el, base) {
+function propValue(el, base, budget) {
   const a = el.attrs;
   if ('content' in a) return a.content;
   switch (el.tag) {
@@ -458,11 +520,11 @@ function propValue(el, base) {
       return absolute(a.data, base) || '';
     case 'data':
     case 'meter':
-      return a.value ?? textOf(el);
+      return a.value ?? textOf(el, budget);
     case 'time':
-      return a.datetime || textOf(el);
+      return a.datetime || textOf(el, budget);
     default:
-      return textOf(el);
+      return textOf(el, budget);
   }
 }
 
@@ -476,7 +538,7 @@ function addValue(node, key, value) {
 // One itemscope element as a node of the JSON-LD shape: its itemtype as
 // @type, each itemprop as a property (a property given twice becomes a
 // list), a nested itemscope as a nested node.
-function readItem(scope, base, depth = 0) {
+function readItem(scope, base, budget, depth = 0) {
   const node = {};
   const types = (scope.attrs.itemtype || '').split(/\s+/).filter(Boolean).map(typeName);
   if (types.length) node['@type'] = types.length === 1 ? types[0] : types;
@@ -487,7 +549,7 @@ function readItem(scope, base, depth = 0) {
     if (el.text !== undefined) continue;
     const isScope = 'itemscope' in el.attrs;
     if ('itemprop' in el.attrs) {
-      const value = isScope ? (depth < MAX_DEPTH ? readItem(el, base, depth + 1) : {}) : propValue(el, base);
+      const value = isScope ? (depth < MAX_DEPTH ? readItem(el, base, budget, depth + 1) : {}) : propValue(el, base, budget);
       for (const name of el.attrs.itemprop.split(/\s+/).filter(Boolean)) addValue(node, typeName(name), value);
     }
     if (!isScope) for (let k = el.children.length - 1; k >= 0; k -= 1) pending.push(el.children[k]);
@@ -498,8 +560,9 @@ function readItem(scope, base, depth = 0) {
 // Every top-level item on the page (itemscope without itemprop), wherever it sits.
 function microdataItems(root, base) {
   const items = [];
+  const budget = { left: TEXT_BUDGET };
   walk(root, (el) => {
-    if (el.attrs && 'itemscope' in el.attrs && !('itemprop' in el.attrs)) items.push(readItem(el, base));
+    if (el.attrs && 'itemscope' in el.attrs && !('itemprop' in el.attrs)) items.push(readItem(el, base, budget));
     return el.text === undefined;
   });
   return items;
@@ -524,6 +587,16 @@ function isHidden(attrs) {
   return 'hidden' in attrs || /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(attrs.style || '');
 }
 
+// Crossed-out text is a price or a figure the page no longer stands by
+// ("<s>$24,995</s> $23,995"), so the text a price is checked against leaves
+// it out. The style is read one declaration at a time, in one pass.
+const CROSSED_OUT = new Set(['s', 'strike', 'del']);
+function isCrossedOut(el) {
+  if (CROSSED_OUT.has(el.tag)) return true;
+  const style = el.attrs.style;
+  return typeof style === 'string' && /line-through/i.test(style) && style.split(';').some((d) => /^\s*text-decoration(?:-line)?\s*:/i.test(d) && /line-through/i.test(d));
+}
+
 function visibleText(root) {
   const parts = [];
   let size = 0;
@@ -534,7 +607,7 @@ function visibleText(root) {
       size += n.text.length;
       return false;
     }
-    return n.tag === '#document' || (!UNSEEN.has(n.tag) && !isHidden(n.attrs));
+    return n.tag === '#document' || (!UNSEEN.has(n.tag) && !isHidden(n.attrs) && !isCrossedOut(n));
   });
   return decodeEntities(parts.join(' ')).replace(/\s+/g, ' ').trim().slice(0, TEXT_LIMIT);
 }
@@ -543,19 +616,14 @@ const relHas = (attrs, word) => String(attrs.rel || '').toLowerCase().split(/\s+
 
 // A link to a single-page site's route ("#/inventory/...") is a page of its
 // own; any other fragment is a place on the same page.
-function withoutFragment(href) {
-  const u = new URL(href);
-  if (!/^#!?\//.test(u.hash)) u.hash = '';
+function withoutFragment(u) {
+  if (u.hash && !/^#!?\//.test(u.hash)) u.hash = '';
   return u.href;
 }
 
-function isCarfax(href) {
-  try {
-    const host = new URL(href).hostname.toLowerCase();
-    return host === 'carfax.com' || host.endsWith('.carfax.com');
-  } catch {
-    return false;
-  }
+function isCarfax(u) {
+  const host = u.hostname.toLowerCase();
+  return host === 'carfax.com' || host.endsWith('.carfax.com');
 }
 
 function factsFrom(doc, pageUrl) {
@@ -568,6 +636,9 @@ function factsFrom(doc, pageUrl) {
   let next = null;
   const links = [];
   const carfaxLinks = [];
+  // a Set beside each list: a page of thousands of links is read in one pass
+  const seenLinks = new Set();
+  const seenCarfax = new Set();
   for (const t of doc.tokens) {
     if (!t.open) continue;
     const a = t.attrs;
@@ -576,12 +647,20 @@ function factsFrom(doc, pageUrl) {
     else if (t.open === 'link' && relHas(a, 'canonical') && !canonical) canonical = absolute(a.href, base);
     if ((t.open === 'link' || t.open === 'a') && relHas(a, 'next') && !next) next = absolute(a.href, base);
     if (t.open === 'a' || t.open === 'area' || t.open === 'iframe') {
-      const href = absolute(t.open === 'iframe' ? a.src : a.href, base);
-      if (!href) continue;
-      if (isCarfax(href) && !carfaxLinks.includes(href)) carfaxLinks.push(href);
-      if (t.open !== 'iframe' && origin && new URL(href).origin === origin) {
-        const clean = withoutFragment(href);
-        if (!links.includes(clean)) links.push(clean);
+      // parsed once, then read for its host, its origin and its address
+      const u = urlOf(t.open === 'iframe' ? a.src : a.href, base);
+      if (!u) continue;
+      const href = u.href;
+      if (isCarfax(u) && !seenCarfax.has(href)) {
+        seenCarfax.add(href);
+        carfaxLinks.push(href);
+      }
+      if (t.open !== 'iframe' && origin && u.origin === origin) {
+        const clean = withoutFragment(u);
+        if (!seenLinks.has(clean)) {
+          seenLinks.add(clean);
+          links.push(clean);
+        }
       }
     }
   }
@@ -598,7 +677,9 @@ function factsFrom(doc, pageUrl) {
  *                without in-page fragments
  *   carfaxLinks  every link to a carfax.com page, once each
  *   text         the text a person sees (no scripts, styles, head or hidden
- *                elements), whitespace squeezed, at most TEXT_LIMIT characters
+ *                elements), without crossed-out text (<s>, <strike>, <del>
+ *                or a line-through style: an old price), whitespace
+ *                squeezed, at most TEXT_LIMIT characters
  * @param {string} html
  * @param {string} pageUrl  the page's own address
  */

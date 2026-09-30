@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
 
@@ -183,4 +183,32 @@ test('the two agreements are templates: no pilot-dealer value, every dollar amou
   assert.match(a, /shown at purchase/, 'Schedule A says the fees are the ones shown at purchase');
   assert.match(sub, /\[Attorney: see questions-for-attorney\.md item 3/, 'the website-terms note stays');
   assert.match(sub, /\[Attorney: see item 7\.\]/, 'the personal-accounts note stays');
+});
+
+// Chrome's permission prompt can come from three places now (round J added
+// the photo servers), and the demo script tells the presenter what each one
+// is. A new place the extension asks from fails here until it is added to
+// KNOWN and to the script.
+test('the demo script says what every Chrome permission prompt the extension raises is for', () => {
+  const KNOWN = {
+    'wizard.js { origins }': 'rescan',
+    'popup.js { origins: rescanOrigins() }': 'rescan',
+    'sidepanel.js { origins: patterns }': 'photos',
+    "sidepanel.js { origins: [NHTSA_ORIGIN + '/' + '*'] }": 'NHTSA',
+  };
+  const WORDS = { rescan: /automatic rescan/, photos: /download this car's photos/, NHTSA: /Check with NHTSA/ };
+  const kinds = new Set();
+  const files = readdirSync(new URL('../extension/', import.meta.url), { recursive: true }).filter((f) => f.endsWith('.js'));
+  assert.ok(files.includes('sidepanel.js') && files.includes('wizard.js'), 'the extension folder moved: fix this test');
+  for (const file of files) {
+    for (const m of read('../extension/' + file).matchAll(/chrome\.permissions\.request\((\{[^}]*\})\)/g)) {
+      const kind = KNOWN[`${file} ${m[1]}`];
+      assert.ok(kind, `extension/${file} asks Chrome for ${m[1]}: add it to KNOWN here and say what it is in the demo script`);
+      kinds.add(kind);
+    }
+  }
+  assert.deepEqual([...kinds].sort(), Object.keys(WORDS).sort(), 'a permission request in KNOWN is gone from the code: take it out of here and the demo script');
+  const line = read('../marketing/demo-script.md').split('\n').find((l) => l.startsWith('- **Chrome asks for a permission:**'));
+  assert.ok(line, 'the demo script lost its "Chrome asks for a permission" line');
+  for (const kind of kinds) assert.match(line, WORDS[kind], `the demo script does not say a prompt can be the ${kind} permission`);
 });

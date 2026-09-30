@@ -5,12 +5,15 @@
 //     Chrome's rules for host patterns (ports, "*", "*.<domain>", IP hosts);
 //   - the side panel asks Chrome only from the salesperson's click, before
 //     anything else is awaited, and only for what neededPatterns names; the
-//     service worker never asks.
+//     service worker never asks; a queued car whose photo server has not
+//     been asked about waits for that click;
+//   - photos on Facebook's servers are never asked for nor sent to the
+//     worker (the worker's own refusal is in photoDownload.test.js).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { photoOriginsOf, permissionPattern, neededPatterns, patternCovers, patternHost } from '../extension/src/photoHosts.js';
+import { photoOriginsOf, permissionPattern, neededPatterns, patternCovers, patternHost, isFacebookServer } from '../extension/src/photoHosts.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const manifest = JSON.parse(read('../extension/manifest.json'));
@@ -62,6 +65,36 @@ test('neededPatterns: the manifest\'s own image host is never asked for, Faceboo
   assert.deepEqual(need(['http://img.cdn.example/a.jpg', 'http://127.0.0.1:5173/photo/1.png']), [], 'http photos: nothing to ask (the e2e mock serves these)');
   assert.deepEqual(need([]), []);
   assert.deepEqual(neededPatterns(['https://img.example/a.jpg']), ['https://img.example' + ANY], 'no lists: everything https is needed');
+});
+
+// Photos a dealer page reuses from its Facebook page sit on Facebook's image
+// servers, not on facebook.com: those are Facebook's too.
+const FACEBOOK_PHOTOS = [
+  'https://www.facebook.com/marketplace/x.jpg',
+  'https://scontent-iad3-1.xx.fbcdn.net/v/t39/1.jpg',
+  'https://static.xx.fbcdn.net/rsrc/2.png',
+  'https://lookaside.fbsbx.com/lookaside/crawler/3.jpg',
+  'https://connect.facebook.net/4.jpg',
+  'https://www.fb.com/5.jpg',
+  'https://FBCDN.NET./6.jpg',
+];
+
+test('Facebook\'s servers, its image servers included, are never asked for', () => {
+  assert.deepEqual(photoOriginsOf(FACEBOOK_PHOTOS), []);
+  assert.deepEqual(need(FACEBOOK_PHOTOS), []);
+  assert.deepEqual(neededPatterns(FACEBOOK_PHOTOS), [], 'not even with no lists');
+  for (const url of FACEBOOK_PHOTOS) assert.equal(permissionPattern(url), null, url);
+  // a name that only ends the same way, or has Facebook's name inside it, is someone else's
+  assert.deepEqual(need(['https://notfbcdn.net/a.jpg', 'https://fbcdn.net.example/b.jpg', 'https://myfb.com/c.jpg']),
+    ['https://notfbcdn.net' + ANY, 'https://fbcdn.net.example' + ANY, 'https://myfb.com' + ANY]);
+});
+
+test('isFacebookServer: Facebook\'s servers whatever the scheme, nothing else', () => {
+  for (const url of FACEBOOK_PHOTOS) assert.equal(isFacebookServer(url), true, url);
+  assert.equal(isFacebookServer('http://scontent.fbcdn.net/a.jpg'), true, 'http too: the download is refused, not only the asking');
+  for (const url of ['https://notfbcdn.net/a.jpg', 'https://fbcdn.net.example/b.jpg', 'https://img.cdn.example/c.jpg', 'not a url', '', null, undefined]) {
+    assert.equal(isFacebookServer(url), false, String(url));
+  }
 });
 
 test('neededPatterns: one pattern per server not yet covered, in photo order', () => {
@@ -155,8 +188,24 @@ test('the side panel asks Chrome for photo servers only from the click handler, 
   assert.match(ask, /permissions\.request\(\{ origins: patterns \}\)/);
   assert.doesNotMatch(before, /\bawait\b/, 'nothing is awaited before Chrome is asked');
 
-  // both are called only from the click handler, each before anything else in its branch is awaited
+  // Nothing is awaited on the way into the click handler's branches: Chrome
+  // shows a prompt only while the click still counts. Measured from the
+  // start of onClick, so an await added at its top is caught, not only one
+  // in the branch itself. The wizard and upkeep short-circuits are the
+  // exception: those steps show no photo or VIN button.
   const click = fnText(src, 'onClick');
+  const allowAt = click.indexOf('if (btn.dataset.allowPhotos');
+  const switchAt = click.indexOf('switch (btn.id)');
+  assert.ok(allowAt > 0 && switchAt > allowAt, 'onClick has its Allow photos branch, then its switch');
+  assert.doesNotMatch(click.slice(0, allowAt), /\bawait\b/, 'nothing is awaited in the click before the Allow photos branch');
+  const allowEnd = click.indexOf('\n  }\n', allowAt); // the Allow photos branch returns; its own awaits come after its ask
+  assert.ok(allowEnd > allowAt && allowEnd < switchAt, 'the Allow photos branch ends before the switch');
+  const shortCircuits = /^\s*if \(state\.step === '(?:wizard|upkeep)' && \(await handle(?:Wizard|Upkeep)Click\([^\n]*\n/gm;
+  const beforeSwitch = click.slice(0, allowAt) + click.slice(allowEnd + 4, switchAt);
+  assert.equal((beforeSwitch.match(shortCircuits) || []).length, 2, 'the wizard and upkeep short-circuits are where this test expects them');
+  assert.doesNotMatch(beforeSwitch.replace(shortCircuits, ''), /\bawait\b/, 'nothing but the wizard and upkeep short-circuits is awaited before the switch');
+
+  // both are called only from the click handler, each before anything else in its branch is awaited
   for (const name of ['askForPhotos', 'checkVinOnline']) {
     const everywhere = (src.match(new RegExp(`(?<!['"])\\b${name}\\b(?!['"])`, 'g')) || []).length;
     const inClick = [...click.matchAll(new RegExp(`\\b${name}\\(`, 'g'))];
@@ -174,6 +223,81 @@ test('the side panel asks Chrome for photo servers only from the click handler, 
   }
   // the photo branches of the click handler come before anything the wizard or upkeep await
   assert.ok(click.indexOf('btn.dataset.allowPhotos') < click.indexOf('await handleWizardClick'), 'Allow photos asks before any other await');
+});
+
+// canAutoOpen, run as written with the rest of the panel replaced by stubs:
+// a queued car whose photos need a server Chrome has not been asked about
+// waits at review, because Chrome prompts only from a click.
+test('the queue does not open the form by itself for a car whose photo server has not been asked about', () => {
+  const src = stripComments(read('../extension/sidepanel.js'));
+  const body = fnText(src, 'canAutoOpen');
+  const make = new Function('state', 'currentListing', 'dailyCap', 'photoPatterns', 'refusedPhotoServers', `${body}\nreturn canAutoOpen;`);
+  const run = (photos, { granted = [], refused = [] } = {}) => make(
+    { guardrails: { ok: true }, vinCheck: { local: { ok: true } } },
+    () => ({ missing: [] }),
+    () => ({ reached: false }),
+    (urls = photos) => need(urls, granted),
+    new Set(refused),
+  )();
+  const cdn = ['https://img.uncovered.example/1.jpg', 'https://img.uncovered.example/2.jpg'];
+  const pattern = 'https://img.uncovered.example' + ANY;
+  assert.equal(run([]), true, 'a car that passes every check and has no photos opens');
+  assert.equal(run(['http://127.0.0.1:5173/photo/1.png']), true, 'nothing to ask: it opens');
+  assert.equal(run(cdn), false, 'a server not yet asked about: the car waits for a click');
+  assert.equal(run(cdn, { granted: [pattern] }), true, 'granted: it opens');
+  assert.equal(run(cdn, { refused: [pattern] }), true, 'refused this session: it opens without those photos, and Allow photos asks again');
+  assert.equal(run([...cdn, 'https://img.other.example/3.jpg'], { refused: [pattern] }), false, 'one refused, another not yet asked: it waits');
+  assert.equal(run(['https://scontent-iad3-1.xx.fbcdn.net/v/1.jpg']), true, 'Facebook\'s servers are never asked for, so they never hold the car');
+});
+
+// attachPhotos and downloadPhotos, run as written with the rest of the panel
+// replaced by stubs: the worker is never sent a photo on Facebook's servers,
+// and the salesperson is told those photos were left out.
+test('the side panel never sends a Facebook photo to the worker, and says it left them out', async () => {
+  const src = stripComments(read('../extension/sidepanel.js'));
+  assert.equal((src.match(/type: 'downloadPhotos'/g) || []).length, 2, 'the worker is asked for photos from attachPhotos and downloadPhotos only');
+  const photos = ['https://img.cdn.example/1.jpg', 'https://scontent-iad3-1.xx.fbcdn.net/v/2.jpg', 'https://img.cdn.example/3.jpg', 'https://www.facebook.com/marketplace/4.jpg'];
+  const facebook = photos.filter((u) => /fbcdn|facebook/.test(u));
+  const sent = [];
+  const chrome = {
+    runtime: {
+      sendMessage: async (msg) => {
+        sent.push(...msg.urls);
+        return { ok: true, photos: msg.urls.map((url, i) => ({ url, ok: true, name: `photo-${i}.jpg`, type: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,AA==' })) };
+      },
+    },
+    scripting: { executeScript: async ({ args }) => [{ result: { ok: true, attached: args[1].length } }] },
+  };
+  const panel = {
+    state: { listing: { photos }, vehicle: { photos, stock: 'P1' }, vin: 'V', fill: null, map: { photoLimitDefault: 20 }, fbTabId: 1, photos: null },
+    chrome,
+    render: () => {},
+    saveFlow: async () => {},
+    photoPatterns: (urls) => need(urls),
+    refusedPhotoServers: new Set(),
+    patternCovers,
+    isFacebookServer,
+    attachPhotosInPage: () => {},
+    photoList: () => photos,
+    hostList: (patterns) => patterns.map(patternHost).join(', '),
+    sleep: async () => {},
+    document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
+    status: '',
+  };
+  panel.setStatus = (text) => { panel.status = text; };
+  const names = Object.keys(panel).filter((k) => k !== 'status');
+  const load = (name) => new Function(...names, `${fnText(src, name)}\nreturn ${name};`)(...names.map((k) => panel[k]));
+
+  await load('attachPhotos')();
+  assert.deepEqual(sent, photos.filter((u) => !facebook.includes(u)), 'attachPhotos sends only the dealer\'s photos');
+  assert.deepEqual(panel.state.photos.failed.map((f) => [f.url, f.facebook]), facebook.map((u) => [u, true]), 'and records Facebook\'s as left out');
+  assert.equal(panel.state.photos.attached, 2);
+
+  sent.length = 0;
+  await load('downloadPhotos')();
+  assert.deepEqual(sent, photos.filter((u) => !facebook.includes(u)), 'downloadPhotos sends only the dealer\'s photos');
+  assert.match(panel.status, /^2 of 4 photos downloaded/);
+  assert.match(panel.status, /2 are on Facebook's own servers, which Lot Sync doesn't download from\./);
 });
 
 test('nothing but a click in an extension page asks for a host: never the service worker, never an adapter', () => {

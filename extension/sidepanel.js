@@ -21,7 +21,7 @@ import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, descri
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
-import { neededPatterns, patternCovers, patternHost } from './src/photoHosts.js';
+import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
@@ -593,6 +593,11 @@ async function attachPhotos(only = null) {
   const isRefused = (u) => refused.some((p) => patternCovers(p, u));
   for (const url of urls.filter(isRefused)) state.photos.failed.push({ url, error: 'not allowed in Chrome', refused: true });
   urls = urls.filter((u) => !isRefused(u));
+  // Nor from Facebook's own servers, which Lot Sync never reads from
+  // (src/photoHosts.js): those photos are left out and said so.
+  const fromFacebook = (u) => isFacebookServer(u);
+  for (const url of urls.filter(fromFacebook)) state.photos.failed.push({ url, error: "on Facebook's servers", facebook: true });
+  urls = urls.filter((u) => !fromFacebook(u));
   render();
   for (let i = 0; i < urls.length && !state.photos.error; i += 4) {
     const batch = urls.slice(i, i + 4);
@@ -699,7 +704,8 @@ async function downloadPhotos() {
   const all = photoList();
   // as when attaching: nothing from a server the salesperson said no to
   const refused = photoPatterns(all).filter((p) => refusedPhotoServers.has(p));
-  const urls = all.filter((u) => !refused.some((p) => patternCovers(p, u)));
+  const onFacebook = all.filter((u) => isFacebookServer(u)); // never downloaded from (src/photoHosts.js)
+  const urls = all.filter((u) => !refused.some((p) => patternCovers(p, u)) && !isFacebookServer(u));
   setStatus(`Downloading ${urls.length} photos…`);
   let n = 0;
   for (let i = 0; i < urls.length; i += 4) {
@@ -716,8 +722,9 @@ async function downloadPhotos() {
       await sleep(150);
     }
   }
-  const left = all.length - urls.length;
-  const note = left ? ` Photos from ${hostList(refused)} were not allowed, so ${left === 1 ? 'one was' : `${left} were`} not downloaded.` : '';
+  const left = all.length - urls.length - onFacebook.length;
+  let note = left ? ` Photos from ${hostList(refused)} were not allowed, so ${left === 1 ? 'one was' : `${left} were`} not downloaded.` : '';
+  if (onFacebook.length) note += ` ${onFacebook.length === 1 ? 'One is' : `${onFacebook.length} are`} on Facebook's own servers, which Lot Sync doesn't download from.`;
   setStatus(`${n} of ${all.length} photos downloaded to your Downloads folder.${note}`);
 }
 
@@ -925,8 +932,10 @@ function photosHtml() {
   const limitNote = p.total > p.limit ? ` (the form takes ${p.limit}${p.verified ? '' : ', unverified'}; the first ${p.limit} were used)` : '';
   let html = `<div id="photos" class="${p.done ? 'done' : ''}">${p.attached} of ${Math.min(p.total, p.limit)} attached${p.done ? '' : '…'}${limitNote}</div>`;
   const blocked = blockedPatterns();
-  const others = p.failed.filter((f) => !blocked.some((b) => patternCovers(b, f.url))).length;
+  const onFacebook = p.failed.filter((f) => f.facebook).length;
+  const others = p.failed.filter((f) => !f.facebook && !blocked.some((b) => patternCovers(b, f.url))).length;
   if (others) html += `<p class="hint">${others} couldn't be downloaded.</p>`;
+  if (onFacebook) html += `<p class="hint">${onFacebook === 1 ? 'One is' : `${onFacebook} are`} on Facebook's own servers, which Lot Sync doesn't download from.</p>`;
   for (const pattern of blocked) {
     const mine = p.failed.filter((f) => patternCovers(pattern, f.url));
     const host = esc(patternHost(pattern));

@@ -19,5 +19,11 @@ None of these pages shows how any named platform marks up its inventory. That is
 | `carousel.html` | A vehicle page with a carousel of four other cars (one new), each with its own address and one with its own Carfax link, and the page's car repeated in microdata with an older price |
 | `microdata.html` | A microdata-only page (`itemscope`, `itemprop`, `content`, `link href`, `img src` against a `<base href>`), plus a dealer item that is not a vehicle |
 | `stale-price.html` | Markup whose price the page no longer shows: no price |
+| `stale-price-struck.html` | The same stale markup price, which the page shows only crossed out (`<s>`) beside the new one: no price |
+| `stale-price-was.html` | The same, shown only after "Was:" beside "Now:": no price |
+| `stale-price-msrp.html` | A markup price the page shows only after "MSRP", beside a lower sale price: no price |
+| `stale-price-payment.html` | A markup price the page shows only in a payment estimate ("based on a price of"), beside the current price: no price |
+| `price-specification.html` | An offer with no price of its own and two `priceSpecification`s, a `StrikethroughPrice` first and the sale price second, both shown on the page (the old one crossed out by a class): the sale price |
+| `no-currency.html` | An offer with no `priceCurrency` whose amount the page shows with a dollar sign ("$17,163.00"): counted as US dollars |
 
 `gate-before.json` is different: it is not a page but the pre-owned gate's decisions, captured on 2026-09-29 before the gate learned schema.org condition values. It covers every record in `test/fixtures/records.json` and every car of the sandbox lot (`demo/site/inventory.js`, day 1 and day 2), each as it is and with one sign taken away at a time. `test/classify.test.js` checks that the gate still decides each of them exactly the same way, for the same reason.

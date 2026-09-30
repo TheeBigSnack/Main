@@ -1,14 +1,15 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import vm from 'node:vm';
+import { createServer } from 'node:http';
 import { startMockSite } from './e2e/mock-dealer-site.mjs';
 import dealerInspire, { scan, getDetails, makeDirectSearch, detect, trimRecord, FIELDS, probeInPage, searchInPage, origins, scanOptions, photoOrigins } from '../extension/adapters/dealerInspire.js';
 import { ADAPTERS, detectAdapter, adapterById, adapterForService, unsupportedSiteMessage, platformNames } from '../extension/adapters/index.js';
 import { VEHICLE_FIELDS } from '../extension/src/vehicle.js';
 import { scanWithSearch, incompleteWarning } from '../extension/src/scanRunner.js';
 import { withDefaults } from '../extension/src/settings.js';
-import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, learnCarAddressShape, matchesCarAddressShape, vinInAddress } from '../extension/adapters/schemaOrg.js';
+import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, MAX_FAILED_IN_A_ROW, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress } from '../extension/adapters/schemaOrg.js';
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
 import { fixtures, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage } from './helpers.js';
 
@@ -167,10 +168,14 @@ test('scan, getDetails, normalize, origins, scanOptions and photoOrigins return 
     const options = a.scanOptions(fx.service);
     assert.ok(options && typeof options === 'object' && !Array.isArray(options));
     const res = await a.scan(fx.search(), { ...options, ...fx.missing.options });
-    // unread is the one optional key: cars still listed whose details this scan could not read
-    const { unread, ...shape } = res;
+    // the optional keys, each only when there are some: unread (cars still
+    // listed whose details this scan did not read), pagesRead (cars whose own
+    // page this scan read) and leftForLater (pages the page limit left)
+    const { unread, pagesRead, leftForLater, ...shape } = res;
     assert.deepEqual(Object.keys(shape).sort(), ['complete', 'confirm', 'fetchedAt', 'ok', 'records', 'requests', 'total'], `${a.PLATFORM.id}.scan return shape`);
     assert.ok(unread === undefined || (Array.isArray(unread) && unread.length > 0), `${a.PLATFORM.id}.scan unread, when given, lists VINs`);
+    assert.ok(pagesRead === undefined || (Array.isArray(pagesRead) && pagesRead.length > 0 && pagesRead.every((v) => res.records.some((r) => a.normalize(r).vin === v))), `${a.PLATFORM.id}.scan pagesRead, when given, lists VINs of this scan's cars`);
+    assert.ok(leftForLater === undefined || (Number.isInteger(leftForLater) && leftForLater > 0), `${a.PLATFORM.id}.scan leftForLater, when given, counts pages`);
     assert.deepEqual(Object.keys(res.confirm).sort(), ['checked', 'error', 'notFound']);
     assert.equal(res.ok, true);
     assert.ok(!Number.isNaN(Date.parse(res.fetchedAt)));
@@ -520,8 +525,10 @@ test('schemaOrg scan: the list and its rel=next pages to the end, then each car\
   assert.deepEqual([one.ok, one.complete, one.records.length], [true, false, 10]);
   assert.equal(one.records.find((r) => r.node.vehicleIdentificationNumber === cars[5].vin).carried, true);
   // the list page itself fails, or has no car links (a list drawn by scripts)
-  const noList = await scanSite(new Map([[LIST, httpError(503)]]));
+  const noList = await scanSite(new Map([[LIST, httpError(500)]]));
   assert.deepEqual([noList.ok, noList.error], [false, 'list-failed']);
+  const busy = await scanSite(new Map([[LIST, httpError(503)]]));
+  assert.deepEqual([busy.ok, busy.error], [false, 'blocked'], 'a 503 is the website asking to be left alone');
   const drawn = await scanSite(new Map([[LIST, html('<html><head><title>Used</title></head><body><div id="app"></div></body></html>')]]));
   assert.deepEqual([drawn.ok, drawn.error], [false, 'no-cars']);
   assert.match(drawn.message, /draws its list with scripts/);
@@ -608,7 +615,7 @@ test('schemaOrg confirm: a page without the car counts only once this website\'s
   bare.set(O + gone.path, html(noLongerAvailable));
   const res = await scanSite(bare, { confirmVins: [gone.vin], confirmUrls: { [gone.vin]: O + gone.path } });
   assert.deepEqual(res.confirm.notFound, []);
-  assert.match(res.confirm.error, /carry no vehicle data/);
+  assert.match(res.confirm.error, /don't mark up their own car/);
   assert.ok(res.records.every((r) => r.carried), 'the cars themselves come from the list\'s data');
 });
 
@@ -722,18 +729,50 @@ test('fetchVehicleDetails passes the car\'s known page to the adapter, from the 
   }
 });
 
-test('a scan that did not read everything says which way: cars missing, or pages that could not be read', async () => {
-  assert.equal(incompleteWarning({ records: [1, 2], total: 3 }), 'The website returned 2 of 3 cars. Missing cars were double-checked one by one.');
-  assert.equal(incompleteWarning({ records: [1, 2, 3], total: 3 }), "Some of the website's pages could not be read this time. Missing cars were double-checked one by one.");
+test('a scan that did not read everything says which way: cars missing, pages that could not be read, or pages left for the next scan', async () => {
+  const checked = { checked: ['A'], notFound: [], error: null };
+  const failed = { checked: [], notFound: [], error: "one car's page gave HTTP 500" };
+  const none = { checked: [], notFound: [], error: null };
+  // "double-checked" only when the check ran and checked a car
+  assert.equal(incompleteWarning({ records: [1, 2], total: 3 }), 'The website returned 2 of 3 cars.');
+  assert.equal(incompleteWarning({ records: [1, 2], total: 3, confirm: checked }), 'The website returned 2 of 3 cars. Missing cars were double-checked one by one.');
+  assert.equal(incompleteWarning({ records: [1, 2], total: 3, confirm: failed }), 'The website returned 2 of 3 cars.');
+  assert.equal(incompleteWarning({ records: [1, 2, 3], total: 3, confirm: none }), "Some of the website's pages could not be read this time.");
+  assert.equal(incompleteWarning({ records: [1, 2, 3], total: 3, confirm: checked }), "Some of the website's pages could not be read this time. Missing cars were double-checked one by one.");
   assert.equal(incompleteWarning({ records: [1, 2], unread: ['A'], total: 3 }), "One car's page could not be read this time, so that car shows what the last scan read.");
-  assert.equal(incompleteWarning({ records: [1], unread: ['A', 'B'], total: 4 }), 'The website returned 3 of 4 cars. Missing cars were double-checked one by one.');
+  assert.equal(incompleteWarning({ records: [1], unread: ['A', 'B'], total: 4, confirm: failed }), 'The website returned 3 of 4 cars.');
+  // pages the page limit left were never asked for: not "could not be read"
+  assert.equal(incompleteWarning({ records: [1, 2], total: 6, leftForLater: 4 }), "This lot has more car pages than one scan reads, so 4 cars' pages were left for the next scan.");
+  assert.equal(incompleteWarning({ records: [1, 2], unread: ['A'], total: 3, leftForLater: 1, confirm: checked }), "This lot has more car pages than one scan reads, so one car's page was left for the next scan. A car whose page was not read this time shows what the last scan read. Missing cars were double-checked one by one.");
+
   const cars = standardCars(4);
   const siteMap = standardSite({ cars });
-  siteMap.set(O + cars[1].path, httpError(503));
+  siteMap.set(O + cars[1].path, httpError(500));
   const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
   const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(siteMap), site, settings: withDefaults({}, site), options: schemaOrg.scanOptions(SERVICE) });
   assert.equal(out.snapshot.complete, false);
-  assert.equal(out.diff.warnings[0], "Some of the website's pages could not be read this time. Missing cars were double-checked one by one.", 'every car is known from the list; one page failed');
+  assert.equal(out.diff.warnings[0], "Some of the website's pages could not be read this time.", 'every car is known from the list; one page failed; nothing was missing, so nothing was double-checked');
+
+  // a bad server day: page 2 of the list fails, and a missing posted car's page fails too
+  const six = standardCars(6);
+  const settings = withDefaults({}, site);
+  const posted = { [six[4].vin]: { name: 'x', price: six[4].price, postedAt: '2026-09-29T12:00:00Z' } };
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars: six })), site, settings, posted, options: schemaOrg.scanOptions(SERVICE) });
+  const bad = standardSite({ cars: six });
+  bad.set(LIST + '?page=2', httpError(500));
+  bad.set(O + six[4].path, httpError(500));
+  const day2 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(bad), site, settings, posted, prevSnapshot: day1.snapshot, options: schemaOrg.scanOptions(SERVICE) });
+  assert.ok(day2.res.confirm.error);
+  assert.equal(day2.diff.warnings[0], "Some of the website's pages could not be read this time.", 'never "double-checked" when the check failed');
+  assert.match(day2.diff.warnings[1], /^Couldn't double-check missing cars .*Nothing was marked as gone\.$/);
+  assert.deepEqual(day2.diff.takeDown, []);
+  // the same day with the missing cars' pages answering 404: they were double-checked, and are gone
+  const sold = standardSite({ cars: six });
+  sold.set(LIST + '?page=2', httpError(500));
+  for (const c of six.slice(4)) sold.set(O + c.path, httpError(404));
+  const day2b = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(sold), site, settings, posted, prevSnapshot: day1.snapshot, options: schemaOrg.scanOptions(SERVICE) });
+  assert.equal(day2b.diff.warnings[0], "Some of the website's pages could not be read this time. Missing cars were double-checked one by one.");
+  assert.deepEqual(day2b.diff.takeDown.map((t) => t.vin).sort(), [six[4].vin, six[5].vin].sort());
 });
 
 test('scanWithSearch keeps the saved lot-wide lines when a scan did not read every description', async () => {
@@ -746,4 +785,271 @@ test('scanWithSearch keeps the saved lot-wide lines when a scan did not read eve
   const skim = { ...dealerInspire, normalize: (r) => ({ ...dealerInspire.normalize(r), descriptionRaw: r.vin === records[0].vin ? 'One car.' : null }) };
   const some = await scanWithSearch({ adapter: skim, search: fakeSearch(records), site, settings: withDefaults({}), boilerplate: saved });
   assert.deepEqual(some.boilerplate, saved);
+});
+
+// ---------- schemaOrg: refusals, look-alike pages, the page limit and the hostile-site limits ----------
+
+const CHALLENGE = '<!doctype html><html><head><title>Just a moment...</title></head><body>Checking your browser before accessing the site.</body></html>';
+const carPageCalls = (search) => search.calls.filter((u) => u.includes('/inventory/'));
+
+test('schemaOrg scan: a 503, a bot check behind any error status, or three failed car pages in a row stop the scan; nothing is retried', async () => {
+  const cars = standardCars(40);
+  const every = (answer) => {
+    const site = standardSite({ cars, perPage: 40 });
+    for (const c of cars) site.set(O + c.path, typeof answer === 'function' ? answer(c) : answer);
+    return site;
+  };
+  // a firewall's "checking your browser" page served as 503
+  const challenged = fakeSiteSearch(every({ ok: false, status: 503, contentType: 'text/html', text: CHALLENGE }));
+  const r503 = await schemaOrg.scan(challenged, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([r503.ok, r503.error], [false, 'blocked']);
+  assert.match(r503.message, /HTTP 503.*stopped/);
+  assert.ok(carPageCalls(challenged).length <= CONCURRENCY, `no new page after the 503 (${challenged.calls.length} requests)`);
+  // the same page behind another error status is still a bot check
+  const other = fakeSiteSearch(every({ ok: false, status: 502, contentType: 'text/html; charset=utf-8', text: CHALLENGE }));
+  const r502 = await schemaOrg.scan(other, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([r502.ok, r502.error], [false, 'blocked']);
+  assert.match(r502.message, /bot check/);
+  assert.ok(carPageCalls(other).length <= CONCURRENCY, `no new page after the bot check (${other.calls.length} requests)`);
+  // plain failures one after another (a 500 on every car page, or the connection reset)
+  for (const [label, site, search] of [
+    ['500', every(httpError(500, 'Internal server error')), null],
+    ['reset', null, async (request) => { if (request.url.includes('/inventory/')) throw new Error('connection reset'); return { finalUrl: request.url, redirected: false, ...standardSite({ cars, perPage: 40 }).get(request.url) }; }],
+  ]) {
+    const calls = [];
+    const s = search ? async (request) => { calls.push(request.url); return search(request); } : fakeSiteSearch(site);
+    const res = await schemaOrg.scan(s, schemaOrg.scanOptions(SERVICE));
+    const asked = (search ? calls : s.calls).filter((u) => u.includes('/inventory/')).length;
+    assert.deepEqual([res.ok, res.error], [false, 'failing'], label);
+    assert.match(res.message, new RegExp(`failed ${MAX_FAILED_IN_A_ROW} times in a row.*stopped`), label);
+    assert.ok(asked <= MAX_FAILED_IN_A_ROW + CONCURRENCY - 1, `${label}: stopped after ${MAX_FAILED_IN_A_ROW} failures in a row, not after all 40 (${asked} car pages asked for)`);
+  }
+  // one failure among pages that answer is not a run: the scan goes on
+  const flaky = standardSite({ cars, perPage: 40 });
+  for (const n of [3, 10, 20]) flaky.set(O + cars[n].path, httpError(500));
+  const goesOn = await scanSite(flaky);
+  assert.deepEqual([goesOn.ok, goesOn.complete, goesOn.records.length], [true, false, 40]);
+  // a sold car's 404 page is its page gone, whatever words it carries (a lead form's captcha notice)
+  const sold = standardSite({ cars: cars.slice(0, 5) });
+  sold.set(O + cars[2].path, { ok: false, status: 404, contentType: 'text/html', text: '<html><head><title>Page not found</title></head><body>This site is protected by reCAPTCHA. Are you human? Just a moment.</body></html>' });
+  const r404 = await scanSite(sold, { confirmVins: [cars[2].vin], confirmUrls: { [cars[2].vin]: O + cars[2].path } });
+  assert.equal(r404.ok, true);
+  assert.deepEqual(r404.confirm.notFound, [cars[2].vin]);
+});
+
+// A car page whose own Car node has no VIN but whose "similar vehicles"
+// carousel has two other cars' nodes: the car can't be told from the page.
+function carouselSite(cars, perPage = 4) {
+  const site = standardSite({ cars, perPage });
+  cars.forEach((c, n) => {
+    const page = standardCarPage(c, { carousel: [cars[(n + 1) % cars.length], cars[(n + 2) % cars.length]] });
+    const own = `"vehicleIdentificationNumber":"${c.vin}",`;
+    assert.equal(page.split(own).length, 2, 'the page names its own VIN once, in its own node');
+    site.set(O + c.path, html(page.replace(own, '')));
+  });
+  return site;
+}
+
+test('schemaOrg confirm: a live car whose page marks up only other cars, or redirects to such a page, is never called gone', async () => {
+  const cars = standardCars(12);
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const posted = { [cars[10].vin]: { name: 'x', price: cars[10].price, postedAt: '2026-09-29T12:00:00Z' } };
+  const first = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(carouselSite(cars)), site, settings, posted, options: schemaOrg.scanOptions(SERVICE) });
+  assert.equal(Object.keys(first.snapshot.vehicles).length, 12, 'every car read from the list\'s data');
+  for (const redirect of [false, true]) {
+    // day 2: the last list page fails, so 4 of 12 cars are missing; each car's page still shows it
+    const day2 = carouselSite(cars);
+    day2.set(LIST + '?page=3', httpError(500));
+    if (redirect) {
+      // each missing car's address now redirects (a slug change) to the same kind of page
+      for (const c of cars.slice(8)) {
+        const moved = O + '/inventory/' + c.vin.toLowerCase() + '/';
+        day2.set(O + c.path, { ...day2.get(O + c.path), redirected: true, finalUrl: moved });
+      }
+    }
+    const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(day2), site, settings, posted, prevSnapshot: first.snapshot, options: schemaOrg.scanOptions(SERVICE) });
+    const label = redirect ? 'redirected' : 'at its page';
+    assert.deepEqual(out.res.confirm.notFound, [], label);
+    assert.match(out.res.confirm.error, /don't mark up their own car/, label);
+    assert.deepEqual(out.diff.takeDown, [], `${label}: nothing taken down, the posted car included`);
+    assert.deepEqual(out.diff.needsALook.map((n) => n.vin).sort(), cars.slice(8).map((c) => c.vin).sort(), label);
+  }
+  // where car pages do carry their own VIN, the same pages without the car are proof: gone
+  const plain = standardSite({ cars, perPage: 4 });
+  const firstPlain = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(plain), site, settings, posted, options: schemaOrg.scanOptions(SERVICE) });
+  const soldDay = standardSite({ cars: cars.slice(0, 8), perPage: 4 });
+  for (const c of cars.slice(8)) soldDay.set(O + c.path, html(standardListPage(cars.slice(0, 4)), { redirected: true, finalUrl: LIST }));
+  const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(soldDay), site, settings, posted, prevSnapshot: firstPlain.snapshot, options: schemaOrg.scanOptions(SERVICE) });
+  assert.deepEqual(out.diff.takeDown.map((t) => t.vin).sort(), cars.slice(8).map((c) => c.vin).sort());
+
+  // at post time: a page that moved to one without the car leaves the decision to the list
+  const moved = carouselSite(cars);
+  moved.set(O + cars[1].path, { ...moved.get(O + cars[1].path), redirected: true, finalUrl: O + '/inventory/' + cars[1].vin.toLowerCase() + '/' });
+  const d = await schemaOrg.getDetails(fakeSiteSearch(moved), cars[1].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[1].path });
+  assert.equal(d.ok, true);
+  assert.equal(d.record && d.record.node.vehicleIdentificationNumber, cars[1].vin, 'still on the list: still for sale');
+  const gone = await schemaOrg.getDetails(fakeSiteSearch(soldDay), cars[9].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[9].path });
+  assert.deepEqual([gone.ok, gone.record], [true, null], 'moved to the list, and not on it: gone');
+});
+
+test('schemaOrg scan: past the page limit, the pages read longest ago come first, so every car comes round; the warning says they were left for the next scan', async () => {
+  const cars = standardCars(10);
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = { ...schemaOrg.scanOptions(SERVICE), maxCarPages: 6 };
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5)); // each scan its own time
+  const vinsOf = (search) => carPageCalls(search).map((u) => cars.find((c) => O + c.path === u).vin);
+  const V = cars.map((c) => c.vin);
+
+  // (a) a list of links only: a car whose page is not read has nothing to show
+  const links = standardSite({ cars, perPage: 10, listData: false });
+  const s1 = fakeSiteSearch(links);
+  const one = await scanWithSearch({ adapter: schemaOrg, search: s1, site, settings, options });
+  assert.deepEqual(vinsOf(s1), V.slice(0, 6), 'no more than the limit');
+  assert.deepEqual([one.res.leftForLater, one.res.complete, Object.keys(one.snapshot.vehicles).length], [4, false, 6]);
+  assert.equal(one.diff.warnings[0], "This lot has more car pages than one scan reads, so 4 cars' pages were left for the next scan.");
+  assert.equal(one.snapshot.vehicles[V[0]].pageReadAt, one.res.fetchedAt);
+  await tick();
+  const s2 = fakeSiteSearch(links);
+  const two = await scanWithSearch({ adapter: schemaOrg, search: s2, site, settings, prevSnapshot: one.snapshot, options });
+  assert.deepEqual(vinsOf(s2).slice(0, 4).sort(), V.slice(6).sort(), 'the cars never read come first');
+  assert.equal(vinsOf(s2).length, 6);
+  assert.equal(Object.keys(two.snapshot.vehicles).length, 10, 'every car is in the lot now');
+  assert.equal(two.snapshot.vehicles[V[5]].pageReadAt, one.res.fetchedAt, 'a car not read this time keeps when it was read');
+  assert.equal(two.diff.warnings[0], "This lot has more car pages than one scan reads, so 4 cars' pages were left for the next scan. A car whose page was not read this time shows what the last scan read.");
+  await tick();
+  const s3 = fakeSiteSearch(links);
+  await scanWithSearch({ adapter: schemaOrg, search: s3, site, settings, prevSnapshot: two.snapshot, options });
+  assert.deepEqual(vinsOf(s3).slice(0, 4), V.slice(2, 6), 'then the pages read longest ago');
+
+  // (b) a list without prices: a car whose page is not read is Not ready until it is
+  const noPrice = new Set(V);
+  const thin = standardSite({ cars, perPage: 10, noPrice: new Set() });
+  const unpricedList = standardSite({ cars, perPage: 10, noPrice });
+  thin.set(LIST, unpricedList.get(LIST)); // the list shows no price; each car's page does
+  const b1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(thin), site, settings, options });
+  assert.equal(b1.snapshot.vehicles[V[8]].price, null, 'from the list: no price yet');
+  await tick();
+  const b2 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(thin), site, settings, prevSnapshot: b1.snapshot, options });
+  for (const n of [6, 7, 8, 9]) assert.equal(b2.snapshot.vehicles[V[n]].price, cars[n].price, `car ${n}: read from its page on the next scan`);
+  for (const n of [2, 3, 4, 5]) assert.equal(b2.snapshot.vehicles[V[n]].price, cars[n].price, `car ${n}: keeps what its page said`);
+});
+
+test('schemaOrg: a redirect to another website is followed as a browser would, and its answer is never used', async () => {
+  const hits = [];
+  const other = createServer((req, res) => {
+    hits.push(req.url);
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(other.page || '<html></html>');
+  });
+  const dealer = createServer((req, res) => {
+    const got = dealer.site.get(dealer.origin + req.url);
+    if (got && got.location) {
+      res.writeHead(301, { location: got.location });
+      return res.end();
+    }
+    res.writeHead(got ? got.status : 404, { 'content-type': got ? got.contentType : 'text/plain' });
+    res.end(got ? got.text : 'Not found');
+  });
+  await Promise.all([other, dealer].map((srv) => new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve))));
+  try {
+    const otherOrigin = `http://127.0.0.1:${other.address().port}`;
+    dealer.origin = `http://127.0.0.1:${dealer.address().port}`;
+    const cars = standardCars(4);
+    const sold = standardCars(1, { from: 60 })[0];
+    dealer.site = standardSite({ cars, origin: dealer.origin });
+    // a listed car's page and a missing car's last page both send the reader to another website,
+    // which answers with a page that shows each car still for sale
+    dealer.site.set(dealer.origin + cars[1].path, { location: otherOrigin + '/tracker?from=dealer' });
+    dealer.site.set(dealer.origin + sold.path, { location: otherOrigin + '/tracker?from=dealer' });
+    other.page = standardCarPage(cars[1], { origin: otherOrigin }).replace('</head>', `<script type="application/ld+json">${JSON.stringify(standardCarNode(sold, otherOrigin))}</script></head>`);
+    const service = { kind: 'schemaOrg', origin: dealer.origin, listUrl: dealer.origin + '/used-vehicles/' };
+    const search = schemaOrg.makeDirectSearch(service);
+    const res = await schemaOrg.scan(search, { ...schemaOrg.scanOptions(service), confirmVins: [sold.vin], confirmUrls: { [sold.vin]: dealer.origin + sold.path } });
+    assert.ok(hits.length >= 1, 'the redirect was followed (the request went out, as it would from a browser)');
+    assert.equal(res.ok, true);
+    assert.match(res.confirm.error, /another website/, 'the other website\'s answer proves nothing about the missing car');
+    assert.deepEqual(res.confirm.notFound, []);
+    assert.ok(!res.records.some((r) => r.node.vehicleIdentificationNumber === sold.vin), 'the missing car is not brought back from the other website');
+    const listed = res.records.find((r) => r.node.vehicleIdentificationNumber === cars[1].vin);
+    assert.ok(listed && listed.carried && listed.url.startsWith(dealer.origin), 'the listed car comes from the dealer\'s own list, not the other website');
+    assert.equal(res.complete, false);
+    for (const r of res.records) assert.ok(!JSON.stringify(r).includes(otherOrigin), 'nothing from the other website is kept');
+  } finally {
+    await Promise.all([other, dealer].map((srv) => new Promise((resolve) => srv.close(resolve))));
+  }
+});
+
+test('schemaOrg limits: list pages, car pages, sitemaps, the page size and the request timeout all hold against a hostile website', async () => {
+  // an endless list: every page links rel=next to one more, each with one car
+  const listAt = (n) => (n === 1 ? LIST : `${LIST}?page=${n}`);
+  const endless = [];
+  const started = Date.now();
+  const res = await schemaOrg.scan(async (request) => {
+    endless.push(request.url);
+    const m = /\?page=(\d+)$/.exec(request.url);
+    const n = request.url === LIST ? 1 : m ? Number(m[1]) : 0;
+    if (n > 1000) return { ...httpError(500), finalUrl: request.url }; // a safety net so a broken limit fails instead of hanging
+    if (n) return html(standardListPage(standardCars(1, { from: n }), { next: listAt(n + 1).slice(O.length) }), { finalUrl: request.url });
+    const car = standardCars(1, { from: Number((/(\d{6})\/$/.exec(request.url) || [])[1]) - 100000 })[0];
+    return html(standardCarPage(car), { finalUrl: request.url });
+  }, schemaOrg.scanOptions(SERVICE));
+  const listReads = endless.filter((u) => u.startsWith(LIST)).length;
+  assert.equal(listReads, MAX_LIST_PAGES, 'the list stops at MAX_LIST_PAGES pages');
+  assert.deepEqual([res.ok, res.complete, res.total], [true, false, MAX_LIST_PAGES]);
+  assert.ok(Date.now() - started < 1000, `an endless list is cut short quickly (${Date.now() - started} ms)`);
+
+  // a sitemap index with more children than MAX_SITEMAPS
+  const cars = standardCars(3);
+  const mapped = standardSite({ cars, sitemap: true });
+  mapped.set(O + '/robots.txt', { ok: true, status: 200, contentType: 'text/plain', text: `Sitemap: ${O}/sitemap-index.xml\n` });
+  mapped.set(O + '/sitemap-index.xml', { ok: true, status: 200, contentType: 'application/xml', text: `<sitemapindex>${Array.from({ length: 20 }, (_, n) => `<sitemap><loc>${O}/sitemap-${n}.xml</loc></sitemap>`).join('')}</sitemapindex>` });
+  for (let n = 0; n < 20; n += 1) mapped.set(`${O}/sitemap-${n}.xml`, { ok: true, status: 200, contentType: 'application/xml', text: '<urlset></urlset>' });
+  const sm = fakeSiteSearch(mapped);
+  const withMap = await schemaOrg.scan(sm, { ...schemaOrg.scanOptions(SERVICE), sitemap: true });
+  const sitemapReads = sm.calls.filter((u) => /sitemap/.test(u)).length;
+  assert.equal(sitemapReads, MAX_SITEMAPS, `at most MAX_SITEMAPS sitemaps (${sitemapReads} read)`);
+  assert.deepEqual([withMap.ok, withMap.complete], [true, false], 'sitemaps left unread: not complete');
+
+  // more car pages than the limit: no more than the limit are asked for
+  const many = fakeSiteSearch(standardSite({ cars: standardCars(10), perPage: 10 }));
+  const capped = await schemaOrg.scan(many, { ...schemaOrg.scanOptions(SERVICE), maxCarPages: 4 });
+  assert.equal(carPageCalls(many).length, 4);
+  assert.deepEqual([capped.complete, capped.leftForLater], [false, 6]);
+
+  // a body far larger than the page limit, streamed: the read stops at the limit
+  let reads = 0;
+  let cancelled = false;
+  const chunk = new Uint8Array(1000000).fill(120); // 'x'
+  const streaming = schemaOrg.makeDirectSearch(SERVICE, async (url) => ({
+    ok: true, status: 200, url, redirected: false, headers: { get: () => 'text/html' },
+    body: { getReader: () => ({ read: async () => (reads >= 10 ? { done: true } : (reads += 1, { done: false, value: chunk })), cancel: async () => { cancelled = true; } }) },
+  }));
+  const big = await streaming({ url: LIST });
+  assert.equal(big.text.length, PAGE_TEXT_LIMIT);
+  assert.equal(reads, Math.ceil(PAGE_TEXT_LIMIT / chunk.length), 'nothing is read past the limit');
+  assert.equal(cancelled, true, 'the rest of the body is cancelled');
+
+  // a server that never answers: the request gives up after REQUEST_TIMEOUT_MS
+  assert.match(String(schemaOrg.searchInPage), new RegExp(`ctrl\\.abort\\(\\), ${REQUEST_TIMEOUT_MS}\\)`), 'the in-page copy waits as long');
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const silent = schemaOrg.makeDirectSearch(SERVICE, (url, init) => new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('The operation was aborted')))));
+    let settled = null;
+    const scanning = schemaOrg.scan(silent, schemaOrg.scanOptions(SERVICE)).then((r) => { settled = r; });
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    await flush();
+    mock.timers.tick(REQUEST_TIMEOUT_MS - 1);
+    await flush();
+    assert.equal(settled, null, 'still waiting just before the timeout');
+    mock.timers.tick(1);
+    for (let n = 0; n < 5 && !settled; n += 1) await flush();
+    assert.ok(settled, 'the scan ends once the request times out');
+    assert.deepEqual([settled.ok, settled.error], [false, 'list-failed']);
+    assert.match(settled.message, /aborted/);
+    await scanning;
+  } finally {
+    mock.timers.reset();
+  }
 });

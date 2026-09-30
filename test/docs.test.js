@@ -15,6 +15,8 @@ import { PILOT_RETENTION_DAYS } from '../extension/src/pilot.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
+import { checkPreOwned } from '../extension/src/classify.js';
+import { readdirSync } from 'node:fs';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -326,4 +328,73 @@ test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 list
   const heading = handoff.match(/^### 5\.7 .*steps `([^`]+)`/m);
   assert.ok(heading, 'HANDOFF.md 5.7 lists the steps');
   assert.deepEqual(heading[1].split(',').map((s) => s.trim()), steps, 'HANDOFF.md 5.7 step list differs from src/wizardSteps.js wizardSteps(true)');
+});
+
+// Round J's photo permission: Chrome keeps a grant, and the side panel keeps a
+// refusal only in memory, so a "no" is asked again once the panel reopens.
+test('the texts say Chrome remembers a yes, and a no only while the side panel stays open', () => {
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /^const refusedPhotoServers = new Set\(\);$/m, 'the side panel no longer keeps photo refusals in a Set: check what the texts below say');
+  assert.ok(!panel.split('\n').some((l) => l.includes('refusedPhotoServers') && /storage/.test(l)), 'the side panel stores photo refusals now: the texts can say Chrome or Lot Sync remembers a no');
+  const unreleased = read('../CHANGELOG.md').split('\n## ')[1];
+  const texts = { 'README.md': read('../README.md'), 'CHANGELOG.md (Unreleased)': unreleased, 'docs/help.md': doc('help.md'), 'store/listing.md': read('../store/listing.md'), 'marketing/demo-script.md': read('../marketing/demo-script.md') };
+  for (const [name, text] of Object.entries(texts)) {
+    assert.doesNotMatch(text, /remembers (the|your) answer|asks once/i, `${name} says a photo-server answer is remembered, and a no is forgotten when the side panel closes`);
+  }
+  const line = texts['README.md'].split('\n').find((l) => l.startsWith('- Photos on a server'));
+  assert.ok(line, "README's Limits no longer has the photo-server line");
+  assert.match(line, /remembers a yes/);
+  assert.match(line, /while the side panel stays open/);
+  assert.match(unreleased, /Chrome remembers a yes, and after a no Lot Sync doesn't ask about that server again while the side panel stays open/);
+});
+
+test('the pre-submission checklists quote only what PLAN.md says', () => {
+  const plan = read('../PLAN.md');
+  for (const name of ['store/listing.md', 'docs/launch-checklist.md']) {
+    for (const line of read('../' + name).split('\n').filter((l) => /^- \[ \]/.test(l) && l.includes('PLAN.md'))) {
+      // a quote right after the file's name: PLAN.md ("..."), (PLAN.md, "...")
+      for (const m of line.matchAll(/PLAN\.md`?,? ?\(?"([^"]+)"/g)) {
+        assert.ok(plan.includes(m[1]), `${name} sends the reader to PLAN.md's "${m[1]}", which PLAN.md does not have: ${line.slice(0, 80)}`);
+      }
+    }
+  }
+  const item = read('../store/listing.md').split('\n').find((l) => /^- \[ \]/.test(l) && l.includes('vehicle-images.carscommerce.inc'));
+  assert.ok(item, 'store/listing.md has no pre-submission item for the static photo host');
+  assert.doesNotMatch(item, /requested at post time/, 'the checklist asks again whether photo servers are requested at post time, which PLAN.md records as decided');
+  assert.match(item, /real Chrome/, 'the checklist item names the one run by hand in real Chrome that is left');
+});
+
+test('README\'s pre-owned rules say what classify.js decides when the signs mix', () => {
+  const para = read('../README.md').split('## How the pre-owned check works')[1].split('\n## ')[0];
+  const sentence = (word) => {
+    const s = para.split(/(?<=\.) (?=[A-Z])/).filter((x) => x.includes(word)).join(' ');
+    assert.ok(s, `README's pre-owned section no longer says anything about ${word}`);
+    return s;
+  };
+  const verdict = (v) => checkPreOwned({ inventoryType: null, urlConditionWord: null, siteTitle: '', ...v }).verdict;
+  // a car the website lists as damaged or refurbished
+  assert.equal(verdict({ inventoryType: 'Refurbished', urlConditionWord: 'used' }), 'review');
+  const worn = sentence('damaged or refurbished');
+  assert.match(worn, /\*\*Needs a look\*\*/);
+  if (verdict({ inventoryType: 'Damaged', urlConditionWord: 'new' }) === 'new' && verdict({ inventoryType: 'Refurbished', isDemo: true }) === 'new') {
+    assert.doesNotMatch(worn, /always/, 'README says a damaged or refurbished car always goes to Needs a look; a new or demo sign wins first');
+    assert.match(worn, /unless[^.]*skipped as new[^.]*demo or loaner flag[^.]*new sign with no pre-owned one/, 'README does not say which signs are skipped as new first');
+  }
+  // a demo or loaner flag
+  assert.equal(verdict({ inventoryType: 'Used', isDemo: true }), 'review');
+  const demo = sentence('demo or loaner flag means');
+  assert.doesNotMatch(demo, /always/, 'README says a demo flag always means sold as new; a pre-owned demo goes to Needs a look');
+  assert.match(demo, /pre-owned and nowhere new, it goes to \*\*Needs a look\*\*/);
+});
+
+// node --test runs every test( and it( call site once; none of the files
+// makes tests in a loop, so the count of call sites is the count npm test prints.
+test('README\'s unit-test count is the number of tests npm test runs', () => {
+  const dir = new URL('./', import.meta.url);
+  const files = readdirSync(dir).filter((f) => f.endsWith('.test.js'));
+  let count = 0;
+  for (const f of files) count += (readFileSync(new URL(f, dir), 'utf8').match(/^\s*(?:test|it)(?:\.(?:only|skip|todo))?\(/gm) || []).length;
+  const m = read('../README.md').match(/^npm test\s+# (\d+) unit tests/m);
+  assert.ok(m, 'README.md no longer gives the unit-test count on its npm test line');
+  assert.equal(Number(m[1]), count, `README.md says ${m[1]} unit tests, and test/*.test.js holds ${count}`);
 });

@@ -14,6 +14,7 @@ import { extractJsonLd, vehicleNodes, microdataVehicles, pageFacts, parseVehicle
 import { normalizeVehicle, priceFromOffers, milesFromOdometer, readingNotes } from '../extension/adapters/schemaOrgNormalize.js';
 import { normalizeVehicle as dealerInspireVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { trimRecord } from '../extension/adapters/dealerInspire.js';
+import { PAGE_TEXT_LIMIT } from '../extension/adapters/schemaOrg.js';
 import { VEHICLE_FIELDS } from '../extension/src/vehicle.js';
 import { assessVehicle, readCondition, DECISION } from '../extension/src/classify.js';
 import { fixtures, MY_STORE } from './helpers.js';
@@ -221,6 +222,78 @@ test('the tokenizer follows the browser\'s rules and costs one pass, whatever th
   assert.ok(Date.now() - started < 5000, `${Date.now() - started} ms for four hostile pages`);
 });
 
+// A page built to be slow, as big as a scan reads (PAGE_TEXT_LIMIT), or
+// half that where the page is only tags, read in well under a second.
+function quick(label, run, ms = 1000) {
+  const started = performance.now();
+  const result = run();
+  const took = performance.now() - started;
+  assert.ok(took < ms, `${label}: ${Math.round(took)} ms`);
+  return result;
+}
+const HOSTILE_VIN = '1G1SAMPL7MF000120';
+
+test('references by @id: a node that points at itself thousands of times is copied a bounded number of times', () => {
+  const refs = Array.from({ length: 20000 }, () => ({ '@id': '#b' }));
+  const blocks = [{ '@id': '#b', '@type': 'Car', vehicleIdentificationNumber: HOSTILE_VIN, r: refs, offers: { '@id': '#o' } }, { '@id': '#o', '@type': 'Offer', price: 19995, priceCurrency: 'USD' }];
+  const page = `<script type="application/ld+json">${JSON.stringify(blocks)}</script>`;
+  const { vehicles } = quick('20,000 references to itself', () => parseVehiclePage(page, SITE + '/'));
+  assert.equal(vehicles.length, 1);
+  assert.equal(vehicles[0].vehicleIdentificationNumber, HOSTILE_VIN);
+  assert.equal(vehicles[0].r.length, 20000);
+  assert.ok(JSON.stringify(vehicles[0]).length < 20 * page.length, 'the copy stays the size of the page, so it can be stored and sent');
+  // many cars that all point at one wide node share the page's limit
+  const wide = { '@id': '#w', k: Array.from({ length: 50000 }, (_, i) => i) };
+  const many = Array.from({ length: 30000 }, () => ({ '@type': 'Car', x: { '@id': '#w' } }));
+  assert.equal(quick('30,000 cars pointing at one wide node', () => vehicleNodes([wide, ...many])).length, 30000);
+  // a real car is copied whole: its offer and seller by @id, as graph-vdp.html shows
+  const [civic] = vehicleNodes(extractJsonLd(html('graph-vdp.html')));
+  assert.equal(civic.offers.seller.name, 'Sample Motors');
+});
+
+test('pages built to be slow read in one pass: stray end tags, nested itemprops, thousands of links, long blocks', () => {
+  const half = Math.floor(PAGE_TEXT_LIMIT / 2);
+  // thousands of unclosed tags, then as many end tags that close nothing
+  const tags = Math.floor(half / 9 / 2);
+  quick('stray end tags', () => parseVehiclePage('<div>'.repeat(tags) + '</b>'.repeat(tags), SITE + '/'));
+  // itemprops nested inside one another: each value is its whole subtree
+  const nested = '<div itemscope itemtype="https://schema.org/Car"><span itemprop="vehicleIdentificationNumber">' + HOSTILE_VIN + '</span>' + '<span itemprop="name">x'.repeat(Math.floor(half / 25));
+  const [deep] = quick('nested itemprops', () => parseVehiclePage(nested, SITE + '/')).vehicles;
+  assert.equal(deep.vehicleIdentificationNumber, HOSTILE_VIN, 'the car is still read');
+  // a real description, and a wrapper around a whole page, still read as written
+  const description = 'Heated seats. '.repeat(700).trim();
+  const wrapped = `<body itemscope itemtype="https://schema.org/WebPage"><main itemprop="mainContentOfPage">${'<p>Filler text. </p>'.repeat(20000)}</main><div itemscope itemtype="https://schema.org/Car"><span itemprop="vehicleIdentificationNumber">${HOSTILE_VIN}</span><div itemprop="description">${description}</div></div></body>`;
+  const [real] = microdataVehicles(wrapped, SITE + '/');
+  assert.equal(real.description, description);
+  // thousands of different links
+  const links = Array.from({ length: Math.floor(half / 26) }, (_, i) => `<a href="/c/${i}">x</a>`).join('');
+  const facts = quick('distinct links', () => pageFacts(links, SITE + '/'));
+  assert.equal(facts.links.length, Math.floor(half / 26));
+  assert.equal(facts.links[7], SITE + '/c/7');
+  // a JSON-LD block with a long run of spaces inside it (the CDATA ending is taken off by hand)
+  quick('a block of spaces', () => extractJsonLd('<script type="application/ld+json">{' + ' '.repeat(PAGE_TEXT_LIMIT) + 'x}</script>'));
+  assert.deepEqual(extractJsonLd('<script type="application/ld+json">//<![CDATA[\n{"a": 1}\n//]]></script><script type="application/ld+json">/*<![CDATA[*/{"b": 2}/*]]>*/</script><script type="application/ld+json"><![CDATA[{"c": 3}]]></script>'), [{ a: 1 }, { b: 2 }, { c: 3 }]);
+  // a block with thousands of raw line breaks, repaired in one pass
+  assert.equal(quick('raw line breaks', () => extractJsonLd('<script type="application/ld+json">{"description": "' + 'a\n'.repeat(half / 2) + '"}</script>'))[0].description.length, half);
+});
+
+test('the price and mileage checks read a long run of digits and commas in one pass', () => {
+  // as long as the page text can be, a comma-grouped run that never ends
+  const run = '1' + ',111'.repeat(Math.floor((TEXT_LIMIT - 10) / 4)) + ',11';
+  const facts = shown('$' + run + ' miles ' + 'Mileage: ' + run);
+  // a text search, so a tighter limit: it takes a millisecond or two
+  quick('price', () => priceFromOffers(car(), facts), 250);
+  quick('mileage', () => milesFromOdometer(car({ mileageFromOdometer: { value: 41230 } }), facts), 250);
+  quick('flat vehicle', () => normalizeVehicle(car({ mileageFromOdometer: { value: 41230 } }), { url: civicUrl, facts }));
+  quick('digits', () => milesFromOdometer(car({ mileageFromOdometer: { value: 41230 } }), shown('9'.repeat(TEXT_LIMIT) + ' miles')));
+  quick('a mileage written out', () => milesFromOdometer(car({ mileageFromOdometer: '1' + '.'.repeat(TEXT_LIMIT) + '!' }), shown('')));
+  quick('photos and features', () => normalizeVehicle(car({ image: Array.from({ length: 50000 }, (_, i) => '/p/' + i + '.jpg'), features: Array.from({ length: 50000 }, (_, i) => 'Feature ' + i) }), { url: civicUrl, facts: shown() }));
+  // and the bounds read every real price and mileage
+  assert.equal(priceFromOffers(car({ offers: { '@type': 'Offer', price: 1250000, priceCurrency: 'USD' } }), shown('$1,250,000')).value, 1250000);
+  assert.deepEqual(milesFromOdometer(car({ mileageFromOdometer: { value: 1250000 } }), shown('1,250,000 miles')), { value: 1250000, reason: '' });
+  assert.deepEqual(milesFromOdometer(car({ mileageFromOdometer: { value: 41230 } }), shown('41,230,5 miles')), { value: null, reason: 'the page gives no unit for the mileage' }, 'part of a bigger number');
+});
+
 test('the reader is pure: no DOM, no network, no platform named', () => {
   for (const file of ['schemaOrgParse.js', 'schemaOrgNormalize.js']) {
     const src = readFileSync(new URL('../extension/adapters/' + file, import.meta.url), 'utf8');
@@ -369,7 +442,6 @@ test('price: one offer in US dollars that the page also shows; never an average,
   const two = offers([{ '@type': 'Offer', price: 19995, priceCurrency: 'USD' }, { '@type': 'Offer', price: 18995, priceCurrency: 'USD' }]);
   assert.deepEqual(priceFromOffers(car(two), shown('$19,995 $18,995')), { value: null, label: 'the page gives more than one price', reason: 'the page gives more than one price' });
   assert.equal(flat(offers({ '@type': 'Offer', price: 19995, priceCurrency: 'EUR' })).price, null);
-  assert.equal(flat(offers({ '@type': 'Offer', price: 19995 })).priceLabel, 'the page does not say the price is in US dollars');
   assert.equal(flat(offers({ '@type': 'Offer', priceSpecification: { '@type': 'UnitPriceSpecification', price: 19995, priceCurrency: 'USD' } })).price, 19995, 'a price specification');
   assert.equal(flat(offers({ '@type': 'Offer', price: 0, priceCurrency: 'USD' })).priceLabel, 'Call for price');
   assert.equal(flat(offers(undefined)).priceLabel, 'Call for price');
@@ -379,6 +451,88 @@ test('price: one offer in US dollars that the page also shows; never an average,
   assert.equal(flat({}, shown('Stock 19995 \u00b7 19,995 miles')).price, null, 'the same digits without a dollar sign are not a price');
   assert.equal(flat({}, shown('Our price $19,995.00')).price, 19995);
   assert.equal(flat({}, shown('Our price $119,995')).price, null, 'part of a bigger number is not the price');
+});
+
+test('price: a price the page shows only crossed out, after "Was", "MSRP" or the like, or in a payment estimate is not the car\'s price', () => {
+  // the stale markup price of stale-price.html, in the layouts a price drop leaves behind
+  for (const file of ['stale-price-struck.html', 'stale-price-was.html', 'stale-price-msrp.html', 'stale-price-payment.html']) {
+    const page = readPage(file);
+    assert.equal(page.cars[0].price, null, `${file}: the markup says $24,995; the page's current price is $23,995`);
+    assert.equal(page.cars[0].priceLabel, 'the page does not show this price', file);
+    assert.deepEqual(assessVehicle(page.cars[0], {}).blockers.map((b) => b.code), ['no-price'], file);
+  }
+  assert.ok(!readPage('stale-price-struck.html').facts.text.includes('24,995'), 'crossed-out text is not in the text a price is checked against');
+  assert.match(readPage('stale-price-struck.html').facts.text, /\$23,995/);
+
+  const at = (price, text) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text)).value;
+  for (const text of [
+    'Was $24,995 Now $23,995',
+    'Was: $24,995 \u00b7 Sale price $23,995',
+    'MSRP $24,995 Sale Price $23,995',
+    'M.S.R.P.: $24,995 Our price $23,995',
+    'Retail Price: $24,995 Internet Price $23,995',
+    'List price $24,995 Sale $23,995',
+    'Compare at $24,995 Ours $23,995',
+    'Reg. $24,995 Now $23,995',
+    'Originally $24,995 Now $23,995',
+    'Previous price - $24,995 Now $23,995',
+    'Now $23,995. Estimated payment $389/mo based on $24,995.',
+    'Now $23,995. $389/mo based on a price of $24,995.',
+  ]) assert.equal(at(24995, text), null, text);
+  // the page's current price is kept whatever labels sit around it
+  for (const text of ['Was $24,995 Now $23,995', 'MSRP $24,995 Sale Price $23,995', 'Sale Price $23,995 MSRP $24,995', 'Price was reduced! Now $23,995', 'Value Price $23,995']) assert.equal(at(23995, text), 23995, text);
+  assert.equal(at(24995, 'Price $24,995 \u00b7 Estimated payment $389/mo based on $24,995'), 24995, 'shown once as the price and once in the estimate');
+  // crossed out by the page's markup: <s>, <strike>, <del> or a line-through style
+  for (const struck of ['<s>$24,995</s>', '<strike>$24,995</strike>', '<del>$24,995</del>', '<span style="color: gray; text-decoration: line-through">$24,995</span>', '<span style="text-decoration-line:line-through">$24,995</span>']) {
+    const facts = pageFacts(`<p>${struck} <b>$23,995</b></p>`, civicUrl);
+    assert.equal(facts.text, '$23,995', struck);
+    assert.equal(at(24995, facts.text), null, struck);
+  }
+  assert.equal(pageFacts('<p><span style="text-decoration: underline">$24,995</span></p>', civicUrl).text, '$24,995', 'only a line through the text crosses it out');
+});
+
+test('price: priceSpecification without an offer price; a strikethrough, list or MSRP entry is never the price', () => {
+  const tacoma = readPage('price-specification.html').cars[0];
+  assert.equal(tacoma.price, 29995, 'the StrikethroughPrice comes first in the markup and on the page, and is not the price');
+  assert.equal(tacoma.priceLabel, 'Price');
+  const spec = (list, text = 'MSRP $32,995 Sale Price $29,995') => priceFromOffers(car({ offers: { '@type': 'Offer', priceSpecification: list } }), shown(text));
+  const usd = (price, priceType) => ({ '@type': 'UnitPriceSpecification', price, priceCurrency: 'USD', ...(priceType ? { priceType } : {}) });
+  const plain = '$32,995 $29,995';
+  for (const type of ['https://schema.org/StrikethroughPrice', 'http://schema.org/ListPrice', 'schema:MSRP', 'SRP', 'InvoicePrice', 'MinimumAdvertisedPrice', { '@id': 'https://schema.org/ListPrice' }]) {
+    assert.deepEqual(spec([usd(32995, type), usd(29995)], plain), { value: 29995, label: 'Price', reason: '' }, JSON.stringify(type));
+    assert.deepEqual(spec([usd(29995), usd(32995, type)], plain), { value: 29995, label: 'Price', reason: '' }, JSON.stringify(type) + ' second');
+  }
+  assert.equal(spec([usd(32995, 'ListPrice'), usd(29995, 'https://schema.org/SalePrice')], plain).value, 29995, 'a SalePrice is the price');
+  assert.deepEqual(spec([usd(32995), usd(29995)], plain), { value: null, label: 'the page gives more than one price', reason: 'the page gives more than one price' });
+  assert.deepEqual(spec([usd(29995), usd(29995)], plain).value, 29995, 'two that agree are one price');
+  assert.deepEqual(spec([usd(32995, 'StrikethroughPrice')], plain), { value: null, label: 'Call for price', reason: 'the page gives no price' }, 'only a crossed-out price: no price');
+  assert.equal(spec([{ ...usd(389), billingDuration: 1, unitCode: 'MON' }, usd(29995)], '$389/mo $29,995').value, 29995, 'a monthly payment is not the price');
+  assert.equal(spec([{ ...usd(12), referenceQuantity: { value: 1, unitCode: 'MTR' } }], '$12').value, null, 'nor a price per unit');
+  // the currency may sit on the offer
+  assert.equal(priceFromOffers(car({ offers: { '@type': 'Offer', priceCurrency: 'USD', priceSpecification: [{ price: 29995, priceType: 'ListPrice' }, { price: 27995 }] } }), shown('$29,995 $27,995')).value, 27995);
+});
+
+test('price: no currency counts as US dollars only when the page shows that amount with a dollar sign as its current price', () => {
+  assert.equal(readPage('no-currency.html').cars[0].price, 17163, 'no-currency.html: "$17,163.00" on the page');
+  const bare = (text, price = 27163) => priceFromOffers(car({ offers: { '@type': 'Offer', price } }), shown(text));
+  for (const text of ['Price $27,163', 'Price $27163', 'Price $27,163.00', 'Price $ 27,163', 'Price US$27,163', 'Price USD $27,163']) {
+    assert.deepEqual(bare(text), { value: 27163, label: 'Price', reason: '' }, text);
+  }
+  assert.equal(bare('Price $27,163', '27163.00').value, 27163, 'the price written as text');
+  const notDollars = { value: null, label: 'the page does not say the price is in US dollars', reason: 'the page does not say the price is in US dollars' };
+  assert.deepEqual(bare('Price USD 27,163'), notDollars, 'US dollars in words, but no dollar sign');
+  const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };
+  for (const text of ['Price 27,163', 'Price CA$27,163', 'Price C$27,163', 'Price $27,163.50', 'Price $127,163', 'Stock 27163', '']) assert.deepEqual(bare(text), notShown, text);
+  for (const text of ['Was $27,163 Now $25,999', 'MSRP $27,163 Sale Price $25,999', 'List Price: $27,163']) assert.deepEqual(bare(text), notShown, text);
+  assert.deepEqual(bare('Was $27,163 Now $27,163'), { value: 27163, label: 'Price', reason: '' }, 'shown once as the current price');
+  assert.deepEqual(priceFromOffers(car({ offers: { '@type': 'Offer', price: 27163 } }), null), notShown, 'no page text');
+  // an explicit currency other than US dollars is never a price, whatever the page shows
+  for (const currency of ['EUR', 'CAD', 'mxn', 'US']) {
+    assert.deepEqual(priceFromOffers(car({ offers: { '@type': 'Offer', price: 27163, priceCurrency: currency } }), shown('Price $27,163')), { value: null, label: 'the price is not in US dollars', reason: 'the price is not in US dollars' }, currency);
+  }
+  assert.equal(priceFromOffers(car({ offers: { '@type': 'Offer', price: 27163, priceCurrency: 'USD' } }), shown('Price USD 27,163')).value, 27163, 'USD in the markup: the amount in words is enough');
+  // an offer with a currency and one without are two prices, as before
+  assert.equal(priceFromOffers(car({ offers: [{ '@type': 'Offer', price: 27163, priceCurrency: 'USD' }, { '@type': 'Offer', price: 27163 }] }), shown('$27,163')).label, 'the page gives more than one price');
 });
 
 test('mileage: miles when the markup says so or the page shows it; kilometres never', () => {

@@ -9,11 +9,13 @@
 // listing form read both alike. Nothing here depends on a platform.
 //
 // Only what the markup states is taken, and a price only when the page
-// shows it too: markup can carry a stale price or an MSRP the page no longer
-// shows. Kilometres are never turned into miles. A number of previous owners
-// is not a Carfax report, so it never sets the one-owner flag. When a price
-// or a mileage is left out, priceFromOffers and milesFromOdometer (and
-// readingNotes) say why; the price's reason also shows as its label.
+// shows it too as the car's current price: markup can carry a stale price
+// or an MSRP the page no longer shows, or shows only crossed out or after
+// "Was" or "MSRP". Kilometres are never turned into miles. A number of
+// previous owners is not a Carfax report, so it never sets the one-owner
+// flag. When a price or a mileage is left out, priceFromOffers and
+// milesFromOdometer (and readingNotes) say why; the price's reason also
+// shows as its label.
 
 import { toNumber, shortLocation, conditionFromSchemaOrg, conditionWordFromPath } from '../src/normalize.js';
 import { readCondition, titleConditionWords } from '../src/classify.js';
@@ -148,21 +150,61 @@ function availabilityOf(value) {
 
 // ---------- price and mileage ----------
 
-// Every dollar amount the page shows ("$27,163", "$ 27,163.00", "USD 27163").
+// An amount in dollars: "$27,163", "$27163", "$ 27,163.00", "US$27,163",
+// "USD 27163", never part of a bigger number ("$119,995" is not $19,995)
+// and never another country's dollar ("CA$27,163"). The digit groups are
+// bounded, so a page with a long run of digits and commas is read in one
+// pass: no car costs a billion dollars.
+const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|\d{1,9})(?:\.(\d{1,2}))?(?!,?\d)/gi;
+
+// Words right before an amount that make it a price other than the car's
+// current one: the old price ("Was $24,995", "Reg. $24,995", "Originally
+// $24,995"), the sticker or list price ("MSRP: $24,995", "Retail price
+// $24,995", "Compare at $24,995"), or the price a payment is worked out
+// from ("$389/mo based on a price of $24,995").
+const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on)\b\.?(?:[\s:\-\u2013\u2014]*(?:price|pricing|of|a|the|at|for)\b)*[\s:\-\u2013\u2014]*$/i;
+
+// Every dollar amount the page shows: its value, whether it is written with
+// a dollar sign, and whether the words before it make it a reference price.
 function shownPrices(pageText) {
+  const t = String(pageText || '');
   const out = [];
-  for (const m of String(pageText || '').matchAll(/(?:\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?![\d,]*\d)/gi)) {
-    out.push(Number(m[1].replace(/,/g, '') + (m[2] ? '.' + m[2] : '')));
+  for (const m of t.matchAll(AMOUNT)) {
+    out.push({
+      value: Number(m[2].replace(/,/g, '') + (m[3] ? '.' + m[3] : '')),
+      dollar: m[1].includes('$'),
+      reference: REFERENCE_CUE.test(t.slice(Math.max(0, m.index - 48), m.index)),
+    });
   }
   return out;
 }
 
+// Price types that name a price other than the one the car sells for: the
+// crossed-out, list, sticker, invoice or lowest advertised price
+// (schema.org's PriceTypeEnumeration and Google's StrikethroughPrice). Only
+// a price with no type, or a SalePrice, is the car's price.
+const REFERENCE_PRICE_TYPES = new Set(['strikethroughprice', 'listprice', 'msrp', 'srp', 'invoiceprice', 'minimumadvertisedprice']);
+
+// An offer's price specifications that can be the car's price: not a
+// reference price, and not a price per month or per unit (a payment).
+function sellingSpecs(value) {
+  return nodes(value).filter((s) => !REFERENCE_PRICE_TYPES.has(key(memberName(s.priceType))) && s.billingDuration === undefined && s.referenceQuantity === undefined);
+}
+
+const firstGiven = (value) => list(value).find((x) => x !== '' && x !== null && x !== undefined);
+
 /**
  * The car's price from its offers, and why there is none when there is none.
  * One Offer (or several that agree) in US dollars, with a positive price
- * that the page also shows. Never an average: an AggregateOffer is a range,
- * not a price. The reason doubles as the label ("No price on the website
- * (the page does not show this price)").
+ * that the page also shows as its current price: not only crossed out or
+ * after "Was", "MSRP", "List" or the like. An offer's price, else the price
+ * specifications that are neither a reference price (StrikethroughPrice,
+ * ListPrice, MSRP ...) nor a payment; two of those that differ are more
+ * than one price. A price with no currency counts as US dollars only when
+ * the page shows that amount with a dollar sign; any other currency is no
+ * price. Never an average: an AggregateOffer is a range, not a price. The
+ * reason doubles as the label ("No price on the website (the page does not
+ * show this price)").
  * @returns {{ value: number|null, label: string, reason: string }}
  */
 export function priceFromOffers(node, facts) {
@@ -172,21 +214,28 @@ export function priceFromOffers(node, facts) {
   if (offers.some((o) => list(o['@type']).some((t) => memberName(t) === 'AggregateOffer'))) return none('the page gives a price range, not one price');
   const priced = [];
   for (const o of offers) {
-    const spec = nodes(o.priceSpecification)[0] || {};
-    const raw = o.price ?? spec.price;
-    const given = list(raw).find((x) => x !== '' && x !== null && x !== undefined);
-    if (given === undefined) continue;
-    // words in the price field ("Call for price") are the website's label for no price
-    if (typeof given === 'string' && !/\d/.test(given)) return none('the page gives no price', words(given) || 'Call for price');
-    const value = toNumber(typeof given === 'string' ? given.trim() : given);
-    if (value === null) return none('the price is not a number');
-    if (value > 0) priced.push({ value, currency: (text(o.priceCurrency) || text(spec.priceCurrency)).toUpperCase() });
+    const specs = sellingSpecs(o.priceSpecification);
+    const own = firstGiven(o.price);
+    // the offer's own price, else each price specification that can be the car's price
+    const given = own !== undefined
+      ? [{ raw: own, currency: text(o.priceCurrency) || text((specs[0] || {}).priceCurrency) }]
+      : specs.map((s) => ({ raw: firstGiven(s.price), currency: text(s.priceCurrency) || text(o.priceCurrency) })).filter((g) => g.raw !== undefined);
+    for (const { raw, currency } of given) {
+      // words in the price field ("Call for price") are the website's label for no price
+      if (typeof raw === 'string' && !/\d/.test(raw)) return none('the page gives no price', words(raw) || 'Call for price');
+      const value = toNumber(typeof raw === 'string' ? raw.trim() : raw);
+      if (value === null) return none('the price is not a number');
+      if (value > 0) priced.push({ value, currency: currency.toUpperCase() });
+    }
   }
   if (!priced.length) return none('the page gives no price', 'Call for price');
   if (new Set(priced.map((p) => p.value + ' ' + p.currency)).size > 1) return none('the page gives more than one price');
   const { value, currency } = priced[0];
-  if (currency !== 'USD') return none(currency ? 'the price is not in US dollars' : 'the page does not say the price is in US dollars');
-  if (!shownPrices(facts && facts.text).includes(value)) return none('the page does not show this price');
+  if (currency && currency !== 'USD') return none('the price is not in US dollars');
+  const current = shownPrices(facts && facts.text).filter((p) => p.value === value && !p.reference);
+  if (!current.length) return none('the page does not show this price');
+  // no currency in the markup: US dollars only when the page shows this amount with a dollar sign
+  if (!currency && !current.some((p) => p.dollar)) return none('the page does not say the price is in US dollars');
   return { value, label: 'Price', reason: '' };
 }
 
@@ -194,12 +243,13 @@ const MILES = new Set(['smi', 'mi', 'mile', 'miles']);
 const KILOMETRES = new Set(['kmt', 'km', 'kms', 'kilometer', 'kilometers', 'kilometre', 'kilometres']);
 
 // Does the page show this number as miles ("41,230 miles", "41,230 mi",
-// "Mileage: 41,230")?
+// "Mileage: 41,230")? Never part of a bigger number. The digit groups are
+// bounded, so a long run of digits and commas is read in one pass.
 function shownAsMiles(value, pageText) {
   const t = String(pageText || '');
-  const number = String.raw`(?<![\d,.])(\d{1,3}(?:,\d{3})+|\d+)(?![\d,]*\d)`;
+  const number = String.raw`(?<![\d,.])(\d{1,3}(?:,\d{3}){1,2}|\d{1,9})(?!,?\d)`;
   const after = new RegExp(number + String.raw`\s*(?:mi|miles)\b`, 'gi');
-  const before = new RegExp(String.raw`\b(?:mileage|miles|odometer)\s*:?\s*` + number + String.raw`(?!\s*(?:km|kilomet))`, 'gi');
+  const before = new RegExp(String.raw`\b(?:mileage|miles|odometer)\s*(?::\s*)?` + number + String.raw`(?!\s*(?:km|kilomet))`, 'gi');
   for (const re of [after, before]) for (const m of t.matchAll(re)) if (Number(m[1].replace(/,/g, '')) === value) return true;
   return false;
 }
@@ -221,7 +271,9 @@ export function milesFromOdometer(node, facts) {
     unit = text(raw.unitCode) || text(raw.unitText);
   } else if (typeof raw === 'number') value = toNumber(raw);
   else {
-    const m = String(raw).trim().match(/^([\d,.]+)\s*([a-z.]*)$/i);
+    // a mileage written out is short; a long string is no mileage, and is not searched
+    const written = String(raw).trim();
+    const m = written.length <= 40 ? written.match(/^([\d,.]+)\s*([a-z.]*)$/i) : null;
     if (m) {
       value = toNumber(m[1]);
       unit = m[2];
@@ -260,12 +312,18 @@ function engineOf(value) {
   return [litres ? litres + 'L' : '', words(spec.engineType)].filter(Boolean).join(' ');
 }
 
+// Each list keeps a Set beside it, so thousands of photos or features are
+// read in one pass.
 function photosOf(value, base) {
   const out = [];
+  const seen = new Set();
   for (const img of list(value)) {
     const raw = typeof img === 'string' ? img : img && typeof img === 'object' ? text(img.contentUrl) || text(img.url) : '';
     const href = absolute(raw, base);
-    if (href && !out.includes(href)) out.push(href);
+    if (href && !seen.has(href)) {
+      seen.add(href);
+      out.push(href);
+    }
   }
   return out;
 }
@@ -275,9 +333,13 @@ function photosOf(value, base) {
 // marks as present (value true or "Yes").
 function featuresOf(node) {
   const out = [];
+  const seen = new Set();
   const add = (f) => {
     const t = words(f);
-    if (t && !out.includes(t)) out.push(t);
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
   };
   for (const f of [...list(node.features), ...list(node.feature)]) add(f);
   for (const p of nodes(node.additionalProperty)) if (list(p.value).some((v) => v === true || /^(true|yes)$/i.test(String(v).trim()))) add(p.name);
