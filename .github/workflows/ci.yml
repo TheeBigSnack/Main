@@ -126,9 +126,6 @@ jobs:
     needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Until this job has passed once in CI, its failure does not fail the
-    # workflow; the integrator removes this line after that first pass.
-    continue-on-error: true
     env:
       # The landing page's origin: LEAD_ORIGINS in the functions' env file,
       # and what the stack test sends as Origin to the lead function.

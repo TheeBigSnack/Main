@@ -66,7 +66,7 @@ Every account, dealership, invite miss and demo request a run makes carries the 
 
 The lines under each check are what it rests on: `>` lines are the HTTP requests and the start of each answer, `$` lines the SQL, with every key and token replaced by `<hidden>` or `<token>`. A file that stops early prints `FAIL <file> ran to the end (stopped: ...)` with the reason, and the next file still runs. In CI, the step "What the stack logged" prints the functions' log and each container's recent log when anything failed, and a failed `supabase start` is retried once with `--debug`.
 
-The job is marked `continue-on-error` until it has passed once in CI; after that first pass the line comes out and the job counts like the others.
+The job counts like the others: a failure fails the workflow. Its first CI run (2026-09-30) passed 61 checks with none failed. Through the local gateway, a client-written `cf-connecting-ip` reached the lead function's brake while `x-real-ip` and `X-Forwarded-For` did not; the hosted gateway may differ, which is why supabase/README.md's "Demo requests" asks for the check on the first deploy.
 
 ## What it does not prove
 
