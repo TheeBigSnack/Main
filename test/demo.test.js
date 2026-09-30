@@ -158,6 +158,7 @@ test('the second sample website reads as its promised lot through the standard v
   assert.deepEqual(decide('wrangler').blockers.map((b) => b.code), ['no-photos']);
   assert.equal(decide('outback').decision, DECISION.REVIEW, '12 miles on a used car');
   assert.ok(![DECISION.READY, DECISION.NOT_READY].includes(decide('trailer').decision), 'the trailer is never offered as a car');
+  assert.match(decide('trailer').reason, /body style "Trailer" makes it a trailer\. Lot Sync fills in only Marketplace's car\/truck and motorcycle forms/, 'held for being a trailer, not only for its missing odometer');
   // the car pages' three kinds of markup read the same
   assert.deepEqual([by.f150.price, by.f150.mileage, by.f150.photoCount], [31495, 58112, 3], 'the @graph page');
   assert.deepEqual([by.escape.price, by.escape.mileage, by.escape.photoCount], [16495, 52110, 3], 'the microdata-only page');

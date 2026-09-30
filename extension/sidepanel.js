@@ -290,11 +290,16 @@ async function startFlow(req) {
 // sync, the server's count of theirs across their machines (src/cap.js).
 const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
 
+// Anything assumed besides the dealership's own defaults (a reading of the
+// website's words, a colour guessed from the photos, a motorcycle read from
+// the make) holds a queued car at review, where the assumed list is shown.
 function canAutoOpen() {
   if (!state.guardrails || !state.guardrails.ok) return false;
   if (state.vinCheck && state.vinCheck.local && !state.vinCheck.local.ok) return false;
-  const blockers = currentListing().missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
+  const listing = currentListing();
+  const blockers = listing.missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
   if (blockers.length) return false;
+  if ((listing.assumed || []).some((a) => !['condition', 'titleStatus'].includes(a.key))) return false;
   // Chrome asks for a new photo server only from a click: the car waits for Open the Marketplace form
   if (photoPatterns().some((p) => !refusedPhotoServers.has(p))) return false;
   return !dailyCap().reached;
@@ -415,8 +420,9 @@ async function resumeFlow(origin, flow) {
   if (state.step === 'publish' && state.fbTabId) startWatcher();
 }
 
-// Which colors the website gives no usable word for (blank, or a word that
-// isn't on Facebook's list, like "Sepia").
+// Which colors the website gives no usable word for (blank, or a word that is
+// neither on Facebook's list nor one of listingData.js's shade names, like
+// "Titanium").
 function colorsNeeded() {
   const v = state.vehicle || {};
   return { exterior: !normalizeColor(v.exteriorColor), interior: !normalizeColor(v.interiorColor) };
@@ -815,14 +821,17 @@ function vinCheckHtml() {
   return html;
 }
 
-// The two fields the website can't give: filled from the dealership's
-// defaults (and said so), or left for the person when there is no default or
-// the website's own text says the title is branded.
+// Every value that took an assumption, each with where it came from: a
+// reading of the website's words (a mild hybrid, a body style from the page
+// address, a colour shade name, an electric car's single-speed gearbox), a
+// colour guessed from the photos, or the dealership's defaults for the two
+// fields the website can't give. Below it, what is left for the person: no
+// default, a branded title, or a vehicle kind Lot Sync doesn't fill in.
 function assumptionsHtml() {
   const l = currentListing();
   let html = '';
   if (l.assumed.length) {
-    html += `<section class="highlight" id="assumed"><h3>Filled from your dealership's defaults</h3><ul class="list">${l.assumed.map((b) => `<li><b>${esc(b.label)}</b>: ${esc(b.value)} <span class="why">${esc(b.why)}</span></li>`).join('')}</ul></section>`;
+    html += `<section class="highlight" id="assumed"><h3>Assumed: check these on the form</h3><ul class="list">${l.assumed.map((b) => `<li><b>${esc(b.label)}</b>: ${esc(b.value)} <span class="why">${esc(b.why)}</span></li>`).join('')}</ul></section>`;
   }
   if (l.leftBlank.length) {
     html += `<section class="highlight" id="leftBlank"><h3>You fill in yourself</h3><ul class="list">${l.leftBlank.map((b) => `<li><b>${esc(b.label)}</b> <span class="why">${esc(b.why)}</span></li>`).join('')}</ul></section>`;

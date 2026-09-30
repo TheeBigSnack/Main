@@ -28,7 +28,7 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 4. **Ready to post** lists pre-owned cars at your store that have photos and a price. Click **Post** on one. The side panel opens and:
    - re-checks the car on the website (still pre-owned, still on the lot, still priced),
    - writes a description from the website's facts, which you can edit,
-   - shows what it will fill in, including **Vehicle condition** and **Title status** from your dealership's defaults (Settings), which you can change on the form.
+   - shows what it will fill in, including **Vehicle condition** and **Title status** from your dealership's defaults (Settings), which you can change on the form, and under **Assumed: check these on the form** every value that took a reading of the website's words (a mild hybrid listed as Hybrid, a body style from the car's page address), with those words. A word the form has no match for is left blank, with the website's words shown. In a queue, a car with anything assumed besides those two defaults waits at this screen rather than opening the form by itself.
 5. Click **Open the Marketplace form**. A new tab opens on Facebook's create-vehicle-listing page and the fields fill in, photos included. Anything it couldn't fill is listed in the panel with a copy button.
 6. On Facebook: check every field, including condition and title, then click **Publish** yourself. The panel notices the listing page and asks you to confirm; paste the listing link if it didn't notice. The car moves to **My listings**.
 7. Click **Rescan website** any time (or let the automatic rescans do it). **To do** shows what to take down (sold, or gone sale-pending), what to reprice (with your listing price next to the website's), and what's new.
@@ -90,7 +90,7 @@ Three separate signs on the dealer website have to agree the car is pre-owned:
 2. the condition word in the car's web address (`/inventory/used-2019-...` vs `/inventory/new-2027-...`)
 3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
 
-A demo or loaner flag means "sold as new"; if the website also calls the car pre-owned and nowhere new, it goes to **Needs a look** instead. A car the website lists as damaged or refurbished goes to **Needs a look**, unless it is already skipped as new: a demo or loaner flag, or a new sign with no pre-owned one, decides first. A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
+A demo or loaner flag means "sold as new"; if the website also calls the car pre-owned and nowhere new, it goes to **Needs a look** instead. A trailer, RV, powersport vehicle or boat goes to **Needs a look** too (Lot Sync fills in only the car/truck and motorcycle forms), unless it is skipped as new. A car the website lists as damaged or refurbished goes to **Needs a look**, unless it is already skipped as new: a demo or loaner flag, or a new sign with no pre-owned one, decides first. A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
 
 ## Limits
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 702 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 717 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # six e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data

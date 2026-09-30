@@ -147,9 +147,9 @@ try {
   assert.equal(decision('wrangler'), 'not-ready');
   assert.ok(car('wrangler').blockers.includes('no-photos'));
   assert.equal(decision('outback'), 'review', '12 miles on a used car');
-  // the trade-in trailer has no odometer: held for a person to look at, never offered as a car
+  // the trade-in trailer: held for a person to look at, never offered as a car (Lot Sync fills in only the car/truck and motorcycle forms)
   assert.equal(decision('trailer'), 'review', 'the trailer waits on Needs a look');
-  assert.match(car('trailer').reason, /no mileage/);
+  assert.match(car('trailer').reason, /makes it a trailer/);
   // the new car in the Sorento's carousel is not part of the used lot, and nothing else crept in
   assert.equal(car('telluride'), undefined, 'the carousel\'s new car is not read as a car on the lot');
   const onLot = new Set(STANDARD.lot('day1').map((c) => c.vin));

@@ -37,6 +37,7 @@ export async function fetchVehicleDetails(tabId, vin, { url = null } = {}) {
 export function recheck(vehicle, settings = {}) {
   const assessment = assessVehicle(vehicle, settings);
   if (assessment.decision === DECISION.READY) return { ok: true, assessment };
+  if (assessment.kind) return { ok: false, assessment, message: assessment.reason };
   const why = {
     [DECISION.SKIP]: "The website now says this is a new vehicle, so it can't go on Marketplace.",
     [DECISION.REVIEW]: 'The website details for this car no longer add up, so it needs a look first.',

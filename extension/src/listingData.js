@@ -3,7 +3,9 @@
 // option (and how each field is found on the page) lives in
 // extension/facebook/formMap.js, not here.
 
-export const VEHICLE_KIND = Object.freeze({ CAR_TRUCK: 'car_truck', MOTORCYCLE: 'motorcycle' });
+// Marketplace's vehicle types Lot Sync knows. formMap.js has options only for
+// the two it fills in (FORM_KINDS below).
+export const VEHICLE_KIND = Object.freeze({ CAR_TRUCK: 'car_truck', MOTORCYCLE: 'motorcycle', TRAILER: 'trailer', RV: 'rv', POWERSPORT: 'powersport', BOAT: 'boat' });
 
 // Facebook's wording for the two fields the website can't tell us. They are
 // filled from the dealership's defaults (Settings) and shown in the panel as
@@ -21,79 +23,266 @@ export function brandedTitleSignal(v = {}) {
   return m ? m[1] : '';
 }
 
-// UNVERIFIED: the live inventory had no motorcycle to check against on
-// 2026-09-26. Body type wins; otherwise a short list of makes that only
-// build bikes. Brands that build cars too (Honda, BMW, Suzuki) are left out on
-// purpose so a car is never listed as a motorcycle.
-const MOTORCYCLE_MAKES = ['harley-davidson', 'harley davidson', 'harley', 'yamaha', 'kawasaki', 'ducati', 'triumph', 'indian', 'ktm', 'bmw motorrad', 'aprilia', 'moto guzzi', 'royal enfield', 'husqvarna', 'vespa'];
+// What kind of vehicle this is, by Marketplace's vehicle types. Lot Sync
+// fills in only the car/truck and motorcycle forms (FORM_KINDS); a trailer,
+// an RV, a powersport vehicle or a boat is kept out of the posting flow
+// (classify.js sends it to Needs a look), never filled in as a car.
+// UNVERIFIED: the live inventory had none of these to check against on
+// 2026-09-26.
+// The body type wins. A car body style ("Crew Cab Pickup - Trailer Tow",
+// "Pickup w/Camper Shell") makes it a car or truck, whatever equipment words
+// follow and whatever the make. Only when the body type says nothing is the
+// make read, from short lists of makes that build that kind. Some motorcycle
+// makes build ATVs, side-by-sides or boats too (Yamaha, Kawasaki), so a
+// motorcycle read from the make alone is listed as an assumption, which holds
+// a queued car at review. Makes that build cars too (Honda, BMW, Suzuki) are
+// on no list, so a car is never held back by its make.
+const MOTORCYCLE_MAKES = ['harley-davidson', 'harley', 'yamaha', 'kawasaki', 'ducati', 'triumph', 'indian', 'ktm', 'bmw motorrad', 'aprilia', 'moto guzzi', 'royal enfield', 'husqvarna', 'vespa'];
+
+// Checked in this order: "Travel Trailer" is an RV, "Boat Trailer" and
+// "Motorcycle Trailer" are trailers, "Jet Ski" is a powersport vehicle.
+const OTHER_KINDS = [
+  { kind: VEHICLE_KIND.RV, name: 'an RV or camper', body: /\b(?:rvs?|motor ?homes?|campers?|camper ?vans?|travel ?trailers?|fifth ?wheels?|5th ?wheels?|toy ?haulers?|pop.?up (?:campers?|trailers?)|class [abc])\b/i, makes: ['winnebago', 'jayco', 'airstream', 'forest river', 'keystone', 'coachmen', 'grand design', 'thor', 'tiffin', 'newmar', 'entegra', 'heartland', 'dutchmen'] },
+  { kind: VEHICLE_KIND.TRAILER, name: 'a trailer', body: /\btrailers?\b/i, makes: ['big tex', 'pj', 'load trail', 'wells cargo', 'haulmark', 'featherlite'] },
+  { kind: VEHICLE_KIND.POWERSPORT, name: 'a powersport vehicle', body: /\b(?:atvs?|utvs?|side[ -]?(?:by|x)[ -]?sides?|sxs|utility vehicles?|snowmobiles?|jet ?skis?|wave ?runners?|sea.?doos?|personal watercraft|pwc|golf carts?|go.?karts?)\b/i, makes: ['polaris', 'can am', 'brp', 'sea doo', 'ski doo', 'arctic cat'] },
+  { kind: VEHICLE_KIND.BOAT, name: 'a boat', body: /\b(?:boats?|pontoons?|watercraft|yachts?|outboards?)\b/i, makes: ['bayliner', 'sea ray', 'boston whaler', 'mastercraft', 'bennington', 'chaparral'] },
+];
+export const FORM_KINDS = Object.freeze([VEHICLE_KIND.CAR_TRUCK, VEHICLE_KIND.MOTORCYCLE]);
+
+// A make as the lists hold it: lower case, punctuation as spaces, and the
+// company words dropped ("Thor Motor Coach Inc" -> "thor", "Can-Am" -> "can am",
+// "Big Tex Trailers" -> "big tex").
+const MAKE_SUFFIX = /\s+(?:inc|llc|ltd|co|corp|corporation|company|mfg|manufacturing|industries|rvs?|trailers?|motor coach|coach|boats?|marine|powersports?|motorcycles?|usa|north america|america)$/;
+export function makeKey(make) {
+  let t = String(make || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  for (let before = ''; before !== t;) {
+    before = t;
+    t = t.replace(MAKE_SUFFIX, '').trim();
+  }
+  return t;
+}
+// The whole make, or its first words ("Harley-Davidson Motor Co" is "harley")
+function makeOnList(make, list) {
+  const k = makeKey(make);
+  if (!k) return false;
+  return list.some((entry) => {
+    const e = makeKey(entry);
+    return k === e || k.startsWith(e + ' ');
+  });
+}
+
+// { kind, name, from, fromMake }: `from` is the website's own words it was
+// read from; `fromMake` is true when the body type said nothing and the make
+// decided it.
+export function readVehicleKind(v = {}) {
+  const body = String(v.bodyType || '').trim();
+  const carBody = matchBody(body);
+  const car = { kind: VEHICLE_KIND.CAR_TRUCK, name: 'a car or truck', from: carBody ? `body style "${body}"` : '', fromMake: false };
+  // a van or cargo body may be a camper van or a cargo trailer; any other car body style is a car
+  if (carBody && carBody.style !== 'Van') return car;
+  for (const k of OTHER_KINDS) if (k.body.test(body)) return { kind: k.kind, name: k.name, from: `body style "${body}"`, fromMake: false };
+  if (/\b(?:motorcycles?|motorbikes?|scooters?|sport ?bikes?|dirt ?bikes?)\b/i.test(body)) return { kind: VEHICLE_KIND.MOTORCYCLE, name: 'a motorcycle', from: `body style "${body}"`, fromMake: false };
+  if (carBody) return car;
+  for (const k of OTHER_KINDS) if (makeOnList(v.make, k.makes)) return { kind: k.kind, name: k.name, from: `make "${String(v.make).trim()}"`, fromMake: true };
+  if (makeOnList(v.make, MOTORCYCLE_MAKES)) return { kind: VEHICLE_KIND.MOTORCYCLE, name: 'a motorcycle', from: `make "${String(v.make).trim()}"`, fromMake: true };
+  return car;
+}
 
 export function vehicleKind(v = {}) {
-  const body = String(v.bodyType || '');
-  if (/motorcycle|motorbike|scooter|sport ?bike|dirt ?bike/i.test(body)) return VEHICLE_KIND.MOTORCYCLE;
-  const make = String(v.make || '').trim().toLowerCase();
-  if (make && MOTORCYCLE_MAKES.includes(make)) return VEHICLE_KIND.MOTORCYCLE;
-  return VEHICLE_KIND.CAR_TRUCK;
+  return readVehicleKind(v).kind;
 }
+
+// Each reader below turns the website's own words for one form field into
+// { value, why }. `value` is Facebook's option in Lot Sync's spelling, or ''
+// when the words map to nothing (the field is left blank and the panel shows
+// the website's words; never a guess). `why` is set when the value took a
+// reading a person should see: the panel lists it under the assumptions,
+// with the website's own words.
+const reading = (value, why = '') => ({ value, why });
+const said = (text) => `the website says "${String(text).trim()}"`;
 
 // Facebook's color list in Lot Sync's spelling (formMap.js maps Gray to Grey etc.).
 export const COLORS = Object.freeze(['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Gray', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white']);
 
+// The list's own words (and grey): a color the website states.
 const COLOR_WORDS = [
   ['off white', 'Off white'], ['off-white', 'Off white'], ['black', 'Black'], ['white', 'White'], ['silver', 'Silver'],
-  ['gray', 'Gray'], ['grey', 'Gray'], ['charcoal', 'Charcoal'], ['graphite', 'Charcoal'], ['blue', 'Blue'], ['red', 'Red'],
-  ['maroon', 'Burgundy'], ['burgundy', 'Burgundy'], ['green', 'Green'], ['brown', 'Brown'], ['bronze', 'Brown'],
+  ['gray', 'Gray'], ['grey', 'Gray'], ['charcoal', 'Charcoal'], ['blue', 'Blue'], ['red', 'Red'],
+  ['burgundy', 'Burgundy'], ['green', 'Green'], ['brown', 'Brown'],
   ['tan', 'Tan'], ['beige', 'Beige'], ['gold', 'Gold'], ['yellow', 'Yellow'], ['orange', 'Orange'], ['purple', 'Purple'],
-  ['pink', 'Pink'], ['turquoise', 'Turquoise'], ['teal', 'Turquoise'],
+  ['pink', 'Pink'], ['turquoise', 'Turquoise'],
+];
+// A small set of shade names that mean one color on the list, shown as a
+// reading whenever one decides the color.
+const SHADE_WORDS = [
+  ['ebony', 'Black'], ['onyx', 'Black'], ['ivory', 'Off white'], ['pewter', 'Gray'], ['graphite', 'Charcoal'],
+  ['maroon', 'Burgundy'], ['sepia', 'Brown'], ['bronze', 'Brown'], ['navy', 'Blue'], ['teal', 'Turquoise'],
 ];
 
-// "Diesel Gray/Black" -> "Gray" (the first colour word wins); "Sepia" -> ""
-export function normalizeColor(text) {
-  const t = String(text || '').toLowerCase();
-  if (!t) return '';
+function firstWord(t, words) {
   let best = null;
-  for (const [word, canonical] of COLOR_WORDS) {
+  for (const [word, canonical] of words) {
     const m = new RegExp(`\\b${word}\\b`).exec(t);
-    if (m && (best === null || m.index < best.index)) best = { index: m.index, canonical };
+    if (m && (best === null || m.index < best.index)) best = { index: m.index, word, canonical };
   }
-  return best ? best.canonical : '';
+  return best;
 }
 
-const BODY_STYLES = [
-  [/mini.?van/i, 'Minivan'],
-  [/\b(truck|pickup|crew cab|quad cab|regular cab|extended cab)/i, 'Truck'],
-  [/\bsuv|sport utility|crossover/i, 'SUV'],
-  [/sedan/i, 'Sedan'],
-  [/coupe/i, 'Coupe'],
-  [/hatch/i, 'Hatchback'],
-  [/convertible|roadster|cabriolet/i, 'Convertible'],
-  [/\bvan\b|cargo/i, 'Van'],
-  [/wagon/i, 'Wagon'],
+// The first color word wins, a list word or a shade name alike: "Diesel
+// Gray/Black" -> Gray; "Ebony w/Red Accents" -> Black, read from "ebony" and
+// shown as a reading; "Titanium" -> ''. A shade name straight before a list
+// word names the same color twice ("Ivory White", "Onyx Black"): the list
+// word the website states is taken.
+export function readColor(text) {
+  const t = String(text || '').toLowerCase();
+  if (!t.trim()) return reading('');
+  const stated = firstWord(t, COLOR_WORDS);
+  const shade = firstWord(t, SHADE_WORDS);
+  if (!shade) return reading(stated ? stated.canonical : '');
+  if (stated && stated.index < shade.index) return reading(stated.canonical);
+  if (stated && /^\s*$/.test(t.slice(shade.index + shade.word.length, stated.index))) return reading(stated.canonical);
+  return reading(shade.canonical, `${said(text)}; ${shade.word} is read as ${shade.canonical}; check it on the form`);
+}
+
+export function normalizeColor(text) {
+  return readColor(text).value;
+}
+
+// Whole words only, singular or plural ("Vans", "SUVs"), so a model name
+// such as Wagoneer or Caravan is never a body style. '4dr Car' and 'Cars'
+// name no body style and stay blank.
+const TRUCK_CABS = '(?:crew|quad|regular|reg|standard|single|extended|ext|double|access|king|mega|chassis|club|super)[ -]?cabs?|cab[ -]?chassis|super[ -]?crew|crew[ -]?max|xtra[ -]?cab';
+const BODY_WORDS = [
+  ['mini.?vans?', 'Minivan'],
+  [`trucks?|pickups?|${TRUCK_CABS}`, 'Truck'],
+  ['suvs?|sport utility(?: vehicles?)?|crossovers?', 'SUV'],
+  ['sedans?', 'Sedan'],
+  ['convertibles?|roadsters?|cabriolets?', 'Convertible'],
+  ['coupes?', 'Coupe'],
+  ['hatch(?:backs?)?', 'Hatchback'],
+  ['vans?|cargo', 'Van'],
+  ['wagons?', 'Wagon'],
 ];
+// anywhere in the text, and anchored at its start (for the page address)
+const BODY_STYLES = BODY_WORDS.map(([words, style]) => [new RegExp(`\\b(?:${words})\\b`, 'i'), style]);
+const BODY_AT_START = BODY_WORDS.map(([words, style]) => [new RegExp(`^(?:${words})\\b`, 'i'), style]);
+const CAB_AT_START = new RegExp(`^(?:${TRUCK_CABS})\\b`, 'i');
+
+function matchBody(text, styles = BODY_STYLES) {
+  const t = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // "Coupé" is "Coupe"
+  for (const [re, style] of styles) {
+    const m = re.exec(t);
+    if (m) return { style, words: m[0] };
+  }
+  return null;
+}
 
 export function normalizeBodyStyle(text) {
-  const t = String(text || '');
-  for (const [re, style] of BODY_STYLES) if (re.test(t)) return style;
-  return '';
+  const hit = matchBody(text);
+  return hit ? hit.style : '';
 }
 
-export function normalizeTransmission(text) {
+// The car's own page address, as words: "/inventory/used-2019-ram-1500-4d-
+// quad-cab-<vin>/" -> "used 2019 ram 1500 4d quad cab <vin>". Only the last
+// part of the path, which names this car; a folder such as /trucks/ may be a
+// list the car merely sits in.
+function addressWords(url) {
+  let path = '';
+  try {
+    path = new URL(String(url || '')).pathname;
+  } catch {
+    return '';
+  }
+  const last = path.split('/').filter(Boolean).pop() || '';
+  let decoded = last;
+  try {
+    decoded = decodeURIComponent(last);
+  } catch {
+    // keep it as written
+  }
+  return decoded.replace(/\.[a-z]{2,5}$/i, '').replace(/[-_+.]+/g, ' ');
+}
+
+// Body words in the car's page address, only where an address names the body
+// rather than the model or a place: after the model year, and either a cab
+// name (-quad-cab-, -supercrew-) or a body word straight after a door count
+// or the drive (-4d-sport-utility-, -2d-coupe-, -4x4-sport-utility-). "Van
+// Nuys" before the year, a "glc-300-coupe", a "gran-coupe" or a "city-wagon"
+// is a place or a model name, so it gives nothing. When unsure, nothing.
+const DOORS = /^\d ?d(?:r|oor)?$/;
+const DRIVE = /^(?:[24]wd|awd|fwd|rwd|4x[24]|2x4)$/;
+function bodyFromAddress(url) {
+  const tokens = addressWords(url).toLowerCase().split(/\s+/).filter(Boolean);
+  const year = tokens.findIndex((t) => /^(?:19|20)\d{2}$/.test(t));
+  if (year < 0) return null;
+  for (let i = year + 1; i < tokens.length; i += 1) {
+    const rest = tokens.slice(i).join(' ');
+    const cab = CAB_AT_START.exec(rest);
+    if (cab) return { style: 'Truck', words: cab[0] };
+    if (DOORS.test(tokens[i - 1]) || DRIVE.test(tokens[i - 1])) {
+      const hit = matchBody(rest, BODY_AT_START);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+// The body field first; when it maps to nothing, the body words in the car's
+// page address (bodyFromAddress), shown as a reading.
+export function readBodyStyle(v = {}) {
+  const stated = matchBody(v.bodyType);
+  if (stated) return reading(stated.style);
+  const fromAddress = bodyFromAddress(v.url);
+  if (!fromAddress) return reading('');
+  const field = String(v.bodyType || '').trim() ? `its body style field says "${String(v.bodyType).trim()}"` : 'the website gives no body style';
+  return reading(fromAddress.style, `read from the car's page address ("${fromAddress.words.toLowerCase().replace(/\s+/g, '-')}"); ${field}; check it on the form`);
+}
+
+// Facebook has no word for natural gas, propane or hydrogen: those stay blank.
+const NO_FORM_FUEL = /hydrogen|fuel.?cell|\bfcev\b|natural gas|\bcng\b|\blng\b|propane|\blpg\b|autogas/i;
+
+export function readFuelType(text) {
   const t = String(text || '');
-  if (!t) return '';
-  if (/manual|\bm\/t\b|stick/i.test(t)) return 'Manual';
-  if (/auto|\ba\/t\b|\bcvt\b|\bdct\b|\bdsg\b/i.test(t)) return 'Automatic';
-  return '';
+  if (!t.trim()) return reading('');
+  if (NO_FORM_FUEL.test(t)) return reading('');
+  if (/plug.?in|\bphev\b/i.test(t)) return reading('Plug-in hybrid');
+  if (/\bmild\b[^,;]*\b(?:hybrid|electric)|\bmhev\b|\be-?torque\b|\be-?assist\b/i.test(t)) return reading('Hybrid', `${said(t)}: a mild hybrid; change it on the form if you list mild hybrids as Gasoline`);
+  if (/hybrid|\bhev\b/i.test(t)) return reading('Hybrid');
+  // "battery" alone is not electric drive: "Gasoline (Start/Stop Battery)"
+  const electric = /electric|\bb?ev\b/i.test(t);
+  if (electric && /\bgas(?:oline)?\b|petrol|unleaded|diesel/i.test(t)) return reading('Hybrid', `${said(t)}: it runs on fuel and electricity, so it is listed as Hybrid; check it on the form`);
+  if (electric) return reading('Electric');
+  if (/diesel/i.test(t)) return reading('Diesel');
+  if (/flex|\be-?85\b|ethanol/i.test(t)) return reading('Flex');
+  if (/\bgas(?:oline)?\b|petrol|unleaded/i.test(t)) return reading('Gasoline');
+  return reading('');
 }
 
 export function normalizeFuelType(text) {
+  return readFuelType(text).value;
+}
+
+// An automatic with a manual mode is an automatic, and a manual with
+// automatic rev matching is a manual: the first word wins.
+const AUTOMATIC = /auto|\ba\/t\b|\be?cvt\b|continuously variable|dual.?clutch|twin.?clutch|\bdct\b|\bdsg\b|\bpdk\b|tiptronic|steptronic|paddle|shiftable|manumatic/i;
+const MANUAL = /manual|\bm\/t\b|stick/i;
+// An electric car's single-speed reduction gear: no gears to shift.
+const SINGLE_SPEED = /\b(?:1|one|single)[- ]?speed\b|direct.?drive|reduction gear|fixed.?gear/i;
+
+// `fuel` is the car's fuel type in Facebook's words (readFuelType's value).
+export function readTransmission(text, { fuel = '' } = {}) {
   const t = String(text || '');
-  if (!t) return '';
-  if (/plug.?in/i.test(t)) return 'Plug-in hybrid';
-  if (/hybrid/i.test(t)) return 'Hybrid';
-  if (/electric|\bev\b|battery/i.test(t)) return 'Electric';
-  if (/diesel/i.test(t)) return 'Diesel';
-  if (/flex|e85/i.test(t)) return 'Flex';
-  if (/gas|petrol|unleaded/i.test(t)) return 'Gasoline';
-  return '';
+  if (!t.trim()) return reading('');
+  const a = AUTOMATIC.exec(t);
+  const m = MANUAL.exec(t);
+  if (a && (!m || a.index <= m.index)) return reading('Automatic');
+  if (m) return reading('Manual');
+  if (SINGLE_SPEED.test(t) && fuel === 'Electric') return reading('Automatic', `${said(t)} on an electric car, which has no gears to shift; Automatic is the form's nearest word; check it on the form`);
+  return reading('');
+}
+
+export function normalizeTransmission(text, options = {}) {
+  return readTransmission(text, options).value;
 }
 
 export const STATE_NAMES = Object.freeze({
@@ -152,23 +341,30 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
   const branded = brandedTitleSignal(v);
   const conditionDefault = CONDITIONS.includes(d.condition) ? d.condition : '';
   const titleDefault = TITLE_STATUSES.includes(d.titleStatus) ? d.titleStatus : '';
-  const extStated = normalizeColor(v.exteriorColor);
-  const intStated = normalizeColor(v.interiorColor);
+  const kind = readVehicleKind(v);
+  const body = readBodyStyle(v);
+  const ext = readColor(v.exteriorColor);
+  const int = readColor(v.interiorColor);
+  const fuel = readFuelType(v.fuelType);
+  const gearbox = readTransmission(v.transmission, { fuel: fuel.value });
+  const extStated = ext.value;
+  const intStated = int.value;
   const extGuess = !extStated && COLORS.includes(g.exterior) ? g.exterior : '';
   const intGuess = !intStated && COLORS.includes(g.interior) ? g.interior : '';
   const fields = {
-    vehicleType: vehicleKind(v),
+    // only a kind the form is filled in for; classify.js keeps the others out of the posting flow
+    vehicleType: FORM_KINDS.includes(kind.kind) ? kind.kind : '',
     year: v.year ? String(v.year) : '',
     make: String(v.make || '').trim(),
     model: [v.model, v.trim].map((s) => String(s || '').trim()).filter(Boolean).join(' '),
     vin: String(v.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, ''),
     mileage: typeof v.mileage === 'number' && v.mileage >= 0 ? String(Math.round(v.mileage)) : '',
     price: typeof price === 'number' && price > 0 ? String(Math.round(price)) : '',
-    bodyStyle: normalizeBodyStyle(v.bodyType),
+    bodyStyle: body.value,
     exteriorColor: extStated || extGuess,
     interiorColor: intStated || intGuess,
-    fuelType: normalizeFuelType(v.fuelType),
-    transmission: normalizeTransmission(v.transmission),
+    fuelType: fuel.value,
+    transmission: gearbox.value,
     location: locationQuery(dealer),
     description: String(description || ''),
     condition: conditionDefault,
@@ -176,9 +372,22 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
     // the live form's "This vehicle has a clean title" box: yes = tick, no = untick, '' = leave as is
     cleanTitle: branded ? 'no' : titleDefault === 'Clean' ? 'yes' : '',
   };
-  // what the panel highlights: filled from a default (assumed) or left for the person
+  // what the panel highlights: filled from a reading of the website's words,
+  // a photo guess or a default (assumed), or left for the person
   const assumed = [];
   const leftBlank = [];
+  if (!fields.vehicleType) leftBlank.push({ key: 'vehicleType', label: 'Vehicle type', why: `the website's ${kind.from} makes it ${kind.name}; Lot Sync fills in only the car/truck and motorcycle forms` });
+  const read = (key, label, r) => {
+    if (r.value && r.why) assumed.push({ key, label, value: r.value, why: r.why });
+  };
+  if (fields.vehicleType === VEHICLE_KIND.MOTORCYCLE && kind.fromMake) {
+    assumed.push({ key: 'vehicleType', label: 'Vehicle type', value: 'Motorcycle', why: `read from the website's ${kind.from}; no body style says it is a motorcycle, and some motorcycle makes build ATVs, side-by-sides or boats too; check it on the form` });
+  }
+  read('bodyStyle', 'Body style', body);
+  read('exteriorColor', 'Exterior color', ext);
+  read('interiorColor', 'Interior color', int);
+  read('fuelType', 'Fuel type', fuel);
+  read('transmission', 'Transmission', gearbox);
   const guessWhy = (raw) => `guessed from the photos (${g.confidence || 'unknown'} confidence); the website ${raw ? `says "${raw}"` : 'gives no color'}; check it on the form`;
   if (extGuess) assumed.push({ key: 'exteriorColor', label: 'Exterior color', value: extGuess, why: guessWhy(v.exteriorColor) });
   if (intGuess) assumed.push({ key: 'interiorColor', label: 'Interior color', value: intGuess, why: guessWhy(v.interiorColor) });
@@ -197,7 +406,7 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
     leftBlank,
     branded,
     missing: Object.keys(fields).filter((k) => !fields[k]),
-    // what the website said, for the side panel to show next to a blank field
-    source: { bodyType: v.bodyType || '', exteriorColor: v.exteriorColor || '', interiorColor: v.interiorColor || '', fuelType: v.fuelType || '', transmission: v.transmission || '' },
+    // what the website said, by form field, for the side panel to show next to a blank field
+    source: { vehicleType: v.bodyType || '', bodyStyle: v.bodyType || '', bodyType: v.bodyType || '', exteriorColor: v.exteriorColor || '', interiorColor: v.interiorColor || '', fuelType: v.fuelType || '', transmission: v.transmission || '' },
   };
 }

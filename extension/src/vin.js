@@ -141,7 +141,7 @@ export async function decodeVinOnline(vin, { fetchImpl = globalThis.fetch, timeo
     const engine = [pick('DisplacementL') && `${Number(pick('DisplacementL')).toFixed(1)}L`, pick('EngineCylinders') && `${pick('EngineCylinders')} cyl`, pick('EngineModel')].filter(Boolean).join(' ');
     const decoded = {
       make: pick('Make'), model: pick('Model'), year: Number(pick('ModelYear')) || null, trim: pick('Trim'), series: pick('Series'),
-      bodyClass: pick('BodyClass'), vehicleType: pick('VehicleType'), fuelType: pick('FuelTypePrimary'), fuelTypeSecondary: pick('FuelTypeSecondary'),
+      bodyClass: pick('BodyClass'), vehicleType: pick('VehicleType'), fuelType: pick('FuelTypePrimary'), fuelTypeSecondary: pick('FuelTypeSecondary'), electrificationLevel: pick('ElectrificationLevel'),
       engine, driveType: pick('DriveType'), transmission: [pick('TransmissionStyle'), pick('TransmissionSpeeds') && `${pick('TransmissionSpeeds')}-speed`].filter(Boolean).join(' '),
       doors: pick('Doors'), plantCountry: pick('PlantCountry'), errorCode: pick('ErrorCode'), errorText: pick('ErrorText'),
     };
@@ -163,6 +163,22 @@ const drive = (s) => {
   if (/rwd|rear.?wheel/.test(t)) return 'RWD';
   return '';
 };
+// The decode's fuel in the form's words. vPIC's ElectrificationLevel says it
+// best ("Mild HEV", "PHEV", "BEV"); without one, a second fuel of Electric
+// beside gasoline or diesel is a hybrid, never an electric car, and a second
+// fuel of ethanol ("Ethanol (E85)", how vPIC reports a flex-fuel car) is Flex.
+export function fuelFromDecode(decoded = {}) {
+  const level = String(decoded.electrificationLevel || '');
+  if (/\bfcev\b|fuel cell/i.test(level)) return '';
+  if (/\bphev\b|plug.?in/i.test(level)) return 'Plug-in hybrid';
+  if (/\bbev\b|battery electric/i.test(level)) return 'Electric';
+  if (/\bhev\b|hybrid/i.test(level)) return 'Hybrid';
+  const primary = normalizeFuelType(decoded.fuelType);
+  if (/ethanol|\be85\b/i.test(decoded.fuelTypeSecondary || '') && primary === 'Gasoline') return 'Flex';
+  if (/electric/i.test(decoded.fuelTypeSecondary || '') && primary && primary !== 'Electric') return 'Hybrid';
+  return primary;
+}
+
 const titleWords = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
 
 // Website record vs the NHTSA decode, field by field. verdict: 'agree' |
@@ -182,11 +198,12 @@ export function compareVin(vehicle = {}, decoded = {}) {
   const bodyV = normalizeBodyStyle(decoded.bodyClass) || (/pickup|truck/i.test(decoded.bodyClass) ? 'Truck' : /sport utility|suv|crossover/i.test(decoded.bodyClass) ? 'SUV' : '');
   add('Body', vehicle.bodyType, decoded.bodyClass, v(bodyW, bodyV, bodyW === bodyV));
   const fuelW = normalizeFuelType(vehicle.fuelType);
-  const fuelV = normalizeFuelType([decoded.fuelType, decoded.fuelTypeSecondary].filter(Boolean).join('/'));
-  add('Fuel', vehicle.fuelType, [decoded.fuelType, decoded.fuelTypeSecondary].filter(Boolean).join(' / '), v(fuelW, fuelV, fuelW === fuelV));
+  const fuelV = fuelFromDecode(decoded);
+  const fuelShown = [decoded.fuelType, decoded.fuelTypeSecondary].filter(Boolean).join(' / ') + (decoded.electrificationLevel ? ` (${decoded.electrificationLevel})` : '');
+  add('Fuel', vehicle.fuelType, fuelShown, v(fuelW, fuelV, fuelW === fuelV));
   add('Drive', vehicle.drivetrain, decoded.driveType, v(drive(vehicle.drivetrain), drive(decoded.driveType), drive(vehicle.drivetrain) === drive(decoded.driveType)));
-  const trW = normalizeTransmission(vehicle.transmission);
-  const trV = normalizeTransmission(decoded.transmission);
+  const trW = normalizeTransmission(vehicle.transmission, { fuel: fuelW });
+  const trV = normalizeTransmission(decoded.transmission, { fuel: fuelV });
   add('Transmission', vehicle.transmission, decoded.transmission, v(trW, trV, trW === trV));
   add('Engine', vehicle.engine, decoded.engine, 'info');
 

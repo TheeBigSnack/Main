@@ -52,12 +52,16 @@ test('title and condition come from the dealership defaults, never from a guess'
 });
 
 test('a color guessed from the photos fills only a blank, and is marked as a guess', () => {
-  const v = vehicle('usedNoCarfax', { styles: { interior_color: 'Sepia' } }); // exterior Black (stated), interior not on the list
+  const v = vehicle('usedNoCarfax', { styles: { interior_color: 'Titanium' } }); // exterior Black (stated), interior neither a list word nor a shade name
   const d = buildListingData(v, { guesses: { exterior: 'Red', interior: 'Brown', confidence: 'medium' } });
   assert.equal(d.fields.exteriorColor, 'Black', 'a stated color is never overridden');
   assert.equal(d.fields.interiorColor, 'Brown');
   assert.deepEqual(d.assumed.map((a) => a.key), ['interiorColor', 'condition', 'titleStatus']);
-  assert.match(d.assumed[0].why, /guessed from the photos \(medium confidence\); the website says "Sepia"/);
+  assert.match(d.assumed[0].why, /guessed from the photos \(medium confidence\); the website says "Titanium"/);
+  // a shade name the website states is its reading, and a photo guess never replaces it
+  const sepia = buildListingData(vehicle('usedNoCarfax'), { guesses: { interior: 'Red', confidence: 'high' } });
+  assert.equal(sepia.fields.interiorColor, 'Brown');
+  assert.match(sepia.assumed[0].why, /the website says "Sepia"; sepia is read as Brown/);
   // a guess that is not one of the list words is ignored
   assert.equal(buildListingData(v, { guesses: { interior: 'Mauve' } }).fields.interiorColor, '');
   // no guess: blank, and not "assumed"
@@ -81,14 +85,14 @@ test('a branded title in the website text switches the clean-title default off',
 });
 
 test('blank values are reported, never guessed', () => {
-  const v = vehicle('usedNoCarfax', { styles: { interior_color: 'Sepia' }, mechanical: { fuel_type: 'Unknown' } });
+  const v = vehicle('usedNoCarfax', { styles: { interior_color: 'Titanium' }, mechanical: { fuel_type: 'Unknown' } });
   const d = buildListingData(v, { dealer: {}, price: null });
   assert.equal(d.fields.interiorColor, '');
   assert.equal(d.fields.fuelType, '');
   assert.equal(d.fields.location, '');
   assert.equal(d.fields.price, '');
   assert.deepEqual(d.missing, ['price', 'interiorColor', 'fuelType', 'location', 'description']);
-  assert.equal(d.source.interiorColor, 'Sepia');
+  assert.equal(d.source.interiorColor, 'Titanium');
 });
 
 test('the price posted is whatever the caller chose (website price or before fees)', () => {

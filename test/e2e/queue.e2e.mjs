@@ -2,7 +2,10 @@
 // click "Post 2 cars". The side panel then walks them one at a time: re-check,
 // describe, open and fill the MOCK form. The test clicks Publish on the first
 // car as the salesperson would; the panel notices the listing address, records
-// it and loads the next car by itself. For the second car the test presses
+// it and loads the next car by itself. The second car is a mild hybrid (the
+// website says "Gasoline/Mild Electric Hybrid"), so its fuel is an assumption:
+// the queue stops at review with it listed, and the test clicks Open the
+// Marketplace form as the person would. For the second car the test presses
 // "Saved as draft" (as if the person used Facebook's Save draft), and the
 // queue finishes with 1 posted, 1 draft.
 //
@@ -140,10 +143,16 @@ try {
   // Car 2's draft lands late: 9 s after the page opens, over fields already filled
   // (the fill waits for a still form first, then takes several seconds).
   await dealer.request.get(`${marketOrigin}/prefill?name=honda&late=9000`);
-  const fb2Promise = context.waitForEvent('page', { timeout: 40000 });
   await fb1.click('#publish');
-  const fb2 = watch(await fb2Promise);
   await panel.waitForFunction(() => /Car 2 of 2/.test(document.querySelector('#queueBar')?.textContent || ''), null, { timeout: 40000 });
+  // car 2's fuel is assumed (a mild hybrid listed as Hybrid), so the queue waits at review with it shown
+  await panel.waitForSelector('#openForm', { timeout: 60000 });
+  assert.match(await panel.textContent('#assumed'), /Fuel type[\s\S]*Hybrid[\s\S]*the website says "Gasoline\/Mild Electric Hybrid": a mild hybrid/);
+  assert.equal(await panel.$('#confirmPosted'), null, 'the form was not opened by itself');
+  await panel.screenshot({ path: join(shots, 'queue-3-car2-assumed.png'), fullPage: true });
+  const fb2Promise = context.waitForEvent('page', { timeout: 40000 });
+  await panel.click('#openForm');
+  const fb2 = watch(await fb2Promise);
   await panel.waitForSelector('#confirmPosted', { timeout: 60000 });
   await panel.waitForSelector('#photos.done', { timeout: 30000 });
   assert.match(await panel.textContent('#queueBar'), /1 posted/);
