@@ -5,6 +5,9 @@
 //     has the shape the sandbox promises (ready cars, one without photos, one
 //     without a price, two new ones, a day 2 that sells one, drops one price
 //     and adds one);
+//   - the second sample website (demo/site-standard/) reads as its promised
+//     lot through the standard vehicle data reader, page by page, and is not
+//     mistaken for the first kind of website;
 //   - the shim defines every chrome.* member the extension code references;
 //   - index.html carries the sandbox banner and loads nothing from elsewhere;
 //   - the sandbox's own code has no selector for Publish, Update, Delete or
@@ -19,6 +22,8 @@ import vm from 'node:vm';
 import { localVinCheck, checkVinFormat } from '../extension/src/vin.js';
 import { normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { trimRecord } from '../extension/adapters/dealerInspire.js';
+import { parseVehiclePage } from '../extension/adapters/schemaOrgParse.js';
+import { normalizeVehicle as normalizeStandard } from '../extension/adapters/schemaOrgNormalize.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -94,6 +99,138 @@ test('the sample VINs pass the extension\'s own VIN checks, and the lot has the 
   assert.ok(aimed.some((v) => v.vin === inv.VINS.civic), 'the default sold car stays when another is named');
 });
 
+// The second sample website, loaded the way its page loads it.
+function loadStandard() {
+  const ctx = vm.createContext({ window: {}, URL });
+  vm.runInContext(read('demo/site-standard/inventory.js'), ctx, { filename: 'site-standard/inventory.js' });
+  return ctx.window.LOT_SYNC_STANDARD;
+}
+const STD_BASE = 'http://sandbox.test/demo/site-standard/';
+
+// The used lot read the way the standard vehicle data reader reads a
+// website: the list pages one after another by rel=next, then each car's
+// own page, whose own car is the one carrying that page's address.
+function readStandard(std, scenario) {
+  const site = std.hashSite(STD_BASE);
+  const lists = [];
+  const pages = [];
+  for (let url = site.address('/used-vehicles/'); url && lists.length < 10;) {
+    const answer = std.respond(url, scenario, site);
+    assert.equal(answer.status, 200, url);
+    const { vehicles, facts } = parseVehiclePage(answer.body, url);
+    lists.push({ url, vins: vehicles.map((n) => n.vehicleIdentificationNumber) });
+    for (const node of vehicles) if (!pages.includes(node.url)) pages.push(node.url);
+    url = facts.next;
+  }
+  const cars = pages.map((url) => {
+    const answer = std.respond(url, scenario, site);
+    assert.equal(answer.status, 200, url);
+    const { vehicles, facts } = parseVehiclePage(answer.body, url);
+    const own = vehicles.filter((n) => n.url === url);
+    assert.equal(own.length, 1, `${url} carries its own car once`);
+    return normalizeStandard(own[0], { url, facts });
+  });
+  return { site, lists, pages, cars };
+}
+
+test('the second sample website reads as its promised lot through the standard vehicle data reader', () => {
+  const std = loadStandard();
+  for (const c of std.CARS) {
+    assert.match(c.vin, /SAMPL/, 'the VINs are visibly samples');
+    assert.ok(checkVinFormat(c.vin).ok, `${c.vin}: ${checkVinFormat(c.vin).problems.join('; ')}`);
+    const check = localVinCheck({ vin: c.vin, year: c.year, make: c.make });
+    assert.ok(check.ok, `${c.vin}: ${check.problems.map((p) => p.detail).join('; ')}`);
+    // every check agrees; only a trailer maker is not in the local list of manufacturers
+    for (const k of check.checks) assert.ok(k.ok === true || (c.kind === 'trailer' && k.code === 'make' && k.ok === null), `${c.vin} ${k.code}: ${k.detail}`);
+  }
+
+  // day 1: three list pages linked by rel=next, ten cars, each read from its own page
+  const day1 = readStandard(std, 'day1');
+  assert.equal(day1.lists.length, 3);
+  assert.deepEqual(day1.lists.map((l) => l.vins.length), [4, 4, 2]);
+  assert.equal(day1.cars.length, 10);
+  const by = Object.fromEntries(day1.cars.map((v) => [std.CARS.find((c) => c.vin === v.vin).key, v]));
+  const decide = (key) => assessVehicle(by[key], { myStores: [std.DEALER.name] });
+  for (const key of ['civic', 'f150', 'escape', 'accord', 'sorento', 'rav4']) assert.equal(decide(key).decision, DECISION.READY, `${key}: ${decide(key).reason}`);
+  // honest prices: the Malibu's markup says $14,995 but its page shows $15,495, so it has no price to post
+  assert.equal(by.malibu.price, null);
+  assert.deepEqual(decide('malibu').blockers.map((b) => b.code), ['no-price']);
+  assert.deepEqual(decide('wrangler').blockers.map((b) => b.code), ['no-photos']);
+  assert.equal(decide('outback').decision, DECISION.REVIEW, '12 miles on a used car');
+  assert.ok(![DECISION.READY, DECISION.NOT_READY].includes(decide('trailer').decision), 'the trailer is never offered as a car');
+  // the car pages' three kinds of markup read the same
+  assert.deepEqual([by.f150.price, by.f150.mileage, by.f150.photoCount], [31495, 58112, 3], 'the @graph page');
+  assert.deepEqual([by.escape.price, by.escape.mileage, by.escape.photoCount], [16495, 52110, 3], 'the microdata-only page');
+  assert.deepEqual([by.sorento.price, by.sorento.mileage, by.sorento.photoCount], [25995, 35780, 3], 'the page with a carousel');
+  for (const v of day1.cars) {
+    assert.equal(v.location, std.DEALER.name);
+    for (const u of v.photos) {
+      assert.ok(u.startsWith(STD_BASE + 'photos/') && u.endsWith('.svg'), `${u} is a sandbox placeholder`);
+      assert.ok(existsSync(join(demo, 'site-standard', u.slice(STD_BASE.length))), `${u} exists`);
+    }
+  }
+
+  // the new car is on the website but not on the used list; the Sorento's carousel links to it
+  const telluride = std.CARS.find((c) => c.key === 'telluride');
+  const tellurideUrl = day1.site.address(std.vehicleRoute(telluride));
+  assert.ok(!day1.pages.includes(tellurideUrl));
+  const sorentoPage = std.respond(by.sorento.url, 'day1', day1.site).body;
+  assert.ok(sorentoPage.includes(tellurideUrl), 'the carousel links to the new car');
+  const tellurideRead = parseVehiclePage(std.respond(tellurideUrl, 'day1', day1.site).body, tellurideUrl);
+  assert.equal(assessVehicle(normalizeStandard(tellurideRead.vehicles[0], { url: tellurideUrl, facts: tellurideRead.facts })).decision, DECISION.SKIP);
+
+  // the sitemap lists the used cars' pages, and robots.txt names the sitemap
+  const sitemap = std.respond(day1.site.address('/sitemap.xml'), 'day1', day1.site).body;
+  const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+  for (const u of day1.pages) assert.ok(locs.includes(u), `the sitemap lists ${u}`);
+  assert.ok(!locs.includes(tellurideUrl));
+  assert.match(std.respond('http://sandbox.test/robots.txt', 'day1', day1.site).body, new RegExp(`Sitemap: ${STD_BASE.replace(/\./g, '\\.')}sitemap\\.xml`));
+
+  // day 2: the Accord sold, the Civic dropped $1,000, the Wrangler got photos, a Tucson arrived
+  const day2 = readStandard(std, 'day2');
+  const vins1 = day1.cars.map((v) => v.vin);
+  const vins2 = day2.cars.map((v) => v.vin);
+  assert.deepEqual(vins1.filter((v) => !vins2.includes(v)), [std.VINS.accord]);
+  assert.deepEqual(vins2.filter((v) => !vins1.includes(v)), [std.VINS.tucson]);
+  assert.equal(day2.cars.find((v) => v.vin === std.VINS.civic).price, 19995 - std.DAY2_DEFAULTS.drop);
+  assert.equal(day2.cars.find((v) => v.vin === std.VINS.wrangler).photoCount, 3);
+  // the sold car's page: a 404 by default, a 301 to the list, or a page saying it is no longer available
+  const accordUrl = by.accord.url;
+  assert.equal(std.respond(accordUrl, 'day2', day2.site).status, 404);
+  const moved = std.respond(accordUrl, { name: 'day2', soldPage: '301' }, day2.site);
+  assert.deepEqual([moved.status, moved.location], [301, day2.site.address('/used-vehicles/')]);
+  const followed = std.respond(accordUrl, { name: 'day2', soldPage: '301' }, day2.site, { follow: true });
+  assert.deepEqual([followed.status, followed.redirected, followed.url], [200, true, day2.site.address('/used-vehicles/')]);
+  const gone = std.respond(accordUrl, { name: 'day2', soldPage: '200' }, day2.site);
+  assert.equal(gone.status, 200);
+  assert.match(gone.body, /no longer available/);
+  assert.deepEqual(parseVehiclePage(gone.body, accordUrl).vehicles, [], 'nothing on it reads as the car');
+  // and day 2 can be aimed at the cars a person posted
+  const aimed = readStandard(std, { name: 'day2', sold: std.VINS.civic, dropped: std.VINS.accord });
+  assert.ok(!aimed.cars.some((v) => v.vin === std.VINS.civic));
+  assert.equal(aimed.cars.find((v) => v.vin === std.VINS.accord).price, 23495 - std.DAY2_DEFAULTS.drop);
+});
+
+test('the second sample website is its own kind of website, and switching to it resets the sandbox', () => {
+  const page = read('demo/site-standard/index.html');
+  // no inventory search service on it, so the first sample's adapter never claims it
+  assert.doesNotMatch(page, /SEARCH_SERVICE|IDPSearchServiceHelper/);
+  assert.match(page, /<script src="inventory\.js"><\/script>/);
+  assert.match(page, /window\.fetch = function/, 'the page answers its own requests for its pages');
+  assert.match(page, /'LOT_SYNC_SCENARIO'/, 'the sandbox can switch it to day 2');
+  // the Node mock of the end-to-end flow serves the same dealership
+  assert.match(read('test/e2e/mock-standard-site.mjs'), /demo\/site-standard\/inventory\.js/);
+
+  const html = read('demo/index.html');
+  assert.match(html, /<select id="siteChoice">[\s\S]*value="service"[\s\S]*value="standard"[\s\S]*<\/select>/);
+  assert.match(html, /<script src="site-standard\/inventory\.js"><\/script>/);
+  const demoJs = read('demo/demo.js');
+  // storage is kept per website address and both samples share this page's, so a switch starts over and says so
+  assert.match(demoJs, /async function switchSite\(id\) \{[\s\S]*await reset\(\);[\s\S]*so the sandbox was reset\./);
+  assert.match(demoJs, /myStores: sample\.myStores/);
+  assert.match(demoJs, /hub\.standardPage = /, "the service worker's stand-in answers the second sample's pages");
+});
+
 test('the shim defines every chrome.* member the extension code references', () => {
   const refs = new Set();
   for (const file of walk(join(root, 'extension')).filter((f) => f.endsWith('.js'))) {
@@ -155,9 +292,59 @@ test('the shim\'s storage behaves like chrome.storage: JSON values, defaults, on
   assert.equal(await a.runtime.sendMessage({ type: 'other' }), undefined);
   const c = ctx.window.LotSyncShim.createChrome(ctx.window.LotSyncShim.createHub({}), null);
   await assert.rejects(c.runtime.sendMessage({ type: 'ping' }), /Receiving end does not exist/);
-  assert.equal(await a.permissions.contains({ origins: ['http://x/*'] }), true);
+  assert.equal(await a.permissions.contains({ origins: ['http://x/*'] }), false, 'a host nobody granted');
   assert.equal(await a.alarms.get('nothing'), null);
   assert.deepEqual(await plain(a.windows.getCurrent()), { id: 1, focused: true, type: 'normal', state: 'normal', incognito: false, alwaysOnTop: false });
+});
+
+test('the shim\'s permissions behave like Chrome\'s: granted hosts only, a request answered as the test says, only from a click', async () => {
+  const ctx = vm.createContext({ window: {}, setTimeout, clearTimeout, console, structuredClone, URL });
+  vm.runInContext(read('demo/chrome-shim.js'), ctx, { filename: 'chrome-shim.js' });
+  const Shim = ctx.window.LotSyncShim;
+  const manifest = JSON.parse(read('extension/manifest.json'));
+  const hub = Shim.createHub({ manifest, extensionBase: 'http://sandbox.test:8080/extension/' });
+  const a = Shim.createChrome(hub, null);
+  const plain = async (p) => JSON.parse(JSON.stringify(await p));
+  const ANY = '/' + '*';
+  const photoHost = 'https://photos.example-cdn.test' + ANY;
+  // the manifest's hosts and the sandbox's own origin are granted; any other host is not
+  for (const host of manifest.host_permissions) assert.equal(await a.permissions.contains({ origins: [host] }), true, host);
+  assert.equal(await a.permissions.contains({ origins: ['http://sandbox.test:8080' + ANY] }), true, 'the sandbox reads its own sample website and photos');
+  assert.equal(await a.permissions.contains({ origins: ['http://sandbox.test:9090' + ANY] }), false, 'another port is another origin');
+  assert.equal(await a.permissions.contains({ origins: [photoHost] }), false);
+  assert.equal(await a.permissions.contains({ permissions: ['storage'] }), true);
+  assert.equal(await a.permissions.contains({ permissions: ['debugger'] }), false);
+  assert.ok((await plain(a.permissions.getAll())).origins.includes('http://sandbox.test:8080' + ANY));
+  // a no leaves it ungranted; a yes grants it, fires onAdded, and getAll lists it
+  const added = [];
+  a.permissions.onAdded.addListener((p) => added.push(p.origins));
+  hub.permissionAnswer = false;
+  assert.equal(await a.permissions.request({ origins: [photoHost] }), false);
+  assert.equal(await a.permissions.contains({ origins: [photoHost] }), false);
+  hub.permissionAnswer = true;
+  assert.equal(await a.permissions.request({ origins: [photoHost] }), true);
+  assert.equal(await a.permissions.contains({ origins: [photoHost] }), true);
+  assert.ok((await plain(a.permissions.getAll())).origins.includes(photoHost));
+  // nothing to ask when everything is granted already, whatever the answer would be
+  hub.permissionAnswer = false;
+  assert.equal(await a.permissions.request({ origins: [manifest.host_permissions[0], 'http://sandbox.test:8080' + ANY] }), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(hub.permissionRequests)), [[photoHost], [photoHost]], 'only the two real questions were asked');
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(added)), [[photoHost]]);
+  // wildcard subdomains: *.cdn.test covers img.cdn.test, not xcdn.test
+  hub.permissionAnswer = true;
+  await a.permissions.request({ origins: ['https://*.cdn.test' + ANY] });
+  assert.equal(await a.permissions.contains({ origins: ['https://img.cdn.test' + ANY] }), true);
+  assert.equal(await a.permissions.contains({ origins: ['https://xcdn.test' + ANY] }), false);
+  // a granted host can be removed again, a required one can't
+  assert.equal(await a.permissions.remove({ origins: [photoHost] }), true);
+  assert.equal(await a.permissions.contains({ origins: [photoHost] }), false);
+  await assert.rejects(a.permissions.remove({ origins: [manifest.host_permissions[0]] }), /required/);
+  // outside a click, Chrome refuses to ask; the frame's user activation says whether a click is under way
+  const idle = Shim.createChrome(hub, { navigator: { userActivation: { isActive: false } }, addEventListener: () => {} });
+  await assert.rejects(idle.permissions.request({ origins: [photoHost] }), /user gesture/);
+  const clicked = Shim.createChrome(hub, { navigator: { userActivation: { isActive: true } }, addEventListener: () => {} });
+  assert.equal(await clicked.permissions.request({ origins: [photoHost] }), true);
 });
 
 test('index.html carries the sandbox banner and loads nothing from another site', () => {
@@ -182,7 +369,7 @@ test('index.html carries the sandbox banner and loads nothing from another site'
 
 test('the sandbox\'s own code has no way to click Publish, Update, Delete or Mark as sold', () => {
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  for (const rel of ['demo/chrome-shim.js', 'demo/demo.js']) {
+  for (const rel of ['demo/chrome-shim.js', 'demo/demo.js', 'demo/site-standard/inventory.js', 'demo/site-standard/index.html']) {
     const code = strip(read(rel)).toLowerCase();
     for (const word of ['#publish', '#update', 'mark as sold', "'publish'", '"publish"', '.click(']) {
       assert.ok(!code.includes(word), `${rel} contains ${word}`);

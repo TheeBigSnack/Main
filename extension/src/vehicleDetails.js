@@ -6,7 +6,10 @@
 import { probeTab, searchViaTab, detectAdapter } from './scanRunner.js';
 import { assessVehicle, DECISION } from './classify.js';
 
-export async function fetchVehicleDetails(tabId, vin) {
+// `url` is the car's page as the last scan kept it (the snapshot entry's
+// url): an adapter that reads the car from its own page starts there; one
+// that asks an inventory service ignores it.
+export async function fetchVehicleDetails(tabId, vin, { url = null } = {}) {
   const wanted = String(vin || '').toUpperCase();
   let probe;
   try {
@@ -18,7 +21,8 @@ export async function fetchVehicleDetails(tabId, vin) {
   if (!adapter) return { ok: false, message: "This tab isn't a dealership inventory page Lot Sync can read. Open the used inventory page and click Post again." };
   let r;
   try {
-    r = await adapter.getDetails(searchViaTab(tabId, adapter, probe.service), wanted, adapter.scanOptions(probe.service));
+    const options = { ...adapter.scanOptions(probe.service), ...(typeof url === 'string' && url ? { url } : {}) };
+    r = await adapter.getDetails(searchViaTab(tabId, adapter, probe.service), wanted, options);
   } catch (e) {
     return { ok: false, message: "Couldn't read the dealership website: " + ((e && e.message) || e) };
   }

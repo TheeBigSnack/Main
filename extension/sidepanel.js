@@ -21,6 +21,7 @@ import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, descri
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
+import { neededPatterns, patternCovers, patternHost } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
@@ -166,6 +167,81 @@ const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, pric
 // each fill could not do. Bookkeeping only; a failure here never stops a post.
 const pilotNote = (change) => (state.origin ? updatePilot(state.origin, change).catch(() => null) : Promise.resolve(null));
 
+// ---------- photo servers ----------
+// The service worker downloads the car's photos, and Chrome lets it read a
+// server only with a host permission (src/photoHosts.js). The manifest names
+// one image host; for any other, Chrome's own prompt asks the salesperson the
+// first time they fill a car whose photos sit there, and Chrome remembers a yes.
+
+const MANIFEST_HOSTS = (chrome.runtime.getManifest && chrome.runtime.getManifest().host_permissions) || [];
+// What Chrome has granted, kept in memory: a click must ask before it waits
+// on anything, so it can't stop to look this up first.
+let grantedOrigins = [];
+// Servers the salesperson said no to while this panel is open. They are not
+// asked about again for the next car, only from their own Allow photos button.
+const refusedPhotoServers = new Set();
+let photoPromptOpen = false;
+
+async function refreshGranted() {
+  try {
+    const all = await chrome.permissions.getAll();
+    grantedOrigins = all && Array.isArray(all.origins) ? all.origins : [];
+  } catch (e) {
+    /* keep what was known; at worst Chrome is asked for a server it already allows, and says yes without a prompt */
+  }
+}
+
+const photoList = () => (state.listing ? state.listing.photos : (state.vehicle && state.vehicle.photos) || []);
+const photoPatterns = (urls = photoList()) => neededPatterns(urls, { manifestHosts: MANIFEST_HOSTS, granted: grantedOrigins });
+const hostList = (patterns) => {
+  const hosts = patterns.map(patternHost);
+  return hosts.length > 1 ? `${hosts.slice(0, -1).join(', ')} and ${hosts[hosts.length - 1]}` : hosts.join('');
+};
+const askSentence = (patterns) => `Chrome will ask to let Lot Sync download this car's photos from ${hostList(patterns)}.`;
+
+// Asks Chrome, in one request, for every server this car's photos sit on
+// that Lot Sync can't download from yet. It runs first in a click handler,
+// before anything else is awaited: Chrome shows its prompt only during the
+// salesperson's click, and the click stops counting after a few seconds of
+// waiting. Everything it needs is in memory. again: also a server refused
+// earlier (the Allow photos button). Resolves true when nothing is missing.
+async function askForPhotos(urls = photoList(), { again = false } = {}) {
+  const patterns = neededPatterns(urls, { manifestHosts: MANIFEST_HOSTS, granted: grantedOrigins }).filter((p) => again || !refusedPhotoServers.has(p));
+  if (!patterns.length) return true;
+  setStatus(askSentence(patterns));
+  photoPromptOpen = true;
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins: patterns });
+  } catch (e) {
+    setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
+    return false;
+  } finally {
+    photoPromptOpen = false;
+  }
+  await refreshGranted();
+  for (const p of patterns) {
+    if (granted) refusedPhotoServers.delete(p);
+    else refusedPhotoServers.add(p);
+  }
+  setStatus('');
+  return granted;
+}
+
+// After the Allow photos button: a yes attaches the photos from that server
+// that were left out of the form; a no leaves things as they are.
+async function afterAllowPhotos(pattern, granted) {
+  const host = patternHost(pattern);
+  if (!granted) {
+    if (!$('status').textContent) setStatus(`Photos from ${host} were not allowed.`, 'error');
+    return render();
+  }
+  setStatus(`Photos from ${host} are allowed.`);
+  const left = state.step === 'publish' && state.photos && state.fbTabId ? state.photos.failed.filter((f) => patternCovers(pattern, f.url)).map((f) => f.url) : [];
+  if (left.length) return attachPhotos(left);
+  return render();
+}
+
 // ---------- the flow ----------
 
 async function startFlow(req) {
@@ -178,12 +254,13 @@ async function startFlow(req) {
   state.windowId = req.windowId || null;
   state.queueMode = Boolean(req.queue);
   await loadSaved();
+  await refreshGranted(); // current before canAutoOpen below looks at the photo servers
   state.step = 'checking';
   setStatus('');
   render();
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
 
-  const fresh = await fetchVehicleDetails(state.dealerTabId, state.vin);
+  const fresh = await fetchVehicleDetails(state.dealerTabId, state.vin, { url: state.snapshotVehicles[state.vin]?.url });
   if (!fresh.ok) return block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok) return block(check.message, 'check-' + check.assessment.decision);
@@ -218,6 +295,8 @@ function canAutoOpen() {
   if (state.vinCheck && state.vinCheck.local && !state.vinCheck.local.ok) return false;
   const blockers = currentListing().missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
   if (blockers.length) return false;
+  // Chrome asks for a new photo server only from a click: the car waits for Open the Marketplace form
+  if (photoPatterns().some((p) => !refusedPhotoServers.has(p))) return false;
   return !dailyCap().reached;
 }
 
@@ -496,10 +575,24 @@ async function runProbe() {
   await saveFlow();
 }
 
-async function attachPhotos() {
+// only: photos to try again (after Allow photos), added to what is already
+// attached; otherwise the car's photos up to the form's limit.
+async function attachPhotos(only = null) {
   const limit = (state.fill && state.fill.photoLimit && state.fill.photoLimit.value) || state.map.photoLimitDefault;
-  const urls = state.listing.photos.slice(0, limit);
-  state.photos = { total: state.listing.photos.length, limit, verified: Boolean(state.fill && state.fill.photoLimit && state.fill.photoLimit.verified), attached: 0, failed: [], done: false, error: null };
+  let urls = state.listing.photos.slice(0, limit);
+  if (only && state.photos) {
+    urls = urls.filter((u) => only.includes(u));
+    Object.assign(state.photos, { failed: state.photos.failed.filter((f) => !urls.includes(f.url)), done: false, error: null });
+  } else {
+    state.photos = { total: state.listing.photos.length, limit, verified: Boolean(state.fill && state.fill.photoLimit && state.fill.photoLimit.verified), attached: 0, failed: [], done: false, error: null };
+  }
+  // A server the salesperson said no to is not downloaded from: its photos
+  // are recorded as failed like any other, and the photos section names the
+  // server with a button that asks again.
+  const refused = photoPatterns(urls).filter((p) => refusedPhotoServers.has(p));
+  const isRefused = (u) => refused.some((p) => patternCovers(p, u));
+  for (const url of urls.filter(isRefused)) state.photos.failed.push({ url, error: 'not allowed in Chrome', refused: true });
+  urls = urls.filter((u) => !isRefused(u));
   render();
   for (let i = 0; i < urls.length && !state.photos.error; i += 4) {
     const batch = urls.slice(i, i + 4);
@@ -603,7 +696,10 @@ async function checkVinOnline() {
 }
 
 async function downloadPhotos() {
-  const urls = state.listing ? state.listing.photos : state.vehicle.photos;
+  const all = photoList();
+  // as when attaching: nothing from a server the salesperson said no to
+  const refused = photoPatterns(all).filter((p) => refusedPhotoServers.has(p));
+  const urls = all.filter((u) => !refused.some((p) => patternCovers(p, u)));
   setStatus(`Downloading ${urls.length} photos…`);
   let n = 0;
   for (let i = 0; i < urls.length; i += 4) {
@@ -620,7 +716,9 @@ async function downloadPhotos() {
       await sleep(150);
     }
   }
-  setStatus(`${n} of ${urls.length} photos downloaded to your Downloads folder.`);
+  const left = all.length - urls.length;
+  const note = left ? ` Photos from ${hostList(refused)} were not allowed, so ${left === 1 ? 'one was' : `${left} were`} not downloaded.` : '';
+  setStatus(`${n} of ${all.length} photos downloaded to your Downloads folder.${note}`);
 }
 
 // ---------- rendering ----------
@@ -763,6 +861,7 @@ function viewReview() {
     ${capHtml(cap)}
     <button type="button" class="primary wide" id="openForm" ${cap.reached ? 'disabled' : ''}>Open the Marketplace form</button>
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
+    ${photoServersHtml()}
     <button type="button" class="plain wide" id="checkForm" ${cap.reached ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
     <p class="hint">For the first run: the panel reports which fields it can find on the page, without filling anything. You can fill it in from there.</p>
   </section>`;
@@ -785,6 +884,7 @@ function viewProbe() {
     <p class="hint">Photo upload: ${p.fileInputs ?? '?'} file input(s) on the page · limit ${esc(limit)}${p.photoText ? ` · the page says: "${esc(p.photoText)}"` : ''}</p>
     <details><summary>Controls on the page (${controls.length})</summary><ul class="list">${controls.map((c) => `<li>${esc(c.tag)}${c.type ? '[' + esc(c.type) + ']' : ''}${c.role ? '[' + esc(c.role) + ']' : ''}: "${esc(c.name)}"</li>`).join('')}</ul></details>
   </section>
+  ${photoServersHtml()}
   <div class="actions">
     <button type="button" class="primary" id="fillNow" ${found.length ? '' : 'disabled'}>Fill it in now</button>
     <button type="button" class="plain" id="probeAgain">Check again</button>
@@ -801,12 +901,39 @@ function copyBtn(text) {
   return `<button type="button" class="copy" data-copy="${esc(text)}">Copy</button>`;
 }
 
+const allowButton = (pattern) => `<button type="button" class="plain" data-allow-photos="${esc(pattern)}">Allow photos from ${esc(patternHost(pattern))}</button>`;
+
+// The servers of the photos that didn't come which Lot Sync still may not download from.
+const blockedPatterns = () => (state.photos ? photoPatterns(state.photos.failed.map((f) => f.url)) : []);
+
+// Said before the click that asks: which servers Chrome's prompt will name,
+// and the ones refused earlier, which that click doesn't ask about again.
+// except: servers the photos section already speaks about.
+function photoServersHtml(except = []) {
+  const needed = photoPatterns().filter((p) => !except.includes(p));
+  const toAsk = needed.filter((p) => !refusedPhotoServers.has(p));
+  let html = toAsk.length ? `<p class="hint" id="photoAsk">${esc(askSentence(toAsk))}</p>` : '';
+  for (const p of needed.filter((x) => refusedPhotoServers.has(x))) {
+    html += `<div class="banner warn">Photos from ${esc(patternHost(p))} were not allowed, so they won't be attached. ${allowButton(p)}</div>`;
+  }
+  return html;
+}
+
 function photosHtml() {
   const p = state.photos;
   if (!p) return '<div id="photos">Preparing photos…</div>';
   const limitNote = p.total > p.limit ? ` (the form takes ${p.limit}${p.verified ? '' : ', unverified'}; the first ${p.limit} were used)` : '';
   let html = `<div id="photos" class="${p.done ? 'done' : ''}">${p.attached} of ${Math.min(p.total, p.limit)} attached${p.done ? '' : '…'}${limitNote}</div>`;
-  if (p.failed.length) html += `<p class="hint">${p.failed.length} couldn't be downloaded.</p>`;
+  const blocked = blockedPatterns();
+  const others = p.failed.filter((f) => !blocked.some((b) => patternCovers(b, f.url))).length;
+  if (others) html += `<p class="hint">${others} couldn't be downloaded.</p>`;
+  for (const pattern of blocked) {
+    const mine = p.failed.filter((f) => patternCovers(pattern, f.url));
+    const host = esc(patternHost(pattern));
+    const what = mine.length === 1 ? 'the photo from it is' : `the ${mine.length} photos from it are`;
+    const why = mine.some((f) => f.refused) ? `Photos from ${host} were not allowed` : `Lot Sync has no permission to download photos from ${host} yet`;
+    html += `<div class="banner warn">${why}, so ${what} not attached. ${allowButton(pattern)}</div>`;
+  }
   if (p.error) html += `<div class="banner warn">${esc(p.error)} Use <b>Download photos</b> and add them by hand.</div>`;
   return html;
 }
@@ -847,7 +974,7 @@ function viewPublish() {
   ${f.blocked.length ? `<section class="highlight"><h3>Couldn't fill <span class="pill bad">${f.blocked.length}</span></h3><ul class="list">${f.blocked.map((x) => `<li><b>${esc(x.label)}</b>${x.value ? ': ' + esc(x.value).slice(0, 80) + copyBtn(x.value) : ''} <span class="why">${esc(x.reason)}</span>${
     x.candidates && x.candidates.length ? `<div class="why">Similar controls on the page: ${x.candidates.map((c) => `${esc(c.tag)}${c.role ? '[' + esc(c.role) + ']' : ''}${c.type ? '[' + esc(c.type) + ']' : ''}${c.haspopup ? '[popup ' + esc(c.haspopup) + ']' : ''}${c.editable ? '[editable]' : ''} "${esc(c.name || c.near)}"`).join('; ')}</div>` : ''
   }</li>`).join('')}</ul><p class="hint">Copy the report (Copy report on the dry run, or this list) and send it to whoever maintains formMap.js.</p></section>` : ''}
-  <section><h3>Photos</h3>${photosHtml()}
+  <section><h3>Photos</h3>${photosHtml()}${photoServersHtml(blockedPatterns())}
     <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
   </section>
   <section>${detect}
@@ -960,10 +1087,20 @@ async function onClick(ev) {
   const btn = ev.target.closest('button');
   if (!btn) return;
   if (btn.dataset.copy !== undefined) return copy(btn.dataset.copy);
+  if (photoPromptOpen) return undefined; // Chrome's prompt is open: its answer comes first
+  // Every Chrome prompt for photo servers is asked from here, first thing in
+  // the click (askForPhotos says why).
+  if (btn.dataset.allowPhotos !== undefined) {
+    const pattern = btn.dataset.allowPhotos;
+    const granted = await askForPhotos(photoList().filter((u) => patternCovers(pattern, u)), { again: true });
+    return afterAllowPhotos(pattern, granted);
+  }
   if (state.step === 'wizard' && (await handleWizardClick(btn.id, wizardCtx))) return undefined;
   if (state.step === 'upkeep' && (await handleUpkeepClick(btn.id, upkeepCtx))) return undefined;
   switch (btn.id) {
-    case 'openForm': return openForm();
+    case 'openForm':
+      await askForPhotos();
+      return openForm();
     case 'checkForm': return openForm({ probeOnly: true });
     case 'checkVinOnline': return checkVinOnline();
     case 'guessColors': {
@@ -975,7 +1112,9 @@ async function onClick(ev) {
       render();
       return saveFlow();
     }
-    case 'fillNow': return runFill();
+    case 'fillNow':
+      await askForPhotos();
+      return runFill();
     case 'probeAgain': return runProbe();
     case 'copyReport': return copy(JSON.stringify(state.probe, null, 2));
     case 'backToReview':
@@ -996,8 +1135,12 @@ async function onClick(ev) {
       render();
       return saveFlow();
     case 'copyDescription': return copy(state.description);
-    case 'fillAgain': return runFill();
-    case 'downloadPhotos': return downloadPhotos();
+    case 'fillAgain':
+      await askForPhotos();
+      return runFill();
+    case 'downloadPhotos':
+      await askForPhotos();
+      return downloadPhotos();
     case 'confirmPosted': return confirmPosted();
     case 'notPosted': return notPosted();
     case 'savedDraft': return savedDraft();
@@ -1110,6 +1253,10 @@ async function init() {
   $('panel').addEventListener('click', onClick);
   $('panel').addEventListener('input', onInput);
   $('panel').addEventListener('change', (ev) => { if (state.step === 'wizard') handleWizardChange(ev.target); });
+  await refreshGranted();
+  // a permission granted or removed elsewhere (the popup, chrome://extensions) counts from the next click
+  chrome.permissions.onAdded.addListener(refreshGranted);
+  chrome.permissions.onRemoved.addListener(refreshGranted);
   try {
     const win = await chrome.windows.getCurrent();
     panelWindowId = win && typeof win.id === 'number' ? win.id : null;

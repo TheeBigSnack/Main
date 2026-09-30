@@ -5,7 +5,9 @@
 // clicks it, and the sample Marketplace counts the clicks to prove it),
 // confirm, My listings, the Numbers tab, a queue of two, day 2 on the website,
 // the rescan's To do items, the price update and the take-down through the
-// side panel, the background rescan, and Reset.
+// side panel, the background rescan, and Reset. Then a second pass over the
+// other sample website, which publishes standard vehicle data on each car's
+// page: switching to it, the scan, a post, day 2 and the background rescan.
 //
 // Run:  node demo/drive.mjs
 // Needs the repo's Playwright (npm ci) and a Chromium: LOTSYNC_CHROME=<path>
@@ -40,6 +42,9 @@ page.on('response', (r) => { if (r.status() >= 400 && !/favicon\.ico$/.test(r.ur
 const F150 = '1FTSAMPL9LE000001';
 const RAV4 = '4T3SAMPL1ME000002';
 const CIVIC = '2HGSAMPL6KE000003';
+// Example Auto Outlet, the second sample website (demo/site-standard/inventory.js)
+const STD_CIVIC = '2HGSAMPL1KH000201';
+const STD_ACCORD = '1HGSAMPL3LA000202';
 
 const popup = page.frameLocator('#popupFrame');
 const panel = page.frameLocator('#panelFrame');
@@ -283,6 +288,104 @@ try {
   assert.equal(await publishClicks(), 0);
   assert.match(await text(page.locator('#scenario')), /day 1/);
   await shot(page, 'drive-14-reset.png');
+
+  // ---- 12. The other sample website: standard vehicle data on each car's own page ----
+  await page.selectOption('#siteChoice', 'standard');
+  await page.locator('#siteNote').filter({ hasText: /the sandbox was reset/ }).waitFor({ timeout: 30000 });
+  await waitReady();
+  assert.match(await text(page.locator('#siteNote')), /Both sample websites share this page's address/);
+  assert.match(await text(page.locator('#url')), /\/demo\/site-standard\/index\.html#\/used-vehicles\/$/);
+  assert.equal(await publishClicks(), 0);
+  await tab(1).locator('text=Example Auto Outlet is not a real dealership').waitFor();
+  await openPopup();
+  await popup.locator('#scan').click();
+  await popup.locator('.banner.info').waitFor({ timeout: 30000 });
+  // six ready; the Malibu (its markup price is not the one the page shows) and the Wrangler (no photos) not ready;
+  // the Outback (12 miles) needs a look, and the trade-in trailer is either left out or held there too
+  const stdMeta = await text(popup.locator('.meta'));
+  const trailerKept = /^Last scan .* · 10 used cars/.test(stdMeta);
+  assert.match(stdMeta, /(9|10) used cars · 6 ready to post/);
+  assert.equal(await text(popupTab('ready').locator('.count')), '6');
+  assert.equal(await text(popupTab('notReady').locator('.count')), '2');
+  assert.equal(await text(popupTab('review').locator('.count')), trailerKept ? '2' : '1');
+  await popupTab('ready').click();
+  const stdReady = await text(popup.locator('.rows'));
+  for (const name of ['2018 Ford Escape SE', '2019 Ford F-150 XLT', '2019 Honda Civic EX', '2020 Honda Accord Sport', '2021 Kia Sorento LX', '2022 Toyota RAV4 XLE']) assert.ok(stdReady.includes(name), `${name} is ready to post`);
+  assert.doesNotMatch(stdReady, /Malibu|Trailer|Telluride|Outback/);
+  await popupTab('notReady').click();
+  const stdNotReady = await text(popup.locator('.panel'));
+  assert.match(stdNotReady, /2017 Chevrolet Malibu LT[\s\S]*No price on the website/);
+  assert.doesNotMatch(stdNotReady, /14,995/, 'the markup price the page does not show is never used');
+  await shot(page, 'drive-15-standard-scanned.png');
+
+  // ---- 13. Post the Civic from its own page; the person publishes ----
+  await popupTab('ready').click();
+  await popup.locator(`button[data-action="openPost"][data-vin="${STD_CIVIC}"]`).click();
+  await popup.locator('#status').filter({ hasText: /side panel/i }).waitFor();
+  await panel.locator('#openForm').waitFor({ timeout: 20000 });
+  assert.match(await text(panel.locator('#vehicle')), /2019 Honda Civic EX[\s\S]*\$19,995/);
+  const stdDraft = await panel.locator('#description').inputValue();
+  assert.match(stdDraft, /^2019 Honda Civic EX with 41,230 miles\./);
+  assert.match(stdDraft, /I'm Alex, sales consultant at Example Auto Outlet\./);
+  assert.match(stdDraft, /Tax, title and registration are extra\./);
+  assert.match(stdDraft, /This Civic EX has the 1\.5L Turbo 4-Cylinder, a CVT and a sunroof\./, "the car's own write-up is kept");
+  assert.match(await text(panel.locator('#checks')), /All checks passed/);
+  assert.match(await text(panel.locator('#panel')), /Location[\s\S]*45505/);
+  await panel.locator('#openForm').click();
+  const stdForm = await tabFrame(2);
+  await panel.locator('#confirmPosted').waitFor({ timeout: 40000 });
+  await panel.locator('#photos.done').waitFor({ timeout: 40000 });
+  const stdFields = await stdForm.evaluate(() => {
+    const v = (id) => document.getElementById(id).value;
+    return { year: document.getElementById('year').dataset.value, make: v('make'), model: v('model'), vin: v('vin'), mileage: v('mileage'), price: v('price'), location: v('location'), photos: document.getElementById('photoCount').textContent };
+  });
+  assert.deepEqual(stdFields, { year: '2019', make: 'Honda', model: 'Civic EX', vin: STD_CIVIC, mileage: '41230', price: '19,995', location: 'Springfield, Ohio', photos: '3 photos' });
+  assert.match(await text(panel.locator('#fillResults')), /Filled in\s*17/);
+  assert.equal(await publishClicks(), 0, 'the extension must not publish');
+  await tab(2).locator('#publish').click(); // the person
+  await panel.locator('#detected').waitFor({ timeout: 15000 });
+  await panel.locator('#confirmPosted').click();
+  await panel.locator('#done').waitFor();
+  assert.match(await text(panel.locator('#done')), /Recorded: 2019 Honda Civic EX at \$19,995/);
+  assert.equal(await publishClicks(), 1);
+  await shot(page, 'drive-16-standard-posted.png');
+
+  // ---- 14. The Accord was listed by hand: Mark posted ----
+  await openPopup();
+  await popupTab('ready').click();
+  await popup.locator(`button[data-action="post"][data-vin="${STD_ACCORD}"]`).click();
+  await popup.locator(`button[data-action="unpost"][data-vin="${STD_ACCORD}"]`).waitFor();
+
+  // ---- 15. Day 2: the older listing sells (its page is gone), the newer one drops its price ----
+  await page.click('#day2');
+  assert.match(await text(page.locator('#scenario')), /the 2019 Honda Civic EX sold, the 2020 Honda Accord Sport dropped \$1,000, the 2016 Jeep Wrangler Sport got photos, and a 2021 Hyundai Tucson SEL arrived/);
+  await openPopup();
+  await popup.locator('#scan').click();
+  await popup.locator('h3').first().waitFor({ timeout: 30000 });
+  const stdTodo = await text(popup.locator('.panel'));
+  assert.match(stdTodo, /Take down\s*1[\s\S]*2019 Honda Civic EX[\s\S]*Gone from the website/);
+  assert.match(stdTodo, /Update price\s*1[\s\S]*2020 Honda Accord Sport[\s\S]*\$23,495 → \$22,495/);
+  assert.match(stdTodo, /New arrivals\s*1[\s\S]*2021 Hyundai Tucson SEL/);
+  assert.match(stdTodo, /Just became ready\s*1[\s\S]*2016 Jeep Wrangler Sport/);
+  assert.equal(await text(popupTab('todo').locator('.count')), '2');
+  await page.waitForFunction(() => document.getElementById('badge').textContent === '2', null, { timeout: 5000 });
+  await shot(page, 'drive-17-standard-day2-todo.png', { fullPage: true });
+
+  // ---- 16. The background rescan reads the pages from the service worker ----
+  await page.click('#rescanNow');
+  await page.locator('#rescanStatus').filter({ hasText: /Background rescan done/ }).waitFor({ timeout: 30000 });
+  assert.match(await text(page.locator('#rescanStatus')), new RegExp(`${trailerKept ? 10 : 9} used cars read, 2 to-do items`));
+  assert.equal(await publishClicks(), 1, "still only the person's one click");
+
+  // ---- 17. Reset keeps the chosen website; switching back starts over on the first one ----
+  await page.click('#reset');
+  await waitReady();
+  assert.match(await text(page.locator('#url')), /\/demo\/site-standard\/index\.html#\/used-vehicles\/$/);
+  await page.selectOption('#siteChoice', 'service');
+  await page.locator('#siteNote').filter({ hasText: /Now showing Example Motors/ }).waitFor({ timeout: 30000 });
+  await waitReady();
+  assert.match(await text(page.locator('#url')), /\/demo\/site\/index\.html$/);
+  assert.equal(await text(popup.locator('#scan')), 'Scan website');
 
   assert.deepEqual(errors, [], 'no console errors, page errors or failed requests');
   console.log('Test drive passed. Screenshots in demo/screenshots/');

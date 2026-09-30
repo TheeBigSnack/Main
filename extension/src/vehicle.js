@@ -16,7 +16,7 @@ export const VEHICLE_FIELDS = Object.freeze([
   'name', // "year make model trim": every list, the posted registry (rescan.js markPosted), the description
 
   // --- the pre-owned gate (classify.js checkPreOwned): three signs must agree ---
-  'inventoryType', // "Used" / "Certified Used" / "New": sign 1; the rescan flags a retype
+  'inventoryType', // "Used" / "Certified Used" / "New" (the schema.org reader adds "Damaged" / "Refurbished", which the gate sends to Needs a look): sign 1; the rescan flags a retype
   'siteTitle', // the website's own title for the car ("Pre-Owned 2019 ..."): sign 2 (titleConditionWords); branded-title words (listingData.js)
   'readableType', // "Pre-Owned" / "Certified Pre-Owned" / "New": backs up sign 2 when the title has no condition word
   'url', // the car's page on the website: the popup, the panel and upkeep link to it; the rescan keeps it

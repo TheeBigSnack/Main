@@ -96,9 +96,9 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 | `alarms` | Re-reads a dealership website the person allowed every 3 hours while Chrome is open, to keep the to-do count on the icon current; it never touches Facebook. |
 | `notifications` | One desktop notification when a background rescan adds to the person's to-do list; off in Settings if they prefer. |
 | `https://www.facebook.com/marketplace/*` | Fills the vehicle listing form on the create-listing page the person opened, fills the new price on the edit page they opened, and notices when the tab shows the published listing's address. No other Facebook page is read. |
-| `https://vehicle-images.carscommerce.inc/*` | Downloads the car's own photos from the dealership's image host so they can be attached to the form. (PLAN.md: asking for the photo host at post time instead, and dropping this static host, needs the owner's OK before the submission.) |
+| `https://vehicle-images.carscommerce.inc/*` | Downloads the car's own photos from the dealership's image host so they can be attached to the form. (Any other photo server is requested at post time from the person's click, as the owner approved on 2026-09-29; this static host stays until the Web Store release.) |
 | `https://vpic.nhtsa.dot.gov/*` (optional) | Requested when the person clicks "Check with NHTSA": the free government VIN decode, compared with what the website says. |
-| `https://*/*` (optional) | Never requested as such: the set-up wizard requests only the chosen dealership's website origin and its inventory-service origin, for background rescans. |
+| `https://*/*` (optional) | Never requested as such. The set-up wizard requests only the chosen dealership's website origin and its inventory-service origin, for background rescans; the side panel requests only the https servers the car being posted keeps its photos on, from the person's click on Open the Marketplace form, Fill it in now, Fill again or Download photos, so those photos can be attached to the form. |
 
 ## Privacy practices
 

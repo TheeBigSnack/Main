@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { websitePrice, conditionWordFromUrl, normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
+import { trimRecord } from '../extension/adapters/dealerInspire.js';
 import { assessVehicle, readCondition, titleConditionWords, DECISION } from '../extension/src/classify.js';
 import { fixtures, vehicle, raw, MY_STORE } from './helpers.js';
 
@@ -157,4 +160,110 @@ test('sale pending and in-transit used cars are not ready', () => {
 
 test('missing VIN is ignored', () => {
   assert.equal(normalizeVehicle({ type: 'Used' }), null);
+});
+
+// ---------- signs any website can carry (schema.org condition values) ----------
+
+test('condition words: schema.org condition values, however they are written', () => {
+  for (const used of ['https://schema.org/UsedCondition', 'http://schema.org/UsedCondition', 'https://www.schema.org/UsedCondition/', 'schema:UsedCondition', 'UsedCondition', ' usedcondition ']) {
+    assert.equal(readCondition(used), 'pre-owned', used);
+  }
+  assert.equal(readCondition('https://schema.org/NewCondition'), 'new');
+  assert.equal(readCondition('NewCondition'), 'new');
+  assert.equal(readCondition('https://schema.org/DamagedCondition'), 'damaged');
+  assert.equal(readCondition('schema:RefurbishedCondition'), 'refurbished');
+  // the website's own words for them
+  assert.equal(readCondition('Damaged'), 'damaged');
+  assert.equal(readCondition('Used - Damaged'), 'damaged', 'damaged is read before used');
+  assert.equal(readCondition('Refurbished'), 'refurbished');
+  // not a schema.org value, and not a condition word either
+  assert.equal(readCondition('https://example.test/UsedCondition'), 'unknown');
+  assert.equal(readCondition('https://schema.org/InStock'), 'unknown');
+  // demo still wins, and the old words read as before
+  assert.equal(readCondition('Demo'), 'demo');
+  assert.equal(readCondition('Certified Used'), 'pre-owned');
+  assert.equal(readCondition('New'), 'new');
+});
+
+test('damaged or refurbished goes to a person, never to Ready, whatever the other signs say', () => {
+  const ready = vehicle('usedNormal'); // all three signs and Carfax say pre-owned
+  assert.equal(assessVehicle(ready, MY_STORE).decision, DECISION.READY);
+  for (const [word, Word] of [['damaged', 'Damaged'], ['refurbished', 'Refurbished']]) {
+    for (const patch of [{ inventoryType: Word }, { inventoryType: `https://schema.org/${Word}Condition` }, { siteTitle: `${Word} 2019 Ram 1500 Classic Express` }, { urlConditionWord: word }]) {
+      const a = assessVehicle({ ...ready, ...patch }, MY_STORE);
+      assert.equal(a.decision, DECISION.REVIEW, JSON.stringify(patch));
+      assert.match(a.reason, new RegExp(`^The website lists it as ${word} \\(`));
+    }
+  }
+  assert.equal(assessVehicle({ ...ready, inventoryType: 'Damaged' }, MY_STORE).reason, 'The website lists it as damaged (inventory type). Check its condition before posting.');
+  assert.equal(
+    assessVehicle({ ...ready, inventoryType: 'https://schema.org/DamagedCondition', siteTitle: 'Refurbished 2019 Ram 1500 Classic Express' }, MY_STORE).reason,
+    'The website lists it as damaged (inventory type) and refurbished (title). Check its condition before posting.'
+  );
+  // a new car stays skipped and a demo stays a demo, damaged or not
+  assert.equal(assessVehicle({ ...vehicle('newNormal'), siteTitle: 'Damaged 2027 Jeep Grand Cherokee Limited' }, MY_STORE).decision, DECISION.SKIP);
+  assert.equal(assessVehicle({ ...vehicle('newNormal'), inventoryType: 'Damaged', isDemo: true }, MY_STORE).decision, DECISION.SKIP);
+});
+
+test('a schema.org condition is one sign like any other: it supports, it never admits a car on its own', () => {
+  const used = vehicle('usedNormal');
+  // alone, with no other sign and no Carfax: a person checks
+  const lonely = { ...used, inventoryType: 'https://schema.org/UsedCondition', urlConditionWord: null, siteTitle: '2019 Ram 1500 Classic Express', readableType: null, carfaxUrl: null };
+  const a = assessVehicle(lonely, MY_STORE);
+  assert.equal(a.decision, DECISION.REVIEW);
+  assert.equal(a.reason, "Only one sign it's pre-owned (inventory type), and no Carfax report.");
+  // beside the other signs it counts exactly as "Used" does
+  const verdict = (a) => [a.decision, a.reason, a.notes, a.checks.map((c) => c.says)];
+  assert.deepEqual(verdict(assessVehicle({ ...used, inventoryType: 'https://schema.org/UsedCondition' }, MY_STORE)), verdict(assessVehicle(used, MY_STORE)));
+  // and against them it is a disagreement, in either direction
+  assert.match(assessVehicle({ ...used, inventoryType: 'https://schema.org/NewCondition' }, MY_STORE).reason, /disagrees with itself/);
+  assert.match(assessVehicle({ ...used, inventoryType: 'UsedCondition', urlConditionWord: 'new', siteTitle: null, readableType: null }, MY_STORE).reason, /disagrees with itself/);
+});
+
+// ---------- every decision the gate made before it learned any of that ----------
+
+// Each Dealer Inspire record and each sandbox car, as it is and with one
+// sign taken away at a time, under the lot's own store and under none. The
+// same generator produced test/fixtures/structured/gate-before.json from
+// classify.js as it was on 2026-09-29, before schema.org condition values
+// and the damaged and refurbished words; nothing a Dealer Inspire website
+// says may be decided differently since.
+const VARIANTS = {
+  asIs: {},
+  noCarfax: { carfaxUrl: null },
+  noAddressWord: { urlConditionWord: null },
+  noTitle: { siteTitle: null, readableType: null },
+  noType: { inventoryType: null },
+  demo: { isDemo: true },
+};
+
+function gateCases() {
+  const ctx = vm.createContext({ window: {} });
+  vm.runInContext(readFileSync(new URL('../demo/site/inventory.js', import.meta.url), 'utf8'), ctx);
+  const inventory = ctx.window.LOT_SYNC_INVENTORY;
+  const lots = [
+    ['records', MY_STORE, Object.entries(fixtures).filter(([k]) => k !== '_about').map(([k, r]) => [k, normalizeVehicle(r)])],
+    ...['day1', 'day2'].map((day) => [day, { myStores: ['Example Motors Springfield'] }, inventory.records(day, 'http://sandbox.test/demo/site/').map((r) => [r.vin, normalizeVehicle(trimRecord(r, { fullRecords: true }))])]),
+  ];
+  const out = {};
+  for (const [lot, settings, vehicles] of lots) {
+    for (const [id, v] of vehicles) {
+      for (const [variant, patch] of Object.entries(VARIANTS)) {
+        const a = assessVehicle({ ...v, ...patch }, settings);
+        out[`${lot} ${id} ${variant}`] = { decision: a.decision, reason: a.reason, blockers: a.blockers.map((b) => b.text), notes: a.notes, says: a.checks.map((c) => c.says) };
+      }
+      out[`${lot} ${id} anyStore`] = assessVehicle(v, {}).decision;
+    }
+  }
+  return out;
+}
+
+test('regression: every Dealer Inspire record and every sandbox car is decided exactly as before, for the same reason', () => {
+  const before = JSON.parse(readFileSync(new URL('./fixtures/structured/gate-before.json', import.meta.url), 'utf8'));
+  const now = gateCases();
+  assert.deepEqual(Object.keys(now), Object.keys(before), 'the same cases: records.json and the sandbox lot have not changed under the baseline');
+  for (const [key, then] of Object.entries(before)) assert.deepEqual(now[key], then, key);
+  // the baseline covers every decision the gate can make
+  const decisions = new Set(Object.values(before).map((c) => (typeof c === 'string' ? c : c.decision)));
+  assert.deepEqual([...decisions].sort(), ['not-ready', 'ready', 'review', 'skip']);
 });

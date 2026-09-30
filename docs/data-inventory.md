@@ -8,7 +8,7 @@ The privacy texts are checked against this page: `legal/privacy-policy.md`, `leg
 
 ## The short version
 
-- **The extension as shipped** (`extension/src/accountConfig.js` empty) keeps everything in the person's own browser. What leaves it: reads of the dealership's website, the car's photos from the website's image host, the VIN to NHTSA when the person clicks for it, and, only with the description writer turned on in Settings, the car's facts to the rewrite service.
+- **The extension as shipped** (`extension/src/accountConfig.js` empty) keeps everything in the person's own browser. What leaves it: reads of the dealership's website, the car's photos from the servers the website keeps them on, the VIN to NHTSA when the person clicks for it, and, only with the description writer turned on in Settings, the car's facts to the rewrite service.
 - **With Lot Sync accounts** (the owner's Supabase project, `supabase/README.md`), the person's email goes to Supabase to sign in, and their posted list, post attempts, to-do items and scan counts sync to the dealership's rows in the database, where every member of that dealership can read them.
 - **Anthropic** receives the facts listed under "Exactly what reaches Anthropic" and up to four photo addresses, only with the description writer on. The VIN and the price are not among the fields, and nothing about the person but the sign-off (name and role).
 - **Stripe** receives the dealership's name and website address and one manager's email, and collects the card itself. Lot Sync never sees a card number.

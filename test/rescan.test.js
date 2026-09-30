@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from '../extension/src/rescan.js';
-import { snapshot, fixtures, vehicle } from './helpers.js';
+import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError } from './helpers.js';
+import schemaOrg from '../extension/adapters/schemaOrg.js';
+import { scanWithSearch } from '../extension/src/scanRunner.js';
+import { withDefaults } from '../extension/src/settings.js';
 
 const VIN = {
   ram: fixtures.usedNormal.vin, // ready, $27,163
@@ -185,4 +188,101 @@ test('posted-listing bookkeeping', () => {
   assert.equal(posted[VIN.ram].price, 26163);
   posted = markTakenDown(posted, VIN.ram);
   assert.deepEqual(posted, {});
+});
+
+// ---------- the same rules for a website read from its own pages ----------
+// (extension/adapters/schemaOrg.js: a missing car is checked at the page the
+// last scan kept for it, which scanWithSearch hands over as confirmUrls)
+
+const STD = { kind: 'schemaOrg', origin: STANDARD_ORIGIN, listUrl: STANDARD_ORIGIN + '/used-vehicles/' };
+const STD_SITE = { origin: STANDARD_ORIGIN, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+async function standardRescan(cars, today, change = () => {}) {
+  const settings = withDefaults({}, STD_SITE);
+  const first = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars, perPage: 10 })), site: STD_SITE, settings, options: schemaOrg.scanOptions(STD) });
+  assert.equal(first.ok, true);
+  const site = standardSite({ cars: today, perPage: 10 });
+  change(site);
+  const seen = [];
+  const spy = { ...schemaOrg, scan: (search, options) => { seen.push(options); return schemaOrg.scan(search, options); } };
+  const out = await scanWithSearch({ adapter: spy, search: fakeSiteSearch(site), site: STD_SITE, settings, prevSnapshot: first.snapshot, options: schemaOrg.scanOptions(STD) });
+  assert.equal(out.ok, true);
+  return { first, out, options: seen[0] };
+}
+
+test('a website read from its pages: 11 of 20 cars gone at once, each page answering 404, marks nothing gone', async () => {
+  const cars = standardCars(20);
+  const { first, out, options } = await standardRescan(cars, cars.slice(11));
+  assert.deepEqual(options.confirmUrls, Object.fromEntries(cars.map((c) => [c.vin, STANDARD_ORIGIN + c.path])), 'every car\'s last page, from the last snapshot');
+  assert.equal(options.lastSeen, first.snapshot.vehicles);
+  assert.equal(out.res.confirm.notFound.length, 11, 'each page said 404');
+  assert.equal(out.diff.unreliable, true);
+  assert.deepEqual(out.diff.takeDown, []);
+  assert.equal(out.diff.needsALook.length, 11);
+  assert.match(out.diff.warnings.join(' '), /11 of 20 cars disappeared at once/);
+});
+
+test('a website read from its pages: half the lot gone, each page confirming it, is taken down', async () => {
+  const cars = standardCars(20);
+  const { out } = await standardRescan(cars, cars.slice(10));
+  assert.equal(out.diff.unreliable, false);
+  assert.equal(out.diff.takeDown.length, 10);
+  assert.ok(out.diff.takeDown.every((t) => t.why === 'gone'));
+});
+
+test('a website read from its pages: a missing car whose page could not be checked is never marked gone', async () => {
+  const cars = standardCars(12);
+  for (const status of [403, 429, 500]) {
+    const { out } = await standardRescan(cars, cars.slice(1), (site) => site.set(STANDARD_ORIGIN + cars[0].path, httpError(status)));
+    assert.match(out.res.confirm.error, new RegExp(String(status)));
+    assert.deepEqual(out.diff.takeDown, [], `HTTP ${status}`);
+    assert.deepEqual(out.diff.needsALook.map((n) => n.vin), [cars[0].vin]);
+    assert.match(out.diff.warnings.join(' '), /Couldn't double-check missing cars .*Nothing was marked as gone/);
+  }
+});
+
+// A list that names each car by its address and VIN only, as many do: the
+// price, the mileage and the photos are on the car's own page.
+function thinListSite(cars, broken = {}) {
+  const item = (c) => ({ '@type': 'Car', name: `Used ${c.year} ${c.make} ${c.model} ${c.trim}`, url: STANDARD_ORIGIN + c.path, vehicleIdentificationNumber: c.vin });
+  const list = { '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: cars.map((c, n) => ({ '@type': 'ListItem', position: n + 1, item: item(c) })) };
+  const site = standardSite({ cars, perPage: cars.length });
+  site.set(STD.listUrl, { ok: true, status: 200, contentType: 'text/html', text: `<!doctype html><html><head><title>Used</title><script type="application/ld+json">${JSON.stringify(list)}</script></head><body>${cars.map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ')}</body></html>` });
+  for (const [path, answer] of Object.entries(broken)) site.set(STANDARD_ORIGIN + path, answer);
+  return site;
+}
+const rescanOf = (site, prevSnapshot, posted = {}) => scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(site), site: STD_SITE, settings: withDefaults({}, STD_SITE), prevSnapshot, posted, options: schemaOrg.scanOptions(STD) });
+
+test('a website read from its pages: a car still listed whose page fails keeps its last reading, not the thinner list\'s', async () => {
+  const cars = standardCars(6);
+  const first = await rescanOf(thinListSite(cars), null);
+  assert.equal(first.snapshot.vehicles[cars[2].vin].decision, 'ready');
+  const bad = await rescanOf(thinListSite(cars, { [cars[2].path]: httpError(500) }), first.snapshot);
+  assert.equal(bad.ok, true);
+  assert.deepEqual(bad.res.unread, [cars[2].vin]);
+  assert.equal(bad.res.complete, false);
+  assert.equal(bad.res.confirm.error, null, 'a listed car is not missing, so its page is not asked for again');
+  assert.deepEqual(bad.snapshot.vehicles[cars[2].vin], first.snapshot.vehicles[cars[2].vin], 'the last reading stands');
+  assert.deepEqual([bad.diff.needsALook, bad.diff.priceUpdates, bad.diff.takeDown, bad.diff.newArrivals], [[], [], [], []], 'a bad server day puts nothing on the to-do list');
+  assert.equal(bad.diff.warnings[0], "One car's page could not be read this time, so that car shows what the last scan read.");
+  // the day after, the page answers again and is read as usual
+  const next = await rescanOf(thinListSite(cars), bad.snapshot);
+  assert.equal(next.res.unread, undefined);
+  assert.equal(next.res.complete, true);
+});
+
+test('a website read from its pages: a posted car sold on a bad server day is taken down once its page can be checked', async () => {
+  const cars = standardCars(12);
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(thinListSite(cars), null, posted);
+  const rest = cars.slice(1);
+  const bad = await rescanOf(thinListSite(rest, { [cars[0].path]: httpError(429) }), first.snapshot, posted);
+  assert.deepEqual(bad.diff.takeDown, []);
+  assert.deepEqual(bad.diff.needsALook.map((n) => n.vin), [cars[0].vin]);
+  assert.deepEqual(bad.snapshot.missingPages, { [cars[0].vin]: STANDARD_ORIGIN + cars[0].path }, 'the page it was last seen on is kept');
+  for (const day of [1, 2]) {
+    // its page is gone; still posted (nobody has taken the listing down yet), so it stays on Take down
+    const prev = day === 1 ? bad.snapshot : (await rescanOf(thinListSite(rest), bad.snapshot, posted)).snapshot;
+    const good = await rescanOf(thinListSite(rest), prev, posted);
+    assert.deepEqual(good.diff.takeDown.map((t) => [t.vin, t.why]), [[cars[0].vin, 'gone']], `rescan ${day} after the bad day`);
+  }
 });

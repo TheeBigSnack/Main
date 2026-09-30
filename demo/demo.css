@@ -21,15 +21,17 @@ button { font: inherit; cursor: pointer; }
 
 .top { background: #fff; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .banner { background: var(--warn-bg); color: var(--warn); font-weight: 700; text-align: center; padding: 7px 12px; border-bottom: 1px solid #f1dba8; }
-.bar { display: flex; align-items: center; gap: 14px; padding: 8px 14px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 14px; }
 .brand { font-weight: 800; font-size: 16px; white-space: nowrap; }
 .brand span { font-weight: 500; color: var(--muted); font-size: 13px; margin-left: 6px; }
-.scenario { flex: 1; color: var(--muted); font-size: 12px; min-width: 0; }
+.scenario { flex: 1 1 240px; color: var(--muted); font-size: 12px; min-width: 0; }
 .controls { display: flex; gap: 8px; align-items: center; }
 .controls button { border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 8px; padding: 7px 12px; white-space: nowrap; }
 .controls button.go { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .controls button.danger { border-color: var(--bad); color: var(--bad); }
 .controls button:disabled { opacity: 0.5; cursor: default; }
+.controls .site { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.controls select { font: inherit; font-size: 13px; color: var(--text); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .howto { padding: 0 14px 8px; }
 .howto summary { cursor: pointer; font-weight: 600; color: var(--muted); }
 .howto ol { margin: 6px 0 4px; padding-left: 22px; columns: 2; column-gap: 28px; }
@@ -76,7 +78,7 @@ button { font: inherit; cursor: pointer; }
 
 @media (prefers-color-scheme: dark) {
   :root { --bg: #101311; --chrome: #1f2320; --line: #2f3531; --text: #e9ece9; --muted: #a3aaa5; --accent: #4ade80; --warn-bg: #3a2c0c; --warn: #fbbf24; --bad: #fca5a5; }
-  .top, .browser, .sidepanel, .addressbar, .tabbtn.active, .popupHost, .controls button, .page { background: #161917; }
+  .top, .browser, .sidepanel, .addressbar, .tabbtn.active, .popupHost, .controls button, .controls select, .page { background: #161917; }
   .banner { border-color: #4b3a10; }
   .toast { background: #e9ece9; color: #161917; }
   .toast small { color: #5f6661; }

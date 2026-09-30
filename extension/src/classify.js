@@ -11,9 +11,14 @@
 //   Mileage is never used to call a car used: the test site has "New" units
 //   with 3,000-29,000 miles (demos/loaners that aren't flagged as such).
 //   When the signs disagree, or look off, the car goes to "needs a look".
+//   A website that marks a car damaged or refurbished (in its own words or
+//   with schema.org's DamagedCondition and RefurbishedCondition) sends it to
+//   "needs a look" too: a person checks what that means before it is posted.
 //
 // Ready check (only for cars that pass the gate): photos, a price, on the lot,
 // not sale-pending, and at the salesperson's own store.
+
+import { conditionFromSchemaOrg } from './normalize.js';
 
 export const DECISION = Object.freeze({
   READY: 'ready', // pre-owned and ready to post
@@ -25,12 +30,18 @@ export const DECISION = Object.freeze({
 export const LOW_MILES = 100;
 
 // What a condition word says. Only ever given short condition text
-// ("Used", "certified used", "Pre-Owned"), never a full title, so model names
-// like "New Beetle" can't be misread.
+// ("Used", "certified used", "Pre-Owned", or a schema.org condition value
+// such as "https://schema.org/UsedCondition"), never a full title, so model
+// names like "New Beetle" can't be misread. Damaged and refurbished are read
+// before used, so "Used - Damaged" is damaged.
 export function readCondition(text) {
   if (typeof text !== 'string' || !text.trim()) return 'unknown';
+  const schema = conditionFromSchemaOrg(text);
+  if (schema) return schema === 'used' ? 'pre-owned' : schema;
   const t = text.toLowerCase();
   if (/\b(demo|demonstrator|loaner|courtesy)\b/.test(t)) return 'demo';
+  if (/\bdamaged\b/.test(t)) return 'damaged';
+  if (/\brefurbished\b/.test(t)) return 'refurbished';
   if (/\b(pre-?\s?owned|used|certified|cpo)\b/.test(t)) return 'pre-owned';
   if (/\bnew\b/.test(t)) return 'new';
   return 'unknown';
@@ -71,6 +82,14 @@ export function checkPreOwned(v) {
   if (isNew.length && !preOwned.length) {
     if (v.carfaxUrl) notes.push('Has a Carfax report even though the website calls it new. If it is really used, fix its type in the inventory system.');
     return { verdict: 'new', reason: "New vehicle. Marketplace doesn't allow dealers to list new cars.", checks, notes };
+  }
+
+  // Damaged or refurbished never goes straight to Ready, whatever the other
+  // signs say: a person reads the car's page first.
+  const worn = ['damaged', 'refurbished'].filter((word) => saying(word).length);
+  if (worn.length) {
+    const said = worn.map((word) => `${word} (${saying(word).map((c) => c.label.toLowerCase()).join(', ')})`).join(' and ');
+    return { verdict: 'review', reason: `The website lists it as ${said}. Check its condition before posting.`, checks, notes };
   }
 
   if (isNew.length && preOwned.length) {

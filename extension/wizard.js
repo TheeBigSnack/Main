@@ -110,11 +110,11 @@ async function runScan(ctx) {
   wiz.error = '';
   ctx.render();
   const k = siteKeys(wiz.origin);
-  const data = await chrome.storage.local.get([k.snapshot, k.posted]);
+  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate]);
   let r;
   try {
     const tabId = await findDealerTab();
-    r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, snapshot: data[k.snapshot] || null, posted: data[k.posted] || {} });
+    r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, snapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, boilerplate: data[k.boilerplate] || [] });
   } catch (e) {
     r = { ok: false, message: TAB_GONE + ' (' + ((e && e.message) || e) + ')' };
   }

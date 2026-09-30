@@ -55,7 +55,7 @@ Click the Lot Sync icon, then **Settings**. The first line reads "Lot Sync <vers
 - **Ready to post**: pre-owned, at your store, with photos and a price.
 - **Not ready**: pre-owned cars at your store that are missing something a listing needs. They move to Ready to post on their own once the website has it.
 - **Other stores**: your group's cars at other rooftops, kept off your list. Change your store in Settings.
-- **Needs a look**: the website's details for the car do not add up (a used car showing 0 miles, signs that disagree). Fix them on the website, or ask whoever manages inventory, then scan again. Below it, "Skipped as new (never posted)" lists cars the website calls new, demo or loaner. They can never be posted with Lot Sync.
+- **Needs a look**: the website's details for the car do not add up (a used car showing 0 miles, signs that disagree), or the website lists it as damaged or refurbished. Fix them on the website, or ask whoever manages inventory, then scan again. Below it, "Skipped as new (never posted)" lists cars the website calls new, demo or loaner. They can never be posted with Lot Sync.
 - With automatic rescans on, Lot Sync re-reads the website every 3 hours while Chrome is open and puts your to-do count on its icon. It only reads the website then; it never touches Facebook on its own.
 
 ## Post one car
@@ -69,7 +69,9 @@ Click the Lot Sync icon, then **Settings**. The first line reads "Lot Sync <vers
    - **VIN check**: the VIN against what the website says. **Check with NHTSA (free government decoder)** fetches the government decode and lists every difference. It changes nothing by itself.
    - **Filled from your dealership's defaults**: **Vehicle condition** and **Title status**. **You fill in yourself** lists what Lot Sync leaves blank, for example the title of a car whose website text mentions rebuilt, salvage or a lien.
 4. The line "N of M posts today" is the daily cap. Click **Open the Marketplace form**. A new tab opens on Facebook's create-vehicle-listing page. Sign in if Facebook asks; Lot Sync never sees that. The fields fill in and the photos attach.
+   - The first time a car's photos sit on a server Lot Sync may not download from yet, the review screen says "Chrome will ask to let Lot Sync download this car's photos from [server]." When you click, Chrome's own prompt asks. Allow it once and Chrome remembers it for every car on that server. The form fills in either way.
 5. Back in the panel: **Filled in** lists each field as the form shows it, read back after filling. **Needs a click** lists a value that is in but wants a click on the form to confirm. **Couldn't fill** lists anything it could not do, with a **Copy** button per value. Under **Photos**: **Download photos**, **Fill again** and **Copy description**.
+   - If you said no to Chrome, **Photos** says which server was not allowed and that its photos are not attached, with an **Allow photos from [server]** button. It asks Chrome again; if you allow it, those photos attach to the open form. While the side panel stays open, Lot Sync doesn't ask about that server again unless you click that button.
 6. On Facebook, check every field, including **Vehicle condition** and **Title status**. Then click **Publish** yourself.
 7. The panel notices the listing page and shows "Looks like it posted". Click **It's posted, record it**. If it did not notice, paste the listing's address into **Listing link (optional)** first. If you closed the tab without publishing, click **It didn't post**; nothing is recorded.
 8. The car now shows under **My listings**, and every rescan watches it. Click **Post another car** to go on.
@@ -82,7 +84,7 @@ First run on a new machine: on the review screen, **Open the form and check fiel
 
 - On **Ready to post**, tick the cars you want, or tick **Select the next N** to take the first N from the top. The button reads **Post selected** until you tick, then **Post N cars**. Click it.
 - On **To do**, **Queue all N ready arrivals** queues the new arrivals that are ready.
-- The side panel takes the cars one at a time. A car that passes every check opens and fills the Marketplace form straight away. A car with a warning stops at the review screen so you see it.
+- The side panel takes the cars one at a time. A car that passes every check opens and fills the Marketplace form straight away. A car with a warning stops at the review screen so you see it. So does a car whose photos sit on a server Chrome has not been asked about yet: Chrome only asks when you click, so click **Open the Marketplace form**.
 - For each car: check the form and click **Publish** on Facebook. The panel notices the listing and loads the next car. If it did not notice, click **It's posted, next car**. Prefer drafts? Click Facebook's **Save draft**, then **Saved as draft, next car**. **Skip, next car** moves on without posting. A car the re-check blocks offers **Skip this car, next**.
 - The queue bar at the top of the panel: **Post next car**, **Pause**, **Resume**, **Skip this car**, **Stop queue**, and **Clear queue** when it is finished. In the popup, the Ready to post tab shows the same queue with **Continue in the side panel**, **Stop the queue** and **Clear**.
 - The queue survives closing the panel. It can never be longer than the day's remaining cap, and it pauses when the cap is reached. Posted cars stay recorded when a queue is stopped.
@@ -153,7 +155,7 @@ The panel lists it under **Couldn't fill**, with the value Lot Sync wanted to en
 2. **Send it** to support (`docs/support.md` says where and what else to include). Each fix is one line in the form map and comes back in the next zip.
 3. **Fill it by hand.** Click **Copy** next to the value, paste it into the field on Facebook, and check the field before you publish. **Needs a click** means the value is in but the form wants a click to confirm it; click it.
 
-Photos that would not attach: click **Download photos**, then add them from your Downloads folder on the form. If Facebook is set to another language, the panel says so: switch Facebook to English (Facebook's Settings, Language), then click **Fill again**.
+Photos that would not attach: click **Download photos**, then add them from your Downloads folder on the form. If **Photos** says a server was not allowed, click **Allow photos from [server]** first: without that permission Lot Sync can't download those photos either. If Facebook is set to another language, the panel says so: switch Facebook to English (Facebook's Settings, Language), then click **Fill again**.
 
 ## When Facebook restored a draft
 
@@ -173,10 +175,11 @@ Before a first day of posting, delete any old Marketplace drafts.
 
 ## When Chrome asks for a permission
 
-Chrome only asks because you clicked something in Lot Sync. Three cases:
+Chrome only asks because you clicked something in Lot Sync. Four cases:
 
 - **Allow automatic rescans** (in set-up, on the To do tab or in Settings): permission to read your dealership's website and its inventory service in the background, for the 3-hourly rescans. Allow it, or decline and scan by hand; the popup then says "Not allowed, so automatic rescans stay off."
 - **Check with NHTSA (free government decoder)** in the side panel: permission to reach `vpic.nhtsa.dot.gov` for the VIN decode. Decline and the VIN is simply not checked online.
+- **Photos from a server** in the side panel: permission to download a car's photos from the server they sit on, when it is not the photo host Chrome showed at install. Chrome asks when you click **Open the Marketplace form** (or **Fill it in now**, **Fill again** or **Download photos**) for the first car with photos there, one prompt for all of that car's servers. Lot Sync only asks for the servers that car's own photos are on, only over https, and never for Facebook. Decline and the form still fills; those photos are not attached, and **Allow photos from [server]** asks again.
 - At install, Chrome shows what the extension can read: `www.facebook.com/marketplace` and the dealer photo host.
 
 Lot Sync never asks for your Facebook password, cookies or tokens, in Chrome's prompts or anywhere else.
@@ -184,7 +187,7 @@ Lot Sync never asks for your Facebook password, cookies or tokens, in Chrome's p
 ## When the website scan fails
 
 - "Can't read this page": the tab is not on your dealership's website. Open the used inventory page and click **Scan website** again.
-- The website is not one Lot Sync can read yet. Today it reads Dealer Inspire websites that use the Cars Commerce inventory search. Other platforms are being added one at a time; tell support which website yours is.
+- The website is not one Lot Sync can read yet. Today it reads Dealer Inspire websites that use the Cars Commerce inventory search. It also tries websites that publish standard vehicle data for search engines on each car's page; that has been tested only on sample websites so far. Tell support which website yours is.
 - "Couldn't reach the dealership tab" during set-up: open the used inventory page, click the Lot Sync icon and click **Continue set-up**.
 - A warning that many cars vanished at once: if more than half the lot disappears between scans, nothing is marked gone and the last good scan is kept. Scan again later; if it repeats, tell support.
 - "Automatic rescans are on, but Lot Sync has no permission to read this website in the background": click **Allow automatic rescans** on the banner.
@@ -234,7 +237,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 **In Chrome's synced storage, under your own Google account:** your profile (name, role, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance). It follows you to other computers where you are signed in to Chrome.
 
-**What leaves the browser, and only when you act:** reads of your dealership's website and its inventory service (each scan, and the rescans you allowed); the car's photos from the dealer's image host (when a form is filled or **Download photos** is clicked); the NHTSA decode (when you click **Check with NHTSA (free government decoder)**); and, with the description writer on, the car's facts, the dealership name and city, your name and role, the price note, and the photo addresses for a colour guess, sent to the rewrite service. Nothing from your Facebook account is sent anywhere.
+**What leaves the browser, and only when you act:** reads of your dealership's website and its inventory service (each scan, and the rescans you allowed); the car's photos from the servers the website keeps them on (when a form is filled or **Download photos** is clicked); the NHTSA decode (when you click **Check with NHTSA (free government decoder)**); and, with the description writer on, the car's facts, the dealership name and city, your name and role, the price note, and the photo addresses for a colour guess, sent to the rewrite service. Nothing from your Facebook account is sent anywhere.
 
 **To clear it:**
 

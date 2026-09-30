@@ -26,7 +26,15 @@
 //   chrome.tabs.query / get / create / update / remove / onUpdated / onRemoved / onCreated / onActivated
 //                                              tabs are the browser pane's iframes, managed by the sandbox page
 //   chrome.windows.getCurrent                  one window, id 1
-//   chrome.permissions.contains / request      always granted; Chrome's permission prompt is not shown (STUB)
+//   chrome.permissions.contains / request / getAll / remove / onAdded / onRemoved
+//                                              host patterns matched as Chrome matches them: granted are the
+//                                              manifest's host_permissions, the sandbox's own origin (the sample
+//                                              website and its photos are served from it, and a same-origin read
+//                                              needs no permission) and whatever a request was answered yes to;
+//                                              request needs a click (user activation) as in Chrome, asks nothing
+//                                              when everything is granted already, and otherwise answers
+//                                              hub.permissionAnswer (true unless a test sets it) without showing
+//                                              Chrome's prompt (STUB); hub.permissionRequests lists what was asked
 //   chrome.alarms                              remembered, never fired (STUB: the sandbox has a button that
 //                                              sends the rescan message the alarm would)
 //   chrome.notifications.create                shown as a toast on the sandbox page
@@ -50,6 +58,30 @@
   const later = (fn) => setTimeout(fn, 0);
   const glob = (pattern) => new RegExp('^' + String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
 
+  // A host permission pattern taken apart as Chrome reads it: scheme, host
+  // ("*", "*.<domain>" or one name), port ("*" when none is written), path.
+  function parsePattern(pattern) {
+    const s = String(pattern || '');
+    if (s === '<all_urls>') return { scheme: '*', host: '', subdomains: true, port: '*', path: '/' + '*' };
+    const m = /^(\*|[a-z][a-z0-9+.-]*):\/\/(\*|\*\.[^/:*]+|\[[^\]]*\]|[^/:*]+)(?::(\*|\d+))?(\/.*)$/i.exec(s);
+    if (!m) return null;
+    const any = m[2] === '*';
+    const subdomains = any || m[2].startsWith('*.');
+    return { scheme: m[1].toLowerCase(), host: any ? '' : (subdomains ? m[2].slice(2) : m[2]).toLowerCase(), subdomains, port: m[3] || '*', path: m[4] };
+  }
+  // Does granted pattern a cover everything pattern b names (chrome.permissions.contains)?
+  function patternContains(a, b) {
+    if (!a || !b) return false;
+    if (a.scheme === '*' ? !['*', 'http', 'https'].includes(b.scheme) : a.scheme !== b.scheme) return false;
+    if (a.port !== '*' && a.port !== b.port) return false;
+    if (a.subdomains && a.host) {
+      if (b.host !== a.host && !b.host.endsWith('.' + a.host)) return false;
+    } else if (!a.subdomains && (b.subdomains || b.host !== a.host)) {
+      return false;
+    }
+    return glob(a.path).test(b.path);
+  }
+
   // ---------- the shared hub (one per sandbox page) ----------
 
   /**
@@ -67,6 +99,11 @@
     const listeners = new Map(); // event name -> Set<{ fn, frame }>
     const alarms = new Map();
     const badge = { text: '', color: '#000000' };
+    const manifestHosts = (options.manifest && options.manifest.host_permissions) || [];
+    let ownOrigin = '';
+    try { ownOrigin = options.extensionBase ? new URL(options.extensionBase).origin : ''; } catch (e) { ownOrigin = ''; }
+    const grantedHosts = [...manifestHosts, ...(ownOrigin ? [ownOrigin + '/' + '*'] : [])];
+    const covered = (origin) => grantedHosts.some((g) => patternContains(parsePattern(g), parsePattern(origin)));
     let frameSeq = 0;
     let panelBehavior = { openPanelOnActionClick: false };
 
@@ -186,6 +223,35 @@
       },
       notify(id, opts) { if (typeof options.notify === 'function') options.notify(id, clone(opts)); },
       sidePanel(action, opts) { if (typeof options.sidePanel === 'function') options.sidePanel(action, clone(opts)); },
+      // ---------- permissions ----------
+      permissionAnswer: true,
+      permissionRequests: [],
+      permissionsContain(p) {
+        const wanted = (p && p.permissions) || [];
+        const have = hub.manifest.permissions || [];
+        return wanted.every((x) => have.includes(x)) && ((p && p.origins) || []).every(covered);
+      },
+      permissionsGetAll() { return { permissions: [...(hub.manifest.permissions || [])], origins: [...grantedHosts] }; },
+      // What Chrome does after its gesture check: nothing to ask when all is
+      // granted, else the prompt's answer (hub.permissionAnswer), and a yes adds the hosts.
+      permissionsRequest(p) {
+        const origins = ((p && p.origins) || []).map(String);
+        if (hub.permissionsContain(p)) return true;
+        hub.permissionRequests.push(origins);
+        if (!hub.permissionAnswer) return false;
+        const added = origins.filter((o) => !covered(o));
+        grantedHosts.push(...added);
+        if (added.length) hub.emit('permissions.onAdded', [{ permissions: [], origins: added }]);
+        return true;
+      },
+      permissionsRemove(p) {
+        const origins = ((p && p.origins) || []).map(String);
+        if (origins.some((o) => manifestHosts.includes(o))) throw new Error('You cannot remove required permissions.');
+        const removed = origins.filter((o) => grantedHosts.includes(o));
+        for (const o of removed) grantedHosts.splice(grantedHosts.indexOf(o), 1);
+        if (removed.length) hub.emit('permissions.onRemoved', [{ permissions: [], origins: removed }]);
+        return removed.length > 0;
+      },
     };
     return hub;
   }
@@ -316,10 +382,15 @@
       },
 
       permissions: {
-        contains: (p, cb) => promised(() => true, cb),
-        request: (p, cb) => promised(() => true, cb),
-        remove: (p, cb) => promised(() => true, cb),
-        getAll: (cb) => promised(() => ({ permissions: [...(hub.manifest.permissions || [])], origins: [...(hub.manifest.host_permissions || [])] }), cb),
+        contains: (p, cb) => promised(() => hub.permissionsContain(p), cb),
+        // Chrome refuses a request made outside a click; the frame's user activation says whether one is under way.
+        request: (p, cb) => {
+          const activation = win && win.navigator && win.navigator.userActivation;
+          if (activation && !activation.isActive) return promised(() => { throw new Error('This function must be called during a user gesture'); }, cb);
+          return promised(() => hub.permissionsRequest(p), cb);
+        },
+        remove: (p, cb) => promised(() => hub.permissionsRemove(p), cb),
+        getAll: (cb) => promised(() => hub.permissionsGetAll(), cb),
         onAdded: event('permissions.onAdded'),
         onRemoved: event('permissions.onRemoved'),
       },

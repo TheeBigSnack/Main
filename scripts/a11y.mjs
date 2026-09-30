@@ -152,7 +152,8 @@ export function auditPage() {
 
 // Presses Tab through the page (or frame) the way a keyboard user does and
 // reports each control that shows no focus ring. The walk ends when focus
-// comes back to an element it has already stopped on, or leaves the frame.
+// comes back to an element it has already stopped on, or leaves the frame,
+// or goes into a frame inside it (the sandbox's tabs, popup and panel).
 // A repeat is the same element, never the same label: a page has many
 // id-less buttons called Copy or Remove, and each is its own stop. `limit`
 // is only a backstop, about four times the longest audited page (the
@@ -182,6 +183,13 @@ export async function focusWalk(page, target, limit = 120) {
     const info = await target.evaluate(() => {
       const el = document.activeElement;
       if (!el || el === document.body || !document.hasFocus()) return null;
+      // focus inside a frame belongs to that frame's own control, which is audited as its own page;
+      // a frame nobody can see must not take the focus at all
+      if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
+        const f = getComputedStyle(el);
+        const unseen = f.visibility === 'hidden' || Number(f.opacity) === 0;
+        return { frame: true, unseen, tag: el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + (el.title ? ` "${el.title}"` : '') };
+      }
       const visited = window.__lotSyncA11yWalk || (window.__lotSyncA11yWalk = new WeakSet());
       if (visited.has(el)) return { repeat: true };
       visited.add(el);
@@ -190,7 +198,8 @@ export async function focusWalk(page, target, limit = 120) {
       const cls = typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : '';
       return { ring, type: el.type || '', tag: el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + cls, text: (el.textContent || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 40) };
     });
-    if (!info || info.repeat) {
+    if (info && info.frame && info.unseen) found.push({ rule: 'the Tab key reaches into a frame that is not visible', el: info.tag, text: '', detail: '' });
+    if (!info || info.repeat || info.frame) {
       ended = true;
       break;
     }
@@ -329,6 +338,41 @@ async function main() {
     await panelFrame.locator('#description, textarea').first().waitFor({ timeout: 30000 });
     await audit('side panel, reviewing a car', panelFrame);
     await page.close();
+
+    // The sandbox with its sample cars' photos on another https server, as
+    // many dealers keep them: the side panel says Chrome will ask, and after
+    // a no it shows the photos left out with an Allow button. Then the
+    // sandbox page itself (its bar, the sample website choice, the tabs).
+    const photos = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    current = photos;
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect width="4" height="3" fill="#36c"/></svg>';
+    await photos.route('**/demo/site/inventory.js', async (route) => {
+      const res = await route.fetch();
+      const body = (await res.text()).replace('`${base}photos/${c.key}-${i + 1}.svg`', '`https://photos.example-cdn.test/${c.key}-${i + 1}.svg`');
+      if (!body.includes('photos.example-cdn.test')) throw new Error("demo/site/inventory.js no longer builds its photo addresses the way this check moves them; update scripts/a11y.mjs");
+      await route.fulfill({ response: res, body });
+    });
+    await photos.route('https://photos.example-cdn.test/**', (route) => route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: svg }));
+    await photos.goto(`${base}/demo/`);
+    await photos.waitForFunction(() => Boolean(document.body.dataset.ready), null, { timeout: 30000 });
+    if (await photos.locator('#popupHost').isHidden()) await photos.click('#lotSyncButton');
+    await photos.locator('#popupHost').waitFor({ state: 'visible' });
+    await photos.check('#pinPopup');
+    const popup2 = photos.frameLocator('#popupFrame');
+    const panel2 = await (await photos.waitForSelector('#panelFrame', { state: 'attached' })).contentFrame();
+    await popup2.locator('#scan').click();
+    await popup2.locator('.banner.info').waitFor({ timeout: 20000 });
+    await popup2.locator('.tabs button[data-view="ready"]').click();
+    await popup2.locator('button[data-action="openPost"]').first().click();
+    await panel2.locator('#photoAsk').waitFor({ timeout: 30000 });
+    await audit('side panel, Chrome will ask for photos', panel2);
+    await photos.evaluate(() => { window.__lotSyncHub.permissionAnswer = false; });
+    await panel2.locator('#openForm').click();
+    await panel2.locator('#photos.done').waitFor({ timeout: 40000 });
+    await panel2.locator('button[data-allow-photos]').first().waitFor();
+    await audit('side panel, photos not allowed', panel2);
+    await audit('sandbox page', photos); // last: its walk leaves focus wherever it ends
+    await photos.close();
   } finally {
     await browser.close();
     server.close();

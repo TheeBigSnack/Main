@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Example Auto Outlet (sample website)</title>
+</head>
+<body>
+  <p>Loading the sample website…</p>
+  <script src="inventory.js"></script>
+  <script>
+    // The sandbox's second sample website. A static host serves files and
+    // nothing else, so this one page stands in for the website's server:
+    // every route after "#/" (the used list and its pages, each car's page,
+    // the new cars) is drawn from inventory.js, and the page answers its own
+    // requests for those addresses, its sitemap and the host's robots.txt the
+    // same way, the way the first sample's page helper answers its inventory
+    // searches from its inventory file. Nothing here reaches another website.
+    (function () {
+      const std = window.LOT_SYNC_STANDARD;
+      const site = std.hashSite(new URL('./', location.href).href);
+      let scenario = 'day1';
+
+      // fetch() as the website's server would answer it: an address this
+      // website owns gets its page (a 404 for a car that is gone), anything
+      // else goes to the network as usual. The answer carries the address it
+      // came from, as a real response does.
+      const networkFetch = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+        let answer = null;
+        try { answer = std.respond(new URL(url, location.href).href, scenario, site, { follow: true }); } catch (e) { answer = null; }
+        if (!answer) return networkFetch(input, init);
+        const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        const res = new Response(method === 'HEAD' ? null : answer.body, { status: answer.status, headers: { 'content-type': answer.type } });
+        Object.defineProperty(res, 'url', { value: answer.url || new URL(url, location.href).href });
+        Object.defineProperty(res, 'redirected', { value: Boolean(answer.redirected) });
+        return Promise.resolve(res);
+      };
+
+      // The sandbox page sets this before a scan; 'day1' | 'day2' | { name: 'day2', sold, dropped }.
+      Object.defineProperty(window, 'LOT_SYNC_SCENARIO', {
+        get: () => scenario,
+        set: (v) => { scenario = v && (typeof v === 'string' || typeof v === 'object') ? v : 'day1'; render(); },
+      });
+
+      // The page for the current route, drawn into this document: its title,
+      // its structured data and its links are what a person and Lot Sync see.
+      function render() {
+        const answer = std.respond(location.href, scenario, site);
+        if (!answer || !answer.parts) return;
+        document.head.innerHTML = answer.parts.head;
+        document.body.innerHTML = answer.parts.body;
+        window.scrollTo(0, 0);
+      }
+      window.addEventListener('hashchange', render);
+      render();
+    })();
+  </script>
+</body>
+</html>

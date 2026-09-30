@@ -135,7 +135,7 @@ test('performScan on a Dealer Inspire look-alike: neutral probe, the adapter\'s 
     const no = await performScan({ tabId: 3, origin });
     assert.equal(no.ok, false);
     assert.equal(no.message, UNSUPPORTED_MESSAGE);
-    assert.match(no.message, /platforms today: Dealer Inspire\)/);
+    assert.match(no.message, /What it reads today: Dealer Inspire; Standard vehicle data \(schema\.org\)\./);
     assert.ok(!/Dealer Inspire's search service/.test(no.message));
   } finally {
     delete globalThis.chrome;

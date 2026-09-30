@@ -18,7 +18,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const FLOWS = ['popup', 'post', 'queue', 'wizard', 'upkeep'];
+const FLOWS = ['popup', 'post', 'queue', 'wizard', 'upkeep', 'standard'];
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 function usage(problem) {
@@ -83,10 +83,11 @@ async function worker() {
 await Promise.all(Array.from({ length: width }, worker));
 
 const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
+const nameWidth = Math.max(...FLOWS.map((f) => f.length)); // keeps the columns lined up
 console.log('');
 for (const flow of flows) {
   const r = results.find((x) => x.flow === flow);
-  console.log(r ? `${r.ok ? 'PASS' : 'FAIL'}  ${flow.padEnd(7)} ${secs(r.ms).padStart(7)}  ${r.how}` : `SKIP  ${flow.padEnd(7)}          not run`);
+  console.log(r ? `${r.ok ? 'PASS' : 'FAIL'}  ${flow.padEnd(nameWidth)} ${secs(r.ms).padStart(7)}  ${r.how}` : `SKIP  ${flow.padEnd(nameWidth)}          not run`);
 }
 const failed = results.filter((r) => !r.ok).length;
 const notRun = flows.length - results.length;

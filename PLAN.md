@@ -124,7 +124,7 @@ The owner wants Lot Sync built for any dealership. An audit for single-dealer, s
 - M4 (done Sep 28 unless noted): the daily cap per salesperson across machines (the sync answer's post count); one storage-key module (`src/storageKeys.js`); the shared rewrite key replaced by sign-in; local retention (500 entries, 90 days, per list). The pilot runbook for a second dealer on the manager view is in PILOT.md (Sep 28).
 - M5: blank Schedule A, the pilot agreement's table, the store-install emails, the wizard's Price step and the Terms and Privacy acceptance (informational until hosted) are done (Sep 28). The Pilot tab is renamed Numbers (Sep 28). Still open: the Web Store answers and legal drafts rewritten with the attorney.
 - M6: the adapter contract is complete (probe and search per adapter, normalise inside the adapter, opaque service, photo hosts; Sep 28); the second platform itself waits for a named dealer and a real site. The store-name heuristic is per website and the boilerplate rule has a floor (Sep 28). Still open: a Spanish form map with a Spanish-speaking partner.
-- Needs the owner's OK (a permission change): asking for the photo host's permission at post time and dropping the static image host before the Web Store submission.
+- Decided by the owner on 2026-09-29 (a permission change): a photo server's permission is asked for at post time, from the salesperson's own click in the side panel, with Chrome's prompt (`src/photoHosts.js`; `optional_host_permissions` already has `https://*/*`). The static image host stays in `host_permissions` until the Web Store release. Still open: one run in real Chrome to see the prompt, since the tests can't answer it.
 
 ## Open risks
 

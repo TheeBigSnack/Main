@@ -1,12 +1,17 @@
 // Service worker. Its jobs:
-//   1. Download a car's photos from the dealer's image host (the extension has
-//      permission for that host; the Facebook page itself does not) and hand
-//      them to the side panel as data URLs.
+//   1. Download a car's photos from the server they sit on (the extension has
+//      permission for that server: the manifest's image host, or one Chrome
+//      granted when the side panel asked from the salesperson's click; the
+//      Facebook page itself has none) and hand them to the side panel as
+//      data URLs.
 //   2. Open the side panel when the popup can't.
 //   3. Rescan every known dealer website every 3 hours while Chrome is open
-//      (chrome.alarms), calling the site's inventory service directly with
-//      the host permission the wizard asked for, then update the toolbar badge
-//      with the salesperson's to-do count and, optionally, notify.
+//      (chrome.alarms), reading it through its adapter's direct search (the
+//      platform's inventory service, or the website's own pages) with the
+//      host permission the wizard asked for, then update the toolbar badge
+//      with the salesperson's to-do count and, optionally, notify. A website
+//      that turns such a read away fails the rescan with its reason, which
+//      the popup shows; the Scan button still reads it from the tab.
 //   4. Sync the posted list and the pilot numbers with the dealership's
 //      account server (src/accountFlow.js) after a rescan and when the popup
 //      or the side panel asks (syncNow): only once the owner has filled in
@@ -26,9 +31,10 @@ import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
 
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
-// The host a photo lives on, for the error text: the manifest names one
-// image host; a lot whose photos sit elsewhere fails here, and the site
-// registry's photoOrigins (recorded by the scan) says where they are.
+// The host a photo lives on, for the error text: a photo on a server Lot
+// Sync has no permission for fails here, and the error names that server
+// (the site registry's photoOrigins, recorded by the scan, says where the
+// lot's photos are).
 function hostOf(url) {
   try {
     return new URL(url).host;
@@ -157,14 +163,14 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`);
   if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION);
   const k = siteKeys(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff, k.boilerplate]);
   if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS);
   const site = { ...(info.site || {}), origin, name: info.name, adapter: info.adapter };
   const settings = withDefaults(data[k.settings], site);
   const now = new Date().toISOString();
   let out;
   try {
-    out = await scanWithSearch({ adapter, search: adapter.makeDirectSearch(info.service), site, settings, prevSnapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, options: adapter.scanOptions(info.service) });
+    out = await scanWithSearch({ adapter, search: adapter.makeDirectSearch(info.service), site, settings, prevSnapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, options: adapter.scanOptions(info.service), boilerplate: data[k.boilerplate] || [] });
   } catch (e) {
     out = { ok: false, message: String((e && e.message) || e) };
   }

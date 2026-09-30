@@ -216,7 +216,7 @@ async function scan() {
   $('scan').disabled = true;
   setStatus("Reading the website's used inventory…");
   try {
-    const r = await performScan({ tabId: state.tab.id, origin: state.origin, settings: state.settings, settingsFromProfile: state.settingsFromProfile, snapshot: state.snapshot, posted: state.posted });
+    const r = await performScan({ tabId: state.tab.id, origin: state.origin, settings: state.settings, settingsFromProfile: state.settingsFromProfile, snapshot: state.snapshot, posted: state.posted, boilerplate: state.boilerplate });
     if (!r.ok) {
       setStatus(r.message, 'error');
       return;

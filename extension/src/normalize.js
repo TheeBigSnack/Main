@@ -16,6 +16,103 @@ export function toNumber(value) {
   return Number(cleaned);
 }
 
+// ---------- pre-owned signs any website can carry ----------
+
+// schema.org's four OfferItemCondition values, the way websites write them
+// for search engines: the full address (http or https, with or without www
+// or a trailing slash), the "schema:" short form or the bare name.
+const SCHEMA_CONDITIONS = new Map([
+  ['newcondition', 'new'],
+  ['usedcondition', 'used'],
+  ['damagedcondition', 'damaged'],
+  ['refurbishedcondition', 'refurbished'],
+]);
+const SCHEMA_CONDITION = /^(?:(?:https?:\/\/)?(?:www\.)?schema\.org\/|schema:)?([a-z]+condition)\/?$/i;
+
+/**
+ * What a schema.org itemCondition value says: 'used', 'new', 'damaged',
+ * 'refurbished', or null for anything that is not one of those four values
+ * (plain words such as "Used" are the website's own text, not a schema.org
+ * value, and are read by classify.js readCondition instead).
+ * @param {string|{'@id': string}|Array} value
+ */
+export function conditionFromSchemaOrg(value) {
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      const c = conditionFromSchemaOrg(v);
+      if (c) return c;
+    }
+    return null;
+  }
+  const raw = value && typeof value === 'object' ? value['@id'] : value;
+  if (typeof raw !== 'string') return null;
+  const m = raw.trim().match(SCHEMA_CONDITION);
+  return (m && SCHEMA_CONDITIONS.get(m[1].toLowerCase())) || null;
+}
+
+// The words a vehicle page address uses for its condition. "pre-owned"
+// arrives split in two ("pre", "owned") and is joined back below.
+const PATH_CONDITIONS = new Set(['used', 'preowned', 'certified', 'cpo', 'new', 'demo', 'loaner']);
+// Words that may sit next to a condition word in a segment of its own
+// ("/used-vehicles/", "/new-inventory/") without making it about something
+// else. "new-arrivals" is not on the list: that page lists used cars too.
+const SECTION_WORDS = new Set(['vehicles', 'vehicle', 'cars', 'car', 'trucks', 'truck', 'suvs', 'autos', 'inventory', 'for', 'sale']);
+const MODEL_YEAR = /^(?:19|20)\d{2}$/;
+
+function conditionWordsIn(words) {
+  const out = [];
+  for (let i = 0; i < words.length; i += 1) {
+    if (words[i] === 'pre' && words[i + 1] === 'owned') {
+      out.push('pre-owned');
+      i += 1;
+    } else if (PATH_CONDITIONS.has(words[i])) out.push(words[i]);
+  }
+  return out;
+}
+
+/**
+ * The condition word in a vehicle page address, for any website:
+ * "/inventory/used-2019-ram-1500-..." -> "used",
+ * "/certified-pre-owned-2022-jeep-..." -> "certified pre-owned",
+ * "/used/ram/1500/..." -> "used". A word counts in the segment that holds the
+ * first model year, before that year, or as a segment of its own before it
+ * ("used", "used-vehicles"). Nothing after the year is read, so
+ * "used-2012-volkswagen-new-beetle" says used: "New Beetle" is a model. A
+ * single-page site's route after "#/" is read like a path. Null when the
+ * address says nothing.
+ * @param {string} url
+ */
+export function conditionWordFromPath(url) {
+  if (typeof url !== 'string' || !url.trim()) return null;
+  let parsed;
+  try {
+    parsed = new URL(url.trim(), 'https://address.invalid/');
+  } catch {
+    return null;
+  }
+  const route = /^#!?\//.test(parsed.hash) ? parsed.hash.replace(/^#!?/, '') : '';
+  const segments = (parsed.pathname + route).split('/').filter(Boolean);
+  let section = null; // the last whole-segment condition before the year
+  for (const segment of segments) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // a stray % in the address: read the segment as it is
+    }
+    const words = decoded.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const yearAt = words.findIndex((w) => MODEL_YEAR.test(w));
+    if (yearAt !== -1) {
+      const before = conditionWordsIn(words.slice(0, yearAt));
+      return before.length ? before.join(' ') : section;
+    }
+    const found = conditionWordsIn(words);
+    const whole = found.length && words.every((w) => PATH_CONDITIONS.has(w) || SECTION_WORDS.has(w) || w === 'pre' || w === 'owned');
+    if (whole) section = found.join(' ');
+  }
+  return section;
+}
+
 // The store names a lot's vehicles carry, once each and sorted: what the
 // store choice offers and what shortLocation and matchStore judge by.
 export function storeNames(vehicles) {

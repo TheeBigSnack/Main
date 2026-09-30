@@ -61,5 +61,5 @@ Leave the sales sheet. Ask who the two or three salespeople would be and when th
 
 - **A field didn't fill:** the panel lists it under **Couldn't fill** with a copy button. Say so plainly: "Facebook changed something; that's a one-line fix on our side," copy the report, and fill that field by hand.
 - **Facebook restored a draft over the form:** the panel says what changed and that it set it again. Delete the draft afterwards.
-- **The website scan fails:** you are not on the used inventory page, or the site isn't Dealer Inspire. Open the inventory page and scan again.
+- **The website scan fails:** you are not on the used inventory page, or the website is not one Lot Sync can read yet. Open the inventory page and scan again.
 - **Chrome asks for a permission:** that is the automatic rescan asking to read the website in the background. Allow it, or skip and scan by hand.

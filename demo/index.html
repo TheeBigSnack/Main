@@ -12,10 +12,12 @@
   <!--
     The Lot Sync test drive. This page runs the extension's own files
     unchanged (extension/popup.html, sidepanel.html, background.js) in iframes,
-    with demo/chrome-shim.js standing in for the chrome.* API, against a fake
-    dealership website (demo/site/) and a fake Marketplace (demo/marketplace/)
-    that live in this folder. Nothing on this page is loaded from any other
-    site, and nothing here is Facebook or a real dealership.
+    with demo/chrome-shim.js standing in for the chrome.* API, against one of
+    two fake dealership websites (demo/site/, with an inventory search
+    service, and demo/site-standard/, with standard vehicle data on each car's
+    page) and a fake Marketplace (demo/marketplace/) that live in this folder.
+    Nothing on this page is loaded from any other site, and nothing here is
+    Facebook or a real dealership.
   -->
   <header class="top">
     <div class="banner" id="banner" role="note">Sandbox with sample data. Nothing here is Facebook or a real dealership.</div>
@@ -23,6 +25,12 @@
       <div class="brand">Lot Sync <span>test drive</span></div>
       <div class="scenario" id="scenario">Website inventory: day 1</div>
       <div class="controls">
+        <label class="site" title="Switching resets the sandbox: both sample websites share this page's address.">Sample website
+          <select id="siteChoice">
+            <option value="service">Example Motors (inventory search service)</option>
+            <option value="standard">Example Auto Outlet (standard vehicle data)</option>
+          </select>
+        </label>
         <button type="button" id="day2" class="go">Day 2: a car sells and a price drops</button>
         <button type="button" id="rescanNow" title="Sends the service worker the same message its 3-hour alarm would. Needs one scan from the popup first.">Run the automatic rescan now</button>
         <button type="button" id="reset" class="danger">Reset sandbox</button>
@@ -40,8 +48,10 @@
         <li><b>Open &amp; update price</b>: on the sample listing click Edit listing; the panel fills the new price; you click Update. <b>Open listing</b> for the sold car, then Mark as sold. The panel notices both.</li>
       </ol>
       <p class="fine">Every file of the extension runs unchanged; only the chrome.* API is stood in (demo/chrome-shim.js). Storage is in memory and empties when you leave. The daily post cap is 10, as in the default settings.</p>
+      <p class="fine">Two sample websites: Example Motors serves its inventory through a search service; Example Auto Outlet publishes standard vehicle data (schema.org) on each car's own page. Pick one under <b>Sample website</b>. Switching starts the sandbox over, because both share this page's address and Lot Sync keeps its data per website address.</p>
     </details>
     <div class="toasts" id="toasts" aria-live="polite"></div>
+    <div class="rescan" id="siteNote" role="status" hidden></div>
     <div class="rescan" id="rescanStatus" hidden></div>
   </header>
 
@@ -72,6 +82,7 @@
   <iframe id="workerFrame" title="Lot Sync service worker (hidden)" hidden></iframe>
 
   <script src="site/inventory.js"></script>
+  <script src="site-standard/inventory.js"></script>
   <script src="chrome-shim.js"></script>
   <script type="module" src="demo.js"></script>
 </body>

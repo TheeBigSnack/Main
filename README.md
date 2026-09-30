@@ -90,24 +90,25 @@ Three separate signs on the dealer website have to agree the car is pre-owned:
 2. the condition word in the car's web address (`/inventory/used-2019-...` vs `/inventory/new-2027-...`)
 3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
 
-A demo or loaner flag always means "sold as new". A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
+A demo or loaner flag always means "sold as new". A car the website lists as damaged or refurbished always goes to **Needs a look**. A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
 
 ## Limits
 
-- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page). Other platforms come later; each is one file under `extension/adapters/`.
+- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page), checked on the pilot dealer's live site. Lot Sync also tries any other website that publishes standard vehicle data (schema.org) on its car pages; that reader has been tested only on sample websites, so no other platform is known to work until a real site has been scanned. Each platform is one file under `extension/adapters/`.
+- Photos on a server Lot Sync has not been allowed to download from yet: Chrome asks once, from your click on **Open the Marketplace form** (or Fill again, or Download photos), and remembers the answer. Say no and the form is still filled, without those photos.
 - If more than half the cars vanish between scans, nothing is marked gone and a warning shows.
 - The Facebook form map needs a live check (above). Photos go in through the form's file input; if that fails, **Download photos** saves them to your Downloads folder to add by hand.
 
 ## For development
 
 ```
-npm test              # 402 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 627 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
-npm run test:e2e      # five e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep
+npm run test:e2e      # six e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data
 npm run screenshots   # the landing page's product images, taken from the sandbox with sample data (site/screenshots/)
 npm run legal-pages   # the Terms, Privacy Policy and posting rules as site/legal/*.html from legal/*.md (--check: exit 1 when a page differs; legal/legal-status.json says draft)
-npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (landing page, legal pages, manager view, popup, side panel)
+npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (landing page, legal pages, manager view, popup, side panel, the sandbox page)
 npm run test:sql      # the Supabase SQL checks on a local Postgres (PGHOST etc.; CI runs them on Postgres 16)
 npm run check-deploy  # after the Supabase deploy: a checklist of what the live project lets a stranger do (supabase/README.md step 6)
 npm run release -- 0.6.0  # stamp a new version in the three files, test and pack; prints the commit, tag and upload steps (docs/release.md)

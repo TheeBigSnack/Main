@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shortLocation, storeNames, matchStore } from '../extension/src/normalize.js';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { shortLocation, storeNames, matchStore, conditionFromSchemaOrg, conditionWordFromPath } from '../extension/src/normalize.js';
+import { conditionWordFromUrl } from '../extension/adapters/dealerInspireNormalize.js';
+import { fixtures } from './helpers.js';
 
 // The pilot dealer's store names, as a worked example of a group whose
 // stores share the group and brand words (test/fixtures/records.json).
@@ -107,4 +111,71 @@ test('when nothing stands out, nothing is ticked', () => {
   assert.equal(matchStore(null, GROUP), null);
   assert.equal(matchStore(pilotSite, []), null);
   assert.equal(matchStore({}, GROUP), null);
+});
+
+// ---------- pre-owned signs any website can carry ----------
+
+test('conditionFromSchemaOrg: the four schema.org condition values, however they are written', () => {
+  const cases = {
+    'https://schema.org/UsedCondition': 'used',
+    'http://schema.org/UsedCondition': 'used',
+    'https://www.schema.org/UsedCondition/': 'used',
+    'schema:UsedCondition': 'used',
+    UsedCondition: 'used',
+    ' usedcondition ': 'used',
+    'https://schema.org/NewCondition': 'new',
+    NewCondition: 'new',
+    'https://schema.org/DamagedCondition': 'damaged',
+    RefurbishedCondition: 'refurbished',
+  };
+  for (const [value, says] of Object.entries(cases)) assert.equal(conditionFromSchemaOrg(value), says, value);
+  assert.equal(conditionFromSchemaOrg({ '@id': 'https://schema.org/UsedCondition' }), 'used', 'a JSON-LD reference');
+  assert.equal(conditionFromSchemaOrg(['', 'https://schema.org/NewCondition']), 'new', 'the first value that is one');
+  // the website's own words are not schema.org values (classify.js reads those)
+  for (const value of ['Used', 'New', 'Certified Pre-Owned', 'https://example.test/UsedCondition', 'https://schema.org/InStock', 'UsedConditions', 'schema.org/Used', '', null, undefined, 7, {}, []]) {
+    assert.equal(conditionFromSchemaOrg(value), null, String(value));
+  }
+});
+
+test('conditionWordFromPath: a condition word before the model year, or a segment of its own; never after the year', () => {
+  const cases = {
+    'https://x.test/inventory/used-2019-ram-1500-classic-express-4wd/': 'used',
+    '/inventory/certified-used-2022-jeep-wagoneer-series-iii/': 'certified used',
+    '/certified-pre-owned-2022-jeep-wagoneer/': 'certified pre-owned',
+    '/preowned-2020-ford-f-150/': 'preowned',
+    '/inventory/new-2027-jeep-grand-cherokee-limited/': 'new',
+    '/used-2012-volkswagen-new-beetle-3vwsampl/': 'used', // "New Beetle" is a model
+    '/inventory/2010-volkswagen-new-beetle/': null,
+    '/2019/new/ram-1500/': null, // after the year: never read
+    '/used/ram/1500/1c6sampl8hs000106/': 'used', // a segment of its own, no year at all
+    '/used/Ram/2019-Ram-1500-Classic-abc.htm': 'used',
+    '/used-vehicles/2019-ram-1500/': 'used',
+    '/Used%20Cars/2019-Ram-1500/': 'used',
+    '/new-inventory/2027-kia-telluride/': 'new',
+    '/new-arrivals/2019-ram-1500/': null, // a page of arrivals lists used cars too
+    '/inventory/used-cars-near-springfield/2019-ram-1500/': null, // more than a condition in that segment
+    '/cpo/2021-toyota-rav4/': 'cpo',
+    '/demo-2024-jeep-compass/': 'demo',
+    '/loaner/2024-jeep-compass/': 'loaner',
+    '/used/new-2027-jeep-compass/': 'new', // the year's own segment speaks first
+    '/used-Springfield-2019-Ram-1500-1C6SAMPL8HS000106': 'used',
+    '/USED-2019-RAM-1500/': 'used',
+    '/vehicle/2019-ram-1500?condition=used': null, // the query is not the path
+    '/vehicle/ram-1500#used': null, // an in-page fragment is not a route
+    'http://sandbox.test/demo/site/index.html#/inventory/used-2020-ford-f-150-xlt/': 'used', // a single-page route is
+    '/inventory/': null,
+    '/': null,
+  };
+  for (const [url, word] of Object.entries(cases)) assert.equal(conditionWordFromPath(url), word, url);
+  for (const junk of ['', '   ', null, undefined, 42, {}, 'http://[not a host']) assert.equal(conditionWordFromPath(junk), null, String(junk));
+  assert.equal(conditionWordFromPath('/inventory/used-2019-%E0%A4%A-ram/'), 'used', 'a stray % in the address is read as it is');
+});
+
+test('conditionWordFromPath reads every Dealer Inspire address in the fixtures and the sandbox exactly as that adapter does', () => {
+  const ctx = vm.createContext({ window: {} });
+  vm.runInContext(readFileSync(new URL('../demo/site/inventory.js', import.meta.url), 'utf8'), ctx);
+  const sandbox = ['day1', 'day2'].flatMap((day) => ctx.window.LOT_SYNC_INVENTORY.records(day, 'http://sandbox.test/demo/site/'));
+  const urls = [...Object.values(fixtures).filter((r) => r && r.vdp_url), ...sandbox].map((r) => r.vdp_url);
+  assert.ok(urls.length >= 25);
+  for (const url of urls) assert.equal(conditionWordFromPath(url), conditionWordFromUrl(url), url);
 });
