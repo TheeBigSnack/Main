@@ -332,8 +332,22 @@ export function subscribeSeats(status, { pricing } = {}) {
   const n = salespeopleIn(s);
   if (n === null) return null;
   const included = count(num(s.includedSalespeople) ?? num(p.includedSalespeople));
-  const seats = included === null ? n : Math.max(n, included);
+  const seats = Math.min(included === null ? n : Math.max(n, included), MAX_SEATS);
   return seats >= 1 ? seats : null;
+}
+
+// The most seats Checkout bills (MAX_SEATS in supabase/functions/_shared/
+// billing.mjs, held equal by test/billing.test.js), so the card never
+// promises more than the function will ask Stripe for.
+export const MAX_SEATS = 200;
+
+// A subscription Stripe still holds open (the billing function's
+// hasOpenSubscription, held equal by test/billing.test.js): the function
+// refuses a second Checkout next to it, and its seats are still the ones
+// paid for, whatever the state says.
+export const OPEN_STATUSES = Object.freeze(['trialing', 'active', 'past_due', 'unpaid', 'incomplete', 'paused']);
+export function hasOpenSubscription(row) {
+  return Boolean(row) && typeof row === 'object' && typeof row.stripe_subscription_id === 'string' && row.stripe_subscription_id !== '' && OPEN_STATUSES.includes(String(row.status));
 }
 
 /**
@@ -452,7 +466,8 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     detail = LAPSED_WHY[sub.status] || (pilotEnd !== null && pilotEnd <= t ? `The free pilot ended ${date(sub.pilot_ends_at)}.` : '');
   }
 
-  const seatInfo = seatLines({ state, salespeople, includedSalespeople, paid: state === 'active' ? seatsPaid(sub) : null, subscribing: buttons.some((b) => b.action === 'subscribe'), toBuy: subscribeSeats(s, { pricing: p }) });
+  const open = hasOpenSubscription(sub);
+  const seatInfo = seatLines({ state, salespeople, includedSalespeople, paid: state === 'active' || open ? seatsPaid(sub) : null, subscribing: !open && buttons.some((b) => b.action === 'subscribe'), toBuy: subscribeSeats(s, { pricing: p }) });
   return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, buttons };
 }
 

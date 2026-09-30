@@ -556,6 +556,15 @@ $$;
 -- newcomer: signed in, not yet a member; redeems an invite for B
 -- ---------------------------------------------------------------------------
 reset role;
+
+-- two other accounts' invite misses, as the owner (no API role reads or
+-- writes them): b_sales missed two hours ago and never tried again, c_sales
+-- five minutes ago. redeem_invite drops every account's misses older than
+-- an hour, so the newcomer's calls below take b_sales's and leave c_sales's.
+insert into public.invite_misses (user_id, at) values
+  (:'b_sales', now() - interval '2 hours'),
+  (:'c_sales', now() - interval '5 minutes');
+
 select set_config('request.jwt.claims', '{"sub":"' || :'newcomer' || '","role":"authenticated"}', true) as claims \gset
 set local role authenticated;
 
@@ -647,6 +656,15 @@ begin
     raise exception 'invite_misses should hold the newcomer''s 10 misses';
   end if;
   raise notice 'ok: each miss is counted';
+
+  -- an old miss goes at anyone's next call, not only its own account's (docs/data-inventory.md says so)
+  if exists (select 1 from public.invite_misses where user_id = '00000000-0000-4000-8000-0000000000b1') then
+    raise exception 'another account''s miss from two hours ago survived the newcomer''s redeem_invite: old misses are dropped only for the caller';
+  end if;
+  if (select count(*) from public.invite_misses where user_id = '00000000-0000-4000-8000-0000000000c3') <> 1 then
+    raise exception 'another account''s miss from five minutes ago was dropped by the newcomer''s redeem_invite';
+  end if;
+  raise notice 'ok: a miss older than an hour is dropped at anyone''s call, and a fresh one of another account stays';
 
   -- a removed manager's unused codes go with them; used ones stay as the record
   -- (a_sales becomes a manager first: A must keep one); the codes a_mgr made for B, where they are still a

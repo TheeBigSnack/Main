@@ -44,6 +44,8 @@ function world({ subscription = null, usage = [] } = {}) {
     users: { [TOKEN.u1]: { id: U1, email: 'sam@example-motors.test' }, [TOKEN.u3]: { id: U3, email: 'kim@example-motors.test' }, [TOKEN.u4]: { id: U4, email: 'new@example.test' } },
     rows: {
       dealerships: [{ id: D1, name: 'Example Motors', website_origin: ORIGIN }, { id: D2, name: 'Sister Motors', website_origin: SISTER }],
+      // U3's sister-store row comes first on purpose: it is what the handler
+      // falls back to, so only an origin can bill U3's work to D1
       memberships: [
         { user_id: U1, dealership_id: D1, role: 'salesperson' },
         { user_id: U3, dealership_id: D2, role: 'salesperson' },
@@ -94,7 +96,7 @@ test('rewrite: no token and a rejected token are 401, on every route, before any
   assert.deepEqual(fake.calls.map((c) => c.op), ['getUser', 'getUser', 'getUser']);
 });
 
-test('rewrite: a person in no dealership is 403; an origin none of their dealerships has is 403; the origin picks the store for a person in two', async () => {
+test('rewrite: a person in no dealership is 403; an origin none of their dealerships has is 403; the origin picks the store for a person in two, on /rewrite and /color, and never reaches Anthropic', async () => {
   world();
   anthropic(says(GOOD));
   const handler = await load();
@@ -103,13 +105,25 @@ test('rewrite: a person in no dealership is 403; an origin none of their dealers
   const elsewhere = await rewrite(handler, TOKEN.u1, { ...FACTS, origin: SISTER });
   assert.deepEqual([elsewhere.status, elsewhere.body], [403, { ok: false, error: `your account is not a member of the dealership for ${SISTER}` }]);
   assert.equal(net.calls.length, 0);
-  // a person in both stores is billed to the store whose origin came with the facts, however it is written
+  // U3's first membership is the sister store (see world()), so a row below
+  // that lands on D1 got there by its origin, not by the fallback.
+  // A person in both stores is billed to the store whose origin came with the facts, however it is written.
   const both = await rewrite(handler, TOKEN.u3, { ...FACTS, origin: 'HTTPS://WWW.Example-Motors.test/' });
   assert.equal(both.status, 200);
-  // /color takes an origin the same way, when one is sent
-  const color = await invoke(handler, { path: 'rewrite/color', token: TOKEN.u3, body: { photos: ['https://img.example.test/1.jpg'], origin: SISTER } });
+  // /color takes an origin the same way
+  const photos = ['https://img.example.test/1.jpg'];
+  const color = await invoke(handler, { path: 'rewrite/color', token: TOKEN.u3, body: { photos, origin: ORIGIN } });
   assert.equal(color.status, 200);
-  assert.deepEqual(fake.rows('rewrite_usage').map((u) => [u.dealership_id, u.user_id, u.kind]), [[D1, U3, 'rewrite'], [D2, U3, 'color']]);
+  // and the extension's own colour guess sends it
+  const ext = await guessColorsWithBackend({ endpoint: ENDPOINT, key: TOKEN.u3, photos, options: ['Gray'], origin: ORIGIN, fetchImpl: functionsFetch({ rewrite: handler }) });
+  assert.equal(ext.ok, true, ext.error);
+  // with no origin (an older extension) the first membership pays: the sister store here
+  const older = await invoke(handler, { path: 'rewrite/color', token: TOKEN.u3, body: { photos } });
+  assert.equal(older.status, 200);
+  assert.deepEqual(fake.rows('rewrite_usage').map((u) => [u.dealership_id, u.user_id, u.kind]), [[D1, U3, 'rewrite'], [D1, U3, 'color'], [D1, U3, 'color'], [D2, U3, 'color']]);
+  const calls = requests();
+  assert.equal(calls.length, 4);
+  for (const call of calls) assert.doesNotMatch(call.body, /example-motors\.test/i, 'the origin picks the store; it is not sent to Anthropic');
 });
 
 test('rewrite: the checks come in their order: the body (400) before the membership (403), the membership before the plan (402), the plan before the cap (429)', async () => {

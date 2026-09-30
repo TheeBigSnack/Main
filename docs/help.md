@@ -237,7 +237,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 **In Chrome's synced storage, under your own Google account:** your profile (name, role, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance). It follows you to other computers where you are signed in to Chrome.
 
-**What leaves the browser, and only when you act:** reads of your dealership's website and its inventory service (each scan, and the rescans you allowed); the car's photos from the servers the website keeps them on (when a form is filled or **Download photos** is clicked); the NHTSA decode (when you click **Check with NHTSA (free government decoder)**); and, with the description writer on, the car's facts, the dealership name and city, your name and role, the price note, and the photo addresses for a colour guess, sent to the rewrite service. Nothing from your Facebook account is sent anywhere.
+**What leaves the browser, and only when you act:** reads of your dealership's website and its inventory service (each scan, and the rescans you allowed); the car's photos from the servers the website keeps them on (when a form is filled or **Download photos** is clicked); the NHTSA decode (when you click **Check with NHTSA (free government decoder)**); and, with the description writer on, the car's facts, the dealership name and city, your name and role, the price note, and, for a colour guess, up to four photo addresses and the list of colour words, sent to the rewrite service with your dealership website's address, which the service uses to know which dealership the request is for and does not pass on. Nothing from your Facebook account is sent anywhere.
 
 **To clear it:**
 

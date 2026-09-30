@@ -14,10 +14,10 @@ import {
 import { ACCOUNT, accountsConfigured } from '../extension/src/accountConfig.js';
 import { sessionFromTokenResponse, ACCOUNT_KEY } from '../extension/src/account.js';
 import { siteKeys, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
-import { markPosted } from '../extension/src/rescan.js';
+import { markPosted, markTakenDown } from '../extension/src/rescan.js';
 import { postsToday, capStatus } from '../extension/src/cap.js';
 import { beginPost, endPost, noteFlags } from '../extension/src/pilot.js';
-import { toServerRows, localDayRange } from '../extension/src/sync.js';
+import { toServerRows, localDayRange, postKey } from '../extension/src/sync.js';
 
 const CONFIG = Object.freeze({ url: 'https://abcdefgh.supabase.co/', anonKey: 'anon-key-for-tests', functionsUrl: '' });
 const ORIGIN = 'https://www.example-motors.test';
@@ -224,13 +224,17 @@ test('signOutAll tells the auth server, forgets the session and the named websit
 
 // ---------- the rewrite service's key ----------
 
-test('rewriteKeyFor: the session\'s token only for the account\'s own rewrite function; the typed key for any other address', () => {
+test('rewriteKeyFor: the session\'s token only for the account\'s own rewrite function, nothing there when signed out; the typed key for any other address', () => {
   const session = freshSession();
   const own = rewriteEndpointFor(CONFIG);
   assert.equal(rewriteKeyFor({ rewrite: { endpoint: own, key: 'typed' }, session, config: CONFIG }), session.accessToken);
   assert.equal(rewriteKeyFor({ rewrite: { endpoint: own.toUpperCase() + '/', key: '' }, session, config: CONFIG }), session.accessToken, 'case and a trailing slash do not matter');
   assert.equal(rewriteKeyFor({ rewrite: { endpoint: 'http://localhost:8787', key: 'shared-key' }, session, config: CONFIG }), 'shared-key', 'a self-hosted backend keeps its key');
-  assert.equal(rewriteKeyFor({ rewrite: { endpoint: own, key: 'typed' }, session: null, config: CONFIG }), 'typed', 'signed out: the typed key');
+  assert.equal(rewriteKeyFor({ rewrite: { endpoint: 'http://localhost:8787', key: 'shared-key' }, session: null, config: CONFIG }), 'shared-key', 'signed in or not');
+  // the key typed for a self-hosted service stays in Settings after sign-in points the address at the account's
+  // function; signed out (or with the session refused), it is never sent there (legal/privacy-policy.md: only to its own service)
+  assert.equal(rewriteKeyFor({ rewrite: { endpoint: own, key: 'typed' }, session: null, config: CONFIG }), '', 'signed out: no key for the account\'s function');
+  assert.equal(rewriteKeyFor({ rewrite: { endpoint: own + '/', key: 'typed' }, session: { accessToken: '' }, config: CONFIG }), '', 'a session with no token is no session');
   assert.equal(rewriteKeyFor({ rewrite: { endpoint: own, key: '' }, session: null, config: CONFIG }), '');
   assert.equal(rewriteKeyFor({ rewrite: { endpoint: own, key: 'typed' }, session, config: { url: '', anonKey: '' } }), 'typed', 'no project: never the token');
   assert.equal(rewriteKeyFor(), '');
@@ -249,14 +253,15 @@ test('scanFromStored turns the stored snapshot and diff into the sync function\'
 
 // A small model of the sync function (supabase/functions/sync/index.ts):
 // a lapsed plan is refused with 402 before anything else; the caller's rows
-// are upserted, stamped created_at from the server's clock; the caller's
-// listed rows missing from the registry among those the server already
-// held at `since` (created_at, never posted_at) are taken down; a to-do
-// item is closed by an upload; and the dealership's whole current state
-// comes back with the plan and the caller's posts in the day they sent.
+// are upserted; the caller's listed rows whose key is in `known` (the posts
+// that machine sent or received at its last sync) and missing from the
+// registry are taken down, no time compared; a to-do item is closed by an
+// upload; and the dealership's whole current state comes back with the plan
+// and the caller's posts in the day they sent. `onRequest(call)`, when set,
+// runs while the request is out, before the model answers.
 // `plan` overrides the default (a pilot with 30 days to run, the included 5
 // seats); { state: 'lapsed' } makes every call answer 402 like the function.
-function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math.floor(NOW / 1000) + 3600 })]: U1 }, plan = null } = {}) {
+function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math.floor(NOW / 1000) + 3600 })]: U1 }, plan = null, onRequest = null } = {}) {
   const listings = [];
   const todoItems = [];
   const clock = { t: NOW + 60 * 60 * 1000 };
@@ -265,6 +270,7 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
   const thePlan = { state: 'pilot', pilotEndsAt: new Date(clock.t + 30 * 24 * 3600 * 1000).toISOString(), currentPeriodEnd: null, seats: 5, ...(plan || {}) };
   const handler = async (call) => {
     requests.push(call);
+    if (onRequest) await onRequest(call);
     const m = /^Bearer (.+)$/.exec(call.headers.Authorization || '');
     const userId = m && users[m[1]];
     if (!userId) return { status: 401, body: { ok: false, error: 'sign in again (the token was rejected or has expired)' } };
@@ -276,9 +282,11 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
     // a listing stamped more than five minutes ahead of the server's clock is rejected, not written
     const accepted = rows.listings.filter((r) => Date.parse(r.posted_at) <= clock.t + 5 * 60 * 1000);
     const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: rows.listings.length - accepted.length, conflicts: 0, attempts: rows.postAttempts.length, todoItems: 0, scans: body.scan ? 1 : 0 };
-    const sent = new Set(accepted.map((r) => `${r.vin}@${r.posted_at}`));
+    const sent = new Set(rows.listings.map((r) => postKey(r.vin, r.posted_at)));
+    const known = new Set(Array.isArray(body.known) ? body.known : []);
     for (const r of listings) {
-      if (r.user_id === userId && r.status === 'listed' && !sent.has(`${r.vin}@${r.posted_at}`) && body.since && Date.parse(r.created_at) <= Date.parse(body.since)) {
+      const key = postKey(r.vin, r.posted_at);
+      if (r.user_id === userId && r.status === 'listed' && known.has(key) && !sent.has(key)) {
         r.status = 'taken_down';
         r.taken_down_at = now;
         counts.takenDown += 1;
@@ -292,7 +300,7 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
           counts.conflicts += 1; // a VIN another member has up is theirs until their row is taken down
           continue;
         }
-        listings.push({ id: `${incoming.vin}@${incoming.posted_at}`, ...incoming, created_at: now });
+        listings.push({ id: `${incoming.vin}@${incoming.posted_at}`, ...incoming });
         counts.listingsInserted += 1;
         continue;
       }
@@ -348,6 +356,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const body = calls[0].body;
   assert.equal(body.origin, ORIGIN, 'the trailing slash is dropped');
   assert.equal(body.since, null, 'a first sync');
+  assert.deepEqual(body.known, [], 'knowing nothing, it can take nothing down');
   const today = localDayRange(new Date(NOW));
   assert.deepEqual(body.today, today, 'the caller\'s local day goes up, for the server\'s count of their posts in it');
   assert.deepEqual(Object.keys(body.posted), [VIN_A]);
@@ -376,7 +385,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const flag = storage.data[K.pilot].flags[0];
   assert.equal(flag.doneAt, T(40), 'the flag closed on the colleague\'s machine is closed here');
   assert.equal(flag.how, 'detected');
-  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today } }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap');
+  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, known: [postKey(VIN_A, T(0))], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today } }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap; the Ram, sent, is known, the colleague\'s Honda is not');
   assert.equal(storage.data[ACCOUNT_KEY].accessToken, freshSession().accessToken, 'the session is untouched');
 
   // the second sync carries `since`, sends only pilot changes after it, and writes nothing that did not change
@@ -384,6 +393,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const r2 = await syncOnce({ origin: ORIGIN, scan: { takenAt: T(50), cars: 2, ready: 1, takeDownCount: 0, priceUpdateCount: 0 }, deps: deps({ fetchImpl, storage }) });
   assert.equal(r2.ok, true);
   assert.equal(calls[1].body.since, r.serverTime);
+  assert.deepEqual(calls[1].body.known, [postKey(VIN_A, T(0))], 'what the last sync sent goes up as known');
   assert.deepEqual(calls[1].body.pilot, { posts: [], flags: [] }, 'nothing in the pilot changed since');
   assert.deepEqual(calls[1].body.scan, { takenAt: T(50), cars: 2, ready: 1, takeDownCount: 0, priceUpdateCount: 0 }, 'the counts passed in win');
   assert.deepEqual(storage.writes.slice(writesBefore), [[K.sync]], 'only the state was written');
@@ -406,20 +416,23 @@ test('syncOnce: a token the function rejects signs the person out; not a member 
   assert.deepEqual(stranger.data[K.posted], posted);
 
   const elsewhere = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  const before2 = structuredClone(elsewhere.data);
   const r2 = await syncOnce({ origin: 'https://www.other-dealer.test', deps: deps({ fetchImpl, storage: elsewhere }) });
   assert.equal(r2.ok, false);
   assert.equal(r2.status, 403);
   assert.equal(r2.notMember, true);
   assert.match(r2.error, /not a member of the dealership for https:\/\/www\.other-dealer\.test/);
   assert.equal(ACCOUNT_KEY in elsewhere.data, true, 'not a member is not signed out');
-  assert.equal(elsewhere.writes.length, 0);
+  assert.deepEqual(elsewhere.data, before2, 'a refused sync leaves the storage as it found it (its first-sync placeholder removed)');
   assert.equal(describeSync(r2), `Sync failed: ${r2.error}`);
 
   const offline = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  const before3 = structuredClone(offline.data);
   const r3 = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl: async () => { throw new TypeError('Failed to fetch'); }, storage: offline }) });
   assert.equal(r3.ok, false);
   assert.match(r3.error, /couldn't reach the sync service \(Failed to fetch\)/);
-  assert.equal(offline.writes.length, 0);
+  assert.deepEqual(offline.data, before3, 'a sync that never reached the service leaves the storage as it found it');
+  assert.equal(K.sync in offline.data, false);
 
   const noOrigin = await syncOnce({ origin: '', deps: deps({ fetchImpl, storage: offline }) });
   assert.equal(noOrigin.ok, false);
@@ -456,6 +469,71 @@ test('syncOnce: two machines converge through the flows, and a take-down on one 
   assert.equal(VIN_A in sam.data[K.posted], false);
   assert.deepEqual(prices(alex), prices(sam));
   assert.equal(server.listings.find((x) => x.vin === VIN_B).user_id, U1, 'Sam\'s sync never claims Alex\'s row');
+});
+
+// Round H review: the popup's Taken down writes posted:<origin> while a sync
+// the worker or the side panel started is out; that sync's answer still
+// lists the car, since the request carried it.
+test('syncOnce: Taken down clicked while the request is out stays down, and the next sync takes it down on the server', async () => {
+  let storage;
+  let takeDown = false;
+  const server = fakeSyncServer({
+    onRequest: async () => {
+      if (!takeDown) return;
+      takeDown = false;
+      storage.data[K.posted] = markTakenDown(storage.data[K.posted], VIN_A); // the popup's Taken down
+    },
+  });
+  const { fetchImpl, calls } = fakeFetch({ sync: server.handler });
+  const posted = markPosted(markPosted({}, { vin: VIN_A, name: '2019 Ram 1500', price: 28995 }, 'website', T(0)), { vin: VIN_B, name: '2020 Jeep', price: 34995 }, 'website', T(1));
+  storage = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  assert.equal((await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) })).ok, true);
+  takeDown = true;
+  const during = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) });
+  assert.equal(during.ok, true, during.error);
+  assert.equal(during.counts.takenDown, 0, 'the request carried the Ram, so it is still up on the server');
+  assert.deepEqual(Object.keys(storage.data[K.posted]), [VIN_B], 'the answer does not put the Ram back');
+  assert.ok(storage.data[K.sync].known.includes(postKey(VIN_A, T(0))), 'it was sent, so it is known');
+  const next = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) });
+  assert.equal(next.counts.takenDown, 1);
+  assert.equal(server.listings.find((x) => x.vin === VIN_A).status, 'taken_down');
+  assert.deepEqual(Object.keys(storage.data[K.posted]), [VIN_B]);
+  assert.equal(calls.length, 3);
+});
+
+test('syncOnce: Clear everything for this website while the request is out is no take-down: the registry comes back from the server whole', async () => {
+  let storage;
+  let duringRequest = null; // what the popup does while the request is out
+  const server = fakeSyncServer({
+    onRequest: async () => {
+      const act = duringRequest;
+      duringRequest = null;
+      if (act) act();
+    },
+  });
+  const { fetchImpl } = fakeFetch({ sync: server.handler });
+  const sync = () => syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) });
+  const clearAll = () => {
+    for (const key of Object.values(K)) delete storage.data[key]; // the popup's ownRemove of every key of the website
+  };
+  const posted = markPosted(markPosted({}, { vin: VIN_A, name: '2019 Ram 1500', price: 28995 }, 'website', T(0)), { vin: VIN_B, name: '2020 Jeep', price: 34995 }, 'website', T(1));
+  storage = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  assert.equal((await sync()).ok, true);
+
+  duringRequest = clearAll;
+  assert.equal((await sync()).ok, true);
+  assert.deepEqual(Object.keys(storage.data[K.posted]).sort(), [VIN_A, VIN_B], 'both cars are back, as after any clear and sync');
+  assert.equal((await sync()).counts.takenDown, 0);
+
+  // cleared, and a car marked posted right after, while the request is out: the sync state is gone, so it is a clear too
+  duringRequest = () => {
+    clearAll();
+    storage.data[K.posted] = markPosted({}, { vin: VIN_C, name: '2018 Honda', price: 21495 }, 'website', T(2));
+  };
+  assert.equal((await sync()).ok, true);
+  assert.deepEqual(Object.keys(storage.data[K.posted]).sort(), [VIN_A, VIN_B, VIN_C]);
+  assert.equal((await sync()).counts.takenDown, 0);
+  assert.deepEqual(server.listings.map((x) => [x.vin, x.status]), [[VIN_A, 'listed'], [VIN_B, 'listed'], [VIN_C, 'listed']]);
 });
 
 // ---------- the plan and the cap across machines (Milestone 5) ----------

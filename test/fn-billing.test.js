@@ -289,6 +289,15 @@ test('billing: checkout bills seats above the included count on the seat price, 
   assert.deepEqual([session.form.client_reference_id, session.form['line_items[1][price]'], session.form['line_items[1][quantity]']], [D2, 'price_seat_test', '2']);
 });
 
+test('billing: a checkout sent with no seat count bills the included seats, never the old seat count of a subscription that has ended', async () => {
+  world({ subscriptions: [{ dealership_id: D1, status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_old', seats: 8 }] });
+  stripe({ customers: { cus_1: { metadata: { dealership_id: D1 } } } });
+  const handler = await load();
+  assert.equal((await post(handler, 'checkout', TOKEN.u2)).status, 200);
+  const session = stripeCalls().find((c) => c.path === '/v1/checkout/sessions');
+  assert.equal(session.form['line_items[1][price]'], undefined, 'no seat line: the rooftop price covers the included seats');
+});
+
 test('billing: during a pilot with more than 48 hours left the subscription starts as a trial that ends with the pilot; under 48 hours it is charged at once', async () => {
   const pilotEnds = Date.now() + 10 * DAY;
   world({ subscriptions: [{ dealership_id: D1, status: 'pilot', pilot_ends_at: iso(pilotEnds), stripe_customer_id: 'cus_1' }] });
@@ -320,7 +329,7 @@ test('billing: checkout refuses a store that pays with 409, and one Stripe still
   const handler = await load();
   world({ subscriptions: [{ dealership_id: D1, status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
   const active = await post(handler, 'checkout', TOKEN.u2);
-  assert.deepEqual([active.status, active.body], [409, { ok: false, error: 'this dealership already has a subscription; use the billing portal to change it' }]);
+  assert.deepEqual([active.status, active.body], [409, { ok: false, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' }]);
   for (const s of ['past_due', 'unpaid', 'incomplete', 'paused']) {
     world({ subscriptions: [{ dealership_id: D1, status: s, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
     const open = await post(handler, 'checkout', TOKEN.u2);

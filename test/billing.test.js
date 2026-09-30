@@ -107,6 +107,26 @@ test('pilotAvailable and statusAnswer: what the manager page may offer', () => {
   assert.equal(lapsed.canSubscribe, true);
   assert.equal(lapsed.canStartPilot, false);
   assert.equal(lapsed.canManageBilling, true);
+  // a failed payment: Stripe still holds the subscription open, Checkout would refuse a second one, and the
+  // portal is where it is renewed, so Subscribe is not offered
+  const pastDue = statusAnswer(row({ status: 'past_due', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', seats: 5 }), { role: 'manager', now: NOW });
+  assert.equal(pastDue.state, 'lapsed');
+  assert.equal(pastDue.canSubscribe, false);
+  assert.equal(pastDue.canManageBilling, true);
+});
+
+test('the manager page\'s copies of MAX_SEATS and the open-subscription rule are the billing function\'s', async () => {
+  const page = await import('../manager/data.js');
+  assert.equal(page.MAX_SEATS, MAX_SEATS);
+  const shared = await import('../supabase/functions/_shared/billing.mjs');
+  assert.deepEqual([...page.OPEN_STATUSES], [...shared.OPEN_STATUSES]);
+  for (const status of [...STATUSES, 'pilot', null, '']) {
+    for (const id of ['sub_1', '', null]) {
+      const r = { status, stripe_subscription_id: id };
+      assert.equal(page.hasOpenSubscription(r), shared.hasOpenSubscription(r), `${status} ${id}`);
+    }
+  }
+  assert.equal(page.subscribeSeats({ role: 'manager', salespeople: 250, includedSalespeople: 5 }), MAX_SEATS, 'the card asks for no more seats than Checkout bills');
 });
 
 // ---------- seats ----------
@@ -173,7 +193,7 @@ test('checkoutRefusal: no second Checkout while Stripe still holds a subscriptio
     const refusal = checkoutRefusal(r, NOW);
     assert.equal(refusal.status, 409, s);
     if (subscriptionState(r, NOW) === 'active') {
-      assert.deepEqual(refusal, { status: 409, error: 'this dealership already has a subscription; use the billing portal to change it' }, s + ': the active gate stays');
+      assert.deepEqual(refusal, { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' }, s + ': the active gate stays');
     } else {
       assert.deepEqual(refusal, { status: 409, error: OPEN_SUBSCRIPTION_MESSAGE, code: OPEN_SUBSCRIPTION_CODE }, s);
     }

@@ -3,12 +3,12 @@
 // touches the network or chrome.storage. The caller (the popup, the side
 // panel or the worker, wired in with the Settings UI) does:
 //
-//   const body = syncPayload({ origin, posted, pilot, scan, since, userId });
+//   const body = syncPayload({ origin, posted, pilot, scan, since, known: state.known, userId });
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
-//   posted = mergeRegistry(posted, response, { since, userId });
+//   posted = mergeRegistry(posted, response, { since, userId, sent: body.posted });
 //   pilot  = mergeFlags(pilot, response);
-//   state  = nextSyncState(state, response, { today: body.today })
-//            // since, dealership id and role, the plan, the server's count of today's posts
+//   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId })
+//            // since, known, dealership id and role, the plan, the server's count of today's posts
 //
 // The state is per website; the wiring keeps it under a `sync` entry added
 // to SITE_KEY_NAMES in src/storageKeys.js, so clearing a website removes it.
@@ -21,6 +21,15 @@
 // round, a colleague's row never takes over an entry this person owns: their
 // own entry stays theirs, goes up again whole, and the sync function keeps
 // their row listed (it refuses a colleague's post of a VIN they have up).
+//
+// Take-downs are told by keys, never by time. `known` in the state is the
+// list of this person's own posts (VIN@postedAt) the machine sent or received
+// at its last sync; the next request carries it, and the function takes down
+// only the person's listed rows that are in it and missing from `posted`.
+// A post that reached the server from another machine during or after that
+// sync was never received here, so it is not in `known` and stays up; the
+// machine receives it on this sync and knows it from then on. Two clocks
+// (the function's and the database's) and two transactions never decide it.
 //
 // What travels: the salesperson's own entries of posted:<origin> (VIN, name,
 // price, times, the listing link they saved, their name), the post attempts
@@ -39,6 +48,11 @@ export const SYNC_VERSION = 1;
 // A taken-down listing older than this is not sent back to a machine that
 // has never synced (it cannot have the entry anyway).
 export const TAKEN_DOWN_WINDOW_DAYS = 90;
+
+// At most this many keys in `known`: the sync function's cap on the rows of
+// one request (MAX_ROWS), which a registry that syncs at all stays under. A
+// key left out only means its take-down is missed and can be repeated.
+export const MAX_KNOWN = 2000;
 
 const ms = (x) => {
   if (x === null || x === undefined || x === '') return null;
@@ -74,6 +88,29 @@ const changedAfter = (since, ...stamps) => {
 const isOwn = (entry, userId) => entry.mine !== false && (!entry.userId || !userId || entry.userId === userId);
 // A server row of somebody else than the caller (with both known).
 const isTheirs = (r, userId) => Boolean(r.user_id && userId && String(r.user_id) !== String(userId));
+
+// One post's key, the way the sync function matches a row: the VIN and the
+// posting time, to the millisecond. '' when either is missing.
+export function postKey(vin, postedAt) {
+  const v = vinOf(vin);
+  const at = isoOrNull(postedAt);
+  return v && at ? `${v}@${at}` : '';
+}
+
+// The keys of the entries a request's `posted` carried ({ [vin]: { postedAt } }).
+const sentKeys = (sent) => new Set(Object.entries(isObject(sent) ? sent : {}).map(([key, e]) => (isObject(e) ? postKey(e.vin || key, e.postedAt) : '')).filter(Boolean));
+
+// A list of keys as it goes up and is kept: each one well formed, once, at most MAX_KNOWN.
+function keyList(keys) {
+  const out = new Set();
+  for (const k of Array.isArray(keys) ? keys : []) {
+    if (out.size >= MAX_KNOWN) break;
+    const at = typeof k === 'string' ? k.lastIndexOf('@') : -1;
+    const key = at > 0 ? postKey(k.slice(0, at), k.slice(at + 1)) : '';
+    if (key) out.add(key);
+  }
+  return [...out];
+}
 
 // ---------- the day the cap counts ----------
 
@@ -180,8 +217,11 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
 
 /**
  * The body of one POST to the sync function.
- *   posted: the salesperson's own entries, whole (the function tells a
- *           take-down by an entry that is missing and was known before `since`)
+ *   posted: the salesperson's own entries, whole
+ *   known:  the keys (VIN@postedAt) of their own posts this machine sent or
+ *           received at its last sync (the state's `known`, nextSyncState);
+ *           the function takes down only those missing from `posted`, so a
+ *           machine that never synced takes nothing down
  *   pilot:  posts and flags that changed after `since` (all of them the first time)
  *   scan:   this scan's counts, or null when nothing was scanned
  *   since:  the serverTime of the last answer, or null
@@ -189,7 +229,7 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
  *           the function can count their posts in it (postsToday); `now` is
  *           the moment, a parameter for the tests
  */
-export function syncPayload({ origin = '', posted = {}, pilot = null, scan = null, since = null, userId = '', now = new Date() } = {}) {
+export function syncPayload({ origin = '', posted = {}, known = null, pilot = null, scan = null, since = null, userId = '', now = new Date() } = {}) {
   const own = {};
   for (const [key, e] of Object.entries(isObject(posted) ? posted : {})) {
     if (!isObject(e) || !isOwn(e, userId)) continue;
@@ -207,7 +247,7 @@ export function syncPayload({ origin = '', posted = {}, pilot = null, scan = nul
   const p = withPilotDefaults(pilot);
   const posts = p.posts.filter((a) => changedAfter(since, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
   const flags = p.flags.filter((f) => changedAfter(since, f.flaggedAt, f.doneAt));
-  return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
+  return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, known: keyList(known), pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
 }
 
 // ---------- what comes down ----------
@@ -262,24 +302,34 @@ const rowsOf = (remote, key) => (Array.isArray(remote) ? remote : isObject(remot
  * `userId` given, a colleague's entry also gets `mine: false` (own entries
  * carry no flag). `remote` is the sync answer ({ listings: [...] }) or a
  * plain array of rows.
+ * `sent` is the request's `posted`: a listed row of the caller's that the
+ * request carried and `local` no longer has was removed here while the
+ * request was out (Taken down clicked during the sync), so it is not added
+ * back; the next sync takes it down, as the request's keys become `known`.
+ * The same post twice in one answer (read listed, then taken down, while a
+ * take-down landed between the function's reads) counts as taken down: a
+ * taken-down row is never listed again.
+ * A take-down of another post of the same car never removes one of the
+ * caller's own posts the server holds as listed: the answer looks back 10
+ * minutes (the function's margin), so it can carry a take-down whose
+ * posted_at is later than a re-post from a machine with a slow clock.
  */
-export function mergeRegistry(local, remote, { since = null, userId = '' } = {}) {
+export function mergeRegistry(local, remote, { since = null, userId = '', sent = null } = {}) {
   void since; // the newest-change rule covers it; kept in the signature so callers can say when they last synced
   const base = isObject(local) ? local : {};
+  const removedHere = sentKeys(sent);
   const current = new Map(); // vin -> the latest post the server knows for it
   const own = new Map(); // vin -> the caller's own latest post there
+  const later = (r, have) => !have || ms(r.posted_at) > ms(have.posted_at) || (ms(r.posted_at) === ms(have.posted_at) && r.status !== 'listed');
   for (const r of rowsOf(remote, 'listings')) {
     if (!isObject(r)) continue;
     const vin = vinOf(r.vin);
     const at = ms(r.posted_at);
     if (!vin || at === null) continue;
-    const have = current.get(vin);
-    if (!have || at > ms(have.posted_at)) current.set(vin, r);
-    if (userId && r.user_id && String(r.user_id) === String(userId)) {
-      const mine = own.get(vin);
-      if (!mine || at > ms(mine.posted_at)) own.set(vin, r);
-    }
+    if (later(r, current.get(vin))) current.set(vin, r);
+    if (userId && r.user_id && String(r.user_id) === String(userId) && later(r, own.get(vin))) own.set(vin, r);
   }
+  const listedOwn = new Set(rowsOf(remote, 'listings').filter((r) => isObject(r) && r.status === 'listed' && !isTheirs(r, userId)).map((r) => postKey(r.vin, r.posted_at)));
   const out = {};
   const seen = new Set();
   for (const [key, e] of Object.entries(base)) {
@@ -311,6 +361,7 @@ export function mergeRegistry(local, remote, { since = null, userId = '' } = {})
     if (localPosted === null || remotePosted > localPosted + 999) {
       // the server knows a newer post of this car (from another machine)
       if (r.status === 'listed') out[key] = entryFromRow(r, e, userId);
+      else if (isOwn(e, userId) && listedOwn.has(postKey(e.vin || key, e.postedAt))) out[key] = e; // still listed on the server: a take-down of another post of the car does not remove it
       continue;
     }
     if (r.status !== 'listed') continue; // taken down elsewhere
@@ -334,6 +385,7 @@ export function mergeRegistry(local, remote, { since = null, userId = '' } = {})
   }
   for (const [vin, r] of current) {
     if (seen.has(vin) || r.status !== 'listed') continue;
+    if (!isTheirs(r, userId) && removedHere.has(postKey(r.vin, r.posted_at))) continue; // removed here during the sync
     out[vin] = entryFromRow(r, {}, userId);
   }
   return out;
@@ -385,14 +437,27 @@ export function planFrom(plan) {
 // posts in `today`, the day the request sent, and only from this answer: a
 // count is good for the day and the moment it was made, so an answer
 // without one leaves null rather than an old number.
-export function nextSyncState(previous, response, { today = null } = {}) {
+// `known` is the keys of the caller's own posts this sync sent (`sent`, the
+// request's `posted`) and those the machine holds after the merge (`held`,
+// the registry mergeRegistry wrote), for the next request (syncPayload). A
+// row the answer carried but the merge did not keep (a colleague's newer
+// take-down of the same car shadowed it) is not held here, so it is not
+// known and never taken down from here. Without `held` (direct callers), the
+// caller's own listed rows in the answer stand in. Only an answer that
+// synced (it carries a serverTime) replaces it; a 402 keeps the last one.
+export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null } = {}) {
   const prev = isObject(previous) ? previous : {};
   const r = isObject(response) ? response : {};
   const d = isObject(r.dealership) ? r.dealership : {};
   const day = isObject(today) && isoOrNull(today.from) && isoOrNull(today.to) ? { from: isoOrNull(today.from), to: isoOrNull(today.to) } : null;
+  const synced = Boolean(isoOrNull(r.serverTime));
+  const received = isObject(held)
+    ? [...sentKeys(Object.fromEntries(Object.entries(held).filter(([, e]) => isObject(e) && isOwn(e, userId))))]
+    : rowsOf(r, 'listings').filter((row) => isObject(row) && row.status === 'listed' && userId && String(row.user_id) === String(userId)).map((row) => postKey(row.vin, row.posted_at));
   return {
     version: SYNC_VERSION,
     since: isoOrNull(r.serverTime) || prev.since || null,
+    known: synced ? keyList([...sentKeys(sent), ...received]) : keyList(prev.known),
     dealershipId: d.id || prev.dealershipId || null,
     dealershipName: d.name || prev.dealershipName || '',
     role: r.role || prev.role || '',

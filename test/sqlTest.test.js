@@ -1,7 +1,8 @@
 // scripts/sql-test.mjs: the shim first, then the migrations in number order,
 // then every test file but the shim, each of which must leave the database
-// as it found it; concurrency.sql (two real sessions through dblink) commits
-// and cleans up after itself; and CI runs it all on Postgres 16.
+// as it found it; concurrency.sql (real sessions through dblink) commits,
+// cleans up after itself and sets sign-up's switch back; and CI runs it all
+// on Postgres 16.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -55,7 +56,7 @@ test('tests/concurrency.sql: two dblink sessions, the second waits for the first
     "exception when others then\n  perform set_config('lotsync.concurrency_failure', sqlerrm, false);",
     "perform dblink_disconnect(c);",
     "delete from public.dealerships where id = :'dealer';",
-    "delete from auth.users where id in (:'m1', :'m2');",
+    "delete from auth.users where id in (:'m1', :'m2', :'p');",
     'drop extension dblink;',
     "raise exception 'concurrency.sql left rows behind';",
     "raise exception '%', current_setting('lotsync.concurrency_failure');",
@@ -70,6 +71,46 @@ test('tests/concurrency.sql: two dblink sessions, the second waits for the first
   for (const words of ['two managers acting at once left the dealership with no manager', 'session 2 did not wait for session 1']) {
     assert.ok(sql.includes(words), `concurrency.sql checks: ${words}`);
   }
+});
+
+// round H review: create_dealership counted its hourly throttle before the settings row's lock, so calls from
+// one account sent together all passed it and each looked up a website
+test('tests/concurrency.sql: more than five sign-up calls from one account queue behind the settings row\'s lock, and only five look up a website', () => {
+  const sql = read('../supabase/tests/concurrency.sql');
+  const calls = Number((sql.match(/^  calls constant integer := (\d+);$/m) || [])[1]);
+  assert.ok(calls > 5, 'more calls than the throttle allows in an hour');
+  const flow = [
+    'select open as signup_was_open from public.signup_settings where id \\gset',
+    'update public.signup_settings set open = true;',
+    "perform dblink_connect('lotsync_hold', conn);",
+    "perform dblink_exec('lotsync_hold', 'begin');",
+    "perform * from dblink('lotsync_hold', 'select 1 from public.signup_settings s where s.id for update') as t(one integer);",
+    'for i in 1..calls loop',
+    "json_build_object('sub', p, 'role', 'authenticated')",
+    "perform dblink_exec('lotsync_t' || i, 'set role authenticated');",
+    "dblink_send_query('lotsync_t' || i, format('select public.create_dealership(%L, %L, %L)::text', 'Probe Motors ' || i, 'www.dealership-c.test', 'Quinn'))",
+    'select count(*) into waiting from unnest(pids) x where cardinality(pg_blocking_pids(x)) > 0;',
+    "perform dblink_exec('lotsync_hold', 'commit');",
+    "from dblink_get_result('lotsync_t' || i)",
+    'select count(*) into attempts from public.signup_attempts a where a.user_id = p;',
+    'if waiting <> calls then',
+    'if attempts > 5 then',
+    `if answers is distinct from array[${[...Array(calls - 5).fill("'P0005'"), ...Array(5).fill("'P0009'")].join(', ')}] or attempts <> 5 then`,
+    "perform set_config('lotsync.concurrency_failure', concat_ws(E'\\n', nullif(current_setting('lotsync.concurrency_failure'), ''), sqlerrm), false);",
+    "if c like 'lotsync\\_%' then",
+    "if dblink_is_busy(c) = 1 then perform dblink_cancel_query(c); end if;",
+    "delete from auth.users where id in (:'m1', :'m2', :'p');",
+    "update public.signup_settings set open = :'signup_was_open';",
+    "or exists (select 1 from public.signup_attempts where user_id = '00000000-0000-4000-8000-000000cc00a3')",
+    "raise exception 'concurrency.sql left rows behind';",
+  ];
+  let at = -1;
+  for (const step of flow) {
+    const next = sql.indexOf(step, at + 1);
+    assert.ok(next > at, `concurrency.sql: "${step}" is missing or out of order`);
+    at = next;
+  }
+  assert.ok(sql.includes('the throttle is not counted under the lock'), 'the failure names the cause');
 });
 
 test('CI runs the SQL checks on a Postgres 16 service container', () => {

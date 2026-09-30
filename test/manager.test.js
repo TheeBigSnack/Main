@@ -390,6 +390,19 @@ test('billingCard: the seat line reads "N salespeople; the plan includes M" unde
   for (const c of [under, at, over]) assert.doesNotMatch(c.seatLine + c.seatNote, /\$|\d+\s*(a|per)\s*month/);
 });
 
+test('billingCard: a failed payment (Stripe still holds the subscription open) shows the seats paid for, and no Subscribe note', () => {
+  const pastDue = card(status({ state: 'lapsed', canSubscribe: false, canManageBilling: true, salespeople: INC + 3, subscription: subRow({ status: 'past_due', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', seats: INC }) }));
+  assert.equal(pastDue.seatsPaid, INC, 'the open subscription still pays for its seats');
+  assert.equal(pastDue.subscribeSeats, null, 'no Subscribe note: Checkout refuses a second subscription');
+  assert.equal(pastDue.seatTone, 'warn');
+  assert.match(pastDue.seatNote, new RegExp(`^${INC + 3} salespeople and ${INC} seats paid for\\.`));
+  assert.ok(!pastDue.buttons.some((b) => b.action === 'subscribe'));
+  // a canceled one has ended: Subscribe is offered again, and nothing is paid for
+  const canceled = card(status({ state: 'lapsed', canSubscribe: true, salespeople: INC + 1, subscription: subRow({ status: 'canceled', stripe_subscription_id: 'sub_1', seats: INC }) }));
+  assert.equal(canceled.seatsPaid, null);
+  assert.equal(canceled.subscribeSeats, INC + 1);
+});
+
 test('billingCard: no seat line without a manager\'s count, for a salesperson, or for a plan the page cannot read', () => {
   for (const n of [null, undefined, -1, 2.5, '7']) {
     const c = card(status({ state: 'pilot', canSubscribe: true, salespeople: n, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(10) }) }));

@@ -131,8 +131,11 @@ test('lead: a body over 16 KiB is refused with 400 before it is parsed, by its d
   const big = { ...FORM, message: 'x'.repeat(16 * 1024) };
   const r = await lead(handler, { body: big });
   assert.deepEqual([r.status, r.body], [400, { ok: false, error: 'request too large', field: '' }]);
-  const declared = await lead(handler, { headers: { ...from('192.0.2.3'), 'content-length': String(16 * 1024 + 1) }, raw: JSON.stringify(FORM).padEnd(16 * 1024 + 1, ' ') });
-  assert.deepEqual([declared.status, declared.body.error], [400, 'request too large']);
+  // a small, valid form that declares more than the limit: only the declared
+  // length can refuse it, so the function never reads a body it was told is too big
+  const declared = await lead(handler, { headers: { ...from('192.0.2.3'), 'content-length': String(16 * 1024 + 1) }, raw: JSON.stringify(FORM) });
+  assert.deepEqual([declared.status, declared.body], [400, { ok: false, error: 'request too large', field: '' }]);
+  assert.equal(fake.writes().length, 0, 'neither was stored');
   // a long message within the limit is cut to the table's limit, not refused
   const long = await lead(handler, { body: { ...FORM, message: 'y'.repeat(LEAD_LIMITS.message + 500) }, headers: from('192.0.2.4') });
   assert.equal(long.status, 200);

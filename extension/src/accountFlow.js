@@ -20,17 +20,18 @@
 // What a sync writes, all under the key's lock (src/storage.js): the merged
 // registry to posted:<origin> (colleagues' entries marked `mine: false`, so
 // the cap and the rescan flags stay the salesperson's own), closed flags to
-// pilot:<origin>, and the state for the next call (since, dealership, role,
-// the plan, the server's count of today's posts) to sync:<origin>. The access
-// token is only ever read from the session in chrome.storage.local; it is
-// never copied into the settings or the synced profile.
+// pilot:<origin>, and the state for the next call (since, the keys of the
+// salesperson's own posts it sent or received, dealership, role, the plan,
+// the server's count of today's posts) to sync:<origin>. The access token is
+// only ever read from the session in chrome.storage.local; it is never
+// copied into the settings or the synced profile.
 
 import { ACCOUNT, accountsConfigured } from './accountConfig.js';
 import { signInWithMagicLink, verifyOtp, ensureFreshSession, loadSession, storeSession, clearSession, signOut, authHeaders, errorText, DEFAULT_OTP_TYPE } from './account.js';
-import { syncPayload, mergeRegistry, mergeFlags, nextSyncState, scanSummary } from './sync.js';
+import { syncPayload, mergeRegistry, mergeFlags, nextSyncState, scanSummary, SYNC_VERSION } from './sync.js';
 import { withPilotDefaults } from './pilot.js';
 import { siteKeys } from './storageKeys.js';
-import { updateKey, storageErrorText } from './storage.js';
+import { updateKey, storageErrorText, withLock } from './storage.js';
 import { DECISION } from './classify.js';
 
 export const SYNC_TIMEOUT_MS = 20000;
@@ -167,16 +168,19 @@ export async function signOutAll(deps = {}) {
 // ---------- the rewrite service ----------
 
 /**
- * What goes after "Bearer" when the panel calls the rewrite service: the
- * signed-in session's access token when the service address is the
- * account's own rewrite function, else the key typed in Settings (a
- * self-hosted backend/ keeps working, signed in or not).
+ * What goes after "Bearer" when the panel calls the rewrite service: for the
+ * account's own rewrite function, the signed-in session's access token, and
+ * nothing when signed out (the key typed in Settings belongs to a
+ * self-hosted service and is never sent to the account's function; the
+ * function then answers 401 and the panel keeps its template); for any
+ * other address, the key typed in Settings (a self-hosted backend/ keeps
+ * working, signed in or not).
  */
 export function rewriteKeyFor({ rewrite = {}, session = null, config = ACCOUNT } = {}) {
   const rw = rewrite && typeof rewrite === 'object' ? rewrite : {};
   const own = rewriteEndpointFor(config).toLowerCase();
   const endpoint = trimSlash(rw.endpoint).toLowerCase();
-  if (own && endpoint === own && session && session.accessToken) return String(session.accessToken);
+  if (own && endpoint === own) return session && session.accessToken ? String(session.accessToken) : '';
   return String(rw.key || '');
 }
 
@@ -258,17 +262,46 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
   }
   const since = state && state.since ? state.since : null;
   const userId = (session.user && session.user.id) || '';
-  const body = syncPayload({ origin: o, posted, pilot, scan: summary, since, userId, now: new Date(now) }); // `today` is built from this clock
+  const body = syncPayload({ origin: o, posted, known: state && state.known, pilot, scan: summary, since, userId, now: new Date(now) }); // `today` is built from this clock
+  // A clear while the request is out (Clear everything for this website)
+  // removes the sync state, and a sync state missing when the answer comes
+  // back is how that clear is seen: nothing the request carried is then
+  // treated as known. A first sync has no state to remove, so it writes a
+  // placeholder (pending, no since, nothing known) that a clear removes like
+  // any state; a sync that fails removes it again, so a failure leaves the
+  // website as it found it.
+  let placeholder = false;
+  if (!state) {
+    try {
+      placeholder = Boolean(await updateKey(k.sync, (prev) => (prev ? undefined : { version: SYNC_VERSION, since: null, known: [], pending: true }), storage));
+    } catch (e) {
+      return { ok: false, error: storageErrorText(e) };
+    }
+  }
+  const dropPlaceholder = async () => {
+    if (!placeholder) return;
+    const drop = async () => {
+      const current = await readKey(storage, k.sync);
+      if (current && current.pending) await storage.remove(k.sync);
+    };
+    try {
+      await (typeof storage.lock === 'function' ? storage.lock(k.sync, drop) : withLock(k.sync, drop));
+    } catch {
+      /* a placeholder left behind reads as no state: the next sync is a first sync */
+    }
+  };
   let res;
   try {
     res = await postJson(fetchImpl, syncUrlFor(config), body, authHeaders(session, config.anonKey), timeoutMs);
   } catch (e) {
+    await dropPlaceholder();
     return { ok: false, error: `couldn't reach the sync service (${(e && e.message) || e})` };
   }
   const answer = res.body;
   if (!res.ok || !answer.ok) {
     const error = errorText(answer, res.status);
     if (res.status === 401) {
+      await dropPlaceholder();
       await clearSession(storage); // the token was rejected outright: the person signs in again
       return { ok: false, status: 401, signedOut: true, error };
     }
@@ -278,7 +311,7 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
       // manager's job in the manager view, not a matter of signing in again.
       let plan = null;
       try {
-        const next = await updateKey(k.sync, (prev) => nextSyncState(prev, answer, { today: body.today }), storage);
+        const next = await updateKey(k.sync, (prev) => (prev ? nextSyncState(prev, answer, { today: body.today }) : undefined), storage);
         plan = (next && next.plan) || null;
       } catch {
         /* the state could not be written; the answer still says what happened */
@@ -286,12 +319,23 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
       const lapsedError = typeof answer.error === 'string' && answer.error ? answer.error : LAPSED_MESSAGE;
       return { ok: false, status: res.status, code: LAPSED_CODE, lapsed: true, error: lapsedError, plan: plan || (answer.plan && typeof answer.plan === 'object' ? answer.plan : null) };
     }
+    await dropPlaceholder();
     return { ok: false, status: res.status, notMember: res.status === 403, error };
   }
   let next;
+  let held = null;
   try {
-    await updateKey(k.posted, (current) => {
-      const merged = mergeRegistry(current || {}, answer, { since, userId });
+    // The registry as it is stored now, which the popup may have changed
+    // while the request was out: an entry the request carried and Taken down
+    // removed meanwhile is not put back from the answer (`sent`), and the
+    // next sync takes it down. When the website's registry or its sync
+    // state is gone (Clear everything for this website, or Sign out, while
+    // the request was out), everything comes back from the server whole, as
+    // after any clear, so a clear is never taken for a take-down.
+    await updateKey(k.posted, async (current) => {
+      const cleared = !current || !(await readKey(storage, k.sync));
+      const merged = mergeRegistry(current || {}, answer, { since, userId, sent: cleared ? null : body.posted });
+      held = merged;
       return same(merged, current || {}) ? undefined : merged;
     }, storage);
     await updateKey(k.pilot, (current) => {
@@ -299,7 +343,10 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
       const merged = mergeFlags(before, answer);
       return same(merged, before) ? undefined : merged;
     }, storage);
-    next = await updateKey(k.sync, (prev) => nextSyncState(prev, answer, { today: body.today }), storage);
+    // A state gone by now means a clear landed after the merge: nothing is
+    // written back, and the next sync is a first sync, which takes nothing
+    // down and refills the registry from the server.
+    next = await updateKey(k.sync, (prev) => (prev ? nextSyncState(prev, answer, { today: body.today, sent: body.posted, userId, held }) : undefined), storage);
   } catch (e) {
     return { ok: false, error: storageErrorText(e) };
   }

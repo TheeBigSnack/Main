@@ -53,12 +53,14 @@ comment on table public.memberships is 'Who belongs to which dealership and as w
 -- second row (the unique key includes posted_at). status and taken_down_at
 -- move together: a take-down sets both.
 -- posted_at is the time the salesperson's browser recorded the post (that
--- machine's clock); created_at is when this database first saw the row (the
--- server's clock). The sync function's take-down rule compares created_at
--- with the caller's last sync time and never posted_at, so a slow clock, or
--- a post uploaded late from another of the salesperson's machines, cannot
--- look like a take-down. (created_at was added here in place rather than in
--- a later migration: no project has applied these files yet.)
+-- machine's clock); created_at is when this database first saw the row (its
+-- own clock, when the inserting transaction began). The sync function's
+-- take-down rule compares neither with a sync time: it takes down only the
+-- posts the caller's machine sent or received at its last sync (`known`),
+-- so a slow clock, or a post uploaded late from another of the
+-- salesperson's machines, cannot look like a take-down. (created_at was
+-- added here in place rather than in a later migration: no project has
+-- applied these files yet.)
 -- user_id is the poster's auth.users id, kept without a foreign key so the
 -- dealership's record survives that account being deleted.
 -- ---------------------------------------------------------------------------
