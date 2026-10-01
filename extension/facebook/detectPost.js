@@ -1,7 +1,11 @@
 // Watches the Facebook tab after the form is filled and reports when its
 // address changes to a published listing. It only listens; it never acts on
-// the page. Detection is best-effort: the side panel always asks the
-// salesperson to confirm ("Did it post?") and lets them paste the link.
+// the page. Detection is best-effort. A single post always waits for the
+// salesperson to confirm ("Looks like it posted", It's posted, record it)
+// and lets them paste the link. In a queue, a listing address the form's own
+// tab moved to straight from the create page, for a listing not already
+// recorded, is taken as the person's Publish and recorded without asking
+// (isNewListingFromForm); any other listing address waits for their click.
 
 // 'listing' = a listing page with an id; 'probably' = the "your listings"
 // page, which usually follows a publish; null = nothing to report.
@@ -14,11 +18,42 @@ export function classifyUrl(url, { listingUrlPattern, afterPublishPatterns = [] 
   return null;
 }
 
+// Whether an address is the create-listing page: createUrl's page or a page
+// under it, with any query.
+export function onCreatePage(url, createUrl) {
+  try {
+    const u = new URL(String(url || ''));
+    const c = new URL(String(createUrl || ''));
+    const page = u.pathname.replace(/\/+$/, '');
+    const form = c.pathname.replace(/\/+$/, '');
+    return u.origin === c.origin && (page === form || page.startsWith(form + '/'));
+  } catch (e) {
+    return false;
+  }
+}
+
+// In a queue, whether a watch result may be recorded without asking: a
+// listing address the tab moved to straight from the create page
+// (afterCreate), whose listing is not one already recorded in `posted`.
+export function isNewListingFromForm(result, posted, patterns) {
+  if (!result || result.status !== 'listing' || result.afterCreate !== true) return false;
+  if (!result.id) return true;
+  return !Object.values(posted || {}).some((p) => {
+    const known = classifyUrl(p && p.listingUrl, patterns);
+    return Boolean(known) && known.status === 'listing' && known.id === result.id;
+  });
+}
+
 /**
  * Resolves with { status: 'listing' | 'probably' | 'closed' | 'timeout' | 'cancelled', url }.
+ * A 'listing' result also says whether the address came straight after the
+ * create page (createUrl) in this tab, as an address change this watch saw:
+ * afterCreate. The address the tab already showed when the watch began
+ * never counts as coming from the form.
  */
-export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns = [], timeoutMs = 30 * 60 * 1000 }) {
+export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns = [], createUrl = '', timeoutMs = 30 * 60 * 1000 }) {
   const patterns = { listingUrlPattern, afterPublishPatterns };
+  let onForm = false; // the last address this watch saw in the tab was the create page
   let done = false;
   let timer = null;
   let resolveFn;
@@ -32,12 +67,17 @@ export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns
     chrome.tabs.onRemoved.removeListener(onRemoved);
     resolveFn(result);
   }
-  function check(url) {
+  function check(url, changed) {
     const r = classifyUrl(url, patterns);
-    if (r) finish(r);
+    if (!r) {
+      onForm = onCreatePage(url, createUrl);
+      return;
+    }
+    if (r.status === 'listing') r.afterCreate = changed && onForm;
+    finish(r);
   }
   function onUpdated(id, info) {
-    if (id === tabId && info && info.url) check(info.url);
+    if (id === tabId && info && info.url) check(info.url, true);
   }
   function onRemoved(id) {
     if (id === tabId) finish({ status: 'closed', url: null });
@@ -46,7 +86,7 @@ export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns
   chrome.tabs.onUpdated.addListener(onUpdated);
   chrome.tabs.onRemoved.addListener(onRemoved);
   timer = setTimeout(() => finish({ status: 'timeout', url: null }), timeoutMs);
-  chrome.tabs.get(tabId).then((t) => check(t && t.url)).catch(() => finish({ status: 'closed', url: null }));
+  chrome.tabs.get(tabId).then((t) => check(t && t.url, false)).catch(() => finish({ status: 'closed', url: null }));
 
   return { promise, cancel: () => finish({ status: 'cancelled', url: null }) };
 }

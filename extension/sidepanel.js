@@ -28,7 +28,7 @@ import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/
 import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
-import { watchForListing } from './facebook/detectPost.js';
+import { watchForListing, isNewListingFromForm } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
@@ -934,13 +934,16 @@ async function attachPhotos(only = null) {
 
 function startWatcher() {
   if (watcher) watcher.cancel();
-  watcher = watchForListing({ tabId: state.fbTabId, listingUrlPattern: state.map.listingUrlPattern, afterPublishPatterns: state.map.afterPublishPatterns });
+  watcher = watchForListing({ tabId: state.fbTabId, listingUrlPattern: state.map.listingUrlPattern, afterPublishPatterns: state.map.afterPublishPatterns, createUrl: state.map.createUrl });
   watcher.promise.then((r) => {
     if (state.step !== 'publish') return;
     if (r.status === 'listing' || r.status === 'probably' || r.status === 'closed') {
       state.detected = r;
-      // In a queue, a listing address means the person clicked Publish: record it and load the next car.
-      if (state.queueMode && r.status === 'listing') return confirmPosted();
+      // In a queue, the form's tab moving straight from the form to a new
+      // listing means the person clicked Publish: record it and load the next
+      // car. Any other listing address in that tab (one browsed to, or one it
+      // already showed when the panel came back) waits for the person's click.
+      if (state.queueMode && isNewListingFromForm(r, state.posted, state.map)) return confirmPosted();
       render();
       saveFlow();
     }

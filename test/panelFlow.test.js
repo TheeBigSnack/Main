@@ -23,6 +23,7 @@ import { draftRecord } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
 import { FORM_MAP, applyOverrides } from '../extension/facebook/formMap.js';
+import { isNewListingFromForm } from '../extension/facebook/detectPost.js';
 import { vehicle } from './helpers.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
@@ -951,6 +952,43 @@ test('a queued car is recorded once and moves the queue once, whether the watche
   idle.state.step = 'review';
   await idle.fns.confirmPosted();
   assert.equal(idle.state.posted && Object.keys(idle.state.posted).length, 0);
+});
+
+// In a queue the panel records a post without asking only when the form's
+// own tab went straight from the form to a listing not already recorded;
+// any other listing address shows "Looks like it posted" and waits.
+test('in a queue, only a new listing the form\'s tab moved to straight from the form is recorded without asking', async () => {
+  const ITEM = 'https://www.facebook.com/marketplace/item/555/';
+  const run = async ({ queueMode, result, posted = {} }) => {
+    const calls = [];
+    const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, detected: null };
+    const startWatcher = compile('startWatcher', {
+      state, watcher: null, isNewListingFromForm,
+      watchForListing: (opts) => {
+        calls.push('watch ' + opts.createUrl);
+        return { promise: Promise.resolve(result), cancel: () => {} };
+      },
+      confirmPosted: async () => calls.push('confirmPosted'),
+      render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'),
+    });
+    startWatcher();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { calls, state };
+  };
+  const fromForm = { status: 'listing', url: ITEM, id: '555', afterCreate: true };
+  const q = await run({ queueMode: true, result: fromForm });
+  assert.deepEqual(q.calls, ['watch ' + FORM_MAP.createUrl, 'confirmPosted'], 'published from the form: recorded, next car');
+  for (const [what, opts] of [
+    ['a listing browsed to', { queueMode: true, result: { ...fromForm, url: 'https://www.facebook.com/marketplace/item/987654321/', id: '987654321', afterCreate: false } }],
+    ['a listing the tab already showed', { queueMode: true, result: { ...fromForm, afterCreate: false } }],
+    ['a listing already recorded', { queueMode: true, result: fromForm, posted: { OTHER: { listingUrl: ITEM } } }],
+    ['a single post', { queueMode: false, result: fromForm }],
+  ]) {
+    const r = await run(opts);
+    assert.ok(!r.calls.includes('confirmPosted'), `${what}: not recorded without the person (${r.calls.join(' | ')})`);
+    assert.equal(r.state.detected, opts.result, `${what}: shown as "Looks like it posted"`);
+    assert.ok(r.calls.includes('render') && r.calls.includes('saveFlow'));
+  }
 });
 
 // A side panel opened in a second window brings back the same post at
