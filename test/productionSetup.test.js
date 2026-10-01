@@ -144,7 +144,10 @@ test('the signed-in deploy check is run by the owner in their own terminal, with
   assert.doesNotMatch(item, /\[Claude\]/);
   assert.match(item, /never goes into the chat/);
   assert.match(item, /copy only the value of its `access_token` field[^.]*never the whole entry/);
-  assert.match(item, /\$env:LOTSYNC_TEST_TOKEN = '<the access_token value only>'\n\s+npm run check-deploy\n\s+Remove-Item Env:LOTSYNC_TEST_TOKEN/, 'the PowerShell form, and the variable removed afterwards');
+  assert.match(item, /\$env:LOTSYNC_TEST_TOKEN = Read-Host '[^']+'\n\s+npm run check-deploy\n\s+Remove-Item Env:LOTSYNC_TEST_TOKEN/, 'the PowerShell form, and the variable removed afterwards');
+  // the token is pasted at a prompt, never typed into a command, so no shell history keeps it
+  assert.doesNotMatch(item, /LOTSYNC_TEST_TOKEN\s*=\s*'?</, 'no command carries the token itself');
+  assert.match(item, /read -rs LOTSYNC_TEST_TOKEN[^.]*unset LOTSYNC_TEST_TOKEN/, 'the macOS and Linux form reads it without showing it, and removes it afterwards');
   assert.match(item, /\*\*Sign out\*\*/, 'the test session is ended afterwards');
   assert.match(readme, /copy only the `access_token` field[^.]*never the whole entry/);
   assert.doesNotMatch(readme, /copy `access_token` from the browser's local storage/);
