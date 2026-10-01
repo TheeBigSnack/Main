@@ -217,7 +217,7 @@ To turn it on, your dealership needs the Lot Current rewrite service running and
 Each salesperson may record a set number of posts a day, 10 by default. Your dealership changes it in **Settings**, **Safety**, **Posts per day, per salesperson**.
 
 - The review screen shows "N of M posts today". At the cap, **Post** buttons and tick boxes go away on Ready to post, **Open the Marketplace form** is disabled, and a queue pauses. The message reads "Daily post cap reached (N of M today). It resets tomorrow; the dealer can change it in Settings."
-- It counts posts recorded in this browser for this website today.
+- It counts posts recorded in this browser for this website today. A listing taken down later the same day still counts: the post was made. Unmarking a car you marked by mistake (clicking **Posted ✓**) takes that post back off the count.
 - It is a safety setting, not a guarantee of anything from Facebook. Meta does not publish its limits.
 
 ## The manager view (for managers)

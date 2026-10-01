@@ -428,3 +428,36 @@ test('a form left open when the panel closed comes back before a post request is
   assert.match(requestPanel({ step: 'review', queue }).fns.queueBar(), /id="queueNext"/);
   assert.match(requestPanel({ step: 'idle', vin: null, queue }).fns.queueBar(), /id="queueNext"/);
 });
+
+test('recording a post also writes it to the day\'s log the cap reads, and a full log write never stops the record', async () => {
+  const run = async ({ logFails = false } = {}) => {
+    const writes = [];
+    const store = { 'posted:o': {}, 'postLog:o': [] };
+    const state = { origin: 'o', vin: 'AAA', vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } }, detected: null, queueMode: false, posted: {}, postLog: [] };
+    const confirmPosted = compile('confirmPosted', {
+      state, $: () => null, watcher: null,
+      siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o }),
+      markPosted: (p, v, basis, at) => ({ ...p, [v.vin]: { name: v.name, price: v.price, postedAt: at } }),
+      logPost: (log, vin, at) => [...log, { vin, at }],
+      updateKey: async (key, change) => {
+        if (logFails && key.startsWith('postLog')) throw new Error('QUOTA_BYTES quota exceeded');
+        store[key] = change(store[key]);
+        writes.push(key);
+        return store[key];
+      },
+      panelStorage: {}, storageErrorText: (e) => String(e), setStatus: never('setStatus'),
+      pilotNote: async () => {}, endPost: () => {}, accountsConfigured: () => false,
+      afterQueueStep: never('afterQueueStep'), render: () => {}, saveFlow: async () => {},
+    });
+    await confirmPosted();
+    return { state, store, writes };
+  };
+  const ok = await run();
+  assert.deepEqual(ok.writes, ['posted:o', 'postLog:o']);
+  assert.equal(ok.store['postLog:o'][0].vin, 'AAA');
+  assert.equal(ok.store['postLog:o'][0].at, ok.store['posted:o'].AAA.postedAt, 'the same time as the posted entry, so an unmark finds it');
+  assert.equal(ok.state.step, 'done');
+  const full = await run({ logFails: true });
+  assert.deepEqual(full.writes, ['posted:o']);
+  assert.equal(full.state.step, 'done', 'the post is recorded all the same');
+});

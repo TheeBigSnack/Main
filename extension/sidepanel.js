@@ -18,7 +18,7 @@ import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
-import { capStatus } from './src/cap.js';
+import { capStatus, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
@@ -49,7 +49,7 @@ const languageHint = (lang, nothingFound) => (lang && !/^en\b/i.test(lang) && no
 
 const state = {
   origin: null, vin: null, dealerTabId: null, windowId: null,
-  settings: null, posted: {}, boilerplate: [], siteName: '',
+  settings: null, posted: {}, postLog: [], boilerplate: [], siteName: '',
   vehicle: null, price: null,
   readAt: null, // when the car was last read and checked on the website (READ_MAX_AGE_MS)
   description: '', descriptionSource: 'template', note: '', guardrails: null,
@@ -123,7 +123,7 @@ const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet 
 async function loadSaved() {
   const origin = state.origin;
   const k = siteKeys(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, GLOBAL_KEYS.sites]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.postLog, k.boilerplate, k.queue, k.drafts, k.sync, GLOBAL_KEYS.sites]);
   const sites = data[GLOBAL_KEYS.sites] || {};
   const siteInfo = sites[origin] || null;
   const siteName = data[k.snapshot]?.site?.name || siteInfo?.name || origin;
@@ -137,6 +137,7 @@ async function loadSaved() {
     snapshotTakenAt: data[k.snapshot]?.takenAt || null,
     settings,
     posted: data[k.posted] || {},
+    postLog: data[k.postLog] || [],
     boilerplate: data[k.boilerplate] || [],
     queue: data[k.queue] || null,
     drafts: data[k.drafts] || {},
@@ -461,9 +462,10 @@ async function startFlow(req) {
   if (state.queueMode && canAutoOpen()) await openForm();
 }
 
-// The day's cap for this salesperson: this machine's posts and, after a
-// sync, the server's count of theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
+// The day's cap for this salesperson: this machine's posts (those taken down
+// since included: the day's log) and, after a sync, the server's count of
+// theirs across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { log: state.postLog, serverCount: state.syncState && state.syncState.postsToday });
 
 // Anything assumed besides the dealership's own defaults (a reading of the
 // website's words, a colour guessed from the photos, a motorcycle read from
@@ -677,8 +679,9 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
 // first-run dry run); otherwise open it and fill it in.
 async function openForm({ probeOnly = false } = {}) {
   const k = siteKeys(state.origin);
-  const fresh = await chrome.storage.local.get([k.posted, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
+  const fresh = await chrome.storage.local.get([k.posted, k.postLog, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
   state.posted = fresh[k.posted] || state.posted;
+  state.postLog = fresh[k.postLog] || state.postLog;
   state.syncState = fresh[k.sync] || state.syncState;
   const cap = dailyCap();
   if (cap.reached) {
@@ -845,6 +848,12 @@ async function confirmPosted() {
   } catch (e) {
     setStatus(storageErrorText(e), 'error'); // the post is on Facebook; the panel stays here so it can be recorded once there is room
     return;
+  }
+  try {
+    // the day's log for the cap, which a take-down later leaves alone
+    state.postLog = await updateKey(siteKeys(state.origin).postLog, (log) => logPost(log, state.vehicle.vin, now), panelStorage); // the same key as the posted entry
+  } catch (e) {
+    /* the posted list has the post, and counts it while it stays listed */
   }
   await pilotNote((p) => endPost(p, state.vin, 'posted', { at: now }));
   // the dealership's shared registry (accounts only): the worker syncs; nothing here waits for it
@@ -1895,6 +1904,7 @@ function adoptChanges(changes) {
     touched = true;
   };
   take(k.posted, 'posted', {});
+  take(k.postLog, 'postLog', []);
   take(k.drafts, 'drafts', {});
   // a new scan (the popup, the worker's rescan): the list follows it
   if (changes[k.snapshot]) {

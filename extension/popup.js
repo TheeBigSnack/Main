@@ -3,7 +3,7 @@ import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, b
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
-import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, logPost, unlogPost, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
@@ -33,6 +33,7 @@ const state = {
   snapshot: null, // last saved scan
   diff: null, // to-do list from the last scan
   posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }
+  postLog: [], // today's posts recorded on this computer, those taken down since included: the cap counts them (src/cap.js)
   settings: null, // see src/settings.js
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [],
@@ -74,6 +75,7 @@ async function loadSaved() {
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
+  state.postLog = data[k.postLog] || [];
   const site = state.snapshot?.site || {};
   if (data[k.settings]) {
     state.settings = withDefaults(data[k.settings], site);
@@ -483,9 +485,10 @@ function queueStatusHtml() {
   return `<div class="banner info queue" id="queueStatus"><b>${esc(describeQueue(q))}</b>${next ? ` · next: ${esc(name)}` : ''}<div class="toolbar">${buttons}</div></div>`;
 }
 
-// The day's cap for this salesperson: this machine's posts and, after a
-// sync, the server's count of theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
+// The day's cap for this salesperson: this machine's posts (those taken down
+// since included: the day's log) and, after a sync, the server's count of
+// theirs across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { log: state.postLog, serverCount: state.syncState && state.syncState.postsToday });
 const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
 
 // The Ready tab: the sort menu (remembered for this website in
@@ -943,7 +946,9 @@ async function onPanelClick(ev) {
     case 'post': {
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry) return;
-      await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis));
+      const at = new Date().toISOString();
+      if (!(await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis, at)))) break;
+      await update('postLog', (log) => logPost(log, vin, at)); // the day's log for the cap, which a take-down leaves alone
       break;
     }
     case 'openPost': {
@@ -1073,10 +1078,17 @@ async function onPanelClick(ev) {
       }
       break;
     }
-    case 'unpost':
-      await update('posted', (p) => markTakenDown(p || {}, vin));
+    case 'unpost': {
+      // a mark taken back was a mistake: it leaves the day's log too (a take-down does not)
+      let at = null;
+      const unmarked = await update('posted', (p) => {
+        at = (p && p[vin] && p[vin].postedAt) || null;
+        return markTakenDown(p || {}, vin);
+      });
+      if (unmarked && at) await update('postLog', (log) => (Array.isArray(log) ? unlogPost(log, vin, at) : undefined));
       notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
       break;
+    }
     // Two keys, two writes: stop at the first that fails (the status says
     // why) so the item stays open and can be ticked again once there is room.
     case 'takenDown':
@@ -1144,7 +1156,7 @@ async function onPanelClick(ev) {
         btn.textContent = 'Click again to clear everything';
         return;
       }
-      Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
+      Object.assign(state, { snapshot: null, diff: null, posted: {}, postLog: [], settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
       await ownRemove(Object.values(siteKeys(state.origin)));
       // forget the website for background rescans too, and take its count off the badge
       try {
@@ -1409,6 +1421,7 @@ async function init() {
     };
     take(k.queue, 'queue', null);
     take(k.posted, 'posted', {});
+    take(k.postLog, 'postLog', []);
     take(k.drafts, 'drafts', {});
     take(k.diff, 'diff', null);
     take(k.snapshot, 'snapshot', null);

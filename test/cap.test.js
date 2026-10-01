@@ -97,3 +97,66 @@ test('the server\'s count of today\'s posts raises the cap\'s count when it is h
   assert.deepEqual(capStatus(posted, 10, now, null), capStatus(posted, 10, now));
   assert.equal(capStatus(posted, 10, now, { serverCount: { count: 1, ...day } }).used, 1, 'the colleague\'s entry would make 2 if it counted');
 });
+
+// A take-down removes the car from the posted list, but the post was made
+// today: the day's log (postLog:<origin>, src/cap.js logPost) keeps counting
+// it, as the sync function's count does. Unmarking a mistaken mark takes its
+// own entry off.
+import { logPost, unlogPost, loggedToday } from '../extension/src/cap.js';
+import { markTakenDown } from '../extension/src/rescan.js';
+import { readFileSync } from 'node:fs';
+
+test('a listing taken down the same day still counts against the day\'s cap; an unmarked mistake does not', () => {
+  let posted = {};
+  let log = [];
+  for (let i = 0; i < 10; i += 1) {
+    const vin = `TESTVIN0000000${String(i).padStart(2, '0')}X`;
+    const at = today(i);
+    posted = markPosted(posted, { vin, name: `Car ${i}`, price: 10000 + i }, 'website', at);
+    log = logPost(log, vin, at);
+  }
+  assert.deepEqual(capStatus(posted, 10, now, { log }), { used: 10, cap: 10, remaining: 0, reached: true });
+  // car 3 sells at 3 pm and its listing is taken down
+  const sold = 'TESTVIN000000003X';
+  posted = markTakenDown(posted, sold);
+  assert.equal(postsToday(posted, now), 9, 'the posted list forgets it');
+  assert.deepEqual(capStatus(posted, 10, now, { log }), { used: 10, cap: 10, remaining: 0, reached: true }, 'the cap does not hand the post back');
+  assert.equal(capStatus(posted, 10, now).used, 9, 'without the log it would (the old count)');
+  // a car marked by mistake and unmarked: that one entry leaves the log
+  const wrong = 'TESTVIN000000004X';
+  const at = posted[wrong].postedAt;
+  posted = markTakenDown(posted, wrong);
+  log = unlogPost(log, wrong, at);
+  assert.equal(capStatus(posted, 10, now, { log }).used, 9);
+  assert.equal(unlogPost(log, wrong, today(59)).length, log.length, 'only the entry with that car and time');
+  // the server's count still raises it, and the largest count wins
+  const day = { from: new Date(2026, 8, 26).toISOString(), to: new Date(2026, 8, 27).toISOString() };
+  assert.equal(capStatus(posted, 20, now, { log, serverCount: { count: 12, ...day } }).used, 12);
+});
+
+test('the day\'s log keeps only that day, and ignores anything that is not an entry', () => {
+  const yesterday = new Date(2026, 8, 25, 18, 0).toISOString();
+  const log = logPost([{ vin: 'OLD', at: yesterday }, null, 'x', { vin: 1, at: today(0) }, { vin: 'A', at: today(1) }], 'B', today(2));
+  assert.deepEqual(log, [{ vin: 'A', at: today(1) }, { vin: 'B', at: today(2) }]);
+  assert.equal(loggedToday(log, now), 2);
+  assert.equal(loggedToday(log, new Date(2026, 8, 27, 9, 0)), 0, 'tomorrow starts at nothing');
+  for (const bad of [null, undefined, {}, 'log', [{ at: today(0) }]]) assert.equal(loggedToday(bad, now), 0);
+  assert.deepEqual(unlogPost(null, 'A', today(1)), []);
+  // two posts of the same car in one day (posted, taken down, posted again) are two posts
+  assert.equal(loggedToday(logPost(logPost([], 'A', today(1)), 'A', today(30)), now), 2);
+});
+
+test('only recording a post writes the day\'s log; take-downs never touch it, and the cap reads it in the popup and the side panel', () => {
+  const src = (rel) => readFileSync(new URL('../extension/' + rel, import.meta.url), 'utf8');
+  const panel = src('sidepanel.js');
+  const popup = src('popup.js');
+  assert.match(panel, /updateKey\(siteKeys\(state\.origin\)\.postLog, \(log\) => logPost\(log, state\.vehicle\.vin, now\)/, 'the side panel logs the post it records');
+  assert.match(popup, /update\('postLog', \(log\) => logPost\(log, vin, at\)\)/, 'Mark posted logs it');
+  assert.match(popup, /update\('postLog', \(log\) => \(Array\.isArray\(log\) \? unlogPost\(log, vin, at\)/, 'unmarking takes its own entry off');
+  for (const s of [panel, popup]) assert.match(s, /capStatus\(state\.posted, state\.settings\??\.dailyCap, new Date\(\), \{ log: state\.postLog, serverCount:/);
+  // the take-down paths: upkeep's finish, and the popup's Taken down
+  assert.doesNotMatch(src('upkeep.js'), /postLog/);
+  const takenDown = popup.slice(popup.indexOf("case 'takenDown':"), popup.indexOf("case 'priceUpdated':"));
+  assert.ok(takenDown.length > 50 && !/postLog/.test(takenDown));
+  assert.equal((popup.match(/update\('postLog'/g) || []).length, 2);
+});

@@ -33,14 +33,41 @@ export function serverPostsToday(serverCount, now = new Date()) {
   return from <= at && at < to ? count : 0;
 }
 
-// The day's standing. `options.serverCount` is the count above; the larger
-// of the two counts is the day's, since both are real posts by this person
-// (this machine knows the ones made here; the server knows the ones synced
-// from anywhere, minus what has not gone up yet). The fourth argument is
-// optional: the old three-argument call is the local count alone.
+// The posts this salesperson recorded on this computer today, for one
+// website (postLog:<origin>: a list of { vin, at }), kept apart from the
+// posted list. Taking a listing down removes the car from the posted list,
+// but the post was still made today: the log keeps it, so a take-down never
+// hands a post back (the sync function counts the same way). Each write
+// keeps only the day's entries.
+const sameDay = (at, now) => {
+  const d = new Date(at);
+  return !Number.isNaN(d.getTime()) && localDay(d) === localDay(now);
+};
+const entries = (log) => (Array.isArray(log) ? log.filter((e) => e && typeof e.vin === 'string' && typeof e.at === 'string') : []);
+
+export function logPost(log, vin, at, now = new Date(at)) {
+  return [...entries(log).filter((e) => sameDay(e.at, now)), { vin, at }];
+}
+
+// Unmarking a car (a mark made by mistake) takes that one post back off the
+// log, found by its car and its time.
+export function unlogPost(log, vin, at) {
+  return entries(log).filter((e) => !(e.vin === vin && e.at === at));
+}
+
+export function loggedToday(log, now = new Date()) {
+  return entries(log).filter((e) => sameDay(e.at, now)).length;
+}
+
+// The day's standing: the largest of three counts of this person's posts
+// today, since each is a count of real posts. The posted list knows the
+// cars still listed; `options.log` (the log above) also knows the ones
+// taken down since; `options.serverCount` (the count above) knows the ones
+// synced from anywhere, minus what has not gone up yet. The fourth argument
+// is optional: the old three-argument call is the posted list alone.
 export function capStatus(posted, cap = DEFAULT_DAILY_CAP, now = new Date(), options = undefined) {
   const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : DEFAULT_DAILY_CAP;
-  const serverCount = options && typeof options === 'object' ? options.serverCount : null;
-  const used = Math.max(postsToday(posted, now), serverPostsToday(serverCount, now));
+  const opts = options && typeof options === 'object' ? options : {};
+  const used = Math.max(postsToday(posted, now), loggedToday(opts.log, now), serverPostsToday(opts.serverCount, now));
   return { used, cap: limit, remaining: Math.max(0, limit - used), reached: used >= limit };
 }

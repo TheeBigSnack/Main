@@ -167,6 +167,10 @@ try {
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count')?.textContent === '0');
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '0');
+  // the Ram's listing is down, but it was posted today: the daily cap still counts it
+  await tab(popup, 'ready').click();
+  assert.match(await popup.textContent('#pickHint'), /9 more posts allowed today\./);
+  await tab(popup, 'todo').click();
 
   await popup.click('#settingsBtn');
   assert.match(await popup.textContent('.settings'), /usually \$490 higher than/);
@@ -183,6 +187,13 @@ try {
   // other order gives, so a menu that mixed two of them up would show here.
   await dealer.request.get(`http://127.0.0.1:${server.address().port}/scenario?name=day3`);
   popup = await openPopup();
+  // a new day for the cap too: the day's log of posts (the Ram's, from day 1) moves back a day
+  await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const key = Object.keys(all).find((k) => k.startsWith('postLog:'));
+    const dayBefore = (at) => new Date(Date.parse(at) - 24 * 3600 * 1000).toISOString();
+    await chrome.storage.local.set({ [key]: all[key].map((e) => ({ ...e, at: dayBefore(e.at) })) });
+  });
   await popup.click('#scan');
   await popup.waitForFunction(() => /3 ready to post/.test(document.querySelector('.meta')?.textContent || '')); // the day-2 to-do list is on screen until the rescan ends
   assert.match(await popup.textContent('.panel'), /Just became ready\s*1[\s\S]*2025 Ram 1500 Tradesman[\s\S]*photos added, now at Waynesburg/);
