@@ -227,6 +227,11 @@ test('supabase/README.md says what the code does: the code folding, the known-ke
   assert.doesNotMatch(readme, /a clock running far behind can keep an attempt or a flag from going up/);
 });
 
+test('supabase/README.md says how the webhook settles events from one second and two deliveries at once', () => {
+  assert.match(readme, /a tie is settled by Stripe's own lifecycle: a subscription is incomplete only when it is created, and canceled and incomplete_expired are final/);
+  assert.match(readme, /an event's change is written only onto the row as it was read/);
+});
+
 // Security audit (2026-09-29): invite codes expire, die with their maker, give one answer and are throttled;
 // managers list and revoke them; the website origin is not a manager's to change; the deployment steps never
 // leave a guessable code, a localhost Site URL or the default email budget behind.

@@ -546,11 +546,61 @@ test('billing: an event older than the row\'s last change is stored and not appl
   assert.deepEqual([r.body.applied, fake.rows('subscriptions')[0].status], [true, 'past_due']);
 });
 
+// One paid Checkout without a trial: Stripe makes the subscription
+// incomplete, takes the first payment and makes it active, all in the same
+// second, and delivers the events in any order, some of them at once.
+const checkoutEvents = (created = Math.floor(Date.now() / 1000)) => ({
+  created: subscriptionEvent({ id: 'evt_created', type: 'customer.subscription.created', created }, { status: 'incomplete' }),
+  updated: subscriptionEvent({ id: 'evt_updated', type: 'customer.subscription.updated', created }, { status: 'active' }),
+  paid: { id: 'evt_paid', object: 'event', type: 'invoice.paid', created, data: { object: { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [{ period: { start: created, end: 1790000000 } }] } } } },
+});
+
+test('billing: a paid Checkout\'s events from one second, the first one delivered last, leave the store active and served', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const e = checkoutEvents();
+  for (const event of [e.updated, e.paid, e.created]) {
+    const r = await deliver(handler, JSON.stringify(event));
+    assert.equal(r.status, 200, event.id);
+  }
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.stripe_subscription_id, row.status], ['sub_1', 'active'], 'the late created(incomplete) is older than what the row holds');
+  // Stripe redelivers the first event hours later (after a failed delivery) with its first stamp: still active
+  const again = await deliver(handler, JSON.stringify({ ...e.created, id: 'evt_created_retry' }));
+  assert.deepEqual(again.body, { ok: true, applied: false, attached: true });
+  assert.equal(fake.rows('subscriptions')[0].status, 'active');
+});
+
+test('billing: two deliveries at once do not write over each other: the one decided on a row that changed meanwhile decides again', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const e = checkoutEvents();
+  // created(incomplete) reads the row with no subscription and is about to write it...
+  const held = fake.hold((c) => c.table === 'subscriptions' && c.op !== 'select' && c.payload && c.payload.status === 'incomplete');
+  const slow = deliver(handler, JSON.stringify(e.created));
+  await held.arrived;
+  // ...when updated(active) is delivered, read and written in full
+  const fast = await deliver(handler, JSON.stringify(e.updated));
+  assert.deepEqual(fast.body, { ok: true, applied: true, attached: true });
+  held.commit();
+  const late = await slow;
+  assert.equal(late.status, 200);
+  assert.deepEqual([fake.rows('subscriptions')[0].status, late.body.applied], ['active', false], 'the slower delivery read the row again and found itself older');
+  // a row that keeps changing is not written over: 500, so Stripe delivers the event again
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: null, error: null, count: 0 } : undefined);
+  const busy = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_busy' })));
+  fake.script = null;
+  assert.equal(busy.status, 500);
+  assert.match(busy.body.error, /kept changing/);
+  assert.deepEqual(fake.rows('billing_events'), [], 'not recorded, so the redelivery applies it');
+});
+
 test('billing: a database failure answers 500 so Stripe retries, and the event is not recorded, so the retry applies it', async () => {
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
   const handler = await load();
   const raw = JSON.stringify(subscriptionEvent());
-  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'upsert' ? { error: { message: 'deadlock detected', code: '40P01' } } : undefined);
+  fake.script = (c) => (c.table === 'subscriptions' && c.op !== 'select' ? { error: { message: 'deadlock detected', code: '40P01' } } : undefined);
   const failed = await deliver(handler, raw);
   assert.deepEqual([failed.status, failed.body], [500, { ok: false, error: 'could not write subscriptions: deadlock detected' }]);
   assert.deepEqual(fake.rows('billing_events'), []);

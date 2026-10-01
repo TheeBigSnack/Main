@@ -20,7 +20,7 @@ import {
   planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
   automaticTaxOn, portalSessionParams,
-  formEncode, applyStripeEvent, normalizeStatus,
+  formEncode, applyStripeEvent, normalizeStatus, goesBack,
   parseStripeSignature, hmacSha256Hex, timingSafeEqualHex, verifyStripeSignature,
 } from '../supabase/functions/_shared/billing.mjs';
 import * as page from '../manager/data.js';
@@ -462,10 +462,13 @@ test('applyStripeEvent: deleted is canceled; a stale event never wins; unrelated
     assert.equal(other.stripe_subscription_id, 'sub_2', String(status));
     assert.equal(other.status, 'active', String(status));
     assert.equal(subscriptionState({ ...over, ...other }, NOW + 60_000), 'active', String(status));
-    // not by an update or a delete of it, and not by a created older than the row's last change
-    assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2' }), T + 60), opts), null, String(status));
+    // or by an update saying it is trialing or active (Stripe sends it in the same second as created, in any order)
+    for (const s of ['active', 'trialing']) assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2', status: s }), T + 60), opts).stripe_subscription_id, 'sub_2', `${status}, updated ${s}`);
+    // not by another update, a delete of it, or anything older than the row's last change
+    assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2', status: 'past_due' }), T + 60), opts), null, String(status));
     assert.equal(applyStripeEvent(over, event('customer.subscription.deleted', sub({ id: 'sub_2' }), T + 60), opts), null, String(status));
     assert.equal(applyStripeEvent(over, event('customer.subscription.created', sub({ id: 'sub_2' }), T - 60), opts), null, String(status));
+    assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2' }), T - 60), opts), null, String(status));
   }
   // and a row that never had a subscription (a pilot) takes whatever comes
   const pilot = row({ status: 'pilot', pilot_ends_at: iso(NOW + 5 * DAY), updated_at: iso(NOW) });
@@ -478,6 +481,49 @@ test('applyStripeEvent: deleted is canceled; a stale event never wins; unrelated
   assert.equal(applyStripeEvent(active, { id: 'evt_x', type: 'customer.subscription.updated' }, opts), null, 'no data.object');
   assert.equal(applyStripeEvent(active, null, opts), null);
   assert.equal(applyStripeEvent(active, 'text', opts), null);
+});
+
+test('applyStripeEvent: one Checkout\'s events in the same second end active in any order; incomplete comes only first and a final status stays final', () => {
+  const shell = row({ stripe_customer_id: 'cus_1', updated_at: iso(NOW - DAY) });
+  const invoice = { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [{ period: { start: T, end: T + 30 * 86400 } }] } };
+  const created = event('customer.subscription.created', sub({ status: 'incomplete' }), T);
+  const updated = event('customer.subscription.updated', sub({ status: 'active' }), T);
+  const paid = event('invoice.paid', invoice, T);
+  const orders = [[created, updated, paid], [created, paid, updated], [updated, created, paid], [updated, paid, created], [paid, created, updated], [paid, updated, created]];
+  for (const order of orders) {
+    let current = shell;
+    for (const e of order) {
+      const patch = applyStripeEvent(current, e, opts);
+      if (patch) current = { ...current, ...patch };
+    }
+    assert.equal(current.status, 'active', order.map((e) => e.type).join(' then '));
+    assert.equal(subscriptionState(current, NOW), 'active');
+  }
+  // the lifecycle the tie is settled by
+  assert.equal(goesBack('active', 'incomplete'), true);
+  assert.equal(goesBack('incomplete', 'incomplete'), false);
+  assert.equal(goesBack('incomplete', 'active'), false);
+  assert.equal(goesBack('canceled', 'past_due'), true);
+  assert.equal(goesBack('incomplete_expired', 'active'), true);
+  assert.equal(goesBack('incomplete_expired', 'canceled'), false);
+  assert.equal(goesBack('past_due', 'active'), false);
+  // the last dunning retry fails in the same second the subscription ends: it stays ended, so a new Checkout is open to the manager
+  const ended = row({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', updated_at: iso(NOW) });
+  assert.equal(applyStripeEvent(ended, event('invoice.payment_failed', invoice, T), opts), null);
+  assert.equal(applyStripeEvent(ended, event('customer.subscription.updated', sub({ status: 'past_due' }), T), opts), null);
+  assert.equal(checkoutRefusal(ended, NOW), null);
+  // a redelivery of the first event hours later, with its first stamp, does not undo a paid Checkout
+  const active = row({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', updated_at: iso(NOW) });
+  assert.equal(applyStripeEvent(active, created, opts), null);
+  // a replacement for a canceled subscription, paid in one Checkout, ends active in any order too
+  for (const order of orders) {
+    let current = row({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_0', updated_at: iso(NOW - DAY) });
+    for (const e of order) {
+      const patch = applyStripeEvent(current, e, opts);
+      if (patch) current = { ...current, ...patch };
+    }
+    assert.deepEqual([current.stripe_subscription_id, current.status], ['sub_1', 'active'], 'replacement: ' + order.map((e) => e.type).join(' then '));
+  }
 });
 
 test('applyStripeEvent: invoices mark a failed payment past due and a paid one paid up, in both API shapes', () => {

@@ -138,6 +138,33 @@ async function writeRow(service: SupabaseClient, dealershipId: string, patch: Ro
   if (error) throw new Error('could not write subscriptions: ' + error.message);
 }
 
+// The columns an event's patch is decided on (applyStripeEvent reads them).
+const DECIDING = ['updated_at', 'status', 'stripe_subscription_id'] as const;
+
+// Writes an event's patch only onto the row it was decided against: Stripe
+// sends a Checkout's events at once, so two deliveries can read the same row
+// and the slower one would otherwise write over the faster. The update
+// matches the row as read (no row: an insert, which meets the one another
+// delivery made first). False when the row changed meanwhile; the caller
+// reads it again and decides again.
+async function writeOnto(service: SupabaseClient, dealershipId: string, row: Row | null, patch: Row): Promise<boolean> {
+  if (!row) {
+    const { error } = await service.from('subscriptions').insert({ ...patch, dealership_id: dealershipId });
+    if (!error) return true;
+    if (error.code === '23505') return false;
+    throw new Error('could not write subscriptions: ' + error.message);
+  }
+  let q = service.from('subscriptions').update(patch, { count: 'exact' }).eq('dealership_id', dealershipId);
+  for (const column of DECIDING) {
+    const v = row[column];
+    q = v === null || v === undefined ? q.is(column, null) : q.eq(column, String(v));
+  }
+  const { error, count } = await q;
+  if (error) throw new Error('could not write subscriptions: ' + error.message);
+  return count !== 0;
+}
+const WRITE_TRIES = 3;
+
 // The Stripe customer for a dealership: the one on the row when it still
 // exists, else a new one carrying the dealership id in its metadata (how a
 // webhook finds the row when nothing else does). The idempotency key makes
@@ -284,10 +311,19 @@ async function webhook(req: Request): Promise<Response> {
         attached = false;
         console.log(`${new Date().toISOString()} ${type} ${eventId}: no Lot Current dealership for this customer; recorded, not applied`);
       } else {
-        const patch = applyStripeEvent(target.row, event, { included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
-        if (patch) {
-          await writeRow(service, target.id, patch);
-          applied = true;
+        // decided against the row as read, written only onto that row; a
+        // row another delivery changed meanwhile is read and decided again
+        let row = target.row;
+        let patch: Row | null = null;
+        for (let tries = 0; ; tries += 1) {
+          patch = applyStripeEvent(row, event, { included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
+          if (!patch) break;
+          if (await writeOnto(service, target.id, row, patch)) {
+            applied = true;
+            break;
+          }
+          if (tries + 1 >= WRITE_TRIES) throw new Error('the subscription row kept changing while this event was applied; Stripe will deliver it again');
+          row = await readRow(service, target.id);
         }
         console.log(`${new Date().toISOString()} ${type} ${eventId}: dealership ${target.id} ${applied ? '-> ' + String(patch && patch.status ? patch.status : 'period updated') : 'unchanged (stale or nothing to change)'}`);
       }

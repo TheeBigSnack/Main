@@ -9,7 +9,7 @@
 //   client.auth.getUser(token)                  the user the test registered for that token
 //   from(t).select(columns, { count, head }?)   then eq, in, lt, lte, gte, is, not(col, 'is', null),
 //                                               order, range, maybeSingle
-//   from(t).update(patch)                       then eq or in
+//   from(t).update(patch, { count }?)           then eq, in or is (count: 'exact' answers how many rows it changed)
 //   from(t).insert(rows), from(t).upsert(rows, { onConflict, ignoreDuplicates? })
 //
 // The tables live in memory and answer the way PostgREST would. Their
@@ -397,14 +397,19 @@ function runSelect(q) {
 
 function runUpdate(q) {
   const rows = tableOf(q.table);
-  const filters = q.filters.map((f) => ({ ...f, value: f.op === 'in' ? f.value.map((v) => filterValue(q.table, f.column, v)) : filterValue(q.table, f.column, f.value) }));
+  const filters = q.filters.map((f) => ({ ...f, value: f.op === 'in' ? f.value.map((v) => filterValue(q.table, f.column, v)) : f.op === 'is' ? null : filterValue(q.table, f.column, f.value) }));
   const patch = {};
   for (const [column, value] of Object.entries(q.payload)) patch[columnOf(q.table, column)] = stored(q.table, column, value);
-  const next = rows.map((r) => (matches(q.table, r, filters) ? { ...r, ...patch } : r));
+  let changed = 0;
+  const next = rows.map((r) => {
+    if (!matches(q.table, r, filters)) return r;
+    changed += 1;
+    return { ...r, ...patch };
+  });
   next.forEach((r) => checkRow(q.table, r));
   checkKeys(q.table, next);
   tables[q.table] = next;
-  return { data: null, error: null, count: null, status: 204 };
+  return { data: null, error: null, count: q.options?.count === 'exact' ? changed : null, status: 204 };
 }
 
 // insert and upsert. An upsert names its conflict columns, which must be
@@ -507,15 +512,15 @@ function builder(client, table, op, init) {
     q.filters.push({ op: 'in', column, value: [...values] });
     return b;
   };
-  if (op === 'update') return b;
-  b.lt = filter('lt');
-  b.lte = filter('lte');
-  b.gte = filter('gte');
   b.is = (column, value) => {
     if (value !== null) throw new Error('the fake models is(column, null) only');
     q.filters.push({ op: 'is', column, value: null });
     return b;
   };
+  if (op === 'update') return b;
+  b.lt = filter('lt');
+  b.lte = filter('lte');
+  b.gte = filter('gte');
   b.not = (column, operator, value) => {
     if (operator !== 'is' || value !== null) throw new Error("the fake models not(column, 'is', null) only");
     q.filters.push({ op: 'not.is', column, value: null });

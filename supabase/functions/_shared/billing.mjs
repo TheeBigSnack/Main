@@ -414,22 +414,40 @@ export function normalizeStatus(status) {
 // goes on sending events (dunning retries, the final delete) after the row
 // has moved to a new one. An event is stale, and must not win, when it is
 // older than the row's last change for the same subscription, or when it is
-// about another subscription than the row's; the one exception is
-// customer.subscription.created, newer than the row's last change, on a row
-// whose subscription is over (canceled, incomplete_expired) or that never
-// had one: the replacement a manager just paid for.
+// about another subscription than the row's; the one exception is the
+// replacement a manager just paid for: customer.subscription.created, or an
+// update saying it is trialing or active (Stripe sends both within the same
+// second of a Checkout, in any order), newer than the row's last change, on
+// a row whose subscription is over (canceled, incomplete_expired) or that
+// never had one.
 const OVER_STATUSES = Object.freeze(['canceled', 'incomplete_expired']);
-function isStale(row, subscriptionId, eventMs, eventType = '') {
+const ADOPTING_UPDATE_STATUSES = Object.freeze(['trialing', 'active']);
+function isStale(row, subscriptionId, eventMs, eventType = '', eventStatus = '') {
   if (!isRecord(row)) return false;
   const last = ms(row.updated_at);
   const have = typeof row.stripe_subscription_id === 'string' && row.stripe_subscription_id !== '' ? row.stripe_subscription_id : '';
   if (!have) return false; // a row with no subscription yet (a pilot, a customer shell) takes the first one whatever its stamp
   if (subscriptionId !== have) {
     const over = row.status === null || row.status === undefined || OVER_STATUSES.includes(String(row.status));
-    return !(eventType === 'customer.subscription.created' && over && (last === null || eventMs > last));
+    const adopts = eventType === 'customer.subscription.created' || (eventType === 'customer.subscription.updated' && ADOPTING_UPDATE_STATUSES.includes(eventStatus));
+    return !(adopts && over && (last === null || eventMs > last));
   }
   return last !== null && last > eventMs;
 }
+
+// Stripe stamps events to the second, and one Checkout sends several in the
+// same second (created as incomplete, updated to active, invoice paid), so a
+// tie is settled by Stripe's own lifecycle: a subscription is incomplete
+// only when it is created, and canceled and incomplete_expired are final.
+// For the row's own subscription, an event that would put it back to
+// incomplete, or bring it out of a final status, is older than what the row
+// holds, whatever its stamp says.
+export function goesBack(fromStatus, toStatus) {
+  const from = String(fromStatus);
+  if (OVER_STATUSES.includes(from)) return !OVER_STATUSES.includes(String(toStatus));
+  return toStatus === 'incomplete' && from !== 'incomplete';
+}
+const sameSubscription = (row, subscriptionId) => isRecord(row) && Boolean(subscriptionId) && row.stripe_subscription_id === subscriptionId;
 
 // The columns to set on the dealership's row for one event, or null when
 // the event is not one of HANDLED_EVENTS, is stale, or has nothing to
@@ -446,9 +464,11 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
 
   if (event.type.startsWith('customer.subscription.')) {
     const subscriptionId = idOf(obj);
-    if (isStale(row, subscriptionId, at, event.type)) return null;
+    const status = event.type === 'customer.subscription.deleted' ? 'canceled' : normalizeStatus(obj.status);
+    if (isStale(row, subscriptionId, at, event.type, status)) return null;
+    if (sameSubscription(row, subscriptionId) && goesBack(row.status, status)) return null;
     if (subscriptionId) patch.stripe_subscription_id = subscriptionId;
-    patch.status = event.type === 'customer.subscription.deleted' ? 'canceled' : normalizeStatus(obj.status);
+    patch.status = status;
     const end = periodEndOf(obj);
     if (end) patch.current_period_end = end;
     const seats = seatsOf(obj, Number.isInteger(included) ? included : PRICING.includedSalespeople, priceRooftop, priceSeat);
@@ -463,6 +483,7 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
   if (isStale(row, subscriptionId, at, event.type)) return null;
   if (subscriptionId) patch.stripe_subscription_id = subscriptionId;
   if (event.type === 'invoice.payment_failed') {
+    if (goesBack(row.status, 'past_due')) return null; // the last retry failed in the same second the subscription ended
     patch.status = 'past_due';
     return patch;
   }
