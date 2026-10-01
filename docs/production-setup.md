@@ -44,8 +44,8 @@ Why not the alternatives:
 
 1. In Supabase: your avatar, **Account preferences, Access Tokens**, **Generate new token**, name it `github-deploy`. Copy it.
 2. In GitHub: the repository, **Settings, Environments, New environment**, name it `production`:
-   - **Deployment branches and tags**: choose **Selected branches and tags** and add the default branch only.
-   - **Required reviewers**: tick it and add yourself. Every deploy to the real database then waits for your click. Without it nothing waits: a run of the Supabase workflow starts the moment anyone who can start it (you, or a session working with your GitHub access) does. Only an admin of the repository can turn it on, and it is off until one does. To check it, start the workflow's **plan** step: the run should stop at "Waiting for review" until you approve it.
+   - **Deployment branches and tags**: choose **Selected branches and tags** and add the default branch only. Until this is set, a workflow on any branch that names this environment can read the secrets below.
+   - **Required reviewers**: tick it and add yourself. Every deploy to the real database then waits for your click. Without it nothing waits: a run of the Supabase workflow starts the moment anyone who can start it (you, or a session working with your GitHub access) does. Only an admin of the repository can turn it on, and it is off until one does. To check it, start the workflow's **plan** step: the run should stop at "Waiting for review" until you approve it. The approval is yours to give: a session working with your GitHub access could approve a run through GitHub's API too, and leaves that to you.
    - **Environment secrets**, Add secret: `SUPABASE_ACCESS_TOKEN` = the token from 1; `SUPABASE_DB_PASSWORD` = the database password from step 1.
    - **Environment variables**, Add variable: `SUPABASE_PROJECT_REF` = the 20 lower-case letters and digits between `https://` and `.supabase.co`.
 
@@ -56,7 +56,7 @@ Put them on the environment, not under the repository's own Secrets: a repositor
 The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, from the repository's **Actions** tab or by Claude through GitHub. It refuses to start unless the committed config files name the project in `SUPABASE_PROJECT_REF`, and it ends every run with `npm run check-deploy`.
 
 1. **plan**: shows the migrations in `supabase/migrations` the project has not applied yet. Changes nothing.
-2. **database**: applies them. When a change brings a new migration, run this before **functions**: a function may write the column it adds (`0009_cancel_at.sql` and the `billing` function, for one).
+2. **database**: applies them. When a change brings a new migration, run this before **functions**: a function may write the column it adds (`0009_cancel_at.sql` and the `billing` function, for one). **functions** checks: it deploys nothing while a migration is still to be applied.
 
    After plan and database the outside check prints some `FAIL` lines on purpose (no tables yet, then no functions yet); the run stays green. From functions on, a `FAIL` turns the run red.
 3. **functions**: deploys the functions named in the box. The default is all four: `rewrite` (the description writer), `sync` (the sync between machines), `billing` (Stripe) and `lead` (the website's demo form). Each one's settings stay where `supabase/README.md` puts them; a function without its secrets answers with what is missing.

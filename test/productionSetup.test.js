@@ -56,6 +56,12 @@ test('the workflow and the doc say a run waits for the owner only once he is a r
   assert.match(header, /Only that second setting makes a run wait for his approval: without it nothing pauses, and a run starts the moment anyone who can dispatch it does\./);
   const doc = read('docs/production-setup.md');
   assert.match(doc, /\*\*Required reviewers\*\*: tick it and add yourself\.[^\n]*Without it nothing waits[^\n]*it is off until one does\.[^\n]*"Waiting for review"/);
+  // the branch limit is a setting too, and the approval is his own
+  assert.doesNotMatch(header, /limits that environment to the default branch, so a workflow on another branch cannot read them/);
+  assert.match(header, /\(once that is set, a workflow on another branch cannot read them\)/);
+  assert.match(header, /a session working with his GitHub access could approve a run through GitHub's API too, and leaves that to him\./);
+  assert.match(doc, /add the default branch only\. Until this is set, a workflow on any branch that names this environment can read the secrets below\./);
+  assert.match(doc, /a session working with your GitHub access could approve a run through GitHub's API too, and leaves that to you\./);
 });
 
 test('no workflow input or secret is written straight into a shell script; function names are checked against the four', () => {
@@ -77,9 +83,10 @@ test('verify compares production with the repository, and nothing it runs can wr
   assert.match(supabase, /options: \[plan, database, functions, verify, check\]/, 'verify is one of the choices');
   const steps = supabase.split(/\n      - /);
   const ifOf = (step) => (step.match(/^\s+if: (.+)$/m) || [, ''])[1];
-  const verify = steps.filter((st) => ifOf(st) === "inputs.step == 'verify'");
+  const verify = steps.filter((st) => /inputs\.step == 'verify'/.test(ifOf(st)));
+  assert.equal(verify.length, 3, 'three comparisons');
   const said = runText(verify.join('\n'));
-  for (const cmd of ['supabase migration list --linked', 'supabase db push --dry-run', 'supabase db diff --linked --schema public', 'supabase functions download "$f" --project-ref "$PROJECT_REF"']) {
+  for (const cmd of ['supabase migration list --linked', 'supabase db push --dry-run', 'supabase db diff --linked --schema public', 'supabase functions download "$f" --project-ref "$PROJECT_REF" --use-api']) {
     assert.ok(said.includes(cmd), `verify runs ${cmd}`);
   }
   assert.doesNotMatch(said, WRITES, 'verify writes nothing');
@@ -90,7 +97,50 @@ test('verify compares production with the repository, and nothing it runs can wr
   for (const st of steps.filter((x) => WRITES.test(runText(x)))) {
     assert.ok(["inputs.step == 'database'", "inputs.step == 'functions'"].includes(ifOf(st)), `${st.split('\n')[0]} writes and must run for database or functions only`);
   }
-  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = verify \]; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'verify needs the database password to read the schema');
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \] \|\| \[ "\$STEP" = verify \]; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'every step that reads the database needs its password');
+});
+
+// The pinned CLI (2.117.0), without --use-api and with Docker running, as on a
+// GitHub-hosted runner, unpacks a download in an edge-runtime container that
+// writes into supabase/functions as the container's user; the runner then
+// cannot rewrite or restore those files, so verify would stop on the first
+// function before comparing anything. With --use-api the CLI writes each file
+// itself, as the runner, beside the function's entrypoint and never outside
+// supabase/functions.
+test('verify downloads each function over the API, so the runner owns what it compares and puts back', () => {
+  const said = runText(supabase);
+  const downloads = said.split('\n').filter((l) => /\bsupabase functions download\b/.test(l));
+  assert.ok(downloads.length >= 1, 'verify downloads the functions');
+  for (const l of downloads) assert.match(l, /--use-api\b/, `${l.trim()}: the download unpacks on Supabase's side and the CLI writes the files as the runner`);
+  assert.doesNotMatch(said, /--use-docker\b/);
+  assert.match(read('supabase/README.md'), /`supabase functions download <name> --use-api`/, 'the by-hand command is the workflow\'s');
+});
+
+// verify is three separate comparisons; one that fails must not hide the
+// others (on a branch that adds a migration, the migrations check always
+// fails before the first deploy, and the schema and functions went unread).
+test('every verify comparison reports, once the project is linked, even after another one failed', () => {
+  const steps = supabase.split(/\n      - /);
+  assert.match(steps.find((st) => /^name: Link the project\n/.test(st)), /^\s+id: link$/m);
+  const verify = steps.filter((st) => /^\s+if: .*inputs\.step == 'verify'/m.test(st));
+  assert.equal(verify.length, 3);
+  for (const st of verify) {
+    assert.match(st, /^\s+if: \$\{\{ !cancelled\(\) && inputs\.step == 'verify' && steps\.link\.outcome == 'success' \}\}$/m, `${st.split('\n')[0]}: runs after another comparison failed, never without the link`);
+  }
+});
+
+// A function from the repository may write a column only its migration adds
+// (0009_cancel_at.sql and billing): deployed before that migration, its
+// webhook answers 500 until database runs. The docs say database first; the
+// functions step enforces it.
+test('the functions step deploys nothing while production has a migration to apply', () => {
+  const steps = supabase.split(/\n      - /);
+  const deploy = runText(steps.find((st) => /^name: Deploy the functions\n/.test(st)));
+  const check = deploy.indexOf('supabase db push --dry-run');
+  assert.ok(check > 0, 'the deploy step asks db push what it would apply');
+  assert.ok(check < deploy.indexOf('supabase functions deploy'), 'before deploying anything');
+  assert.match(deploy.slice(check), /if ! grep -q 'Remote database is up to date' "\$RUNNER_TEMP\/push-plan\.txt"; then\n[^\n]*::error::[^\n]*\n\s+exit 1\n\s+fi\n\s+for f in \$FUNCTIONS; do supabase functions deploy/);
+  assert.match(read('docs/production-setup.md'), /\*\*functions\*\* checks: it deploys nothing while a migration is still to be applied\./);
 });
 
 test('the functions box deploys every function in supabase/functions by default, and accepts no other name', () => {
