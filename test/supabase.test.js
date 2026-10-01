@@ -289,3 +289,27 @@ test('the deployment steps leave no guessable first code, no localhost sign-in a
   assert.match(readme, /`counts\.conflicts`/);
   assert.match(readme, /code: "open-subscription"/);
 });
+
+// ---------- a pilot of the length the agreement names ----------
+
+// start_pilot gives pricing.json's pilotDays and takes no length from the
+// caller; a signed pilot agreement may name another length, so the owner
+// records it (or extends a pilot) with one statement in SQL. billing.sql runs
+// that statement exactly as the README writes it, with values in its two
+// brackets.
+test('the owner\'s pilot of an agreed length: the README\'s statement is the one billing.sql runs, and start_pilot still takes no length', () => {
+  const block = readme.match(/```sql\n\s*(-- owner only: a free pilot[\s\S]*?returning dealership_id, status, pilot_ends_at;)\n\s*```/);
+  assert.ok(block, 'supabase/README.md step 5 carries the owner\'s pilot statement');
+  const norm = (x) => x.replace(/\s+/g, ' ').trim();
+  const stmt = norm(block[1]);
+  assert.match(stmt, /^-- owner only: .* insert into public\.subscriptions as s \(dealership_id, status, pilot_ends_at\) values \('<the id returned above>', 'pilot', '<[^>]+>'\) on conflict \(dealership_id\) do update set status = 'pilot', pilot_ends_at = excluded\.pilot_ends_at, updated_at = now\(\) where s\.stripe_subscription_id is null returning /, 'a pilot row, never over a Stripe subscription');
+  const escape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(stmt.split(/'<[^>]*>'/).map(escape).join("'[^']*'"), 'g');
+  assert.equal((norm(read('../supabase/tests/billing.sql')).match(pattern) || []).length, 3, 'billing.sql runs the README\'s statement as written: the agreed pilot, its extension, and a dealership with a Stripe subscription');
+  const billingSql = read('../supabase/migrations/0004_billing.sql');
+  assert.match(billingSql, /create or replace function public\.start_pilot\(dealership_id uuid\)\n/, 'start_pilot takes the dealership only: no manager sets their own pilot length');
+  assert.match(readme, /When the signed agreement names another length, record the pilot yourself before the manager signs in/);
+  const pilot = read('../PILOT.md');
+  assert.match(pilot, /A pilot on the accounts is extended by the owner's statement in `supabase\/README\.md` step 5/, 'PILOT.md says how "extend the pilot" is done');
+  assert.match(pilot, /If the signed pilot agreement names a pilot length other than the standard `pilotDays`, also run the README's pilot statement/);
+});

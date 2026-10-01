@@ -89,6 +89,18 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
 
    Managers may rename their dealership but not change its `website_origin` (a column-level grant): the origin is the key `/sync` matches on and it is unique, so changing it is the owner's job in SQL, as creating the row is.
 
+   **A pilot of the length a signed pilot agreement names.** The manager's **Start the free pilot** (`start_pilot`) always gives `pilotDays` from `marketing/pricing.json`, the standard length in `legal/pilot-agreement.md`, and takes no length from the caller, so no manager can grant themselves a longer one. A dealership you create here sits in the `none` state, and its manager's Getting started card asks for **Start the free pilot**. When the signed agreement names another length, record the pilot yourself before the manager signs in, with the end date the agreement gives: the dealership then arrives on its pilot with that date, the Billing card shows it, and neither card offers **Start the free pilot**. The same statement with a later date extends a running or ended pilot by agreement (`PILOT.md`, "After two weeks"). It changes nothing for a dealership that has a Stripe subscription (no row comes back): its trial and billing are changed in Stripe.
+
+   ```sql
+   -- owner only: a free pilot that ends when the signed pilot agreement says, or a pilot extended by agreement
+   insert into public.subscriptions as s (dealership_id, status, pilot_ends_at)
+   values ('<the id returned above>', 'pilot', '<the agreed end with its UTC offset, for example 2027-01-31 23:59:59+00>')
+   on conflict (dealership_id) do update
+     set status = 'pilot', pilot_ends_at = excluded.pilot_ends_at, updated_at = now()
+     where s.stripe_subscription_id is null
+   returning dealership_id, status, pilot_ends_at;
+   ```
+
 6. **Check the deploy.** Fill `extension/src/accountConfig.js` and `manager/config.js` with the project URL and publishable (or anon) key, both at once with `npm run set-project -- <project URL> <key>`, then from the repository root:
 
    ```
