@@ -13,7 +13,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtures, fakeDealerPage, fakeChrome, vehicle, MY_STORE } from './helpers.js';
-import { wiz, wizardHtml, startWizard, handleWizardClick } from '../extension/wizard.js';
+import { wiz, wizardHtml, startWizard, handleWizardClick, TAB_GONE } from '../extension/wizard.js';
+import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys, SITES_KEY } from '../extension/src/storageKeys.js';
 
@@ -209,3 +210,90 @@ test('on a website with no settings and no profile, set-up still starts from the
   assert.equal(s.salesperson.name, '');
   await handleWizardClick('wizQuit', ctx);
 });
+
+// ---------- a full storage ----------
+// Chrome's storage for the extension has a fixed quota. A write set-up makes
+// that hits it says so in the words the popup and the panel use
+// (STORAGE_FULL: what to clear), never that the tab is gone, and the step it
+// happened on never hangs on "Reading the used inventory…" or "Finishing…".
+
+// Writes of the keys in `full` fail the way Chrome fails them at the quota.
+function fillUp(full) {
+  const set = globalThis.chrome.storage.local.set;
+  globalThis.chrome.storage.local.set = async (obj) => {
+    if (Object.keys(obj).some((key) => full.has(key))) throw new Error('Resource::kQuotaBytes quota exceeded');
+    return set(obj);
+  };
+}
+
+test('a full storage during the first read says what to clear, never that the tab is gone, and Read the website works again once there is room', async () => {
+  const { local } = browser();
+  const full = new Set([SITES_KEY]); // the website's entry in the rescan registry, written by the read itself
+  fillUp(full);
+  await start();
+  await handleWizardClick('wizNext', ctx);
+  assert.equal(wiz.step, 'scan');
+  assert.equal(wiz.error, STORAGE_FULL);
+  assert.ok(!wiz.error.includes(TAB_GONE));
+  assert.equal(wiz.busy, false);
+  assert.match(html, /Clear the numbers on the Numbers tab/);
+  assert.match(html, /id="wizScan" >/, 'Read the website can be clicked again');
+
+  // the snapshot write fails instead: the click still ends, and the step is not left reading
+  full.clear();
+  full.add(k.snapshot);
+  await handleWizardClick('wizScan', ctx); // resolves: no rejection left for the panel to swallow
+  assert.equal(wiz.error, STORAGE_FULL);
+  assert.equal(wiz.busy, false);
+  assert.equal(wiz.scan, null, 'a read that could not be kept is not shown as done');
+  assert.doesNotMatch(html, /Reading the used inventory/);
+  assert.match(html, /id="wizScan" >/);
+  assert.equal(local[k.snapshot], undefined);
+
+  full.clear();
+  await handleWizardClick('wizScan', ctx);
+  assert.equal(wiz.error, '');
+  assert.ok(wiz.scan && wiz.scan.cars > 0, 'read once there is room');
+  assert.ok(local[k.snapshot], 'and kept');
+});
+
+test('a full storage at Finish set-up says what to clear and leaves Finish set-up to click again, never "Finishing…"', async () => {
+  const { local } = browser();
+  await start();
+  await nextUntil('terms');
+  const full = new Set([k.settings]);
+  fillUp(full);
+  await handleWizardClick('wizFinish', ctx); // resolves
+  assert.equal(wiz.step, 'terms');
+  assert.equal(wiz.busy, false);
+  assert.equal(wiz.error, STORAGE_FULL);
+  assert.match(html, /Clear the numbers on the Numbers tab/);
+  assert.doesNotMatch(html, /Finishing…/);
+  assert.equal(local[k.wizardDone], undefined, 'set-up is not recorded as done');
+
+  // the last write, the one that records set-up as done, fails
+  full.clear();
+  full.add(k.wizardDone);
+  await handleWizardClick('wizFinish', ctx);
+  assert.equal(wiz.busy, false);
+  assert.equal(wiz.error, STORAGE_FULL);
+  assert.doesNotMatch(html, /Finishing…/);
+
+  full.clear();
+  await handleWizardClick('wizFinish', ctx);
+  assert.equal(wiz.step, 'done', wiz.error);
+  assert.equal(wiz.error, '');
+  assert.ok(local[k.wizardDone]);
+});
+
+test('a full storage when set-up saves its progress is shown on the step, and the click still ends', async () => {
+  browser();
+  await start();
+  await nextUntil('store');
+  fillUp(new Set([k.wizard])); // the wizard's own progress
+  await handleWizardClick('wizNext', ctx); // resolves
+  assert.equal(wiz.step, 'you', 'the step moves on; only resuming after closing the panel is lost');
+  assert.equal(wiz.error, STORAGE_FULL);
+  assert.match(html, /Clear the numbers on the Numbers tab/, 'the You step shows it');
+});
+

@@ -20,7 +20,7 @@ import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
 import { stampBasis } from './src/rescan.js';
-import { updateKey } from './src/storage.js';
+import { updateKey, storageErrorText, isStorageFull, STORAGE_FULL } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
@@ -152,7 +152,9 @@ async function runScan(ctx) {
     const tabId = await findDealerTab();
     r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, settingsFromProfile: wiz.fromProfile, snapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, boilerplate: data[k.boilerplate] || [] });
   } catch (e) {
-    r = { ok: false, message: TAB_GONE + ' (' + ((e && e.message) || e) + ')' };
+    // the read records the website in the rescan registry: a full storage
+    // there is not a missing tab, and the tab advice would not help
+    r = { ok: false, message: isStorageFull(e) ? STORAGE_FULL : TAB_GONE + ' (' + ((e && e.message) || e) + ')' };
   }
   wiz.busy = false;
   if (!r.ok) {
@@ -170,8 +172,15 @@ async function runScan(ctx) {
   const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
   const stores = storeNames(r.vehicles);
   // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
-  wiz.scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
-  await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: r.diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
+  const scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
+  try {
+    await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: r.diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
+  } catch (e) {
+    wiz.error = storageErrorText(e); // the quota, most likely: the step says what to clear, and Read the website is there again
+    ctx.render();
+    return false;
+  }
+  wiz.scan = scan; // only a read that was kept counts as done
   await recordFlags(wiz.origin, r.diff, r.diff.takenAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   await persist();
@@ -189,8 +198,9 @@ function nav(back = true, nextLabel = 'Next', nextId = 'wizNext', nextDisabled =
 
 export function wizardHtml() {
   const s = wiz.settings || withDefaults({}, wiz.site || {});
-  const progress = `<p class="hint">Set-up · step ${stepIndex() + 1} of ${steps().length}${wiz.scan ? ` · ${esc(wiz.scan.siteName)}` : ''}</p>`;
   const error = wiz.error ? `<div class="banner bad">${esc(wiz.error)}</div>` : '';
+  // The Read and Terms steps show the error next to their button; every other step under the progress line.
+  const progress = `<p class="hint">Set-up · step ${stepIndex() + 1} of ${steps().length}${wiz.scan ? ` · ${esc(wiz.scan.siteName)}` : ''}</p>${wiz.step === 'scan' || wiz.step === 'terms' ? '' : error}`;
   switch (wiz.step) {
     case 'welcome':
       return `${progress}<h3>Set up Lot Current for this dealership</h3>
@@ -346,6 +356,7 @@ function readInputs() {
 async function finish(ctx) {
   readInputs();
   wiz.busy = true;
+  wiz.error = '';
   ctx.render();
   const now = new Date().toISOString();
   const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: now, legal: legalHosted() && wiz.termsAccepted ? acceptLegal(now) : (wiz.settings && wiz.settings.legal) || undefined }, wiz.site || {});
@@ -447,12 +458,27 @@ async function accountAction(id, ctx) {
   if (wiz.step === 'account') ctx.render(); // the person may have moved on meanwhile: never redraw over another step's typing
 }
 
-// Returns true when the click was the wizard's.
+// Returns true when the click was the wizard's. A write that fails (the
+// quota, most likely) ends the click with the reason on the step, never a
+// rejection the panel drops while the step still says "Reading…" or
+// "Finishing…".
 export async function handleWizardClick(id, ctx) {
   if (!wiz.active) return false;
+  try {
+    return await wizardClick(id, ctx);
+  } catch (e) {
+    wiz.busy = false;
+    wiz.error = storageErrorText(e);
+    ctx.render();
+    return true;
+  }
+}
+
+async function wizardClick(id, ctx) {
   switch (id) {
     case 'wizNext': {
       readInputs();
+      wiz.error = ''; // moving on: the last step's error no longer applies
       const list = steps();
       wiz.step = list[Math.min(stepIndex() + 1, list.length - 1)];
       if (wiz.step === 'account') await loadAccount(); // signed in or out in Settings since
@@ -463,6 +489,7 @@ export async function handleWizardClick(id, ctx) {
     }
     case 'wizBack':
       readInputs();
+      wiz.error = '';
       wiz.step = steps()[Math.max(stepIndex() - 1, 0)];
       if (wiz.step === 'account') await loadAccount();
       await persist();
