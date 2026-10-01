@@ -30,7 +30,7 @@ const legalDraft = JSON.parse(read(STATUS_FILE)).draft;
 // names (which the generator refuses), and never written anywhere but here.
 const FIXTURE_URL = 'https://lotsync-fixture.org';
 const EMPTY_BUSINESS = { name: '', legalName: '', streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: '', telephone: '', email: '', url: '', openingHours: [], areaServed: '' };
-const BUSINESS = { ...EMPTY_BUSINESS, name: 'Lot Sync', legalName: 'Lot Sync LLC', streetAddress: '1 Main Street', addressLocality: 'Springfield', addressRegion: 'PA', postalCode: '19064', addressCountry: 'US', telephone: '+1-555-010-0100', email: 'hello@lotsync-fixture.org', openingHours: ['Mo-Fr 09:00-17:00'], areaServed: 'Pennsylvania' };
+const BUSINESS = { ...EMPTY_BUSINESS, name: 'Lot Current', legalName: 'Lot Current LLC', streetAddress: '1 Main Street', addressLocality: 'Springfield', addressRegion: 'PA', postalCode: '19064', addressCountry: 'US', telephone: '+1-555-010-0100', email: 'hello@lotsync-fixture.org', openingHours: ['Mo-Fr 09:00-17:00'], areaServed: 'Pennsylvania' };
 const base = { siteUrl: '', demoEndpoint: '', demoMailto: '', supportEmail: '', signupUrl: '', business: { ...EMPTY_BUSINESS } };
 const ctxOf = (site = {}, extra = {}) => ({ dir: root, site: { ...base, ...site }, pricing, legalDraft, ...extra });
 const page = (slug) => PAGES.find((p) => p.slug === slug);
@@ -76,25 +76,25 @@ test('the page map: every address, file and kind as planned, titles unique and s
   ]);
   for (const r of REDIRECTS) assert.ok(PAGES.some((p) => p.path === r.target), `${r.target} is a page`);
   // the home title keeps "Facebook" out of the tab (the brand is last) while the h1 names the place
-  assert.equal(fullTitle(page('home')), 'Your used cars on Marketplace, from your website | Lot Sync');
+  assert.equal(fullTitle(page('home')), 'Used cars on Marketplace, from your website | Lot Current');
   assert.equal(page('home').h1, 'Your used cars on Facebook Marketplace, from your website, in seconds.');
   // draft legal pages say so before the brand
-  assert.equal(fullTitle(page('legal-terms'), true), 'Terms of service (draft) | Lot Sync');
-  assert.equal(fullTitle(page('legal-terms'), false), 'Terms of service | Lot Sync');
-  assert.equal(fullTitle(page('legal-terms')), legalDraft ? 'Terms of service (draft) | Lot Sync' : 'Terms of service | Lot Sync', 'without a flag, the committed status decides');
-  assert.equal(fullTitle(page('pricing'), true), 'Pricing | Lot Sync', '(draft) is for legal pages only');
+  assert.equal(fullTitle(page('legal-terms'), true), 'Terms of service (draft) | Lot Current');
+  assert.equal(fullTitle(page('legal-terms'), false), 'Terms of service | Lot Current');
+  assert.equal(fullTitle(page('legal-terms')), legalDraft ? 'Terms of service (draft) | Lot Current' : 'Terms of service | Lot Current', 'without a flag, the committed status decides');
+  assert.equal(fullTitle(page('pricing'), true), 'Pricing | Lot Current', '(draft) is for legal pages only');
   // the breadcrumb trails mirror the addresses
   assert.deepEqual(PAGES.map((p) => [...ancestorsOf(p).map((a) => (a.path === '/' ? 'Home' : a.crumb)), ...(p.crumb ? [p.crumb] : [])]), [
     [], ['Home', 'How it works'], ['Home', 'Pricing'], ['Home', 'FAQ'], ['Home', 'For managers'], ['Home', 'Support'], ['Home', 'Legal'],
     ['Home', 'Legal', 'Terms of service'], ['Home', 'Legal', 'Privacy policy'], ['Home', 'Legal', 'Posting rules'], [],
   ]);
   assert.deepEqual(PAGES.map(rootFor), ['./', '../', '../', '../', '../', '../', '../', '../../', '../../', '../../', '/']);
-  assert.equal(socialAlt(page('home')), `Lot Sync's green check mark with the words "Your used cars listed from your website, in seconds." and "${LINE}"`);
+  assert.equal(socialAlt(page('home')), `Lot Current's green check mark with the words "Your used cars listed from your website, in seconds." and "${LINE}"`);
   assert.equal(socialAlt(page('not-found')), '');
-  assert.equal(LINE, 'You click Publish. Lot Sync never does.');
-  assert.equal(SITE_NAME, 'Lot Sync');
+  assert.equal(LINE, 'You click Publish. Lot Current never does.');
+  assert.equal(SITE_NAME, 'Lot Current');
   assert.equal(BRAND_TAGLINE, 'A Chrome extension for dealership salespeople');
-  assert.match(FOOTER_LINE, /^Lot Sync is not affiliated with Meta Platforms, Inc\./);
+  assert.match(FOOTER_LINE, /^Lot Current is not affiliated with Meta Platforms, Inc\./);
   assert.equal(THEME_COLOR, '#14532d');
   for (const p of PAGES) {
     const words = p.social ? p.social.heading : '';
@@ -158,7 +158,7 @@ test('config.js: validateSite accepts the committed config and every honest shap
     [{ supportEmail: 'support@example.org' }, /reserved placeholder host/],
     [{ supportEmail: 'support' }, /plain address/],
     [{ signupUrl: 'https://app.lotsync.example/manager/' }, /reserved placeholder host/],
-    [{ business: { ...EMPTY_BUSINESS, name: 'Lot Sync' } }, /partly filled \(missing streetAddress, addressLocality, addressRegion, postalCode, addressCountry\)/],
+    [{ business: { ...EMPTY_BUSINESS, name: 'Lot Current' } }, /partly filled \(missing streetAddress, addressLocality, addressRegion, postalCode, addressCountry\)/],
     [{ business: { ...BUSINESS, postalCode: '' } }, /partly filled \(missing postalCode\)/],
     [{ business: { ...EMPTY_BUSINESS, telephone: '555' } }, /optional fields but no name or address/],
     [{ business: { ...BUSINESS, url: 'https://lotsync.example' } }, /business\.url/],
@@ -247,7 +247,7 @@ test('renderPage writes the document in the fixed order, with the absolute tags 
         ...(set && p.kind !== 'notFound' ? [`<link rel="canonical" href="${FIXTURE_URL}${p.path}">`] : []),
         `<link rel="icon" href="${r}favicon.svg" type="image/svg+xml">`, `<link rel="icon" href="${r}favicon-32.png" type="image/png" sizes="32x32">`, `<link rel="apple-touch-icon" href="${r}apple-touch-icon.png">`, `<link rel="stylesheet" href="${r}site.css">`,
         ...(p.kind !== 'notFound' ? [
-          '<meta property="og:type" content="website">', '<meta property="og:site_name" content="Lot Sync">', `<meta property="og:title" content="${p.title}">`, `<meta property="og:description" content="${p.description}">`,
+          '<meta property="og:type" content="website">', '<meta property="og:site_name" content="Lot Current">', `<meta property="og:title" content="${p.title}">`, `<meta property="og:description" content="${p.description}">`,
           ...(set ? [`<meta property="og:url" content="${FIXTURE_URL}${p.path}">`, `<meta property="og:image" content="${FIXTURE_URL}/social/${p.slug}.png">`, '<meta property="og:image:width" content="1200">', '<meta property="og:image:height" content="630">', `<meta property="og:image:alt" content="${attr(socialAlt(p))}">`] : []),
           '<meta name="twitter:card" content="summary_large_image">', `<meta name="twitter:title" content="${p.title}">`, `<meta name="twitter:description" content="${p.description}">`,
           '<script type="application/ld+json">',
@@ -262,7 +262,7 @@ test('renderPage writes the document in the fixed order, with the absolute tags 
       assert.equal((head.match(/<meta|<link|<title|<script/g) || []).length, order.length, `${p.slug}: nothing else in the head`);
       if (!set) assert.doesNotMatch(head, /canonical|og:url|og:image|https?:\/\/(?!schema\.org|\*\.supabase\.co)/, `${p.slug}: no absolute address while siteUrl is ''`);
       // header, nav, breadcrumbs, main, footer, script
-      assert.ok(html.includes(`<a class="brand" href="${r}">Lot Sync <small>${BRAND_TAGLINE}</small></a>`), `${p.slug}: the brand link`);
+      assert.ok(html.includes(`<a class="brand" href="${r}">Lot Current <small>${BRAND_TAGLINE}</small></a>`), `${p.slug}: the brand link`);
       const nav = between(html, '<nav aria-label="Site">', '</nav>');
       assert.deepEqual([...nav.matchAll(/<li><a href="([^"]+)"( aria-current="page")?>([^<]+)<\/a><\/li>/g)].map((m) => [m[1], m[3], Boolean(m[2])]),
         NAV.map((n) => [r + n.path.slice(1), n.nav, n === p]), `${p.slug}: the site nav with aria-current on its own item only`);
@@ -297,14 +297,14 @@ test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (Local
   const home = jsonLdFor(page('home'), ctxOf());
   assert.equal(home['@context'], 'https://schema.org');
   assert.deepEqual(home['@graph'], [
-    { '@type': 'Organization', name: 'Lot Sync' },
-    { '@type': 'WebSite', name: 'Lot Sync' },
-    { '@type': 'SoftwareApplication', name: 'Lot Sync', applicationCategory: 'BusinessApplication', operatingSystem: 'Chrome', description: page('home').description },
+    { '@type': 'Organization', name: 'Lot Current' },
+    { '@type': 'WebSite', name: 'Lot Current' },
+    { '@type': 'SoftwareApplication', name: 'Lot Current', applicationCategory: 'BusinessApplication', operatingSystem: 'Chrome', description: page('home').description },
   ]);
   assert.equal(pricing.hypothesis, true, 'pricing.json is still a hypothesis: no Offer is written');
   // siteUrl set: addresses, the logo, the breadcrumb items
   const live = jsonLdFor(page('home'), ctxOf({ siteUrl: FIXTURE_URL }))['@graph'];
-  assert.deepEqual(live[0], { '@type': 'Organization', name: 'Lot Sync', url: FIXTURE_URL, logo: `${FIXTURE_URL}/apple-touch-icon.png` });
+  assert.deepEqual(live[0], { '@type': 'Organization', name: 'Lot Current', url: FIXTURE_URL, logo: `${FIXTURE_URL}/apple-touch-icon.png` });
   assert.equal(live[1].url, FIXTURE_URL);
   assert.equal(live[2].url, FIXTURE_URL);
   assert.ok(!('offers' in live[2]));
@@ -314,7 +314,7 @@ test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (Local
   // the business filled in: LocalBusiness replaces Organization, with only the fields given
   const local = jsonLdFor(page('home'), ctxOf({ business: BUSINESS }))['@graph'][0];
   assert.deepEqual(local, {
-    '@type': 'LocalBusiness', name: 'Lot Sync', legalName: 'Lot Sync LLC',
+    '@type': 'LocalBusiness', name: 'Lot Current', legalName: 'Lot Current LLC',
     address: { '@type': 'PostalAddress', streetAddress: '1 Main Street', addressLocality: 'Springfield', addressRegion: 'PA', postalCode: '19064', addressCountry: 'US' },
     telephone: '+1-555-010-0100', email: 'hello@lotsync-fixture.org', openingHours: ['Mo-Fr 09:00-17:00'], areaServed: 'Pennsylvania',
   });
@@ -369,11 +369,11 @@ test('the files next to the pages: robots.txt, sitemap.xml, CNAME and llms.txt i
   for (const site of [base, { siteUrl: FIXTURE_URL }]) {
     const llms = llmsTxt(site);
     const lines = llms.split('\n');
-    assert.equal(lines[0], '# Lot Sync');
+    assert.equal(lines[0], '# Lot Current');
     assert.equal(lines[1], '');
-    assert.match(lines[2], /^> Lot Sync is a Chrome extension for dealership salespeople/);
+    assert.match(lines[2], /^> Lot Current is a Chrome extension for dealership salespeople/);
     assert.ok(lines[2].includes('a person checks it and clicks Publish') && lines[2].includes('never publishes anything itself'));
-    assert.match(lines[4], /^Lot Sync is not affiliated with Meta Platforms, Inc\.;.*planned prices/);
+    assert.match(lines[4], /^Lot Current is not affiliated with Meta Platforms, Inc\.;.*planned prices/);
     assert.deepEqual(lines.filter((l) => l.startsWith('## ')), ['## Pages', '## Legal']);
     const items = lines.filter((l) => l.startsWith('- '));
     assert.equal(items.length, PAGES.filter((p) => p.sitemap).length);
@@ -458,7 +458,7 @@ test('what the generator refuses: a second h1, a lost description, an unknown va
   assert.throws(() => renderFragmentPage(p, good + '<p style="color: red">x</p>', ctx), /inline style or event handler/);
   assert.throws(() => renderFragmentPage(p, good + '<a href="#main" onclick="x()">x</a>', ctx), /inline style or event handler/);
   assert.throws(() => renderFragmentPage(p, good + '<script src="x.js"></script>', ctx), /neither the JSON-LD block nor site\.js/);
-  assert.throws(() => renderFragmentPage(p, good + '<p>Welcome to Lot Sync</p>', ctx), /contains "Welcome to"/);
+  assert.throws(() => renderFragmentPage(p, good + '<p>Welcome to Lot Current</p>', ctx), /contains "Welcome to"/);
   assert.throws(() => renderFragmentPage(p, good + '<p>Built with Vite</p>', ctx), /contains "Vite"/);
   assert.doesNotThrow(() => renderFragmentPage(p, good + '<p>Send an invite.</p>', ctx), 'invite is not Vite');
   assert.throws(() => renderFragmentPage(p, good + '<p>lorem ipsum</p>', ctx), /contains "lorem"/);
@@ -552,7 +552,7 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     assert.equal(readFileSync(faqFile, 'utf8'), before);
     writeFileSync(join(tmp, CONFIG_FILE), config.replace("demoMailto: '',", "demoMailto: 'mailto:demo@lotsync.example',"));
     assert.match((await run(['--check'])).error.join('\n'), /demoMailto is on a reserved placeholder host/);
-    writeFileSync(join(tmp, CONFIG_FILE), config.replace("name: '',", "name: 'Lot Sync',"));
+    writeFileSync(join(tmp, CONFIG_FILE), config.replace("name: '',", "name: 'Lot Current',"));
     assert.match((await run(['--check'])).error.join('\n'), /business is partly filled/);
     writeFileSync(join(tmp, CONFIG_FILE), config);
     // a fragment with a forbidden word: refused, nothing written

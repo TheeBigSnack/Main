@@ -1,4 +1,4 @@
--- Lot Sync, Milestone 4: views for the manager page.
+-- Lot Current, Milestone 4: views for the manager page.
 --
 -- Both views are SECURITY INVOKER (Postgres 15+): they run with the caller's
 -- rights, so the row-level security of the tables underneath applies and a

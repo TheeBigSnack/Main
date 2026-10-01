@@ -1,4 +1,4 @@
-// The dealer-website platforms Lot Sync can read, in the order their in-page
+// The dealer-website platforms Lot Current can read, in the order their in-page
 // probes are tried. Each adapter implements the contract in README.md
 // (PLATFORM, probeInPage, searchInPage, detect, origins, scanOptions, scan,
 // getDetails, normalize, makeDirectSearch, photoOrigins). Dealer Inspire
@@ -44,7 +44,7 @@ export function platformNames() {
 }
 
 // What the popup and the wizard say on a page no adapter recognises: what
-// Lot Sync reads today, named by the adapters themselves.
+// Lot Current reads today, named by the adapters themselves.
 export function unsupportedSiteMessage() {
-  return `Lot Sync can't read the cars on this page. What it reads today: ${platformNames().join('; ')}. Open your dealership's used inventory page and try again.`;
+  return `Lot Current can't read the cars on this page. What it reads today: ${platformNames().join('; ')}. Open your dealership's used inventory page and try again.`;
 }

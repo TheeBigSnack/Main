@@ -8,7 +8,7 @@ Short, plain, one ask. Fill in the brackets. Send from your own name; attach not
 
 Hi [name],
 
-I've built a Chrome extension called Lot Sync that fills in a Facebook Marketplace vehicle listing from your own website inventory in about ten seconds: photos, price, VIN, description, the lot. The salesperson checks it and clicks Publish themselves, every time. Then it re-reads the website every few hours and tells them the same day when a car sells or the price changes, and opens the listing so they can fix it.
+I've built a Chrome extension called Lot Current that fills in a Facebook Marketplace vehicle listing from your own website inventory in about ten seconds: photos, price, VIN, description, the lot. The salesperson checks it and clicks Publish themselves, every time. Then it re-reads the website every few hours and tells them the same day when a car sells or the price changes, and opens the listing so they can fix it.
 
 It only lets pre-owned cars at your store through, the price is always the website price, and every description names the dealership. It never clicks Publish, never asks for anyone's Facebook login, and doesn't do anything in the background except read your website.
 
@@ -16,7 +16,7 @@ I'd like to run a 30-day pilot at [dealership] with [two or three] salespeople, 
 
 Could I show you in ten minutes at your desk, on your own site? [Two proposed times.]
 
-One thing I'll say up front: Meta's terms prohibit automated access without permission. Having a person click Publish is the safest way to do this, but it isn't a guarantee, and I won't pretend otherwise. Lot Sync is not affiliated with Meta.
+One thing I'll say up front: Meta's terms prohibit automated access without permission. Having a person click Publish is the safest way to do this, but it isn't a guarantee, and I won't pretend otherwise. Lot Current is not affiliated with Meta.
 
 Thanks,
 [your name]

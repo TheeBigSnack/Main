@@ -1,4 +1,4 @@
-// Site survey: what Lot Sync can and cannot read on a real dealer website,
+// Site survey: what Lot Current can and cannot read on a real dealer website,
 // and what that website's pages look like.
 //
 //   npm run survey -- <used-inventory URL> [<URL> ...] [--out survey-out] [--max-car-pages 5] [--headed]
@@ -10,13 +10,13 @@
 //      (page.request, the browser context's own request), to compare what a
 //      read without scripts sees with what the page shows
 //   3. up to --max-car-pages car pages linked from it, one at a time
-//   4. Lot Sync's popup against that tab: Scan website, then what it read
+//   4. Lot Current's popup against that tab: Scan website, then what it read
 // and writes <out>/<host>/report.json and report.md, and <out>/summary.md.
 //
 // A polite survey, not a crawl: every page the survey asks for is at least
 // 2 seconds after the one before (longer when robots.txt sets a Crawl-delay),
 // the timing is fixed, images, video and fonts are not downloaded, and Lot
-// Sync's own scan runs in a temporary copy of the extension whose page limits
+// Current's own scan runs in a temporary copy of the extension whose page limits
 // are lowered (DEFAULTS in survey-lib.mjs). The browser is Playwright's
 // Chromium as it is: its own user agent, nothing hidden. A 403, 429, 503 or a
 // bot check stops that site at once; nothing is retried. Facebook is never
@@ -104,14 +104,14 @@ async function launch(extDir, profileDir) {
 function capText(pauseMs) {
   const survey = 3 + opts.maxCarPages;
   return `the survey itself asks for at most ${survey} pages per site (robots.txt, the list page, the list's server HTML once, and up to ${opts.maxCarPages} car pages), each at least ${pauseMs / 1000} s after the one before; ` +
-    `Lot Sync's own scan then runs as a salesperson's click would, in a copy of the extension limited to ${scanLimits.listPages} list pages, ${scanLimits.sitemaps} sitemaps and ${scanLimits.carPages} car pages ` +
+    `Lot Current's own scan then runs as a salesperson's click would, in a copy of the extension limited to ${scanLimits.listPages} list pages, ${scanLimits.sitemaps} sitemaps and ${scanLimits.carPages} car pages ` +
     '(as shipped: 40, 5 and 600), two at a time with no pauses, as the product does (a Dealer Inspire site is read through its inventory search instead, a few requests)';
 }
 
 async function surveySite(url) {
   const input = new URL(url);
   const report = {
-    tool: 'lot-sync site survey',
+    tool: 'lot-current site survey',
     lotSyncVersion: version,
     host: input.host,
     input: input.href,
@@ -348,22 +348,22 @@ async function surveySite(url) {
       await carPage.close();
     }
 
-    // ---- 5. what Lot Sync reads: the popup's Scan website on the list tab ----
+    // ---- 5. what Lot Current reads: the popup's Scan website on the list tab ----
     phase = 'idle';
     const origin = new URL(finalUrl).origin;
     const permitted = surveyHostPermissions([input.href]).some((p) => new URL(p.slice(0, -1)).hostname === new URL(finalUrl).hostname);
     if (report.stopped) report.lotSync.skippedReason = 'the survey stopped first';
     else if (!permitted) report.lotSync.skippedReason = `the list moved to another website (${origin}); run the survey again with that address`;
-    else if (disallowed.length && disallowed.length >= links.length - disallowed.length) report.lotSync.skippedReason = "robots.txt disallows most of the car pages Lot Sync's scan would read, so the survey did not run it";
+    else if (disallowed.length && disallowed.length >= links.length - disallowed.length) report.lotSync.skippedReason = "robots.txt disallows most of the car pages Lot Current's scan would read, so the survey did not run it";
     else {
       phase = 'scan';
       await politely();
-      log("running Lot Sync's Scan website");
+      log("running Lot Current's Scan website");
       report.lotSync.attempted = true;
       const listPage = page;
       const setup = await context.newPage();
       await setup.goto('chrome://extensions');
-      const extensionId = await setup.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Sync').id);
+      const extensionId = await setup.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Current').id);
       await setup.close();
       const popup = await context.newPage();
       // In a real browser the popup sits on top of the dealer tab; here it has
@@ -402,10 +402,10 @@ async function surveySite(url) {
       await popup.close();
       Object.assign(report.lotSync, lotSyncReading({ ...stored, statusText, metaText, warningsShown }));
       report.lotSync.ok = finished && !statusError && Boolean(stored.snapshot);
-      report.lotSync.message = !finished ? `Lot Sync's scan did not finish within ${opts.scanTimeoutSec} s` : statusError ? statusText : stored.snapshot ? '' : statusText || 'no scan was saved';
+      report.lotSync.message = !finished ? `Lot Current's scan did not finish within ${opts.scanTimeoutSec} s` : statusError ? statusText : stored.snapshot ? '' : statusText || 'no scan was saved';
       const adapter = report.lotSync.adapter ? adapterById(report.lotSync.adapter) : null;
       report.lotSync.adapterName = adapter ? adapter.PLATFORM.name : null;
-      log(report.lotSync.ok ? `Lot Sync read ${report.lotSync.carCount} cars with ${report.lotSync.adapterName}` : `Lot Sync did not read it: ${report.lotSync.message}`);
+      log(report.lotSync.ok ? `Lot Current read ${report.lotSync.carCount} cars with ${report.lotSync.adapterName}` : `Lot Current did not read it: ${report.lotSync.message}`);
     }
     phase = 'done';
   } catch (e) {

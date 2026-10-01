@@ -1,6 +1,6 @@
 // Gets a description for one car. The built-in template always works with no
 // network. Only when the dealer has switched on the rewrite service in
-// Settings (and given its address) is Claude asked, through the Lot Sync
+// Settings (and given its address) is Claude asked, through the Lot Current
 // backend, never directly: no API key ever lives in the extension. Whatever
 // comes back is checked against the website's facts; if it fails, the
 // template is used.

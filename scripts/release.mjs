@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lot Sync release: one command, so every version ships the same way
+// Lot Current release: one command, so every version ships the same way
 // (docs/release.md has the whole checklist).
 //
 //   npm run release -- 0.6.0             that version
@@ -120,7 +120,7 @@ export function newestChangelogVersion(text) {
 // test/docs.test.js wants the README to open with the shipped major.minor.
 export function readmeTitle(version) {
   const v = parseVersion(version);
-  return `# Lot Sync (v${v.major}.${v.minor})`;
+  return `# Lot Current (v${v.major}.${v.minor})`;
 }
 
 export function readmeTitleFits(text, version) {
@@ -142,7 +142,7 @@ export function submitSteps(listing) {
 }
 
 // The same name scripts/pack.mjs writes.
-export const zipPath = (version) => `dist/lot-sync-extension-${version}.zip`;
+export const zipPath = (version) => `dist/lot-current-extension-${version}.zip`;
 
 // Lines whose text differs between two versions of a file (the edit keeps the line count).
 export function changedLines(before, after) {
@@ -156,7 +156,7 @@ export function nextSteps({ version, listing }) {
   const zip = zipPath(version);
   const boxes = submitSteps(listing || '');
   const lines = [
-    `Lot Sync ${version} is packed: ${zip}`,
+    `Lot Current ${version} is packed: ${zip}`,
     'Nothing was committed, tagged, pushed or uploaded. Next, by hand (docs/release.md):',
     '',
     '1. The end-to-end flows and the sandbox drive, with Playwright\'s Chromium (README, "For development"):',
@@ -165,9 +165,9 @@ export function nextSteps({ version, listing }) {
     '2. Commit and tag the release:',
     `     git add ${[...RELEASE_NOTES, ...VERSION_FILES].join(' ')}`,
     `     git commit -m "Release ${version}"`,
-    `     git tag -a v${version} -m "Lot Sync ${version}"`,
+    `     git tag -a v${version} -m "Lot Current ${version}"`,
     '     git push --follow-tags',
-    `3. Upload ${zip} in the Chrome Web Store Developer Dashboard: Lot Sync, Package, Upload new package, then Submit for review.`,
+    `3. Upload ${zip} in the Chrome Web Store Developer Dashboard: Lot Current, Package, Upload new package, then Submit for review.`,
     '   Visibility stays Unlisted for the pilot and the design partners; Public only after the review passes and the owner says so.',
   ];
   if (boxes.length) {

@@ -2,7 +2,7 @@
 
 A template to fill in during Milestone 6. `PLAN.md` says the next dealer-website platform is picked from demand among Dealer.com, DealerOn, Dealer eProcess and DealerFire, and that the milestone is only done when **the next platform is chosen with a written reason and a named first dealer**. This file is where that gets written.
 
-Today Lot Sync has two adapters:
+Today Lot Current has two adapters:
 
 - **Dealer Inspire** websites that use the Cars Commerce inventory search (`extension/adapters/dealerInspire.js`, detected by `window.SEARCH_SERVICE` on the page, service host `websites-search.api.carscommerce.inc`). Verified on the pilot dealer's live site.
 - **Standard vehicle data** (`extension/adapters/schemaOrg.js`): any website that publishes schema.org vehicle markup (JSON-LD or microdata) on its inventory pages, read from the list page, its `rel=next` pages and each car's own page. It was written from the public schema.org definitions and Google's vehicle listing documentation and tested only on synthetic pages. **It is not verified on any real website, and no platform below is claimed to work with it** until a real site on that platform has been scanned. Its limits are listed in `extension/adapters/README.md`: a list drawn by scripts shows few links to a plain read, and a website that turns away reads without cookies can be scanned from the tab but fails the background rescan.
@@ -40,7 +40,7 @@ Only what the repository already says is written here. Everything else is marked
 ### Dealer eProcess
 
 - **Detection**: to be verified on a real site.
-- **Inventory**: `extension/adapters/README.md` says inventory JSON sits behind the search results page with a different pricing block, and that the Carfax link is a separate feed. The pricing block matters: Lot Sync's price basis (the main price, or the lower second price when the website shows one) has to map onto it honestly, and the Carfax flag is a supporting sign in the pre-owned check. Both: to be verified on a real site.
+- **Inventory**: `extension/adapters/README.md` says inventory JSON sits behind the search results page with a different pricing block, and that the Carfax link is a separate feed. The pricing block matters: Lot Current's price basis (the main price, or the lower second price when the website shows one) has to map onto it honestly, and the Carfax flag is a supporting sign in the pre-owned check. Both: to be verified on a real site.
 - **Pre-owned signal**: to be verified on a real site.
 - **Description and features**: to be verified on a real site.
 - **Photo host**: to be verified on a real site.

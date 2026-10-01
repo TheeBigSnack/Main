@@ -75,7 +75,7 @@ export function withDefaults(settings, site = {}) {
 // website's data or reloading the extension. The rewrite-service key stays
 // on this computer only, and the Ready list's order and new-arrival window
 // (readySort, newDays) stay with the website they were set on. A real Lot
-// Sync account (shared with the manager, across a team) is Milestone 4.
+// Current account (shared with the manager, across a team) is Milestone 4.
 export const PROFILE_KEY = 'profile';
 
 export function profileFrom(settings, origin = '') {

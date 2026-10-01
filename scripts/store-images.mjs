@@ -67,7 +67,7 @@ export function tileText(html) {
 async function main() {
   const line = promoLine(readFileSync(listing, 'utf8'));
   const text = tileText(readFileSync(tile, 'utf8'));
-  if (text !== `Lot Sync ${line}`) throw new Error(`store/images/tile.html says "${text}"; it must say the name and the listing's line, "Lot Sync ${line}", and nothing else`);
+  if (text !== `Lot Current ${line}`) throw new Error(`store/images/tile.html says "${text}"; it must say the name and the listing's line, "Lot Current ${line}", and nothing else`);
 
   const { chromium } = await import('playwright');
   const DEFAULT_CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';

@@ -59,7 +59,7 @@ const publishCount = async (p) => (await p.request.get(`${marketOrigin}/publish-
 try {
   const ext = await context.newPage();
   await ext.goto('chrome://extensions');
-  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Sync').id);
+  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Current').id);
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
 
@@ -222,7 +222,7 @@ try {
   // ---- 7. The Numbers tab (view id 'pilot'): one post with its timing, one fill with nothing to fix, and never the description ----
   await tab(popup, 'pilot').click();
   const pilotView = await popup.textContent('.panel');
-  assert.match(pilotView, /Posted through Lot Sync\s*1\b/);
+  assert.match(pilotView, /Posted through Lot Current\s*1\b/);
   assert.match(pilotView, /Every field filled every time/);
   await popup.screenshot({ path: join(shots, 'post-7-pilot.png'), fullPage: true });
   const pilot = await popup.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);

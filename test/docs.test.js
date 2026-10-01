@@ -66,7 +66,7 @@ test('help.md is organised by what people are trying to do', () => {
   const sections = [
     'Install and update', 'Set up', 'Scan', 'Post one car', 'Post several', 'When a car sells or a price changes', 'The Numbers tab', 'Settings',
     'When a field could not be filled', 'When Facebook restored a draft', 'When Chrome asks for a permission', 'When the website scan fails',
-    'When the description writer is off', 'The daily cap', 'What Lot Sync never does', 'Where the data lives', 'How to forget the synced profile',
+    'When the description writer is off', 'The daily cap', 'What Lot Current never does', 'Where the data lives', 'How to forget the synced profile',
   ];
   for (const s of sections) assert.match(help, new RegExp('^## ' + escapeRe(s), 'm'), `docs/help.md has no "${s}" section`);
   // the three answers for a field that could not be filled
@@ -75,11 +75,11 @@ test('help.md is organised by what people are trying to do', () => {
   assert.match(help, /Fill it by hand/);
 });
 
-test('help.md says Lot Sync never clicks Publish and is not affiliated with Meta', () => {
+test('help.md says Lot Current never clicks Publish and is not affiliated with Meta', () => {
   const help = doc('help.md');
-  assert.match(help, /You click Publish\. Lot Sync never does\./);
+  assert.match(help, /You click Publish\. Lot Current never does\./);
   assert.match(help, /never clicks Publish, Update, Delete or Mark as sold/);
-  assert.match(help, /Lot Sync is not affiliated with Meta Platforms, Inc\./);
+  assert.match(help, /Lot Current is not affiliated with Meta Platforms, Inc\./);
   assert.match(help, /not a guarantee/, 'the cap and the design are described honestly');
 });
 
@@ -117,7 +117,7 @@ test('support.md has the inbox, what to ask for, the one-business-day answer, th
   for (const w of ['blocks posting', 'wrong data on a listing', 'cosmetic']) assert.ok(s.includes(w), `support.md lacks the severity word "${w}"`);
   assert.match(s, /Never touch a salesperson's Facebook account/);
   assert.match(s, /Never ask for passwords/);
-  assert.match(s, /Lot Sync is not affiliated with Meta Platforms, Inc\./);
+  assert.match(s, /Lot Current is not affiliated with Meta Platforms, Inc\./);
 });
 
 test('launch-checklist.md has the six groups, a "done when" on every item and no dates', () => {
@@ -275,7 +275,7 @@ test('the synced-profile lists name the Terms acceptance the profile carries', (
 test('README.md carries the shipped version in its title and the queue controls as the popup labels them', () => {
   const readme = read('../README.md');
   const [major, minor] = manifest().version.split('.');
-  assert.match(readme, new RegExp(`^# Lot Sync \\(v${major}\\.${minor}\\)`), `README.md title is not v${major}.${minor}`);
+  assert.match(readme, new RegExp(`^# Lot Current \\(v${major}\\.${minor}\\)`), `README.md title is not v${major}.${minor}`);
   const popup = read('../extension/popup.js');
   assert.ok(popup.includes('Select the next ') && popup.includes('Post selected'), 'the queue labels moved: update README and help.md');
   assert.doesNotMatch(readme, /Select all/, 'README.md names a control the popup does not have');
@@ -335,7 +335,7 @@ test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 list
 test('the texts say Chrome remembers a yes, and a no only while the side panel stays open', () => {
   const panel = read('../extension/sidepanel.js');
   assert.match(panel, /^const refusedPhotoServers = new Set\(\);$/m, 'the side panel no longer keeps photo refusals in a Set: check what the texts below say');
-  assert.ok(!panel.split('\n').some((l) => l.includes('refusedPhotoServers') && /storage/.test(l)), 'the side panel stores photo refusals now: the texts can say Chrome or Lot Sync remembers a no');
+  assert.ok(!panel.split('\n').some((l) => l.includes('refusedPhotoServers') && /storage/.test(l)), 'the side panel stores photo refusals now: the texts can say Chrome or Lot Current remembers a no');
   const unreleased = read('../CHANGELOG.md').split('\n## ')[1];
   const texts = { 'README.md': read('../README.md'), 'CHANGELOG.md (Unreleased)': unreleased, 'docs/help.md': doc('help.md'), 'store/listing.md': read('../store/listing.md'), 'marketing/demo-script.md': read('../marketing/demo-script.md') };
   for (const [name, text] of Object.entries(texts)) {
@@ -345,7 +345,7 @@ test('the texts say Chrome remembers a yes, and a no only while the side panel s
   assert.ok(line, "README's Limits no longer has the photo-server line");
   assert.match(line, /remembers a yes/);
   assert.match(line, /while the side panel stays open/);
-  assert.match(unreleased, /Chrome remembers a yes, and after a no Lot Sync doesn't ask about that server again while the side panel stays open/);
+  assert.match(unreleased, /Chrome remembers a yes, and after a no Lot Current doesn't ask about that server again while the side panel stays open/);
 });
 
 test('the pre-submission checklists quote only what PLAN.md says', () => {

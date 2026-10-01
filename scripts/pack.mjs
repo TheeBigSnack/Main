@@ -1,8 +1,8 @@
-// Packs the extension into dist/lot-sync-extension-<version>.zip: exactly the files under
+// Packs the extension into dist/lot-current-extension-<version>.zip: exactly the files under
 // extension/, nothing else, with the version from manifest.json in the name.
 // Plain Node (22+, the repo's engine), no dependencies: a small zip writer (deflate via zlib).
 //
-// Run: npm run pack        -> dist/lot-sync-extension-0.4.0.zip
+// Run: npm run pack        -> dist/lot-current-extension-0.4.0.zip
 // The same zip is what a tester unzips (README, "Install") and what the
 // Chrome Web Store upload takes (Milestone 5).
 
@@ -19,7 +19,7 @@ if (pkg.version !== manifest.version) {
   console.error(`package.json says ${pkg.version} but extension/manifest.json says ${manifest.version}; make them equal first.`);
   process.exit(1);
 }
-const out = join(root, 'dist', `lot-sync-extension-${manifest.version}.zip`);
+const out = join(root, 'dist', `lot-current-extension-${manifest.version}.zip`);
 
 // Files a packed extension must not carry (editor and OS leftovers).
 const SKIP = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|.*\.swp|.*~)$/;
@@ -81,5 +81,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   mkdirSync(join(root, 'dist'), { recursive: true });
   const bytes = zip(entries);
   writeFileSync(out, bytes);
-  console.log(`${relative(root, out)}: ${files.length} files, ${(bytes.length / 1024).toFixed(0)} KB (Lot Sync ${manifest.version})`);
+  console.log(`${relative(root, out)}: ${files.length} files, ${(bytes.length / 1024).toFixed(0)} KB (Lot Current ${manifest.version})`);
 }

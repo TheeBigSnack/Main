@@ -1,4 +1,4 @@
-# Data inventory: everything Lot Sync stores or sends
+# Data inventory: everything Lot Current stores or sends
 
 Every item the product keeps or sends anywhere, read from the code rather than from the other documents: the extension's `chrome.storage`, each network call, each table in `supabase/migrations/`, what Supabase keeps on its own, what each Edge Function logs, Stripe, the manager view and the website. For each item: the fields, why, where it is kept, who can read it, how long, how it is deleted, and who receives it.
 
@@ -9,10 +9,10 @@ The privacy texts are checked against this page: `legal/privacy-policy.md`, `leg
 ## The short version
 
 - **The extension as shipped** (`extension/src/accountConfig.js` empty) keeps everything in the person's own browser. What leaves it: reads of the dealership's website, the car's photos from the servers the website keeps them on, the VIN to NHTSA when the person clicks for it, and, only with the description writer turned on in Settings, the car's facts to the rewrite service.
-- **With Lot Sync accounts** (the owner's Supabase project, `supabase/README.md`), the person's email goes to Supabase to sign in, and their posted list, post attempts, to-do items and scan counts sync to the dealership's rows in the database, where every member of that dealership can read them.
+- **With Lot Current accounts** (the owner's Supabase project, `supabase/README.md`), the person's email goes to Supabase to sign in, and their posted list, post attempts, to-do items and scan counts sync to the dealership's rows in the database, where every member of that dealership can read them.
 - **Anthropic** receives the facts listed under "Exactly what reaches Anthropic" and up to four photo addresses, only with the description writer on. The VIN and the price are not among the fields, and nothing about the person but the sign-off (name and role).
-- **Stripe** receives the dealership's name and website address and one manager's email, and collects the card itself. Lot Sync never sees a card number.
-- **Never kept or sent anywhere:** a Facebook password, cookie or token, Facebook messages, anything about buyers, the photos themselves (except the files **Download photos** saves on the person's computer when they click it), or anything from the person's browsing beyond the dealership website and the Marketplace pages opened through Lot Sync.
+- **Stripe** receives the dealership's name and website address and one manager's email, and collects the card itself. Lot Current never sees a card number.
+- **Never kept or sent anywhere:** a Facebook password, cookie or token, Facebook messages, anything about buyers, the photos themselves (except the files **Download photos** saves on the person's computer when they click it), or anything from the person's browsing beyond the dealership website and the Marketplace pages opened through Lot Current.
 
 ## In the person's browser: the extension
 
@@ -23,7 +23,7 @@ Keys are `<name>:<origin>`, the origin being the dealer website's (`extension/sr
 | Key | Fields | Why | Written; removed |
 |---|---|---|---|
 | `settings:<origin>` | Salesperson name and role; dealership name, city, state, ZIP; the stores ticked; price basis; price note; daily cap; listing defaults (title status, condition); automatic rescans and notifications on or off; when the posting rules were read; the Terms and Privacy Policy edition accepted and when; the rewrite service on or off, its address and the key typed for it; the Ready to post list's sort order and how many days a car counts as new | Fills the listing and signs the description; orders the Ready list and marks new arrivals | Settings, the set-up wizard, the first scan (defaults read from the website), the Ready tab's Sort menu; clear everything |
-| `snapshot:<origin>` | The site's name, address and platform; per car: VIN, name, stock number, vehicle page address, price and its label, the lower second price, status, availability, location, photo count, mileage, type, Carfax link or not, the website's in-stock date when it gives one (`dateInStock`), when Lot Sync first saw the car (`firstSeenAt`, carried from scan to scan; nothing on a first scan), and the pre-owned decision with its reason; for a car that left the list, the page it was last seen on (`missingPages`) and that sighting (`missingSeen`); for a website read page by page, when Lot Sync last read the car's own page (`pageReadAt`) | Rescans compare against it; the tabs list the cars, in order, with their days on the lot and the New pill | Each scan; clear everything |
+| `snapshot:<origin>` | The site's name, address and platform; per car: VIN, name, stock number, vehicle page address, price and its label, the lower second price, status, availability, location, photo count, mileage, type, Carfax link or not, the website's in-stock date when it gives one (`dateInStock`), when Lot Current first saw the car (`firstSeenAt`, carried from scan to scan; nothing on a first scan), and the pre-owned decision with its reason; for a car that left the list, the page it was last seen on (`missingPages`) and that sighting (`missingSeen`); for a website read page by page, when Lot Current last read the car's own page (`pageReadAt`) | Rescans compare against it; the tabs list the cars, in order, with their days on the lot and the New pill | Each scan; clear everything |
 | `diff:<origin>` | The last scan's changes: cars to take down, prices to update, new arrivals, cars that became ready or need a look, each with VIN, name, stock number, vehicle page address, prices, and whether it is on the person's own list | The to-do list and the icon's count | Each scan; clear everything |
 | `posted:<origin>` | Per VIN: car name, posted price, when posted and updated, the listing link saved or detected, the salesperson name, which build posted it; for a colleague's entry that sync brought in, their account id | Knows which listings are the person's to keep accurate | Mark posted, the side panel, sync; a take-down or unmarking, clear everything |
 | `boilerplate:<origin>` | Sentences that appear in many of the website's own descriptions | Stripped from descriptions | Each scan; clear everything |
@@ -42,7 +42,7 @@ The same place and readers as above (`GLOBAL_KEYS`). **Clear everything for this
 | Key | Fields | Why | Written; removed |
 |---|---|---|---|
 | `sites` | Per dealer website: its name and platform, the service its platform's probe found (on Dealer Inspire, the address of its inventory search service and the public key the website itself uses for it; on a standard-data website, the website's address and its used list's), the hosts its photos come from, automatic rescans on or off, when the last scan and attempt ran and the last error, the last count notified, the last sync attempt, sync and sync error | Background rescans and their status | Each scan and sync; clear everything removes that website's entry |
-| `account` | The Lot Sync sign-in session: access token, refresh token, expiry, the account's id and email, when signed in | Calls to the sync and rewrite functions as the signed-in person | Sign in; **Sign out**, or a token the server refuses |
+| `account` | The Lot Current sign-in session: access token, refresh token, expiry, the account's id and email, when signed in | Calls to the sync and rewrite functions as the signed-in person | Sign in; **Sign out**, or a token the server refuses |
 | `lastPostOrigin` | The dealer website the side panel last worked on | Reopens a post under way | Each post; stays |
 | `postRequest` | The website, the VIN, the tab and window ids, when | Popup to side panel: post this car | Post; removed when the panel acts on it, or when the panel next opens and it is older than 10 minutes |
 | `setupRequest` | The website, the tab and window ids, when | Popup to side panel: run set-up | As `postRequest` |
@@ -60,7 +60,7 @@ Chrome keeps this area in the person's Chrome profile and, when Chrome sync is o
 ### Files and the clipboard
 
 - **Numbers tab CSV** (`pilotCsv`, `extension/src/pilot.js`): the website's name and address, the dealership and salesperson name from Settings, the time zone, the build version, the summary numbers and the rows of the Numbers tab. Saved where the person chooses; it goes wherever they send it.
-- **Copy problem report** (Settings, **Report a problem**, `problemReport` in `extension/popup.js`): Lot Sync and form map versions, the dealer website's address and platform, the last scan, the last automatic rescan and its error, rescans and background permission on or off, signed in or not, the plan, the last sync and its error, the counts on each tab and the queue, the last fill's time, versions and field keys, the Chrome version, the time zone and the time. No names, no cars, no listing links. It goes to the clipboard only; the person pastes it into a message to support.
+- **Copy problem report** (Settings, **Report a problem**, `problemReport` in `extension/popup.js`): Lot Current and form map versions, the dealer website's address and platform, the last scan, the last automatic rescan and its error, rescans and background permission on or off, signed in or not, the plan, the last sync and its error, the counts on each tab and the queue, the last fill's time, versions and field keys, the Chrome version, the time zone and the time. No names, no cars, no listing links. It goes to the clipboard only; the person pastes it into a message to support.
 - **Download photos** (side panel, `downloadPhotos` in `extension/sidepanel.js`): the car's photos, each saved as a file named with the car's stock number (or its VIN when there is none) and the photo's number, such as `P1001-photo-01.jpg`, in the person's Downloads folder, so they can add them to the listing by hand. They stay there until the person deletes them.
 
 The extension uses no cookies, no `localStorage`, no `sessionStorage` and no IndexedDB of its own; everything above is `chrome.storage`.
@@ -128,7 +128,7 @@ No cookies, no web storage, no analytics, and nothing loaded from another host: 
 
 The in-browser sandbox (`demo/`) keeps its sample listings and a count of Publish clicks in that tab's `sessionStorage` and sends nothing anywhere.
 
-## Lot Sync's database (Supabase)
+## Lot Current's database (Supabase)
 
 Every table below is in the Supabase project the owner creates, in the region chosen then. Supabase hosts it. The owner reads everything in the Dashboard (its SQL editor connects as `postgres`). Signed-in people reach it through the API with the public key and their token, and row-level security (`0002_rls.sql`, `0004_billing.sql`) decides what each gets; the service role is used only inside the Edge Functions. Deleting is done by the owner with `0006_privacy.sql`'s functions: `export_dealership`, `delete_dealership` (a dealership and everything it owns, through the foreign keys), `forget_person` (one person's account, memberships and name). Who may ask and how a request is verified: `docs/support.md`, "Privacy requests". What to run: `supabase/README.md`, "Export or delete a dealership's data", including the weekly list of dealerships whose subscription ended.
 
@@ -158,7 +158,7 @@ Every table below is in the Supabase project the owner creates, in the region ch
 
 ### What Supabase keeps on its own
 
-- **The account** (`auth.users`): its id, email, when it was created, confirmed and last signed in, and Supabase's own metadata. No password: Lot Sync signs in with an emailed code or link. With it, the email identity (`auth.identities`) and each signed-in browser's session and refresh token, in whatever columns the project's auth version keeps (look at the `auth` schema in the Table editor before launch). **Sign out** ends that browser's session. `forget_person` deletes the account and, with it, these rows.
+- **The account** (`auth.users`): its id, email, when it was created, confirmed and last signed in, and Supabase's own metadata. No password: Lot Current signs in with an emailed code or link. With it, the email identity (`auth.identities`) and each signed-in browser's session and refresh token, in whatever columns the project's auth version keeps (look at the `auth` schema in the Table editor before launch). **Sign out** ends that browser's session. `forget_person` deletes the account and, with it, these rows.
 - **The pending code or link** from a sign-in email, until it is used or expires.
 - **The auth audit log** (`auth.audit_log_entries`): sign-in events with the IP address, when the project keeps that log in the database. `forget_person` deletes the person's entries; `docs/support.md` reads them for a copy request.
 - **Sign-in emails**: the address and the code or link, sent through Supabase's own sender or the SMTP service the owner sets up (`supabase/README.md`, step 3).
@@ -179,7 +179,7 @@ Logs are Supabase's function logs (Dashboard, Edge Functions, the function, Logs
 ## Stripe
 
 - **The customer**, created by the `billing` function when a manager first opens checkout: `name` (the dealership's name), `email` (that manager's sign-in email), and `metadata` with the dealership's id and website address. Checkout also carries the dealership's id as `client_reference_id` and in the subscription's metadata.
-- **What Stripe collects itself** on its Checkout and billing portal pages: the card and the billing details its form asks for. Lot Sync never receives a card number; the invoices in the webhook events carry the billing contact's details Stripe keeps.
+- **What Stripe collects itself** on its Checkout and billing portal pages: the card and the billing details its form asks for. Lot Current never receives a card number; the invoices in the webhook events carry the billing contact's details Stripe keeps.
 - **Deleting**: nothing in the database reaches Stripe. When a dealership is deleted, the owner deletes the Stripe customer by hand in the Stripe Dashboard (`supabase/README.md`, "Delete"), which cancels any open subscription. Stripe keeps its own records of payments on its own terms [Pending attorney answer: questions-for-attorney.md 8.6].
 
 ## Support
@@ -194,7 +194,7 @@ Logs are Supabase's function logs (Dashboard, Edge Functions, the function, Logs
 
 | Recipient | Role | Receives | Named in |
 |---|---|---|---|
-| Supabase | processor | The database, sign-in, the Edge Functions and their logs: everything under "Lot Sync's database" and "What Supabase keeps on its own" | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md` |
+| Supabase | processor | The database, sign-in, the Edge Functions and their logs: everything under "Lot Current's database" and "What Supabase keeps on its own" | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md` |
 | Anthropic | processor | The description facts and up to four photo addresses, only with the description writer on | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md`, `store/listing.md` |
 | Stripe | processor | The dealership's name and website address, one manager's email, and what the payer types on Stripe's pages | `legal/privacy-policy.md` |
 | Google | processor | The synced profile, through Chrome sync under the person's own Google account; the extension's listing in the Chrome Web Store [Pending attorney answer: questions-for-attorney.md 8.8] | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md` |
@@ -202,9 +202,9 @@ Logs are Supabase's function logs (Dashboard, Edge Functions, the function, Logs
 | [hosting provider] | processor | Visitors' IP addresses and browsers in the access logs of the website and the manager view | `legal/privacy-policy.md` |
 | [email provider] | processor | Sign-in emails (the address and the code or link) once the owner sets up SMTP, and the support inbox | `legal/privacy-policy.md` |
 | The dealership's website | not a processor: the dealership's own website and the inventory search it uses, if any, read as the person's browser would | On Dealer Inspire, search requests with the website's own public key and VINs of its own cars; on a standard-data website, plain page reads with no key (its used list and next pages, car pages, `/robots.txt` and sitemaps). From the person's browser, or from the extension's service worker for the background rescans the person allowed | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md` |
-| Photo servers | not a processor: the servers the dealership's website names for its cars' photos, which may be its own, its platform's image host or another company's; Chrome lets Lot Sync read one only once the manifest covers it or the person allows it in Chrome's own prompt, from their click | A request for each photo of the car being posted, without cookies, when a form is filled or **Download photos** is clicked; like any download it shows the server the person's IP address and browser | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md` |
+| Photo servers | not a processor: the servers the dealership's website names for its cars' photos, which may be its own, its platform's image host or another company's; Chrome lets Lot Current read one only once the manifest covers it or the person allows it in Chrome's own prompt, from their click | A request for each photo of the car being posted, without cookies, when a form is filled or **Download photos** is clicked; like any download it shows the server the person's IP address and browser | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md` |
 | NHTSA | not a processor: a public government service the person chooses to ask | One VIN per click | `legal/privacy-policy.md`, `legal/chrome-web-store-privacy.md` |
 
-Facebook is not a recipient of anything Lot Sync sends: the extension types into the form in the person's own tab, and the person publishes. What Facebook receives then, it receives from the person under Facebook's own terms.
+Facebook is not a recipient of anything Lot Current sends: the extension types into the form in the person's own tab, and the person publishes. What Facebook receives then, it receives from the person under Facebook's own terms.
 
 The outside hosts the shipped code names, which the test compares with the code: `www.facebook.com` (the Marketplace pages the person opens), `vehicle-images.carscommerce.inc` (a dealership website platform's image host), `vpic.nhtsa.dot.gov` (NHTSA), `supabase.co` (Supabase), `api.anthropic.com` (Anthropic), `api.stripe.com` (Stripe), `cdn.jsdelivr.net` (jsDelivr), `schema.org` (named in the website's structured data as its vocabulary; never contacted).

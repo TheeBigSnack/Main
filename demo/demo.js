@@ -1,4 +1,4 @@
-// Wires the Lot Sync test drive (demo/index.html): the fake browser pane
+// Wires the Lot Current test drive (demo/index.html): the fake browser pane
 // whose tabs are iframes, the extension's real popup, side panel and service
 // worker mounted in iframes with demo/chrome-shim.js in front of them, the
 // shared hub they talk through, the sample data the end-to-end flows also
@@ -29,7 +29,7 @@ const Shim = window.LotSyncShim;
 
 // The two sample websites: Example Motors (demo/site/), whose page carries an
 // inventory search service, and Example Auto Outlet (demo/site-standard/),
-// which publishes standard vehicle data on each car's own page. Lot Sync
+// which publishes standard vehicle data on each car's own page. Lot Current
 // keeps its data per website address and both are served from this page's
 // address, so one is in use at a time and switching starts the sandbox over.
 const SAMPLES = {
@@ -213,7 +213,7 @@ function toast(id, opts) {
   const el = document.createElement('div');
   el.className = 'toast';
   el.dataset.id = id;
-  el.innerHTML = `<b>${esc((opts && opts.title) || 'Lot Sync')}</b>${esc((opts && opts.message) || '')}<br><small>a desktop notification, as Chrome would show it</small>`;
+  el.innerHTML = `<b>${esc((opts && opts.title) || 'Lot Current')}</b>${esc((opts && opts.message) || '')}<br><small>a desktop notification, as Chrome would show it</small>`;
   $('toasts').appendChild(el);
   setTimeout(() => el.remove(), 9000);
 }
@@ -345,7 +345,7 @@ async function mountWorker(iframe) {
       return real(input, init);
     };
   })();</script>`;
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><base href="${EXT_BASE}"><script src="${DEMO_BASE}chrome-shim.js"></script>${intercept}<title>Lot Sync service worker (sandbox)</title></head><body><script type="module" src="background.js"></script></body></html>`;
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base href="${EXT_BASE}"><script src="${DEMO_BASE}chrome-shim.js"></script>${intercept}<title>Lot Current service worker (sandbox)</title></head><body><script type="module" src="background.js"></script></body></html>`;
   await new Promise((resolve) => { iframe.addEventListener('load', resolve, { once: true }); iframe.srcdoc = doc; });
   hub.emit('runtime.onInstalled', [{ reason: 'install' }]);
 }
@@ -399,7 +399,7 @@ $('rescanNow').addEventListener('click', async () => {
 // ---------- the sample website ----------
 
 // Switching starts over: the two samples share this page's address, so they
-// would share Lot Sync's data too.
+// would share Lot Current's data too.
 async function switchSite(id) {
   if (!SAMPLES[id] || SAMPLES[id] === sample) return;
   sample = SAMPLES[id];
@@ -410,7 +410,7 @@ async function switchSite(id) {
   } catch (e) { /* the address stays as it was; the choice still applies */ }
   await reset();
   const note = $('siteNote');
-  note.textContent = `Now showing ${sample.label}'s sample website. Both sample websites share this page's address, and Lot Sync keeps its data per website address, so the sandbox was reset.`;
+  note.textContent = `Now showing ${sample.label}'s sample website. Both sample websites share this page's address, and Lot Current keeps its data per website address, so the sandbox was reset.`;
   note.hidden = false;
 }
 

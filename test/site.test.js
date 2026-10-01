@@ -39,10 +39,10 @@ function stripTags(src) {
 }
 const text = stripTags(html);
 
-test('the page says who publishes, that Lot Sync never does, and that it is not affiliated with Meta', () => {
+test('the page says who publishes, that Lot Current never does, and that it is not affiliated with Meta', () => {
   assert.match(text, /not affiliated with Meta Platforms, Inc\./, 'carries the non-affiliation line');
   assert.match(text, /clicks? Publish/, 'says the person clicks Publish');
-  assert.match(text, /never clicks Publish|Lot Sync never does|never (clicks|does) Publish|Lot Sync never clicks/i, 'says Lot Sync never does');
+  assert.match(text, /never clicks Publish|Lot Current never does|never (clicks|does) Publish|Lot Current never clicks/i, 'says Lot Current never does');
   assert.match(text, /not a guarantee|isn't a guarantee|is not guaranteed|won't pretend|no tool can honestly promise/, 'does not oversell safety');
   assert.match(text, /safest design available/, 'the honest line about a person clicking Publish');
   assert.match(text, /Is this allowed on Facebook\?/, 'the FAQ asks the question straight');

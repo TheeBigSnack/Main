@@ -48,7 +48,7 @@ try {
   await ext.goto('chrome://extensions');
   const extensionId = await ext.evaluate(async () => {
     const list = await chrome.management.getAll();
-    return list.find((e) => e.name === 'Lot Sync').id;
+    return list.find((e) => e.name === 'Lot Current').id;
   });
   await ext.close();
 

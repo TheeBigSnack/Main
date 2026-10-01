@@ -50,12 +50,12 @@ test('the sales sheet and the positioning quote the pricing config, not their ow
   }
 });
 
-test('customer-facing copy says who publishes and that Lot Sync is not affiliated with Meta', () => {
+test('customer-facing copy says who publishes and that Lot Current is not affiliated with Meta', () => {
   for (const rel of CUSTOMER_FACING) {
     const doc = read('../marketing/' + rel);
     assert.match(doc, /not affiliated with Meta/, `${rel} carries the non-affiliation line`);
     assert.match(doc, /clicks? Publish/, `${rel} says the person clicks Publish`);
-    assert.match(doc, /never clicks Publish|Lot Sync never does|never (clicks|does) Publish|Lot Sync never clicks/i, `${rel} says Lot Sync never does`);
+    assert.match(doc, /never clicks Publish|Lot Current never does|never (clicks|does) Publish|Lot Current never clicks/i, `${rel} says Lot Current never does`);
     assert.match(doc, /not a guarantee|isn't a guarantee|is not guaranteed|won't pretend|no tool can honestly promise/, `${rel} does not oversell safety`);
   }
 });
@@ -125,7 +125,7 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   assert.match(store, new RegExp(`more than ${OVERDUE_HOURS} hours`), 'the red threshold is OVERDUE_HOURS from manager/data.js');
   assert.match(store, new RegExp(`more than ${SCAN_STALE_HOURS} hours ago`), 'the stale-scan line is SCAN_STALE_HOURS from manager/data.js');
   // the three sentences that matter
-  assert.match(store, /\*\*You click Publish\. Lot Sync never does\.\*\*/);
+  assert.match(store, /\*\*You click Publish\. Lot Current never does\.\*\*/);
   assert.match(store, /\*\*Keep prices honest\.\*\*/);
   assert.match(store, /\*\*Clear the To do tab the day items appear\.\*\*/);
   // who creates invite codes is stated from the code: the manager view's Invite codes card calls create_invite
@@ -136,7 +136,7 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   assert.doesNotMatch(store, /manager view (doesn't|does not) have a button/, 'the old sentence about the missing button');
   // the controls, word for word as the popup, the side panel and the manager view label them
   const ui = (read('../extension/popup.js') + read('../extension/sidepanel.js')).replace(/&amp;/g, '&');
-  for (const label of ['Send me a sign-in code', 'Sign in', 'Invite code', 'Join', 'Set up Lot Sync', 'Ready to post', 'Open the Marketplace form', "It's posted, record it", 'Open & update price', 'Mark posted']) {
+  for (const label of ['Send me a sign-in code', 'Sign in', 'Invite code', 'Join', 'Set up Lot Current', 'Ready to post', 'Open the Marketplace form', "It's posted, record it", 'Open & update price', 'Mark posted']) {
     assert.ok(ui.includes(label), `"${label}" is no longer a label in popup.js or sidepanel.js: update onboarding-store.md and this list together`);
     assert.ok(store.includes(label), `onboarding-store.md does not name "${label}"`);
   }

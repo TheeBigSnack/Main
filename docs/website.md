@@ -1,6 +1,6 @@
 # The website: how it is built, hosted and put on a domain
 
-`site/` is the Lot Sync website: plain HTML, CSS and one small ES module, committed as served. No build step, no framework, no bundler, no source maps, nothing loaded from another host (no fonts, scripts, analytics or CDNs: the pages' Content-Security-Policy allows only the site's own files and, from the home page, the `lead` function). This page is for the owner: what the site is made of, how to turn GitHub Pages on, how to point a domain at it, and what to fill in so the pages stop saying "not set" and "not open yet". The rules in `CLAUDE.md` apply to every word on it.
+`site/` is the Lot Current website: plain HTML, CSS and one small ES module, committed as served. No build step, no framework, no bundler, no source maps, nothing loaded from another host (no fonts, scripts, analytics or CDNs: the pages' Content-Security-Policy allows only the site's own files and, from the home page, the `lead` function). This page is for the owner: what the site is made of, how to turn GitHub Pages on, how to point a domain at it, and what to fill in so the pages stop saying "not set" and "not open yet". The rules in `CLAUDE.md` apply to every word on it.
 
 ## What the site is made of
 
@@ -34,9 +34,9 @@ Everything that needs the site's absolute address or an inbox comes from `SITE` 
 | `siteUrl` | The site's address once the domain exists: an https origin, no path, no trailing slash | No canonical, `og:url`, `og:image`, `sitemap.xml` or `CNAME` is written; `node scripts/site-pages.mjs --check` and `npm test` report "siteUrl is not set: the site is not ready to publish" as a condition (not a failure) |
 | `demoEndpoint` | The `lead` Edge Function's address (`supabase/README.md`, "Demo requests"); set the function's `LEAD_ORIGINS` secret to `siteUrl` | With `demoMailto` also empty, the home page says the demo request form is not open yet and shows no address |
 | `demoMailto` | `mailto:` plus a real inbox: the form's action without JavaScript and the fallback when `demoEndpoint` is empty | As above. A reserved placeholder domain (`.example`, `example.com` and the like) is refused by the generator and the tests |
-| `supportEmail` | A plain address, shown on `/support/` | The support page tells people to ask the person who set Lot Sync up for their store |
+| `supportEmail` | A plain address, shown on `/support/` | The support page tells people to ask the person who set Lot Current up for their store |
 | `signupUrl` | The manager view's address, once self-serve sign-up is open | Nothing about sign-up shows |
-| `business` | The entity's name and registered address (`name`, `streetAddress`, `addressLocality`, `addressRegion`, `postalCode`, `addressCountry`) and the optional `legalName`, `telephone`, `email`, `url`, `openingHours`, `areaServed` | The home page carries an Organization record; with every required field filled it carries LocalBusiness instead; half filled, the generator refuses to write. It is the Lot Sync entity's address, never a dealer's |
+| `business` | The entity's name and registered address (`name`, `streetAddress`, `addressLocality`, `addressRegion`, `postalCode`, `addressCountry`) and the optional `legalName`, `telephone`, `email`, `url`, `openingHours`, `areaServed` | The home page carries an Organization record; with every required field filled it carries LocalBusiness instead; half filled, the generator refuses to write. It is the Lot Current entity's address, never a dealer's |
 
 After any change there: `npm run site-pages`, `npm run legal-pages`, `npm test`, commit the outputs with the config.
 

@@ -38,7 +38,7 @@ export const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 export const PHOTO_TIMEOUT_MS = 30 * 1000;
 
 // The host a photo lives on, for the error text: a photo on a server Lot
-// Sync has no permission for fails here, and the error names that server
+// Current has no permission for fails here, and the error names that server
 // (the site registry's photoOrigins, recorded by the scan, says where the
 // lot's photos are).
 function hostOf(url) {
@@ -94,7 +94,7 @@ async function cappedBytes(res, deadline) {
 
 // fetchImpl and timeoutMs are for the tests; the worker uses fetch and the 30 seconds.
 export async function downloadPhoto(url, index, { fetchImpl = globalThis.fetch, timeoutMs = PHOTO_TIMEOUT_MS } = {}) {
-  if (isFacebookServer(url)) return { url, ok: false, error: `on Facebook's servers (${hostOf(url)}); Lot Sync doesn't download from Facebook` };
+  if (isFacebookServer(url)) return { url, ok: false, error: `on Facebook's servers (${hostOf(url)}); Lot Current doesn't download from Facebook` };
   const controller = new AbortController();
   let timer;
   const deadline = new Promise((resolve, reject) => {
@@ -200,7 +200,7 @@ async function hasPermission(info, adapter) {
   }
 }
 
-export const NO_PERMISSION = 'Lot Sync has no permission to read this website in the background. Click Allow automatic rescans in Settings.';
+export const NO_PERMISSION = 'Lot Current has no permission to read this website in the background. Click Allow automatic rescans in Settings.';
 export const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
 
 // A failed attempt is recorded so the popup can show that the schedule is not working.

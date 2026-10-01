@@ -1,36 +1,36 @@
 DRAFT: starting point for attorney review. Not legal advice.
 
-# Lot Sync Terms of Service
+# Lot Current Terms of Service
 
-Last updated: [date]. These Terms are between [Lot Sync entity name] ("Lot Sync", "we") and the dealership that subscribes ("Customer") and each person the Customer authorises to use the service ("User", "you").
+Last updated: [date]. These Terms are between [Lot Current entity name] ("Lot Current", "we") and the dealership that subscribes ("Customer") and each person the Customer authorises to use the service ("User", "you").
 
-## 1. What Lot Sync is
+## 1. What Lot Current is
 
-Lot Sync is browser software and related services that read a dealership's own website inventory, help a User prepare a Facebook Marketplace vehicle listing, and report inventory changes. Lot Sync fills in forms and opens pages. **The User publishes, edits and removes every listing personally.** Lot Sync does not publish, edit or delete listings on the User's behalf and does not act while the User is away.
+Lot Current is browser software and related services that read a dealership's own website inventory, help a User prepare a Facebook Marketplace vehicle listing, and report inventory changes. Lot Current fills in forms and opens pages. **The User publishes, edits and removes every listing personally.** Lot Current does not publish, edit or delete listings on the User's behalf and does not act while the User is away.
 
-Lot Sync is not affiliated with, endorsed by or partnered with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only to name the third-party service on which Users post.
+Lot Current is not affiliated with, endorsed by or partnered with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only to name the third-party service on which Users post.
 
 ## 2. Third-party rules you must follow
 
-- **Meta.** You must comply with Meta's Terms of Service, Commerce Policies, Community Standards and any Marketplace vehicle-listing rules. Meta prohibits accessing its products "using automated means" without permission and restricts what dealers may list. Lot Sync's design keeps a person in control of every publish action, but **we make no promise that Meta will treat your use as compliant, and we have no control over Meta's decisions.**
+- **Meta.** You must comply with Meta's Terms of Service, Commerce Policies, Community Standards and any Marketplace vehicle-listing rules. Meta prohibits accessing its products "using automated means" without permission and restricts what dealers may list. Lot Current's design keeps a person in control of every publish action, but **we make no promise that Meta will treat your use as compliant, and we have no control over Meta's decisions.**
 - **Advertising law.** You are responsible for the accuracy of every listing, including price, fees and dealer identification, under the FTC Act, state auto-advertising rules (for Pennsylvania, the Automotive Industry Trade Practices regulations) and any other law that applies to you.
 - **Your own website's terms.** The Customer confirms it is entitled to have its website inventory read for its own listings (see the Dealer Subscription Agreement).
 
 ## 3. Acceptable use
 
-You may not: use Lot Sync to list new, demonstrator or loaner vehicles on Marketplace; publish prices that differ from the dealership's website price basis; use fake price changes, delete-and-relist or other ranking tricks; misrepresent the seller as a private party; make claims not supported by the dealership's data; discriminate in any listing; use multiple or shared Facebook accounts, proxies, spoofing or any evasion technique; attempt to make Lot Sync act without a person; reverse engineer the service or use it to build a competing product; or use it in any unlawful way. We may suspend access for breach.
+You may not: use Lot Current to list new, demonstrator or loaner vehicles on Marketplace; publish prices that differ from the dealership's website price basis; use fake price changes, delete-and-relist or other ranking tricks; misrepresent the seller as a private party; make claims not supported by the dealership's data; discriminate in any listing; use multiple or shared Facebook accounts, proxies, spoofing or any evasion technique; attempt to make Lot Current act without a person; reverse engineer the service or use it to build a competing product; or use it in any unlawful way. We may suspend access for breach.
 
 ## 4. Accounts and access
 
-Users are authorised by the Customer. Each User uses their own Facebook account and is responsible for it. Lot Sync never requests, stores or uses Facebook passwords, cookies or tokens. The Customer is responsible for its Users' conduct.
+Users are authorised by the Customer. Each User uses their own Facebook account and is responsible for it. Lot Current never requests, stores or uses Facebook passwords, cookies or tokens. The Customer is responsible for its Users' conduct.
 
 ## 5. No guarantees about leads, sales or account status
 
-Lot Sync is a tool. We do not guarantee leads, sales, listing visibility, listing approval or the continued good standing of any Facebook account. Automated-access rules are set by Meta and may change without notice.
+Lot Current is a tool. We do not guarantee leads, sales, listing visibility, listing approval or the continued good standing of any Facebook account. Automated-access rules are set by Meta and may change without notice.
 
 ## 6. Descriptions and AI assistance
 
-Lot Sync can draft listing descriptions from the dealership's own data, optionally using an AI model. Drafts are checked against the source data, but **the User reviews and is responsible for every description published.**
+Lot Current can draft listing descriptions from the dealership's own data, optionally using an AI model. Drafts are checked against the source data, but **the User reviews and is responsible for every description published.**
 
 ## 7. Fees, billing and cancellation
 
@@ -38,7 +38,7 @@ Subscriptions are per rooftop (store) per month, at the prices shown at purchase
 
 ## 8. Intellectual property
 
-Lot Sync and its software are ours. Dealership data stays the Customer's. The Customer grants us a licence to process its data to provide the service.
+Lot Current and its software are ours. Dealership data stays the Customer's. The Customer grants us a licence to process its data to provide the service.
 
 ## 9. Privacy
 

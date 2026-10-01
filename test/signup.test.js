@@ -147,8 +147,8 @@ test('create_dealership: P0005 and P0009 are answered, not raised, and a taken w
   assert.equal((fn.match(/'P0009'/g) || []).length, 2);
   // what each sentence says
   const constant = (name) => said(fn.match(new RegExp(`${name} constant text := '((?:[^']|'')*)';`))[1]);
-  assert.match(constant('closed'), /^sign-up is not open: .*invite code, from Lot Sync or from your dealership's manager$/);
-  assert.match(constant('taken'), /^that website already has a Lot Sync dealership: ask its manager for an invite code \(if nobody there uses Lot Sync, write to Lot Sync support\)$/);
+  assert.match(constant('closed'), /^sign-up is not open: .*invite code, from Lot Current or from your dealership's manager$/);
+  assert.match(constant('taken'), /^that website already has a Lot Current dealership: ask its manager for an invite code \(if nobody there uses Lot Current, write to Lot Current support\)$/);
 });
 
 test('the trim is JavaScript\'s trim(), in both functions, so the manager page\'s copy and the SQL agree', () => {

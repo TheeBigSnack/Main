@@ -168,7 +168,7 @@ try {
   // ---- 7. The Numbers tab (view id 'pilot'): two posts timed, every field filled, both to-do items fixed ----
   await openPopup();
   await popupTab('pilot').click();
-  await popup.locator('.panel').filter({ hasText: /Posted through Lot Sync/ }).waitFor();
+  await popup.locator('.panel').filter({ hasText: /Posted through Lot Current/ }).waitFor();
   await shot('05-pilot.png');
 
   const clicks = await page.evaluate(() => Number(sessionStorage.getItem('lotSyncSandbox.publishClicks') || 0));

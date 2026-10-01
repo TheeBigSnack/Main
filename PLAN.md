@@ -1,4 +1,4 @@
-# Lot Sync: 12-week plan
+# Lot Current: 12-week plan
 
 Dates start Monday Sept 28, 2026. Every milestone has acceptance criteria and a demo. The non-negotiables in CLAUDE.md apply to every milestone.
 
@@ -41,7 +41,7 @@ What the owner has to do: load the unpacked extension and try one car (README, "
 
 Scope
 - Batch queue: select several ready cars (or all new arrivals) and "Post 5 cars"; the panel walks through them one at a time (prefill, the salesperson clicks Publish, record, next). Skip, Pause and Stop always available; state in chrome.storage; the queue can't exceed the remaining daily cap.
-- Listing upkeep: each To do item gets a button that opens the right listing (saved URL or Marketplace "Your listings") with the new price pre-filled; sold cars open the listing for the salesperson to click Mark as sold or Delete; Lot Sync marks the item done, detecting it automatically when possible.
+- Listing upkeep: each To do item gets a button that opens the right listing (saved URL or Marketplace "Your listings") with the new price pre-filled; sold cars open the listing for the salesperson to click Mark as sold or Delete; Lot Current marks the item done, detecting it automatically when possible.
 - First-run wizard in the side panel: choose store, enter name, grant the dealer-site permission (`optional_host_permissions`), read `legal/posting-rules.md`, run the first scan.
 - Automatic rescans every 3 hours while Chrome is open (`chrome.alarms`), keeping the VIN double-check and the mass-disappearance guard; toolbar badge with the to-do count; optional desktop notification.
 - Multi-dealer foundation: move platform code into `extension/adapters/` with detect(page), scan(options), normalize(record), getDetails(vin); `dealerInspire.js` holds today's code; TODO stubs for Dealer.com, DealerOn, Dealer eProcess, DealerFire.
@@ -63,7 +63,7 @@ Scope
 - The numbers, recorded by the extension itself (`extension/src/pilot.js`, the Numbers tab, CSV export) and defined in `PILOT.md`.
 
 Acceptance criteria
-1. Each pilot salesperson posts at least 5 cars through Lot Sync and keeps them updated for two weeks.
+1. Each pilot salesperson posts at least 5 cars through Lot Current and keeps them updated for two weeks.
 2. Median time per post under 60 seconds including review; prefill failure rate per field recorded and the top failure fixed.
 3. Every sold car flagged within one rescan cycle; the manager confirms the numbers.
 
@@ -87,7 +87,7 @@ Demo: sign in by magic link, post on one machine, see it on the other and on the
 
 Scope
 - Stripe Billing: per-rooftop subscription, free pilot period, customer portal.
-- Landing page in `site/` (static, mobile-first): hero, how it works, features, "What Lot Sync won't do", pricing, FAQ with an honest "Is this allowed on Facebook?", demo request form, legal links, "Not affiliated with Meta Platforms, Inc."
+- Landing page in `site/` (static, mobile-first): hero, how it works, features, "What Lot Current won't do", pricing, FAQ with an honest "Is this allowed on Facebook?", demo request form, legal links, "Not affiliated with Meta Platforms, Inc."
 - Chrome Web Store submission, unlisted first; listing text, 5 screenshots, privacy-practices answers (`legal/chrome-web-store-privacy.md`).
 - Legal docs updated from attorney feedback; Terms and Privacy acceptance added to the wizard.
 
@@ -120,7 +120,7 @@ Demo: the partner list with usage numbers, and the chosen next platform.
 
 ## Wider use (audit of 2026-09-28)
 
-The owner wants Lot Sync built for any dealership. An audit for single-dealer, single-platform and single-machine assumptions found 44 items; 21 were fixed in 0.4.0 (CHANGELOG). The rest ride with their milestone:
+The owner wants Lot Current built for any dealership. An audit for single-dealer, single-platform and single-machine assumptions found 44 items; 21 were fixed in 0.4.0 (CHANGELOG). The rest ride with their milestone:
 - M4 (done Sep 28 unless noted): the daily cap per salesperson across machines (the sync answer's post count); one storage-key module (`src/storageKeys.js`); the shared rewrite key replaced by sign-in; local retention (500 entries, 90 days, per list). The pilot runbook for a second dealer on the manager view is in PILOT.md (Sep 28).
 - M5: blank Schedule A, the pilot agreement's table, the store-install emails, the wizard's Price step and the Terms and Privacy acceptance (informational until hosted) are done (Sep 28). The Pilot tab is renamed Numbers (Sep 28). Still open: the Web Store answers and legal drafts rewritten with the attorney.
 - M6: the adapter contract is complete (probe and search per adapter, normalise inside the adapter, opaque service, photo hosts; Sep 28); the second platform itself waits for a named dealer and a real site. The store-name heuristic is per website and the boilerplate rule has a floor (Sep 28). Still open: a Spanish form map with a Spanish-speaking partner.

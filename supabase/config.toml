@@ -1,4 +1,4 @@
-# Lot Sync: the Supabase CLI's project file (Milestone 4). Minimal on purpose;
+# Lot Current: the Supabase CLI's project file (Milestone 4). Minimal on purpose;
 # `supabase init` would write a much longer one and every value left out here
 # keeps the CLI's default. The owner links it to their project once with
 # `supabase link --project-ref <ref>`; nothing secret lives here.
@@ -18,7 +18,7 @@ major_version = 17
 
 [auth]
 enabled = true
-# Magic links only: no passwords anywhere in Lot Sync.
+# Magic links only: no passwords anywhere in Lot Current.
 enable_signup = true
 # Where the sign-in email may send people. Local stack only: on the hosted
 # project this is Authentication, URL configuration, and there the Site URL
@@ -40,7 +40,7 @@ sign_in_sign_ups = 30
 enable_signup = true
 enable_confirmations = false
 
-# The sign-in emails in Lot Sync's own words (templates/). While
+# The sign-in emails in Lot Current's own words (templates/). While
 # enable_confirmations is false every sign-in sends magic_link, a person's
 # first one included; confirmation goes only to an address that has never
 # signed in, and only while confirmations are on (a new hosted project's
@@ -51,11 +51,11 @@ enable_confirmations = false
 # (test/emailTemplates.test.js). The hosted project needs the templates
 # pasted in (README, "Sign-in emails").
 [auth.email.template.magic_link]
-subject = "Your Lot Sync sign-in code"
+subject = "Your Lot Current sign-in code"
 content_path = "./supabase/templates/magic_link.html"
 
 [auth.email.template.confirmation]
-subject = "Your Lot Sync sign-in code"
+subject = "Your Lot Current sign-in code"
 content_path = "./supabase/templates/confirmation.html"
 
 # The two Edge Functions check the caller's token themselves (a bad token gets

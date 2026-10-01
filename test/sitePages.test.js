@@ -154,7 +154,7 @@ test('canonical, share and favicon tags follow the siteUrl state on every page; 
     }
     const short = fullTitle(p).slice(0, -TITLE_SUFFIX.length);
     assert.equal(og['og:type'], 'website', `${p.file}: og:type`);
-    assert.equal(og['og:site_name'], 'Lot Sync', `${p.file}: og:site_name`);
+    assert.equal(og['og:site_name'], 'Lot Current', `${p.file}: og:site_name`);
     assert.equal(og['og:title'], short, `${p.file}: og:title`);
     assert.equal(og['og:description'], p.description, `${p.file}: og:description`);
     assert.equal(tw['twitter:card'], 'summary_large_image', `${p.file}: twitter:card`);
@@ -192,7 +192,7 @@ test('the site nav, the breadcrumbs and the footer are the same on every page, m
     assert.match(html, /<a class="skip" href="#main">Skip to content<\/a>/, `${p.file}: the skip link`);
     assert.match(html, /<main id="main">/, `${p.file}: the main landmark`);
     const header = between(html, '<header class="top">', '</header>');
-    assert.ok(header.includes(`<a class="brand" href="${r}">Lot Sync <small>`), `${p.file}: the brand link goes to the home page`);
+    assert.ok(header.includes(`<a class="brand" href="${r}">Lot Current <small>`), `${p.file}: the brand link goes to the home page`);
     const nav = between(header, '<nav aria-label="Site">', '</nav>');
     const items = [...nav.matchAll(/<li><a href="([^"]*)"( aria-current="page")?>([^<]*)<\/a><\/li>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
     assert.deepEqual(items, NAV.map((n) => [href(n.path), n.nav, n === p]), `${p.file}: the nav is NAV in order, aria-current on this page only`);
@@ -292,7 +292,7 @@ test('robots.txt allows everything and names the sitemap once there is one; llms
   assert.deepEqual(robots.slice(2).filter(Boolean), SITE.siteUrl ? [`Sitemap: ${SITE.siteUrl}/sitemap.xml`] : [], 'the Sitemap line exists exactly when siteUrl is set');
   const llms = read('site/llms.txt');
   const lines = llms.split('\n');
-  assert.equal(lines[0], '# Lot Sync', 'an H1 first');
+  assert.equal(lines[0], '# Lot Current', 'an H1 first');
   assert.equal(lines[1], '');
   assert.match(lines[2], /^> \S/, 'a blockquote summary second');
   assert.match(lines[2], /clicks Publish/, 'the summary says who publishes');
@@ -372,15 +372,15 @@ test('the structured data on every page parses, names schema.org as its vocabula
     if (p.slug === 'home') {
       const org = data['@graph'][0];
       assert.equal(org['@type'], businessFilled ? 'LocalBusiness' : 'Organization');
-      assert.equal(org.name, businessFilled ? SITE.business.name.trim() : 'Lot Sync');
+      assert.equal(org.name, businessFilled ? SITE.business.name.trim() : 'Lot Current');
       if (businessFilled) {
         assert.equal(org.address['@type'], 'PostalAddress');
         for (const k of ['streetAddress', 'addressLocality', 'addressRegion', 'postalCode', 'addressCountry']) assert.equal(org.address[k], SITE.business[k].trim(), `LocalBusiness ${k} is config.js's`);
       }
       const web = data['@graph'].find((n) => n['@type'] === 'WebSite');
-      assert.equal(web.name, 'Lot Sync');
+      assert.equal(web.name, 'Lot Current');
       const app = data['@graph'].find((n) => n['@type'] === 'SoftwareApplication');
-      assert.equal(app.name, 'Lot Sync');
+      assert.equal(app.name, 'Lot Current');
       assert.equal(app.applicationCategory, 'BusinessApplication');
       assert.equal(app.operatingSystem, 'Chrome');
       assert.equal(app.description, p.description);
@@ -603,7 +603,7 @@ test('honest on every page: who clicks Publish, nothing guaranteed, the non-affi
     const text = visibleText(PAGES.find((p) => p.slug === slug));
     assert.match(text, /Is this allowed on Facebook\?/, `${slug}: the question asked straight`);
     assert.match(text, /clicks? Publish/, `${slug}: the person clicks Publish`);
-    assert.match(text, /Lot Sync never does|never clicks Publish/, `${slug}: Lot Sync never does`);
+    assert.match(text, /Lot Current never does|never clicks Publish/, `${slug}: Lot Current never does`);
     assert.match(text, /safest design available/, `${slug}: the honest line`);
     assert.match(text, /not a guarantee/, `${slug}: not a guarantee`);
   }

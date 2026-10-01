@@ -1,4 +1,4 @@
-// docs/data-inventory.md lists everything Lot Sync stores or sends, read
+// docs/data-inventory.md lists everything Lot Current stores or sends, read
 // from the code, and the privacy texts are checked against it. These tests
 // keep the page true as the code grows: each fails when the code gains
 // something the page does not name (a chrome.storage key or area, a table or
@@ -221,7 +221,7 @@ test('supabase/README.md and the auth.ts header name every table the functions r
 });
 
 test('every view the migrations create is named in the database section', () => {
-  const db = section(inventory, "## Lot Sync's database (Supabase)");
+  const db = section(inventory, "## Lot Current's database (Supabase)");
   const views = MIGRATIONS.flatMap((f) => [...read('supabase/migrations/' + f).matchAll(/^create (?:or replace )?view public\.(\w+)/gm)].map((m) => m[1]));
   assert.ok(views.length >= 2);
   for (const v of views) assert.ok(db.includes('`' + v + '`'), `docs/data-inventory.md does not name the view ${v}`);
@@ -453,7 +453,7 @@ test('the photos go to whatever https server the website names, and the inventor
   assert.match(photoRows[0][to], /photo servers the dealership's website names[^|]*another company[^|]*Chrome's own prompt, from the user's click/, 'the Web Store answers do not say the photos go to any server the website names, asked for from the click');
   for (const r of sends.rows) assert.doesNotMatch(r[to], /image host/, 'a Web Store answer still names "the image host" as a recipient');
   // the privacy policy's services that are not processors
-  const others = policy.split('\n').find((l) => l.startsWith('Lot Sync also reaches services that are not our processors'));
+  const others = policy.split('\n').find((l) => l.startsWith('Lot Current also reaches services that are not our processors'));
   assert.ok(others, 'the privacy policy no longer names the services that are not processors');
   assert.match(others, /photo servers the dealership's website names[^;]*another company[^;]*Download photos[^;]*Chrome's own prompt/, 'the privacy policy does not say the photos come from any server the website names, from the User\'s click');
   assert.doesNotMatch(others, /image host/, 'the privacy policy still names one image host');
