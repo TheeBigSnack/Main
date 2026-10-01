@@ -60,35 +60,52 @@ function toBase64(buffer) {
 
 class PhotoTooLarge extends Error {}
 
-// What a downloaded file really is, from its first bytes: a JPEG, PNG, GIF or
-// WebP photo, or null. A server's content type can be missing or wrong (S3
-// serves an upload without one as binary/octet-stream), and a 200 answer
-// can be an error or bot-check page instead of the photo.
+// What a downloaded file really is, from its first bytes: a JPEG, PNG, GIF,
+// WebP or AVIF photo, or null. A server's content type can be missing or
+// wrong (S3 serves an upload without one as binary/octet-stream), and a 200
+// answer can be an error or bot-check page instead of the photo.
 export function sniffPhotoType(bytes) {
   const b = bytes || new Uint8Array(0);
   const starts = (...sig) => sig.every((x, i) => b[i] === x);
+  const ascii = (from, to) => String.fromCharCode(...b.subarray(from, to));
   if (starts(0xff, 0xd8, 0xff)) return 'image/jpeg';
   if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
   if (starts(0x47, 0x49, 0x46, 0x38)) return 'image/gif';
-  if (starts(0x52, 0x49, 0x46, 0x46) && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  if (starts(0x52, 0x49, 0x46, 0x46) && ascii(8, 12) === 'WEBP') return 'image/webp';
+  if (b.length >= 12 && ascii(4, 8) === 'ftyp' && /^avi[fs]$/.test(ascii(8, 12))) return 'image/avif';
   return null;
 }
 
+// The content types of the formats sniffPhotoType knows: a body under one of
+// these that shows none of them is not that photo.
+const KNOWN_PHOTO_TYPE = /^image\/(?:jpe?g|pjpeg|png|gif|webp|avif)$/;
+
 // The type a downloaded file goes to the form with, or null when it is not a
-// photo. The bytes win when they show a photo format, whatever the header
-// says. Otherwise only a server that calls it an image (image/*, such as
-// AVIF or SVG) is believed, and not when the body is a page of markup in a
-// format other than SVG. Anything else (a text/html answer, a missing or
-// octet-stream type over bytes of no photo format) is no photo.
+// photo. An empty body is never a photo. The bytes win when they show a
+// photo format, whatever the header says. Otherwise only a server that calls
+// it an image of a format the bytes check doesn't know (image/*, such as
+// HEIC or SVG) is believed: an SVG only when the body is an SVG drawing, any
+// other only when the body is not a page of markup. Anything else (a
+// text/html answer, a missing or octet-stream type over bytes of no photo
+// format, an empty, JSON or text body under a JPEG or PNG type) is no photo.
 export function photoTypeFor(declared, bytes) {
-  const sniffed = sniffPhotoType(bytes);
+  const b = bytes || new Uint8Array(0);
+  if (!b.length) return null;
+  const sniffed = sniffPhotoType(b);
   if (sniffed) return sniffed;
   const type = String(declared || '').toLowerCase();
-  if (!/^image\/[\w.+-]+$/.test(type)) return null;
-  let i = 0;
-  while (i < bytes.length && i < 64 && (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0a || bytes[i] === 0x0d || bytes[i] === 0xef || bytes[i] === 0xbb || bytes[i] === 0xbf)) i += 1;
-  if (bytes[i] === 0x3c && type !== 'image/svg+xml') return null; // '<': an HTML page under an image type
+  if (!/^image\/[\w.+-]+$/.test(type) || KNOWN_PHOTO_TYPE.test(type)) return null;
+  const head = String.fromCharCode(...b.subarray(0, 1024)).toLowerCase();
+  if (type === 'image/svg+xml') return /<svg[\s>]/.test(head) && !/<html[\s>]|<!doctype html/.test(head) ? type : null;
+  if (/^[\s\u00ef\u00bb\u00bf]*</.test(head)) return null; // '<': an HTML page under an image type
   return type;
+}
+
+// The file name's ending for a photo type: the usual one for the formats
+// above, else the type's own name (image/heic: heic).
+function photoExtension(type) {
+  const known = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/svg+xml': 'svg' };
+  return known[type] || type.slice('image/'.length).replace(/^x-/, '').replace(/[^a-z0-9]/g, '').slice(0, 8) || 'img';
 }
 
 // The body, read a chunk at a time and given up on as soon as it passes the
@@ -150,7 +167,7 @@ export async function downloadPhoto(url, index, { fetchImpl = globalThis.fetch, 
     // photo that couldn't be downloaded, never one attached under a .jpg name
     const type = photoTypeFor(declared, bytes);
     if (!type) return { url, ok: false, error: `not a photo (${declared || 'no type given'}) from ${hostOf(url)}` };
-    const ext = /png/i.test(type) ? 'png' : /webp/i.test(type) ? 'webp' : /gif/i.test(type) ? 'gif' : 'jpg';
+    const ext = photoExtension(type);
     return {
       url,
       ok: true,

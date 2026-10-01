@@ -36,7 +36,7 @@ function chunkedBody(chunks, { stallAfter = Infinity } = {}) {
 }
 
 test('a small photo comes back as a data URL with its size and a numbered name', LIMIT, async () => {
-  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
   let asked;
   const fetchImpl = async (url, init) => {
     asked = init;
@@ -100,7 +100,7 @@ test('a body that stops arriving fails the photo after the timeout', LIMIT, asyn
 });
 
 test('a batch with one stalled server still answers, with the other photos', LIMIT, async () => {
-  const fetchImpl = (url) => (url.includes('slow') ? new Promise(() => {}) : Promise.resolve(new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/jpeg' } })));
+  const fetchImpl = (url) => (url.includes('slow') ? new Promise(() => {}) : Promise.resolve(new Response(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]), { headers: { 'content-type': 'image/jpeg' } })));
   const urls = ['https://a.example/1.jpg', 'https://slow.example/2.jpg', 'https://a.example/3.jpg'];
   const photos = await Promise.all(urls.map((u, i) => downloadPhoto(u, i, { fetchImpl, timeoutMs: 50 })));
   assert.deepEqual(photos.map((p) => p.ok), [true, false, true]);
@@ -110,7 +110,7 @@ test('never from Facebook\'s own servers, even ones the manifest covers: nothing
   let calls = 0;
   const fetchImpl = async () => {
     calls += 1;
-    return new Response(new Uint8Array([1]), { headers: { 'content-type': 'image/jpeg' } });
+    return new Response(new Uint8Array([0xff, 0xd8, 0xff, 1]), { headers: { 'content-type': 'image/jpeg' } });
   };
   for (const url of [
     'https://www.facebook.com/marketplace/photo.jpg',
@@ -158,4 +158,24 @@ test('a photo is known by its bytes: a JPEG served as octet-stream or with no ty
   assert.equal(sniffPhotoType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])), 'image/gif');
   assert.equal(sniffPhotoType(new Uint8Array([1, 2, 3])), null);
   assert.equal(sniffPhotoType(new Uint8Array(0)), null);
+});
+
+test('an empty body, or one that is not the photo its type names, is a photo that couldn\'t be downloaded', LIMIT, async () => {
+  const answer = (text, type) => async () => new Response(new TextEncoder().encode(text), { headers: { 'content-type': type } });
+  for (const [text, type] of [['', 'image/jpeg'], ['', 'image/svg+xml'], ['{"error":"not found"}', 'image/jpeg'], ['Not Found', 'image/png'], ['Not Found', 'image/webp'], ['<!doctype html><html><body>Checking your browser</body></html>', 'image/svg+xml']]) {
+    const r = await downloadPhoto('https://img.cdn.example/1.jpg', 0, { fetchImpl: answer(text, type) });
+    assert.deepEqual([r.ok, r.error], [false, `not a photo (${type}) from img.cdn.example`], `${JSON.stringify(text)} under ${type}`);
+  }
+  // an SVG drawing is still one, named as one; an AVIF photo is known by its bytes, with or without a type
+  const svg = await downloadPhoto('https://img.cdn.example/d.svg', 3, { fetchImpl: answer('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>', 'image/svg+xml') });
+  assert.deepEqual([svg.ok, svg.name, svg.type], [true, 'photo-04.svg', 'image/svg+xml']);
+  const avif = new Uint8Array([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, 0, 0, 0, 0]);
+  for (const type of [null, 'image/avif', 'application/octet-stream']) {
+    const r = await downloadPhoto('https://img.cdn.example/e', 4, { fetchImpl: async () => new Response(avif, type ? { headers: { 'content-type': type } } : {}) });
+    assert.deepEqual([r.ok, r.name, r.type], [true, 'photo-05.avif', 'image/avif'], `AVIF under ${type}`);
+  }
+  assert.equal(sniffPhotoType(avif), 'image/avif');
+  // a format the bytes check doesn't know, under its own image type, keeps its name
+  const heic = await downloadPhoto('https://img.cdn.example/f', 5, { fetchImpl: async () => new Response(new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]), { headers: { 'content-type': 'image/heic' } }) });
+  assert.deepEqual([heic.ok, heic.name, heic.type], [true, 'photo-06.heic', 'image/heic']);
 });
