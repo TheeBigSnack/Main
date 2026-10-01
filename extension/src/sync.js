@@ -54,6 +54,15 @@ export const TAKEN_DOWN_WINDOW_DAYS = 90;
 // key left out only means its take-down is missed and can be repeated.
 export const MAX_KNOWN = 2000;
 
+// How far before `since` the pilot entries that go up are picked from. `since`
+// is the server's clock and the entries carry this machine's, so a machine
+// a few minutes slow stamps a post made just after a sync before `since`;
+// without the look-back that post attempt, or a to-do item ticked off then,
+// would never go up. The sync function looks back as far for the same reason
+// (CUTOFF_MARGIN_MS); an entry sent twice changes nothing there (attempts
+// are upserted, a closed item is never reopened).
+export const PILOT_LOOKBACK_MS = 10 * 60 * 1000;
+
 const ms = (x) => {
   if (x === null || x === undefined || x === '') return null;
   const t = typeof x === 'number' ? x : Date.parse(x);
@@ -222,7 +231,8 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
  *           received at its last sync (the state's `known`, nextSyncState);
  *           the function takes down only those missing from `posted`, so a
  *           machine that never synced takes nothing down
- *   pilot:  posts and flags that changed after `since` (all of them the first time)
+ *   pilot:  posts and flags that changed after `since`, less PILOT_LOOKBACK_MS
+ *           for a slow clock here (all of them the first time)
  *   scan:   this scan's counts, or null when nothing was scanned
  *   since:  the serverTime of the last answer, or null
  *   today:  the caller's local calendar day ({ from, to }, localDayRange), so
@@ -245,8 +255,10 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
     };
   }
   const p = withPilotDefaults(pilot);
-  const posts = p.posts.filter((a) => changedAfter(since, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
-  const flags = p.flags.filter((f) => changedAfter(since, f.flaggedAt, f.doneAt));
+  const s = ms(since);
+  const from = s === null ? null : s - PILOT_LOOKBACK_MS;
+  const posts = p.posts.filter((a) => changedAfter(from, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
+  const flags = p.flags.filter((f) => changedAfter(from, f.flaggedAt, f.doneAt));
   return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, known: keyList(known), pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
 }
 

@@ -4,7 +4,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN } from '../extension/src/sync.js';
+import { readFileSync } from 'node:fs';
+import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, PILOT_LOOKBACK_MS } from '../extension/src/sync.js';
 import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
@@ -100,6 +101,27 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closed, since: T(15), userId: U1 }).pilot.flags.length, 1);
   // fills never leave the browser
   assert.equal('fills' in body.pilot, false);
+});
+
+test('syncPayload: a clock six minutes slow here still sends the post made and the to-do item ticked off just after a sync', () => {
+  // since is the server's clock; this machine's stamps run six minutes behind it
+  const since = T(30);
+  const here = (min) => T(30 - 6 + min);
+  let pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [], warnings: [] }, { at: T(0) });
+  pilot = beginPost(pilot, { vin: VIN_B, at: here(1) });
+  pilot = endPost(pilot, VIN_B, 'posted', { at: here(2) });
+  pilot = resolveFlag(pilot, VIN_A, 'takeDown', { at: here(2), how: 'manual' });
+  assert.ok(Date.parse(here(2)) < Date.parse(since), 'both stamps look older than the last sync');
+  const body = syncPayload({ origin: ORIGIN, posted: {}, pilot, since, userId: U1 });
+  assert.deepEqual(body.pilot.posts.map((a) => a.vin), [VIN_B], 'the post attempt goes up');
+  assert.deepEqual(body.pilot.flags.map((f) => [f.vin, Boolean(f.doneAt)]), [[VIN_A, true]], 'the closed to-do item goes up, so the server closes it');
+  // the look-back is the sync function's own margin for clock error, or more
+  const fn = readFileSync(new URL('../supabase/functions/sync/index.ts', import.meta.url), 'utf8');
+  const margin = fn.match(/const CUTOFF_MARGIN_MS = ([\d\s*]+);/);
+  assert.ok(margin, 'the sync function names CUTOFF_MARGIN_MS');
+  assert.ok(PILOT_LOOKBACK_MS >= margin[1].split('*').reduce((a, n) => a * Number(n.trim()), 1));
+  // entries older than the look-back are on the server already and stay here
+  assert.deepEqual(syncPayload({ origin: ORIGIN, posted: {}, pilot, since: T(59), userId: U1 }).pilot.posts, []);
 });
 
 test('syncPayload sends the state\'s known keys as the function matches them: VIN@postedAt, each once, well formed, at most MAX_KNOWN', () => {
