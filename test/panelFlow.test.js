@@ -597,3 +597,59 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   assert.deepEqual(full.writes, ['posted:o']);
   assert.equal(full.state.step, 'done', 'the post is recorded all the same');
 });
+
+// The queue bar's Stop queue and Clear queue, as onClick runs them: the queue
+// goes, and so does a queued car with nothing on Facebook yet, but a post whose
+// Marketplace form is open, or one that is not the queue's, stays where it is.
+function queueBarClick(id, { step, queueMode, vin = 'AAA' }) {
+  const calls = [];
+  const FORM_STEPS = new Function(`return ${/const FORM_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)();
+  const state = { origin: 'https://www.example-motors.test', vin, step, queueMode, queue: { vins: ['AAA', 'BBB'], index: 0, status: id === 'queueClear' ? 'done' : 'running' } };
+  const fns = compileMany(['formOpen', 'onClick'], {
+    state, FORM_STEPS, promptOpen: false,
+    watcher: { cancel: () => calls.push('watcher cancelled') },
+    saveQueue: async () => calls.push('saveQueue ' + JSON.stringify(state.queue)),
+    clearFlow: async () => {
+      calls.push('clearFlow');
+      Object.assign(state, { vin: null, step: 'idle', queueMode: false });
+    },
+    saveFlow: async () => calls.push('saveFlow'),
+    setStatus: (text, kind) => calls.push(`status${kind ? '(' + kind + ')' : ''}: ${text}`),
+    render: () => calls.push('render:' + state.step),
+  });
+  return { state, calls, click: () => fns.onClick({ target: { closest: () => ({ id, dataset: {} }) } }) };
+}
+
+test('Stop queue and Clear queue never drop a Marketplace form that is open, nor a post that is not the queue\'s', async () => {
+  for (const id of ['queueStop', 'queueClear']) {
+    // a form is open (a queued car's, or a single post's): it stays, and a queued car goes on as a single post
+    for (const queueMode of [true, false]) {
+      for (const step of ['filling', 'probe', 'publish']) {
+        const p = queueBarClick(id, { step, queueMode });
+        await p.click();
+        const what = `${id}, ${queueMode ? 'queued' : 'single'} car at ${step}`;
+        assert.equal(p.state.queue, null, `${what}: the queue goes`);
+        assert.ok(!p.calls.includes('clearFlow') && !p.calls.includes('watcher cancelled'), `${what}: ${p.calls.join(' | ')}`);
+        assert.deepEqual([p.state.vin, p.state.step, p.state.queueMode], ['AAA', step, false], what);
+        assert.ok(p.calls.includes('saveFlow'), `${what}: saved as a single post`);
+      }
+    }
+    // a single post with nothing on Facebook yet is not the queue's either: it stays
+    for (const step of ['checking', 'review', 'blocked', 'done']) {
+      const p = queueBarClick(id, { step, queueMode: false });
+      await p.click();
+      assert.deepEqual([p.state.queue, p.state.vin, p.state.step], [null, 'AAA', step], `${id}, single post at ${step}`);
+      assert.ok(!p.calls.includes('clearFlow'));
+    }
+    // a queued car with nothing on Facebook yet, or no post at all: cleared, as before
+    for (const step of ['checking', 'review', 'blocked']) {
+      const p = queueBarClick(id, { step, queueMode: true });
+      await p.click();
+      assert.ok(p.calls.includes('clearFlow'), `${id}, queued car at ${step}`);
+      assert.deepEqual([p.state.queue, p.state.vin, p.state.step], [null, null, 'idle']);
+    }
+    const none = queueBarClick(id, { step: 'queueDone', queueMode: false, vin: null });
+    await none.click();
+    assert.deepEqual([none.state.queue, none.state.step], [null, 'idle']);
+  }
+});

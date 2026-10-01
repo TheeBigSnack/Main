@@ -99,6 +99,7 @@ First run on a new machine: on the review screen, **Open the form and check fiel
 - For each car: check the form and click **Publish** on Facebook. The panel notices the listing and loads the next car. If it did not notice, click **It's posted, next car**. Prefer drafts? Click Facebook's **Save draft**, then **Saved as draft, next car**. **Skip, next car** moves on without posting. A car the re-check blocks offers **Skip this car, next**.
 - The queue bar at the top of the panel: **Post next car**, **Pause**, **Resume**, **Skip this car**, **Stop queue**, and **Clear queue** when it is finished. In the popup, the Ready to post tab shows the same queue with **Continue in the side panel**, **Stop the queue** and **Clear**.
 - The queue survives closing the panel. It can never be longer than the day's remaining cap, and it pauses when the cap is reached. Posted cars stay recorded when a queue is stopped.
+- **Stop queue** (or **Clear queue**) while a car's Marketplace form is open leaves that car on its form: the panel says so, and you record it with **It's posted, record it** or **It didn't post**, so a listing you publish from it is still recorded. A single post that is not part of the queue stays where it is too.
 - A car saved as a draft shows "Draft on Facebook" on Ready to post until you publish it on Facebook and click **Mark posted**.
 
 ## When a car sells or a price changes

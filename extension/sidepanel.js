@@ -1855,13 +1855,26 @@ async function onClick(ev) {
       if (state.queue.status === 'done') state.step = 'queueDone';
       return render();
     case 'queueStop':
-    case 'queueClear':
-      if (watcher) watcher.cancel();
+    case 'queueClear': {
+      const stopped = btn.id === 'queueStop' ? 'Queue stopped. Posted cars stay recorded.' : '';
       state.queue = null;
       await saveQueue();
+      // The post under way stays when it isn't one of the queue's cars, and
+      // when its Marketplace form is open: a listing published from that form
+      // must still be recorded (formOpen). A queued car on its form goes on
+      // as a single post, recorded with It's posted, record it.
+      if (state.vin && (!state.queueMode || formOpen())) {
+        const open = formOpen() ? ` ${state.vehicle ? state.vehicle.name : state.vin} stays on its form: say whether it posted.` : '';
+        state.queueMode = false;
+        await saveFlow();
+        setStatus(stopped + open);
+        return render();
+      }
+      if (watcher) watcher.cancel();
       await clearFlow();
-      setStatus(btn.id === 'queueStop' ? 'Queue stopped. Posted cars stay recorded.' : '');
+      setStatus(stopped);
       return render();
+    }
     case 'back':
     case 'postAnother':
       await clearFlow();
