@@ -68,9 +68,10 @@ jobs:
     timeout-minutes: 30
     environment:
       name: production
+    # The two secrets are not here: each step that runs the supabase command
+    # gets them in its own env, so the actions that set up the runner and
+    # npm run check-deploy never see them.
     env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
       STEP: ${{ inputs.step }}
       FUNCTIONS: ${{ inputs.functions }}
@@ -84,6 +85,9 @@ jobs:
         with:
           version: 2.117.0
       - name: The settings are there and name the committed project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           if ! printf '%s' "$PROJECT_REF" | grep -Eq '^[a-z0-9]{20}$'; then echo "::error::the variable SUPABASE_PROJECT_REF is missing or is not a 20-character project ref"; exit 1; fi
           node -e "import('./extension/src/accountConfig.js').then(({ ACCOUNT }) => { const want = 'https://' + process.env.PROJECT_REF + '.supabase.co'; if (ACCOUNT.url.replace(/\/+\$/, '') !== want) { console.log('::error::extension/src/accountConfig.js names ' + (ACCOUNT.url || 'no project') + ', not ' + want + ': run npm run set-project and commit first'); process.exit(1); } })"
@@ -96,12 +100,21 @@ jobs:
       - name: Link the project
         id: link
         if: inputs.step != 'check'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase link --project-ref "$PROJECT_REF"
       - name: Migrations db push would apply
         if: inputs.step == 'plan' || inputs.step == 'database'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase db push --dry-run
       - name: Apply the migrations
         if: inputs.step == 'database'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase db push --yes
       # Each name is checked against the four functions in supabase/functions,
       # so the box can only ever deploy one of them. Nothing deploys while
@@ -110,6 +123,9 @@ jobs:
       # would fail until database has run.
       - name: Deploy the functions
         if: inputs.step == 'functions'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           for f in $FUNCTIONS; do
             case "$f" in
@@ -130,6 +146,9 @@ jobs:
       # or function difference).
       - name: "verify: production has applied exactly the migrations in supabase/migrations"
         if: ${{ !cancelled() && inputs.step == 'verify' && steps.link.outcome == 'success' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           set -o pipefail
           supabase migration list --linked
@@ -141,6 +160,9 @@ jobs:
           fi
       - name: "verify: production's public schema is the one the migrations build"
         if: ${{ !cancelled() && inputs.step == 'verify' && steps.link.outcome == 'success' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           supabase db diff --linked --schema public > "$RUNNER_TEMP/schema-diff.sql"
           if grep -q '[^[:space:]]' "$RUNNER_TEMP/schema-diff.sql"; then
@@ -163,6 +185,9 @@ jobs:
       # behaviour: a function deployed from a Windows checkout compares equal.
       - name: "verify: each deployed function's source is the one in supabase/functions"
         if: ${{ !cancelled() && inputs.step == 'verify' && steps.link.outcome == 'success' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           status=0
           for dir in supabase/functions/*/; do

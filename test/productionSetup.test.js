@@ -241,3 +241,35 @@ test('docs/stripe-setup.md deploys billing through the Supabase workflow, never 
     assert.match(part, /On the production project[^\n]*Supabase workflow/, from);
   }
 });
+
+// A secret in a job's env reaches every step of the job, the third-party
+// actions included (supabase/setup-cli runs at a movable tag), and every
+// script that runs there. Each deploy secret goes only to the steps that use
+// it: the supabase command's steps, the deploy that runs wrangler, and the
+// check that the settings exist.
+test('the deploy secrets reach only the steps that use them, never an action or the outside checks', () => {
+  const jobEnv = (yml) => (yml.match(/^ {4}env:\n((?: {6}.+\n)+)/m) || [, ''])[1];
+  const value = /\$\{\{ secrets\.[A-Z_]+ \}\}/;
+  for (const [name, yml] of [['supabase', supabase], ['manager', manager]]) {
+    assert.ok(jobEnv(yml).length > 0, `${name}: the job env is found`);
+    assert.doesNotMatch(jobEnv(yml), /secrets\./, `${name}: no secret in the job's env`);
+    for (const st of yml.split(/\n      - /).slice(1)) {
+      if (/(^|\n\s*)uses: /.test(st)) assert.doesNotMatch(st, /secrets\./, `${name}: ${st.split('\n')[0]} is an action and gets no secret`);
+    }
+  }
+  const steps = supabase.split(/\n      - /).slice(1);
+  const cli = steps.filter((st) => /\bsupabase (link|db|migration|functions)\b/.test(runText(st)));
+  assert.ok(cli.length >= 7, 'link, the dry run, the push, the deploy and the three verify steps');
+  for (const st of cli) {
+    assert.match(st, /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/, st.split('\n')[0]);
+    assert.match(st, /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD \}\}/, st.split('\n')[0]);
+  }
+  for (const st of steps.filter((x) => value.test(x))) {
+    assert.ok(cli.includes(st) || st.startsWith('name: The settings are there'), `${st.split('\n')[0]} gets a secret it does not use`);
+  }
+  assert.doesNotMatch(steps.at(-1), /secrets\./, 'check-deploy runs without the token');
+  const mine = manager.split(/\n      - /).slice(1);
+  const holders = mine.filter((st) => value.test(st));
+  assert.deepEqual(holders.map((st) => st.split('\n')[0]), ['name: Deploy to Cloudflare Pages'], 'only the deploy holds the Cloudflare token');
+  assert.match(mine.find((st) => st.startsWith('name: Is Cloudflare set up?')), /HAS_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN != '' \}\}/, 'the first step learns only whether it is set');
+});

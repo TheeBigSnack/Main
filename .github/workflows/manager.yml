@@ -58,9 +58,10 @@ jobs:
     timeout-minutes: 10
     environment:
       name: manager-view
+    # The Cloudflare secrets are not here: only the deploy step gets them, so
+    # the actions that set up the runner, the page's tests and the hosting
+    # check never see them. The first step learns only whether they are set.
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'lotcurrent-app' }}
       MANAGER_URL: ${{ vars.MANAGER_URL }}
       SENDER_DOMAIN: ${{ vars.SENDER_DOMAIN }}
@@ -68,8 +69,11 @@ jobs:
     steps:
       - name: Is Cloudflare set up?
         id: ready
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+          if [ "$HAS_TOKEN" != true ] || [ "$HAS_ACCOUNT" != true ]; then
             echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set: nothing deployed (docs/production-setup.md, step 6)"
             echo "go=false" >> "$GITHUB_OUTPUT"
           else
@@ -97,6 +101,9 @@ jobs:
       # The project is created on the first run; with a wrong token or account id the create fails and says why.
       - name: Deploy to Cloudflare Pages
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if npx --yes wrangler@4.145.0 pages project list | grep -Fq " $PAGES_PROJECT "; then
             echo "the project $PAGES_PROJECT exists"
