@@ -265,6 +265,8 @@ test('every pilot reaches the retention line: its clock starts when the owner ma
   const early = retention.slice(retention.indexOf('**A pilot ended early.**'));
   assert.ok(early.length > 0, 'the README says how to record a pilot ended early');
   assert.match(early, /values \('<dealership id>', 'pilot', now\(\)\)\non conflict \(dealership_id\) do update\n {2}set status = 'pilot', pilot_ends_at = excluded\.pilot_ends_at, updated_at = now\(\)\n {2}where s\.status is null or \(s\.status = 'pilot' and s\.pilot_ends_at > excluded\.pilot_ends_at\);/, 'it ends a pilot, or a dealership with no plan, and leaves a paying one alone');
+  // review: a dealership that subscribed during its pilot and cancelled still read `pilot`, and the upsert left it so
+  assert.match(early, /subscribed during its pilot and then cancelled: its row says `canceled` with the pilot's end still ahead, so it still reads `pilot`, and the statement answers `INSERT 0 0`\. End that one's pilot with:\n\n```sql\nupdate public\.subscriptions\nset pilot_ends_at = now\(\), updated_at = now\(\)\nwhere dealership_id = '<dealership id>' and status in \('canceled', 'incomplete_expired'\) and pilot_ends_at > now\(\);\n```/, 'a cancelled subscriber\'s pilot can be ended early too');
   assert.match(early, /\*\*Dealerships with no plan\.\*\*[\s\S]*where public\.subscription_state\(d\.id\) = 'none'/, 'the weekly run lists the dealerships served with no end');
   const pilot = read('../PILOT.md');
   assert.match(pilot, /its pilot row with the signed agreement's start date and length/, 'PILOT.md\'s account step starts the clock');
@@ -287,8 +289,8 @@ test('accounts that never joined are listed and deleted in the weekly run, and t
   assert.match(s, /lower\(u\.email\) <> lower\('<your own test address, docs\/production-setup\.md step 7>'\)/, 'the owner\'s own test account stays');
   assert.match(s, /delete from auth\.users u where u\.id in \('<id>', '<id>'\);/);
   assert.match(s, /Do not use `forget_person` for these/, 'not forget_person: it also deletes the demo requests');
-  assert.match(policy, /An account that was only used to ask for a sign-in code \(it never joined a dealership or tried to start one\) holds only its email address and sign-in times, and is deleted once it is 30 days old\. \[Pending attorney answer: questions-for-attorney\.md 8\.5\]/);
+  assert.match(policy, /An account that was only used to ask for a sign-in code \(it never joined a dealership or tried to start one\) holds only its email address, its sign-in times and sessions, and the sign-in log's entries for it \(with the IP address\), and is deleted within a week after it is 30 days old\. \[Pending attorney answer: questions-for-attorney\.md 8\.5\]/);
   const item = read('../legal/questions-for-attorney.md').split('\n').find((l) => l.startsWith('- **8.5**'));
-  assert.match(item, /an account that never joins a dealership or tries to start one holds only that email address and sign-in times/);
-  assert.match(read('../docs/data-inventory.md'), /deleted by the owner's weekly run once it is 30 days old \(`supabase\/README\.md`, "Accounts that never joined"\)/);
+  assert.match(item, /an account that never joins a dealership or tries to start one holds only that email address, its sign-in times and sessions, and the sign-in log's entries for it \(with the IP address\), and the owner's weekly run now deletes it within a week after it is 30 days old/);
+  assert.match(read('../docs/data-inventory.md'), /deleted by the owner's weekly run within a week after it is 30 days old \(`supabase\/README\.md`, "Accounts that never joined"\)/);
 });

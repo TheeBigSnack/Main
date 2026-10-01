@@ -530,7 +530,15 @@ on conflict (dealership_id) do update
   where s.status is null or (s.status = 'pilot' and s.pilot_ends_at > excluded.pilot_ends_at);
 ```
 
-It also covers a dealership whose pilot clock was never started (no row, or a row with no status). It changes nothing for one that has a Stripe subscription, or whose pilot has already ended.
+It also covers a dealership whose pilot clock was never started (no row, or a row with no status). It changes nothing for one that has a Stripe subscription, or whose pilot has already ended. That includes one that subscribed during its pilot and then cancelled: its row says `canceled` with the pilot's end still ahead, so it still reads `pilot`, and the statement answers `INSERT 0 0`. End that one's pilot with:
+
+```sql
+update public.subscriptions
+set pilot_ends_at = now(), updated_at = now()
+where dealership_id = '<dealership id>' and status in ('canceled', 'incomplete_expired') and pilot_ends_at > now();
+```
+
+It lapses at once and the retention line lists it, as above.
 
 **Dealerships with no plan.** In the same weekly run, list the dealerships whose pilot clock was never started (step 5 without its `subscriptions` row, or one made before that step had it). They are served with no end, so the retention line never lists them:
 
@@ -543,7 +551,7 @@ order by d.created_at;
 
 For each one on a pilot agreement whose pilot has ended or that has stopped, record the end with the statement above (the 30 days run from the day it really ended, which can be sooner than the `ended_about` it then shows); one still running gets its clock (step 5's `subscriptions` insert). A test dealership of your own is listed too: delete it when you are done with it.
 
-**Accounts that never joined.** Asking for a sign-in code, in the extension or on the manager view, creates an account for the address typed before anyone proves they own it, so a mistyped address or a curious visitor leaves one behind. One that never joins a dealership or tries to start one holds only its email address and Supabase's sign-in times, and nothing else deletes it. In the same weekly run, list those more than 30 days old:
+**Accounts that never joined.** Asking for a sign-in code, in the extension or on the manager view, creates an account for the address typed before anyone proves they own it, so a mistyped address or a curious visitor leaves one behind. One that never joins a dealership or tries to start one holds only its email address, Supabase's sign-in times and sessions for it, and the auth audit log's entries for it (with the IP address), and nothing else deletes it. In the same weekly run, list those more than 30 days old:
 
 ```sql
 select u.id, u.email, u.created_at

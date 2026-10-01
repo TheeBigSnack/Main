@@ -1,9 +1,9 @@
 -- Lot Current: three rules that only a test with sessions acting at the same
 -- moment can prove, each with real sessions through dblink:
 --
---   keep_a_manager (0002_rls.sql)       two managers acting at once cannot leave a dealership with none
---   create_dealership (0007_signup.sql)  calls from one account sent together get 5 lookups an hour, no more
---   redeem_invite (0002_rls.sql)         invite codes tried together by one account get 10 lookups an hour, no more
+--   keep_a_manager (0002_rls.sql)                      two managers acting at once cannot leave a dealership with none
+--   create_dealership (0010_backend_review_fixes.sql)  calls from one account sent together get 5 lookups an hour, no more
+--   redeem_invite (0010_backend_review_fixes.sql)      invite codes tried together by one account get 10 lookups an hour, no more
 --
 -- keep_a_manager. rls.sql proves the rule inside one session: the last
 -- manager can neither step down nor leave. One session cannot prove it
