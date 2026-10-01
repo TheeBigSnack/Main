@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const html = read('manager/index.html');
@@ -102,4 +102,29 @@ test('docs/production-setup.md names every piece it relies on, and says the secr
   assert.match(read('package.json'), /"set-project": "node scripts\/set-project\.mjs"/);
   assert.match(read('package.json'), /"check-hosting": "node scripts\/check-hosting\.mjs"/);
   for (const s of ['npm run check-hosting', 'MANAGER_URL', 'SENDER_DOMAIN', 'scripts/check-hosting.mjs']) assert.ok(doc.includes(s), s);
+});
+
+// Supabase's CAPTCHA protection refuses /auth/v1/otp without a captcha token,
+// and neither the extension's code request nor the manager view's link
+// request sends one: a doc that tells the owner to turn it on would stop
+// every new sign-in. The check lifts itself once client code sends a token.
+test('no doc tells the owner to turn CAPTCHA on while neither sign-in request sends a captcha token', () => {
+  const code = ['extension', 'manager']
+    .flatMap((dir) => readdirSync(new URL(`../${dir}/`, import.meta.url), { recursive: true }).filter((f) => /\.(m?js|html)$/.test(f)).map((f) => read(`${dir}/${f}`)))
+    .join('\n');
+  const sendsToken = /captcha_?token|gotrue_meta_security/i.test(code);
+  const docs = ['docs/production-setup.md', 'supabase/README.md', 'docs/stack-test.md', 'docs/launch-checklist.md', 'docs/release.md', 'README.md', 'PILOT.md'];
+  const turnOn = /\b(?:turn|switch)\s+on\b|\b(?:turn|switch)\s+(?:\*\*)?captcha\b[^.]*?\bon\b|\benabl/i;
+  if (!sendsToken) {
+    for (const doc of docs) {
+      for (const sentence of read(doc).split(/(?<=[.!?])\s+|\n/).filter((x) => /captcha/i.test(x))) {
+        assert.doesNotMatch(sentence, turnOn, `${doc} tells the owner to turn CAPTCHA on, and no client sends a captcha token: "${sentence.trim()}"`);
+      }
+    }
+    assert.match(read('docs/production-setup.md'), /leave CAPTCHA off\. Neither the extension nor the manager view sends a captcha token/);
+    assert.match(read('supabase/README.md'), /Leave \*\*CAPTCHA protection\*\* \(Authentication, Attack protection\) off: neither/);
+  }
+  // the old instruction, in either doc's words, as a failing example
+  assert.match('5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.', turnOn);
+  assert.match('and turn on **CAPTCHA protection** (Authentication, Attack protection) once the manager page is public.', turnOn);
 });

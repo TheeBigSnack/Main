@@ -74,7 +74,7 @@ In the Supabase Dashboard, **Authentication**:
 2. **Email Templates**: paste `supabase/templates/magic_link.html` into **Magic link or OTP** and `supabase/templates/confirmation.html` into **Confirm sign up**, each with the subject in `supabase/config.toml` ("Your Lot Current sign-in code"). Both templates already carry the Lot Current name, so they can be pasted now; Claude will give you the exact text.
 3. **Sign In / Providers, Email**: leave it on; check the email OTP length is **6** and the expiry **3600** seconds.
 4. **Rate limits**: emails sent about **30 an hour**; sign-ups and sign-ins about **30 per 5 minutes**.
-5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.
+5. **Attack protection**: leave CAPTCHA off. Neither the extension nor the manager view sends a captcha token, so with CAPTCHA on every new sign-in would be refused. The two rate limits above and your own email sender (Step 5 below) are what protect the email budget; CAPTCHA can come later, once both send a token.
 
 ## Step 5. The sign-in email sender [Owner]
 
