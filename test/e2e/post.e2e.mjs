@@ -235,6 +235,26 @@ try {
   assert.deepEqual(flowPhotos, ['2.png', '1.png']);
   assert.equal(await publishCount(dealer), '0', 'the extension must not publish');
 
+  // ---- 4b2. Fill again fills the fields only; Attach photos again sends every photo once more, and says so ----
+  // (the mock form adds each change of its photo box to what it holds, as the panel expects of the real one)
+  const fillsRecorded = () => panel.evaluate(async (o) => (((await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`] || {}).fills || []).length, origin);
+  assert.equal(await fillsRecorded(), 1);
+  assert.match(await panel.textContent('#photosKept'), /Fill again fills the fields only/);
+  await panel.click('#fillAgain');
+  for (let i = 0; i < 300 && (await fillsRecorded()) < 2; i++) await panel.waitForTimeout(100);
+  assert.equal(await fillsRecorded(), 2, 'Fill again filled the form again');
+  await panel.waitForSelector('#photos.done');
+  assert.equal(await fb.textContent('#photoCount'), '2 photos', 'Fill again sends no photo a second time');
+  assert.match(await panel.textContent('#photos'), /2 of 2 attached/);
+  assert.equal(await panel.$('#photosAgain'), null);
+  assert.equal(await panel.textContent('#attachAgain'), 'Attach photos again');
+  await panel.click('#attachAgain');
+  await panel.waitForSelector('#photosAgain');
+  await panel.waitForSelector('#photos.done', { timeout: 30000 });
+  await fb.waitForFunction(() => document.getElementById('photoCount').textContent === '4 photos');
+  assert.match(await panel.textContent('#photosAgain'), /each is on it twice now/);
+  assert.equal(await publishCount(dealer), '0', 'the extension must not publish');
+
   // ---- 4c. A Post for another car while this form waits for Publish never drops it ----
   // (the popup's Post writes this request; another car's VIN, as written there)
   const otherCar = { origin, vin: 'TESTVIN00000000B2', dealerTabId: null, at: Date.now() };
@@ -289,9 +309,11 @@ try {
   assert.equal(pilot.posts[0].outcome, 'posted');
   assert.equal(pilot.posts[0].salesperson, 'Roger');
   assert.ok(pilot.posts[0].seconds >= 0 && pilot.posts[0].reviewedAt && pilot.posts[0].formOpenedAt && pilot.posts[0].filledAt, 'every step is timed');
-  assert.equal(pilot.fills.length, 1, 'the dry run is not a fill');
-  assert.equal(pilot.fills[0].filled.length, 17);
-  assert.deepEqual([...pilot.fills[0].partial, ...pilot.fills[0].blocked], []);
+  assert.equal(pilot.fills.length, 2, 'the dry run is not a fill; Fill it in now and Fill again are');
+  for (const fill of pilot.fills) {
+    assert.equal(fill.filled.length, 17);
+    assert.deepEqual([...fill.partial, ...fill.blocked], []);
+  }
   assert.doesNotMatch(JSON.stringify(pilot), /Call or message me|HEMI/, 'the description and the car\'s details are never recorded');
   await popup.close();
   await panel.close();

@@ -770,7 +770,7 @@ test('a post dropped while its form loads, fills or gets its photos, or while it
 // Fill again, Fill it in now, Allow photos and each batch of photos act on
 // a form opened earlier: they go to the tab the run began with, only while
 // that tab still shows the form (formTabShows), and a batch that lands after
-// It didn't post, a Fill again or a new form for the car is dropped. The tab
+// It didn't post, Attach photos again or a new form for the car is dropped. The tab
 // can be moved to another listing's edit form, and a late photo download must
 // never reach another car's form. runFill, attachPhotos and formTabShows as
 // written; Chrome's tabs, downloads and injections are stand-ins.
@@ -805,7 +805,7 @@ function formTabPanel({ photos = 6 } = {}) {
     startWatcher: () => calls.push('startWatcher'), photoPatterns: () => [], refusedPhotoServers: new Set(), patternCovers: () => false, isFacebookServer: () => false,
   });
   const tick = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
-  return { state, calls, fns, tabs, tick, next: async () => { await tick(); downloads.shift()(); await tick(); } };
+  return { state, calls, fns, tabs, tick, pending: () => downloads.length, next: async () => { await tick(); downloads.shift()(); await tick(); } };
 }
 
 test('photos and later fills go only to this car\'s form, in the tab the run began with, while it still shows the form', async () => {
@@ -859,6 +859,53 @@ test('photos and later fills go only to this car\'s form, in the tab the run beg
   opened.tabs[77] = 'https://www.facebook.com/marketplace/create/item';
   await opened.fns.runFill({ opened: true });
   assert.deepEqual(opened.calls.filter((c) => c.startsWith('inject') || c.startsWith('tabs.get')), ['inject 77: fill']);
+});
+
+// Each change of the form's photo box adds to the photos already on it (the
+// mock form does the same), so Fill again fills the fields only and leaves
+// the photos sent earlier where they are; Attach photos again sends every
+// photo once more, on the person's word, and the photos section then says
+// each may be on the form twice. The form's own count stands in for the form.
+test('Fill again leaves the photos on the form as they are; Attach photos again sends them all and says they may now be there twice', async () => {
+  const p = formTabPanel({ photos: 2 });
+  let onForm = 0;
+  const injected = () => p.calls.filter((c) => c.startsWith('inject'));
+  const count = () => { onForm = injected().filter((c) => c.includes('photos')).reduce((n, c) => n + c.split(' ').pop().split(',').length, 0); return onForm; };
+  const first = p.fns.runFill({ opened: true });
+  await p.next();
+  await first;
+  assert.deepEqual([count(), p.state.photos.attached, p.state.photos.done], [2, 2, true]);
+  const sent = p.state.photos;
+
+  // Fill again: the fields are filled again, no photo is sent, and the count still matches the form
+  const refill = p.fns.runFill({ photos: false });
+  await p.tick();
+  if (p.pending()) await p.next(); // a photo download it started is answered, so its photos would reach the form
+  await refill;
+  assert.deepEqual(injected(), ['inject 77: fill', 'inject 77: photos 1.jpg,2.jpg', 'inject 77: fill']);
+  assert.equal(count(), 2, 'the form still holds each photo once');
+  assert.equal(p.state.photos, sent, 'the photo count on screen is the one for the photos on the form');
+  assert.match(src, /case 'fillAgain': return runFill\(\{ photos: false \}\);/, 'the Fill again button fills the fields only');
+
+  // Attach photos again: every photo is sent once more, and the panel says the form may hold two of each
+  const again = p.fns.attachPhotos(null, { again: true });
+  await p.next();
+  await again;
+  assert.equal(count(), 4);
+  assert.deepEqual([p.state.photos.attached, p.state.photos.again], [2, true]);
+  const photosHtml = compile('photosHtml', { state: p.state, blockedPatterns: () => [], esc: (x) => String(x), patternCovers: () => false, patternHost: (x) => x, allowButton: () => '' });
+  assert.match(photosHtml(), /each is on it twice now: remove the extra copies on Facebook before you publish/);
+  assert.match(src, /case 'attachAgain':\s*await askForPhotos\(\);\s*return state\.step === 'publish' \? attachPhotos\(null, \{ again: true \}\)/, 'the Attach photos again button sends them all again');
+
+  // the first photos of a form (It didn't post, then a new form) are not "again", whatever the button
+  const fresh = formTabPanel({ photos: 1 });
+  const firstAgain = fresh.fns.attachPhotos(null, { again: true });
+  await fresh.next();
+  await firstAgain;
+  assert.equal(fresh.state.photos.again, false);
+  const kept = compile('photosHtml', { state: fresh.state, blockedPatterns: () => [], esc: (x) => String(x), patternCovers: () => false, patternHost: (x) => x, allowButton: () => '' })();
+  assert.match(kept, /Fill again<\/b> fills the fields only and leaves these photos on the form/);
+  assert.doesNotMatch(kept, /twice/);
 });
 
 // A post request (the popup's Post, its Continue in the side panel, the queue

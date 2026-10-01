@@ -873,7 +873,11 @@ const FORM_GONE_TEXT = "Nothing was filled: the tab Lot Current opened for this 
 
 // opened: the form was opened for this car a moment ago (openForm), and is
 // filled as it loaded; any later fill checks the tab first (formTabShows).
-async function runFill({ opened = false } = {}) {
+// photos: false for Fill again, which fills the fields only. The photos sent
+// earlier are still on the form, and each change of its photo box adds to
+// what is there, so sending them again would put every photo on it twice
+// (Attach photos again does that, on the person's word).
+async function runFill({ opened = false, photos = true } = {}) {
   const run = flowRun;
   const { map, listing } = state;
   const tabId = state.fbTabId;
@@ -907,7 +911,7 @@ async function runFill({ opened = false } = {}) {
   await pilotNote((p) => notePostStep(noteFill(p, { vin: state.vin, fill: state.fill, mapVersion: state.map.version, version: VERSION }), state.vin, 'filledAt'));
   if (run !== flowRun) return;
   startWatcher();
-  await attachPhotos();
+  if (photos) await attachPhotos();
 }
 
 // Fill it in now, on the form the dry run opened: the same checks as Open
@@ -952,11 +956,14 @@ async function runProbe() {
 }
 
 // only: photos to try again (after Allow photos), added to what is already
-// attached; otherwise the car's photos up to the form's limit. Each batch
+// attached; otherwise the car's photos up to the form's limit. again: the
+// person's Attach photos again, which adds every photo once more; when some
+// were attached before, the photos section says each may now be on the
+// form twice (photosHtml). Each batch
 // goes to the tab this run began with, only while it still shows the form
 // (formTabShows), and only while this run's photo count is still the one on
-// screen: a post dropped, a Fill again or It didn't post meanwhile ends it.
-async function attachPhotos(only = null) {
+// screen: a post dropped, Attach photos again or It didn't post meanwhile ends it.
+async function attachPhotos(only = null, { again = false } = {}) {
   const run = flowRun; // the post was dropped meanwhile: no more photos, and nothing written into the next car's post
   const tabId = state.fbTabId;
   const limit = (state.fill && state.fill.photoLimit && state.fill.photoLimit.value) || state.map.photoLimitDefault;
@@ -965,7 +972,8 @@ async function attachPhotos(only = null) {
     urls = urls.filter((u) => only.includes(u));
     Object.assign(state.photos, { failed: state.photos.failed.filter((f) => !urls.includes(f.url)), done: false, error: null });
   } else {
-    state.photos = { total: state.listing.photos.length, limit, verified: Boolean(state.fill && state.fill.photoLimit && state.fill.photoLimit.verified), attached: 0, failed: [], done: false, error: null };
+    const before = state.photos;
+    state.photos = { total: state.listing.photos.length, limit, verified: Boolean(state.fill && state.fill.photoLimit && state.fill.photoLimit.verified), attached: 0, failed: [], done: false, error: null, again: Boolean(again && before && (before.again || before.attached > 0 || !before.done)) }; // some attached before, or a run still sending them
   }
   // A server the salesperson said no to is not downloaded from: its photos
   // are recorded as failed like any other, and the photos section names the
@@ -1575,6 +1583,9 @@ function photosHtml() {
   if (!p) return '<div id="photos">Preparing photos…</div>';
   const limitNote = p.total > p.limit ? ` (the form takes ${p.limit}${p.verified ? '' : ', unverified'}; the first ${p.limit} were used)` : '';
   let html = `<div id="photos" class="${p.done ? 'done' : ''}">${p.attached} of ${Math.min(p.total, p.limit)} attached${p.done ? '' : '…'}${limitNote}</div>`;
+  // The count is what Lot Current sent to the form, not what the form holds now.
+  if (p.again) html += '<div class="banner warn" id="photosAgain">Every photo was attached again. If the form still had the ones attached before, each is on it twice now: remove the extra copies on Facebook before you publish.</div>';
+  else if (p.done && p.attached) html += '<p class="hint" id="photosKept"><b>Fill again</b> fills the fields only and leaves these photos on the form. If the form lost them (the page reloaded, or you discarded a draft), click <b>Attach photos again</b>.</p>';
   const blocked = blockedPatterns();
   const onFacebook = p.failed.filter((f) => f.facebook).length;
   const others = p.failed.filter((f) => !f.facebook && !blocked.some((b) => patternCovers(b, f.url))).length;
@@ -1596,7 +1607,7 @@ function viewPublish() {
   const skipped = f.skipped || [];
   const pre = f.preexisting || [];
   const preexisting = pre.length
-    ? `<div class="banner bad" id="preexisting"><b>This form already held another vehicle before Lot Current filled it:</b> ${pre.map((p) => `${esc(p.label)} "${esc(p.shown)}"`).join(', ')}. That is probably a draft Facebook restored. Lot Current replaced the fields it manages (check each one below), but photos and anything else from that draft may still be on the form. Remove them, or discard the draft on Facebook and click <b>Fill again</b>, before you publish.</div>`
+    ? `<div class="banner bad" id="preexisting"><b>This form already held another vehicle before Lot Current filled it:</b> ${pre.map((p) => `${esc(p.label)} "${esc(p.shown)}"`).join(', ')}. That is probably a draft Facebook restored. Lot Current replaced the fields it manages (check each one below), but photos and anything else from that draft may still be on the form. Remove them, or discard the draft on Facebook and click <b>Fill again</b>, then <b>Attach photos again</b>, before you publish.</div>`
     : '';
   const changed = f.changedAfterFill || [];
   const changedBanner = changed.length
@@ -1628,7 +1639,7 @@ function viewPublish() {
     x.candidates && x.candidates.length ? `<div class="why">Similar controls on the page: ${x.candidates.map((c) => `${esc(c.tag)}${c.role ? '[' + esc(c.role) + ']' : ''}${c.type ? '[' + esc(c.type) + ']' : ''}${c.haspopup ? '[popup ' + esc(c.haspopup) + ']' : ''}${c.editable ? '[editable]' : ''} "${esc(c.name || c.near)}"`).join('; ')}</div>` : ''
   }</li>`).join('')}</ul><p class="hint">Copy the report (Copy report on the dry run, or this list) and send it to whoever maintains formMap.js.</p></section>` : ''}
   <section><h3>Photos</h3>${photosHtml()}${photoServersHtml(blockedPatterns())}
-    <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
+    <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="attachAgain">${state.photos && (state.photos.attached || state.photos.again) ? 'Attach photos again' : 'Attach photos'}</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
   </section>
   <section>${detect}
     <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && d.url) || '')}" placeholder="paste the listing's address if you have it" /></label>
@@ -2072,9 +2083,10 @@ async function onClick(ev) {
       render();
       return saveFlow();
     case 'copyDescription': return copy(state.description);
-    case 'fillAgain':
+    case 'fillAgain': return runFill({ photos: false }); // the fields only: the photos stay as they are on the form
+    case 'attachAgain':
       await askForPhotos();
-      return runFill();
+      return state.step === 'publish' ? attachPhotos(null, { again: true }) : undefined;
     case 'downloadPhotos':
       await askForPhotos();
       return downloadPhotos();
