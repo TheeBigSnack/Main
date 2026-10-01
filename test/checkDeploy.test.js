@@ -70,7 +70,7 @@ const configs = {
 };
 
 test('a correct deploy passes every check, the signed-in ones included', async () => {
-  const findings = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const findings = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const failed = findings.filter((f) => !f.ok);
   assert.deepEqual(failed, []);
   for (const t of TABLES) assert.ok(findings.some((f) => f.check === `anon reads nothing from ${t}` && f.ok), t);
@@ -113,26 +113,26 @@ test('each broken deploy is caught and named', async () => {
 // review 5 (G12): the README deploys billing and lead after step 6, so a correct
 // deploy at step 6 must pass, with each of their lines a note saying where
 test('at README step 6, before billing and lead are deployed, nothing fails and their lines are notes', async () => {
-  const findings = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing', 'lead'] }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const findings = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing', 'lead'] }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const { text, failed, notes } = report(findings);
   assert.equal(failed, 0, text);
   const later = findings.filter((f) => /^(billing|lead): /.test(f.check));
-  assert.equal(later.length, 5, 'billing: preflight, no token, webhook; lead: stranger, preflight');
+  assert.equal(later.length, 6, 'billing: preflight, the manager view\'s preflight, no token, webhook; lead: stranger, preflight');
   for (const f of later) {
     assert.equal(f.ok, false, f.check);
     assert.equal(f.warnOnly, true, f.check);
     assert.equal(f.detail, `404, not deployed yet: ${DEPLOYED_LATER[f.check.split(':')[0]]}`);
   }
-  assert.equal(notes, 5);
+  assert.equal(notes, 6);
   assert.match(text, /^note {2}billing: refuses a call with no user token \(404, not deployed yet: supabase\/README\.md, Billing\)$/m);
   assert.match(text, /^note {2}lead: refuses a page that is not the landing page \(404, not deployed yet: supabase\/README\.md, Demo requests\)$/m);
-  assert.match(text, /Nothing failed; 5 note\(s\) above\.$/);
+  assert.match(text, /Nothing failed; 6 note\(s\) above\.$/);
   assert.doesNotMatch(text, /Every check passed/, 'notes are not passes');
   // everything the README has deployed by step 6 is still judged: sync and rewrite pass
   for (const name of ['sync', 'rewrite']) assert.ok(findings.filter((f) => f.check.startsWith(`${name}: `)).every((f) => f.ok), name);
 
   // billing deployed, Stripe not set up yet: the webhook says so in a note
-  const noSecret = await runChecks({ fetchImpl: fakeProject({ noWebhookSecret: true }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const noSecret = await runChecks({ fetchImpl: fakeProject({ noWebhookSecret: true }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const webhook = noSecret.find((f) => f.check === 'billing: the webhook refuses an unsigned event');
   assert.equal(webhook.warnOnly, true);
   assert.match(webhook.detail, /^500, STRIPE_WEBHOOK_SECRET is not set yet: supabase\/README\.md, Billing$/);
@@ -237,7 +237,7 @@ test('a legacy anon key still gets every line ok against a correct project', asy
     if (h.apikey === LEGACY) h.apikey = KEY;
     return project(url, { ...init, headers: h });
   };
-  const findings = await runChecks({ fetchImpl, url: URL_, anonKey: LEGACY, testToken: 'user-token', siteOrigin: SITE });
+  const findings = await runChecks({ fetchImpl, url: URL_, anonKey: LEGACY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER });
   assert.deepEqual(findings.filter((f) => !f.ok), []);
 });
 
@@ -265,6 +265,15 @@ test('with the manager view\'s origin, billing\'s preflight from it is checked: 
   assert.ok(refused.find((x) => x.check === "billing: answers the extension's CORS preflight").ok, 'the extension\'s line alone would read ok');
   const later = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing'] }), url: URL_, anonKey: KEY, managerOrigin: MANAGER, configs });
   assert.equal(later.find((x) => x.check === name).warnOnly, true);
-  // without the origin the line is not there
-  assert.equal(good.length - 1, (await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs })).length);
+  // without the origin nothing is sent from it, and the line is a note, so the run never says every check passed
+  const sent = [];
+  const project = fakeProject();
+  const unset = await runChecks({ fetchImpl: (u, init = {}) => { sent.push((init.headers || {}).Origin || ''); return project(u, init); }, url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  assert.ok(!sent.includes(MANAGER));
+  const u = unset.find((x) => x.check === name);
+  assert.deepEqual([u.ok, u.warnOnly], [false, true]);
+  assert.match(u.detail, /^not checked: set LOTSYNC_MANAGER_ORIGIN to the manager view's address; its Billing card works only once that origin is in ALLOWED_ORIGINS$/);
+  assert.equal(report(unset).failed, 0, 'a note, not a failure');
+  assert.doesNotMatch(report(unset).text, /Every check passed/);
+  assert.match(report(good).text, /Every check passed/);
 });

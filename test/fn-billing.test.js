@@ -625,8 +625,8 @@ test('billing: a database failure answers 500 so Stripe retries, and the event i
 test('billing: scripts/check-deploy.mjs reads its billing lines as ok against the real handler, and the webhook line as a note until the secret is set', async () => {
   world();
   let billing = await load();
-  let findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY })).filter((f) => f.check.startsWith('billing:'));
-  assert.deepEqual(findings.map((f) => f.check), ['billing: answers the extension\'s CORS preflight', 'billing: refuses a call with no user token', 'billing: the webhook refuses an unsigned event']);
+  let findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY, managerOrigin: MANAGER_PAGE })).filter((f) => f.check.startsWith('billing:'));
+  assert.deepEqual(findings.map((f) => f.check), ['billing: answers the extension\'s CORS preflight', 'billing: refuses a call with no user token', 'billing: answers the manager view\'s CORS preflight', 'billing: the webhook refuses an unsigned event']);
   for (const f of findings) assert.equal(f.ok, true, `${f.check}: ${f.detail}`);
   billing = await load({ STRIPE_WEBHOOK_SECRET: undefined });
   findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY })).filter((f) => f.check === 'billing: the webhook refuses an unsigned event');

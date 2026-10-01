@@ -245,6 +245,26 @@ test('supabase/README.md names today, postsToday, plan, the 402 rule and the Bil
   assert.doesNotMatch(readme, /not wired in this step/, 'the card is wired now');
 });
 
+// The billing function lets a browser page call it only from an origin in
+// ALLOWED_ORIGINS, and the hosted manager view's Billing card calls it from
+// its own: a setup that sets ALLOWED_RETURN_ORIGINS and not ALLOWED_ORIGINS
+// leaves the card at "Couldn't read the plan" while check-deploy's extension
+// lines read ok.
+test('every command block that sets ALLOWED_RETURN_ORIGINS sets ALLOWED_ORIGINS to the manager view too, and no doc calls it optional', () => {
+  for (const doc of ['supabase/README.md', 'docs/stripe-setup.md', 'docs/production-setup.md']) {
+    const text = read(`../${doc}`);
+    const blocks = [...text.matchAll(/```[a-z]*\n([^]*?)```/g)].map((m) => m[1]).filter((b) => /secrets set ALLOWED_RETURN_ORIGINS=/.test(b));
+    if (doc !== 'docs/production-setup.md') assert.ok(blocks.length >= 1, `${doc} sets the billing secrets in a command block`);
+    for (const b of blocks) {
+      const back = /secrets set ALLOWED_RETURN_ORIGINS=(\S+)/.exec(b)[1];
+      assert.ok(b.includes(`secrets set ALLOWED_ORIGINS=${back}`), `${doc}: a block sets ALLOWED_RETURN_ORIGINS=${back} without ALLOWED_ORIGINS=${back}`);
+    }
+    assert.doesNotMatch(text, /`ALLOWED_ORIGINS` \| function secret, optional/, `${doc} calls ALLOWED_ORIGINS optional`);
+  }
+  assert.match(readme, /\| `ALLOWED_ORIGINS` \| function secret \| [^\n]*The hosted manager view's origin must be in it/);
+  assert.doesNotMatch(http, /\(the manager\s*\n?\/\/ page during development, say\)/, 'http.ts says the hosted manager view needs it');
+});
+
 test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule', () => {
   assert.match(readme, /a code works once and for 7 days/);
   assert.match(readme, /marks as taken down the caller's listed rows whose key is in `known` and missing from `posted` \(no time decides it/);

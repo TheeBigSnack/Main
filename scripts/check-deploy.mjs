@@ -17,7 +17,8 @@
 //     answers that page's CORS preflight: the page calls billing from a
 //     browser, so its origin must be in the ALLOWED_ORIGINS secret, or every
 //     call fails there while the extension's lines read ok (a note until
-//     billing is deployed);
+//     billing is deployed). Without it that line is a note, so a run that
+//     never tried the page's call does not end in "Every check passed.";
 //   - with LOTSYNC_TEST_TOKEN (the access token of a signed-in test account
 //     that belongs to no dealership), /sync answers 403, and eleven wrong
 //     invite codes end in the throttle's P0005, which proves the misses are
@@ -188,6 +189,8 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
     const pre = await call(fetchImpl, `${base}/functions/v1/billing/status`, { method: 'OPTIONS', headers: { Origin: managerOrigin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization, apikey' } });
     const allow = header(pre.headers, 'access-control-allow-origin');
     out.push(notDeployedYet('billing', pre.status, { check: 'billing: answers the manager view\'s CORS preflight', ok: pre.status >= 200 && pre.status < 300 && allow === managerOrigin, detail: `${pre.status}, allow-origin ${allow || 'none'} (is ${managerOrigin} in ALLOWED_ORIGINS?)` }));
+  } else {
+    out.push({ check: 'billing: answers the manager view\'s CORS preflight', ok: false, warnOnly: true, detail: "not checked: set LOTSYNC_MANAGER_ORIGIN to the manager view's address; its Billing card works only once that origin is in ALLOWED_ORIGINS" });
   }
   // An unsigned event gets 400 once the signing secret is set. Before that the
   // function itself answers 500 naming STRIPE_WEBHOOK_SECRET (billing is
