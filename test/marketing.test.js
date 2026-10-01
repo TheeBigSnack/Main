@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
-import { honestyProblems } from './honesty.js';
+import { honestyProblems, offPricing } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
@@ -42,12 +42,10 @@ test('the sales sheet and the positioning quote the pricing config, not their ow
     assert.match(doc, new RegExp(`${pricing.pilotDays}[ -]day`), `${rel} quotes the pilot length`);
     assert.match(doc, new RegExp(`${pricing.includedSalespeople === 5 ? 'five' : pricing.includedSalespeople} salespeople included`), `${rel} quotes the included seats`);
   }
-  // no other dollar-per-month figure sneaks into customer-facing copy (the
+  // no other dollar figure sneaks into customer-facing copy, whatever words follow it (the
   // internal positioning may cite competitor ranges)
   for (const rel of CUSTOMER_FACING) {
-    const doc = read('../marketing/' + rel);
-    const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
-    for (const m of doc.matchAll(/(\$[\d,]+)\s*(?:a|per)\s*month/g)) assert.ok(allowed.has(m[1]), `${rel}: ${m[0]} is not from pricing.json`);
+    assert.deepEqual(offPricing(read('../marketing/' + rel), pricing), [], `marketing/${rel} quotes a price that is not from pricing.json`);
   }
 });
 

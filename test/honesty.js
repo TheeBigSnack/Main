@@ -95,3 +95,14 @@ export function honestyProblems(text, { customerFacing = true, denials = [] } = 
 function context(text, at) {
   return text.slice(Math.max(0, at - 30), at + 50).replace(/\s+/g, ' ').trim();
 }
+
+// Every dollar figure in a text that is not one of pricing.json's three
+// prices as the copy writes them ("$149", "$20", "$99"), whatever words follow
+// it: "per rooftop per month", "/month", "monthly" and "a year" are all prices.
+// Customer-facing copy quotes pricing.json and nothing else.
+export function offPricing(text, pricing) {
+  const money = (n) => '$' + Number(n).toLocaleString('en-US');
+  const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
+  const figures = [...String(text).matchAll(/\$\s?\d[\d,]*(\.\d+)?|\b\d[\d,]*(\.\d+)?\s*(dollars|usd)\b|\busd\s?\d[\d,]*(\.\d+)?/gi)].map((m) => m[0]);
+  return figures.filter((f) => !allowed.has(f));
+}

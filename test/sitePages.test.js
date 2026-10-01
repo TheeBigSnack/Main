@@ -27,7 +27,7 @@ import {
 import { pngSize, parseIco } from '../scripts/favicons.mjs';
 import { MIME, ROOT_FILES, MISSING_PATHS, resolvePath, startPagesServer } from '../scripts/site-check.mjs';
 import { SITE } from '../site/config.js';
-import { honestyProblems } from './honesty.js';
+import { honestyProblems, offPricing } from './honesty.js';
 const LEGAL_DRAFT = JSON.parse(readFileSync(new URL('../legal/legal-status.json', import.meta.url), 'utf8')).draft === true;
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -565,11 +565,10 @@ test('site/config.js validates, holds no placeholder, and the demo form and the 
 
 test('the prices on every page are pricing.json\'s, through data-pricing spans with fallback text, and no other figure', () => {
   assert.deepEqual(pricing, JSON.parse(read('marketing/pricing.json')), 'site/pricing.json equals marketing/pricing.json');
-  const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
   for (const p of PAGES) {
     const html = htmlOf(p);
     const text = visibleText(p);
-    for (const m of text.matchAll(/(\$[\d,]+)\s*(?:a|per)\s*month/g)) assert.ok(allowed.has(m[1]), `${p.file}: ${m[0]} is not from pricing.json`);
+    assert.deepEqual(offPricing(text, pricing), [], `${p.file}: a price that is not from pricing.json`);
     const spans = [...html.matchAll(/data-pricing="([^"]+)">([^<]*)</g)];
     if (p.slug === 'home' || p.slug === 'pricing') {
       assert.ok(spans.length >= 4, `${p.file}: the pricing numbers are data-pricing spans`);

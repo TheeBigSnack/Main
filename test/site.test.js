@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { PAGES, cspFor } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
-import { honestyProblems } from './honesty.js';
+import { honestyProblems, offPricing } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -80,9 +80,8 @@ test('site/pricing.json is the marketing pricing config, and the page quotes it'
   assert.match(html, /<a href="\.\/pricing\/">The pricing page<\/a> has the founding-dealer price/, 'the home page links the rest');
   assert.match(text, /planned pric/i, 'labelled as planned pricing');
   assert.match(text, /confirmed with you before any paid subscription/i, 'confirmed before any paid subscription');
-  // no other dollar-per-month figure
-  const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
-  for (const m of priced.matchAll(/(\$[\d,]+)\s*(?:a|per)\s*month/g)) assert.ok(allowed.has(m[1]), `${m[0]} is not from pricing.json`);
+  // no other dollar figure, whatever words follow it
+  assert.deepEqual(offPricing(priced, pricing), [], 'a price that is not from pricing.json');
   // every number JavaScript fills has fallback text, and a key the config has
   for (const m of (html + pricingPage).matchAll(/data-pricing="([^"]+)">([^<]*)</g)) {
     assert.ok(m[2].trim().length > 0, `data-pricing="${m[1]}" has fallback text`);

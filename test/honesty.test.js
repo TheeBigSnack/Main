@@ -6,9 +6,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { honestyProblems, NEVER, NOT_TO_CUSTOMERS } from './honesty.js';
+import { honestyProblems, offPricing, NEVER, NOT_TO_CUSTOMERS } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+const pricing = JSON.parse(read('../marketing/pricing.json'));
+const money = (n) => '$' + Number(n).toLocaleString('en-US');
 
 // Claims about Meta that no document may make, internal ones included.
 const AFFILIATION_CLAIMS = [
@@ -99,4 +101,15 @@ test('the copy tests use these lists and keep no shorter copy of their own', () 
     assert.ok(!src.includes('/approved by (meta|facebook)/i'), `${file} keeps its own affiliation list`);
     assert.ok(!src.includes('guarantee[ds]?/gi'), `${file} keeps its own guarantee filter`);
   }
+});
+
+test('a price in customer-facing copy is one of pricing.json\'s, whatever words follow it', () => {
+  // each of these once passed, because only "$N a month" and "$N per month" were read
+  for (const line of ['Or $199 per rooftop per month on the annual plan.', 'Just $49/month.', 'From $79 monthly.', '$1,490 a year, paid up front.', '$299 per store per month.', 'Founding stores pay **$79** a month.', 'Only $1,299/month per rooftop.', 'A seat is 25 dollars.']) {
+    assert.notDeepEqual(offPricing(line, pricing), [], `"${line}" passes the price check`);
+  }
+  // pricing.json's own figures pass, in the forms the copy uses
+  const quoted = `${money(pricing.perRooftopMonthly)} per rooftop per month, ${money(pricing.extraSalespersonMonthly)} a month per extra salesperson, a founding rate of **${money(pricing.foundingDealerMonthly)}** a month.`;
+  assert.deepEqual(offPricing(quoted, pricing), []);
+  assert.deepEqual(offPricing(quoted, { ...pricing, perRooftopMonthly: pricing.perRooftopMonthly + 1 }), [money(pricing.perRooftopMonthly)], 'a figure the config no longer has fails');
 });

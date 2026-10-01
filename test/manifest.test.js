@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { honestyProblems } from './honesty.js';
+import { honestyProblems, offPricing } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const manifest = JSON.parse(read('../extension/manifest.json'));
@@ -53,5 +53,6 @@ test('the Web Store listing draft quotes the manifest description word for word 
   // "not a guarantee" is the honest line; nothing else may promise safety, compliance or a guarantee (the
   // shared customer-facing lists of test/honesty.js, as for the marketing copy and the website)
   assert.deepEqual(honestyProblems(listing), [], 'store/listing.md');
+  assert.deepEqual(offPricing(listing, JSON.parse(read('../marketing/pricing.json'))), [], 'store/listing.md quotes a price that is not from pricing.json');
   assert.doesNotMatch(listing, /\bsafe\b|\bcompliant\b|\bguaranteed\b/i);
 });
