@@ -79,6 +79,14 @@ export function webhookUrlFor(input) {
   return u.toString();
 }
 
+// The website's https origin for the portal's Terms and Privacy links, like
+// https://lotcurrent.com (a trailing slash is fine). null for anything else:
+// a bare host, http, a path, a query, a user name.
+export function siteOriginFor(input) {
+  const s = String(input || '').trim().replace(/\/+$/, '');
+  return /^https:\/\/[^/?#@\s]+$/.test(s) ? s : null;
+}
+
 // What should exist, from pricing.json. siteUrl (https origin, may be '')
 // gives the portal the Terms and Privacy addresses the website serves.
 export function wantedObjects(pricing, { productName = 'Lot Current', siteUrl = '' } = {}) {
@@ -89,8 +97,8 @@ export function wantedObjects(pricing, { productName = 'Lot Current', siteUrl = 
     if (!(typeof pricing[k] === 'number' && pricing[k] > 0)) throw new Error(`pricing.json has no positive ${k}`);
   }
   if (pricing.foundingDealerMonthly >= pricing.perRooftopMonthly) throw new Error('pricing.json: the founding-dealer rate is not below the rooftop price');
-  const site = String(siteUrl || '').replace(/\/+$/, '');
-  const legal = /^https:\/\/[^/]+$/.test(site) ? { terms_of_service_url: `${site}/legal/terms/`, privacy_policy_url: `${site}/legal/privacy/` } : null;
+  const site = siteOriginFor(siteUrl);
+  const legal = site ? { terms_of_service_url: `${site}/legal/terms/`, privacy_policy_url: `${site}/legal/privacy/` } : null;
   return {
     product: { name: productName, tax_code: SAAS_TAX_CODE, metadata: { [TAG]: 'plan' } },
     prices: [
@@ -243,6 +251,12 @@ export async function runSetup(opts) {
   // Live prices charge real money: not from a file that still calls itself a guess
   if (mode === 'live' && !(isRecord(pricing) && pricing.hypothesis === false)) {
     fail('marketing/pricing.json', 'it still says "hypothesis": true, so nothing was read or changed in live mode. Live prices wait for docs/launch-checklist.md, "Pricing confirmed": a dealer has agreed to a price in writing, pricing.json has "hypothesis": false and those numbers, and test/marketing.test.js passes');
+    return done();
+  }
+  // A --site-url that is given but unusable would leave the portal with no
+  // legal links while the run blamed a missing flag
+  if (String(siteUrl || '').trim() && !siteOriginFor(siteUrl)) {
+    fail('billing portal: legal links', `--site-url ${siteUrl} is not an https origin like https://lotcurrent.com (no path), so nothing was read or changed; run again with the website's origin`);
     return done();
   }
   ok('the Stripe key', `${mode} mode${apply ? ', creating what is missing' : ', reading only'}`);

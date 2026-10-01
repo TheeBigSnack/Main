@@ -280,6 +280,23 @@ test('stripe setup: no webhook address and no site address are notes, not failur
   assert.equal(line(bad, 'webhook').note, undefined);
 });
 
+test('stripe setup: a --site-url that is not an https origin fails before anything is read or changed', async () => {
+  for (const siteUrl of ['lotcurrent.example', 'https://lotcurrent.example/legal/', 'http://lotcurrent.example', 'https://lotcurrent.example?x=1']) {
+    const s = fakeStripe();
+    const r = await run(s, { apply: true, siteUrl });
+    assert.equal(r.ok, false, siteUrl);
+    const l = line(r, 'billing portal: legal links');
+    assert.equal(l.ok, false, siteUrl);
+    assert.equal(l.note, undefined, `${siteUrl} is a failure, not a note`);
+    assert.match(l.detail, /not an https origin/);
+    assert.doesNotMatch(r.lines.map((x) => x.detail).join('\n'), /no --site-url given/);
+    assert.equal(s.calls.length, 0, `${siteUrl}: no Stripe call`);
+  }
+  for (const siteUrl of ['https://lotcurrent.example', 'https://lotcurrent.example/', ' https://lotcurrent.example ']) {
+    assert.equal(wantedObjects(pricing, { siteUrl }).portal.business_profile.terms_of_service_url, 'https://lotcurrent.example/legal/terms/');
+  }
+});
+
 test('stripe setup: a rejected key or an unreachable Stripe ends in one FAIL line, never a crash', async () => {
   const s = fakeStripe();
   const rejected = await runSetup({ key: 'sk_test_other', pricing, fetchImpl: s.fetchImpl });
