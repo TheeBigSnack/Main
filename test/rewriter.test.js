@@ -173,3 +173,10 @@ test('a Claude draft that drops the dealership\'s price note falls back to the t
   const kept = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: template.replace('Highlights:', 'What I like about it:') }) });
   assert.equal(kept.source, 'claude', kept.note);
 });
+
+test('nothing about the car\'s type leaves the browser, so the service lets a draft say certified only as the write-up or features do', () => {
+  for (const v of [vehicle('usedNormal'), vehicle('certified')]) {
+    const f = rewriteFacts({ vehicle: v });
+    for (const k of ['inventoryType', 'readableType', 'urlConditionWord', 'siteTitle', 'certified']) assert.ok(!(k in f), k);
+  }
+});

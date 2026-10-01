@@ -12,9 +12,9 @@
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';
 import { buildRewritePrompt as jsPrompt } from '../../backend/rewritePrompt.js';
-import { runGuardrails as tsGuardrails, BANNED_PHRASES, WORD_LIMITS } from '../functions/_shared/guardrails.ts';
+import { runGuardrails as tsGuardrails, BANNED_PHRASES, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled } from '../functions/_shared/guardrails.ts';
 import { buildRewritePrompt as tsPrompt, SYSTEM_PROMPT } from '../functions/_shared/rewritePrompt.ts';
-import { BANNED_PHRASES as JS_BANNED, WORD_LIMITS as JS_LIMITS } from '../../extension/src/rewriteTemplate.js';
+import { BANNED_PHRASES as JS_BANNED, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled } from '../../extension/src/rewriteTemplate.js';
 import { SYSTEM_PROMPT as JS_SYSTEM } from '../../backend/rewritePrompt.js';
 
 const vehicle = {
@@ -45,6 +45,10 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with only 38,000 original miles. Mileage: 38,000; odometer reads 41,230; 38K on the clock.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Was 31,995, now just 28,995! Internet price: 28,995. Sale price 28995 plus tax, yours for 28.5k.') + '\nVIN TESTVIN0000000001.',
   sixty('Low mileage 2019 Ram 1500 Big Horn, gas mileage of 22 mpg, 2 years or 24,000 miles, 5 miles to empty, range: 290 miles, towing was 7,500 lbs.') + '\nVIN TESTVIN0000000001.',
+  sixty('Certified 2019 Ram 1500 Big Horn with a warranty, financing for all credit, a clean Carfax, never smoked in, new tires and brakes, well maintained and runs great.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, like-new with a clean-title, zero accidents, great on gas and priced below market.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with only thirty thousand miles, twenty-five mpg, two owners and five grand off; this one is one careful owner, its sole owner.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, a single-owner truck with new rotors and a fresh inspection.').replace('Example Motors in Springfield', 'Certified Credit Motors in Thousand Oaks') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -52,6 +56,8 @@ const contexts = [
   { vehicle: { ...vehicle, carfaxOneOwner: true }, dealer, priceNote: 'Price includes the $500 doc fee; tax and tags extra.', price: 28995 },
   { vehicle: { ...vehicle, priceBeforeFees: null }, dealer: {}, priceNote: 'doc fee of $490', price: null },
   { vehicle, dealer, salesperson: { name: 'Alex', title: 'Product  Specialist' }, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, urlConditionWord: 'certified used', descriptionRaw: 'Thirty thousand miles of service records. New tires and brakes, inspected, warranty included, non-smoker.' }, dealer: { name: 'Certified Credit Motors', city: 'Thousand Oaks' }, salesperson: { title: 'finance manager' }, priceNote: 'Financing through the dealership.', price: 28995 },
+  { vehicle: { ...vehicle, inventoryType: 'Certified Used', features: ['Clean CARFAX', 'Garage Kept'] }, dealer, priceNote: '', price: 28995 },
   {},
 ];
 
@@ -63,6 +69,8 @@ for (const text of texts) {
   }
 }
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
+assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part)]));
+for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 assert.deepEqual({ ...WORD_LIMITS }, { ...JS_LIMITS });
 
 const facts = {

@@ -136,7 +136,7 @@ test('a plain-English problem list comes back for the side panel', () => {
 });
 
 // ---------- the salesperson's highlights and closing line ----------
-import { featureChoices, settleHighlights, checkClosingLine, ensureClosingLine, usableClosingLine, MAX_HIGHLIGHTS, CLOSING_LINE_MAX_WORDS } from '../extension/src/rewriteTemplate.js';
+import { featureChoices, settleHighlights, checkClosingLine, ensureClosingLine, usableClosingLine, spelledQuantities, MAX_HIGHLIGHTS, CLOSING_LINE_MAX_WORDS } from '../extension/src/rewriteTemplate.js';
 
 const SAMPLE_DEALER = { name: 'Example Auto Outlet', city: 'Springfield' };
 
@@ -256,7 +256,7 @@ test('the template passes its own word count whatever the features and write-up 
   const picks = ['Navigation System', 'Heated Seats', 'Backup Camera', 'Bluetooth', 'Apple CarPlay', 'Remote Start'];
   for (let n = 0; n <= picks.length; n += 1) {
     for (const narrative of [[], ['A clean truck.'], ['A clean truck that drives well.'], ['A clean truck that drives well and has been kept up nicely.']]) {
-      const v = vehicle('usedNoCarfax', { features: picks.slice(0, n) });
+      const v = { ...vehicle('usedNoCarfax', { features: picks.slice(0, n) }), descriptionRaw: narrative.join(' ') }; // the write-up comes from the website's description
       const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price, narrative };
       assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], `${n} features, ${JSON.stringify(narrative)}`);
     }
@@ -396,4 +396,100 @@ test('a description without the dealership\'s price note fails the checks; the t
   // no note set (or none for this car): nothing to look for
   assert.deepEqual(runGuardrails(dropped, { ...c, priceNote: '' }).problems, []);
   assert.deepEqual(runGuardrails(dropped, { ...c, priceNote: '   ' }).problems, []);
+});
+
+// ---------- claims only the website can make ----------
+
+// A car whose write-up and features say nothing about warranty, financing,
+// certification, history, care or new parts; the template for it passes.
+const PLAIN = () => ({ ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: 'Rides on 20-inch wheels with the 8.4-inch touchscreen.', carfaxOneOwner: false, inventoryType: 'Used', readableType: 'Pre-Owned', urlConditionWord: 'used', siteTitle: 'Pre-Owned 2019 Ram 1500 Classic Express' });
+const plainCtx = (v = PLAIN(), extra = {}) => ({ vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price, ...extra });
+const codesAfter = (sentence, c = plainCtx()) => {
+  const base = buildTemplateDescription(c).replace(/\nMessage me to set up a test drive or ask a question\./, '');
+  return [...new Set(runGuardrails(`${base}\n${sentence}`, c).problems.map((p) => p.code))].filter((code) => !/^too-/.test(code)).sort();
+};
+
+test('a draft that invents warranty, financing, certification, history, care, new parts or condition fails the checks', () => {
+  assert.deepEqual(runGuardrails(buildTemplateDescription(plainCtx()), plainCtx()).problems, [], 'the template passes');
+  const invented = {
+    'Comes with a warranty and financing for all credit.': ['unsupported-claim'],
+    'Certified pre-owned with a fresh inspection.': ['unsupported-claim'],
+    'Clean Carfax, never smoked in, new tires and brakes.': ['unsupported-claim'],
+    'It has been well maintained and garage kept.': ['unsupported-claim'],
+    'Runs great and is in excellent condition.': ['unsupported-claim'],
+    'Zero accidents and no accident history.': ['banned-phrase'],
+    'Low miles, great on gas, priced below market.': ['banned-phrase'],
+    'It is like-new with a clean-title.': ['banned-phrase'],
+    'Only thirty thousand miles and gets twenty-five mpg.': ['unknown-number'],
+    'Two owners, both local.': ['unknown-number'],
+    'One careful owner, only one previous owner.': ['one-owner'],
+    'A single-owner truck.': ['one-owner'],
+  };
+  for (const [sentence, codes] of Object.entries(invented)) assert.deepEqual(codesAfter(sentence), codes, sentence);
+  const c = plainCtx();
+  const said = (sentence) => runGuardrails(`${buildTemplateDescription(c)}\n${sentence}`, c).problems.filter((p) => p.code === 'unsupported-claim').map((p) => p.text);
+  assert.deepEqual(said('Comes with a warranty and financing for all credit.'), [
+    'Says "warranty", but the website says nothing about a warranty or guarantee for this car',
+    'Says "financing", but the website says nothing about financing or credit for this car',
+  ]);
+  assert.deepEqual(said('Clean Carfax, never smoked in, new tires and brakes.'), [
+    'Says "Clean Carfax", but the website says nothing about accident, damage or title history for this car',
+    'Says "smoked", but the website says nothing about smoking or pets for this car',
+    'Says "new tires", but the website says nothing about new or replaced parts for this car',
+  ]);
+  const thirty = runGuardrails(`${buildTemplateDescription(c)}\nOnly thirty thousand miles.`, c).problems.find((p) => p.code === 'unknown-number');
+  assert.equal(thirty.text, '"thirty thousand" isn\'t in the website\'s data for this car');
+});
+
+test('a claim the website itself makes passes, and the template built from such a write-up passes its own checks', async () => {
+  const v = { ...PLAIN(), descriptionRaw: 'Local trade with new tires and brakes. Passed our full inspection and comes with the rest of the factory warranty. Non-smoker, garage kept.', features: [...FEATURES, 'Certified Pre-Owned'] };
+  const c = plainCtx(v, { priceNote: 'Price requires financing through the dealership.' });
+  const r = await generateDescription({ ...c, settings: {} });
+  assert.match(r.text, /Local trade with new tires and brakes\./);
+  assert.deepEqual(r.guardrails.problems, []);
+  for (const sentence of ['New tires and brakes, and it passed a full inspection.', 'The rest of the factory warranty comes with it.', 'Financing through the dealership.', 'A non-smoker, garage kept.', 'Certified pre-owned.']) {
+    assert.deepEqual(codesAfter(sentence, c), [], sentence);
+  }
+  // new brakes in the write-up are not new rotors
+  assert.deepEqual(codesAfter('New rotors too.', c), ['unsupported-claim']);
+  // spelled-out numbers the website writes the same way, or as digits, are its own
+  const w = { ...PLAIN(), descriptionRaw: 'Two sets of keys and twenty-two inch wheels.' };
+  assert.deepEqual(codesAfter('Comes with two sets of keys.', plainCtx(w)), []);
+  assert.deepEqual(codesAfter('About twenty thousand miles.', plainCtx({ ...PLAIN(), mileage: 20000 })), []);
+});
+
+test('certified passes when the website lists the car as certified, whatever its write-up says', () => {
+  for (const listed of [{ inventoryType: 'Certified Used' }, { readableType: 'Certified Pre-Owned' }, { urlConditionWord: 'certified used' }, { siteTitle: 'Certified Pre-Owned 2019 Ram 1500 Classic Express' }]) {
+    assert.deepEqual(codesAfter('Certified pre-owned and ready to go.', plainCtx({ ...PLAIN(), ...listed })), [], JSON.stringify(listed));
+  }
+  assert.deepEqual(codesAfter('A CPO truck.', plainCtx()), ['unsupported-claim']);
+});
+
+test('the dealership\'s name, the salesperson\'s role, the city and the car\'s own colours are not claims', () => {
+  const v = { ...PLAIN(), exteriorColor: 'Smoke Gray', interiorColor: 'Black' };
+  const c = { vehicle: v, dealer: { name: 'Certified Auto Credit Center', city: 'Thousand Oaks' }, salesperson: { name: 'Sam', title: 'finance manager' }, priceNote: '', price: v.price };
+  const text = buildTemplateDescription(c);
+  assert.match(text, /Smoke Gray exterior/);
+  assert.deepEqual(runGuardrails(text, c).problems, []);
+});
+
+test('a website feature with a banned phrase or a one-owner claim is never a highlight, so the template passes', async () => {
+  const features = ['Accident Free', 'Clean Title', 'Priced Below Market', 'Like-New Condition', 'CARFAX One-Owner', 'One Owner', 'Heated Seats', 'Backup Camera'];
+  const choices = featureChoices(features);
+  assert.deepEqual(choices, ['Heated Seats', 'Backup Camera']);
+  for (const flag of [false, true]) {
+    const v = { ...PLAIN(), features, carfaxOneOwner: flag };
+    const r = await generateDescription({ vehicle: v, dealer: EXAMPLE, salesperson: SAM, price: v.price });
+    assert.deepEqual(r.guardrails.problems, [], `one-owner flag ${flag}`);
+  }
+});
+
+test('a number in words passes only as the website says it, unit and all', () => {
+  const w = { ...PLAIN(), descriptionRaw: 'Comes with two sets of keys. Twenty-two inch wheels.' };
+  assert.deepEqual(codesAfter('Comes with two sets of keys.', plainCtx(w)), []);
+  assert.deepEqual(codesAfter('Two owners before this one.', plainCtx(w)), ['unknown-number'], 'the same number word with another unit is not the website\'s');
+  assert.deepEqual(codesAfter('Twenty-five grand.', plainCtx()), ['unknown-number']);
+  // a "one" in passing, a word that only holds a number word, and inch sizes are not quantities
+  assert.deepEqual(codesAfter('This one is ready for someone new, with a phone mount.', plainCtx()), []);
+  assert.deepEqual(spelledQuantities('Only thirty thousand miles, twenty-five mpg, two owners, five grand, one owner.').map((q) => [q.said, q.value]), [['thirty thousand miles', 30000], ['twenty-five mpg', 25], ['two owners', 2], ['five grand', 5000]]);
 });

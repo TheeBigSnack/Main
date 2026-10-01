@@ -318,6 +318,23 @@ test('rewrite: a draft that leaves out the dealership\'s price note is refused; 
   assert.deepEqual([withNote.body.ok, withNote.body.guardrails.problems], [true, []]);
 });
 
+test('rewrite: a draft that invents a warranty, a history or a certification is refused; the facts\' own claims pass', async () => {
+  const invented = GOOD.replace('It is a comfortable, easy car', 'It is certified, accident free, has a warranty and new tires, and is a comfortable, easy car');
+  world();
+  anthropic(says(invented));
+  const r = await rewrite(await load(), TOKEN.u1);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'unsupported-claim', 'unsupported-claim', 'unsupported-claim']);
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says "warranty", but the website says nothing about a warranty or guarantee for this car'));
+  // a write-up that says certified, new tires and a warranty: the draft may say them too
+  const certified = GOOD.replace('It is a comfortable, easy car', 'It is certified, has the rest of its warranty and new tires, and is a comfortable, easy car');
+  const facts = { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative: ['Certified pre-owned with new tires and the rest of the factory warranty.'] }), origin: ORIGIN };
+  world();
+  anthropic(says(certified));
+  const ok = await rewrite(await load(), TOKEN.u1, facts);
+  assert.deepEqual([ok.body.ok, ok.body.guardrails.problems], [true, []]);
+});
+
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {
   world();
   anthropic(says(null, { stop: 'refusal' }));

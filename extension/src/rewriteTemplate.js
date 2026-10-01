@@ -10,8 +10,12 @@
 //     every description it applies to (the checks fail a text without it)
 //   - a sign-off naming the salesperson's role and the dealership (the
 //     checks fail a text that names either one nowhere)
-//   - no ALL CAPS, no walls of emoji, no claims the data doesn't support,
-//     nothing about protected characteristics, never posing as a private seller
+//   - no ALL CAPS, no walls of emoji, nothing about protected
+//     characteristics, never posing as a private seller
+//   - no claim about the car's certification, warranty, financing, history,
+//     care, new parts or condition that the website's own words for this car
+//     (or the dealer's price note) don't make, and no number, in digits or
+//     in words, that isn't in the website's data
 // The template is the final fallback, so it is built to pass its own checks.
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
@@ -19,14 +23,15 @@ import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
 // Phrases that never belong in a listing. Matched on word boundaries,
-// case-insensitively. A false positive only means the template is used.
+// case-insensitively, with a hyphen or a space between words ("like-new",
+// "clean title"). A false positive only means the template is used.
 export const BANNED_PHRASES = Object.freeze([
   // claims the website's data can't support
-  'best price in town', 'lowest price', 'best deal', 'no accidents', 'accident free', 'accident-free',
+  'best price in town', 'lowest price', 'best deal', 'no accidents', 'zero accidents', 'no accident history', 'accident free',
   'never been in an accident', 'clean title', 'no issues', 'runs perfect', 'runs perfectly', 'perfect condition',
   'mint condition', 'like new', 'flawless', "everyone's approved", 'everyone approved', 'guaranteed approval',
   'guaranteed financing', 'bad credit ok', 'no credit check', 'must sell', 'priced to sell', "won't last", 'wont last',
-  'act fast', 'no reasonable offer refused',
+  'act fast', 'no reasonable offer refused', 'below market', 'great on gas',
   // posing as a private seller
   'private seller', 'private sale', 'for sale by owner', 'selling my', 'my personal', 'my truck', 'my car', 'my suv', 'my daily driver',
   // protected characteristics have no place in a car ad
@@ -212,8 +217,10 @@ const narrativeSentenceOk = (sentence, vehicle) =>
 // short enough to read in a list (40 characters or less), stating no price,
 // price change or mileage (a feature such as "Under 30,000 Miles" or
 // "$1,000 Below Market" is a claim the checks hold to the listing's own
-// numbers, not equipment), ranked by FEATURE_PRIORITY and then the
-// website's own order. The side panel offers these for the salesperson's
+// numbers, not equipment), no banned phrase ("Accident Free", "Clean
+// Title") and no one-owner claim (the template says one owner itself, from
+// the Carfax flag), ranked by FEATURE_PRIORITY and then the website's own
+// order. The side panel offers these for the salesperson's
 // pick; the template takes the first few.
 export function featureChoices(features) {
   if (!Array.isArray(features)) return [];
@@ -223,6 +230,7 @@ export function featureChoices(features) {
     if (typeof f !== 'string') continue;
     const t = f.replace(/\s+/g, ' ').trim();
     if (!t || t.length > 40 || seen.has(t.toLowerCase()) || !statesNoOtherNumbers(t, {})) continue;
+    if (BANNED_RE.some(([, re]) => re.test(t)) || ONE_OWNER.test(t)) continue;
     seen.add(t.toLowerCase());
     clean.push(t);
   }
@@ -285,7 +293,7 @@ export function checkClosingLine(line) {
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(t)) problems.push({ code: 'closing-banned', text: `The closing line says "${phrase}"` });
   }
-  if (/\b(one|1|single)[- ]owner\b/i.test(t)) problems.push({ code: 'closing-one-owner', text: "The closing line says one owner; that comes from the car's Carfax report, not from you" });
+  if (ONE_OWNER.test(t)) problems.push({ code: 'closing-one-owner', text: "The closing line says one owner; that comes from the car's Carfax report, not from you" });
   if (shouting(t)) problems.push({ code: 'closing-caps', text: 'The closing line has ALL CAPS shouting' });
   if (emojiCount(t) > 1) problems.push({ code: 'closing-emoji', text: 'The closing line has more than one emoji' });
   return { ok: problems.length === 0, problems };
@@ -410,8 +418,115 @@ function emojiCount(text) {
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const oneLine = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
-const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/\s+/g, '\\s+') + '\\b', 'i')]);
-const ONE_OWNER = /\b(one|1|single)[- ]owner\b/i;
+const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/[\s-]+/g, '[\\s-]+') + '\\b', 'i')]);
+// "one owner", "1-owner", "single-owner", "one careful owner", "only one
+// previous owner", "its sole owner", "owned by one family"
+const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+){0,2}owner|(?:sole|only) owner|owned by (?:one|a single))\b/i;
+
+// ---------- claims only the website can make ----------
+// What a description says about the car's certification, warranty,
+// financing, history, care, parts or condition comes from the website's own
+// words for this car (its write-up, features and the rest of its record) or
+// the dealer's price note, never from the writer. Each kind of claim is found
+// by its words, and passes when words of the same kind are in those sources
+// (new parts: the same part, too); certified also passes when the website
+// lists the car as certified. The dealership's name, its city and the
+// salesperson's role are not claims about the car and are set aside first,
+// as are banned phrases (flagged on their own). A false positive only means
+// the template is used: beyond its own fixed sentences, everything the
+// template writes is copied from those sources.
+const PARTS = "tires?|tyres?|brakes?|rotors?|pads|battery|batteries|wipers?|shocks?|struts?|exhaust|alternator|starter|clutch|timing (?:belt|chain)|water pump|engine|motor|transmission|paint|parts";
+export const CLAIM_KINDS = Object.freeze([
+  { what: 'certification', re: /\b(?:certified|cpo)\b/i },
+  { what: 'a warranty or guarantee', re: /\b(?:warrant(?:y|ies|eed)|guarantee[ds]?)\b/i },
+  { what: 'financing or credit', re: /\b(?:financ\w*|credit|approv\w*|loans?|lenders?|apr|down[\s-]payments?|monthly payments?|per month|lease\w*|buy[\s-]here)\b/i },
+  { what: 'accident, damage or title history', re: /\b(?:accidents?|collisions?|wreck(?:s|ed)?|damaged?|flood\w*|salvage|rebuilt|titles?|clean (?:carfax|autocheck|history|record|report))\b/i },
+  { what: 'smoking or pets', re: /\b(?:non[\s-]?smok\w*|smok(?:er|ers|ing|ed)|smoke[\s-]?free|pet[\s-]?free|no pets)\b/i },
+  { what: 'service history, inspection or upkeep', re: /\b(?:inspect\w*|serviced|service (?:history|records?)|maintenance|maintained|oil changes?|tune[\s-]?up|reconditioned|garage[\s-]kept|well[\s-](?:kept|cared)|taken care of)\b/i },
+  { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:set of\\s+)?(${PARTS})\\b`, 'i'), part: true },
+  { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
+]);
+
+// The website's own words for this car, where its claims may come from.
+function claimSource({ vehicle = {}, priceNote = '' }) {
+  const v = vehicle;
+  const bits = [
+    v.year, v.make, v.model, v.trim, v.name, v.engine, v.transmission, v.drivetrain, v.exteriorColor, v.interiorColor,
+    v.bodyType, v.fuelType, v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), priceNote,
+  ];
+  return bits.filter((b) => b !== null && b !== undefined).join('\n');
+}
+
+// The website lists the car as certified: its inventory type, the type it
+// shows, or the condition word in its address or at the start of its title.
+// The rewrite service gets none of these, so there a draft says certified
+// only when the write-up or the features do.
+export function listedCertified(v = {}) {
+  const titleWords = typeof v.siteTitle === 'string' ? (v.siteTitle.match(/^\s*(.*?)\s*\b(?:19|20)\d{2}\b/) || [])[1] : '';
+  return /\b(?:certified|cpo)\b/i.test([v.inventoryType, v.readableType, v.urlConditionWord, titleWords].filter((s) => typeof s === 'string').join(' '));
+}
+
+// The text with the given names (the dealership, its city, the role) set aside.
+function without(text, names) {
+  let out = String(text || '');
+  for (const n of names) {
+    const name = oneLine(n);
+    if (name) out = out.replace(new RegExp(escapeRe(name).replace(/ /g, '\\s+'), 'gi'), ' ');
+  }
+  return out;
+}
+
+function claimProblems(text, ctx) {
+  const source = claimSource(ctx);
+  const problems = [];
+  for (const kind of CLAIM_KINDS) {
+    const m = kind.re.exec(text);
+    if (!m) continue;
+    if (kind.what === 'certification' && listedCertified(ctx.vehicle)) continue;
+    if (kind.re.test(source) && (!kind.part || new RegExp(`\\b${escapeRe(m[1].replace(/(?:ies|s)$/i, ''))}`, 'i').test(source))) continue;
+    problems.push({ code: 'unsupported-claim', text: `Says "${m[0]}", but the website says nothing about ${kind.what} for this car` });
+  }
+  return problems;
+}
+
+// ---------- numbers written out in words ----------
+// "thirty thousand miles", "twenty-five mpg", "two owners": a quantity in
+// words is a number like any other, so it must be in the website's data (as
+// digits, or in the same words with the same unit). Number words count only
+// as a quantity: with "hundred" or "thousand", or before a unit; a "one" in
+// passing ("this one") is not a number, and "one owner" has its own check.
+const NUMBER_WORDS = Object.freeze({ zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 });
+const NUM_WORD = `(?:${Object.keys(NUMBER_WORDS).join('|')}|hundred|thousand)`;
+const SPELLED = new RegExp(`\\b${NUM_WORD}(?:(?:[\\s-]+|\\s+and\\s+)${NUM_WORD})*\\b`, 'gi');
+const SPELLED_UNIT = new RegExp(`^[\\s-]*(?:${MILE_WORDS}[\\s-]+){0,2}(miles?|mi|mpg|k|grand|dollars?|bucks|years?|months?|owners?|keys|sets? of keys)\\b`, 'i');
+function spelledValue(words) {
+  let total = 0;
+  let current = 0;
+  for (const w of words.toLowerCase().split(/[\s-]+/)) {
+    if (w in NUMBER_WORDS) current += NUMBER_WORDS[w];
+    else if (w === 'hundred') current = (current || 1) * 100;
+    else if (w === 'thousand') {
+      total += (current || 1) * 1000;
+      current = 0;
+    }
+  }
+  return total + current;
+}
+// [{ words, said, value }]: the number words, them with their unit, the number.
+export function spelledQuantities(text) {
+  const t = String(text ?? '');
+  const out = [];
+  for (const m of t.matchAll(SPELLED)) {
+    const unit = SPELLED_UNIT.exec(t.slice(m.index + m[0].length, m.index + m[0].length + 40));
+    if (!/\b(?:hundred|thousand)\b/i.test(m[0]) && !unit) continue;
+    const value = spelledValue(m[0]) * (unit && /^(?:k|grand)$/i.test(unit[1]) ? 1000 : 1);
+    if (unit && /^owner/i.test(unit[1]) && value === 1) continue;
+    out.push({ words: m[0], said: oneLine(m[0] + (unit ? unit[0] : '')), value });
+  }
+  return out;
+}
+// The words, said the same way, somewhere in the text (a hyphen or a space between words).
+const saysWords = (text, words) => new RegExp(`\\b${escapeRe(oneLine(words)).replace(/[\s-]+/g, '[\\s-]+')}\\b`, 'i').test(String(text || ''));
 
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
@@ -431,6 +546,17 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   const src = sourceNumbers({ vehicle, dealer, priceNote, price });
   for (const n of numbersIn(prose)) {
     if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
+  }
+  // the car's own words: without the dealership's name, its city and the role, which are not claims about it
+  const role = String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
+  const aboutCar = without(prose, [dealer.name, dealer.city, role]);
+  const sourceWords = claimSource({ vehicle, priceNote });
+  const spelled = new Set();
+  for (const q of spelledQuantities(aboutCar)) {
+    const words = oneLine(q.words).toLowerCase();
+    if (spelled.has(words) || src.has(String(q.value)) || saysWords(sourceWords, q.said)) continue;
+    spelled.add(words);
+    problems.push({ code: 'unknown-number', text: `"${oneLine(q.words)}" isn't in the website's data for this car` });
   }
   problems.push(...priceAndMileageProblems(prose, { vehicle, priceNote, price }));
   // The price note is the dealer's wording. When it quotes a dollar amount and
@@ -465,6 +591,8 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
+  // a banned phrase is said once, as banned, not again as a claim
+  problems.push(...claimProblems(BANNED_RE.reduce((s, [, re]) => s.replace(new RegExp(re.source, 'gi'), ' '), aboutCar), { vehicle, priceNote }));
   // the dealership is always named: with no name set there is nothing to name it by
   const dealerName = String(dealer.name || '').trim();
   if (!dealerName) problems.push({ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' });
@@ -472,7 +600,6 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
     problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
   }
   // the salesperson's role is always stated (the sign-off says it), so the listing never reads as a private sale
-  const role = String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
   if (role && !t.replace(/\s+/g, ' ').toLowerCase().includes(role.toLowerCase())) {
     problems.push({ code: 'no-role', text: `Doesn't give your role ("${role}"); the sign-off says it` });
   }
