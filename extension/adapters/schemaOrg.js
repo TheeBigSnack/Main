@@ -512,8 +512,28 @@ async function twoAtATime(items, work) {
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker));
 }
 
-// What normalize needs from a page besides the car's node.
-const factsForCar = (facts) => ({ title: facts.title, text: facts.text, carfaxLinks: facts.carfaxLinks });
+// What normalize needs from a page besides the car's node, with the text
+// its price and mileage are checked against cut down to this car's own
+// (schemaOrgParse.js visibleText gives the page's text in segments, each
+// tied to the card it sits in). On the car's own page: the page without
+// the cards of the other cars it links to, so a "similar vehicles" tile at
+// the price this car's markup still carries does not pass for this car's
+// price. For a car read from a list (list: true): its own card, the one
+// around its link; a car without one has no text, so the list's data shows
+// no price and its own page is read instead. A link is this car's when it
+// is one of its addresses or carries its VIN; another car's when it carries
+// another VIN, reads like a car's page, or is a car page the list named
+// (isCar).
+function factsForCar(facts, { urls = [], vin = '', list = false, isCar = null } = {}) {
+  const out = { title: facts.title, text: facts.text, carfaxLinks: facts.carfaxLinks };
+  if (!Array.isArray(facts.segments)) return out;
+  const keys = new Set(urls.filter((u) => typeof u === 'string' && u).map(pageKey));
+  const own = (href) => keys.has(pageKey(href)) || (Boolean(vin) && vinInAddress(href) === vin);
+  const otherCar = (href) => !own(href) && (Boolean(vinInAddress(href)) || looksLikeCarAddress(href) || Boolean(isCar && isCar(href)));
+  const kept = list ? facts.segments.filter((g) => g.link && own(g.link)) : facts.segments.filter((g) => !g.link || !otherCar(g.link));
+  out.text = kept.map((g) => g.text).join(' ');
+  return out;
+}
 
 // The car a page is about. With its VIN known, only the node with that VIN
 // (a carousel of other cars never stands in for it). Without, the node whose
@@ -530,7 +550,7 @@ function carOnPage(nodes, { vin, pageUrl }) {
 
 // A car read from the list's data rather than from its own page.
 function listRecord(listed, carUrl, carried) {
-  const record = { node: { ...listed.node, url: carUrl }, url: listed.page, facts: factsForCar(listed.facts) };
+  const record = { node: { ...listed.node, url: carUrl }, url: listed.page, facts: factsForCar(listed.facts, { urls: [carUrl, (onSite(firstText(listed.node.url), listed.page, originOf(listed.page)) || {}).href], vin: nodeVin(listed.node), list: true }) };
   if (carried) record.carried = true;
   return record;
 }
@@ -640,7 +660,7 @@ async function confirmOne(site, vin, href) {
   if (page.kind === 'blocked') return { error: page.message.replace(/, so the scan stopped.*$/, '') };
   if (page.kind === 'error') return { error: `one car's page gave ${page.message}` };
   const node = page.parsed.vehicles.find((n) => nodeVin(n) === vin);
-  if (node) return soldOut(node) ? { gone: true } : { found: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts) } };
+  if (node) return soldOut(node) ? { gone: true } : { found: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts, { urls: [got.finalUrl, href], vin }) } };
   if (got.redirected && pathKey(got.finalUrl) !== pathKey(href)) return { unsure: true };
   if (page.parsed.vehicles.length || hasStructuredData(got.text)) return { unsure: true };
   return { error: "one car's page had no structured data to check against" };
@@ -867,7 +887,7 @@ export async function scan(search, options = {}) {
     const node = carOnPage(page.parsed.vehicles, { vin: item.vin, pageUrl: got.finalUrl });
     if (node && nodeVin(node)) {
       evidence.ownNode = true;
-      item.record = { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts) };
+      item.record = { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts, { urls: [got.finalUrl, item.href], vin: nodeVin(node), isCar: (href) => cars.has(pageKey(href)) }) };
     } else if (item.listedCar && item.listedCar.vin) {
       item.record = listRecord(item.listedCar, item.href, true); // the page doesn't mark the car up; the list does
     } else if (page.truncated) readErrors += 1;
@@ -925,7 +945,7 @@ async function carFromPage(site, vin, href) {
   if (page.kind === 'blocked') return { error: page.message.replace(/, so the scan stopped.*$/, '.') };
   if (page.kind !== 'html') return { error: `Couldn't read the car's page on the website (${page.message}).` };
   const node = page.parsed.vehicles.find((n) => nodeVin(n) === vin);
-  if (node) return { record: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts) } };
+  if (node) return { record: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts, { urls: [got.finalUrl, href], vin }) } };
   return { none: true };
 }
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText } from '../extension/src/rescan.js';
-import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
+import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, standardCarPage, standardListPage, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
 import { scanWithSearch } from '../extension/src/scanRunner.js';
@@ -328,6 +328,51 @@ test('a website read from its pages: a posted car sold on a bad server day is ta
     const good = await rescanOf(thinListSite(rest), prev, posted);
     assert.deepEqual(good.diff.takeDown.map((t) => [t.vin, t.why]), [[cars[0].vin, 'gone']], `rescan ${day} after the bad day`);
   }
+});
+
+// A price drop the page shows while its markup still says the old price (the
+// case the visible-price check exists for), with another car at that old
+// price on the same page: the other car's tile or card is not this car's price.
+const htmlAnswer = (text) => ({ ok: true, status: 200, contentType: 'text/html', text });
+test('a website read from its pages: a posted car whose page dropped its price while its markup did not is not kept at the old price by another car\'s tile at that price', async () => {
+  const cars = standardCars(6);
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  assert.equal(first.snapshot.vehicles[cars[0].vin].price, 15000);
+  const dropped = (carousel) => {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0], { carousel }).replace('Our price $15,000', 'Our price $14,000')));
+    return site;
+  };
+  for (const carousel of [[{ ...cars[1], price: 15000 }], [{ ...cars[1], price: 15000 }, { ...cars[2], price: 17000 }]]) {
+    const day2 = await rescanOf(dropped(carousel), first.snapshot, posted);
+    assert.deepEqual(day2.diff.priceUpdates, [], `${carousel.length} other car(s) on the page`);
+    assert.deepEqual(day2.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']], `${carousel.length} other car(s) on the page`);
+  }
+  // with no other car at the old price the same page reads the same way, and the page's own price is still read when the markup has it
+  const fixed = standardSite({ cars, perPage: 10 });
+  fixed.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0], { price: 14000, carousel: [{ ...cars[1], price: 15000 }] })));
+  const day3 = await rescanOf(fixed, first.snapshot, posted);
+  assert.deepEqual(day3.diff.priceUpdates.map((u) => [u.vin, u.from, u.to]), [[cars[0].vin, 15000, 14000]]);
+});
+
+test('a website read from its pages: a car read from the list is priced from its own card, never from another car\'s card at its markup price', async () => {
+  const cars = standardCars(4);
+  // the list's data says $15,000 for the first car, its card shows $14,000, and the second car's card shows $15,000
+  const listed = [{ ...cars[0], price: 15000 }, { ...cars[1], price: 15000 }, cars[2], cars[3]];
+  const list = standardListPage(listed).replace(/<span>\$15,000<\/span>/, '<span>$14,000</span>');
+  const site = standardSite({ cars: listed, perPage: 10 });
+  site.set(STD.listUrl, htmlAnswer(list));
+  site.set(STANDARD_ORIGIN + cars[0].path, httpError(500)); // its own page can't be read: the list's data stands in
+  const out = await rescanOf(site, null);
+  const car0 = out.vehicles.find((v) => v.vin === cars[0].vin);
+  assert.equal(car0.price, null, 'the card for this car shows another amount');
+  assert.equal(car0.priceLabel, 'the page does not show this price');
+  assert.equal(out.vehicles.find((v) => v.vin === cars[1].vin).price, 15000, 'the second car\'s own page is read as usual');
+  // its own card at the list's price: the list's data stands
+  const same = standardSite({ cars: listed, perPage: 10 });
+  same.set(STANDARD_ORIGIN + cars[0].path, httpError(500));
+  assert.equal((await rescanOf(same, null)).vehicles.find((v) => v.vin === cars[0].vin).price, 15000);
 });
 
 // ---------- the dates the snapshot keeps for the Ready and To do tabs ----------

@@ -160,7 +160,7 @@ test('microdataVehicles reads itemprop microdata into nodes of the same shape', 
 
 test('pageFacts: the title, canonical, next page, same-origin links, Carfax links and only the visible text', () => {
   const f = pageFacts(html('graph-vdp.html'), civicUrl + '?from=search');
-  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'links', 'carfaxLinks', 'text']);
+  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'links', 'carfaxLinks', 'text', 'segments']);
   assert.equal(f.title, 'Used 2019 Honda Civic EX Sedan', 'the og:title, without the site name');
   assert.equal(f.canonical, civicUrl);
   assert.equal(f.next, null);
@@ -489,6 +489,44 @@ test('price: a price the page shows only crossed out, after "Was", "MSRP" or the
     assert.equal(at(24995, facts.text), null, struck);
   }
   assert.equal(pageFacts('<p><span style="text-decoration: underline">$24,995</span></p>', civicUrl).text, '$24,995', 'only a line through the text crosses it out');
+});
+
+test('price: a guide or estimate value, a class that strikes the old price through, or a page style rule that does, is not the car\'s price', () => {
+  const at = (price, text) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text)).value;
+  // a value from a price guide, an estimate or the window sticker at the stale markup amount
+  for (const label of ['KBB Fair Market Value', 'Market value', 'Sticker price', 'Book value:', 'Estimated value', 'Window sticker', 'Kelley Blue Book® Value:', 'Trade-in value', 'Edmunds True Market Value']) {
+    assert.equal(at(26000, `${label} $26,000 Our price $24,995`), null, label);
+    assert.equal(at(24995, `${label} $26,000 Our price $24,995`), 24995, `${label}: the current price is still read`);
+  }
+  assert.equal(at(26000, 'Value Price $26,000'), 26000, 'a bare "value" is no cue');
+  // crossed out by a class named for it, word by word, never by a piece of a word
+  for (const cls of ['strike', 'price strikethrough', 'old-price', 'price-was', 'was_price', 'originalPrice', 'price--previous', 'line-through', 'is-crossed']) {
+    const facts = pageFacts(`<p><span class="${cls}">$24,995</span> <b>$23,995</b></p>`, civicUrl);
+    assert.equal(facts.text, '$23,995', cls);
+    assert.equal(at(24995, facts.text), null, cls);
+  }
+  for (const cls of ['font-bold', 'holder', 'golden', 'price', 'price-box theme-old', 'wash', 'old-school', 'original-content']) {
+    assert.equal(pageFacts(`<p><span class="${cls}">$24,995</span></p>`, civicUrl).text, '$24,995', `${cls} is not crossed out`);
+  }
+  // crossed out by the page's own style rule for a class
+  const styled = pageFacts('<html><head><style>.tag{color:red} .card .gone, .x > span.price-tag { text-decoration: gray line-through; } .keep{text-decoration:underline}</style></head><body><p><span class="gone">$24,995</span> <span class="price-tag">$24,500</span> <span class="keep">$23,995</span></p></body></html>', civicUrl);
+  assert.equal(styled.text, '$23,995');
+  assert.equal(pageFacts('<html><head><style>' + '{'.repeat(20000) + '.a{text-decoration:line-through}</style></head><body><span class="a">$1</span></body></html>', civicUrl).text, '', 'a long run of braces is read in one pass');
+});
+
+test('price: the page text comes in segments, each tied to the other page on this website its card links to', () => {
+  const page = `<html><body><h1>Used 2019 Honda Civic EX</h1><div class="price-box"><p>Our price $20,995</p><a href="/finance/">Payments</a></div>
+  <aside><a href="/inventory/used-2018-honda-accord-1hgsampl0jh000102/">2018 Accord $21,995</a><div class="tile"><a href="/inventory/used-2017-ford-escape-1fmsampl0hu000103/"><img alt="">2017 Escape</a> <span>$19,000</span></div></aside>
+  <a href="${civicUrl}">This car</a> <a href="https://www.carfax.com/x">Carfax</a></body></html>`;
+  const f = pageFacts(page, civicUrl);
+  assert.equal(f.text, 'Used 2019 Honda Civic EX Our price $20,995 Payments 2018 Accord $21,995 2017 Escape $19,000 This car Carfax');
+  assert.deepEqual(f.segments, [
+    { link: null, text: 'Used 2019 Honda Civic EX' },
+    { link: SITE + '/finance/', text: 'Our price $20,995 Payments' },
+    { link: SITE + '/inventory/used-2018-honda-accord-1hgsampl0jh000102/', text: '2018 Accord $21,995' },
+    { link: SITE + '/inventory/used-2017-ford-escape-1fmsampl0hu000103/', text: '2017 Escape $19,000' },
+    { link: null, text: 'This car Carfax' },
+  ], 'a link to this page or another website is no card');
 });
 
 test('price: priceSpecification without an offer price; a strikethrough, list or MSRP entry is never the price', () => {

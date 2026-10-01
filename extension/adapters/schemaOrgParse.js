@@ -589,27 +589,132 @@ function isHidden(attrs) {
 
 // Crossed-out text is a price or a figure the page no longer stands by
 // ("<s>$24,995</s> $23,995"), so the text a price is checked against leaves
-// it out. The style is read one declaration at a time, in one pass.
+// it out: <s>, <strike> and <del>; a line-through style on the element; a
+// class the page's own <style> rules strike through; and a class named for
+// it. A class is read word by word (split at "-", "_" and camelCase), never
+// by a piece of a word ("font-bold" holds "old" but is not crossed out): a
+// word that says struck ("strike", "strikethrough", "crossed",
+// "line-through"), or one class that names an old price ("old-price",
+// "price-was", "originalPrice"). The style is read one declaration at a
+// time, in one pass.
 const CROSSED_OUT = new Set(['s', 'strike', 'del']);
-function isCrossedOut(el) {
+const STRUCK_WORDS = new Set(['strike', 'strikethrough', 'striked', 'struck', 'crossed', 'crossedout', 'linethrough']);
+const OLD_WORDS = new Set(['was', 'old', 'original', 'orig', 'previous', 'prev', 'former']);
+const PRICE_WORDS = new Set(['price', 'pricing', 'amount']);
+const classWords = (cls) => cls.split(/[-_]+|(?<=[a-z0-9])(?=[A-Z])/).map((w) => w.toLowerCase()).filter(Boolean);
+function isCrossedOut(el, struck) {
   if (CROSSED_OUT.has(el.tag)) return true;
   const style = el.attrs.style;
-  return typeof style === 'string' && /line-through/i.test(style) && style.split(';').some((d) => /^\s*text-decoration(?:-line)?\s*:/i.test(d) && /line-through/i.test(d));
+  if (typeof style === 'string' && /line-through/i.test(style) && style.split(';').some((d) => /^\s*text-decoration(?:-line)?\s*:/i.test(d) && /line-through/i.test(d))) return true;
+  const cls = el.attrs.class;
+  if (typeof cls !== 'string' || !cls.trim()) return false;
+  for (const c of cls.trim().split(/\s+/).slice(0, 40)) {
+    if (struck.has(c)) return true;
+    const words = classWords(c);
+    if (words.some((w) => STRUCK_WORDS.has(w))) return true;
+    for (let k = 0; k + 1 < words.length; k += 1) if (words[k] === 'line' && words[k + 1] === 'through') return true;
+    if (words.some((w) => OLD_WORDS.has(w)) && words.some((w) => PRICE_WORDS.has(w))) return true;
+  }
+  return false;
 }
 
-function visibleText(root) {
-  const parts = [];
-  let size = 0;
+// The classes the page's own <style> rules strike through
+// (".was { text-decoration: line-through }"): the last class of each
+// selector of such a rule. The rules are split at their braces in one pass
+// (a pattern over the whole block would cost the square of a long one).
+function struckClasses(doc) {
+  const out = new Set();
+  for (const t of doc.tokens) {
+    if (t.open !== 'style' || typeof t.raw !== 'string' || !/line-through/i.test(t.raw)) continue;
+    const parts = t.raw.slice(0, 500000).split(/([{}])/);
+    for (let k = 0; k + 3 < parts.length; k += 2) {
+      if (parts[k + 1] !== '{' || parts[k + 3] !== '}' || !/text-decoration(?:-line)?\s*:[^;]*line-through/i.test(parts[k + 2])) continue;
+      for (const selector of parts[k].split(',')) {
+        const last = selector.trim().split(/[\s>+~]+/).pop() || '';
+        const names = [...last.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)];
+        if (names.length) out.add(names[names.length - 1][1]);
+      }
+    }
+  }
+  return out;
+}
+
+// The same-website page each element links to: null for none, the address
+// when every link inside it goes to one other page, MANY for two or more.
+// Each link's address is the one factsFrom already read (kept on its
+// attributes under LINK: the address without a fragment, absent for a link
+// to this page itself, an in-page fragment or another website), so no
+// address is parsed twice. Worked out from the leaves up, in one pass over
+// the elements; each element keeps its answer as `linksTo`.
+const MANY = {};
+const LINK = Symbol('link');
+function linkTargets(root) {
+  const order = [];
   walk(root, (n) => {
-    if (size > TEXT_LIMIT * 2) return false; // enough read; whitespace is squeezed below
+    if (n.text !== undefined) return false;
+    order.push(n);
+    return n.tag === '#document' || !UNSEEN.has(n.tag);
+  });
+  for (let k = order.length - 1; k >= 0; k -= 1) {
+    const el = order[k];
+    let t = (el.tag === 'a' || el.tag === 'area') ? el.attrs[LINK] ?? null : null;
+    for (const c of el.children) {
+      if (t === MANY) break;
+      const ct = c.linksTo;
+      if (ct === undefined || ct === null) continue;
+      t = t === null || t === ct ? ct : MANY;
+    }
+    el.linksTo = t;
+  }
+}
+
+/**
+ * What a person sees on the page, as one string (text) and as segments of
+ * it tied to a link (segments: { link, text }). A segment's link is the
+ * other page on this website that the "card" it sits in points to: the
+ * largest element around a link that points to that page only, among
+ * siblings that point elsewhere (one car's tile in a "similar vehicles"
+ * carousel, one car's card on a list). Text outside any card has link null.
+ * The adapter reads a car's own text from them: on its page, everything but
+ * other cars' cards; on a list, its own card.
+ */
+function visibleText(root, { struck = new Set() } = {}) {
+  linkTargets(root);
+  const parts = [];
+  const segments = []; // { link, raw }, consecutive texts of one card together
+  let size = 0;
+  const nodes = [root];
+  const cards = [null];
+  while (nodes.length) {
+    const n = nodes.pop();
+    const card = cards.pop();
+    if (size > TEXT_LIMIT * 2) break; // enough read; whitespace is squeezed below
     if (n.text !== undefined) {
       parts.push(n.text);
+      const last = segments[segments.length - 1];
+      if (last && last.link === card) last.raw += ' ' + n.text;
+      else segments.push({ link: card, raw: n.text });
       size += n.text.length;
-      return false;
+      continue;
     }
-    return n.tag === '#document' || (!UNSEEN.has(n.tag) && !isHidden(n.attrs) && !isCrossedOut(n));
-  });
-  return decodeEntities(parts.join(' ')).replace(/\s+/g, ' ').trim().slice(0, TEXT_LIMIT);
+    if (n.tag !== '#document' && (UNSEEN.has(n.tag) || isHidden(n.attrs) || isCrossedOut(n, struck))) continue;
+    const several = n.linksTo === MANY;
+    for (let k = n.children.length - 1; k >= 0; k -= 1) {
+      const c = n.children[k];
+      nodes.push(c);
+      if (!several) cards.push(card);
+      else {
+        // a child pointing to one page, inside an element that points to several, is that page's card
+        const ct = c.text === undefined ? c.linksTo : null;
+        cards.push(typeof ct === 'string' ? ct : null);
+      }
+    }
+  }
+  const squeeze = (t) => decodeEntities(t).replace(/\s+/g, ' ').trim();
+  return {
+    text: squeeze(parts.join(' ')).slice(0, TEXT_LIMIT),
+    segments: segments.map((g) => ({ link: g.link, text: squeeze(g.raw).slice(0, TEXT_LIMIT) })).filter((g) => g.text),
+  };
 }
 
 const relHas = (attrs, word) => String(attrs.rel || '').toLowerCase().split(/\s+/).includes(word);
@@ -639,6 +744,8 @@ function factsFrom(doc, pageUrl) {
   // a Set beside each list: a page of thousands of links is read in one pass
   const seenLinks = new Set();
   const seenCarfax = new Set();
+  // the page's own address as its links give it, for the cards of visibleText
+  const here = page ? withoutFragment(new URL(page)) : '';
   for (const t of doc.tokens) {
     if (!t.open) continue;
     const a = t.attrs;
@@ -657,6 +764,7 @@ function factsFrom(doc, pageUrl) {
       }
       if (t.open !== 'iframe' && origin && u.origin === origin) {
         const clean = withoutFragment(u);
+        if (clean !== here) a[LINK] = clean;
         if (!seenLinks.has(clean)) {
           seenLinks.add(clean);
           links.push(clean);
@@ -664,7 +772,8 @@ function factsFrom(doc, pageUrl) {
       }
     }
   }
-  return { title: ogTitle || title, canonical, next, links, carfaxLinks, text: visibleText(doc.root) };
+  const seen = visibleText(doc.root, { struck: struckClasses(doc) });
+  return { title: ogTitle || title, canonical, next, links, carfaxLinks, text: seen.text, segments: seen.segments };
 }
 
 /**
@@ -677,9 +786,11 @@ function factsFrom(doc, pageUrl) {
  *                without in-page fragments
  *   carfaxLinks  every link to a carfax.com page, once each
  *   text         the text a person sees (no scripts, styles, head or hidden
- *                elements), without crossed-out text (<s>, <strike>, <del>
- *                or a line-through style: an old price), whitespace
- *                squeezed, at most TEXT_LIMIT characters
+ *                elements), without crossed-out text (<s>, <strike>, <del>,
+ *                a line-through style or a class for it: an old price),
+ *                whitespace squeezed, at most TEXT_LIMIT characters
+ *   segments     the same text in pieces, each with the other page on this
+ *                website its card links to, or null (visibleText above)
  * @param {string} html
  * @param {string} pageUrl  the page's own address
  */
