@@ -273,3 +273,22 @@ test('every pilot reaches the retention line: its clock starts when the owner ma
   assert.match(read('../docs/launch-checklist.md'), /an early end recorded the day the notice comes/);
   assert.match(read('../docs/production-setup.md'), /Prepares the three SQL statements of `supabase\/README\.md` step 5 for the pilot dealership \(the dealership, the manager's invite code, and its pilot row/, 'the production steps run the pilot row too');
 });
+
+// review: asking for a sign-in code creates an account for any address typed, and one that never joined a
+// dealership was kept forever, in no retention rule, with no owner list to find it
+test('accounts that never joined are listed and deleted in the weekly run, and the policy and the attorney question say so', () => {
+  const s = readme.slice(readme.indexOf('**Accounts that never joined.**'), readme.indexOf('### Forget a person'));
+  assert.ok(s.length > 30, 'the README has the weekly list of accounts that never joined');
+  assert.match(s, /where u\.created_at < now\(\) - interval '30 days'/);
+  // every account that holds anything stays: the sign-up limit, a dealership's numbers, an invite code
+  for (const table of ['memberships m', 'signup_attempts a', 'invites i', 'listings l', 'post_attempts p', 'rewrite_usage r']) {
+    assert.ok(s.includes(`and not exists (select 1 from public.${table} where `), `the list keeps an account with a row in ${table.split(' ')[0]}`);
+  }
+  assert.match(s, /lower\(u\.email\) <> lower\('<your own test address, docs\/production-setup\.md step 7>'\)/, 'the owner\'s own test account stays');
+  assert.match(s, /delete from auth\.users u where u\.id in \('<id>', '<id>'\);/);
+  assert.match(s, /Do not use `forget_person` for these/, 'not forget_person: it also deletes the demo requests');
+  assert.match(policy, /An account that was only used to ask for a sign-in code \(it never joined a dealership or tried to start one\) holds only its email address and sign-in times, and is deleted once it is 30 days old\. \[Pending attorney answer: questions-for-attorney\.md 8\.5\]/);
+  const item = read('../legal/questions-for-attorney.md').split('\n').find((l) => l.startsWith('- **8.5**'));
+  assert.match(item, /an account that never joins a dealership or tries to start one holds only that email address and sign-in times/);
+  assert.match(read('../docs/data-inventory.md'), /deleted by the owner's weekly run once it is 30 days old \(`supabase\/README\.md`, "Accounts that never joined"\)/);
+});

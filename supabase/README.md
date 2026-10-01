@@ -543,6 +543,32 @@ order by d.created_at;
 
 For each one on a pilot agreement whose pilot has ended or that has stopped, record the end with the statement above (the 30 days run from the day it really ended, which can be sooner than the `ended_about` it then shows); one still running gets its clock (step 5's `subscriptions` insert). A test dealership of your own is listed too: delete it when you are done with it.
 
+**Accounts that never joined.** Asking for a sign-in code, in the extension or on the manager view, creates an account for the address typed before anyone proves they own it, so a mistyped address or a curious visitor leaves one behind. One that never joins a dealership or tries to start one holds only its email address and Supabase's sign-in times, and nothing else deletes it. In the same weekly run, list those more than 30 days old:
+
+```sql
+select u.id, u.email, u.created_at
+from auth.users u
+where u.created_at < now() - interval '30 days'
+  and lower(u.email) <> lower('<your own test address, docs/production-setup.md step 7>')
+  and not exists (select 1 from public.memberships m where m.user_id = u.id)
+  and not exists (select 1 from public.signup_attempts a where a.user_id = u.id)
+  and not exists (select 1 from public.invites i where i.used_by = u.id or i.created_by = u.id)
+  and not exists (select 1 from public.listings l where l.user_id = u.id)
+  and not exists (select 1 from public.post_attempts p where p.user_id = u.id)
+  and not exists (select 1 from public.rewrite_usage r where r.user_id = u.id)
+order by u.created_at;
+```
+
+and delete them by id:
+
+```sql
+-- only when the project keeps the auth audit log in the database (auth.audit_log_entries exists)
+delete from auth.audit_log_entries a where a.payload ->> 'actor_id' in ('<id>', '<id>');
+delete from auth.users u where u.id in ('<id>', '<id>');
+```
+
+The account row takes its sessions and sign-in identities with it. The list leaves out every account that holds anything: a membership, a sign-up attempt (it counts toward `per_account`, so it stays with its account), an invite code it used or made, or rows in a dealership's numbers (someone removed from a dealership that carries on is kept until they ask, and then forgotten as below). Do not use `forget_person` for these: it also deletes the demo requests sent from the address. The 30 days stand until the attorney answers `legal/questions-for-attorney.md` 8.5.
+
 ### Forget a person: the person asked
 
 ```sql
