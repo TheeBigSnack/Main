@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { section } from '../scripts/store-check.mjs';
 import { copyProblems } from './copyGuards.js';
+import { honestyProblems, offPricing } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const manifest = JSON.parse(read('../extension/manifest.json'));
@@ -35,6 +36,14 @@ test('every permission the manifest asks for is explained in the Web Store priva
   assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage', 'sidePanel', 'alarms', 'notifications']);
   assert.deepEqual(manifest.host_permissions, ['https://www.facebook.com/marketplace/*', 'https://vehicle-images.carscommerce.inc/*']);
   assert.deepEqual(manifest.optional_host_permissions, ['https://vpic.nhtsa.dot.gov/*', 'https://*/*']);
+  // and no other key that widens what the extension can reach or who can reach it: optional permissions
+  // (cookies, debugger, tabs...), content scripts on Facebook or any other site, pages that other sites can
+  // message, files any page can load, or a content security policy of its own. Adding one is a widening
+  // the owner approves first (CLAUDE.md, "Ask the owner before"), then lists here and in the privacy answers.
+  assert.deepEqual(Object.keys(manifest).sort(), ['action', 'background', 'description', 'host_permissions', 'icons', 'manifest_version', 'minimum_chrome_version', 'name', 'optional_host_permissions', 'permissions', 'side_panel', 'version'], 'the manifest has a key that is not on the approved list');
+  for (const key of ['optional_permissions', 'content_scripts', 'externally_connectable', 'web_accessible_resources', 'content_security_policy']) assert.ok(!(key in manifest), `the manifest asks for ${key}`);
+  assert.deepEqual(manifest.background, { service_worker: 'background.js', type: 'module' }, 'one module service worker');
+  assert.deepEqual(manifest.side_panel, { default_path: 'sidepanel.html' });
 });
 
 // The justification tables, row by row: a pattern named elsewhere in the
@@ -92,9 +101,12 @@ test('the Web Store listing draft quotes the manifest description word for word 
   assert.match(listing, /Lot Current is not affiliated with Meta Platforms, Inc\./);
   assert.match(listing, /You click Publish\. Lot Current never does\./);
   assert.match(listing, /legal\/chrome-web-store-privacy\.md/);
-  // "not a guarantee" is the honest line; nothing else may promise safety, compliance, a guarantee or anything about an account
-  // (test/copyGuards.js, the same rules as the website and the marketing kit), and the listing never says safe or compliant at all
+  // "not a guarantee" is the honest line; nothing else may promise safety, compliance, a guarantee or anything about
+  // an account (test/copyGuards.js and the shared lists of test/honesty.js, the same rules as the website and the
+  // marketing kit), no price but pricing.json's, and the listing never says safe or compliant at all
   assert.deepEqual(copyProblems(listing), [], 'store/listing.md');
+  assert.deepEqual(honestyProblems(listing), [], 'store/listing.md');
+  assert.deepEqual(offPricing(listing, JSON.parse(read('../marketing/pricing.json'))), [], 'store/listing.md quotes a price that is not from pricing.json');
   assert.doesNotMatch(listing, /\bsafe\b|\bcompliant\b|\bguaranteed\b/i);
   // the Web Store answers are read by the same reviewer
   assert.deepEqual(copyProblems(read('../legal/chrome-web-store-privacy.md')), [], 'legal/chrome-web-store-privacy.md');

@@ -8,6 +8,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
 import { copyProblems } from './copyGuards.js';
+import { honestyProblems, offPricing } from './honesty.js';
+import { stripComments } from './helpers.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
@@ -42,12 +44,10 @@ test('the sales sheet and the positioning quote the pricing config, not their ow
     assert.match(doc, new RegExp(`${pricing.pilotDays}[ -]day`), `${rel} quotes the pilot length`);
     assert.match(doc, new RegExp(`${pricing.includedSalespeople === 5 ? 'five' : pricing.includedSalespeople} salespeople included`), `${rel} quotes the included seats`);
   }
-  // no other dollar-per-month figure sneaks into customer-facing copy (the
+  // no other dollar figure sneaks into customer-facing copy, whatever words follow it (the
   // internal positioning may cite competitor ranges)
   for (const rel of CUSTOMER_FACING) {
-    const doc = read('../marketing/' + rel);
-    const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
-    for (const m of doc.matchAll(/(\$[\d,]+)\s*(?:a|per)\s*month/g)) assert.ok(allowed.has(m[1]), `${rel}: ${m[0]} is not from pricing.json`);
+    assert.deepEqual(offPricing(read('../marketing/' + rel), pricing), [], `marketing/${rel} quotes a price that is not from pricing.json`);
   }
 });
 
@@ -62,10 +62,12 @@ test('customer-facing copy says who publishes and that Lot Current is not affili
 });
 
 test('no claim we have not measured, and nothing that sounds like Meta approval', () => {
-  // test/copyGuards.js: what no document may say, internal ones included, and what customer-facing copy may not say
-  // either (no promise about anyone's account; the positioning names some of these so we know what to avoid)
+  // test/copyGuards.js and the shared lists (test/honesty.js): what no document may say, internal ones included, and
+  // what customer-facing copy may not say either (the positioning names some of these so we know what to avoid)
   for (const rel of ALL) {
-    assert.deepEqual(copyProblems(read('../marketing/' + rel), { customerFacing: CUSTOMER_FACING.includes(rel) }), [], rel);
+    const doc = read('../marketing/' + rel);
+    assert.deepEqual(copyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], rel);
+    assert.deepEqual(honestyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], `marketing/${rel}`);
   }
 });
 
@@ -101,6 +103,19 @@ test('the emails are templates for any dealership: no pilot-dealer value, no "ou
   const offer = read('../marketing/pilot-offer-email.md');
   assert.match(offer, new RegExp(`${pricing.pilotDays}-day pilot`), 'the pilot offer quotes the pilot length');
   assert.match(offer, /\[dealership\]/, 'the pilot offer names the dealership as a bracket');
+});
+
+test('no marketing or Web Store document names the pilot dealer: every marketing file is sorted, and each is checked', () => {
+  // CLAUDE.md keeps the pilot dealer to test/fixtures/, marked worked examples and the pilot record
+  // (PILOT.md, CHANGELOG.md, legal/questions-for-attorney.md); the demo script, the sales sheet and the
+  // internal positioning are read before or at another dealership, so they name no pilot value either
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).sort();
+  assert.deepEqual(md('marketing'), [...ALL].sort(), 'a marketing document is not in CUSTOMER_FACING or ALL here: sort it, so the checks in this file read it');
+  for (const rel of [...ALL.map((f) => 'marketing/' + f), ...md('store').map((f) => 'store/' + f)]) {
+    const doc = read('../' + rel);
+    const line = doc.split('\n').findIndex((l) => PILOT.test(l));
+    assert.equal(line, -1, `${rel}:${line + 1} contains the pilot value "${line >= 0 && doc.split('\n')[line].match(PILOT)[0]}"`);
+  }
 });
 
 test('the store-install emails quote the pricing config and the code\'s numbers, and name the controls as the code labels them', () => {
@@ -181,26 +196,66 @@ test('the two agreements are templates: no pilot-dealer value, every dollar amou
 
 // Chrome's permission prompt can come from three places now (round J added
 // the photo servers), and the demo script tells the presenter what each one
-// is. A new place the extension asks from fails here until it is added to
-// KNOWN and to the script.
+// is. Every prompt goes through askChrome (src/askChrome.js), the extension's
+// one call to chrome.permissions.request, which refuses Facebook's servers and
+// wildcard hosts whatever list it is handed (test/askChrome.test.js). So this
+// reads every use of chrome.permissions and of askChrome in the code: a
+// request made anywhere else, an alias, a renamed import or a computed name on
+// chrome fails; a new place to ask from fails until it is added to KNOWN and
+// to the script; and so does a second call with the same words as a known one.
 test('the demo script says what every Chrome permission prompt the extension raises is for', () => {
+  const GATE = 'src/askChrome.js';
+  // each askChrome call's argument, as written, in that file: [what it asks for, how many calls]
   const KNOWN = {
-    'wizard.js { origins }': 'rescan',
-    'popup.js { origins: rescanOrigins() }': 'rescan',
-    'sidepanel.js { origins: patterns }': 'photos',
-    'sidepanel.js { origins }': 'rescan', // the website itself, when posting or rescanning from the side panel's list
-    "sidepanel.js { origins: [NHTSA_ORIGIN + '/' + '*'] }": 'NHTSA',
+    'wizard.js origins': ['rescan', 1],
+    'popup.js rescanOrigins()': ['rescan', 2],
+    'sidepanel.js patterns': ['photos', 1],
+    'sidepanel.js origins': ['rescan', 1], // the website itself, when posting or rescanning from the side panel's list
+    "sidepanel.js [NHTSA_ORIGIN + '/' + '*']": ['NHTSA', 1],
   };
+  // what else the code may do with chrome.permissions (none of these prompts)
+  const QUIET = ['contains', 'getAll', 'onAdded', 'onRemoved'];
   const WORDS = { rescan: /automatic rescan/, photos: /download this car's photos/, NHTSA: /Check with NHTSA/ };
-  const kinds = new Set();
-  const files = readdirSync(new URL('../extension/', import.meta.url), { recursive: true }).filter((f) => f.endsWith('.js'));
-  assert.ok(files.includes('sidepanel.js') && files.includes('wizard.js'), 'the extension folder moved: fix this test');
-  for (const file of files) {
-    for (const m of read('../extension/' + file).matchAll(/chrome\.permissions\.request\((\{[^}]*\})\)/g)) {
-      const kind = KNOWN[`${file} ${m[1]}`];
-      assert.ok(kind, `extension/${file} asks Chrome for ${m[1]}: add it to KNOWN here and say what it is in the demo script`);
-      kinds.add(kind);
+  const argumentAt = (code, open) => {
+    let depth = 0;
+    for (let k = open; k < code.length; k += 1) {
+      if (code[k] === '(') depth += 1;
+      else if (code[k] === ')' && (depth -= 1) === 0) return code.slice(open + 1, k).trim();
     }
+    return null;
+  };
+  const kinds = new Set();
+  const calls = {};
+  const requests = [];
+  const files = readdirSync(new URL('../extension/', import.meta.url), { recursive: true }).filter((f) => f.endsWith('.js'));
+  assert.ok(files.includes('sidepanel.js') && files.includes('wizard.js') && files.includes(GATE), 'the extension folder moved: fix this test');
+  for (const file of files) {
+    let code = stripComments(read('../extension/' + file), { trailing: true });
+    assert.doesNotMatch(code, /\bchrome\s*(?:\?\.)?\s*\[/, `extension/${file} reads chrome by a computed name (chrome[...]): write chrome.<name>, so this inventory reads what it uses`);
+    for (const m of code.matchAll(/\bpermissions\b(\s*\??\.\s*([A-Za-z_$][\w$]*)(\s*\()?)?/g)) {
+      const [, , method, paren] = m;
+      if (QUIET.includes(method)) continue;
+      assert.ok(method === 'request' && paren, `extension/${file}: "permissions" appears as "${m[0]}". In code, use only chrome.permissions.${QUIET.join('/')}, and ask Chrome through askChrome(origins) (src/askChrome.js); in text a person reads, word it another way (this test reads strings as code)`);
+      requests.push(`${file} ${argumentAt(code, m.index + m[0].length - 1)}`);
+    }
+    if (file === GATE) continue;
+    // the one import form, on one line and under its own name, so every call below is read
+    code = code.replace(/^import \{([^}\n]*)\} from '\.\/src\/askChrome\.js';$/gm, (line, names) => {
+      assert.deepEqual(names.split(',').map((n) => n.trim()).filter(Boolean), ['askChrome'], `extension/${file}: import { askChrome } from './src/askChrome.js', nothing renamed and nothing else`);
+      return '';
+    });
+    for (const m of code.matchAll(/\baskChrome\b(\s*\()?/g)) {
+      assert.ok(m[1], `extension/${file}: askChrome appears as "${code.slice(m.index, m.index + 40).split('\n')[0]}"; import it as import { askChrome } from './src/askChrome.js' and call it as askChrome(origins), never under another name, so this inventory reads every request`);
+      const arg = argumentAt(code, m.index + m[0].length - 1);
+      const key = `${file} ${arg}`;
+      assert.ok(KNOWN[key], `extension/${file} asks Chrome for ${arg}: add it to KNOWN here and say what it is in the demo script`);
+      calls[key] = (calls[key] || 0) + 1;
+      kinds.add(KNOWN[key][0]);
+    }
+  }
+  assert.deepEqual(requests, [`${GATE} { origins: asked }`], 'Chrome is asked for a permission only inside askChrome (src/askChrome.js), which refuses Facebook\'s servers and wildcard hosts: call askChrome(origins) instead of chrome.permissions.request');
+  for (const [key, [, count]] of Object.entries(KNOWN)) {
+    assert.equal(calls[key] || 0, count, `extension/${key.replace(' ', ' asks Chrome for ')} in ${calls[key] || 0} places, not ${count}: a new place to ask from is added to KNOWN here and to the demo script; a removed one is taken out of both`);
   }
   assert.deepEqual([...kinds].sort(), Object.keys(WORDS).sort(), 'a permission request in KNOWN is gone from the code: take it out of here and the demo script');
   const line = read('../marketing/demo-script.md').split('\n').find((l) => l.startsWith('- **Chrome asks for a permission:**'));

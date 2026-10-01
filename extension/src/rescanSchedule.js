@@ -3,6 +3,7 @@
 // does the work.
 
 import { adapterById, adapterForService } from '../adapters/index.js';
+import { isFacebookServer } from './photoHosts.js';
 
 export const RESCAN_ALARM = 'lot-sync-rescan';
 export const RESCAN_PERIOD_MINUTES = 180; // every 3 hours while Chrome is open
@@ -58,10 +59,21 @@ export function latestOf(...isos) {
  *   the wizard and the popup pass it, the site's stored service: then the
  *   adapter named on the site (or the one that recognises the service) is
  *   asked, so nothing here reads the service itself.
+ * Never one of Facebook's servers (photoHosts.js isFacebookServer): when the
+ * site record or its service names one, the list is empty, so nothing asks
+ * Chrome for a Facebook host and the background rescan's permission check
+ * (background.js hasPermission) says no. Lot Current reads the dealer's
+ * website, never Facebook.
  */
 export function originsFor(site, needs) {
   const out = new Set();
-  const add = (u) => { try { out.add(new URL(u).origin + '/*'); } catch (e) { /* skip */ } };
+  let facebook = false;
+  const add = (u) => {
+    try {
+      if (isFacebookServer(u)) facebook = true;
+      else out.add(new URL(u).origin + '/' + '*');
+    } catch (e) { /* skip */ }
+  };
   if (site && site.origin) add(site.origin);
   let list = needs;
   if (list && !Array.isArray(list) && typeof list === 'object') {
@@ -69,5 +81,5 @@ export function originsFor(site, needs) {
     list = adapter ? adapter.origins(list) : [];
   }
   for (const pattern of Array.isArray(list) ? list : []) add(pattern);
-  return [...out];
+  return facebook ? [] : [...out];
 }

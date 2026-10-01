@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import vm from 'node:vm';
 import { normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { assessVehicle } from '../extension/src/classify.js';
@@ -248,4 +248,97 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
   const context = vm.createContext({ window: {}, document, location, URL, fetch, setTimeout, clearTimeout, AbortController, TextDecoder });
   context.fetchCalls = fetchCalls;
   return context;
+}
+
+// ---------- reading source code the way the guard tests do ----------
+
+// The comment stripper the guard tests read source through (test/posting,
+// anyDealer, dataInventory and demo): block comments, whole-line // comments
+// and, with trailing, a // comment after code. A // right after ":", a quote
+// or a backslash is not cut: that is an address ("https://"), a string ('//')
+// or the end of a regex literal (/^https?:\/\//), with code after it.
+// It is a regex, so it trusts every "/*" to open a comment; the files it reads
+// are held to that by commentStripperBlindSpots below.
+export function stripComments(src, { trailing = false } = {}) {
+  const out = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return trailing ? out.replace(/([^:'"`\\])\/\/[^\n]*$/gm, '$1') : out;
+}
+
+// Every place in a source file where stripComments would cut real code: a
+// "/*" inside a string or template literal, a "/*" inside a // comment that
+// is not closed on its line, and a block comment that runs past its line
+// after code on its first line (how a "/*" inside a regex literal shows up).
+// Each would make the stripper delete everything up to the next "*/", so a
+// guard test reading the file would not see that code. [] when the file is safe.
+export function commentStripperBlindSpots(src) {
+  const out = [];
+  let line = 1;
+  let state = 'code'; // code | line | block | ' | " | `
+  let codeOnLine = false;
+  let block = null;
+  const holes = []; // the ${ } of the template literals we are inside, innermost last
+  for (let k = 0; k < src.length; k++) {
+    const c = src[k];
+    const d = src[k + 1];
+    if (c === '\n') {
+      line += 1;
+      codeOnLine = false;
+      if (state === 'line' || state === "'" || state === '"') state = 'code';
+      continue;
+    }
+    if (state === 'code') {
+      if (c === '/' && d === '/') { state = 'line'; k += 1; continue; }
+      if (c === '/' && d === '*') { state = 'block'; block = { line, afterCode: codeOnLine }; k += 1; continue; }
+      if (!/\s/.test(c)) codeOnLine = true;
+      if (c === "'" || c === '"' || c === '`') state = c;
+      else if (c === '{' && holes.length) holes[holes.length - 1] += 1;
+      else if (c === '}' && holes.length) {
+        if (holes[holes.length - 1] === 0) { holes.pop(); state = '`'; } else holes[holes.length - 1] -= 1;
+      }
+    } else if (state === 'block') {
+      if (c === '*' && d === '/') {
+        if (block.afterCode && line > block.line) out.push(`line ${block.line}: a block comment that runs past its line starts after code`);
+        state = 'code';
+        codeOnLine = true;
+        k += 1;
+      }
+    } else if (state === 'line') {
+      if (c === '/' && d === '*') {
+        // the stripper cuts from here to the next "*/"; harmless only when that is on this line or nowhere
+        const eol = src.indexOf('\n', k);
+        const close = src.indexOf('*/', k + 2);
+        if (close >= 0 && eol >= 0 && close > eol) out.push(`line ${line}: "/*" inside a // comment`);
+      }
+    } else if (c === '\\') {
+      if (d === '\n') line += 1;
+      k += 1;
+    } else if (state === '`' && c === '$' && d === '{') {
+      holes.push(0);
+      state = 'code';
+      k += 1;
+    } else if (c === state) {
+      state = 'code';
+      codeOnLine = true;
+    } else if (c === '/' && d === '*') {
+      out.push(`line ${line}: "/*" inside a ${state === '`' ? 'template literal' : 'string'}`);
+    }
+  }
+  return out;
+}
+
+// The source files the guard tests read through stripComments: the extension,
+// the rewrite service, the manager view, the website, the Edge Functions and
+// the sandbox. Paths relative to the repository root.
+export function strippedSourceFiles() {
+  const root = new URL('../', import.meta.url);
+  const out = [];
+  const walk = (dir) => {
+    for (const d of readdirSync(new URL(dir, root), { withFileTypes: true })) {
+      if (d.name === 'node_modules') continue;
+      if (d.isDirectory()) walk(dir + d.name + '/');
+      else if (/\.(m?js|ts)$/.test(d.name)) out.push(dir + d.name);
+    }
+  };
+  for (const dir of ['extension/', 'backend/', 'manager/', 'site/', 'supabase/functions/', 'demo/']) walk(dir);
+  return out;
 }

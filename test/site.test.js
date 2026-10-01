@@ -1,5 +1,5 @@
 // The website (site/) is customer-facing copy, so every page passes the same
-// honesty checks as marketing/ (the shared lists in test/copyGuards.js, which
+// honesty checks as marketing/ (test/copyGuards.js and the shared lists in test/honesty.js, which
 // test/marketing.test.js and the store listing's test use too), the home and
 // pricing pages quote the one pricing config, no page names a dealer or loads
 // anything from anywhere else, and the only images are the sandbox's
@@ -16,6 +16,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { PAGES, cspFor } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
 import { copyProblems } from './copyGuards.js';
+import { honestyProblems, offPricing } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -50,9 +51,11 @@ test('the page says who publishes, that Lot Current never does, and that it is n
   assert.match(text, /Is this allowed on Facebook\?/, 'the FAQ asks the question straight');
 });
 
-// test/copyGuards.js: what no customer-facing text may say, the same rules as the marketing kit and the store listing
+// test/copyGuards.js and the shared honesty lists (test/honesty.js): what no customer-facing text may say, the same
+// rules as the marketing kit and the store listing
 function assertHonest(said, where) {
   assert.deepEqual(copyProblems(said), [], where);
+  assert.deepEqual(honestyProblems(said), [], where);
 }
 
 test('no claim we have not measured, and nothing that sounds like Meta approval', () => {
@@ -81,9 +84,8 @@ test('site/pricing.json is the marketing pricing config, and the page quotes it'
   assert.match(html, /<a href="\.\/pricing\/">The pricing page<\/a> has the founding-dealer price/, 'the home page links the rest');
   assert.match(text, /planned pric/i, 'labelled as planned pricing');
   assert.match(text, /confirmed with you before any paid subscription/i, 'confirmed before any paid subscription');
-  // no other dollar-per-month figure
-  const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
-  for (const m of priced.matchAll(/(\$[\d,]+)\s*(?:a|per)\s*month/g)) assert.ok(allowed.has(m[1]), `${m[0]} is not from pricing.json`);
+  // no other dollar figure, whatever words follow it
+  assert.deepEqual(offPricing(priced, pricing), [], 'a price that is not from pricing.json');
   // every number JavaScript fills has fallback text, and a key the config has
   for (const m of (html + pricingPage).matchAll(/data-pricing="([^"]+)">([^<]*)</g)) {
     assert.ok(m[2].trim().length > 0, `data-pricing="${m[1]}" has fallback text`);
@@ -106,6 +108,35 @@ test('the page speaks to any dealership', () => {
   for (const rel of [...files, '../scripts/screenshots.mjs']) {
     const hit = read(rel).match(PILOT);
     assert.equal(hit, null, `${rel.slice(3)} contains "${hit && hit[0]}"`);
+  }
+});
+
+// site/ is published whole (.github/workflows/pages.yml uploads the folder), so a file in
+// site/screenshots/ that no page shows (a failed run's capture, say) would be published too.
+test('site/screenshots holds exactly the images the pages show, and npm run screenshots writes nothing else there', () => {
+  const shown = new Set();
+  const walk = (dir) => {
+    for (const d of readdirSync(new URL(dir, import.meta.url), { withFileTypes: true })) {
+      if (d.isDirectory()) walk(dir + d.name + '/');
+      else if (/\.(html|css|js)$/.test(d.name)) for (const m of read(dir + d.name).matchAll(/screenshots\/([\w.-]+)/g)) shown.add(m[1]);
+    }
+  };
+  walk('../site/');
+  assert.ok(shown.size >= 1, 'the pages show the sandbox screenshots');
+  assert.deepEqual(readdirSync(new URL('../site/screenshots/', import.meta.url)).sort(), [...shown].sort(), 'site/screenshots/ holds a file no page shows, or misses one a page shows');
+  // the script: its shot() helper draws exactly those names, and every other capture goes to a git-ignored folder
+  const src = read('../scripts/screenshots.mjs');
+  assert.deepEqual([...src.matchAll(/\bshot\('([^']+)'\)/g)].map((m) => m[1]).sort(), [...shown].sort(), 'npm run screenshots draws exactly the images the pages show');
+  const ignored = read('../.gitignore').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const others = [...src.matchAll(/page\.screenshot\(\{\s*path:\s*((?:[^,(){}]|\([^()]*\))+)/g)].map((m) => m[1].trim()).filter((p) => p !== 'file'); // file: shot()'s own
+  assert.ok(others.length >= 1, 'the failure capture is still taken');
+  for (const p of others) {
+    assert.doesNotMatch(p, /\bshots\b/, `screenshots.mjs captures ${p} into site/screenshots/, which is published`);
+    const def = /^[A-Za-z_$][\w$]*$/.test(p) ? (src.match(new RegExp(`const ${p} = (.+);`)) || [])[1] : p;
+    const dir = (String(def).match(/^join\(root, '([^']+)'/) || [])[1];
+    assert.ok(dir, `screenshots.mjs captures to ${p}, which is not join(root, '<folder>', ...)`);
+    assert.ok(!/^site(\/|$)/.test(dir), `screenshots.mjs captures ${p} into ${dir}, which is published`);
+    assert.ok(ignored.includes(dir.replace(/\/?$/, '/')), `screenshots.mjs captures ${p} into ${dir}, which .gitignore does not ignore`);
   }
 });
 

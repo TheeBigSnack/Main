@@ -25,6 +25,7 @@ import { trimRecord } from '../extension/adapters/dealerInspire.js';
 import { parseVehiclePage } from '../extension/adapters/schemaOrgParse.js';
 import { normalizeVehicle as normalizeStandard } from '../extension/adapters/schemaOrgNormalize.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
+import { stripComments } from './helpers.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const demo = join(root, 'demo');
@@ -235,7 +236,7 @@ test('the second sample website is its own kind of website, and switching to it 
 test('the shim defines every chrome.* member the extension code references', () => {
   const refs = new Set();
   for (const file of walk(join(root, 'extension')).filter((f) => f.endsWith('.js'))) {
-    const src = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const src = stripComments(readFileSync(file, 'utf8'));
     for (const m of src.matchAll(/\bchrome\.([a-zA-Z.]+)/g)) refs.add(m[1].replace(/\.+$/, ''));
   }
   assert.ok(refs.size >= 25, `found only ${refs.size} chrome.* references`);
@@ -369,9 +370,8 @@ test('index.html carries the sandbox banner and loads nothing from another site'
 });
 
 test('the sandbox\'s own code has no way to click Publish, Update, Delete or Mark as sold', () => {
-  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   for (const rel of ['demo/chrome-shim.js', 'demo/demo.js', 'demo/site-standard/inventory.js', 'demo/site-standard/index.html']) {
-    const code = strip(read(rel)).toLowerCase();
+    const code = stripComments(read(rel)).toLowerCase();
     for (const word of ['#publish', '#update', 'mark as sold', "'publish'", '"publish"', '.click(']) {
       assert.ok(!code.includes(word), `${rel} contains ${word}`);
     }

@@ -5,7 +5,7 @@ import { capStatus, postsToday, DEFAULT_DAILY_CAP } from '../extension/src/cap.j
 import { markPosted } from '../extension/src/rescan.js';
 import { FORM_MAP, DEV_OVERRIDE_KEYS, applyOverrides } from '../extension/facebook/formMap.js';
 import { ADAPTERS } from '../extension/adapters/index.js';
-import { snapshot, fixtures } from './helpers.js';
+import { snapshot, fixtures, stripComments, commentStripperBlindSpots, strippedSourceFiles } from './helpers.js';
 
 const VIN = fixtures.usedNormal.vin;
 
@@ -44,8 +44,8 @@ test('the posted registry can carry the listing link and who posted, without bre
 });
 
 // Non-negotiable #1, enforced on the source itself: nothing in the Facebook
-// code can publish, update, delete or mark a listing sold.
-const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+// code can publish, update, delete or mark a listing sold. The source is read
+// without its comments (stripComments, test/helpers.js).
 const read = (rel) => stripComments(readFileSync(new URL(rel, import.meta.url), 'utf8'));
 
 test('the form map has no selector, name or option that could reach Publish, Update, Delete or Mark as sold', () => {
@@ -99,40 +99,29 @@ test('the fill code never submits a form or clicks anything but a dropdown optio
   assert.ok(!/['"`]click['"`]/.test(src), 'fillForm.js must not dispatch a click event');
 });
 
-// The comment stripper above removes /* ... */ blocks; a "/*" inside a string
-// would swallow real code from the guarded text, so the guarded files may
-// not contain one outside a comment.
-function blockOpenerInsideString(src) {
-  // walk each line, tracking whether we are inside a quoted string
-  const lines = src.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    let quote = null;
-    for (let j = 0; j < line.length; j++) {
-      const c = line[j];
-      if (quote) {
-        if (c === '\\') { j++; continue; }
-        if (c === quote) quote = null;
-        else if (c === '/' && line[j + 1] === '*') return i + 1;
-      } else if (c === "'" || c === '"' || c === '`') {
-        quote = c;
-      } else if (c === '/' && (line[j + 1] === '/' || line[j + 1] === '*')) {
-        break; // a real comment: the rest of the line is not code
-      }
-    }
-  }
-  return 0;
-}
-
-test('the guarded files contain no block-comment opener inside a string', () => {
-  assert.equal(blockOpenerInsideString("const a = 'x'; /* fine */ const b = 1;"), 0);
-  assert.equal(blockOpenerInsideString("const p = ORIGIN + '/*';"), 1);
-  const adapterFiles = readdirSync(new URL('../extension/adapters/', import.meta.url)).filter((f) => /\.js$/.test(f)).map((f) => '../extension/adapters/' + f);
-  for (const rel of ['../extension/facebook/fillForm.js', '../extension/sidepanel.js', '../extension/upkeep.js', '../extension/src/scanRunner.js', '../extension/src/scan.js', ...adapterFiles]) {
-    const raw = readFileSync(new URL(rel, import.meta.url), 'utf8');
-    const line = blockOpenerInsideString(raw);
-    assert.equal(line, 0, `${rel} line ${line} has a /* inside a string, which would blind the comment stripper`);
-  }
+// The comment stripper removes /* ... */ blocks with a regex, so a "/*" that
+// does not open a comment (inside a string, a template or a // comment) would
+// swallow real code up to the next "*/" and blind every guard test reading
+// that file. Every file any guard test reads through it is held to having none.
+test('no file the guard tests read has a "/*" the comment stripper would mistake for a comment', () => {
+  // the scanner itself, on the shapes that have hidden code before
+  assert.deepEqual(commentStripperBlindSpots("const a = 'x'; /* fine */ const b = 1;\n/**\n * a doc comment\n */\nf(); /* one line */\n"), []);
+  assert.deepEqual(commentStripperBlindSpots("const p = ORIGIN + '/*';"), ['line 1: "/*" inside a string']);
+  const tabLookup = "try {\n  const tabs = await chrome.tabs.query({ url: origin + '/*' });\n  chrome.scripting.executeScript({ target, func });\n} catch (e) { /* no access */ }\n";
+  assert.doesNotMatch(stripComments(tabLookup), /executeScript/, 'the regex stripper hides the line in between');
+  assert.deepEqual(commentStripperBlindSpots(tabLookup), ['line 2: "/*" inside a string']);
+  assert.deepEqual(commentStripperBlindSpots('const t = `a\n${b ? `x` : \'\'} c/*\n`;\n/* d */'), ['line 2: "/*" inside a template literal']);
+  assert.deepEqual(commentStripperBlindSpots('// reads src/*.js\nhidden();\n/* real */\n'), ['line 1: "/*" inside a // comment']);
+  assert.deepEqual(commentStripperBlindSpots('const re = /[/*]/; hidden();\n/* real */\n'), ['line 1: a block comment that runs past its line starts after code']);
+  assert.deepEqual(commentStripperBlindSpots("const p = origin + '/' + '*'; /* skip */"), [], 'the split form the extension uses');
+  // the trailing mode cuts a // comment after code, never the code after a regex literal that ends in \/\/
+  const afterRegex = "const isWeb = (u) => /^https?:\\/\\//i.test(u) && hidden(u); // why\n";
+  assert.equal(stripComments(afterRegex, { trailing: true }), "const isWeb = (u) => /^https?:\\/\\//i.test(u) && hidden(u); \n");
+  assert.equal(stripComments("go('https://x'); // why\n", { trailing: true }), "go('https://x'); \n");
+  // every file the guard tests read: the extension, the rewrite service, the manager view, the website, the Edge Functions, the sandbox
+  const files = strippedSourceFiles();
+  for (const must of ['extension/wizard.js', 'extension/sidepanel.js', 'extension/src/rescanSchedule.js', 'extension/facebook/fillForm.js', 'backend/server.js', 'manager/manager.js', 'demo/demo.js']) assert.ok(files.includes(must), `${must} is not read`);
+  for (const rel of files) assert.deepEqual(commentStripperBlindSpots(readFileSync(new URL('../' + rel, import.meta.url), 'utf8')), [], `${rel}: the comment stripper would hide code here (write '/' + '*' instead)`);
 });
 
 test('the side panel reaches the Facebook tab only through the known fill functions', () => {

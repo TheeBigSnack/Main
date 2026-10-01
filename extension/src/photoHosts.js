@@ -16,7 +16,7 @@
 // Facebook's own domains, the image servers included: a dealer page that
 // reuses photos from its Facebook page points at scontent-*.fbcdn.net or
 // lookaside.fbsbx.com, not at facebook.com.
-const FACEBOOK_DOMAINS = ['facebook.com', 'facebook.net', 'fb.com', 'fbcdn.net', 'fbsbx.com'];
+const FACEBOOK_DOMAINS = ['facebook.com', 'facebook.net', 'fb.com', 'fbcdn.net', 'fbsbx.com', 'messenger.com'];
 
 // Written in two parts so no comment stripper mistakes it for a comment opener.
 const ANY_PATH = '/' + '*';

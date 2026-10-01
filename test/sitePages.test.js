@@ -6,8 +6,10 @@
 // site/ (or an anchor on the page, or an inbox from config.js); the two
 // Content-Security-Policy variants; robots.txt, llms.txt, sitemap.xml and
 // CNAME; the structured data; the favicons and the share images; the
-// redirect stubs at the legal pages' old addresses; the pricing, the honesty
-// lines and the forbidden words over every page; the Pages-like server of
+// redirect stubs at the legal pages' old addresses; the honesty lines and the
+// forbidden words (test/honesty.js) over every page's text, alt text and head,
+// llms.txt and the share sentences, and the pricing over the same places but
+// alt text (the screenshots show sample cars' prices); the Pages-like server of
 // scripts/site-check.mjs; both generators' --check modes; and that the
 // browser checks (scripts/site-check.mjs, scripts/a11y.mjs) cover every page.
 // No browser here: the live checks are `npm run test:site` and
@@ -28,6 +30,8 @@ import { pngSize, parseIco } from '../scripts/favicons.mjs';
 import { MIME, ROOT_FILES, MISSING_PATHS, resolvePath, startPagesServer } from '../scripts/site-check.mjs';
 import { SITE } from '../site/config.js';
 import { copyProblems } from './copyGuards.js';
+import { LEGAL, isPlaceholderUrl } from '../extension/src/legalLinks.js';
+import { honestyProblems, offPricing } from './honesty.js';
 const LEGAL_DRAFT = JSON.parse(readFileSync(new URL('../legal/legal-status.json', import.meta.url), 'utf8')).draft === true;
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -514,8 +518,53 @@ test('the legal pages\' old addresses redirect: a stub per entry, sending the br
     assert.equal((html.match(/<link rel="canonical"/g) || []).length, SITE.siteUrl ? 1 : 0, `${r.file}: a canonical exactly when siteUrl is set`);
     assert.doesNotMatch(html, FORBIDDEN);
   }
-  // the extension's legal links expect those directory addresses once the host exists
-  assert.match(read('extension/src/legalLinks.js'), /\/legal\/terms\/[\s\S]*\/legal\/privacy\/[\s\S]*\/legal\/posting-rules\//, 'legalLinks.js names the new addresses');
+  // the comment in the extension's legal links names those directory addresses for when the host exists
+  // (its values are checked in the next test)
+  assert.match(read('extension/src/legalLinks.js'), /\/legal\/terms\/[\s\S]*\/legal\/privacy\/[\s\S]*\/legal\/posting-rules\//, 'legalLinks.js\'s comment names the new addresses');
+});
+
+// What extension/src/legalLinks.js may hold: three placeholders nobody can host (the wizard and Settings then
+// record no acceptance), or the three legal pages' addresses on siteUrl's host, with a new edition, once
+// legal/legal-status.json says the texts are final. Anything else links salespeople to a page that is not
+// there, or records an acceptance of a draft marked "not in effect".
+const LEGAL_SOURCES = { termsUrl: 'legal/terms-of-service.md', privacyUrl: 'legal/privacy-policy.md', rulesUrl: 'legal/posting-rules.md' };
+function legalLinkProblems(legal, siteUrl, status) {
+  const keys = Object.keys(LEGAL_SOURCES);
+  const placeholders = keys.filter((k) => isPlaceholderUrl(legal[k]));
+  if (placeholders.length === keys.length) return [];
+  const problems = [];
+  if (placeholders.length) problems.push(`${placeholders.join(', ')} still a placeholder: switch all three addresses together`);
+  if (!siteUrl) problems.push('siteUrl in site/config.js is not set, so no address can be checked');
+  for (const k of keys) {
+    const page = PAGES.find((p) => p.source === LEGAL_SOURCES[k]);
+    const want = siteUrl + page.path;
+    if (!isPlaceholderUrl(legal[k]) && legal[k] !== want) problems.push(`${k} is ${legal[k]}, not the page's address ${want}`);
+  }
+  if (!status || status.draft !== false) problems.push('legal/legal-status.json does not say "draft": false');
+  if (/draft/i.test(String(legal.version))) problems.push(`version ${legal.version} is the draft edition: bump it with the addresses`);
+  return problems;
+}
+
+test('the extension\'s legal links are placeholders, or the legal pages\' real addresses with a final edition', () => {
+  const status = JSON.parse(read('legal/legal-status.json'));
+  assert.deepEqual(legalLinkProblems(LEGAL, SITE.siteUrl, status), [], 'extension/src/legalLinks.js');
+  // the Web Store listing names the same addresses (store/listing.md: "change both together")
+  const listing = read('store/listing.md');
+  for (const k of Object.keys(LEGAL_SOURCES)) assert.ok(listing.includes('`' + LEGAL[k] + '`'), `store/listing.md does not name ${k} ${LEGAL[k]}`);
+  // the checker, on the edits it is there for
+  const site = 'https://lot.test';
+  const final = { draft: false };
+  assert.deepEqual(legalLinkProblems({ version: 'x-draft', termsUrl: 'https://a.example/t', privacyUrl: 'https://a.example/p', rulesUrl: 'https://a.example/r' }, site, { draft: true }), [], 'placeholders are fine at any time');
+  const good = { version: '2027-01-01', termsUrl: site + '/legal/terms/', privacyUrl: site + '/legal/privacy/', rulesUrl: site + '/legal/posting-rules/' };
+  assert.deepEqual(legalLinkProblems(good, site, final), []);
+  // the host swapped without the pages' paths: every link a 404
+  const p1 = legalLinkProblems({ ...good, termsUrl: site + '/terms', privacyUrl: site + '/privacy', rulesUrl: site + '/posting-rules' }, site, final);
+  assert.equal(p1.length, 3, p1.join('; '));
+  assert.ok(legalLinkProblems({ ...good, termsUrl: 'https://www.lot.test/legal/terms/' }, site, final).some((p) => /termsUrl/.test(p)), 'another host than siteUrl');
+  assert.ok(legalLinkProblems({ ...good, version: '2026-09-28-draft' }, site, final).some((p) => /draft edition/.test(p)), 'the version not bumped');
+  assert.ok(legalLinkProblems(good, site, { draft: true }).some((p) => /legal-status/.test(p)), 'the texts still drafts');
+  assert.ok(legalLinkProblems({ ...good, rulesUrl: 'https://a.example/r' }, site, final).some((p) => /rulesUrl still a placeholder/.test(p)), 'only some switched');
+  assert.ok(legalLinkProblems(good, '', final).some((p) => /siteUrl/.test(p)), 'no siteUrl to check against');
 });
 
 // ---------- config.js, the form and the inboxes ----------
@@ -563,13 +612,27 @@ test('site/config.js validates, holds no placeholder, and the demo form and the 
 
 // ---------- pricing and honesty over every page ----------
 
+// what no customer-facing page may say: the shared lists in test/honesty.js. The legal texts name the
+// forbidden things only to deny them; those denials are read first, then the scan.
+const DENIALS = [/not affiliated with, endorsed by or partnered with Meta/g, /no one can promise your account will never be restricted/g];
+// What a page says besides its visible text: the head's title and every attribute a screen reader, a
+// share card or a search engine reads out (alt, aria-label, title, and each meta tag's content,
+// og:image:alt included). The sample car prices in the screenshots' alt text are not prices of ours, so
+// an image's alt text is the one place the price check does not read (docs/website.md says so).
+const attributeWords = (html) => [['<title>', title(html)], ...[...html.matchAll(/\s(alt|aria-label|title|content)="([^"]*)"/g)].map((m) => [m[1], unattr(m[2])])];
+function pageHonesty(html) {
+  const out = honestyProblems(textOf(bodyOf(html)), { denials: DENIALS });
+  for (const [where, said] of attributeWords(html)) for (const problem of honestyProblems(said, { denials: DENIALS })) out.push(`${where}: ${problem}`);
+  return out;
+}
+
 test('the prices on every page are pricing.json\'s, through data-pricing spans with fallback text, and no other figure', () => {
   assert.deepEqual(pricing, JSON.parse(read('marketing/pricing.json')), 'site/pricing.json equals marketing/pricing.json');
-  const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
   for (const p of PAGES) {
     const html = htmlOf(p);
     const text = visibleText(p);
-    for (const m of text.matchAll(/(\$[\d,]+)\s*(?:a|per)\s*month/g)) assert.ok(allowed.has(m[1]), `${p.file}: ${m[0]} is not from pricing.json`);
+    assert.deepEqual(offPricing(text, pricing), [], `${p.file}: a price that is not from pricing.json`);
+    for (const [where, said] of attributeWords(html)) if (where !== 'alt') assert.deepEqual(offPricing(said, pricing), [], `${p.file}: ${where}: a price that is not from pricing.json`);
     const spans = [...html.matchAll(/data-pricing="([^"]+)">([^<]*)</g)];
     if (p.slug === 'home' || p.slug === 'pricing') {
       assert.ok(spans.length >= 4, `${p.file}: the pricing numbers are data-pricing spans`);
@@ -587,17 +650,29 @@ test('the prices on every page are pricing.json\'s, through data-pricing spans w
     if (p.script) assert.ok(spans.length > 0, `${p.file}: a page that loads site.js has numbers for it to fill`);
     if (!p.script) assert.equal(spans.length, 0, `${p.file}: no data-pricing span on a page without site.js`);
   }
+  // the head and the labels are read too; an image's alt text is not (it describes sample cars' prices)
+  const offPage = (html) => attributeWords(html).filter(([where]) => where !== 'alt').flatMap(([, said]) => offPricing(said, pricing));
+  assert.deepEqual(offPage(htmlOf(home)), []);
+  assert.deepEqual(offPage(htmlOf(home).replace(/(<meta name="description" content=")/, '$1Plans from $49/month. ')), ['$49'], 'a price in the description is caught');
+  assert.deepEqual(offPage(htmlOf(home).replace(/(<title>)/, '$1From $79 monthly: ')), ['$79'], 'a price in the title is caught');
 });
 
 // test/copyGuards.js: what no customer-facing page may say (the legal texts name the forbidden things only to
-// deny them; copyProblems reads those denials first, then scans the rest)
+// deny them; copyProblems reads those denials first, then scans the rest). pageHonesty (the lists in
+// test/honesty.js) also reads each page's alt text, aria-labels, titles and share tags.
 
 test('honest on every page: who clicks Publish, nothing guaranteed, the non-affiliation line, nothing that sounds like Meta approval', () => {
   for (const p of PAGES) {
     const said = visibleText(p);
     assert.ok(said.includes(FOOTER_LINE), `${p.file}: the non-affiliation line`);
     assert.deepEqual(copyProblems(said), [], p.file);
+    assert.deepEqual(pageHonesty(htmlOf(p)), [], p.file);
   }
+  // alt text and the head are read too: a claim there fails like one in the text
+  const altClaim = htmlOf(home).replace(/(<img\b[^>]*\balt=")/, '$1Approved by Meta, and your account is safe: ');
+  assert.ok(pageHonesty(altClaim).some((x) => x.startsWith('alt: ')), 'a claim in an image\'s alt text is caught');
+  const headClaim = htmlOf(home).replace(/(<meta property="og:title" content=")/, '$1Meta-approved: ');
+  assert.ok(pageHonesty(headClaim).some((x) => x.startsWith('content: ')), 'a claim in a share tag is caught');
   for (const slug of ['home', 'faq']) {
     const text = visibleText(PAGES.find((p) => p.slug === slug));
     assert.match(text, /Is this allowed on Facebook\?/, `${slug}: the question asked straight`);
@@ -617,6 +692,19 @@ test('honest on every page: who clicks Publish, nothing guaranteed, the non-affi
     const said = [textOf(doc), ...[...doc.matchAll(/<meta\b[^>]*\bcontent="([^"]*)"/g)].map((m) => unattr(m[1]))].join(' ');
     assert.deepEqual(copyProblems(said), [], f);
   }
+});
+
+test('llms.txt and the share-image sentences pass the same honesty lists, and quote no other price', () => {
+  // llms.txt is what AI assistants quote about Lot Current; the share sentences are each image's alt text
+  // in images.json and the og:image:alt the pages carry once siteUrl is set
+  const llmsProblems = (text) => [...honestyProblems(text), ...offPricing(text, pricing).map((f) => `${f} is not from pricing.json`)];
+  const llms = read('site/llms.txt');
+  assert.deepEqual(llmsProblems(llms), [], 'site/llms.txt');
+  assert.notDeepEqual(llmsProblems(llms + '> Approved by Meta, and your account is safe.\n'), [], 'a claim added to llms.txt is caught');
+  assert.notDeepEqual(llmsProblems(llms + '> From $49/month.\n'), [], 'a price added to llms.txt is caught');
+  const social = JSON.parse(read('site/social/images.json'));
+  for (const [path, { alt }] of Object.entries(social)) assert.deepEqual(llmsProblems(alt), [], `site/social/images.json ${path}`);
+  for (const p of PAGES.filter((x) => x.social)) assert.deepEqual(llmsProblems(socialAlt(p)), [], `the share sentence of ${p.slug}`);
 });
 
 // ---------- the checks that need a browser, and their server ----------

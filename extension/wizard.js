@@ -10,6 +10,7 @@
 import { performScan, rememberSite } from './src/scanRunner.js';
 import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
+import { askChrome } from './src/askChrome.js';
 import { shortLocation, storeNames, matchStore } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
@@ -95,7 +96,7 @@ async function findDealerTab() {
     // Without the tabs permission Chrome ignores the url filter for tabs the
     // extension can't read, so only a tab whose address is visible and on the
     // site counts.
-    const tabs = (await chrome.tabs.query({ url: wiz.origin + '/*' })).filter((t) => t.id && typeof t.url === 'string' && t.url.startsWith(wiz.origin + '/'));
+    const tabs = (await chrome.tabs.query({ url: wiz.origin + '/' + '*' })).filter((t) => t.id && typeof t.url === 'string' && t.url.startsWith(wiz.origin + '/'));
     const pick = tabs.find((t) => t.id === wiz.dealerTabId) || tabs.find((t) => t.windowId === wiz.windowId) || tabs[0];
     if (pick) wiz.dealerTabId = pick.id;
   } catch (e) { /* no access to tab addresses: keep the stored id */ }
@@ -237,11 +238,15 @@ export function wizardHtml() {
     }
     case 'permission': {
       const origins = originsFor(wiz.site, wiz.service);
+      // nothing to ask for (a site or service on Facebook's servers, which askChrome refuses): say so instead of offering a button that can't work
+      const ask = !origins.length
+        ? '<p class="hint">Lot Current can\'t read this website in the background, so automatic rescans stay off for it. The Scan button in the popup still works by hand.</p>'
+        : wiz.granted ? '<div class="banner good">Permission granted. Automatic rescans are on.</div>' : `<div class="actions"><button type="button" class="primary" id="wizGrant">Allow automatic rescans</button></div><p class="hint">Or skip: the Scan button in the popup still works by hand.</p>`;
       return `${progress}<h3>Automatic rescans</h3>
-        <p>Every 3 hours while Chrome is open, Lot Current can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update. For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background. Chrome will ask.</p>
-        ${wiz.granted ? '<div class="banner good">Permission granted. Automatic rescans are on.</div>' : `<div class="actions"><button type="button" class="primary" id="wizGrant">Allow automatic rescans</button></div><p class="hint">Or skip: the Scan button in the popup still works by hand.</p>`}
+        <p>Every 3 hours while Chrome is open, Lot Current can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update.${origins.length ? ` For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background. Chrome will ask.` : ''}</p>
+        ${ask}
         <label class="block"><input type="checkbox" id="wizNotify" ${s.notify !== false ? 'checked' : ''} /> Show a desktop notification when listings need attention</label>
-        ${nav(true, wiz.granted ? 'Next' : 'Skip for now')}`;
+        ${nav(true, wiz.granted || !origins.length ? 'Next' : 'Skip for now')}`;
     }
     case 'rules':
       return `${progress}<h3>The posting rules</h3>
@@ -428,7 +433,7 @@ export async function handleWizardClick(id, ctx) {
       readInputs(); // keep the notification tick as the person left it across the re-render
       const origins = originsFor(wiz.site, wiz.service);
       try {
-        wiz.granted = await chrome.permissions.request({ origins }); // straight from the click
+        wiz.granted = await askChrome(origins); // straight from the click
       } catch (e) {
         wiz.error = "Couldn't ask Chrome for permission: " + ((e && e.message) || e);
       }
