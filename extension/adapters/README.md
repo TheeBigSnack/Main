@@ -22,7 +22,7 @@ Adding a platform: one new file here, its line in `ADAPTERS` (before `schemaOrg`
 
 Two kinds of code in an adapter:
 
-- `probeInPage` and `searchInPage` are copied into the page by Chrome, so they are **self-contained** (no imports, no identifier from outside the function body) and **read-only** (no clicks, no events, no form values, no submit). `test/adapters.test.js` runs both in a bare sandbox and checks they reach nothing in the module; `test/posting.test.js` checks the read-only rule and that `scanRunner.js` injects nothing else.
+- `probeInPage` and `searchInPage` are copied into the page by Chrome, so they are **self-contained** (no imports, no identifier from outside the function body) and **read-only** (no clicks, events, focus or scrolling; no form values, text, markup, classes or styles written; nothing added to or removed from the page; no navigation, new window or dialog; no cookie or page storage written). `test/adapters.test.js` runs both in a bare sandbox and checks they reach nothing in the module; `test/posting.test.js` checks the read-only rule by reading their text for each of those forms (a second test proves it catches every form it names), and that `scanRunner.js` injects nothing else.
 - Everything else never touches the page. It is given a `search(request)` from one of two places: `scanRunner.searchViaTab(tabId, adapter, service)` (the popup, the wizard and the post-time re-check: the call runs inside the tab through `searchInPage`) or `makeDirectSearch(service)` (the background rescan and the side panel's own list, with the host permission the wizard or the panel's click asked for).
 
 Who calls what:

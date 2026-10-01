@@ -162,6 +162,59 @@ test('the side panel sends the dealer website\'s origin with every draft and col
   }
 });
 
+// What code injected into the dealer's tab (src/scan.js, every adapter's
+// probeInPage and searchInPage) may not contain, by text: a click or submit
+// by any name, an event, focus or scrolling; an assignment to a form value,
+// a tick box, a choice, the page's text or markup, its classes, style or
+// data; adding, moving or removing anything in the page, or resetting a
+// form; any navigation (location, reload, history, the Navigation API, a
+// new window) or dialog; writing the page's cookie or storage, or messaging
+// its code; and call/apply/Reflect/eval, which could reach any of these
+// another way. An assignment never matches a comparison (==, ===, =>), so
+// code that only reads stays free to compare. A text check catches what a
+// person writes, not every way JavaScript can reach the same thing, so code
+// review still matters; the test below holds the list to each form it names.
+const ASSIGN = String.raw`\s*(?:\*\*|<<|>>>?|\?\?|\|\||&&|[-+*/%&|^])?=(?![=>])`;
+const READ_ONLY = new RegExp([
+  String.raw`\bclick\b|\bsubmit\b|requestSubmit|dispatchEvent|\.focus\b|\.blur\(|scrollIntoView|\bscroll(?:To|By)?\(`,
+  String.raw`\.(?:value|checked|selected|selectedIndex|files|textContent|innerText|outerText|innerHTML|outerHTML|nodeValue|className|hidden|disabled|contentEditable)${ASSIGN}`,
+  String.raw`\bdocument\.(?:title|designMode|body)${ASSIGN}|\.style\.[\w$]+${ASSIGN}|\.style\.(?:setProperty|cssText)\b|\.classList\.(?:add|remove|toggle|replace)\(|\.dataset\.[\w$]+${ASSIGN}`,
+  String.raw`\.(?:setAttribute|setAttributeNS|removeAttribute|toggleAttribute)\(|\.insertAdjacent(?:HTML|Element|Text)\b|\.(?:appendChild|insertBefore|removeChild|replaceChild|replaceChildren|replaceWith|remove|prepend|before|after|reset|showModal)\(|\b(?:body|head|documentElement)\.append\(`,
+  String.raw`\bdocument\.(?:write|writeln|open|close)\(|\bexecCommand\b`,
+  String.raw`location\.(?:href|assign|replace)|(?<!\b(?:const|let|var)\s+)\blocation${ASSIGN}|\blocation\.[\w$]+${ASSIGN}|\.reload\(|\bhistory\.(?:pushState|replaceState|back|forward|go)\b|\bnavigation\.(?:navigate|reload|back|forward|traverseTo)\b`,
+  String.raw`\bwindow\.(?:open|alert|confirm|prompt)\b|(?<![\w$.])(?:open|alert|confirm|prompt)\(|\.postMessage\(`,
+  String.raw`\bdocument\.cookie${ASSIGN}|\bcookieStore\b|\b(?:localStorage|sessionStorage)\.(?:setItem|removeItem|clear)\(|\b(?:localStorage|sessionStorage)\.[\w$]+${ASSIGN}|\bindexedDB\b`,
+  String.raw`\.call\(|\.apply\(|Reflect\.|new Function|\beval\b`,
+].join('|'));
+
+test('the dealer-tab read-only guard catches every page write and navigation it names, and lets comparisons through', () => {
+  const caught = [
+    "location = '/x';", "window.location = u;", "document.location = '/z';", "location.href = u;", 'location.assign(u);', 'location.replace(u);',
+    "location.hash = '#x';", 'location.reload();', 'top.location.reload(true);', "history.pushState({}, '', '/y');", 'history.back();',
+    "navigation.navigate('/n');", "window.open('/x');", "open('/x');", "alert('hi');", "window.confirm('ok?');", "document.cookie = 'lc=1';",
+    "localStorage.setItem('a', '1');", "sessionStorage.clear();", 'window.postMessage({ go: 1 }, "*");',
+    'box.checked = true;', 'opt.selected = true;', 'sel.selectedIndex = 2;', "input.value = 'x';", "input.value ??= 'x';", "el.textContent = '';",
+    "document.body.textContent = '';", "el.innerText += 'x';", "el.outerHTML = '';", "el.innerHTML = '';", "document.title = 'x';", "el.className = 'x';",
+    'el.hidden = true;', 'btn.disabled = false;', "el.style.display = 'none';", "el.classList.add('x');", "el.dataset.lc = '1';",
+    "el.setAttribute('a', 'b');", "el.removeAttribute('a');", 'box.form && box.form.reset();', 'el.remove();', 'document.body.appendChild(el);',
+    'parent.insertBefore(a, b);', 'document.body.append(el);', "el.insertAdjacentHTML('beforeend', '<b>');", "document.write('<p>');",
+    'el.focus();', 'el.blur();', 'el.scrollIntoView();', 'scrollTo(0, 0);', 'el.click();', 'form.submit();', 'form.requestSubmit();',
+    "el.dispatchEvent(new Event('change'));", 'fn.call(el);', "eval('x');",
+  ];
+  const free = [
+    'if (location === u) return null;', "const on = box.checked === true;", 'const picked = opt.selected == true;', 'const t = document.title;',
+    'const here = location.origin + location.pathname;', 'const text = el.textContent.trim();', 'if (el.hidden !== false) return null;',
+    "const url = new URL('/x', location.origin);", "params.append('page', '2');", 'const keep = (location) => location.origin;',
+    "const location = window.location.origin;", "const ok = el.innerText.length >= 3;",
+  ];
+  // each one put into a copy of a real injected function, the way a later edit would land
+  const host = stripComments(String(ADAPTERS[ADAPTERS.length - 1].probeInPage));
+  const at = host.indexOf('{') + 1;
+  assert.ok(!READ_ONLY.test(host), 'the host function itself only reads');
+  for (const line of caught) assert.ok(READ_ONLY.test(host.slice(0, at) + line + host.slice(at)), `the guard misses: ${line}`);
+  for (const line of free) assert.ok(!READ_ONLY.test(host.slice(0, at) + line + host.slice(at)), `the guard refuses read-only code: ${line}`);
+});
+
 test('the dealer-site scan reaches the dealer tab only through the neutral probe and each adapter\'s own read-only probe and search', () => {
   // the wizard, the popup and the post-time re-check all go through scanRunner.js
   const runner = read('../extension/src/scanRunner.js');
@@ -169,10 +222,6 @@ test('the dealer-site scan reaches the dealer tab only through the neutral probe
   const known = (runner.match(/func: (probeSiteInPage|adapter\.probeInPage|adapter\.searchInPage)\b/g) || []).length;
   assert.ok(injections === 3 && injections === known, `scanRunner.js may inject only the neutral probe and the adapters' probe and search (${injections} vs ${known})`);
   assert.ok(!/files:\s*\[|chrome\.debugger|tabs\.sendMessage/.test(runner), 'no other way into a page');
-  // word forms and indirect calls too: no click or submit by any name, no
-  // assignment into the page, no navigation, no call/apply/Reflect/eval
-  // that could reach one of those another way
-  const READ_ONLY = /\bclick\b|\bsubmit\b|requestSubmit|dispatchEvent|\.focus\b|\.value\s*[?|&+-]*=|\.innerHTML\s*=|\.setAttribute\(|\.insertAdjacentHTML|location\.(href|assign|replace)|\.call\(|\.apply\(|Reflect\.|new Function|\beval\b/;
   const page = read('../extension/src/scan.js');
   assert.ok(!READ_ONLY.test(page), 'scan.js must only read the page');
   assert.ok(ADAPTERS.length >= 1);
