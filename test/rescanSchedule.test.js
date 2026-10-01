@@ -52,6 +52,23 @@ test('the host permissions a site needs: its own origin plus what its adapter as
   assert.deepEqual(originsFor(null, []), []);
 });
 
+test('the host permissions a site needs never name one of Facebook\'s servers: such a site needs nothing Chrome can grant', () => {
+  const ANY = '/' + '*';
+  const FB = ['https://www.facebook.com', 'https://facebook.com', 'https://m.facebook.com', 'https://web.facebook.com', 'https://www.fb.com', 'https://scontent.xx.fbcdn.net', 'https://lookaside.fbsbx.com', 'https://connect.facebook.net', 'https://www.messenger.com', 'https://WWW.FACEBOOK.COM.'];
+  for (const fb of FB) {
+    // a site record on Facebook itself
+    assert.deepEqual(originsFor({ origin: fb }, []), [], fb);
+    assert.deepEqual(originsFor({ origin: fb, adapter: 'dealerInspire' }, { search: 'https://websites-search.api.carscommerce.inc/api/v1/listings/1' }), [], fb);
+    // a dealer website whose service (or adapter list) points at Facebook: nothing, not the dealer's half
+    assert.deepEqual(originsFor({ origin: 'https://www.dealer.test', adapter: 'dealerInspire' }, { search: fb + '/marketplace/api/1' }), [], fb);
+    assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, [fb + ANY]), [], fb);
+    assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, [fb + '/marketplace' + ANY]), [], fb);
+  }
+  assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, ['https://*.facebook.com' + ANY]), [], 'a wildcard over Facebook');
+  // look-alikes are other people's servers, not Facebook's
+  assert.deepEqual(originsFor({ origin: 'https://www.notfacebook.com' }, ['https://facebook.com.dealer.test' + ANY]), ['https://www.notfacebook.com' + ANY, 'https://facebook.com.dealer.test' + ANY]);
+});
+
 const ALL = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => r);
 
 test('scanWithSearch: records in, snapshot + diff + boilerplate + photo hosts out, and the site kept without service details', async () => {

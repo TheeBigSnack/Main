@@ -119,6 +119,10 @@ test('reading a car from the panel needs the website and its inventory service, 
   assert.deepEqual(siteReadOrigins('', di), []);
   // the adapter is found from the service when the entry does not name it
   assert.equal(siteReadOrigins('https://www.example-dealer.test', { service: di.service }).length, 2);
+  // never one of Facebook's servers, as the website or as its service: nothing to ask Chrome for
+  assert.deepEqual(siteReadOrigins('https://www.facebook.com', di), []);
+  assert.deepEqual(siteReadOrigins('https://www.example-dealer.test', { adapter: 'dealerInspire', service: { search: 'https://www.facebook.com/marketplace/x', apiKey: 'k' } }), []);
+  assert.deepEqual(siteReadOrigins('https://www.messenger.com', so), []);
 });
 
 test('which website patterns Chrome has not granted: by Chrome\'s own matching, so only the missing ones are asked for', () => {

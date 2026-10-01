@@ -50,6 +50,8 @@ test('permissionPattern: https://<host>/ with any path, no port, never http or F
   assert.equal(permissionPattern('https://www.facebook.com'), null);
   assert.equal(permissionPattern('https://facebook.com'), null);
   assert.equal(permissionPattern('https://static.xx.facebook.com'), null);
+  assert.equal(permissionPattern('https://www.messenger.com'), null, 'Messenger is Facebook\'s too');
+  assert.equal(isFacebookServer('https://www.messenger.com/t/1'), true);
   assert.equal(permissionPattern(''), null);
   assert.equal(permissionPattern('img.cdn.example'), null);
 });
