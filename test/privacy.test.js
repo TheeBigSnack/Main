@@ -271,4 +271,5 @@ test('every pilot reaches the retention line: its clock starts when the owner ma
   assert.match(pilot, /record the end in the database that day \(`supabase\/README\.md`, "A pilot ended early"\)/, 'PILOT.md records a stop or an early end');
   assert.match(pilot, /those records are the CSVs the owner collected and, for a dealership on accounts, its rows in the database/, 'the database rows are pilot records too');
   assert.match(read('../docs/launch-checklist.md'), /an early end recorded the day the notice comes/);
+  assert.match(read('../docs/production-setup.md'), /Prepares the three SQL statements of `supabase\/README\.md` step 5 for the pilot dealership \(the dealership, the manager's invite code, and its pilot row/, 'the production steps run the pilot row too');
 });

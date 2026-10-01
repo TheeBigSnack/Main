@@ -110,7 +110,7 @@ In the Supabase Dashboard, **Authentication**:
 
 ## Step 7. The first dealership and the end-to-end check [Claude, then the owner]
 
-1. **[Claude]** Prepares the two SQL statements of `supabase/README.md` step 5 for the pilot dealership; **[Owner]** runs them in the Dashboard's SQL editor and keeps the manager invite code for the manager.
+1. **[Claude]** Prepares the three SQL statements of `supabase/README.md` step 5 for the pilot dealership (the dealership, the manager's invite code, and its pilot row with the signed agreement's start date and length); **[Owner]** runs them in the Dashboard's SQL editor and keeps the manager invite code for the manager.
 2. **[Owner]** Signs in once in the manager view with a test address that belongs to no dealership; Claude says where to copy its access token from, and runs `check-deploy` with it (`LOTSYNC_TEST_TOKEN`). Done when no line reads `FAIL`.
 3. **[Owner]** On two computers, two test salespeople sign in and redeem invite codes; a car posted on one shows on the other after its next scan, and the manager view shows both. That is the launch checklist's "Supabase project live" and "The posted registry syncs".
 
