@@ -231,3 +231,29 @@ test('every guardrail code is either a posting rule (stops the fill) or a style 
   assert.deepEqual(ruleProblems(null), []);
   assert.deepEqual(ruleProblems({ ok: true, problems: [] }), []);
 });
+
+// The template copies the first sentences of the dealer's own write-up. One
+// that a posting rule stops (a banned phrase, a one-owner claim the Carfax
+// flag doesn't back) is left out, so the template never writes what its own
+// checks stop: a stop on the review screen comes from the person's edit.
+test('the write-up sentences the posting rules stop are left out of the template, the rest are used', () => {
+  const plain = { ...vehicle('usedNormal', { features: FEATURES.slice(0, 4) }), carfaxOneOwner: false }; // the flag is read from the raw record, so set on the normalised one
+  const cases = [
+    ['ONE OWNER, CLEAN TITLE! Priced to sell. Local trade with new tires and brakes.', ['ONE OWNER', 'CLEAN TITLE', 'Priced to sell'], 'Local trade with new tires and brakes.'],
+    ['1-owner vehicle with low miles. Local trade with new tires and brakes.', ['1-owner'], 'Local trade with new tires and brakes.'],
+    ['Selling my truck because I bought another. Local trade with new tires and brakes.', ['Selling my truck'], 'Local trade with new tires and brakes.'],
+  ];
+  for (const [story, gone, kept] of cases) {
+    const text = buildTemplateDescription({ ...ctx(plain), narrative: [story] });
+    for (const g of gone) assert.ok(!text.includes(g), `"${g}" is left out:\n${text}`);
+    assert.ok(text.includes(kept), `the rest of the write-up is used:\n${text}`);
+    assert.deepEqual(ruleProblems(runGuardrails(text, ctx(plain))), [], text);
+  }
+  // nothing usable left: no write-up sentence at all
+  const none = buildTemplateDescription({ ...ctx(plain), narrative: ['One owner! Must sell.'] });
+  assert.deepEqual(ruleProblems(runGuardrails(none, ctx(plain))), []);
+  assert.ok(!/must sell|one owner!/i.test(none));
+  // the Carfax flag set: a one-owner sentence is a fact the data backs, and is kept
+  const owned = { ...plain, carfaxOneOwner: true };
+  assert.match(buildTemplateDescription({ ...ctx(owned), narrative: ['1-owner vehicle with low miles.'] }), /1-owner vehicle with low miles\./);
+});

@@ -200,8 +200,9 @@ function stripClosing(text, line) {
   return String(text || '').replace(closingPattern(c), ' ');
 }
 
-function firstSentences(text, maxSentences, maxWords) {
-  const sentences = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean);
+// keep: which sentences may be used at all (the rest are skipped, not counted).
+function firstSentences(text, maxSentences, maxWords, keep = () => true) {
+  const sentences = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean).filter(keep);
   const out = [];
   for (const s of sentences.slice(0, maxSentences)) {
     if (wordCount([...out, s].join(' ')) > maxWords) break;
@@ -233,7 +234,8 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45) : '';
+  // the dealer's own write-up, less any sentence a posting rule stops (breaksRule): the template never writes what its own checks stop
+  const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45, (s) => !breaksRule(s, v)) : '';
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
@@ -293,6 +295,13 @@ function emojiCount(text) {
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/\s+/g, '\\s+') + '\\b', 'i')]);
+const ONE_OWNER_RE = /\b(one|1|single)[- ]owner\b/i;
+
+// A sentence that a posting rule would stop in any description: a banned
+// phrase, or a one-owner claim the Carfax one-owner flag doesn't back.
+function breaksRule(sentence, vehicle) {
+  return BANNED_RE.some(([, re]) => re.test(sentence)) || (ONE_OWNER_RE.test(sentence) && !vehicle.carfaxOneOwner);
+}
 
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
@@ -335,7 +344,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '',
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(t)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
   }
-  if (/\b(one|1|single)[- ]owner\b/i.test(t) && !vehicle.carfaxOneOwner) {
+  if (ONE_OWNER_RE.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
   const dealerName = String(dealer.name || '').trim();
