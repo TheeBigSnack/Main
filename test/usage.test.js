@@ -9,6 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { lastDefinition } from './migrations.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const sql = read('../supabase/migrations/0008_usage.sql');
@@ -30,11 +31,14 @@ const COLUMNS = [
   'last_synced_scan_at', 'rewrite_calls',
 ];
 
+// the function as the database runs it: its last definition (0008_usage.sql,
+// or a later migration that replaced it)
 const body = (() => {
-  const start = sql.indexOf('create or replace function public.usage_report(');
-  const end = sql.indexOf(`comment on function ${SIGNATURE} is `, start);
-  assert.ok(start >= 0 && end > start, '0008_usage.sql has no usage_report() with a comment after it');
-  return sql.slice(start, end);
+  const { file, sql: text } = lastDefinition('usage_report');
+  const start = text.indexOf('create or replace function public.usage_report(');
+  const end = text.indexOf(`comment on function ${SIGNATURE} is `, start);
+  assert.ok(start >= 0 && end > start, `${file} has no usage_report() with a comment after it`);
+  return text.slice(start, end);
 })();
 const returned = (() => {
   const m = body.match(/\nreturns table \(\n([^]*?)\n\)\n/);

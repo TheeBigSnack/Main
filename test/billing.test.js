@@ -13,6 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
+import { MIGRATIONS, migration } from './migrations.js';
 import {
   PRICING, STATUSES, STATES, HANDLED_EVENTS, MAX_SEATS, MIN_TRIAL_SECONDS,
   ms, subscriptionState, pilotAvailable, statusAnswer, SEAT_ROLE, seatCount,
@@ -711,9 +712,12 @@ test('0004_billing.sql: RLS on, members read, nobody but the service role writes
 });
 
 test('subscription_state(): its comment names who calls it, and no Edge Function does: they compute the same word in billing.mjs', () => {
-  const sql = read('../supabase/migrations/0004_billing.sql');
-  const head = sql.slice(sql.indexOf('-- subscription_state(dealership_id)'), sql.indexOf('create or replace function public.subscription_state'));
-  const comment = head.replace(/^-- ?/gm, '').replace(/\s+/g, ' ');
+  // 0004_billing.sql is applied in production and never edited, so the comment that says who calls the
+  // function is corrected in a later migration's header (supabase/README.md, step 2)
+  const later = MIGRATIONS.filter((f) => f > '0004').map(migration).join('\n');
+  const at = later.lastIndexOf('0004_billing.sql, subscription_state(dealership_id):');
+  assert.ok(at >= 0, 'a migration after 0004 corrects the comment on subscription_state()');
+  const comment = later.slice(at).split(/\n-- {3}\d{4}_|\n-- -{10}/)[0].replace(/^-- ?/gm, '').replace(/\s+/g, ' ');
   // a maintainer who changes the SQL rule must not believe /sync, /rewrite or billing follow it
   const callers = ['sync', 'rewrite', 'billing'].filter((fn) => /\.rpc\(\s*['"]subscription_state['"]/.test(read(`../supabase/functions/${fn}/index.ts`)));
   assert.deepEqual(callers, [], 'no Edge Function calls subscription_state()');

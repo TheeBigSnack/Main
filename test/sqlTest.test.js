@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { plan, FINGERPRINT, changed } from '../scripts/sql-test.mjs';
+import { lastDefinition } from './migrations.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
@@ -143,7 +144,7 @@ test('tests/concurrency.sql: invite codes one account sends together take turns 
     at = next;
   }
   // and the function takes the account's lock before it counts
-  const rls = read('../supabase/migrations/0002_rls.sql');
+  const { sql: rls } = lastDefinition('redeem_invite');
   const redeem = rls.slice(rls.indexOf('create or replace function public.redeem_invite'), rls.indexOf('comment on function public.redeem_invite'));
   const lock = redeem.indexOf("perform pg_advisory_xact_lock(hashtext('redeem_invite'), hashtext(uid::text));");
   assert.ok(lock > 0 && lock < redeem.indexOf('select count(*) into misses'), 'redeem_invite locks the account before counting its misses');

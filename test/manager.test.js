@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
+import { lastDefinition } from './migrations.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -619,7 +620,7 @@ test('inviteCard: a manager gets the two buttons in the SQL\'s two roles; a sale
   assert.equal(c.hint, INVITE_HINT);
   assert.match(c.hint, /open codes: not used yet and not expired/);
   assert.match(c.hint, /stops working when the manager who made it leaves the dealership or stops being a manager\./, 'the rule redeem_invite and the trigger enforce');
-  assert.match(read('supabase/migrations/0002_rls.sql'), /m\.user_id = inv\.created_by[\s\S]{0,160}m\.role = 'manager'/, 'redeem_invite refuses a code whose maker is no longer a manager, not only one who left');
+  assert.match(lastDefinition('redeem_invite').sql, /m\.user_id = inv\.created_by[\s\S]{0,160}m\.role = 'manager'/, 'redeem_invite refuses a code whose maker is no longer a manager, not only one who left');
   assert.match(read('supabase/migrations/0001_schema.sql'), new RegExp(`expires_at timestamptz not null default \\(now\\(\\) \\+ interval '${INVITE_DAYS} days'\\)`), 'INVITE_DAYS is the schema\'s');
   const invites = [{ code: 'ABCDEF012345', role: 'salesperson', created_at: NOW }];
   for (const role of ['salesperson', '', undefined, 'owner']) {

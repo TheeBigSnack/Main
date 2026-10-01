@@ -14,6 +14,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { MIGRATIONS, migration, lastDefinition } from './migrations.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const schema = read('../supabase/migrations/0001_schema.sql');
@@ -41,9 +43,12 @@ test('0001_schema.sql: every table gets RLS in 0002_rls.sql; listings carry the 
 });
 
 test('0002_rls.sql: redeem_invite folds both sides of the code; invites have no policy and no API privilege; every definer pins search_path', () => {
-  assert.match(rls, /where upper\(trim\(i\.code\)\) = upper\(trim\(redeem_invite\.code\)\)/);
-  assert.doesNotMatch(rls, /where i\.code = /, 'the stored code is never compared verbatim');
-  assert.match(rls, /where invites\.code = inv\.code;/, 'the used mark goes on the row that was found');
+  const { sql: redeemFile } = lastDefinition('redeem_invite');
+  for (const text of [rls, redeemFile]) {
+    assert.match(text, /where upper\(trim\(i\.code\)\) = upper\(trim\(redeem_invite\.code\)\)/);
+    assert.doesNotMatch(text, /where i\.code = /, 'the stored code is never compared verbatim');
+    assert.match(text, /where invites\.code = inv\.code;/, 'the used mark goes on the row that was found');
+  }
   assert.doesNotMatch(rls, /on public\.invites for/, 'no policy on invites: read only inside redeem_invite');
   assert.doesNotMatch(rls, /grant [^;]*on public\.invites to (anon|authenticated)/);
   const definers = (rls.match(/security definer/g) || []).length;
@@ -214,17 +219,61 @@ test('supabase/README.md names today, postsToday, plan, the 402 rule and the Bil
   assert.doesNotMatch(readme, /not wired in this step/, 'the card is wired now');
 });
 
-test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule, in-place migrations', () => {
+test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule, the migrations rule', () => {
   assert.match(readme, /a code works once and for 7 days/);
   assert.match(readme, /marks as taken down the caller's listed rows whose key is in `known` and missing from `posted` \(no time decides it/);
   assert.match(readme, /a request without `known` takes nothing down/);
   assert.match(readme, /the answer looks back 10 minutes before `since`/);
   assert.match(readme, /matches none of their dealerships gets 403/);
-  assert.match(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/);
+  assert.match(readme, /The production project has applied `0001` to `0008`, and `db push` never runs a file again once it has applied it, so those files are never edited, not even their comments/);
+  assert.doesNotMatch(readme, /Until the first project has applied them/, 'the in-place rule ended when production applied the files');
   // the pilot lists go up by the machine's own clock, never by the server's `since`
   assert.match(readme, /The pilot lists never meet `since`: their stamps are the machine's own clock/);
   assert.match(readme, /`localSince`, its own clock when its last successful sync began/);
   assert.doesNotMatch(readme, /a clock running far behind can keep an attempt or a flag from going up/);
+});
+
+// 0001 to 0008 are applied in the production project. `supabase db push` never runs an applied file again,
+// so an edit to one would reach a fresh build (and these tests) and never production. Each is held to the
+// SHA-256 of the text production applied; a change goes into a new numbered file instead.
+const APPLIED = {
+  '0001_schema.sql': 'a781dc0771958bacbe86448c3fe5ea1cd258583fe11a677a76955ff5bc3877d8',
+  '0002_rls.sql': '25c73dc346820f882563b2ccc91ca58f3cff46d97bffbdbc678bc72de67e47c7',
+  '0003_views.sql': 'e651faa63f595e94059b4b624c407570fc7c7c418fed11d7e139c8b5aa2d0ab2',
+  '0004_billing.sql': '6e7f0637e6d74dd4bfab20f7d8cca26279d1d9e1683427820512f219ec58dc36',
+  '0005_leads.sql': '3eed948aa5eebf1fa2746ff4c034d64132f017c1c42d45cbbc41fe5a5e93922f',
+  '0006_privacy.sql': '11e44419ea8da5127325f6a49813bf823f2f313779d76dbbf466afd6a39c37e4',
+  '0007_signup.sql': 'af23fca0fa04d4f292cfa9b86750d5515f48fb406b1e72203b7069ce4a58953e',
+  '0008_usage.sql': 'd71bfb982b354490f58603559ce5e7f3a13bb08d6dc8fce64fece757ae46e022',
+};
+
+test('the migrations production has applied are never edited; a change is a new numbered file after them', () => {
+  for (const [file, sha] of Object.entries(APPLIED)) {
+    assert.ok(MIGRATIONS.includes(file), `${file} is still there`);
+    const text = migration(file).replace(/\r\n/g, '\n');
+    assert.equal(createHash('sha256').update(text).digest('hex'), sha, `${file} was edited after production applied it: put the change in a new numbered file and restore it (git checkout 8a09dc1 -- supabase/migrations/${file})`);
+  }
+  const later = MIGRATIONS.filter((f) => !(f in APPLIED));
+  assert.ok(later.every((f) => f > '0008'), `a new file is numbered after the applied ones: ${later.join(', ')}`);
+  for (const f of later) {
+    const text = migration(f);
+    const code = text.replace(/--.*$/gm, '');
+    assert.doesNotMatch(text, /changed in place/i, `${f}: nothing applied is changed in place`);
+    assert.doesNotMatch(code, /^\s*create function /im, `${f}: a function is changed with create or replace`);
+    // a replaced function keeps its security settings only when they are written out again
+    const definers = (code.match(/security definer/g) || []).length;
+    assert.equal((code.match(/security definer\s*\n\s*set search_path = ''/g) || []).length, definers, `${f}: every security definer function pins search_path`);
+  }
+  // the functions 0010 replaces keep the language, security and search_path they were made with
+  for (const [name, file] of [['redeem_invite', '0002_rls.sql'], ['create_dealership', '0007_signup.sql'], ['usage_report', '0008_usage.sql']]) {
+    const header = (sql) => {
+      const start = sql.indexOf(`create or replace function public.${name}(`);
+      return sql.slice(start, sql.indexOf('as $$', start));
+    };
+    const latest = lastDefinition(name);
+    assert.notEqual(latest.file, file, `${name} is replaced by a later file`);
+    assert.equal(header(latest.sql), header(migration(file)), `${latest.file} changes ${name}()'s signature, language, security or search_path`);
+  }
 });
 
 test('supabase/README.md says how the webhook settles events from one second and two deliveries at once', () => {
@@ -240,7 +289,9 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   assert.match(schema, /create table public\.invite_misses/);
   assert.match(rls, /revoke all on public\.invite_misses from anon, authenticated, service_role;/);
   assert.match(rls, /alter table public\.invite_misses enable row level security;/);
-  const redeem = rls.slice(rls.indexOf('create or replace function public.redeem_invite'), rls.indexOf('comment on function public.redeem_invite'));
+  // the definition the database runs: the last migration that creates the function
+  const { sql: redeemFile } = lastDefinition('redeem_invite');
+  const redeem = redeemFile.slice(redeemFile.indexOf('create or replace function public.redeem_invite'), redeemFile.indexOf('comment on function public.redeem_invite'));
   assert.ok(redeem.indexOf('invite_misses') < redeem.indexOf('from public.invites'), 'the throttle runs before the code is looked up');
   // answered, not raised: a raise would roll back the delete of every account's old misses that runs first
   assert.match(redeem, /if misses >= 10 then\s+perform set_config\('response\.status', '400', true\);\s+return jsonb_build_object\('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text\);/);

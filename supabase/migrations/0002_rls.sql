@@ -191,11 +191,9 @@ create trigger memberships_keep_a_manager
 -- listings (the posted registry): every member sees the dealership's whole
 -- registry (that is the point of syncing: two salespeople see the same
 -- list, and a manager sees both). A salesperson inserts and updates only
--- rows that carry their own user_id, inside their own dealership. The policy
--- lets a manager update any row of the dealership (fixing a link, marking a
--- take-down after the salesperson left), but the manager view has no such
--- action yet: it lists a former member's listed cars for the manager to
--- chase. Only managers delete.
+-- rows that carry their own user_id, inside their own dealership. A manager
+-- updates any row of the dealership (fixing a link, marking a take-down
+-- after the salesperson left). Only managers delete.
 -- ---------------------------------------------------------------------------
 create policy "members read their dealership's listings"
   on public.listings for select to authenticated
@@ -220,11 +218,9 @@ create policy "managers delete listings of their dealership"
   using (public.is_manager(dealership_id));
 
 -- ---------------------------------------------------------------------------
--- post_attempts (time per post): the same shape as listings. Every member
--- reads all of the dealership's (the manager view's per-salesperson table
--- shows anyone signed in to the dealership each colleague's posts and
--- seconds per post; the privacy texts say so). A salesperson records only
--- their own attempts; a manager can correct any; only managers delete.
+-- post_attempts (time per post): the same shape as listings. A salesperson
+-- records only their own attempts; a manager sees and can correct all of the
+-- dealership's; only managers delete.
 -- ---------------------------------------------------------------------------
 create policy "members read their dealership's post attempts"
   on public.post_attempts for select to authenticated
@@ -278,10 +274,9 @@ create trigger post_attempts_keep_salesperson
 -- ---------------------------------------------------------------------------
 -- todo_items (sold cars to take down, prices to update): an item belongs to
 -- the dealership, not to a person (the listing with the same VIN says who
--- posted), so the policy lets any member add one or close one. Today only
--- the poster's own extension does either (its rescan flags the salesperson's
--- own listings, extension/src/pilot.js noteFlags), and the manager view has
--- no tick-off. Only managers delete.
+-- posted), so any member may add one or close one: the rescan that flags it
+-- may run on a colleague's machine, and a manager may tick it off. Only
+-- managers delete.
 -- ---------------------------------------------------------------------------
 create policy "members read their dealership's to-do items"
   on public.todo_items for select to authenticated
@@ -344,16 +339,9 @@ create policy "members read their dealership's rewrite usage"
 -- redeem_invite(code, display_name): the signed-in caller becomes a member of
 -- the invite's dealership with the invite's role, and the code is marked
 -- used. SECURITY DEFINER because the caller may read neither invites nor
--- insert into memberships. A code can raise a member's role, never lower
--- it: a salesperson who redeems a manager code becomes a manager (and may
--- take a new name), but a member whose role is already the code's or above
--- (a manager given a salesperson code meant for a new hire, say) changes
--- nothing. That caller is answered 'you are already a <role> of this
--- dealership; the code was not used' (P0012, status 400, answered like a
--- miss below but not counted as one), and the code stays unused for the
--- person it was made for. (Changed in place: no project has applied this
--- file yet.) Returns what the extension needs to store: the dealership's
--- id, name and website origin, and the role.
+-- insert into memberships. Rejoining an existing membership updates its role
+-- and name rather than failing. Returns what the extension needs to store:
+-- the dealership's id, name and website origin, and the role.
 -- The code is compared ignoring case and surrounding spaces on both sides:
 -- create_invite() stores upper-case codes and the extension sends upper
 -- case, but the first manager's code is typed by the owner in SQL
@@ -363,20 +351,15 @@ create policy "members read their dealership's rewrite usage"
 -- dealership gets one answer for all four, 'that invite code is not valid'
 -- with code P0002, so a guess learns nothing, not even that a code once
 -- existed. Every miss is counted in invite_misses, and after 10 misses
--- inside an hour the function answers 'too many attempts; try again in an
--- hour' (P0005) before it looks anything up. One account's calls take
--- turns at the throttle (a transaction lock per account, taken before the
--- count): calls sent together would otherwise each count before any of
--- them had written its miss, and every one of them would be looked up
--- (supabase/tests/concurrency.sql).
+-- inside an hour the function raises 'too many attempts; try again in an
+-- hour' (P0005) before it looks anything up.
 -- The miss is answered, not raised: PostgREST runs the call in one
 -- transaction and rolls it back on an error, which would take the row that
 -- counts the miss with it. So the function sets response.status to 400 and
 -- returns the { code, message, details, hint } object PostgREST builds for
 -- a raised error; on the wire, to the extension and to the manager page, a
 -- miss looks exactly like a raise, and the count survives. The throttle is
--- answered the same way: by then the call has dropped every account's
--- misses older than an hour, and a raise would bring them back.
+-- a plain raise because nothing has been written by then.
 -- Parameters are referenced as redeem_invite.code to avoid the PL/pgSQL
 -- name clash with the column of the same name.
 -- ---------------------------------------------------------------------------
@@ -396,19 +379,13 @@ begin
     raise exception 'not signed in' using errcode = '42501';
   end if;
 
-  -- the throttle, before anything is looked up, one call of this account at
-  -- a time: the lock is held until this call's transaction ends, so the
-  -- next call's count, a statement that starts after it gets the lock, sees
-  -- this call's miss. Misses older than an hour no longer count and are
-  -- dropped, everyone's, so an account that never tries again does not
-  -- keep its misses; a throttled call is answered, not raised, so that
-  -- delete is kept
-  perform pg_advisory_xact_lock(hashtext('redeem_invite'), hashtext(uid::text));
+  -- the throttle, before anything is looked up; misses older than an hour
+  -- no longer count and are dropped, everyone's, so an account that never
+  -- tries again does not keep its misses
   delete from public.invite_misses where invite_misses.at < now() - interval '1 hour';
   select count(*) into misses from public.invite_misses where invite_misses.user_id = uid;
   if misses >= 10 then
-    perform set_config('response.status', '400', true);
-    return jsonb_build_object('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text);
+    raise exception 'too many attempts; try again in an hour' using errcode = 'P0005';
   end if;
 
   -- both sides folded (changed in place: no project has applied this file yet)
@@ -427,15 +404,6 @@ begin
     insert into public.invite_misses (user_id) values (uid);
     perform set_config('response.status', '400', true);
     return jsonb_build_object('code', 'P0002', 'message', 'that invite code is not valid', 'details', null::text, 'hint', null::text);
-  end if;
-
-  -- already a member at the code's role or above: nothing changes, the
-  -- code stays unused, and no miss is counted (the code was a real one)
-  select * into member from public.memberships m
-  where m.user_id = uid and m.dealership_id = inv.dealership_id;
-  if found and (member.role = 'manager' or member.role = inv.role) then
-    perform set_config('response.status', '400', true);
-    return jsonb_build_object('code', 'P0012', 'message', format('you are already a %s of this dealership; the code was not used', member.role), 'details', null::text, 'hint', null::text);
   end if;
 
   insert into public.memberships as m (user_id, dealership_id, role, name)
@@ -459,7 +427,7 @@ begin
   );
 end;
 $$;
-comment on function public.redeem_invite(text, text) is 'Makes the signed-in caller a member of the invite''s dealership and marks the code used. The only way in through the API. One answer (P0002) for an unknown, used, expired or cancelled code; P0005 after 10 misses in an hour; P0012, with the code left unused, for a member whose role is already the code''s or above (a code never lowers a role).';
+comment on function public.redeem_invite(text, text) is 'Makes the signed-in caller a member of the invite''s dealership and marks the code used. The only way in through the API. One answer (P0002) for an unknown, used, expired or cancelled code; P0005 after 10 misses in an hour.';
 
 -- ---------------------------------------------------------------------------
 -- create_invite(dealership_id, role): a manager of that dealership gets a

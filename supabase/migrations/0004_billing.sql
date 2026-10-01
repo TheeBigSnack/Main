@@ -67,12 +67,9 @@ comment on table public.billing_events is 'Stripe webhook events, one row each (
 --           incomplete, incomplete_expired, paused)
 -- SECURITY INVOKER on purpose: the row is read under the caller's RLS, so a
 -- person who is not a member of that dealership gets 'none', the same as
--- for a dealership that does not exist, and learns nothing. Called here by
--- start_pilot() and by the owner's usage_report() (0008_usage.sql). No Edge
--- Function calls it: /sync, /rewrite and billing compute the same word in
--- TypeScript from the row they read, with subscriptionState() and planOf()
--- in functions/_shared/billing.mjs. A change to the rule goes into both;
--- supabase/tests/billing.sql and test/billing.test.js hold them to it.
+-- for a dealership that does not exist, and learns nothing. The function
+-- calls it with the service role and sees the truth. Kept equal to
+-- subscriptionState() in functions/_shared/billing.mjs.
 -- ---------------------------------------------------------------------------
 create or replace function public.subscription_state(dealership_id uuid)
 returns text
