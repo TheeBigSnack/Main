@@ -1146,6 +1146,11 @@ async function onPanelClick(ev) {
       }
       Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
       await ownRemove(Object.values(siteKeys(state.origin)));
+      // The synced profile is the person's, not this website's data: start
+      // again from it, as a popup opened on a website with no settings does,
+      // so the next Scan or Settings save puts it back instead of defaults.
+      state.settings = settingsFromProfile(await loadProfile(), { origin: state.origin });
+      state.settingsFromProfile = Boolean(state.settings);
       // forget the website for background rescans too, and take its count off the badge
       try {
         await updateKey(SITES_KEY, (sites) => {
