@@ -61,7 +61,8 @@ export function latestOf(...isos) {
  */
 export function originsFor(site, needs) {
   const out = new Set();
-  const add = (u) => { try { out.add(new URL(u).origin + '/*'); } catch (e) { /* skip */ } };
+  // the pattern's '/' + '*' is split so the guard test's comment stripper never sees a block-comment opener
+  const add = (u) => { try { out.add(new URL(u).origin + '/' + '*'); } catch (e) { /* skip */ } };
   if (site && site.origin) add(site.origin);
   let list = needs;
   if (list && !Array.isArray(list) && typeof list === 'object') {

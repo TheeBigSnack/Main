@@ -237,8 +237,9 @@ test('every file of the extension reaches a page only through the known injected
 });
 
 // The comment stripper above removes /* ... */ blocks; a "/*" inside a string
-// would swallow real code from the guarded text, so the guarded files may
-// not contain one outside a comment.
+// would swallow real code from the guarded text, so no file of the extension
+// (every one is walked above) may contain one outside a comment. A match
+// pattern is written origin + '/' + '*'.
 function blockOpenerInsideString(src) {
   // walk each line, tracking whether we are inside a quoted string
   const lines = src.split('\n');
@@ -261,14 +262,16 @@ function blockOpenerInsideString(src) {
   return 0;
 }
 
-test('the guarded files contain no block-comment opener inside a string', () => {
+test('no file of the extension contains a block-comment opener inside a string', () => {
   assert.equal(blockOpenerInsideString("const a = 'x'; /* fine */ const b = 1;"), 0);
   assert.equal(blockOpenerInsideString("const p = ORIGIN + '/*';"), 1);
-  const adapterFiles = readdirSync(new URL('../extension/adapters/', import.meta.url)).filter((f) => /\.js$/.test(f)).map((f) => '../extension/adapters/' + f);
-  for (const rel of ['../extension/facebook/fillForm.js', '../extension/sidepanel.js', '../extension/upkeep.js', '../extension/src/scanRunner.js', '../extension/src/scan.js', ...adapterFiles]) {
-    const raw = readFileSync(new URL(rel, import.meta.url), 'utf8');
+  assert.equal(blockOpenerInsideString("const p = ORIGIN + '/' + '*';"), 0);
+  const files = extensionFiles();
+  assert.ok(['wizard.js', 'src/rescanSchedule.js', 'sidepanel.js', 'facebook/fillForm.js', 'adapters/dealerInspire.js'].every((f) => files.includes(f)), 'every folder is walked');
+  for (const file of files) {
+    const raw = readFileSync(new URL('../extension/' + file, import.meta.url), 'utf8');
     const line = blockOpenerInsideString(raw);
-    assert.equal(line, 0, `${rel} line ${line} has a /* inside a string, which would blind the comment stripper`);
+    assert.equal(line, 0, `extension/${file} line ${line} has a /* inside a string, which would blind the comment stripper`);
   }
 });
 
