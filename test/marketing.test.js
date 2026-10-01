@@ -194,6 +194,7 @@ test('the demo script says what every Chrome permission prompt the extension rai
     'wizard.js { origins }': 'rescan',
     'popup.js { origins: rescanOrigins() }': 'rescan',
     'sidepanel.js { origins: patterns }': 'photos',
+    'sidepanel.js { origins }': 'rescan', // the website itself, when posting or rescanning from the side panel's list
     "sidepanel.js { origins: [NHTSA_ORIGIN + '/' + '*'] }": 'NHTSA',
   };
   const WORDS = { rescan: /automatic rescan/, photos: /download this car's photos/, NHTSA: /Check with NHTSA/ };

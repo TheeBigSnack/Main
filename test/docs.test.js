@@ -45,6 +45,9 @@ const LABELS = [
   'Make cover',
   'Untick all',
   'Your closing line (optional)',
+  'Rescan the website',
+  'Post the next',
+  'Allow reading',
 ];
 
 test('the four launch-kit files exist and are not stubs', () => {

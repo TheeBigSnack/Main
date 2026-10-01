@@ -171,13 +171,15 @@ function fnText(src, name) {
 
 test('the side panel asks Chrome for photo servers only from the click handler, first, and only for what neededPatterns names', () => {
   const src = stripComments(read('../extension/sidepanel.js'));
-  // the panel's two requests: the NHTSA decode (checkVinOnline) and the photo servers (askForPhotos)
+  // the panel's three requests: the NHTSA decode (checkVinOnline), the photo
+  // servers (askForPhotos) and the website itself (askForSite, test below)
   const requests = [...src.matchAll(/permissions\.request\(/g)].map((m) => m.index);
-  assert.equal(requests.length, 2, 'sidepanel.js makes exactly two permission requests');
+  assert.equal(requests.length, 3, 'sidepanel.js makes exactly three permission requests');
   const ask = fnText(src, 'askForPhotos');
   const vin = fnText(src, 'checkVinOnline');
   assert.equal((ask.match(/permissions\.request\(/g) || []).length, 1);
   assert.equal((vin.match(/permissions\.request\(/g) || []).length, 1);
+  assert.equal((fnText(src, 'askForSite').match(/permissions\.request\(/g) || []).length, 1);
   assert.match(vin, /permissions\.request\(\{ origins: \[NHTSA_ORIGIN \+ '\/' \+ '\*'\] \}\)/);
 
   // the photo request: the patterns come straight from neededPatterns, and nothing is awaited first
@@ -223,6 +225,62 @@ test('the side panel asks Chrome for photo servers only from the click handler, 
   }
   // the photo branches of the click handler come before anything the wizard or upkeep await
   assert.ok(click.indexOf('btn.dataset.allowPhotos') < click.indexOf('await handleWizardClick'), 'Allow photos asks before any other await');
+});
+
+// Posting from the side panel's own list reads the car straight from the
+// website, which needs the website permission automatic rescans use. Chrome
+// asks for it only during a click, so the ask comes first in each of the four
+// clicks that need it, and asks only for what siteReadOrigins names.
+test('the side panel asks Chrome for the website only from a click, first, and only for the patterns siteReadOrigins names', () => {
+  const src = stripComments(read('../extension/sidepanel.js'));
+  const ask = fnText(src, 'askForSite');
+  assert.match(ask, /^async function askForSite\(origins = siteMissing\(\)\)/, 'the default is what is missing of the website\'s patterns');
+  assert.match(src, /const siteNeeds = \(\) => siteReadOrigins\(state\.origin, state\.siteInfo\);/);
+  assert.match(src, /const siteMissing = \(\) => missingOrigins\(siteNeeds\(\), grantedOrigins\);/);
+  const before = ask.slice(0, ask.indexOf('await chrome.permissions.request('));
+  assert.ok(before.length > 0, 'askForSite awaits its request');
+  assert.doesNotMatch(before, /\bawait\b/, 'nothing is awaited before Chrome is asked');
+  assert.match(ask, /permissions\.request\(\{ origins \}\)/);
+
+  // called only as the first await of the four click actions
+  const callers = ['postFromList', 'queueFromList', 'rescanFromList', 'allowSiteAndRetry'];
+  const everywhere = (src.match(/\baskForSite\(/g) || []).length;
+  assert.equal(everywhere, callers.length + 1, 'askForSite is named only where it is defined and in the four click actions');
+  for (const name of callers) {
+    const body = fnText(src, name);
+    const at = body.indexOf('await askForSite(');
+    assert.ok(at > 0, `${name} asks for the website`);
+    assert.doesNotMatch(body.slice(0, at), /\bawait\b/, `${name} asks Chrome before it awaits anything`);
+  }
+  // allowSiteAndRetry asks for the patterns the blocked read named, or the website's own
+  assert.match(fnText(src, 'allowSiteAndRetry'), /state\.blockedOrigins[^\n]*: siteNeeds\(\)/);
+
+  // each action is reached from the click handler with nothing awaited on the
+  // way in the idle and blocked steps: the only awaits before the list's Post
+  // buttons are the photo prompt's own branch and the wizard's and upkeep's
+  // handlers, each behind its own step
+  const click = fnText(src, 'onClick');
+  const switchAt = click.indexOf('switch (btn.id)');
+  const postAt = click.indexOf('btn.dataset.postVin');
+  assert.ok(postAt > 0 && postAt < switchAt, 'the list\'s Post buttons are handled before the switch');
+  const awaitsBefore = [...click.slice(0, postAt).matchAll(/[^\n]*\bawait\b[^\n]*/g)].map((m) => m[0].trim());
+  assert.deepEqual(awaitsBefore, [
+    'const granted = await askForPhotos(photoList().filter((u) => patternCovers(pattern, u)), { again: true });',
+    "if (state.step === 'wizard' && (await handleWizardClick(btn.id, wizardCtx))) return undefined;",
+    "if (state.step === 'upkeep' && (await handleUpkeepClick(btn.id, upkeepCtx))) return undefined;",
+  ], 'nothing else is awaited before the list\'s actions');
+  assert.match(click, /if \(btn\.dataset\.allowPhotos !== undefined\) \{\n\s*const pattern = btn\.dataset\.allowPhotos;\n\s*const granted = await askForPhotos\([^\n]*\n\s*return afterAllowPhotos\(pattern, granted\);\n\s*\}/, 'the photo prompt\'s await is inside its own branch, which returns');
+  assert.match(click, /if \(btn\.dataset\.postVin !== undefined && state\.step === 'idle'\) return oneAtATime\(\(\) => postFromList\(btn\.dataset\.postVin\)\);/);
+  for (const [id, name, step] of [['panelQueue', 'queueFromList', 'idle'], ['allowSite', 'allowSiteAndRetry', 'blocked']]) {
+    assert.match(click, new RegExp(`case '${id}': return state\\.step === '${step}' \\? oneAtATime\\(\\(\\) => ${name}\\(\\)\\) : undefined;`), `${id} goes straight to ${name}`);
+  }
+  assert.match(click, /case 'panelRescan': return state\.step === 'idle' \? rescanFromList\(\) : undefined;/, 'panelRescan goes straight to rescanFromList (it has its own Rescanning… state)');
+  // oneAtATime calls the action before anything else, so Chrome's prompt is still inside the click
+  assert.match(fnText(src, 'oneAtATime'), /^function oneAtATime\(action\) \{\n\s*if \(listBusy\) return undefined;\n\s*listBusy = true;\n\s*return action\(\)\.finally\(/);
+  for (const name of callers) {
+    const uses = (src.match(new RegExp(`\\b${name}\\(`, 'g')) || []).length;
+    assert.equal(uses, 2, `${name} is called only from the click handler`);
+  }
 });
 
 // canAutoOpen, run as written with the rest of the panel replaced by stubs:
