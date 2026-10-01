@@ -127,11 +127,13 @@ Notes:
 
 ## The Numbers tab
 
-**Numbers** shows the numbers the pilot agreement lets Lot Current record, kept in this browser, per website:
+**Numbers** shows the pilot numbers Lot Current records, kept in this browser, per website:
 
 - how long each post took, from the click on **Post** to **It's posted, record it**, your review included;
 - which form fields Lot Current could not fill, by field name only;
 - how long sold cars and price changes stayed on your listings, from the scan that flagged them to the moment the change was seen or you ticked the item off.
+
+Each post attempt and each to-do item names the car (its VIN and name), each post attempt your name from Settings and, when it stopped, the reason; a price change keeps the website's old and new price.
 
 It never records buyers, messages, the description text or anything from your Facebook account beyond your own listings.
 

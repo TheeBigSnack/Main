@@ -699,7 +699,7 @@ const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
 // and with accounts the posts and the to-do items also sync (src/sync.js).
 function viewPilot() {
   const synced = accountsConfigured() ? ' While you are signed in, the posts and the to-do items also sync to your dealership\'s account for the manager view.' : '';
-  const lead = `<p class="lead">The numbers your dealership sees, kept in this browser per website: how long each post takes, which form fields Lot Current couldn't fill, and how long sold cars and price changes stayed on your listings.${synced} No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
+  const lead = `<p class="lead">The numbers your dealership sees, kept in this browser per website: how long each post takes, which form fields Lot Current couldn't fill, and how long sold cars and price changes stayed on your listings. Each record names the car (its VIN and name) and you (your name from Settings), and a price change keeps the website's old and new price.${synced} No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
   if (!hasPilotData(state.pilot)) return lead + empty('Nothing recorded yet. The numbers start with the first post through the side panel.');
   const s = summarizePilot(state.pilot, { labels: FIELD_LABELS });
   const stat = (k, v) => `<tr><td>${k}</td><td class="n">${v}</td></tr>`;

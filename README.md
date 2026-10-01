@@ -38,7 +38,7 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
-8. **Numbers** shows the numbers the pilot agreement lets Lot Current record, kept in this browser: how long each post took (from the click on Post to "It's posted", your review included), which form fields it couldn't fill, and how long sold cars and price changes stayed on your listings. **Download CSV** gives your manager the spreadsheet; **Copy summary** is for the weekly check-in. No customer data, nothing from Facebook beyond your own listings, and never the description text. `PILOT.md` defines each number.
+8. **Numbers** shows the pilot numbers Lot Current records, kept in this browser: how long each post took (from the click on Post to "It's posted", your review included), which form fields it couldn't fill, and how long sold cars and price changes stayed on your listings, each with the car's VIN and name, your name from Settings and, for a price change, the website's old and new price. **Download CSV** gives your manager the spreadsheet; **Copy summary** is for the weekly check-in. No customer data, nothing from Facebook beyond your own listings, and never the description text. `PILOT.md` defines each number.
 
 ### Several cars at once (the queue)
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 922 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 926 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
