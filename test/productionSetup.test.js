@@ -72,6 +72,21 @@ test('the manager view deploys from the default branch only, configured, tested,
   assert.match(manager, /pages deploy "\$RUNNER_TEMP\/manager"/, 'only the staged folder is uploaded');
 });
 
+test('every manager view run ends with the hosting check; "check only" skips everything that deploys', () => {
+  const steps = manager.split(/\n      - /);
+  const last = steps.at(-1);
+  assert.match(last, /^name: Check the hosted page and the DNS records\n\s+if: steps\.ready\.outputs\.go == 'true' \|\| env\.CHECK_ONLY == 'true'\n/, 'it runs on check-only runs too, even before Cloudflare is set up');
+  assert.match(last, /if \[ "\$DEPLOYED" = true \]; then\n\s+pages=/, 'the pages.dev address is checked only once there is a deploy to check');
+  assert.match(last, /node scripts\/check-hosting\.mjs "\$\{pages\[@\]\}"/);
+  assert.match(last, /--sender "\$SENDER_DOMAIN"/);
+  assert.match(last, /exit "\$status"/, 'a failed check fails the run');
+  for (const s of steps.filter((x) => /set-project\.mjs --check|node --test|rsync|pages deploy/.test(x))) {
+    assert.match(s, /if: steps\.ready\.outputs\.go == 'true' && env\.CHECK_ONLY != 'true'\n/, s.split('\n')[0]);
+  }
+  assert.match(manager, /CHECK_ONLY: \$\{\{ inputs\.check_only == true \}\}/);
+  assert.match(manager, /test\/checkHosting\.test\.js/);
+});
+
 test('docs/production-setup.md names every piece it relies on, and says the secret values never go in chat or git', () => {
   const doc = read('docs/production-setup.md');
   for (const p of ['scripts/set-project.mjs', '.github/workflows/supabase.yml', '.github/workflows/manager.yml', 'manager/_headers', 'npm run set-project', 'SUPABASE_ACCESS_TOKEN', 'SUPABASE_DB_PASSWORD', 'SUPABASE_PROJECT_REF', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID']) {
@@ -85,4 +100,6 @@ test('docs/production-setup.md names every piece it relies on, and says the secr
   assert.doesNotMatch(doc, /repository secret[s]?:/i, 'no secret goes in the repository-wide list');
   assert.match(manager, /environment:\n\s+name: manager-view/);
   assert.match(read('package.json'), /"set-project": "node scripts\/set-project\.mjs"/);
+  assert.match(read('package.json'), /"check-hosting": "node scripts\/check-hosting\.mjs"/);
+  for (const s of ['npm run check-hosting', 'MANAGER_URL', 'SENDER_DOMAIN', 'scripts/check-hosting.mjs']) assert.ok(doc.includes(s), s);
 });

@@ -79,26 +79,34 @@ In the Supabase Dashboard, **Authentication**:
 ## Step 5. The sign-in email sender [Owner]
 
 1. Sign up at resend.com (Free plan).
-2. **Domains, Add domain**: `mail.lotcurrent.com`. A subdomain keeps sign-in mail separate from your own mailbox's reputation and leaves the GoDaddy mailbox's records untouched.
-3. Resend shows a short list of DNS records (an MX and a TXT for sending, a TXT for DKIM). Add each one in GoDaddy (**My Products, lotcurrent.com, DNS, Add new record**) exactly as shown, then press **Verify** in Resend. It can take from minutes to a few hours.
+2. **Domains, Add domain**: `mail.lotcurrent.com`. If it asks for a region, pick **North Virginia (us-east-1)**, next to the Supabase project. A subdomain keeps sign-in mail separate from your own mailbox's reputation and leaves the GoDaddy mailbox's records untouched.
+3. Resend lists the DNS records to add. In GoDaddy (**My Products, lotcurrent.com, DNS, Add new record**) add each one, typing in GoDaddy's **Name** box only the part before `.lotcurrent.com` (GoDaddy adds the domain itself). For `mail.lotcurrent.com` that is, per Resend's GoDaddy guide (checked 2026-10-01):
+
+   | Type | Name | Value | Priority |
+   |---|---|---|---|
+   | MX | `send.mail` | copied from Resend (like `feedback-smtp.us-east-1.amazonses.com`) | 10 |
+   | TXT | `send.mail` | copied from Resend (like `v=spf1 include:amazonses.com ~all`) | |
+   | TXT | `resend._domainkey.mail` | copied from Resend (a long value starting `p=`) | |
+
+   No DMARC record is needed: lotcurrent.com already has one (`_dmarc`, `p=quarantine` with relaxed alignment, seen 2026-10-01), and it covers `mail.lotcurrent.com`, whose Resend mail passes it once the three records above are in. Leave it as it is. Then press **Verify** in Resend. It can take from minutes to a few hours.
 4. In the domain's settings, make sure **click tracking** and **open tracking** are off: tracking rewrites the sign-in link and breaks it.
 5. **API Keys, Create API key**: name `supabase-smtp`, permission **Sending access**, domain `mail.lotcurrent.com`. Copy it.
 6. In Supabase, **Authentication, Emails, SMTP Settings**, turn on custom SMTP:
    - Sender email `sign-in@mail.lotcurrent.com`, sender name `Lot Current`
-   - Host `smtp.resend.com`, port `465`, username `resend`, password = the API key from 5
-
-   (These are Resend's SMTP values as last known; Resend's SMTP page shows the current ones next to your key.)
-7. Test: sign in from the manager view with two addresses at two different mail services (say Gmail and Outlook). Each email should arrive in the inbox, not spam, with the six-digit code and the link.
+   - Host `smtp.resend.com`, port `465`, username `resend`, password = the API key from 5 (Resend's SMTP page, checked 2026-10-01)
+7. In GitHub, on the `manager-view` environment of step 6 (create it now if step 6 isn't done yet), add the **Environment variable** `SENDER_DOMAIN` = `mail.lotcurrent.com`. **[Claude]** then runs the **Manager view** workflow with **Check only** (from the default branch, once this setup is merged), which runs `npm run check-hosting` and says which of the records above it can see.
+8. Test: sign in from the manager view with two addresses at two different mail services (say Gmail and Outlook). Each email should arrive in the inbox, not spam, with the six-digit code and the link.
 
 ## Step 6. The manager view at app.lotcurrent.com [Owner, then Claude]
 
 1. **[Owner]** Sign up at cloudflare.com (Free plan). You don't need to move lotcurrent.com's DNS to Cloudflare.
 2. **[Owner]** Your profile, **API Tokens, Create Token, Create Custom Token**: name `github-manager-deploy`, permission **Account, Cloudflare Pages, Edit**, your account only. Copy it. Also copy the **Account ID** (on the account's home page, right-hand column, or Workers & Pages overview).
 3. **[Owner]** In GitHub, **Settings, Environments, New environment** `manager-view`, deployment branches: the default branch only; its environment secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-4. **[Claude]** Run the **Manager view** workflow (`.github/workflows/manager.yml`). It refuses to upload a page that isn't set to the production project (`npm run set-project -- --check`), runs the page's tests, creates the Cloudflare project `lotcurrent-app` on the first run and uploads `manager/` without the local demo server. It also runs by itself when a change to the page reaches the default branch. Before the Cloudflare secrets exist it says so and stops without failing.
+4. **[Claude]** Run the **Manager view** workflow (`.github/workflows/manager.yml`). It refuses to upload a page that isn't set to the production project (`npm run set-project -- --check`), runs the page's tests, creates the Cloudflare project `lotcurrent-app` on the first run, uploads `manager/` without the local demo server, and ends by checking `https://lotcurrent-app.pages.dev/` from the outside (`npm run check-hosting`: the page, its security headers, the committed project in its `config.js`). It also runs by itself when a change to the page reaches the default branch. Before the Cloudflare secrets exist it says so and stops without failing.
 5. **[Owner]** In Cloudflare, **Workers & Pages, lotcurrent-app, Custom domains, Set up a custom domain**: `app.lotcurrent.com`. Do this **before** the DNS record: Cloudflare's docs say a CNAME added first will not resolve.
 6. **[Owner]** In GoDaddy DNS, add **CNAME**, name `app`, value the `.pages.dev` address Cloudflare shows for the project (usually `lotcurrent-app.pages.dev`).
-7. **[Claude]** Check `https://app.lotcurrent.com/` loads, sends its security headers (`manager/_headers`) and that a sign-in link lands back on it.
+7. **[Owner]** On the `manager-view` environment add the **Environment variable** `MANAGER_URL` = `https://app.lotcurrent.com/`.
+8. **[Claude]** Runs the workflow with **Check only**: `https://app.lotcurrent.com/` loads with its security headers (`manager/_headers`) and its CNAME points at `lotcurrent-app.pages.dev`. Every later deploy checks it too. Then a sign-in link should land back on it (step 7 below).
 
 ## Step 7. The first dealership and the end-to-end check [Claude, then the owner]
 
@@ -116,5 +124,6 @@ In the Supabase Dashboard, **Authentication**:
 | `.github/workflows/supabase.yml` | The by-hand database and functions deploy, ending in `check-deploy` |
 | `.github/workflows/manager.yml` | The manager view's deploy to Cloudflare Pages |
 | `manager/_headers` | The manager view's security headers on Cloudflare (the page's own policy plus "no site may frame this page") |
+| `scripts/check-hosting.mjs` (`npm run check-hosting`) | The outside check for the hosted manager view (address, headers, project, CNAME) and the sender's DNS records; the Manager view workflow runs it after every deploy, and on its own with **Check only** |
 | `scripts/check-deploy.mjs` | The outside check; tells publishable, anon and secret keys apart and fails if a secret key is in a file browsers read |
 | `supabase/functions/_shared/auth.ts` | The functions prefer the new publishable and secret keys and fall back to the legacy ones |
