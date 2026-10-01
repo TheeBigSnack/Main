@@ -56,7 +56,7 @@ Chrome keeps this area in the person's Chrome profile and, when Chrome sync is o
 
 | Key | Fields | Why | Who can read it | Written; removed | Recipient |
 |---|---|---|---|---|---|
-| `profile` | Salesperson name, role and closing line; dealership name, city, state, ZIP; the stores ticked; price basis; price note; daily cap; listing defaults; the rewrite service on or off and its address (never its key); the Terms acceptance; the website it was saved on and when | The person's details follow them to another computer | The person and the extension on each computer where they are signed in to Chrome; Google, which runs Chrome sync | Saving Settings or finishing set-up; **Forget my synced profile** (Settings), or clearing Chrome's sync data; saving Settings again re-creates it; **Clear everything for this website** leaves it | Google |
+| `profile` | Salesperson name, role and closing line; dealership name, city, state, ZIP; the stores ticked; price basis; price note; daily cap; listing defaults; the rewrite service on or off and its address (never its key); the Terms acceptance; the website it was saved on and when | The person's details follow them to another computer | The person and the extension on each computer where they are signed in to Chrome; Google, which runs Chrome sync | Saving Settings or finishing set-up; **Forget my synced profile** (Settings), or clearing Chrome's sync data; only saving Settings or finishing set-up re-creates it (a scan or a sign-in does not); **Clear everything for this website** leaves it | Google |
 
 ### Files and the clipboard
 

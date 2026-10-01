@@ -265,4 +265,4 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 ## How to forget the synced profile
 
-**Settings**, **Saved data**, **Forget my synced profile**. It removes the profile from Chrome's sync storage. The settings on this computer stay as they are; saving them again re-creates the profile. Clearing your Chrome sync data removes it too. Do this before removing the extension if you want nothing left behind.
+**Settings**, **Saved data**, **Forget my synced profile**. It removes the profile from Chrome's sync storage. The settings on this computer stay as they are. Only saving Settings or finishing set-up re-creates the profile; a scan or a sign-in does not. Clearing your Chrome sync data removes it too. Do this before removing the extension if you want nothing left behind.

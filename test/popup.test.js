@@ -193,7 +193,8 @@ test('saving Settings or signing in before the website\'s first scan leaves the 
     const saved = p.local[k.settings];
     assert.ok(saved, `${how}: settings were saved`);
     assert.notEqual(saved.dealer.name, host, `${how}: the website's address is not stored as the dealership's name`);
-    assert.notEqual(p.sync[PROFILE_KEY].dealer.name, host, `${how}: nor carried in the synced profile`);
+    assert.notEqual(p.sync[PROFILE_KEY]?.dealer.name, host, `${how}: nor carried in the synced profile`);
+    const profile = structuredClone(p.sync[PROFILE_KEY]); // Save settings writes it; a sign-in does not
     await p.scan();
     assert.equal(p.status(), '', `${how}: the scan went through`);
     const s = p.local[k.settings];
@@ -201,7 +202,7 @@ test('saving Settings or signing in before the website\'s first scan leaves the 
     assert.deepEqual(s.myStores, [STORE], `${how}: and ticks the website's own store`);
     const ready = Object.values(p.local[k.snapshot].vehicles).filter((v) => v.decision === 'ready');
     assert.ok(ready.length && ready.every((v) => v.location === STORE), `${how}: only this store's cars are ready to post`);
-    assert.equal(p.sync[PROFILE_KEY].dealer.name, STORE, `${how}: the profile is saved again with the name`);
+    assert.deepEqual(p.sync[PROFILE_KEY], profile, `${how}: the scan leaves the synced profile as the person saved it (on this website the scan fills the name in)`);
   }
   // Settings an earlier build saved that way (the address as the name, no
   // store) are put right by the website's first scan too.
@@ -297,4 +298,57 @@ test('on a Facebook tab or a new tab Settings has no Save, and nothing writes th
     assert.deepEqual(p.sync[PROFILE_KEY], PROFILE, `${tabUrl}: the synced profile is untouched`);
     assert.match(p.status(), /Open your dealership's website/);
   }
+});
+
+// "Forget my synced profile" says only saving Settings (or finishing set-up)
+// brings the profile back, and so does the privacy policy: a scan, the
+// automatic-rescan permission or a sign-in must not put it back in Chrome sync.
+test('after Forget my synced profile, a Rescan, Allow automatic rescans or a sign-in leaves it forgotten; only Save settings re-creates it', async () => {
+  const settings = { ...structuredClone(PROFILE), ...MY_STORE };
+  const p = await loadPopup({ local: { [k.settings]: settings }, sync: { [PROFILE_KEY]: structuredClone(PROFILE) }, granted: false });
+  await p.scan();
+  assert.equal(p.status(), '', 'the scan went through');
+  await p.click('forgetProfile');
+  assert.match(p.status(), /^Your synced profile was removed from Chrome's sync storage\. The settings on this computer are unchanged; only saving Settings or finishing set-up re-creates the profile\.$/);
+  assert.equal(p.sync[PROFILE_KEY], undefined);
+
+  await p.scan();
+  assert.equal(p.status(), '', 'the rescan went through');
+  assert.equal(p.sync[PROFILE_KEY], undefined, 'a rescan does not re-create it');
+
+  globalThis.chrome.permissions.request = async () => true;
+  await p.click('allowRescans');
+  assert.match(p.status(), /Automatic rescans are on/);
+  assert.equal(p.local[k.settings].autoRescan, true, 'the setting was saved for this website');
+  assert.equal(p.sync[PROFILE_KEY], undefined, 'allowing rescans does not re-create it');
+
+  // a sign-in points the rewrite address at the account and saves the website's settings
+  const boxes = { accountEmail: 'sam@example.test', accountCode: '123456' };
+  const query = globalThis.document.querySelector;
+  const fetchBefore = globalThis.fetch;
+  globalThis.document.querySelector = (sel) => { const m = /\[name="(\w+)"\]/.exec(sel); return m && m[1] in boxes ? { value: boxes[m[1]] } : null; };
+  globalThis.fetch = async (url) => (String(url).endsWith('/auth/v1/verify')
+    ? { ok: true, status: 200, json: async () => ({ access_token: 'a.e30.c', refresh_token: 'r', expires_in: 3600, user: { id: 'u1', email: boxes.accountEmail } }) }
+    : { ok: false, status: 404, json: async () => ({}) });
+  try {
+    await p.click('accountSignIn');
+  } finally {
+    globalThis.document.querySelector = query;
+    globalThis.fetch = fetchBefore;
+  }
+  assert.match(p.status(), /Synced|Sync failed|Signed in/, 'the sign-in went through');
+  assert.equal(p.sync[PROFILE_KEY], undefined, 'a sign-in does not re-create it');
+
+  // Save settings does, as the status line and the privacy policy say
+  await p.tab('settings');
+  const values = { salespersonName: 'Sam', salespersonTitle: 'sales manager', dailyCap: '5' };
+  const before = globalThis.FormData;
+  globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll() { return []; } has(name) { return name in values; } };
+  try {
+    await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: () => null }, preventDefault() {} });
+  } finally {
+    globalThis.FormData = before;
+  }
+  assert.equal(p.sync[PROFILE_KEY].salesperson.name, 'Sam');
+  assert.equal(p.sync[PROFILE_KEY].origin, POPUP_ORIGIN);
 });

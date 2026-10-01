@@ -481,3 +481,19 @@ test('every text that describes the background rescan says it also syncs with th
     assert.doesNotMatch(read(rel), /only reads the website/, `${rel} says the background job only reads the website`);
   }
 });
+
+// Only Save settings (the popup's onSettingsSubmit) and finishing set-up
+// (wizard.js) write the synced profile; a scan, the rescan permission or a
+// sign-in never puts back a profile the person forgot. Every text that says
+// what re-creates it says exactly that.
+test('every text that says what re-creates the forgotten profile names only Save settings and finishing set-up', () => {
+  const popup = read('../extension/popup.js');
+  assert.equal((popup.match(/await saveProfile\(/g) || []).length, 1, 'popup.js writes the profile from more than one place: these texts must say what else re-creates it');
+  assert.match(popup.slice(popup.indexOf('async function onSettingsSubmit(')), /^[^]*?await saveProfile\(/, 'the popup writes the profile outside Save settings');
+  assert.equal((read('../extension/wizard.js').match(/await saveProfile\(/g) || []).length, 1, 'set-up writes the profile from more than one place');
+  for (const rel of ['../legal/privacy-policy.md', '../docs/help.md', '../docs/data-inventory.md', '../extension/popup.js']) {
+    const sentences = read(rel).split(/(?<=\.)\s+|\n/).filter((t) => /re-creates?/.test(t));
+    assert.ok(sentences.length, `${rel} no longer says what re-creates the profile`);
+    for (const t of sentences) assert.match(t, /only saving Settings or finishing set-up re-creates/i, `${rel}: "${t.trim().slice(0, 120)}" does not say only Save settings and finishing set-up re-create the profile`);
+  }
+});

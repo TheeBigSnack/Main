@@ -164,7 +164,10 @@ async function setSiteAuto(auto) {
 
 // Writes what the popup holds for these fields. False when the write failed
 // (the status says why; the values stay on screen until the popup closes).
-// Every key belongs to a website, so with none open nothing is written.
+// Every key belongs to a website, so with none open nothing is written. The
+// synced profile is not written here: only Save settings (onSettingsSubmit)
+// and finishing set-up write it, so "Forget my synced profile" holds until
+// the person saves again, as the popup and the privacy policy say.
 const NO_SITE_TEXT = "Open your dealership's website in this tab first: settings are kept for each dealership website.";
 async function save(...names) {
   if (!state.origin) {
@@ -180,7 +183,6 @@ async function save(...names) {
     setStatus(storageErrorText(e), 'error');
     return false;
   }
-  if (names.includes('settings') && state.settings) await saveProfile(state.settings, undefined, state.origin);
   if (names.includes('diff') || names.includes('posted')) chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   return true;
 }
@@ -1216,7 +1218,7 @@ async function onPanelClick(ev) {
     case 'forgetProfile':
       try {
         await chrome.storage.sync.remove(PROFILE_KEY);
-        setStatus('Your synced profile was removed from Chrome\'s sync storage. The settings on this computer are unchanged; saving them again re-creates the profile.');
+        setStatus('Your synced profile was removed from Chrome\'s sync storage. The settings on this computer are unchanged; only saving Settings or finishing set-up re-creates the profile.');
       } catch (e) {
         setStatus("Couldn't reach Chrome's sync storage: " + ((e && e.message) || e), 'error');
       }
@@ -1474,6 +1476,7 @@ async function onSettingsSubmit(ev) {
     message = 'Saved, but automatic rescans need one scan of this website first.';
   }
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
+  await saveProfile(state.settings, undefined, state.origin); // the person's explicit save is what (re)creates the synced profile
   await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');
   if (note) note.textContent = message;
