@@ -627,7 +627,9 @@ export function probeFormInPage(map) {
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
-    typeahead: TEXT_INPUTS + ', [role="textbox"]',
+    // the same controls the fill looks at (fillFormInPage): a dropdown or an
+    // editable box in a typeahead's place is found and filled, so it is found here too
+    typeahead: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
     choice: CHOICES,
     either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
     checkbox: 'input[type="checkbox"], [role="checkbox"], [role="switch"]',

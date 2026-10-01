@@ -107,6 +107,30 @@ function bodyOf(src, name) {
   return '';
 }
 
+// The first-run dry run (probeFormInPage) reports which fields the fill
+// would find, so a maintainer fixes a name pattern only when it is wrong. It
+// must look at the same controls for each kind of field as the fill
+// (fillFormInPage): Make, Model and Location drawn as a dropdown or an
+// editable box are filled, and the dry run must not list them as Not found.
+// Each injected function keeps its own copy (they run self-contained in the
+// page), so the two tables are compared here.
+test('the dry run looks for each kind of field with the same controls the fill does', () => {
+  const src = read('../extension/facebook/fillForm.js');
+  const table = (fn) => {
+    const body = src.slice(src.indexOf(`function ${fn}(`));
+    const start = body.indexOf('const TEXT_INPUTS');
+    const end = body.indexOf('};', body.indexOf('const KIND_SELECTORS')) + 2;
+    assert.ok(start >= 0 && end > start, `${fn} has its selector table`);
+    return new Function(`${body.slice(start, end)}\nreturn KIND_SELECTORS;`)();
+  };
+  const fill = table('fillFormInPage');
+  const probe = table('probeFormInPage');
+  assert.deepEqual(probe, fill);
+  for (const kind of new Set(FORM_MAP.fields.map((f) => f.kind))) assert.ok(fill[kind], `the fill has controls for ${kind} fields`);
+  assert.match(probe.typeahead, /\[role="combobox"\]/, 'a dropdown in a typeahead\'s place is found');
+  assert.match(probe.typeahead, /\[contenteditable="true"\]/, 'so is an editable box');
+});
+
 // What these source checks prove: the usual ways to click, submit or inject
 // in ordinary code are caught. Code written to hide a click from them (a
 // method name built from pieces, say) is for code review; the e2e mock form
