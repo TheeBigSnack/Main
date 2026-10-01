@@ -108,9 +108,12 @@ export function profileFrom(settings, origin = '') {
 export function settingsFromProfile(profile, site = {}) {
   if (!profile || typeof profile !== 'object') return null;
   // The website the profile was saved from decides, never the editable dealer
-  // name. A profile saved before that was recorded (0.4.0) is kept whole, as
-  // before, until it is saved again.
-  const sameDealer = !profile.origin || !site.origin || profile.origin === site.origin;
+  // name. A profile saved before that was recorded (0.4.0: no `origin` key at
+  // all) is kept whole, as before, until it is saved again. One that records
+  // no website (origin '': saved from a tab that was not a dealer's website,
+  // before saveProfile refused that) belongs to no dealership.
+  const legacy = !Object.prototype.hasOwnProperty.call(profile, 'origin');
+  const sameDealer = legacy || !site.origin || (Boolean(profile.origin) && profile.origin === site.origin);
   const person = { salesperson: profile.salesperson, defaults: profile.defaults, legal: profile.legal, rewrite: { ...(profile.rewrite || {}), key: '' } };
   return withDefaults(sameDealer ? { ...profile, ...person } : person, site);
 }
@@ -154,7 +157,11 @@ export async function loadProfile(storage) {
   }
 }
 
+// Saved only with the website the settings belong to: a profile with none
+// would carry one dealership's name, address, price note and cap to every
+// other dealer's website (settingsFromProfile).
 export async function saveProfile(settings, storage, origin = '') {
+  if (!origin) return false;
   try {
     const area = storage || chrome.storage.sync;
     await area.set({ [PROFILE_KEY]: profileFrom(settings, origin) });

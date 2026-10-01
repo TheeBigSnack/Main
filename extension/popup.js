@@ -164,7 +164,13 @@ async function setSiteAuto(auto) {
 
 // Writes what the popup holds for these fields. False when the write failed
 // (the status says why; the values stay on screen until the popup closes).
+// Every key belongs to a website, so with none open nothing is written.
+const NO_SITE_TEXT = "Open your dealership's website in this tab first: settings are kept for each dealership website.";
 async function save(...names) {
+  if (!state.origin) {
+    setStatus(NO_SITE_TEXT, 'error');
+    return false;
+  }
   const k = siteKeys(state.origin);
   const out = {};
   for (const name of names) out[k[name]] = state[name];
@@ -798,7 +804,36 @@ function accountFieldset() {
   </fieldset>`;
 }
 
+// What Settings keeps beside the form: the synced profile, and the problem report.
+const PROFILE_HINT = "Your profile (name, role, closing line, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.";
+const forgetProfileHtml = () => `<p class="hint">${PROFILE_HINT}</p>
+      <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>`;
+const reportProblemHtml = () => `<fieldset><legend>Report a problem</legend>
+      <p class="hint">Copies a short technical report to paste into your message to support: the versions, this website and its platform, the last scan and its error, the tab counts, which form fields the last fill couldn't do, your Chrome version and time zone. No names, no cars, no listing links.</p>
+      <button type="button" class="small" data-action="reportProblem">Copy problem report</button>
+    </fieldset>`;
+const versionHtml = () => {
+  const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
+  return `<p class="hint" id="version">Lot Current ${esc(version)} · form map ${esc(FORM_MAP.version)}</p>`;
+};
+
+// Settings belong to a dealership's website: with none open in this tab (a
+// Facebook page, a new tab) there is nothing to show or save, only the
+// account, the synced profile and the problem report.
+function viewSettingsWithoutSite() {
+  return `<form id="settings" class="settings">
+    ${versionHtml()}
+    <div class="banner info" id="settingsNeedSite">Settings are kept for each dealership website. Open your dealership's website in this tab to see or change them.</div>
+    ${accountFieldset()}
+    <fieldset><legend>Saved data</legend>
+      ${forgetProfileHtml()}
+    </fieldset>
+    ${reportProblemHtml()}
+  </form>`;
+}
+
 function viewSettings() {
+  if (!state.origin) return viewSettingsWithoutSite();
   const entries = Object.values(state.snapshot?.vehicles || {});
   const locations = [...new Set(entries.map((e) => e.location).filter(Boolean))].sort();
   const s = withDefaults(state.settings || {}, knownSite());
@@ -813,9 +848,8 @@ function viewSettings() {
   const feeNote = example
     ? `<p class="hint">On this website the main price is usually ${money(fee.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>`
     : '';
-  const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
   return `<form id="settings" class="settings">
-    <p class="hint" id="version">Lot Current ${esc(version)} · form map ${esc(FORM_MAP.version)}</p>
+    ${versionHtml()}
     <fieldset><legend>You</legend>
       ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name"')}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
@@ -895,13 +929,9 @@ function viewSettings() {
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
       <p class="hint">Scans and your posted list are kept in this browser, separately for each website. When you are signed in, your posted list, post timings, to-do items and scan counts also sync to your dealership's account. Clearing this website does not remove them there: while you are signed in, the next sync brings your posted list and its open to-do items back.</p>
       <button type="button" class="danger" data-action="clear">Clear everything for this website</button>
-      <p class="hint">Your profile (name, role, closing line, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
-      <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>
+      ${forgetProfileHtml()}
     </fieldset>
-    <fieldset><legend>Report a problem</legend>
-      <p class="hint">Copies a short technical report to paste into your message to support: the versions, this website and its platform, the last scan and its error, the tab counts, which form fields the last fill couldn't do, your Chrome version and time zone. No names, no cars, no listing links.</p>
-      <button type="button" class="small" data-action="reportProblem">Copy problem report</button>
-    </fieldset>
+    ${reportProblemHtml()}
   </form>`;
 }
 
@@ -1390,6 +1420,10 @@ async function onSettingsSubmit(ev) {
   if (viaEnter) {
     await accountAction(viaEnter);
     render();
+    return;
+  }
+  if (!state.origin) {
+    setStatus(NO_SITE_TEXT, 'error');
     return;
   }
   const form = new FormData(ev.target);

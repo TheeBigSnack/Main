@@ -89,9 +89,23 @@ test('the synced profile carries the person and dealer details but never the ser
   assert.equal(other.salesperson.name, 'Roger');
   assert.deepEqual(other.defaults, { titleStatus: 'Clean', condition: 'Very good' });
   assert.equal(other.rewrite.endpoint, 'http://localhost:8787');
-  // no origin to compare (a profile saved before 0.4.0, or a site without one): keep the profile, as before
+  // no origin to compare (a site without one): keep the profile, as before
   assert.equal(settingsFromProfile(p, {}).dealer.name, WAYNESBURG);
-  assert.equal(settingsFromProfile({ ...p, origin: '' }, { origin: 'https://www.some-other-dealer.test', name: 'Some Other Dealer' }).priceNote, 'Tax and tags extra.');
+  // a profile saved before 0.4.0 has no origin key at all: kept whole, as before
+  const legacy = { ...p };
+  delete legacy.origin;
+  assert.equal(settingsFromProfile(legacy, { origin: 'https://www.some-other-dealer.test', name: 'Some Other Dealer' }).priceNote, 'Tax and tags extra.');
+  // a profile saved with no website (from a Facebook tab, before the popup
+  // refused that) names no dealership: only the person's own fields carry
+  const nowhere = settingsFromProfile({ ...p, origin: '' }, { origin: 'https://www.some-other-dealer.test', name: 'Some Other Dealer' });
+  assert.deepEqual(nowhere.dealer, { name: 'Some Other Dealer', city: '', state: '', zip: '' });
+  assert.deepEqual([nowhere.priceNote, nowhere.dailyCap, nowhere.basis, nowhere.myStores], ['', 10, 'website', []]);
+  assert.equal(nowhere.salesperson.name, 'Roger', 'the person\'s own fields still carry');
+  // and no profile is written without the website it belongs to
+  const before = JSON.stringify(store);
+  assert.equal(await saveProfile(s, fake, ''), false);
+  assert.equal(await saveProfile(s, fake), false);
+  assert.equal(JSON.stringify(store), before, 'nothing was written');
   assert.equal(settingsFromProfile(null), null);
   assert.equal(DEFAULT_SALESPERSON_TITLE, 'sales consultant');
 });

@@ -145,7 +145,7 @@ It never records buyers, messages, the description text or anything from your Fa
 
 ## Settings
 
-Click **Settings** at the top of the popup. Click **Save settings** at the bottom, then **Rescan website** to apply. The sections:
+Click **Settings** at the top of the popup, with your dealership's website open in the tab: settings are kept for each dealership website. On any other tab (Facebook, a new tab) Settings shows only **Account**, **Forget my synced profile** and **Report a problem**, and says to open your dealership's website. Click **Save settings** at the bottom, then **Rescan website** to apply. The sections:
 
 - **You**: your name and your role, for the sign-off in every description, and **Your closing line (optional)**: a sentence of your own added after the sign-off, in place of "Message me to set up a test drive or ask a question." It is about you, not the car: no prices and no numbers other than a phone number, none of the phrases the checks ban, up to 30 words. A line that breaks these rules is not saved, and the popup says why.
 - **Your store**: tick your store or stores. Leave all unticked to include every store.

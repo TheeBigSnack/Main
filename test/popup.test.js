@@ -267,3 +267,34 @@ test('Clear the numbers keeps a to-do item closed since the last sync until the 
   assert.equal(q.status(), 'The numbers for this website were cleared. The to-do item still open stays until it is done.');
   assert.deepEqual(q.local[k.pilot].flags.map((f) => f.vin), [third.vin]);
 });
+
+// Settings belong to a dealership's website (CLAUDE.md: the dealership's
+// fields travel only to the website the profile was saved on). Opened on a
+// tab that is not one (Facebook, a new tab), the popup knows no website: its
+// Settings offer no Save, and nothing it does writes the profile or a key
+// with no website in it.
+test('on a Facebook tab or a new tab Settings has no Save, and nothing writes the profile or a settings key without a website', async () => {
+  for (const tabUrl of ['https://www.facebook.com/marketplace/create/vehicle', 'chrome://newtab/']) {
+    const p = await loadPopup({ tabUrl, sync: { [PROFILE_KEY]: structuredClone(PROFILE) } });
+    await p.tab('settings');
+    const html = p.panel();
+    assert.match(html, /id="settingsNeedSite">Settings are kept for each dealership website\. Open your dealership's website in this tab to see or change them\./, tabUrl);
+    assert.doesNotMatch(html, /type="submit"/, `${tabUrl}: no Save settings`);
+    assert.doesNotMatch(html, /name="dealerName"|name="priceNote"|name="dailyCap"/, `${tabUrl}: no dealership fields to fill in`);
+    assert.match(html, /data-action="forgetProfile"/, `${tabUrl}: the profile can still be forgotten`);
+    assert.match(html, /data-action="reportProblem"/, `${tabUrl}: and a problem reported`);
+
+    // a submit anyway (Enter in a box) saves nothing
+    const values = { salespersonName: 'Someone', dealerName: 'Another Dealer', priceNote: 'Price includes the $499 doc fee.', dailyCap: '4' };
+    const before = globalThis.FormData;
+    globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll() { return []; } has(name) { return name in values; } };
+    try {
+      await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: () => null }, preventDefault() {} });
+    } finally {
+      globalThis.FormData = before;
+    }
+    assert.deepEqual(Object.keys(p.local).filter((key) => /^settings:/.test(key)), [], `${tabUrl}: no settings key was written`);
+    assert.deepEqual(p.sync[PROFILE_KEY], PROFILE, `${tabUrl}: the synced profile is untouched`);
+    assert.match(p.status(), /Open your dealership's website/);
+  }
+});
