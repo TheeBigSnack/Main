@@ -79,6 +79,8 @@ In the Supabase Dashboard, **Authentication**:
 
 ## Step 5. The sign-in email sender [Owner]
 
+Resend sees every sign-in email (the address and the code or link), so it is a processor: `legal/privacy-policy.md` (Processors) and `docs/data-inventory.md` (Who receives data) already name it. Using another sender means changing both first, in the same commit, before it is switched on.
+
 1. Sign up at resend.com (Free plan).
 2. **Domains, Add domain**: `mail.lotcurrent.com`. If it asks for a region, pick **North Virginia (us-east-1)**, next to the Supabase project. A subdomain keeps sign-in mail separate from your own mailbox's reputation and leaves the GoDaddy mailbox's records untouched.
 3. Resend lists the DNS records to add. In GoDaddy (**My Products, lotcurrent.com, DNS, Add new record**) add each one, typing in GoDaddy's **Name** box only the part before `.lotcurrent.com` (GoDaddy adds the domain itself). For `mail.lotcurrent.com` that is, per Resend's GoDaddy guide (checked 2026-10-01):
@@ -99,6 +101,8 @@ In the Supabase Dashboard, **Authentication**:
 8. Test: sign in from the manager view with two addresses at two different mail services (say Gmail and Outlook). Each email should arrive in the inbox, not spam, with the six-digit code and the link.
 
 ## Step 6. The manager view at app.lotcurrent.com [Owner, then Claude]
+
+Cloudflare's access logs see every manager's IP address and browser, so it is a processor: `legal/privacy-policy.md` and `docs/data-inventory.md` already name it as the manager view's host. Another host means changing both first, in the same commit.
 
 1. **[Owner]** Sign up at cloudflare.com (Free plan). You don't need to move lotcurrent.com's DNS to Cloudflare.
 2. **[Owner]** Your profile, **API Tokens, Create Token, Create Custom Token**: name `github-manager-deploy`, permission **Account, Cloudflare Pages, Edit**, your account only. Copy it. Also copy the **Account ID** (on the account's home page, right-hand column, or Workers & Pages overview).

@@ -490,6 +490,25 @@ test('every recipient is named in the texts the inventory says, and the privacy 
   for (const b of bullets) assert.ok(all.some((r) => r.processor && r.name === b), `the privacy policy lists ${b} as a processor, and docs/data-inventory.md does not`);
 });
 
+// docs/production-setup.md chooses the services that see sign-in email and manager traffic; the website's host is
+// the Pages workflow. Each chosen one is a processor of its own, row and Processors line, never a shared bracket.
+test('the services production setup chooses, and the website\'s host, are each a processor in the inventory and the privacy policy', () => {
+  const setup = read('docs/production-setup.md');
+  const choices = section(setup, '## The choices, and why');
+  const chosen = [...choices.matchAll(/^\| [^|]+ \| \*\*([A-Z][A-Za-z0-9]+)/gm)].map((m) => m[1]);
+  assert.deepEqual(chosen, ['Supabase', 'Resend', 'Cloudflare'], 'the choices table changed: name the new service in both texts');
+  const hosts = read('.github/workflows/pages.yml').includes('actions/deploy-pages') ? ['GitHub'] : [];
+  const inbox = /GoDaddy mailbox|GoDaddy's Microsoft 365 mailbox/.test(setup) ? ['GoDaddy'] : [];
+  const processors = recipients().filter((r) => r.processor).map((r) => r.name);
+  const bullets = [...section(policy, '## Processors').matchAll(/^- \*\*([^*]+)\*\*/gm)].map((m) => m[1]);
+  for (const name of [...chosen, ...hosts, ...inbox]) {
+    assert.ok(processors.includes(name), `docs/data-inventory.md has no processor row for ${name}`);
+    assert.ok(bullets.includes(name), `the privacy policy's Processors section has no "- **${name}**" line`);
+  }
+  for (const text of [inventory, policy]) assert.doesNotMatch(text, /\[(hosting|email) provider\]/, 'a bracket standing for services already chosen');
+  assert.doesNotMatch(inventory, /not decided yet/, 'the manager view\'s host is decided (docs/production-setup.md)');
+});
+
 test('every Recipient cell names a recipient of the list, and every recipient receives something', () => {
   const names = new Set(recipients().map((r) => r.name));
   const used = new Set();
