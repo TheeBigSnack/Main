@@ -8,7 +8,10 @@
 //     is a failure: the table is missing), and redeem_invite is refused;
 //   - each function answers a CORS preflight from the extension, refuses a
 //     call with no token (401), and the lead function refuses a page that is
-//     not the landing page (403). The README deploys billing and lead after
+//     not the landing page (403). Billing also answers a preflight from the
+//     manager view's address (LOTSYNC_MANAGER_ORIGIN), which the function
+//     secret ALLOWED_ORIGINS must list, or the Billing card cannot reach it;
+//     without that address the line is a note saying so. The README deploys billing and lead after
 //     step 6 (its Billing and Demo requests sections), so a 404 from either is
 //     a note, not a failure, and so is the webhook's 500 that says
 //     STRIPE_WEBHOOK_SECRET is not set yet; rerun it after those sections and
@@ -22,6 +25,7 @@
 //   (both default to extension/src/accountConfig.js)
 //   optional: LOTSYNC_TEST_TOKEN=<a non-member's access token>
 //             LOTSYNC_SITE_ORIGIN=https://<where site/ is hosted>
+//             LOTSYNC_MANAGER_ORIGIN=https://<the manager view's address>
 //
 // It reads and never writes: the only thing it changes is the test
 // account's own invite-miss count (only with LOTSYNC_TEST_TOKEN). It keeps
@@ -51,6 +55,14 @@ export const DEPLOYED_LATER = Object.freeze({
 });
 
 const trimUrl = (u) => String(u || '').trim().replace(/\/+$/, '');
+// A page's origin (scheme, host, port) from an address typed with or without a path.
+export function originOf(u) {
+  try {
+    return new URL(String(u || '').trim()).origin;
+  } catch {
+    return '';
+  }
+}
 
 // What kind of API key a string is. Supabase's new keys are plain strings
 // (sb_publishable_..., sb_secret_...); the legacy anon and service_role keys
@@ -140,10 +152,10 @@ const header = (h, name) => (h && typeof h.get === 'function' ? h.get(name) : nu
 
 /**
  * Runs every check against the live project and returns the findings.
- * @param {object} deps  { fetchImpl, url, anonKey, testToken?, siteOrigin?, configs? }
+ * @param {object} deps  { fetchImpl, url, anonKey, testToken?, siteOrigin?, managerOrigin?, configs? }
  * @returns {Promise<{ check, ok, detail, warnOnly? }[]>}
  */
-export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, testToken = '', siteOrigin = '', configs = null } = {}) {
+export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, testToken = '', siteOrigin = '', managerOrigin = '', configs = null } = {}) {
   const base = trimUrl(url);
   const out = configs ? configFindings(configs) : [];
   if (!base || !anonKey) {
@@ -171,12 +183,29 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
 
   // the functions: CORS for the extension, 401 without a token (billing: a
   // note until the README's Billing section has deployed it)
+  const preflightStatus = {};
   for (const f of FUNCTIONS) {
     const pre = await call(fetchImpl, `${base}/functions/v1/${f.path}`, { method: 'OPTIONS', headers: { Origin: EXTENSION_ORIGIN, 'Access-Control-Request-Method': f.method, 'Access-Control-Request-Headers': 'authorization, apikey, content-type' } });
+    preflightStatus[f.name] = pre.status;
     out.push(notDeployedYet(f.name, pre.status, { check: `${f.name}: answers the extension's CORS preflight`, ok: pre.status >= 200 && pre.status < 300 && header(pre.headers, 'access-control-allow-origin') === EXTENSION_ORIGIN, detail: `${pre.status}, allow-origin ${header(pre.headers, 'access-control-allow-origin') || 'none'}` }));
     const bare = await call(fetchImpl, `${base}/functions/v1/${f.path}`, { method: f.method, headers: { apikey: anonKey, 'Content-Type': 'application/json', Origin: EXTENSION_ORIGIN }, body: f.body ? JSON.stringify(f.body) : undefined });
     out.push(notDeployedYet(f.name, bare.status, { check: `${f.name}: refuses a call with no user token`, ok: bare.status === 401, detail: String(bare.status) }));
   }
+  // The manager view's Billing card calls billing from its own address, with
+  // the user's token, so the browser asks first; only an origin listed in
+  // ALLOWED_ORIGINS is answered (the extension's always is). Without the
+  // address this cannot be checked, which is a note once billing is up.
+  const managerCheck = "billing: answers the manager view's CORS preflight";
+  const manager = originOf(managerOrigin);
+  if (manager) {
+    const pre = await call(fetchImpl, `${base}/functions/v1/billing/status`, { method: 'OPTIONS', headers: { Origin: manager, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization, apikey' } });
+    const allow = header(pre.headers, 'access-control-allow-origin');
+    const ok = pre.status >= 200 && pre.status < 300 && allow === manager;
+    out.push(notDeployedYet('billing', pre.status, { check: managerCheck, ok, detail: `${pre.status}, allow-origin ${allow || 'none'}${ok ? '' : ` (is ${manager} in the ALLOWED_ORIGINS secret?)`}` }));
+  } else if (preflightStatus.billing !== 404) {
+    out.push({ check: managerCheck, ok: false, warnOnly: true, detail: "not checked: set LOTSYNC_MANAGER_ORIGIN to the manager view's address; the ALLOWED_ORIGINS secret must list it, or the Billing card cannot reach billing" });
+  }
+
   // An unsigned event gets 400 once the signing secret is set. Before that the
   // function itself answers 500 naming STRIPE_WEBHOOK_SECRET (billing is
   // deployed, Stripe is not set up yet): a note. Any other 500 is a failure.
@@ -236,6 +265,7 @@ async function main() {
     anonKey: process.env.LOTSYNC_ANON_KEY || ACCOUNT.anonKey,
     testToken: process.env.LOTSYNC_TEST_TOKEN || '',
     siteOrigin: trimUrl(process.env.LOTSYNC_SITE_ORIGIN || ''),
+    managerOrigin: process.env.LOTSYNC_MANAGER_ORIGIN || '',
     configs: { account: ACCOUNT, manager: CONFIG, site: SITE },
   });
   const { text, failed } = report(findings);

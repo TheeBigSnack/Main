@@ -69,11 +69,12 @@ supabase secrets set STRIPE_SECRET_KEY=sk_test_...
 supabase secrets set STRIPE_PRICE_ROOFTOP=price_... STRIPE_PRICE_SEAT=price_... STRIPE_PORTAL_CONFIGURATION=bpc_...
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...
 supabase secrets set ALLOWED_RETURN_ORIGINS=https://<the manager view's address>
+supabase secrets set ALLOWED_ORIGINS=https://<the manager view's address>
 supabase functions deploy billing --no-verify-jwt
-npm run check-deploy
+LOTSYNC_MANAGER_ORIGIN=https://<the manager view's address> npm run check-deploy
 ```
 
-The second and third lines are the ones step 3 and step 4 printed. `ALLOWED_RETURN_ORIGINS` is the manager view's address with no path; it must also be in `ALLOWED_ORIGINS`. Leave `STRIPE_AUTOMATIC_TAX` unset for now (the last section). `check-deploy` should now show every billing line as ok.
+The second and third lines are the ones step 3 and step 4 printed. `ALLOWED_RETURN_ORIGINS` and `ALLOWED_ORIGINS` are both the manager view's address with no path. The first is where Stripe may send a manager back to; the second lets the manager view call the billing function at all (without it the browser blocks every call from the Billing card, and Start the free pilot, Subscribe and Manage billing all fail). Both are comma-separated lists, and setting one replaces it whole, so keep any other origin it needs (a local manager page you test with, say) in the same value. Leave `STRIPE_AUTOMATIC_TAX` unset for now (the last section). `check-deploy` should now show every billing line as ok, the manager view's preflight included; without `LOTSYNC_MANAGER_ORIGIN` that line is a note, not a pass.
 
 ## 6. Try it as a manager would [owner, about 15 minutes]
 
