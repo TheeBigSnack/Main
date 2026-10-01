@@ -128,6 +128,15 @@ test('the manager page\'s copies of MAX_SEATS and the open-subscription rule are
     }
   }
   assert.equal(page.subscribeSeats({ role: 'manager', salespeople: 250, includedSalespeople: 5 }), MAX_SEATS, 'the card asks for no more seats than Checkout bills');
+  // a Subscribe without a count: the page says what checkout does (billing/index.ts, normalizeSeats)
+  assert.equal(page.subscribeSeats({ role: 'manager', salespeople: null, includedSalespeople: 5 }), null);
+  assert.equal(normalizeSeats(undefined, 5), 5);
+  const src = read('../manager/data.js');
+  const at = src.indexOf('export function subscribeSeats');
+  const doc = src.slice(src.lastIndexOf('/**', at), at).replace(/\s*\* ?/g, ' ');
+  assert.doesNotMatch(doc, /the seats the row already had/, 'checkout never keeps an old seat count');
+  assert.match(doc, /Subscribe then sends none and the billing function bills the included count, never the seats of a subscription that has ended/);
+  assert.match(read('../supabase/functions/billing/index.ts'), /a request without seats gets\s+\/\/ the included count, never the row's old one/);
 });
 
 // ---------- seats ----------

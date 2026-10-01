@@ -384,8 +384,8 @@ const salespeopleIn = (s) => (s.role === 'manager' ? count(s.salespeople) : null
  * The seats Subscribe asks Checkout for: one per salesperson now, never
  * fewer than the plan includes (the rooftop price covers those, and the
  * billing function bills only the seats above them). Null when the answer
- * has no count; Subscribe then sends none and the function keeps the
- * included count, or the seats the row already had.
+ * has no count; Subscribe then sends none and the billing function bills the
+ * included count, never the seats of a subscription that has ended.
  * @param {object} status   GET .../billing/status's answer
  * @param {object} options  pricing: { includedSalespeople } fallback, as billingCard takes it
  * @returns {number|null}
