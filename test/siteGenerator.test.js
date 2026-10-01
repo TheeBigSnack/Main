@@ -19,7 +19,10 @@ import {
   fullTitle, rootFor, cspFor, render, renderPage, jsonLdFor, socialAlt, faqItems, ancestorsOf, textOf, escapeHtml,
   robotsTxt, sitemapXml, llmsTxt, listedPages, cnameTxt, isPlaceholderHost, validateSite, validatePages, siteUrlReport, templateVars, renderFragmentPage,
   readContext, buildSite, staleFiles, writeSite, assertClean, main,
+  strayFiles, strayAdvice, KEPT_FILES, FAVICON_FILES, SOCIAL_INDEX, socialFile,
 } from '../scripts/site-pages.mjs';
+import { FILES as FAVICONS, SOURCE as FAVICON_SOURCE } from '../scripts/favicons.mjs';
+import { DIR as SOCIAL_DIR, IMAGES_JSON } from '../scripts/social-images.mjs';
 import { SITE } from '../site/config.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -215,6 +218,7 @@ test('siteUrl is not set: the site is not ready to publish', async () => {
 test('the committed pages, robots.txt and llms.txt are what the sources make now (npm run site-pages)', async () => {
   const ctx = await readContext(root);
   assert.deepEqual(staleFiles(ctx), [], 'an output differs from its sources: run npm run site-pages and commit');
+  assert.deepEqual(strayFiles(ctx), [], 'a file under site/ is none of the site\'s: the deploy would publish it unchecked');
   const { files, remove } = buildSite(ctx);
   assert.deepEqual(files.map((f) => f.file), [...FRAGMENT_PAGES.map((p) => p.file), 'site/robots.txt', 'site/llms.txt', ...(SITE.siteUrl ? ['site/sitemap.xml', 'site/CNAME'] : [])]);
   assert.deepEqual(remove, SITE.siteUrl ? [] : ['site/sitemap.xml', 'site/CNAME']);
@@ -535,6 +539,25 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     assert.equal((await run([])).code, 0);
     assert.equal((await run(['--check'])).code, 0);
     assert.equal(readFileSync(faqFile, 'utf8'), written, 'the hand edit is gone');
+    // a file no generator writes, nobody keeps and no page shows: the deploy publishes site/ whole, so --check refuses it
+    const stray = 'site/offer/index.html';
+    mkdirSync(join(tmp, 'site/offer'), { recursive: true });
+    writeFileSync(join(tmp, stray), '<!doctype html><title>Offer</title><p>Approved by Meta, an official Facebook partner. Your account is guaranteed safe.</p>');
+    mkdirSync(join(tmp, 'site/screenshots'), { recursive: true });
+    writeFileSync(join(tmp, 'site/screenshots/01-ready-to-post.png'), 'shown on the home page');
+    writeFileSync(join(tmp, 'site/screenshots/failure.png'), 'left by a failed npm run screenshots');
+    writeFileSync(join(tmp, 'site/.DS_Store'), '');
+    r = await run(['--check']);
+    assert.equal(r.code, 1, 'a stray page fails the check');
+    assert.deepEqual(r.error, [strayAdvice(stray), strayAdvice('site/screenshots/failure.png')]);
+    assert.match(r.error[0], /^site\/offer\/index\.html is not part of the site .* the deploy would publish it unchecked: delete it/);
+    r = await run([]);
+    assert.equal(r.code, 1, 'a run writes the pages, names the stray files and fails');
+    assert.deepEqual(r.error, [strayAdvice(stray), strayAdvice('site/screenshots/failure.png')]);
+    assert.ok(existsSync(join(tmp, stray)), 'a run never deletes a file it does not own');
+    rmSync(join(tmp, 'site/offer'), { recursive: true });
+    rmSync(join(tmp, 'site/screenshots/failure.png'));
+    assert.deepEqual([(await run(['--check'])).code, (await run([])).code], [0, 0], 'the screenshot a page shows and the system file are the site\'s');
     // siteUrl set: sitemap.xml and CNAME appear, every page gets its canonical; cleared again: they must go
     writeFileSync(join(tmp, CONFIG_FILE), config.replace("siteUrl: '',", `siteUrl: '${FIXTURE_URL}',`));
     r = await run(['--check']);
@@ -594,6 +617,14 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('the files under site/ the map knows besides the pages: the ones kept by hand, and the favicons and share images as their generators name them', () => {
+  assert.deepEqual([...FAVICON_FILES].sort(), FAVICONS.map((f) => f.file).sort(), 'scripts/favicons.mjs writes these');
+  assert.ok(KEPT_FILES.includes(FAVICON_SOURCE), 'the mark the favicons are drawn from');
+  assert.equal(SOCIAL_INDEX, IMAGES_JSON);
+  for (const p of PAGES.filter((x) => x.social)) assert.equal(socialFile(p), `${SOCIAL_DIR}/${p.slug}.png`);
+  for (const f of KEPT_FILES) assert.ok(existsSync(join(root, f)), `${f} exists`);
 });
 
 test('the script imports only node: modules and site/config.js, and reads the inputs it names', () => {

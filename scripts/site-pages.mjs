@@ -19,11 +19,18 @@
 // takes the shared header, footer and head tags from here (renderPage) so
 // every page of the site has the same chrome. The favicons and the share
 // images are drawn by scripts/favicons.mjs and scripts/social-images.mjs.
+// The Pages deploy publishes site/ whole, so any other file there (a page
+// written by hand, a page the map no longer has, a stray screenshot) is
+// named by both modes and refused by --check: nothing under site/ goes live
+// unless a generator writes it, it is kept by hand in KEPT_FILES, or a page
+// shows it.
 //
 // Run:  npm run site-pages                     -> writes the pages and files
 //       node scripts/site-pages.mjs --check    -> writes nothing; exit 1 when an
 //                                                output is missing, differs, or
-//                                                exists although it must not
+//                                                exists although it must not,
+//                                                or a file under site/ is
+//                                                none of the site's
 //
 // A fragment is the inner HTML of <main id="main">: sections with .wrap, as
 // the home page has them. It may use {{name}} (the value, HTML-escaped),
@@ -52,8 +59,8 @@
 // imports only node: modules and site/config.js.
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -177,6 +184,19 @@ export const REDIRECTS = Object.freeze([
   Object.freeze({ file: 'site/legal/privacy.html', to: 'privacy/', target: '/legal/privacy/', label: 'Privacy policy' }),
   Object.freeze({ file: 'site/legal/posting-rules.html', to: 'posting-rules/', target: '/legal/posting-rules/', label: 'Posting rules' }),
 ]);
+
+// The files under site/ that are neither a page of the map nor a stub: the
+// ones kept by hand (the config, the pricing copy, the stylesheet, the
+// script, the mark), the favicons scripts/favicons.mjs draws from the mark,
+// and the index of the share images scripts/social-images.mjs draws (one
+// site/social/<slug>.png per page with a social heading). Screenshots
+// (scripts/screenshots.mjs) belong to the site while a page shows them.
+export const KEPT_FILES = Object.freeze([CONFIG_FILE, PRICING_FILE, 'site/site.css', 'site/site.js', 'site/favicon.svg']);
+export const FAVICON_FILES = Object.freeze(['site/favicon-32.png', 'site/apple-touch-icon.png', 'site/favicon.ico']);
+export const SOCIAL_INDEX = 'site/social/images.json';
+export const socialFile = (page) => `site/social/${page.slug}.png`;
+// what an operating system leaves in a folder (.gitignore keeps them out of the repository, so never deployed)
+const OS_FILES = /^(\.DS_Store|Thumbs\.db)$/;
 
 export const NAV = Object.freeze(PAGES.filter((p) => p.nav));
 export const LEGAL_PAGES = Object.freeze(PAGES.filter((p) => p.kind === 'legal'));
@@ -812,6 +832,31 @@ export function staleFiles(ctx) {
   return out;
 }
 
+// every file under rel (a folder of dir), as a path relative to dir
+function filesUnder(dir, rel) {
+  if (!existsSync(join(dir, rel))) return [];
+  return readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? filesUnder(dir, `${rel}/${d.name}`) : OS_FILES.test(d.name) ? [] : [`${rel}/${d.name}`]));
+}
+
+/**
+ * The files under site/ that are none of the site's: no generator writes
+ * them (this one, scripts/legal-pages.mjs, favicons, social-images), they
+ * are not kept by hand (KEPT_FILES), and no page shows them. The deploy
+ * publishes site/ whole, so each would go live with no check reading it.
+ */
+export function strayFiles(ctx, built = buildSite(ctx)) {
+  const shown = built.files.flatMap(({ file, content }) => [...content.matchAll(/\bsrc="([^":]+)"/g)]
+    .map((m) => (m[1].startsWith('/') ? `site${m[1]}` : posix.normalize(posix.join(posix.dirname(file), m[1])))));
+  const known = new Set([
+    ...built.files.map((f) => f.file), ...built.remove,
+    ...PAGES.map((p) => p.file), ...REDIRECTS.map((r) => r.file),
+    ...KEPT_FILES, ...FAVICON_FILES, SOCIAL_INDEX, ...PAGES.filter((p) => p.social).map(socialFile),
+    ...shown,
+  ]);
+  return filesUnder(ctx.dir, 'site').filter((file) => !known.has(file));
+}
+export const strayAdvice = (file) => `${file} is not part of the site (no generator writes it, it is not kept by hand and no page shows it), so the deploy would publish it unchecked: delete it, or add it to the site map in scripts/site-pages.mjs`;
+
 /** Writes every output and removes the files that must not exist; answers what it did. */
 export function writeSite(ctx) {
   const { files, remove } = buildSite(ctx);
@@ -833,7 +878,9 @@ export function writeSite(ctx) {
 export const USAGE = [
   'Usage: npm run site-pages              write the pages, robots.txt, llms.txt (and sitemap.xml, CNAME once siteUrl is set)',
   '       node scripts/site-pages.mjs --check',
-  '                                       write nothing; exit 1 when an output is missing, differs, or exists although it must not',
+  '                                       write nothing; exit 1 when an output is missing, differs, or exists although it must not,',
+  '                                       or a file under site/ is none of the site\'s (no generator writes it, it is not kept',
+  '                                       by hand, no page shows it): the deploy publishes site/ whole',
   '',
   ...FRAGMENT_PAGES.map((p) => `  ${p.source.padEnd(32)}-> ${p.file}`),
   '  (always)                        -> site/robots.txt, site/llms.txt',
@@ -861,12 +908,17 @@ export async function main(argv, io = { log: (s) => console.log(s), error: (s) =
     io.log(siteUrlReport(ctx.site));
     if (argv.includes('--check')) {
       const stale = staleFiles(ctx);
+      const stray = strayFiles(ctx);
       for (const s of stale) io.error(`${s}: run npm run site-pages`);
-      if (!stale.length) io.log('The website pages match site-src/, site/config.js, site/pricing.json and legal/legal-status.json.');
-      return stale.length ? 1 : 0;
+      for (const file of stray) io.error(strayAdvice(file));
+      if (!stale.length && !stray.length) io.log('The website pages match site-src/, site/config.js, site/pricing.json and legal/legal-status.json.');
+      return stale.length || stray.length ? 1 : 0;
     }
     for (const line of writeSite(ctx)) io.log(line);
-    return 0;
+    // a stray file is never deleted here (it may be someone's work): it is named, and the run fails until it goes
+    const stray = strayFiles(ctx);
+    for (const file of stray) io.error(strayAdvice(file));
+    return stray.length ? 1 : 0;
   } catch (e) {
     io.error(`site-pages: ${e.message}`);
     return 1;

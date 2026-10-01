@@ -608,6 +608,15 @@ test('honest on every page: who clicks Publish, nothing guaranteed, the non-affi
   }
   assert.ok(visibleText(home).includes(LINE), 'the home page carries the line');
   for (const slug of ['legal-terms', 'legal-posting-rules']) assert.match(visibleText(PAGES.find((p) => p.slug === slug)), /no (promise|guarantees?)|does not guarantee|no one can promise/i, `${slug}: promises nothing about Facebook`);
+  // The deploy publishes site/ whole: every HTML file there (the redirect stubs, and anything the map does not
+  // name, which site-pages --check also refuses) is held to the same lines, title and description included.
+  const html = walk('site').filter((f) => f.endsWith('.html'));
+  assert.ok(html.length >= PAGES.length + REDIRECTS.length);
+  for (const f of html) {
+    const doc = read(f);
+    const said = [textOf(doc), ...[...doc.matchAll(/<meta\b[^>]*\bcontent="([^"]*)"/g)].map((m) => unattr(m[1]))].join(' ');
+    assert.deepEqual(copyProblems(said), [], f);
+  }
 });
 
 // ---------- the checks that need a browser, and their server ----------

@@ -7,7 +7,10 @@
 # job is skipped. Nothing is built: site/ is committed as served, and the two
 # --check runs refuse the deploy when a committed page differs from what its
 # generator would write (someone edited an output by hand, or changed
-# site/config.js, a fragment or a legal text without rerunning it). Then the
+# site/config.js, a fragment or a legal text without rerunning it), and
+# site-pages refuses any file under site/ that is none of the site's (no
+# generator writes it, it is not kept by hand, no page shows it), since the
+# whole folder is uploaded. Then the
 # unit tests, the same npm test CI's unit job runs, refuse it when any rule
 # fails: the honesty rules over every page, site/pricing.json equal to the
 # pricing Stripe is set up from, and the rest. This workflow does not wait
