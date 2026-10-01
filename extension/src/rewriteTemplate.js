@@ -98,37 +98,80 @@ export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price
 }
 
 // ---------- prices and mileage the text states ----------
-// A dollar amount or a mileage in a description is a claim about this car's
-// price or odometer, so it must be the one the listing carries: the price
-// being posted (or an amount in the dealer's price note) and the website's
+// A price or a mileage in a description is a claim about this car's price
+// or odometer, so it must be the one the listing carries: the price being
+// posted (or an amount in the dealer's price note) and the website's
 // mileage. The write-up's own numbers count as "in the website's data", so
 // without these checks a write-up still saying last month's "now just
-// $28,995 with 38,000 miles" would pass. Distances, ranges and warranty
-// terms ("30 miles away", "300 miles of range", "a 3-year/36,000-mile
-// warranty") are not the odometer.
+// $28,995 with 38,000 miles" would pass. Both are read in the usual ways a
+// write-up states them: "$28,995", "Internet price: 28,995", "was 31,995";
+// "38,000 miles", "38,000 original miles", "Mileage: 38,000", "odometer
+// reads 38,000", "38,000 on the clock". Distances, ranges, warranty terms
+// and fuel economy ("30 miles away", "300 miles of range", "a
+// 3-year/36,000-mile warranty", "2 years or 24,000 miles", "gas mileage of
+// 30 mpg") are not the odometer, and a model year is neither ("Low mileage
+// 2019 Ram").
+
+const amountOf = (digits, thousands) => Math.round(Number(String(digits).replace(/,/g, '')) * (thousands ? 1000 : 1));
+const YEAR_SHAPED = /^(?:19|20)\d{2}$/;
+// Words that can sit between a number and "miles": "38,000 original miles".
+const MILE_WORDS = '(?:original|actual|true|indicated|documented|verified|certified|highway|hwy|city|local|easy|gentle|careful|adult|low|total|clean)';
+// After a number: a mileage or another measure, so not a price.
+const MEASURE_AFTER = new RegExp(`^\\s?(?:(?:k|thousand)\\b)?[\\s-]*(?:${MILE_WORDS}[\\s-]+){0,2}(?:miles?\\b|mi\\b|kms?\\b|kilomet|lbs?\\b|pounds?\\b|rpm\\b|cc\\b|hp\\b|horsepower|mpg|gal|watts?\\b|volts?\\b|ft\\b|feet|on the (?:odometer|odo|clock)\\b)`, 'i');
 
 const DOLLARS = /\$\s?(\d[\d,]*(?:\.\d+)?)(\s?k\b)?/gi;
-export function dollarAmounts(text) {
-  return [...String(text ?? '').matchAll(DOLLARS)].map((m) => ({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) }));
-}
-
-const MILES = /(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?[\s-]*(?:miles?\b|mi\b\.?)/gi;
-const NOT_ODOMETER_BEFORE = /(?:\/|\b(?:within|up to|every|range of|per))\s*$/i;
-const NOT_ODOMETER_AFTER = /^[\s-]*(?:\/|(?:from|per|an? hour)\b|(?:[\w'-]+\s+){0,2}(?:warranty|powertrain|bumper|coverage|range|radius|away|charge|tank)\b)/i;
-export function mileageClaims(text) {
-  const t = String(text ?? '');
+// A price-sized number right after a price word, written without "$".
+const PRICE_WORD = /\b(prices?|priced|msrp|asking|was|now(?:\s+(?:just|only))?|yours for|reduced to|dropped to)(?:\s+(?:is|of|at|to|just|only|now))*\s*[:\-–]?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d{4,7}(?:\.\d{1,2})?|\d{1,3}(?:\.\d+)?(?=\s?k\b))(?![\d,]\d)(\s?k\b)?/gi;
+function priceWordAmounts(t) {
   const out = [];
-  for (const m of t.matchAll(MILES)) {
-    if (NOT_ODOMETER_BEFORE.test(t.slice(Math.max(0, m.index - 12), m.index))) continue;
-    if (NOT_ODOMETER_AFTER.test(t.slice(m.index + m[0].length, m.index + m[0].length + 40))) continue;
-    out.push({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) });
+  for (const m of t.matchAll(PRICE_WORD)) {
+    if (!m[3] && YEAR_SHAPED.test(m[2])) continue;
+    if (MEASURE_AFTER.test(t.slice(m.index + m[0].length, m.index + m[0].length + 40))) continue;
+    out.push({ text: m[0].trim(), value: amountOf(m[2], m[3]), lead: m[1], at: m.index });
   }
   return out;
+}
+export function dollarAmounts(text) {
+  const t = String(text ?? '');
+  const signed = [...t.matchAll(DOLLARS)].map((m) => ({ text: m[0].trim(), value: amountOf(m[1], m[2]), at: m.index }));
+  return [...signed, ...priceWordAmounts(t)].sort((a, b) => a.at - b.at).map(({ text: said, value }) => ({ text: said, value }));
+}
+
+const MILES = new RegExp(`(\\d[\\d,]*(?:\\.\\d+)?)(\\s?(?:k|thousand)\\b)?[\\s-]*(?:${MILE_WORDS}[\\s-]+){0,2}(?:miles?\\b|mi\\b\\.?)`, 'gi');
+const NOT_ODOMETER_BEFORE = /(?:\/|\b(?:within|up to|every|range(?: of)?|per|(?:years?|yrs?|months?|mos?)\s+(?:or|and)))\s*:?\s*$/i;
+const NOT_ODOMETER_AFTER = /^[\s-]*(?:\/|(?:from|per|an? hour|to empty)\b|(?:[\w'-]+\s+){0,2}(?:warranty|powertrain|bumper|coverage|range|radius|away|charge|tank)\b)/i;
+// "Mileage: 38,000", "odometer reads 38,000", "38,000 on the odometer".
+const ODOMETER_SAYS = /\b(gas |fuel )?(?:mileage|odometer(?: reading)?|odo)\b(?:\s+(?:is|of|reads|reading|shows|showing|says|at|now))*\s*[:\-–]?\s*(?:(?:only|just)\s+)?(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?/gi;
+const ON_ODOMETER = /(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?\s+on the (?:odometer|odo|clock)\b/gi;
+const FUEL_AFTER = /^\s*(?:mpg|mpge|miles? per|city|hwy|highway|combined|\/|%)/i;
+export function mileageClaims(text) {
+  const t = String(text ?? '');
+  const found = new Map(); // where the number starts -> the claim
+  for (const m of t.matchAll(MILES)) {
+    if (NOT_ODOMETER_BEFORE.test(t.slice(Math.max(0, m.index - 20), m.index))) continue;
+    if (NOT_ODOMETER_AFTER.test(t.slice(m.index + m[0].length, m.index + m[0].length + 40))) continue;
+    found.set(m.index, { text: m[0].trim(), value: amountOf(m[1], m[2]) });
+  }
+  for (const m of t.matchAll(ODOMETER_SAYS)) {
+    const at = m.index + m[0].length - m[2].length - (m[3] || '').length;
+    if (m[1] || found.has(at) || (!m[3] && YEAR_SHAPED.test(m[2]))) continue;
+    if (FUEL_AFTER.test(t.slice(m.index + m[0].length, m.index + m[0].length + 20))) continue;
+    found.set(at, { text: m[0].trim(), value: amountOf(m[2], m[3]) });
+  }
+  for (const m of t.matchAll(ON_ODOMETER)) if (!found.has(m.index)) found.set(m.index, { text: m[0].trim(), value: amountOf(m[1], m[2]) });
+  return [...found.entries()].sort((a, b) => a[0] - b[0]).map(([, claim]) => claim);
 }
 
 // Wording that claims a price change. Prices only ever mirror the website,
 // and a listing's price drop reaches buyers through the listing itself.
 export const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|was \$|now (?:just |only )?\$)/i;
+const CHANGE_LEAD = /^(?:was|now|reduced to|dropped to)\b/i;
+function priceChangeSaid(text) {
+  const m = PRICE_CHANGE.exec(text);
+  if (m) return m[0].trim();
+  const w = priceWordAmounts(String(text ?? '')).find((a) => CHANGE_LEAD.test(a.lead));
+  return w ? w.text : '';
+}
 
 // The problems a text's prices and mileage give, for runGuardrails.
 function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = null }) {
@@ -149,20 +192,23 @@ function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = n
     claimed.add(m.value);
     problems.push({ code: 'mileage-mismatch', text: `Says ${m.value.toLocaleString('en-US')} miles, but the website shows ${miles === null ? 'no mileage for this car' : `${miles.toLocaleString('en-US')} miles`}` });
   }
-  const change = PRICE_CHANGE.exec(text);
-  if (change) problems.push({ code: 'price-change', text: `Says "${change[0].trim()}"; a description never claims a price change` });
+  const change = priceChangeSaid(text);
+  if (change) problems.push({ code: 'price-change', text: `Says "${change}"; a description never claims a price change` });
   return problems;
 }
 
-// A write-up sentence the template may copy: no dollar amount at all (the
-// price is the listing's own field), no price change, and no mileage other
-// than the website's.
+// A write-up sentence or a feature the template may copy: no price at all
+// (the price is the listing's own field), no price change, and no mileage
+// other than the website's.
 const narrativeSentenceOk = (sentence, vehicle) => !priceAndMileageProblems(sentence, { vehicle }).length;
 
 // The website's features a description can name as highlights: each once,
-// short enough to read in a list (40 characters or less), ranked by
-// FEATURE_PRIORITY and then the website's own order. The side panel offers
-// these for the salesperson's pick; the template takes the first few.
+// short enough to read in a list (40 characters or less), stating no price,
+// price change or mileage (a feature such as "Under 30,000 Miles" or
+// "$1,000 Below Market" is a claim the checks hold to the listing's own
+// numbers, not equipment), ranked by FEATURE_PRIORITY and then the
+// website's own order. The side panel offers these for the salesperson's
+// pick; the template takes the first few.
 export function featureChoices(features) {
   if (!Array.isArray(features)) return [];
   const seen = new Set();
@@ -170,7 +216,7 @@ export function featureChoices(features) {
   for (const f of features) {
     if (typeof f !== 'string') continue;
     const t = f.replace(/\s+/g, ' ').trim();
-    if (!t || t.length > 40 || seen.has(t.toLowerCase())) continue;
+    if (!t || t.length > 40 || seen.has(t.toLowerCase()) || !narrativeSentenceOk(t, {})) continue;
     seen.add(t.toLowerCase());
     clean.push(t);
   }

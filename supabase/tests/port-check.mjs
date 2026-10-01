@@ -42,6 +42,9 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, was $31,995, now just $28,995 with 38,000 miles! Price reduced.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41K miles, a 3-year/36,000-mile warranty, 30 miles away, $28,995 and $28.5k.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, a private sale.').replace('sales consultant at', 'at') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with only 38,000 original miles. Mileage: 38,000; odometer reads 41,230; 38K on the clock.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Was 31,995, now just 28,995! Internet price: 28,995. Sale price 28995 plus tax, yours for 28.5k.') + '\nVIN TESTVIN0000000001.',
+  sixty('Low mileage 2019 Ram 1500 Big Horn, gas mileage of 22 mpg, 2 years or 24,000 miles, 5 miles to empty, range: 290 miles, towing was 7,500 lbs.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

@@ -126,38 +126,82 @@ export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price
 }
 
 // ---------- prices and mileage the text states ----------
-// A dollar amount or a mileage in a description is a claim about this car's
-// price or odometer, so it must be the one the listing carries: the price
-// being posted (or an amount in the dealer's price note) and the website's
-// mileage. Distances, ranges and warranty terms are not the odometer.
+// A price or a mileage in a description is a claim about this car's price
+// or odometer, so it must be the one the listing carries: the price being
+// posted (or an amount in the dealer's price note) and the website's
+// mileage. Both are read in the usual ways a write-up states them
+// ("$28,995", "Internet price: 28,995", "was 31,995"; "38,000 original
+// miles", "Mileage: 38,000", "odometer reads 38,000", "38,000 on the
+// clock"). Distances, ranges, warranty terms and fuel economy are not the
+// odometer, and a model year is neither.
 
 interface Amount {
   text: string;
   value: number;
 }
-
-const DOLLARS = /\$\s?(\d[\d,]*(?:\.\d+)?)(\s?k\b)?/gi;
-export function dollarAmounts(text: unknown): Amount[] {
-  return [...String(text ?? '').matchAll(DOLLARS)].map((m) => ({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) }));
+interface WordAmount extends Amount {
+  lead: string;
+  at: number;
 }
 
-const MILES = /(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?[\s-]*(?:miles?\b|mi\b\.?)/gi;
-const NOT_ODOMETER_BEFORE = /(?:\/|\b(?:within|up to|every|range of|per))\s*$/i;
-const NOT_ODOMETER_AFTER = /^[\s-]*(?:\/|(?:from|per|an? hour)\b|(?:[\w'-]+\s+){0,2}(?:warranty|powertrain|bumper|coverage|range|radius|away|charge|tank)\b)/i;
-export function mileageClaims(text: unknown): Amount[] {
-  const t = String(text ?? '');
-  const out: Amount[] = [];
-  for (const m of t.matchAll(MILES)) {
+const amountOf = (digits: string, thousands: string | undefined): number => Math.round(Number(String(digits).replace(/,/g, '')) * (thousands ? 1000 : 1));
+const YEAR_SHAPED = /^(?:19|20)\d{2}$/;
+const MILE_WORDS = '(?:original|actual|true|indicated|documented|verified|certified|highway|hwy|city|local|easy|gentle|careful|adult|low|total|clean)';
+const MEASURE_AFTER = new RegExp(`^\\s?(?:(?:k|thousand)\\b)?[\\s-]*(?:${MILE_WORDS}[\\s-]+){0,2}(?:miles?\\b|mi\\b|kms?\\b|kilomet|lbs?\\b|pounds?\\b|rpm\\b|cc\\b|hp\\b|horsepower|mpg|gal|watts?\\b|volts?\\b|ft\\b|feet|on the (?:odometer|odo|clock)\\b)`, 'i');
+
+const DOLLARS = /\$\s?(\d[\d,]*(?:\.\d+)?)(\s?k\b)?/gi;
+const PRICE_WORD = /\b(prices?|priced|msrp|asking|was|now(?:\s+(?:just|only))?|yours for|reduced to|dropped to)(?:\s+(?:is|of|at|to|just|only|now))*\s*[:\-–]?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d{4,7}(?:\.\d{1,2})?|\d{1,3}(?:\.\d+)?(?=\s?k\b))(?![\d,]\d)(\s?k\b)?/gi;
+function priceWordAmounts(t: string): WordAmount[] {
+  const out: WordAmount[] = [];
+  for (const m of t.matchAll(PRICE_WORD)) {
     const at = m.index as number;
-    if (NOT_ODOMETER_BEFORE.test(t.slice(Math.max(0, at - 12), at))) continue;
-    if (NOT_ODOMETER_AFTER.test(t.slice(at + m[0].length, at + m[0].length + 40))) continue;
-    out.push({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) });
+    if (!m[3] && YEAR_SHAPED.test(m[2])) continue;
+    if (MEASURE_AFTER.test(t.slice(at + m[0].length, at + m[0].length + 40))) continue;
+    out.push({ text: m[0].trim(), value: amountOf(m[2], m[3]), lead: m[1], at });
   }
   return out;
+}
+export function dollarAmounts(text: unknown): Amount[] {
+  const t = String(text ?? '');
+  const signed = [...t.matchAll(DOLLARS)].map((m) => ({ text: m[0].trim(), value: amountOf(m[1], m[2]), at: m.index as number }));
+  return [...signed, ...priceWordAmounts(t)].sort((a, b) => a.at - b.at).map(({ text: said, value }) => ({ text: said, value }));
+}
+
+const MILES = new RegExp(`(\\d[\\d,]*(?:\\.\\d+)?)(\\s?(?:k|thousand)\\b)?[\\s-]*(?:${MILE_WORDS}[\\s-]+){0,2}(?:miles?\\b|mi\\b\\.?)`, 'gi');
+const NOT_ODOMETER_BEFORE = /(?:\/|\b(?:within|up to|every|range(?: of)?|per|(?:years?|yrs?|months?|mos?)\s+(?:or|and)))\s*:?\s*$/i;
+const NOT_ODOMETER_AFTER = /^[\s-]*(?:\/|(?:from|per|an? hour|to empty)\b|(?:[\w'-]+\s+){0,2}(?:warranty|powertrain|bumper|coverage|range|radius|away|charge|tank)\b)/i;
+const ODOMETER_SAYS = /\b(gas |fuel )?(?:mileage|odometer(?: reading)?|odo)\b(?:\s+(?:is|of|reads|reading|shows|showing|says|at|now))*\s*[:\-–]?\s*(?:(?:only|just)\s+)?(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?/gi;
+const ON_ODOMETER = /(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?\s+on the (?:odometer|odo|clock)\b/gi;
+const FUEL_AFTER = /^\s*(?:mpg|mpge|miles? per|city|hwy|highway|combined|\/|%)/i;
+export function mileageClaims(text: unknown): Amount[] {
+  const t = String(text ?? '');
+  const found = new Map<number, Amount>();
+  for (const m of t.matchAll(MILES)) {
+    const at = m.index as number;
+    if (NOT_ODOMETER_BEFORE.test(t.slice(Math.max(0, at - 20), at))) continue;
+    if (NOT_ODOMETER_AFTER.test(t.slice(at + m[0].length, at + m[0].length + 40))) continue;
+    found.set(at, { text: m[0].trim(), value: amountOf(m[1], m[2]) });
+  }
+  for (const m of t.matchAll(ODOMETER_SAYS)) {
+    const end = (m.index as number) + m[0].length;
+    const at = end - m[2].length - (m[3] || '').length;
+    if (m[1] || found.has(at) || (!m[3] && YEAR_SHAPED.test(m[2]))) continue;
+    if (FUEL_AFTER.test(t.slice(end, end + 20))) continue;
+    found.set(at, { text: m[0].trim(), value: amountOf(m[2], m[3]) });
+  }
+  for (const m of t.matchAll(ON_ODOMETER)) if (!found.has(m.index as number)) found.set(m.index as number, { text: m[0].trim(), value: amountOf(m[1], m[2]) });
+  return [...found.entries()].sort((a, b) => a[0] - b[0]).map(([, claim]) => claim);
 }
 
 // Wording that claims a price change. Prices only ever mirror the website.
 export const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|was \$|now (?:just |only )?\$)/i;
+const CHANGE_LEAD = /^(?:was|now|reduced to|dropped to)\b/i;
+function priceChangeSaid(text: string): string {
+  const m = PRICE_CHANGE.exec(text);
+  if (m) return m[0].trim();
+  const w = priceWordAmounts(String(text ?? '')).find((a) => CHANGE_LEAD.test(a.lead));
+  return w ? w.text : '';
+}
 
 function priceAndMileageProblems(text: string, { vehicle = {}, priceNote = '', price = null }: GuardrailContext): GuardrailProblem[] {
   const problems: GuardrailProblem[] = [];
@@ -177,8 +221,8 @@ function priceAndMileageProblems(text: string, { vehicle = {}, priceNote = '', p
     claimed.add(m.value);
     problems.push({ code: 'mileage-mismatch', text: `Says ${m.value.toLocaleString('en-US')} miles, but the website shows ${miles === null ? 'no mileage for this car' : `${miles.toLocaleString('en-US')} miles`}` });
   }
-  const change = PRICE_CHANGE.exec(text);
-  if (change) problems.push({ code: 'price-change', text: `Says "${change[0].trim()}"; a description never claims a price change` });
+  const change = priceChangeSaid(text);
+  if (change) problems.push({ code: 'price-change', text: `Says "${change}"; a description never claims a price change` });
   return problems;
 }
 

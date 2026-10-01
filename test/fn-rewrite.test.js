@@ -261,6 +261,22 @@ test('rewrite: a draft repeating a stale price, price drop or mileage from the w
   assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says 29,000 miles, but the website shows 34,567 miles'));
 });
 
+test('rewrite: a stale mileage or price said without "miles" right after it or without "$" is refused too', async () => {
+  world();
+  const narrative = ['Was 24,995, now just 21,995 with 29,000 original miles. Mileage: 29,000.'];
+  const stale = GOOD.replace('It shows 34,567 miles', 'It was 24,995, now just 21,995, with 29,000 original miles (odometer reads 29,000)');
+  anthropic(says(stale));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1, { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative }), origin: ORIGIN });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  const codes = r.body.guardrails.problems.map((p) => p.code);
+  assert.ok(!codes.includes('unknown-number'), 'every number is in the write-up');
+  assert.deepEqual([...new Set(codes)].sort(), ['mileage-mismatch', 'price-change', 'price-mismatch']);
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says 29,000 miles, but the website shows 34,567 miles'));
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says "was 24,995"; a description never claims a price change'));
+});
+
 test('rewrite: with no dealership name in the facts, no draft passes: the description must name the dealership', async () => {
   world();
   anthropic(says(GOOD.replace(' at Example Motors', '')));

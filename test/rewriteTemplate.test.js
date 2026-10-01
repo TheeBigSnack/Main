@@ -263,6 +263,62 @@ test('the template passes its own word count whatever the features and write-up 
   }
 });
 
+test('a stale mileage or price is caught in the usual ways a write-up states it, and the template leaves it out', async () => {
+  // the car: 20,986 miles, posted at 26,673
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: 26673 };
+  const base = buildTemplateDescription(c);
+  const stale = {
+    'Only 38,000 original miles.': ['mileage-mismatch'],
+    'Just 38,000 actual miles!': ['mileage-mismatch'],
+    'Mileage: 38,000.': ['mileage-mismatch'],
+    'Odometer reads 38,000.': ['mileage-mismatch'],
+    'Odometer reading is just 38K.': ['mileage-mismatch'],
+    'It has 38,000 on the clock.': ['mileage-mismatch'],
+    'Was 31,995, now just 28,995!': ['price-change', 'price-mismatch'],
+    'Sale price 28,995 plus tax.': ['price-mismatch'],
+    'Internet price: 28,995.': ['price-mismatch'],
+    'Yours for 28,995 today.': ['price-mismatch'],
+    'Now 26,673!': ['price-change'],
+  };
+  for (const [sentence, codes] of Object.entries(stale)) {
+    const got = runGuardrails(`${base}\n${sentence}`, c).problems.map((p) => p.code).filter((code) => /price|mileage/.test(code));
+    assert.deepEqual([...new Set(got)].sort(), codes, sentence);
+    // the template, given the same sentence in the write-up, leaves it out and still passes
+    const r = await generateDescription({ vehicle: { ...v, descriptionRaw: `${sentence} Rides on 20-inch wheels with the 8.4-inch touchscreen.` }, dealer: EXAMPLE, salesperson: SAM, price: 26673 });
+    assert.ok(!r.text.includes(sentence), `the template leaves out: ${sentence}`);
+    assert.match(r.text, /Rides on 20-inch wheels/);
+    assert.deepEqual(r.guardrails.problems, [], sentence);
+  }
+  assert.ok(runGuardrails(`${base}\nOnly 38,000 original miles.`, c).problems.some((p) => p.text === 'Says 38,000 miles, but the website shows 20,986 miles'));
+  assert.ok(runGuardrails(`${base}\nInternet price: 28,995.`, c).problems.some((p) => p.text === "Says $28,995, but this listing's price is $26,673"));
+  // the listing's own price and mileage, said the same ways, are fine
+  for (const sentence of ['Internet price: 26,673.', 'Mileage: 20,986.', 'Odometer reads 20,986.', 'Just 20,986 actual miles.']) {
+    const got = runGuardrails(`${base}\n${sentence}`, c).problems.filter((p) => /price|mileage/.test(p.code));
+    assert.deepEqual(got, [], sentence);
+  }
+});
+
+test('a model year, fuel economy, a warranty, a range or a weight is never read as the mileage or a price', () => {
+  for (const words of ['Low mileage 2019 Ram 1500.', 'Great gas mileage of 30 mpg.', 'Fuel mileage: 28 city / 36 highway.', '1 owner low miles.', 'Range: 290 Miles', 'Free Oil Changes 2 Years or 24,000 Miles', '24 months or 24,000 miles of coverage.', '5 Miles to Empty Warning', 'Towing capacity was 7,500 lbs.', 'The price includes 2 keys.', 'It was 2019 when it came in.']) {
+    assert.deepEqual(mileageClaims(words), [], words);
+    assert.deepEqual(dollarAmounts(words), [], words);
+  }
+  assert.deepEqual(mileageClaims('Only 38,000 original miles. Mileage: 38,000 miles. Odometer reads 41,230; 45k on the odo.').map((m) => m.value), [38000, 38000, 41230, 45000]);
+  assert.deepEqual(dollarAmounts('Was 31,995, now just $28,995. Internet price: 28,995. Priced at 26,673; yours for 28.5k.').map((a) => a.value), [31995, 28995, 28995, 26673, 28500]);
+});
+
+test('a feature stating a price or a mileage is never a highlight, so the template passes whatever the features', async () => {
+  const features = ['Under 30,000 Miles', '$1,000 Below Market', 'Price Reduced', 'Range: 290 Miles', 'Free Oil Changes 2 Years or 24,000 Miles', '5 Miles to Empty Warning', 'Heated Seats', 'Backup Camera'];
+  const choices = featureChoices(features);
+  for (const f of ['Under 30,000 Miles', '$1,000 Below Market', 'Price Reduced']) assert.ok(!choices.includes(f), f);
+  for (const f of ['Range: 290 Miles', 'Free Oil Changes 2 Years or 24,000 Miles', '5 Miles to Empty Warning', 'Heated Seats', 'Backup Camera']) assert.ok(choices.includes(f), f);
+  assert.deepEqual(settleHighlights(['Under 30,000 Miles', 'Heated Seats'], features), ['Heated Seats'], "a salesperson's pick can't bring one in");
+  const v = vehicle('usedNormal', { features }); // 20,986 miles
+  const r = await generateDescription({ vehicle: v, dealer: EXAMPLE, salesperson: SAM, price: v.price });
+  assert.deepEqual(r.guardrails.problems, []);
+});
+
 // ---------- the dealership is always named ----------
 
 test('with no dealership name set, the description never passes and never signs off "at ."', async () => {
