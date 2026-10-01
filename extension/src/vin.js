@@ -11,7 +11,7 @@
 // disagreements for a person to look at (facts only, and the website is
 // still the source the dealer controls).
 
-import { normalizeBodyStyle, normalizeFuelType, normalizeTransmission } from './listingData.js';
+import { normalizeBodyStyle, normalizeFuelType, normalizeTransmission, readVehicleKind, VEHICLE_KIND } from './listingData.js';
 
 const TRANSLIT = { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8, J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9, S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9 };
 const WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
@@ -65,6 +65,19 @@ export function modelYearFromVin(vin) {
   return base + idx;
 }
 
+// The model years the VIN can mean. The position-7 rule above (a letter
+// there means 2010 or later) is for passenger cars, multipurpose vehicles
+// and trucks of 10,000 lb or less (49 CFR 565.15); a motorcycle, a trailer
+// or a powersport vehicle has no such rule, so its 10th character reads as
+// either of two years 30 apart.
+export function modelYearReadings(vin, { lightVehicle = true } = {}) {
+  const v = normalizeVin(vin);
+  if (v.length !== 17) return [];
+  const idx = YEAR_CODES.indexOf(v[9]);
+  if (idx === -1) return [];
+  return lightVehicle ? [modelYearFromVin(v)] : [1980 + idx, 2010 + idx];
+}
+
 // Manufacturer groups by the first characters of the VIN (the WMI). Not
 // every code in the world, just enough to catch a wrong make on a US lot.
 // Each row lists plain prefixes, and the longest prefix that matches wins,
@@ -104,6 +117,12 @@ export const MANUFACTURERS = Object.freeze([
   [['WB1', 'WB3'], 'BMW Motorrad', ['bmw', 'bmw motorrad']],
 ]);
 
+// VINs from makers of motorcycles and powersport vehicles, never a car or
+// light truck: the groups below, and Suzuki's motorcycle code JS1 (its other
+// codes build cars and SUVs too).
+const CYCLE_MAKERS = new Set(['Harley-Davidson', 'Yamaha', 'Kawasaki', 'Ducati', 'Indian', 'Triumph', 'Piaggio', 'BMW Motorrad']);
+const cycleVin = (vin, maker) => Boolean(maker && CYCLE_MAKERS.has(maker.group)) || vin.startsWith('JS1');
+
 export function manufacturerFromVin(vin) {
   const v = normalizeVin(vin);
   let best = null;
@@ -122,13 +141,20 @@ export function localVinCheck(vehicle = {}) {
   const checks = [];
   checks.push({ code: 'format', label: 'VIN format and check digit', ok: format.ok, detail: format.ok ? (format.notes[0] || '17 characters, check digit correct') : format.problems.join('; ') });
 
-  const vinYear = format.ok ? modelYearFromVin(vin) : null;
-  if (vinYear === null) checks.push({ code: 'year', label: 'Model year', ok: null, detail: 'could not be read from the VIN' });
-  else if (typeof vehicle.year !== 'number') checks.push({ code: 'year', label: 'Model year', ok: null, detail: `VIN says ${vinYear}; the website has no year` });
-  else if (vehicle.year === vinYear) checks.push({ code: 'year', label: 'Model year', ok: true, detail: `${vinYear}, website agrees` });
-  else checks.push({ code: 'year', label: 'Model year', ok: false, detail: `VIN says ${vinYear}, the website says ${vehicle.year}` });
-
   const maker = format.ok ? manufacturerFromVin(vin) : null;
+  // the position-7 year rule holds only for a car or light truck: not for a motorcycle by
+  // the website's body style or make, nor for a VIN from a motorcycle maker
+  const lightVehicle = readVehicleKind(vehicle).kind === VEHICLE_KIND.CAR_TRUCK && !cycleVin(vin, maker);
+  const readings = format.ok ? modelYearReadings(vin, { lightVehicle }) : [];
+  const said = readings.join(' or ');
+  let vinYear = readings.length === 1 ? readings[0] : null;
+  if (!readings.length) checks.push({ code: 'year', label: 'Model year', ok: null, detail: 'could not be read from the VIN' });
+  else if (typeof vehicle.year !== 'number') checks.push({ code: 'year', label: 'Model year', ok: null, detail: `VIN says ${said}; the website has no year` });
+  else if (readings.includes(vehicle.year)) {
+    vinYear = vehicle.year;
+    checks.push({ code: 'year', label: 'Model year', ok: true, detail: `${vinYear}, website agrees` });
+  } else checks.push({ code: 'year', label: 'Model year', ok: false, detail: `VIN says ${said}, the website says ${vehicle.year}` });
+
   const make = String(vehicle.make || '').trim().toLowerCase();
   if (!maker) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: 'this manufacturer code is not in the local list' });
   else if (!make) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: `VIN is from ${maker.group}; the website has no make` });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { vinCheckDigit, checkVinFormat, modelYearFromVin, manufacturerFromVin, MANUFACTURERS, localVinCheck, decodeVinOnline, compareVin, normalizeVin } from '../extension/src/vin.js';
+import { vinCheckDigit, checkVinFormat, modelYearFromVin, modelYearReadings, manufacturerFromVin, MANUFACTURERS, localVinCheck, decodeVinOnline, compareVin, normalizeVin } from '../extension/src/vin.js';
 import { fixtures, vehicle } from './helpers.js';
 
 test('every real VIN from the site has a correct check digit and decodes to its model year', () => {
@@ -159,4 +159,30 @@ test('a check-digit typo is caught whatever country built the car; a correct non
     assert.equal(r.checks[0].ok, false, typo);
     assert.match(r.checks[0].detail, /check digit is .* but should be .*typo in the VIN/, typo);
   }
+});
+
+test('a motorcycle\'s model year is read without the car rule for position 7: a 2014 with a digit there agrees; a car still differs', () => {
+  const valid = (vin) => vin.slice(0, 8) + vinCheckDigit(vin) + vin.slice(9);
+  const year = (vehicle) => localVinCheck(vehicle).checks.find((c) => c.code === 'year');
+  // a digit in position 7 and E in position 10: 1984 by the car rule, 1984 or 2014 for a motorcycle
+  for (const vehicle of [
+    { vin: valid('JYAVP27E0EA000000'), make: 'Yamaha', year: 2014, bodyType: 'Motorcycle' },
+    { vin: valid('JYAVP27E0EA000000'), make: 'Yamaha', year: 2014, bodyType: '' }, // a motorcycle maker's VIN
+    { vin: valid('JS1GT78A0E2100001'), make: 'Suzuki', year: 2014, bodyType: '' }, // Suzuki's motorcycle code
+    { vin: valid('JH2PC40J0DK000001'), make: 'Honda', year: 2013, bodyType: 'Motorcycle' }, // a car maker's motorcycle, by its body style
+  ]) {
+    const r = localVinCheck(vehicle);
+    assert.equal(r.ok, true, `${vehicle.vin}: ${r.problems.map((p) => p.detail).join('; ')}`);
+    assert.equal(year(vehicle).detail, `${vehicle.year}, website agrees`);
+    assert.equal(r.vinYear, vehicle.year);
+  }
+  const off = year({ vin: valid('JYAVP27E0EA000000'), make: 'Yamaha', year: 1999, bodyType: 'Motorcycle' });
+  assert.equal(off.ok, false);
+  assert.equal(off.detail, 'VIN says 1984 or 2014, the website says 1999');
+  // a car or light truck keeps the position-7 rule
+  const truck = localVinCheck({ vin: valid('1C6RR77T0ES643289'), make: 'Ram', year: 2014, bodyType: 'Truck' });
+  assert.equal(truck.ok, false);
+  assert.equal(year({ vin: valid('1C6RR77T0ES643289'), make: 'Ram', year: 2014, bodyType: 'Truck' }).detail, 'VIN says 1984, the website says 2014');
+  assert.deepEqual(modelYearReadings(valid('JYAVP27E0EA000000'), { lightVehicle: false }), [1984, 2014]);
+  assert.deepEqual(modelYearReadings('1C6RR7FT0KS643289'), [2019]);
 });
