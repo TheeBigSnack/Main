@@ -411,8 +411,6 @@ test('README\'s pre-owned rules say what classify.js decides when the signs mix'
   assert.match(demo, /pre-owned and nowhere new, it goes to \*\*Needs a look\*\*/);
 });
 
-// node --test runs every test( and it( call site once; none of the files
-// makes tests in a loop, so the count of call sites is the count npm test prints.
 // The e2e flows are listed in four places besides their files, and a merge that keeps one side of a
 // conflicting list would quietly stop CI running a flow: the files are the one list the others follow.
 test('the e2e flows agree: test/e2e files, package.json scripts, the CI matrix, e2e-all.mjs and README\'s count', () => {
@@ -434,6 +432,8 @@ test('the e2e flows agree: test/e2e files, package.json scripts, the CI matrix, 
   assert.equal(readme[1], WORDS[files.length] || String(files.length), 'README.md\'s count of e2e flows');
 });
 
+// node --test runs every test( and it( call site once; none of the files
+// makes tests in a loop, so the count of call sites is the count npm test prints.
 test('README\'s unit-test count is the number of tests npm test runs', () => {
   const dir = new URL('./', import.meta.url);
   const files = readdirSync(dir).filter((f) => f.endsWith('.test.js'));
