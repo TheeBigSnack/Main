@@ -25,13 +25,15 @@ export const MASS_DISAPPEARANCE_MIN_LOT = 10;
 
 // The price to post. 'beforeFees' means the lower second price the website
 // shows; when this car has none below its main price, the main price is used
-// (a price that is not on the website is never posted).
+// (a price that is not on the website is never posted). A car with no main
+// price ("call for price") has no price on either basis, so the rescan raises
+// "Website no longer shows a price" whichever basis the dealer chose.
 export function basisPrice(v, basis = 'website') {
   if (!v) return null;
   const main = typeof v.price === 'number' ? v.price : null;
   const lower = typeof v.priceBeforeFees === 'number' && v.priceBeforeFees > 0 ? v.priceBeforeFees : null;
-  if (basis !== 'beforeFees') return main;
-  if (lower !== null && (main === null || lower < main)) return lower;
+  if (basis !== 'beforeFees' || main === null) return main;
+  if (lower !== null && lower < main) return lower;
   return main;
 }
 

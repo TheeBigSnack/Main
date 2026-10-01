@@ -23,7 +23,8 @@ test('the price to post: the lower second price only when this car shows one bel
   assert.equal(basisPrice({ price: 20000 }, 'beforeFees'), 20000, 'no second price: the main price');
   assert.equal(basisPrice({ price: 20000, priceBeforeFees: 21000 }, 'beforeFees'), 20000, 'a higher second number is not a price before fees');
   assert.equal(basisPrice({ price: 20000, priceBeforeFees: 0 }, 'beforeFees'), 20000);
-  assert.equal(basisPrice({ priceBeforeFees: 19000 }, 'beforeFees'), 19000);
+  assert.equal(basisPrice({ priceBeforeFees: 19000 }, 'beforeFees'), null, 'no main price (call for price): no price on either basis');
+  assert.equal(basisPrice({ price: null, priceBeforeFees: 19000 }, 'beforeFees'), null);
   assert.equal(basisPrice({}, 'beforeFees'), null);
   assert.equal(basisPrice(null), null);
 });
@@ -108,7 +109,7 @@ test('price increase on a car nobody posted is reported too', () => {
 });
 
 test('"before fees" price basis compares the price without the doc fee', () => {
-  const curr = snapshot([['usedNormal', { pricing: { internet_price: 25673 } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { high: { label: 'Was', value: '25673' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   const website = diffScans(snapshot(LOT), curr, { confirm: confirmed() });
   const beforeFees = diffScans(snapshot(LOT), curr, { confirm: confirmed(), basis: 'beforeFees' });
   assert.equal(website.priceUpdates.length, 0);
@@ -123,6 +124,23 @@ test('website switches to "call for price": needs a look', () => {
   assert.equal(d.priceUpdates.length, 0);
   assert.equal(d.needsALook.length, 1);
   assert.match(d.needsALook[0].text, /no longer shows a price/);
+});
+
+test('under the "before fees" basis, "call for price" still needs a look, and a hidden number never becomes a price update', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 26673 } }; // posted at the "Was" line
+  const call = { low: false, high: { label: 'Price', value: 'Please call for price' } };
+  // the display says call for price; the hidden internet_price is still 26673
+  const day2 = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: call } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const d2 = diffScans(snapshot(LOT), day2, { posted, confirm: confirmed(), basis: 'beforeFees' });
+  assert.equal(d2.priceUpdates.length, 0);
+  assert.equal(d2.needsALook.length, 1);
+  assert.match(d2.needsALook[0].text, /no longer shows a price/);
+  assert.equal(listingStatus(day2.vehicles[VIN.ram], 26673, basisPrice(day2.vehicles[VIN.ram], 'beforeFees')).text, 'Website no longer shows a price');
+  // the hidden number changes while the page still says call for price: not a price the website shows
+  const day3 = snapshot([['usedNormal', { pricing: { internet_price: 24999, price: 24999 }, extra_fields: { lightning: { pricing: call } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const d3 = diffScans(day2, day3, { posted, confirm: confirmed(), basis: 'beforeFees' });
+  assert.equal(d3.priceUpdates.length, 0);
+  assert.match(d3.needsALook.map((n) => n.text).join(' '), /no longer shows a price/);
 });
 
 test('car you posted goes sale-pending: take down', () => {

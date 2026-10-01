@@ -106,7 +106,7 @@ test('a price note quoting a fee amount must match the gap between the two price
   const t3 = runGuardrails(buildTemplateDescription(wrongTied), wrongTied);
   assert.ok(t3.problems.some((p) => p.code === 'price-note-amount' && /\$500/.test(p.text)), JSON.stringify(t3.problems));
   // no second price on this car: nothing to compare the note with, so it passes
-  const single = vehicle('usedNormal', { pricing: { internet_price: null, price: null } });
+  const single = vehicle('usedNormal', { extra_fields: { lightning: { pricing: { high: false } } } });
   const c = ctx(single, { priceNote: 'Price includes the $500 doc fee; tax and tags extra.' });
   const h = runGuardrails(buildTemplateDescription(c), c);
   assert.ok(!h.problems.some((p) => p.code === 'price-note-amount'), JSON.stringify(h.problems));
