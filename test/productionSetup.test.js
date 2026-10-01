@@ -356,3 +356,15 @@ test('the signed-in deploy check is run by the owner with the token set at a pro
   const src = read('scripts/check-deploy.mjs');
   assert.match(src, /testToken: process\.env\.LOTSYNC_TEST_TOKEN \|\| ''/);
 });
+
+// Step 5 tests the sign-in email, but the manager view only gets an address in
+// step 6: the test says so and offers the extension's own sign-in instead
+test('step 5\'s sign-in email test does not need the manager view that step 6 hosts', () => {
+  const doc = read('docs/production-setup.md');
+  const step5 = doc.slice(doc.indexOf('## Step 5.'), doc.indexOf('## Step 6.'));
+  const t = step5.split('\n').find((l) => /^8\. Test: /.test(l));
+  assert.ok(t, 'step 5.8 moved: update this test');
+  assert.doesNotMatch(t, /^8\. Test: sign in from the manager view/, 'the manager view has no address yet');
+  assert.match(t, /The manager view has no address until step 6, so either come back to this after step 6 and sign in there, or test now from the extension[^:]*: \*\*Settings\*\*, \*\*Account\*\*, \*\*Send me a sign-in code\*\*\./);
+  assert.ok(read('extension/popup.js').includes('Send me a sign-in code'), 'the extension\'s Settings, Account has that button');
+});

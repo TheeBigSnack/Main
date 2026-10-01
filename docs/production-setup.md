@@ -98,7 +98,7 @@ Resend sees every sign-in email (the address and the code or link), so it is a p
    - Sender email `sign-in@mail.lotcurrent.com`, sender name `Lot Current`
    - Host `smtp.resend.com`, port `465`, username `resend`, password = the API key from 5 (Resend's SMTP page, checked 2026-10-01)
 7. In GitHub, on the `manager-view` environment of step 6 (create it now if step 6 isn't done yet), add the **Environment variable** `SENDER_DOMAIN` = `mail.lotcurrent.com`. **[Claude]** then runs the **Manager view** workflow with **Check only** (from the default branch, once this setup is merged), which runs `npm run check-hosting` and says which of the records above it can see.
-8. Test: sign in from the manager view with two addresses at two different mail services (say Gmail and Outlook). Each email should arrive in the inbox, not spam, with the six-digit code and the link.
+8. Test: sign in with two addresses at two different mail services (say Gmail and Outlook). The manager view has no address until step 6, so either come back to this after step 6 and sign in there, or test now from the extension loaded from an up-to-date copy of the repository: **Settings**, **Account**, **Send me a sign-in code**. Each email should arrive in the inbox, not spam, with the six-digit code and the link (the link opens the manager view only once step 6 is done).
 
 ## Step 6. The manager view at app.lotcurrent.com [Owner, then Claude]
 
