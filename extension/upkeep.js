@@ -8,7 +8,13 @@
 // in (and for a car with no saved link it opens on Marketplace's list of all
 // their listings):
 //   - nothing is filled or ticked off unless the page is this car's listing
-//     (its id in the address, or its year/make/model on the page);
+//     (onListing): its id in the address when the listing's id is known; with
+//     no saved link, never on the Your listings page, and elsewhere only a
+//     page that shows every word of the car's name as a whole word and the
+//     price it was listed at (or the new price). Such a page that is a
+//     listing gives the id, which is what counts from then on. A car with
+//     neither a link nor a listed price is never matched: the person uses
+//     I updated it / I took it down;
 //   - a sold/removed sign counts only if it appeared after the page was first
 //     read, so a page that already says "sold" somewhere waits for the person.
 
@@ -22,6 +28,7 @@ import { updateKey, storageErrorText } from './src/storage.js';
 export const up = {
   active: false,
   origin: null, vin: null, kind: null, price: null, listingUrl: '', name: '', listedPrice: null,
+  listingId: '', // the listing's id, from its saved link or from this car's own listing page once opened (onListing)
   tabId: null, status: 'idle', // idle | opening | waiting | filled | done | gone
   note: '', filledShown: '', seen: null, error: '', fills: 0,
   baseline: null, // { url, sold, unavailable } from the first read of the current page
@@ -52,7 +59,7 @@ function stopPolling() {
 
 export async function startUpkeep(req, ctx) {
   stopPolling();
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: req.listingUrl || '', name: req.name || req.vin, listedPrice: req.listedPrice || null, tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: req.listingUrl || '', name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
   ctx.render();
   const map = ctx.map();
   const url = up.listingUrl || map.yourListingsUrl;
@@ -72,7 +79,33 @@ export async function startUpkeep(req, ctx) {
   poller = setInterval(() => poll(ctx).catch(() => {}), 1500);
 }
 
-const expectFor = (map) => ({ id: listingIdFrom(up.listingUrl, map.listingUrlPattern), name: up.name });
+// What the listing reader is told about this car's listing: its id when
+// known, else its name and the prices that identify it.
+const knownId = (map) => up.listingId || listingIdFrom(up.listingUrl, map.listingUrlPattern);
+const expectFor = (map) => ({ id: knownId(map), name: up.name, prices: [up.listedPrice, up.price].filter((p) => typeof p === 'number' && p > 0) });
+
+// The page of an address, without its query, for comparing two addresses.
+function pageOf(url) {
+  try {
+    const u = new URL(String(url || ''));
+    return u.origin + u.pathname.replace(/\/+$/, '');
+  } catch (e) {
+    return '';
+  }
+}
+
+// Whether what the reader saw is this car's listing. With the listing's id
+// known, only its id in the address counts: a listing of another car with
+// the same name never does. Without it, never the Your listings page (every
+// listing's name is on it), and elsewhere every word of the name as a whole
+// word plus the price it was listed at (or the new price). A car with no
+// listed price and no id is never matched.
+export function onListing(seen, { id = '', yourListingsUrl = '' } = {}) {
+  if (!seen) return false;
+  if (id) return Boolean(seen.matchesId);
+  if (yourListingsUrl && pageOf(seen.url) === pageOf(yourListingsUrl)) return false;
+  return Boolean(seen.matchesName && seen.matchesPrice);
+}
 
 // Every 1.5 s: read the tab; for a price update, fill the box when it shows
 // up on this car's edit form (again if the loading form overwrites it); for
@@ -95,7 +128,10 @@ async function poll(ctx) {
     }
     if (!seen) return;
     up.seen = seen;
-    const onTarget = Boolean(seen.matchesId || seen.matchesName);
+    const id = knownId(map);
+    const onTarget = onListing(seen, { id, yourListingsUrl: map.yourListingsUrl });
+    // the car's own listing page, found by its name and price: its id is what counts from now on
+    if (onTarget && !id) up.listingId = listingIdFrom(seen.url, map.listingUrlPattern);
     if (!up.baseline || up.baseline.url !== seen.url) {
       // first read of this page: what it says now is the starting point, not a change
       up.baseline = { url: seen.url, sold: seen.sold, unavailable: seen.unavailable };
@@ -103,7 +139,7 @@ async function poll(ctx) {
     }
     if (up.offTarget !== !onTarget) {
       up.offTarget = !onTarget;
-      up.note = onTarget ? '' : `This tab isn't showing the listing for ${up.name}. Open that listing and Lot Current continues.`;
+      up.note = onTarget ? '' : offTargetNote(id);
       ctx.render();
     }
     if (!onTarget) return;
@@ -166,6 +202,14 @@ async function finish(ctx, how) {
   up.status = 'done';
   up.note = how === 'detected' ? (up.kind === 'price' ? `The listing now shows ${money(up.price)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
   ctx.render();
+}
+
+// Said while the tab is not on this car's listing.
+function offTargetNote(id) {
+  const done = up.kind === 'price' ? 'I updated it' : 'I took it down';
+  if (id) return `This tab isn't showing the listing for ${up.name}. Open that listing and Lot Current continues.`;
+  if (!up.listedPrice) return `No listing link or listed price was saved for ${up.name}, so Lot Current can't tell which listing is its own and fills in or ticks off nothing. Do it on Facebook, then click ${done}.`;
+  return `This tab isn't showing the listing for ${up.name}. Open its own listing page (Lot Current looks for its full name and ${money(up.listedPrice)}) and Lot Current continues; if it doesn't, click ${done} when you are done.`;
 }
 
 export function endUpkeep() {

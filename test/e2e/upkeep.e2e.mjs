@@ -3,8 +3,12 @@
 // rescan puts both on the To do tab; "Open & update price" opens the MOCK
 // listing, the test clicks Edit as the person would, the panel fills the
 // new price, the test clicks Update, and the panel notices the new price and
-// marks the item done; "Open listing" opens the sold car's listing, the test
-// clicks Mark as sold, and the panel notices and marks it taken down.
+// marks the item done. Along the way the tab is moved to another car's edit
+// form and to another listing of the same year, make and model: nothing is
+// filled there. The sold car's listing link is then forgotten (a car marked
+// posted by hand): "Open listing" opens Your listings, where nothing is
+// ticked off, the test opens the car's own listing from it and clicks Mark
+// as sold, and the panel notices and marks it taken down.
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:upkeep
 
@@ -122,6 +126,11 @@ try {
   await listing.waitForTimeout(3500);
   assert.equal(await listing.inputValue('#price'), '27163', "the other listing's price box is untouched");
   assert.equal(await panel.$('#priceFilled'), null);
+  // ...nor in another listing of the same year, make and model (a Series II, not this Series III).
+  await listing.goto(`${marketOrigin}/marketplace/edit/616161/`);
+  await listing.waitForTimeout(3500);
+  assert.equal(await listing.inputValue('#price'), '41500', "the other Wagoneer's price box is untouched");
+  assert.equal(await panel.$('#priceFilled'), null);
   // Back to the right listing, then Edit: now it fills.
   await listing.goto(`${marketOrigin}/marketplace/item/515151/`);
   await panel.waitForFunction(() => !document.querySelector('#upkeepNote'), null, { timeout: 10000 });
@@ -141,7 +150,15 @@ try {
   await tab(popup, 'mine').click();
   assert.match(await popup.textContent('.panel'), /Wagoneer[\s\S]*Listed \$36,883/);
 
-  // ---- 3. Take the Ram down: the open panel picks up the request, opens the listing, the person clicks Mark as sold, Lot Current notices ----
+  // ---- 3. Take the Ram down, its listing link forgotten (as for a car marked posted by hand): Your listings opens, nothing is ticked off there; the person opens the Ram's listing and clicks Mark as sold; Lot Current notices ----
+  await popup.evaluate(async ({ o, vin }) => {
+    const k = `posted:${o}`;
+    const posted = (await chrome.storage.local.get(k))[k];
+    delete posted[vin].listingUrl;
+    await chrome.storage.local.set({ [k]: posted });
+  }, { o: origin, vin: RAM });
+  await popup.close();
+  popup = await openPopup();
   await tab(popup, 'todo').click();
   const listing2Promise = context.waitForEvent('page', { timeout: 30000 });
   await popup.click('button[data-action="upkeep"][data-kind="takeDown"]');
@@ -149,9 +166,15 @@ try {
   await popup.close();
   const listing2 = watch(await listing2Promise);
   await listing2.waitForLoadState();
-  assert.match(listing2.url(), /\/marketplace\/item\/424242\/$/);
+  assert.match(listing2.url(), /\/marketplace\/you\/selling$/, 'with no link, Your listings opens');
   await panel.waitForSelector('#takeDownWaiting');
-  assert.equal(context.pages().filter((p) => /\/marketplace\/item\/424242\//.test(p.url())).length, 1, 'the request is acted on once');
+  assert.equal(context.pages().filter((p) => /\/marketplace\/you\/selling/.test(p.url())).length, 1, 'the request is acted on once');
+  await panel.waitForFunction(() => /Open its own listing page/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
+  await listing2.waitForTimeout(3500);
+  assert.ok(await panel.$('#takeDownWaiting'), 'nothing is ticked off on Your listings');
+  await listing2.click('text=2019 Ram 1500 Classic Express'); // the person opens the car's own listing
+  await listing2.waitForURL(/\/marketplace\/item\/424242\/$/);
+  await panel.waitForFunction(() => !document.querySelector('#upkeepNote'), null, { timeout: 10000 });
   // A listing page with a "Mark as sold" button, a "Sold" filter tab and
   // "Sold as-is" in its description must not read as sold.
   await listing2.waitForTimeout(3500);

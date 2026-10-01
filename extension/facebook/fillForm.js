@@ -742,8 +742,11 @@ export function fillPriceInPage(map, price) {
 // page's static text counts: text inside buttons, links, menus, tabs and
 // dialogs is skipped, so a "Mark as sold" button never reads as a sold
 // listing, and the sold sign is looked for in short standalone labels only,
-// never in prose such as a description. `expect` ({ id, name }) says which
-// listing the panel is working on; the result reports whether this page is it.
+// never in prose such as a description. `expect` ({ id, name, prices })
+// says which listing the panel is working on; the result reports what on
+// this page says it is: its id in the address (matchesId), every word of its
+// name as a whole word (matchesName), one of its prices (matchesPrice: the
+// price it is listed at, or the new one), on the page or in the Price box.
 export function readListingInPage(map, signs, expect) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -791,16 +794,23 @@ export function readListingInPage(map, signs, expect) {
   const unavailable = Boolean(unavailableRe) && unavailableRe.test(body);
   // is this the listing the panel is working on?
   const want = expect || {};
-  const matchesId = Boolean(want.id) && new RegExp('(^|\\D)' + String(want.id).replace(/\D/g, '') + '(\\D|$)').test(location.href);
-  const tokens = String(want.name || '').toLowerCase().split(/\s+/).filter((t) => t.length >= 2).slice(0, 4);
-  const hay = (document.title + ' ' + body.slice(0, 2000)).toLowerCase();
-  const matchesName = tokens.length >= 2 && tokens.every((t) => hay.includes(t));
+  const id = String(want.id || '').replace(/\D/g, '');
+  const matchesId = Boolean(id) && new RegExp('(^|\\D)' + id + '(\\D|$)').test(location.href);
+  // every word of the name, each as a whole word: "2019 Jeep Grand Cherokee
+  // Limited" is not on a page that names only the Laredo, and "1500" is not "15000"
+  const hay = norm(document.title + ' ' + body);
+  const tokens = norm(want.name).split(' ').map((t) => t.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')).filter(Boolean);
+  const whole = (t) => new RegExp('(^|[^a-z0-9])' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])').test(hay);
+  const matchesName = tokens.length >= 2 && tokens.every(whole);
   // the edit form's Price box, found the same way fillPriceInPage finds it
   const spec = (map.fields || []).find((f) => f.key === 'price');
   const patterns = spec ? spec.name.map((p) => new RegExp(p, 'i')) : [/\bprice\b/i];
   const box = [...document.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"]), [role="textbox"]')]
     .filter(visible)
     .find((c) => patterns.some((re) => re.test(accessibleName(c))));
+  const priceBoxValue = box ? String(box.value || '') : '';
+  const wanted = (Array.isArray(want.prices) ? want.prices : []).filter((p) => typeof p === 'number' && p > 0).map((p) => String(Math.round(p)));
+  const matchesPrice = wanted.some((p) => prices.includes(p) || priceBoxValue.replace(/\D/g, '') === p);
   return {
     url: location.href,
     title: document.title,
@@ -809,8 +819,9 @@ export function readListingInPage(map, signs, expect) {
     unavailable,
     matchesId,
     matchesName,
+    matchesPrice,
     hasPriceBox: Boolean(box),
-    priceBoxValue: box ? String(box.value || '') : '',
+    priceBoxValue,
   };
 }
 

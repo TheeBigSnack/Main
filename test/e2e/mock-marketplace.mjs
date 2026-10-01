@@ -232,10 +232,19 @@ function page(lang) {
 }
 
 // Listings the person has published, for the upkeep pages: id -> { title, price, sold, deleted }.
+// 616161 is another listing of the same year, make and model as 515151 (a
+// different trim): upkeep must never take one for the other.
 const listings = {
   424242: { title: '2019 Ram 1500 Classic Express', price: 27163, sold: false, deleted: false },
   515151: { title: '2022 Jeep Wagoneer Series III', price: 38383, sold: false, deleted: false },
+  616161: { title: '2022 Jeep Wagoneer Series II', price: 41500, sold: false, deleted: false },
 };
+
+// Like Marketplace's Your listings: every listing's name, price and status on one page.
+const yourListingsPage = () => `<!doctype html><html><head><meta charset="utf-8"><title>Your listings (mock)</title></head><body>
+<h1>Your listings</h1>
+<ul>${Object.entries(listings).filter(([, l]) => !l.deleted).map(([id, l]) => `<li><a href="/marketplace/item/${id}/">${l.title}</a> <span>$${l.price.toLocaleString('en-US')}</span> <span>${l.sold ? 'Sold' : 'Active'}</span></li>`).join('')}</ul>
+</body></html>`;
 
 // Like a real listing page: the description is prose (here it even contains
 // the word "sold"), the status badge is a short label of its own, the
@@ -290,6 +299,10 @@ export function startMockMarketplace(port = 0) {
     if (edit && listings[edit[1]]) {
       res.writeHead(200, { 'content-type': 'text/html' });
       return res.end(editPage(edit[1], listings[edit[1]]));
+    }
+    if (/^\/marketplace\/you\/selling\/?$/.test(url.pathname)) {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      return res.end(yourListingsPage());
     }
     if (url.pathname === '/listing-state') {
       res.writeHead(200, { 'content-type': 'application/json' });

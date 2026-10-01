@@ -374,8 +374,9 @@ test('listing upkeep only reads the listing page and fills the Price box; the pe
   const known = (src.match(/func: (fillPriceInPage|readListingInPage)\b/g) || []).length;
   assert.ok(injections === 2 && injections === known, `upkeep.js may inject only the price filler and the listing reader (${injections} vs ${known})`);
   assert.ok(!/\.click\(|['"`]click['"`]|files:\s*\[|chrome\.debugger|tabs\.sendMessage|\.submit\s*\(|requestSubmit|tabs\.remove/i.test(src), 'upkeep.js must not click, close tabs or submit');
-  // nothing is filled or ticked off unless the page is this car's listing
-  assert.match(src, /matchesId \|\| seen\.matchesName/);
+  // nothing is filled or ticked off unless the page is this car's listing (onListing, tested in upkeep.test.js)
+  assert.match(src, /const onTarget = onListing\(seen, \{ id, yourListingsUrl: map\.yourListingsUrl \}\);/);
+  assert.doesNotMatch(src, /matchesId \|\| seen\.matchesName/, 'a name alone never stands in for a known listing id');
   assert.match(src, /if \(!onTarget\) return;/);
   // a sold/removed sign counts only when it appeared after the first read
   assert.match(src, /seen\.sold && !up\.baseline\.sold/);
