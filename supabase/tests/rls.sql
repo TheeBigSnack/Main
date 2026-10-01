@@ -667,18 +667,37 @@ begin
   raise notice 'ok: a code never lowers a role, and a member it would not raise leaves it unused';
 
   -- the throttle: four misses so far (NOPE, expired, orphaned, used); six more make ten, and then the
-  -- function refuses before looking anything up, even a good code
+  -- function refuses before looking anything up, even a good code (below)
   for i in 1..6 loop
     got := public.redeem_invite('GUESS' || i, null);
     if got ->> 'code' <> 'P0002' then raise exception 'miss % was answered with %', i, got; end if;
   end loop;
+end;
+$$;
+
+-- a miss another account made three hours ago, written now as the owner: the throttled call below must
+-- still drop it (the privacy policy: an old miss is deleted at the next attempt by anyone), so the
+-- throttle is answered, not raised, and what the call deleted is kept
+reset role;
+insert into public.invite_misses (user_id, at) values (:'a_sales', now() - interval '3 hours');
+set local role authenticated;
+
+do $$
+declare
+  got jsonb;
+begin
+  -- the eleventh try inside an hour, with the good code a_mgr made for a new hire: refused before the lookup
+  -- (a lookup would answer P0012, already a manager), and answered with status 400, as a miss is
   begin
-    perform public.redeem_invite('NOPE', null);
-    raise exception 'the eleventh try inside an hour was looked up';
+    got := public.redeem_invite('HIREB0000007', null);
   exception when others then
-    if sqlstate <> 'P0005' then raise; end if;
+    raise exception 'the eleventh try inside an hour was raised (%), so PostgREST would roll back what the call deleted', sqlstate;
   end;
-  raise notice 'ok: after 10 misses in an hour redeem_invite refuses with P0005';
+  if got is distinct from jsonb_build_object('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text)
+     or current_setting('response.status', true) is distinct from '400' then
+    raise exception 'the eleventh try inside an hour was answered % with status %', got, current_setting('response.status', true);
+  end if;
+  raise notice 'ok: after 10 misses in an hour redeem_invite answers P0005 with status 400, before looking anything up';
 end;
 $$;
 
@@ -707,7 +726,10 @@ begin
   if (select count(*) from public.invite_misses where user_id = '00000000-0000-4000-8000-0000000000c3') <> 1 then
     raise exception 'another account''s miss from five minutes ago was dropped by the newcomer''s redeem_invite';
   end if;
-  raise notice 'ok: a miss older than an hour is dropped at anyone''s call, and a fresh one of another account stays';
+  if exists (select 1 from public.invite_misses where user_id = '00000000-0000-4000-8000-0000000000a1') then
+    raise exception 'another account''s miss from three hours ago survived a throttled redeem_invite: the throttle undid the call''s delete';
+  end if;
+  raise notice 'ok: a miss older than an hour is dropped at anyone''s call, a throttled one included, and a fresh one of another account stays';
 
   -- a removed manager's unused codes go with them; used ones stay as the record
   -- (a_sales becomes a manager first: A must keep one); the codes a_mgr made for B, where they are still a

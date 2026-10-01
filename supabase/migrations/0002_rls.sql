@@ -363,7 +363,7 @@ create policy "members read their dealership's rewrite usage"
 -- dealership gets one answer for all four, 'that invite code is not valid'
 -- with code P0002, so a guess learns nothing, not even that a code once
 -- existed. Every miss is counted in invite_misses, and after 10 misses
--- inside an hour the function raises 'too many attempts; try again in an
+-- inside an hour the function answers 'too many attempts; try again in an
 -- hour' (P0005) before it looks anything up. One account's calls take
 -- turns at the throttle (a transaction lock per account, taken before the
 -- count): calls sent together would otherwise each count before any of
@@ -375,7 +375,8 @@ create policy "members read their dealership's rewrite usage"
 -- returns the { code, message, details, hint } object PostgREST builds for
 -- a raised error; on the wire, to the extension and to the manager page, a
 -- miss looks exactly like a raise, and the count survives. The throttle is
--- a plain raise because nothing has been written by then.
+-- answered the same way: by then the call has dropped every account's
+-- misses older than an hour, and a raise would bring them back.
 -- Parameters are referenced as redeem_invite.code to avoid the PL/pgSQL
 -- name clash with the column of the same name.
 -- ---------------------------------------------------------------------------
@@ -400,12 +401,14 @@ begin
   -- next call's count, a statement that starts after it gets the lock, sees
   -- this call's miss. Misses older than an hour no longer count and are
   -- dropped, everyone's, so an account that never tries again does not
-  -- keep its misses
+  -- keep its misses; a throttled call is answered, not raised, so that
+  -- delete is kept
   perform pg_advisory_xact_lock(hashtext('redeem_invite'), hashtext(uid::text));
   delete from public.invite_misses where invite_misses.at < now() - interval '1 hour';
   select count(*) into misses from public.invite_misses where invite_misses.user_id = uid;
   if misses >= 10 then
-    raise exception 'too many attempts; try again in an hour' using errcode = 'P0005';
+    perform set_config('response.status', '400', true);
+    return jsonb_build_object('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text);
   end if;
 
   -- both sides folded (changed in place: no project has applied this file yet)

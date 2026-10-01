@@ -242,7 +242,10 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   assert.match(rls, /alter table public\.invite_misses enable row level security;/);
   const redeem = rls.slice(rls.indexOf('create or replace function public.redeem_invite'), rls.indexOf('comment on function public.redeem_invite'));
   assert.ok(redeem.indexOf('invite_misses') < redeem.indexOf('from public.invites'), 'the throttle runs before the code is looked up');
-  assert.match(redeem, /if misses >= 10 then\s+raise exception 'too many attempts; try again in an hour' using errcode = 'P0005'/);
+  // answered, not raised: a raise would roll back the delete of every account's old misses that runs first
+  assert.match(redeem, /if misses >= 10 then\s+perform set_config\('response\.status', '400', true\);\s+return jsonb_build_object\('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text\);/);
+  assert.doesNotMatch(redeem, /raise exception[^;]*'P0005'/, 'the throttle is never raised');
+  assert.ok(rlsTest.includes('another account\'\'s miss from three hours ago survived a throttled redeem_invite'), 'rls.sql checks a throttled call keeps its delete');
   // round H review: misses older than an hour go at anyone's call (docs/data-inventory.md's retention line), which rls.sql proves
   assert.match(rlsTest, /insert into public\.invite_misses \(user_id, at\) values\s+\(:'b_sales', now\(\) - interval '2 hours'\),\s+\(:'c_sales', now\(\) - interval '5 minutes'\);/);
   for (const words of ['another account\'\'s miss from two hours ago survived the newcomer\'\'s redeem_invite', 'another account\'\'s miss from five minutes ago was dropped']) {
@@ -270,7 +273,7 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   }
   assert.match(rls, /grant select on public\.dealerships to authenticated;\s[\s\S]*?grant update \(name\) on public\.dealerships to authenticated;/);
   assert.doesNotMatch(rls, /grant select, update on public\.dealerships/);
-  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was looked up', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice', 'making a manager a salesperson kept the unused code they made', 'a salesperson changed a stored salesperson name through the API', 'a_sales made themselves a manager', 'a_sales renamed a member', 'a_sales removed another member', 'a_sales renamed their dealership', 'redeeming a salesperson code made a manager a salesperson', 'a manager who already belongs used up the code meant for a new hire']) {
+  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was answered % with status %', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice', 'making a manager a salesperson kept the unused code they made', 'a salesperson changed a stored salesperson name through the API', 'a_sales made themselves a manager', 'a_sales renamed a member', 'a_sales removed another member', 'a_sales renamed their dealership', 'redeeming a salesperson code made a manager a salesperson', 'a manager who already belongs used up the code meant for a new hire']) {
     assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
   }
 });
