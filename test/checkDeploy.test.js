@@ -5,11 +5,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runChecks, report, nothingRead, notDeployedYet, configFindings, keyKind, keyHeaders, isBrowserSafeKey, TABLES, EXTENSION_ORIGIN, DEPLOYED_LATER } from '../scripts/check-deploy.mjs';
+import { readFileSync } from 'node:fs';
+import { runChecks, report, nothingRead, notDeployedYet, configFindings, keyKind, keyHeaders, isBrowserSafeKey, pageOrigin, TABLES, EXTENSION_ORIGIN, DEPLOYED_LATER, MANAGER_CORS_CHECK } from '../scripts/check-deploy.mjs';
 
+const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const URL_ = 'https://abcd.supabase.co';
 const KEY = 'sb_publishable_check-deploy-tests';
 const SITE = 'https://lotsync.example';
+// the hosted manager view: ALLOWED_ORIGINS in the fake below, unless broken.noManagerOrigin
+const MANAGER = 'https://app.lotsync.example';
 
 // A fake Supabase that behaves like a correct deploy, with switches to break it.
 function fakeProject(broken = {}) {
@@ -52,7 +56,8 @@ function fakeProject(broken = {}) {
       return reply(400, { ok: false, error: 'the Stripe signature does not match' });
     }
     if (u.pathname.startsWith('/functions/v1/')) {
-      if (method === 'OPTIONS') return reply(204, null, origin === EXTENSION_ORIGIN && !broken.noCors ? { 'access-control-allow-origin': origin } : {});
+      const allowed = (origin === EXTENSION_ORIGIN && !broken.noCors) || (origin === MANAGER && !broken.noManagerOrigin);
+      if (method === 'OPTIONS') return reply(204, null, allowed ? { 'access-control-allow-origin': origin } : {});
       if (anonCall) return reply(broken.gatewayOpen ? 200 : 401, { ok: false });
       return reply(403, { ok: false, error: 'not a member' });
     }
@@ -67,7 +72,7 @@ const configs = {
 };
 
 test('a correct deploy passes every check, the signed-in ones included', async () => {
-  const findings = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const findings = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const failed = findings.filter((f) => !f.ok);
   assert.deepEqual(failed, []);
   for (const t of TABLES) assert.ok(findings.some((f) => f.check === `anon reads nothing from ${t}` && f.ok), t);
@@ -94,9 +99,11 @@ test('each broken deploy is caught and named', async () => {
     // the two functions step 4 deploys are never a note: a 404 there is a failure
     [{ notDeployed: ['sync'] }, "sync: answers the extension's CORS preflight"],
     [{ notDeployed: ['rewrite'] }, 'rewrite: refuses a call with no user token'],
+    // the hosted manager view's origin missing from ALLOWED_ORIGINS: its Billing card cannot call the function
+    [{ noManagerOrigin: true }, MANAGER_CORS_CHECK],
   ];
   for (const [broken, name] of cases) {
-    const findings = await runChecks({ fetchImpl: fakeProject(broken), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+    const findings = await runChecks({ fetchImpl: fakeProject(broken), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
     const f = findings.find((x) => x.check === name);
     assert.ok(f, name);
     assert.equal(f.ok, false, `${JSON.stringify(broken)} is caught by "${name}"`);
@@ -110,26 +117,26 @@ test('each broken deploy is caught and named', async () => {
 // review 5 (G12): the README deploys billing and lead after step 6, so a correct
 // deploy at step 6 must pass, with each of their lines a note saying where
 test('at README step 6, before billing and lead are deployed, nothing fails and their lines are notes', async () => {
-  const findings = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing', 'lead'] }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const findings = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing', 'lead'] }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const { text, failed, notes } = report(findings);
   assert.equal(failed, 0, text);
   const later = findings.filter((f) => /^(billing|lead): /.test(f.check));
-  assert.equal(later.length, 5, 'billing: preflight, no token, webhook; lead: stranger, preflight');
+  assert.equal(later.length, 6, 'billing: preflight, no token, webhook, the manager view\'s preflight; lead: stranger, preflight');
   for (const f of later) {
     assert.equal(f.ok, false, f.check);
     assert.equal(f.warnOnly, true, f.check);
     assert.equal(f.detail, `404, not deployed yet: ${DEPLOYED_LATER[f.check.split(':')[0]]}`);
   }
-  assert.equal(notes, 5);
+  assert.equal(notes, 6);
   assert.match(text, /^note {2}billing: refuses a call with no user token \(404, not deployed yet: supabase\/README\.md, Billing\)$/m);
   assert.match(text, /^note {2}lead: refuses a page that is not the landing page \(404, not deployed yet: supabase\/README\.md, Demo requests\)$/m);
-  assert.match(text, /Nothing failed; 5 note\(s\) above\.$/);
+  assert.match(text, /Nothing failed; 6 note\(s\) above\.$/);
   assert.doesNotMatch(text, /Every check passed/, 'notes are not passes');
   // everything the README has deployed by step 6 is still judged: sync and rewrite pass
   for (const name of ['sync', 'rewrite']) assert.ok(findings.filter((f) => f.check.startsWith(`${name}: `)).every((f) => f.ok), name);
 
   // billing deployed, Stripe not set up yet: the webhook says so in a note
-  const noSecret = await runChecks({ fetchImpl: fakeProject({ noWebhookSecret: true }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const noSecret = await runChecks({ fetchImpl: fakeProject({ noWebhookSecret: true }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const webhook = noSecret.find((f) => f.check === 'billing: the webhook refuses an unsigned event');
   assert.equal(webhook.warnOnly, true);
   assert.match(webhook.detail, /^500, STRIPE_WEBHOOK_SECRET is not set yet: supabase\/README\.md, Billing$/);
@@ -234,7 +241,7 @@ test('a legacy anon key still gets every line ok against a correct project', asy
     if (h.apikey === LEGACY) h.apikey = KEY;
     return project(url, { ...init, headers: h });
   };
-  const findings = await runChecks({ fetchImpl, url: URL_, anonKey: LEGACY, testToken: 'user-token', siteOrigin: SITE });
+  const findings = await runChecks({ fetchImpl, url: URL_, anonKey: LEGACY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER });
   assert.deepEqual(findings.filter((f) => !f.ok), []);
 });
 
@@ -245,4 +252,48 @@ test('with a publishable key no request carries it after Bearer, so a 401 is a r
   await runChecks({ fetchImpl, url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE });
   assert.ok(sent.length > TABLES.length);
   assert.deepEqual(sent.filter((a) => a.includes(KEY)), []);
+});
+
+// The hosted manager view calls billing from its own origin, which the
+// function lets through only when ALLOWED_ORIGINS lists it; the extension's
+// preflight says nothing about that page. Unset, the run says the page was
+// not checked rather than calling billing ok.
+test('the manager view\'s origin: checked when given, a note when not, a failure when ALLOWED_ORIGINS leaves it out', async () => {
+  assert.equal(pageOrigin('https://app.lotsync.example/'), 'https://app.lotsync.example', 'the address MANAGER_URL holds becomes its origin');
+  assert.equal(pageOrigin('https://app.lotsync.example/billing?x=1'), 'https://app.lotsync.example');
+  assert.equal(pageOrigin('http://127.0.0.1:8787/'), 'http://127.0.0.1:8787', 'a page on this computer');
+  for (const bad of ['', 'app.lotsync.example', 'http://app.lotsync.example', 'ftp://x.example']) assert.equal(pageOrigin(bad), '', bad);
+
+  const sent = [];
+  const project = fakeProject();
+  const fetchImpl = (url, init = {}) => { sent.push([url, init.method || 'GET', (init.headers || {}).Origin || '']); return project(url, init); };
+  const good = await runChecks({ fetchImpl, url: URL_, anonKey: KEY, managerOrigin: `${MANAGER}/` });
+  const line = good.find((f) => f.check === MANAGER_CORS_CHECK);
+  assert.equal(line.ok, true, line.detail);
+  assert.deepEqual(sent.filter(([, , o]) => o === MANAGER), [[`${URL_}/functions/v1/billing/status`, 'OPTIONS', MANAGER]], 'one preflight, from the page\'s origin, to the route the card calls first');
+
+  const left = (await runChecks({ fetchImpl: fakeProject({ noManagerOrigin: true }), url: URL_, anonKey: KEY, managerOrigin: MANAGER })).find((f) => f.check === MANAGER_CORS_CHECK);
+  assert.equal(left.ok, false);
+  assert.notEqual(left.warnOnly, true, 'a failure');
+  assert.match(left.detail, /allow-origin none \(is https:\/\/app\.lotsync\.example in ALLOWED_ORIGINS\?\)/);
+
+  const unset = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const note = unset.find((f) => f.check === MANAGER_CORS_CHECK);
+  assert.equal(note.warnOnly, true);
+  assert.match(note.detail, /LOTSYNC_MANAGER_ORIGIN/);
+  assert.doesNotMatch(report(unset).text, /Every check passed/, 'billing is not called ok without the manager view\'s line');
+
+  const wrong = (await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, managerOrigin: 'app.lotsync.example' })).find((f) => f.check === MANAGER_CORS_CHECK);
+  assert.equal(wrong.ok, false);
+  assert.notEqual(wrong.warnOnly, true);
+
+  // the walk-through sets the secret, and the reference no longer calls it optional for the hosted page
+  const stripe = read('docs/stripe-setup.md');
+  const step5 = stripe.slice(stripe.indexOf('## 5. '), stripe.indexOf('## 6. '));
+  assert.match(step5, /\| `ALLOWED_ORIGINS` \| `https:\/\/<the manager view's address>`/);
+  assert.match(step5, /LOTSYNC_MANAGER_ORIGIN=https:\/\/<the manager view's address> npm run check-deploy/);
+  assert.match(read('.github/workflows/supabase.yml'), /run: npm run check-deploy\n\s+env:\n\s+LOTSYNC_MANAGER_ORIGIN: \$\{\{ vars\.MANAGER_URL \}\}\n/, 'the workflow\'s check passes the address when the production environment has it');
+  const env = read('supabase/README.md').split('\n').find((l) => l.startsWith('| `ALLOWED_ORIGINS` |'));
+  assert.doesNotMatch(env, /optional/);
+  assert.match(env, /manager view/);
 });

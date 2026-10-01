@@ -36,6 +36,8 @@
 #   secrets  SUPABASE_ACCESS_TOKEN  a personal access token (supabase.com, Account, Access tokens)
 #            SUPABASE_DB_PASSWORD   the database password chosen when the project was created
 #   variable SUPABASE_PROJECT_REF   the 20-character ref in the project URL (not secret)
+#   variable MANAGER_URL            optional: the manager view's address, as on manager-view;
+#                                   check-deploy then checks that page may call billing (ALLOWED_ORIGINS)
 name: Supabase
 
 on:
@@ -193,3 +195,5 @@ jobs:
       - name: Check the project from the outside
         continue-on-error: ${{ inputs.step == 'plan' || inputs.step == 'database' }}
         run: npm run check-deploy
+        env:
+          LOTSYNC_MANAGER_ORIGIN: ${{ vars.MANAGER_URL }}
