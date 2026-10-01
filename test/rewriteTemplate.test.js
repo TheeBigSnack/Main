@@ -209,3 +209,25 @@ test('a closing line the salesperson wrapped in the description is still recogni
   assert.deepEqual(runGuardrails(wrapped, { ...args, closingLine: line }).problems, []);
   assert.equal(ensureClosingLine(wrapped, line), wrapped, 'not added twice');
 });
+
+// The side panel won't fill a description with a rule problem; style
+// warnings don't stop it. Every code the checks can give is one or the
+// other, so a new check has to be sorted when it is added.
+import { RULE_PROBLEM_CODES, ruleProblems } from '../extension/src/rewriteTemplate.js';
+import { readFileSync } from 'node:fs';
+
+test('every guardrail code is either a posting rule (stops the fill) or a style warning', () => {
+  const src = readFileSync(new URL('../extension/src/rewriteTemplate.js', import.meta.url), 'utf8');
+  const codes = [...new Set([...src.matchAll(/code: '([a-z-]+)'/g)].map((m) => m[1]))].sort();
+  const WARNINGS = ['too-short', 'too-long', 'all-caps', 'emoji', 'no-vin', 'closing-too-long', 'closing-caps', 'closing-emoji'];
+  assert.deepEqual(codes, [...RULE_PROBLEM_CODES, ...WARNINGS].sort());
+  assert.ok(Object.isFrozen(RULE_PROBLEM_CODES));
+  // the rules named in the posting rules: the dealership named, facts only, no posing as a private seller, honest prices
+  for (const code of ['no-dealer', 'unknown-number', 'one-owner', 'banned-phrase', 'price-note-amount']) assert.ok(RULE_PROBLEM_CODES.includes(code), code);
+  const v = vehicle('usedNormal');
+  const g = runGuardrails('MY TRUCK, ONLY $199 A MONTH', { vehicle: v, dealer: { name: 'Example Motors' }, price: v.price });
+  assert.deepEqual(ruleProblems(g).map((p) => p.code).sort(), ['banned-phrase', 'no-dealer', 'unknown-number']);
+  assert.ok(g.problems.some((p) => p.code === 'too-short') && !ruleProblems(g).some((p) => p.code === 'too-short'));
+  assert.deepEqual(ruleProblems(null), []);
+  assert.deepEqual(ruleProblems({ ok: true, problems: [] }), []);
+});

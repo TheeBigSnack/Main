@@ -12,6 +12,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { currentVin } from '../extension/src/queue.js';
+import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
+import { buildListingData } from '../extension/src/listingData.js';
+import { vehicle } from './helpers.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -30,6 +33,11 @@ function compile(name, scope) {
 const never = (what) => () => {
   throw new Error(`${what} must not run`);
 };
+// Several functions compiled in one scope, so they call each other as written.
+function compileMany(names, scope) {
+  const keys = Object.keys(scope);
+  return new Function(...keys, `${names.map(fnText).join('\n')}\nreturn { ${names.join(', ')} };`)(...keys.map((k) => scope[k]));
+}
 
 test('a queue reads its cars through the tab it was started from, or through none', async () => {
   const run = async (queue, leftover) => {
@@ -155,4 +163,84 @@ test('a load for a website the panel has moved away from is dropped, so its cars
   assert.deepEqual(Object.keys(state.posted), ['CCC']);
   assert.equal(state.siteName, C);
   assert.equal(state.siteInfo.name, C);
+});
+
+// Opening the form, compiled with sidepanel.js's own checks and the real
+// guardrails and listing builder; the tab, the fill and the probe are stubs
+// that record they were reached. `description` is what the box holds.
+const DEALER = { name: 'Example Motors', city: 'Exampletown', state: 'PA', zip: '15000' };
+function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, check = null, car = vehicle('usedNormal') }) {
+  const v = car;
+  const calls = [];
+  const box = { value: description };
+  const state = {
+    origin: 'https://www.example-motors.test', vin: v.vin, step, vehicle: v, price: v.price, noteApplies: true, readAt,
+    description, settings: { dealer: DEALER, defaults: {}, basis: 'website', priceNote: '', salesperson: { name: 'Pat', title: 'sales consultant', closingLine: '' }, dailyCap: 10 },
+    posted: {}, colorGuess: null, listing: null, snapshotVehicles: {}, siteInfo: null, dealerTabId: null, map: {},
+  };
+  const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: '', price: state.price, closingLine: '' });
+  // the dry run built the listing when it opened the form
+  if (step === 'probe') state.listing = buildListingData(v, { dealer: DEALER, description, price: v.price, photos: [] });
+  const fns = compileMany(['descriptionStopped', 'openForm', 'fillFromProbe'], {
+    state, ctx, runGuardrails, ruleProblems, buildListingData,
+    $: (id) => (id === 'description' && step === 'review' ? box : null),
+    checksHtml: () => '', setFormButtons: () => calls.push('buttons'),
+    setStatus: (text, kind) => calls.push(`status${kind ? '(' + kind + ')' : ''}: ${text}`),
+    siteKeys: (o) => ({ posted: 'posted:' + o, sync: 'sync:' + o }),
+    dailyCap: () => ({ reached: false, used: 0, cap: 10 }),
+    pickedPhotos: () => [],
+    render: () => {}, saveFlow: async () => {}, pilotNote: async () => {}, notePostStep: () => {},
+    GLOBAL_KEYS: { devOverrides: 'devOverrides' }, FORM_MAP: {}, applyOverrides: (m) => m,
+    chrome: { storage: { local: { get: async () => ({}) } }, tabs: { create: async ({ url }) => { calls.push('tabs.create'); return { id: 77 }; } } },
+    waitForTabLoad: async () => {}, sleep: async () => {},
+    runFill: async () => calls.push(`runFill: ${state.listing.fields.description}`),
+    runProbe: async () => calls.push('runProbe'),
+    readCarForPost: read || never('readCarForPost'), recheck: check || never('recheck'),
+  });
+  return { state, calls, fns, v };
+}
+
+test('a description that breaks a posting rule is never typed into the form; a style warning alone does not stop it', async () => {
+  const v = vehicle('usedNormal');
+  const write = (car) => buildTemplateDescription({ vehicle: car, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const good = write(v);
+  const checked = runGuardrails(good, { vehicle: v, dealer: DEALER, price: v.price });
+  // this record has no features on the website, so its own template is a little short: a warning, not a stop
+  assert.deepEqual([checked.ok, checked.problems.map((p) => p.code), ruleProblems(checked)], [false, ['too-short'], []]);
+  const noCarfax = { ...v, carfaxOneOwner: false, carfaxUrl: '' };
+  const cases = {
+    'the dealership deleted': [v, good.replaceAll(DEALER.name, 'the lot')],
+    'an invented payment': [v, good + '\nOnly $199 a month.'],
+    'posing as a private seller': [v, 'Selling my truck. ' + good],
+    'a one-owner claim the data lacks': [noCarfax, write(noCarfax) + '\nOne owner, garage kept.'],
+  };
+  for (const [what, [car, description]] of Object.entries(cases)) {
+    for (const probeOnly of [false, true]) {
+      const o = formOpener({ description, car });
+      await o.fns.openForm({ probeOnly });
+      assert.ok(!o.calls.includes('tabs.create'), `${what}: the form is not opened (${probeOnly ? 'check fields' : 'fill'})`);
+      assert.ok(o.calls.some((c) => /^status\(error\): Fix the description first: /.test(c)), `${what}: the status line says what to fix`);
+      assert.ok(ruleProblems(o.state.guardrails).length > 0);
+    }
+    // the dry run's Fill it in now checks the same text before filling
+    const p = formOpener({ description, step: 'probe', car });
+    await p.fns.fillFromProbe();
+    assert.ok(!p.calls.some((c) => c.startsWith('runFill')), `${what}: Fill it in now does not fill`);
+  }
+  // only style warnings: the sparse record's own template, and a very short text that names the dealership
+  for (const text of [good, `Pre-owned at ${DEALER.name}. VIN ${v.vin}.`]) {
+    const g = runGuardrails(text, { vehicle: v, dealer: DEALER, price: v.price });
+    assert.ok(!g.ok && ruleProblems(g).length === 0, 'too short is a warning, not a rule');
+    const o = formOpener({ description: text });
+    await o.fns.openForm();
+    assert.deepEqual(o.calls.filter((c) => c === 'tabs.create' || c.startsWith('runFill')), ['tabs.create', `runFill: ${text}`]);
+    const p = formOpener({ description: text, step: 'probe' });
+    await p.fns.fillFromProbe();
+    assert.ok(p.calls.some((c) => c.startsWith('runFill')), 'Fill it in now fills it');
+  }
+  // the text checked is the one in the box, not an older copy in the state
+  const edited = formOpener({ description: good });
+  edited.state.description = good.replaceAll(DEALER.name, 'the lot');
+  await edited.fns.openForm();
+  assert.ok(edited.calls.includes('tabs.create'), 'the box holds the good text');
 });

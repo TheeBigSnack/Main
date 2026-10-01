@@ -347,3 +347,18 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '',
   if (hasClosing) for (const p of checkClosingLine(closing).problems) if (!problems.some((q) => q.text === p.text)) problems.push(p);
   return { ok: problems.length === 0, problems, words };
 }
+
+// The problems that break a posting rule rather than a style preference:
+// the dealership not named (the dealership stays identifiable), a number or
+// a one-owner claim the website's data doesn't hold (facts only), a banned
+// phrase (a claim the data can't support, posing as a private seller, words
+// about protected groups), a price note quoting the wrong fee (honest
+// prices), and the same four in the salesperson's closing line. The side
+// panel won't fill a description that has one. The rest (too short or long,
+// ALL CAPS, emoji, the VIN line missing) are warnings: a car with few
+// features on the website gives a short template, and that is no reason to
+// stop it being posted.
+export const RULE_PROBLEM_CODES = Object.freeze(['no-dealer', 'unknown-number', 'one-owner', 'banned-phrase', 'price-note-amount', 'closing-price', 'closing-number', 'closing-one-owner', 'closing-banned']);
+
+// The rule problems in a runGuardrails result ([] for none, or for no result).
+export const ruleProblems = (guardrails) => ((guardrails && Array.isArray(guardrails.problems)) ? guardrails.problems : []).filter((p) => RULE_PROBLEM_CODES.includes(p.code));

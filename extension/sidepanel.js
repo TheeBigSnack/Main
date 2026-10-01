@@ -15,7 +15,7 @@ import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins } from './src/panelList.js';
 import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
-import { runGuardrails, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
+import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
@@ -190,6 +190,36 @@ function setStatus(text, kind = '') {
 // would be untrue for it, so it is left out and the car card says so.
 const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
 const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
+
+// The description's checks, run again on the text that would be filled (the
+// box's, on the review screen). One that breaks a posting rule (the
+// dealership not named, a number or a claim the website doesn't give, a
+// banned phrase: rewriteTemplate.js ruleProblems) keeps the form shut, with
+// the problems in the status line: Lot Current never types such a text into
+// Facebook's form. Style warnings (length, capitals, emoji) don't stop it.
+// Returns true when stopped.
+function descriptionStopped() {
+  const box = $('description');
+  if (box) state.description = box.value;
+  state.guardrails = runGuardrails(state.description, ctx());
+  const stops = ruleProblems(state.guardrails);
+  const old = $('checks');
+  if (old) old.outerHTML = checksHtml(state.guardrails);
+  setFormButtons();
+  if (!stops.length) return false;
+  setStatus(`Fix the description first: ${stops.map((p) => p.text).join('; ')}.`, 'error');
+  return true;
+}
+
+// Open the Marketplace form and Check fields: off at the day's cap, and while
+// the description breaks a posting rule.
+function setFormButtons(cap = dailyCap()) {
+  const off = cap.reached || ruleProblems(state.guardrails).length > 0;
+  for (const id of ['openForm', 'checkForm']) {
+    const b = $(id);
+    if (b) b.disabled = off;
+  }
+}
 
 // Pilot numbers (src/pilot.js): when each post started and ended, and what
 // each fill could not do. Bookkeeping only; a failure here never stops a post.
@@ -571,9 +601,7 @@ async function openForm({ probeOnly = false } = {}) {
     setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
     return;
   }
-  const box = $('description');
-  if (box) state.description = box.value;
-  state.guardrails = runGuardrails(state.description, ctx());
+  if (descriptionStopped()) return;
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
@@ -621,6 +649,13 @@ async function runFill() {
   await pilotNote((p) => notePostStep(noteFill(p, { vin: state.vin, fill: state.fill, mapVersion: state.map.version, version: VERSION }), state.vin, 'filledAt'));
   startWatcher();
   await attachPhotos();
+}
+
+// Fill it in now, on the form the dry run opened: the same checks as Open
+// the Marketplace form before anything is typed.
+async function fillFromProbe() {
+  if (descriptionStopped()) return undefined;
+  return runFill();
 }
 
 // Read-only: which fields the map can find on the open page. Nothing is filled.
@@ -799,10 +834,17 @@ async function downloadPhotos() {
 
 // ---------- rendering ----------
 
+// Rule problems first (the form stays shut until they are fixed), then the
+// style warnings, which don't stop it.
 function checksHtml(g) {
   if (!g) return '';
   if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words, every number matches the website, no banned phrases, dealership named.</div>`;
-  return `<div class="checks bad" id="checks">Fix before posting:<ul>${g.problems.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul></div>`;
+  const rules = ruleProblems(g);
+  const warnings = g.problems.filter((p) => !rules.includes(p));
+  const list = (problems) => `<ul>${problems.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
+  const fix = rules.length ? `Fix before posting (the form won't open until these are fixed):${list(rules)}` : '';
+  const check = warnings.length ? (rules.length ? 'Also worth a look:' : 'Worth a look before posting:') + list(warnings) : '';
+  return `<div class="checks ${rules.length ? 'bad' : 'warn'}" id="checks">${fix}${check}</div>`;
 }
 
 function sourcePill() {
@@ -1092,6 +1134,7 @@ const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="c
 
 function viewReview() {
   const cap = dailyCap();
+  const formOff = cap.reached || ruleProblems(state.guardrails).length > 0;
   const rw = state.settings.rewrite;
   return `${carCard()}
   <section>
@@ -1113,10 +1156,10 @@ function viewReview() {
   ${assumptionsHtml()}
   <section>
     ${capHtml(cap)}
-    <button type="button" class="primary wide" id="openForm" ${cap.reached ? 'disabled' : ''}>Open the Marketplace form</button>
+    <button type="button" class="primary wide" id="openForm" ${formOff ? 'disabled' : ''}>Open the Marketplace form</button>
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
     <div id="photoServers">${photoServersHtml()}</div>
-    <button type="button" class="plain wide" id="checkForm" ${cap.reached ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
+    <button type="button" class="plain wide" id="checkForm" ${formOff ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
     <p class="hint">For the first run: the panel reports which fields it can find on the page, without filling anything. You can fill it in from there.</p>
   </section>`;
 }
@@ -1536,6 +1579,7 @@ function onInput(ev) {
     state.guardrails = runGuardrails(state.description, ctx());
     const old = $('checks');
     if (old) old.outerHTML = checksHtml(state.guardrails);
+    setFormButtons();
     saveFlow();
   }, 250);
 }
@@ -1591,7 +1635,7 @@ async function onClick(ev) {
     case 'fillNow':
       await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
       if (noPhotosPicked()) return setStatus(NO_PHOTOS_TEXT, 'error');
-      return runFill();
+      return fillFromProbe();
     case 'probeAgain': return runProbe();
     case 'copyReport': return copy(JSON.stringify(state.probe, null, 2));
     case 'backToReview':
@@ -1763,7 +1807,7 @@ function adoptChanges(changes) {
   if (capLine && state.settings) {
     const cap = dailyCap();
     capLine.outerHTML = capHtml(cap);
-    for (const id of ['openForm', 'checkForm']) { const b = $(id); if (b) b.disabled = cap.reached; }
+    setFormButtons(cap);
   }
 }
 
