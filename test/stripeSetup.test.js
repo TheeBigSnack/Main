@@ -296,3 +296,26 @@ test('stripe setup: a new --site-url is applied to the portal and the next read 
   assert.equal(s.db.portals[0].business_profile.terms_of_service_url, 'https://lotcurrent.example/legal/terms/');
   assert.equal((await run(s, { siteUrl: 'https://lotcurrent.example' })).ok, true);
 });
+
+// docs/stripe-setup.md runs test mode on the production project, so the
+// rows the test-mode webhook writes stay in public.subscriptions; the live
+// switch resets them. The statement in the doc must clear every column the
+// webhook copies from Stripe (all of them but the dealership, the free pilot's
+// end, which stays, and updated_at), so a column a later migration adds is
+// caught here, and the doc must not claim test mode leaves no trace.
+test('stripe setup doc: the live switch resets every Stripe column test mode wrote, keeps the free pilots, and the intro does not say nothing leaks', () => {
+  const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
+  const sql = /```sql\n([^]*?)```/.exec(live)?.[1] || '';
+  assert.match(sql, /update public\.subscriptions/, 'the live switch has the reset statement');
+  const migration = readFileSync(new URL('../supabase/migrations/0004_billing.sql', import.meta.url), 'utf8');
+  const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migration)[1];
+  const columns = [...table.matchAll(/^\s+([a-z_]+) /gm)].map((m) => m[1]);
+  assert.ok(columns.includes('stripe_customer_id') && columns.includes('cancel_at'), columns.join(','));
+  for (const c of columns.filter((c) => !['dealership_id', 'pilot_ends_at', 'updated_at'].includes(c))) assert.match(sql, new RegExp(`\\b${c} = `), `the reset sets ${c}`);
+  assert.match(sql, /status = case when pilot_ends_at is not null then 'pilot' end/, 'a free pilot stays a pilot');
+  assert.doesNotMatch(sql, /pilot_ends_at = /, 'the free pilots keep their end dates');
+  assert.ok(live.indexOf('```sql') > live.indexOf('the new webhook secret and the live key'), 'after the live key and webhook secret, so no test event lands after it');
+  assert.doesNotMatch(doc, /nothing made here leaks into live mode/);
+  assert.match(doc.slice(0, doc.indexOf('## What you need first')), /stay there until the live switch resets them/);
+});

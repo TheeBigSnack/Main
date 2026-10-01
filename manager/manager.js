@@ -278,6 +278,7 @@ function billingHtml() {
   const error = state.mock ? '' : (state.billing && state.billing.error) || '';
   const card = billingCard(status, { now: new Date().toISOString() });
   const note = state.billingNote ? `<p class="banner info">${esc(state.billingNote)}</p>` : '';
+  const mode = !error && card.modeNote ? `<p class="banner warn">${esc(card.modeNote)}</p>` : '';
   const seatLine = card.seatLine ? `<p class="plan">${esc(card.seatLine)}</p>` : '';
   const seatNote = card.seatNote ? `<p class="${card.seatTone === 'warn' ? 'banner warn' : 'hint'}">${esc(card.seatNote)}</p>` : '';
   const body = error
@@ -286,7 +287,7 @@ function billingHtml() {
   const buttons = error
     ? '<button type="button" class="ghost" data-action="billing" data-billing="reload">Try again</button>'
     : card.buttons.map((b, i) => `<button type="button" class="${i === 0 ? 'primary' : 'ghost'}" data-action="billing" data-billing="${esc(b.action)}" data-does="${esc(b.does)}">${esc(b.label)}</button>`).join('');
-  return `<section class="card" id="billing"><h2>Billing ${error ? pill('warn', 'Unknown') : pill(card.tone, card.label)}</h2>${note}${body}${buttons ? `<div class="toolbar">${buttons}</div>` : ''}</section>`;
+  return `<section class="card" id="billing"><h2>Billing ${error ? pill('warn', 'Unknown') : pill(card.tone, card.label)}</h2>${note}${mode}${body}${buttons ? `<div class="toolbar">${buttons}</div>` : ''}</section>`;
 }
 
 function renderBilling() {

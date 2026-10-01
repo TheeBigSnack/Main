@@ -88,7 +88,10 @@ test('pilotAvailable and statusAnswer: what the manager page may offer', () => {
   assert.equal(pilotAvailable(row({ status: null, pilot_ends_at: iso(NOW - DAY) })), false, 'a pilot never restarts');
 
   const none = statusAnswer(null, { role: 'manager', now: NOW });
-  assert.deepEqual(none, { state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: pricing.pilotDays, includedSalespeople: pricing.includedSalespeople, salespeople: null });
+  assert.deepEqual(none, { state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: pricing.pilotDays, includedSalespeople: pricing.includedSalespeople, salespeople: null, testMode: false });
+  // the key's mode, as the function passes it in: true only when it says so
+  assert.equal(statusAnswer(null, { role: 'manager', now: NOW, testMode: true }).testMode, true);
+  for (const bad of ['true', 1, undefined, null]) assert.equal(statusAnswer(null, { role: 'manager', now: NOW, testMode: bad }).testMode, false, String(bad));
   // the seat count the function passes in, as a whole number or not at all
   assert.equal(statusAnswer(null, { role: 'manager', now: NOW, salespeople: 7 }).salespeople, 7);
   assert.equal(statusAnswer(null, { role: 'manager', now: NOW, salespeople: 0 }).salespeople, 0, 'no salesperson yet is a count');
@@ -690,6 +693,8 @@ test('billing/index.ts: the four routes, fetch not an SDK, the secret key only i
   assert.match(lines[0], /secretKey: env\('STRIPE_SECRET_KEY'\)/);
   assert.match(lines[1], /if \(!config\.secretKey\)/);
   assert.match(lines[2], /Authorization: `Bearer \$\{config\.secretKey\}`/);
+  // its mode alone (test or live) is kept for the status answer, never the key
+  assert.match(src, /testMode: keyMode\(env\('STRIPE_SECRET_KEY'\)\) === 'test',/);
   assert.doesNotMatch(src, /console\.(log|error)\([^)]*(secretKey|webhookSecret)/, 'never logged');
   // the pure module is the one under test here
   assert.match(src, /from '\.\.\/_shared\/billing\.mjs'/);

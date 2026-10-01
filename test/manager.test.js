@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -375,6 +375,26 @@ test('billingCard: lapsed says so in the agreed words, why, and offers Subscribe
   const sp = card(status({ state: 'lapsed', role: 'salesperson', canSubscribe: true, subscription: subRow({ status: 'unpaid' }) }));
   assert.equal(sp.line, words);
   assert.deepEqual(sp.buttons, []);
+});
+
+test('billingCard: while the billing function runs on a Stripe test-mode key, the card says so to everyone, whatever the plan', () => {
+  assert.equal(BILLING_TEST_MODE_NOTE, 'Billing is in Stripe test mode: only Stripe\'s test cards work, nothing is charged, and a subscription started now does not carry over when real billing starts.');
+  for (const st of [
+    status({ state: 'none', canStartPilot: true, canSubscribe: true }),
+    status({ state: 'pilot', canSubscribe: true, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(10) }) }),
+    status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: inDays(30) }) }),
+    status({ state: 'lapsed', role: 'salesperson', subscription: subRow({ status: 'canceled' }) }),
+  ]) {
+    assert.equal(card({ ...st, testMode: true }).modeNote, BILLING_TEST_MODE_NOTE, st.state);
+    assert.equal(card(st).modeNote, '', `${st.state}: no flag, no note`);
+    assert.equal(card({ ...st, testMode: 'true' }).modeNote, '', `${st.state}: only the answer's true`);
+  }
+  // before billing opens nothing reaches Stripe at all, so there is no mode to speak of
+  assert.equal(card({ ...closedBillingStatus('none', null, { role: 'manager' }), testMode: true }).modeNote, '');
+  // the page shows it above the plan, and not over a status that could not be read
+  const js = read('manager/manager.js');
+  assert.match(js, /const mode = !error && card\.modeNote \? `<p class="banner warn">\$\{esc\(card\.modeNote\)\}<\/p>` : '';/);
+  assert.match(js, /\$\{note\}\$\{mode\}\$\{body\}/);
 });
 
 test('billingCard: no answer, a broken one, or an unknown state gives a card that says so, and never a button', () => {

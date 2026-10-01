@@ -523,6 +523,11 @@ export function billingBody(route, status, { returnUrl = '', dealershipId = '' }
 // to ask, since nothing on the page can renew it yet.
 export const BILLING_CLOSED_NOTE = 'Paying by card is not open yet, so nothing is charged; to carry on after the free pilot, ask your Lot Current contact.';
 export const BILLING_CLOSED_ASK = 'Billing is not open yet: ask your Lot Current contact.';
+// While the billing function runs on a Stripe test-mode key (the status
+// answer's testMode, docs/stripe-setup.md before the live switch), the card
+// says so to everyone who reads it: Checkout takes only Stripe's test cards,
+// and what test mode writes is reset when billing goes live.
+export const BILLING_TEST_MODE_NOTE = 'Billing is in Stripe test mode: only Stripe\'s test cards work, nothing is charged, and a subscription started now does not carry over when real billing starts.';
 // A pilot can start when there is no row, or only the shell of one (a Stripe
 // customer from a checkout that never finished: no status, no pilot): the
 // billing function's pilotAvailable(), word for word (test/billing.test.js
@@ -606,7 +611,9 @@ export function fmtLocalDate(iso, timeZone) {
  *   now:      ISO time the days left count from (default: the clock)
  *   timeZone: IANA zone for the dates (default: this computer's)
  *   pricing:  { pilotDays, includedSalespeople } fallback
- * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, salespeople, seatsPaid, seatLine, seatNote, seatTone, subscribeSeats, buttons: { action, label, does }[] }}
+ * modeNote is BILLING_TEST_MODE_NOTE while the answer says the billing
+ * function runs on a Stripe test-mode key, else empty.
+ * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, salespeople, seatsPaid, seatLine, seatNote, seatTone, subscribeSeats, modeNote, buttons: { action, label, does }[] }}
  */
 export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) {
   const s = status && typeof status === 'object' ? status : {};
@@ -697,7 +704,8 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
 
   const open = hasOpenSubscription(sub);
   const seatInfo = seatLines({ state, salespeople, includedSalespeople, paid: state === 'active' || open ? seatsPaid(sub) : null, subscribing: !open && buttons.some((b) => b.action === 'subscribe'), toBuy: subscribeSeats(s, { pricing: p }) });
-  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, buttons };
+  const modeNote = billingOpen && s.testMode === true ? BILLING_TEST_MODE_NOTE : '';
+  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, modeNote, buttons };
 }
 
 // What the card says when there are more salespeople than paid seats, in

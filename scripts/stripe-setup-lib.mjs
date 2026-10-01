@@ -33,7 +33,7 @@
 // printed. The webhook's signing secret is printed once, when the endpoint
 // is created, because Stripe shows it only then.
 
-import { HANDLED_EVENTS, formEncode } from '../supabase/functions/_shared/billing.mjs';
+import { HANDLED_EVENTS, formEncode, keyMode } from '../supabase/functions/_shared/billing.mjs';
 
 export const STRIPE_API = 'https://api.stripe.com';
 export const TAG = 'lotcurrent';
@@ -52,11 +52,8 @@ const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x)
 const cents = (dollars) => Math.round(Number(dollars) * 100);
 
 // 'test', 'live', or null for something that is not a Stripe secret or
-// restricted key.
-export function keyMode(key) {
-  const m = /^(sk|rk)_(test|live)_[A-Za-z0-9]+$/.exec(String(key || '').trim());
-  return m ? m[2] : null;
-}
+// restricted key: the billing function's own reading of a key.
+export { keyMode };
 
 // The webhook address: an https URL whose path ends in /billing/webhook (the
 // function's route), or a bare Supabase project ref, which becomes

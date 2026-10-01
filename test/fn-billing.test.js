@@ -14,8 +14,8 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { loadFunction, invoke, fake, net, logs, hermetic, functionsFetch, uuid, keysOf, NETWORK_ERROR, SUPABASE_URL, ANON_KEY, SERVICE_KEY, EXTENSION_ORIGIN } from './functions/harness.mjs';
 import { pgTime } from './functions/fake-supabase.mjs';
-import { PRICING, OPEN_SUBSCRIPTION_MESSAGE, OPEN_SUBSCRIPTION_CODE } from '../supabase/functions/_shared/billing.mjs';
-import { billingCard, billingBody, SEATS_NOT_ADDED } from '../manager/data.js';
+import { PRICING, OPEN_SUBSCRIPTION_MESSAGE, OPEN_SUBSCRIPTION_CODE, NO_BILLING_ACCOUNT_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
+import { billingCard, billingBody, SEATS_NOT_ADDED, BILLING_TEST_MODE_NOTE } from '../manager/data.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -157,8 +157,8 @@ test('billing: status answers the documented shape for the dealership asked for,
   const handler = await load();
   const none = await status(handler, TOKEN.u2);
   assert.equal(none.status, 200);
-  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'salespeople', 'state', 'subscription']);
-  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople, salespeople: 1 });
+  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'salespeople', 'state', 'subscription', 'testMode']);
+  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople, salespeople: 1, testMode: false });
   const card = billingCard(none.body);
   assert.deepEqual([card.label, card.buttons.map((b) => b.action)], ['No plan yet', ['pilot', 'subscribe']]);
 
@@ -380,11 +380,40 @@ test('billing: the portal is 404 until a customer exists, then a portal session 
   const early = await post(handler, 'portal', TOKEN.u2);
   assert.deepEqual([early.status, early.body], [404, { ok: false, error: 'this dealership has no billing account yet: subscribe first' }]);
   world({ subscriptions: [{ dealership_id: D1, status: 'past_due', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
+  stripe({ customers: { cus_1: {} } });
   const r = await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 });
   assert.deepEqual([r.status, r.body], [200, { ok: true, url: 'https://billing.stripe.com/p/session/bps_1' }]);
-  const [call] = stripeCalls();
+  const call = stripeCalls().find((c) => c.path === '/v1/billing_portal/sessions');
   assert.deepEqual([call.path, call.form], ['/v1/billing_portal/sessions', { customer: 'cus_1', return_url: RETURN_URL }]);
   assert.match(call.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
+});
+
+test('billing: a customer Stripe no longer has (left from test mode after the switch to live, or deleted) gets a sentence saying whom to ask, not Stripe\'s error, and no portal session', async () => {
+  for (const customers of [{}, { cus_1: { deleted: true } }]) {
+    world({ subscriptions: [{ dealership_id: D1, status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
+    stripe({ customers });
+    net.calls = [];
+    const handler = await load();
+    const r = await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 });
+    assert.deepEqual([r.status, r.body], [404, { ok: false, error: NO_BILLING_ACCOUNT_MESSAGE }], JSON.stringify(customers));
+    assert.deepEqual(stripeCalls().map((c) => `${c.method} ${c.path}`), ['GET /v1/customers/cus_1'], 'no portal session for a customer that is gone');
+    assert.equal(fake.writes('subscriptions').length, 0, 'the row is left as it is: the live switch in docs/stripe-setup.md resets it');
+  }
+  assert.match(NO_BILLING_ACCOUNT_MESSAGE, /test mode/);
+  assert.match(NO_BILLING_ACCOUNT_MESSAGE, /ask your Lot Current contact$/);
+});
+
+test('billing: the status says test mode while the function\'s Stripe key is a test-mode one, and the manager page\'s Billing card says so', async () => {
+  world();
+  for (const [key, testMode] of [['sk_test_abc123', true], ['rk_test_abc123', true], ['sk_live_abc123', false], ['rk_live_abc123', false], [SECRET_KEY, false]]) {
+    const handler = await load({ STRIPE_SECRET_KEY: key });
+    const r = await status(handler, TOKEN.u2);
+    assert.deepEqual([r.status, r.body.testMode], [200, testMode], key.slice(0, 8));
+    const c = billingCard(r.body);
+    assert.equal(c.modeNote, testMode ? BILLING_TEST_MODE_NOTE : '', key.slice(0, 8));
+    // a salesperson's answer carries it too: nothing to press, but the plan is not a real one
+    assert.equal((await status(handler, TOKEN.u1)).body.testMode, testMode);
+  }
 });
 
 test('billing: with STRIPE_PORTAL_CONFIGURATION the portal session names that configuration; with STRIPE_AUTOMATIC_TAX=true Checkout adds tax and asks for the address, and anything else leaves tax off', async () => {
@@ -392,7 +421,7 @@ test('billing: with STRIPE_PORTAL_CONFIGURATION the portal session names that co
   stripe({ customers: { cus_1: {} } });
   const handler = await load({ STRIPE_PORTAL_CONFIGURATION: 'bpc_test_1', STRIPE_AUTOMATIC_TAX: 'TRUE' });
   assert.equal((await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 })).status, 200);
-  assert.deepEqual(stripeCalls()[0].form, { customer: 'cus_1', return_url: RETURN_URL, configuration: 'bpc_test_1' });
+  assert.deepEqual(stripeCalls().find((c) => c.path === '/v1/billing_portal/sessions').form, { customer: 'cus_1', return_url: RETURN_URL, configuration: 'bpc_test_1' });
 
   world();
   stripe();

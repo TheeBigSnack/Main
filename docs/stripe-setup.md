@@ -2,7 +2,7 @@
 
 Billing is built (`supabase/functions/billing/`, the manager view's Billing card) and switched off: nothing charges anyone until a Stripe account exists and the billing function has its secrets. This page is the owner's path from no account to a test-mode subscription that works end to end, then the later switch to live mode. `supabase/README.md`, "Billing", is the reference behind it.
 
-Everything here is **test mode** until the last section. Test mode uses test cards and moves no money. Stripe keeps test and live objects apart, so nothing made here leaks into live mode.
+Everything here is **test mode** until the last section. Test mode uses test cards and moves no money. Stripe keeps test and live objects apart, but the database does not: the rows the test-mode webhook writes into `public.subscriptions` (Stripe ids, a status such as active, the period's end) stay there until the live switch resets them (the last section, step 5). While the function has a test key, the manager view's Billing card says so to everyone who opens it: "Billing is in Stripe test mode: only Stripe's test cards work, nothing is charged, and a subscription started now does not carry over when real billing starts." Every manager who opens the page then sees that line, including a real pilot dealership's manager on the same project.
 
 Who does what: steps marked **[owner]** need the owner's own account, browser or terminal. Claude prepares the code and checks the output; Claude never holds a Stripe key.
 
@@ -79,7 +79,7 @@ Then the manager view's Billing card is turned on: **[Claude]** sets `billing: t
 
 ## 6. Try it as a manager would [owner, about 15 minutes]
 
-Signed in to the manager view as a manager of a test dealership:
+Signed in to the manager view as a manager of a test dealership (the Billing card says billing is in Stripe test mode):
 
 1. **Start the free pilot.** The Billing card shows the pilot's end date. No card is asked for.
 2. **Subscribe.** Stripe Checkout opens with the price. Pay with the test card `4242 4242 4242 4242`, any future date, any CVC, any ZIP. Back on the manager view the card says Subscribed, with the first charge at the end of the pilot.
@@ -96,9 +96,27 @@ Not before the company exists and the attorney has answered the sales-tax questi
 1. Activate the Stripe account: the company's legal name, EIN, address, the business bank account for payouts.
 2. Sales tax, as the attorney advises. If tax is to be collected: turn on Stripe Tax, set the default tax behavior to exclusive and add the registrations in the Dashboard (Stripe Tax charges a fee per transaction: decide with the price), then `supabase secrets set STRIPE_AUTOMATIC_TAX=true`. Checkout then asks for the billing address and adds the tax. Until the word `true` is set, no tax is added.
 3. With the live secret key (`sk_live_`): `npm run stripe-setup -- --apply --live --webhook-url <ref>`. The `--live` flag is required; without it a live key is refused before anything is read.
-4. Set the printed ids, the new webhook secret and the live key in the function secrets, as in step 5; `npm run check-deploy`.
-5. Optional and safer: instead of the full live secret key, give the function a restricted key that may only write customers, Checkout Sessions and portal sessions (Developers, API keys, Create restricted key; check the permission names on that screen). The setup script itself still needs the full key, so run it from your own terminal only.
-6. Run step 6 once with a real card and a real dealership of your own, then refund it from the Dashboard.
+4. Set the printed ids, the new webhook secret and the live key in the function secrets, as in step 5; `npm run check-deploy`. From now on the Billing card no longer says test mode, and test-mode events no longer pass the webhook's signature check.
+5. Reset what test mode wrote, right away and before telling any dealership that billing is live. Supabase Dashboard, SQL editor:
+
+   ```sql
+   update public.subscriptions
+      set stripe_customer_id = null,
+          stripe_subscription_id = null,
+          status = case when pilot_ends_at is not null then 'pilot' end,
+          current_period_end = null,
+          cancel_at = null,
+          cancel_at_period_end = false,
+          seats = default,
+          updated_at = now()
+    where stripe_customer_id is not null
+       or stripe_subscription_id is not null
+       or (status is not null and status <> 'pilot');
+   ```
+
+   Every Stripe id, status and date on the rows came from test mode, which the live key cannot see: left there, a test subscription would read as active for good (syncing with nothing charged), Subscribe would refuse it, and Manage billing would find no customer. Free pilots keep their end dates, so a dealership on its pilot stays on it; one whose pilot has ended reads as lapsed and subscribes again in live mode; one that never had a pilot reads as no plan yet. `billing_events` keeps the test events; they are never applied again.
+6. Optional and safer: instead of the full live secret key, give the function a restricted key that may only write customers, Checkout Sessions and portal sessions (Developers, API keys, Create restricted key; check the permission names on that screen). The setup script itself still needs the full key, so run it from your own terminal only.
+7. Run step 6 once with a real card and a real dealership of your own, then refund it from the Dashboard.
 
 ## What never happens
 

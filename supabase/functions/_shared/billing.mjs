@@ -104,12 +104,29 @@ export function pilotAvailable(row) {
   return (row.status === null || row.status === undefined) && (row.pilot_ends_at === null || row.pilot_ends_at === undefined);
 }
 
+// Which Stripe mode a secret key is for: 'test' or 'live' for a secret
+// (sk_) or restricted (rk_) key, null for anything else. The setup script
+// refuses a live key without --live by it, and the billing function tells
+// the manager page it runs in test mode by it (testMode in the status).
+export function keyMode(key) {
+  const m = /^(sk|rk)_(test|live)_[A-Za-z0-9]+$/.exec(String(key || '').trim());
+  return m ? m[2] : null;
+}
+
+// Stripe answers this for a customer that is gone (deleted, or made with a
+// test-mode key that the function no longer has): the portal has nothing to
+// open, and the manager is told whom to ask instead of Stripe's own error.
+export const NO_BILLING_ACCOUNT_MESSAGE = 'Stripe has no billing account for this dealership any more (one made while billing was in test mode does not carry over): ask your Lot Current contact';
+
 // What GET /billing/status answers, from the row and the caller's role: the
-// state, the row, which buttons the manager page may show, and the
+// state, the row, which buttons the manager page may show, the
 // dealership's seat count now (`salespeople`, from seatCount below), which
-// the function counts for a manager only and passes in; null when it was
-// not counted.
-export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICING, salespeople = null } = {}) {
+// the function counts for a manager only and passes in, null when it was
+// not counted, and whether the function's Stripe key is a test-mode one
+// (`testMode`: only Stripe's test cards work and nothing is charged; the
+// card says so, and docs/stripe-setup.md resets what test mode wrote when
+// billing goes live).
+export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICING, salespeople = null, testMode = false } = {}) {
   const state = subscriptionState(row, now);
   const manager = role === 'manager';
   return {
@@ -121,6 +138,7 @@ export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICI
     pilotDays: pricing.pilotDays,
     includedSalespeople: pricing.includedSalespeople,
     salespeople: Number.isInteger(salespeople) && salespeople >= 0 ? salespeople : null,
+    testMode: testMode === true,
   };
 }
 
