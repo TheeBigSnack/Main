@@ -37,7 +37,7 @@ On the extension side, `extension/src/account.js` (sign-in, the session, invite 
 
 You need the Supabase CLI (`npm install -g supabase` or the installer from supabase.com) and an Anthropic API key if you want the rewrite service.
 
-`docs/production-setup.md` is the owner's order of work for the production project (which steps need the owner, the email sender and the manager view's host, the deploy workflows). This section stays the reference for what each setting means.
+`docs/production-setup.md` is the owner's order of work for the production project (which steps need the owner, the email sender and the manager view's host, the deploy workflows). This section stays the reference for what each setting means. On the production project the database and every function go up through the **Supabase** workflow (`.github/workflows/supabase.yml`: the committed code, the pinned command line, only the project the config files name), and the function secrets go in the Dashboard (Edge Functions, Secrets); the `supabase db push` and `supabase functions deploy` lines in this README, here and under "Demo requests" and "Billing", are the by-hand equivalents for a project of your own.
 
 **API keys.** Supabase is retiring the legacy `anon` and `service_role` keys by the end of 2026. Where this README says anon key, use the project's **publishable** key (`sb_publishable_...`, Project settings, API Keys) when it has one; the legacy anon key keeps working until Supabase turns it off. The functions read the new publishable and secret keys when the runtime provides them and fall back to the legacy ones (`functions/_shared/auth.ts`), and `npm run check-deploy` tells the kinds apart and fails on a secret key in a file a browser reads.
 
@@ -219,7 +219,7 @@ Only what the extension already keeps in the browser and the privacy policy name
 
 ## Demo requests (the landing page's form)
 
-The landing page's **Request a demo** form posts to the `lead` function, which stores the request in `demo_requests` (PLAN.md M5, acceptance 2). Until it is set up the form opens the visitor's own mail app instead, so nothing is lost.
+The landing page's **Request a demo** form posts to the `lead` function, which stores the request in `demo_requests` (PLAN.md M5, acceptance 2). Until it is set up the form opens the visitor's own mail app instead, so nothing is lost. On the production project, set `LEAD_ORIGINS` in the Dashboard (Edge Functions, Secrets) and deploy `lead` with the Supabase workflow's **database** and **functions** steps (`docs/production-setup.md`, step 3); by hand, on a project of your own:
 
 ```
 supabase secrets set LEAD_ORIGINS=https://<where site/ is hosted>
@@ -290,7 +290,7 @@ In the Stripe Dashboard, in **test mode** first (the toggle at the top; everythi
 
 4. The **secret key** from Developers, API keys (`sk_test_...` in test mode, `sk_live_...` in live mode). It only ever goes into the function secrets.
 
-Then the secrets and the function:
+Then the secrets and the function. On the production project the secrets go in the Dashboard (Edge Functions, Secrets) and the function goes up through the Supabase workflow's **database** and **functions** steps (`docs/stripe-setup.md`, step 5); by hand, on a project of your own:
 
 ```
 supabase secrets set STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_...
@@ -300,7 +300,7 @@ supabase db push                                # applies 0004_billing.sql
 supabase functions deploy billing --no-verify-jwt
 ```
 
-`--no-verify-jwt` (or a `[functions.billing]` block with `verify_jwt = false` in `config.toml`, like the other two functions) is required: Stripe's webhook carries no Supabase token, and the function checks the caller's token itself on the other three routes.
+`config.toml`'s `[functions.billing]` block sets `verify_jwt = false`, which the workflow's deploy reads, and `--no-verify-jwt` does the same by hand. One of the two is required: Stripe's webhook carries no Supabase token, and the function checks the caller's token itself on the other three routes.
 
 Then `npm run check-deploy` again (step 6): the three billing lines now read `ok`, the webhook's included once `STRIPE_WEBHOOK_SECRET` is set.
 

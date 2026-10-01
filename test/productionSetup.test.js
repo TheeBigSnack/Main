@@ -212,3 +212,32 @@ test('docs/production-setup.md names every piece it relies on, and says the secr
   assert.match(read('package.json'), /"check-hosting": "node scripts\/check-hosting\.mjs"/);
   for (const s of ['npm run check-hosting', 'MANAGER_URL', 'SENDER_DOMAIN', 'scripts/check-hosting.mjs']) assert.ok(doc.includes(s), s);
 });
+
+// The production project gets its database and functions only through the
+// Supabase workflow (the committed code, the pinned CLI, the project the
+// config files name). The Stripe walk-through once sent the owner through a
+// local link, db push and functions deploy instead.
+test('docs/stripe-setup.md deploys billing through the Supabase workflow, never from a terminal', () => {
+  const doc = read('docs/stripe-setup.md');
+  const blocks = [...doc.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
+  assert.doesNotMatch(blocks, /\bsupabase (db push|functions deploy|link|login)\b/, 'no local deploy command to copy');
+  assert.doesNotMatch(doc, /`supabase\/README\.md` steps 1 to 6/, 'the prerequisite is the production order of work');
+  assert.match(doc, /`docs\/production-setup\.md` steps 1 to 3/);
+  const step5 = doc.slice(doc.indexOf('## 5. '), doc.indexOf('## 6. '));
+  assert.match(step5, /the \*\*Supabase\*\* workflow \(`docs\/production-setup\.md`, step 3\)/);
+  assert.match(step5, /\*\*functions\*\* with `billing` in the box/);
+  assert.match(step5, /Edge Functions, Secrets/, 'secrets in the Dashboard');
+  assert.doesNotMatch(doc, /--no-verify-jwt/);
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
+  assert.doesNotMatch(live, /`npm run check-deploy`\.?$/m, 'the live switch checks through the workflow too');
+  // the workflow's deploy takes the flag from config.toml
+  const toml = read('supabase/config.toml');
+  for (const f of ['billing', 'lead']) assert.match(toml, new RegExp(`\\[functions\\.${f}\\]\\nverify_jwt = false`), f);
+  // the reference's by-hand lines say that production goes through the workflow
+  const readme = read('supabase/README.md');
+  assert.match(readme, /On the production project the database and every function go up through the \*\*Supabase\*\* workflow/);
+  for (const [from, to] of [['## Demo requests', 'supabase functions deploy lead'], ['Then the secrets and the function', 'supabase functions deploy billing']]) {
+    const part = readme.slice(readme.indexOf(from), readme.indexOf(to));
+    assert.match(part, /On the production project[^\n]*Supabase workflow/, from);
+  }
+});
