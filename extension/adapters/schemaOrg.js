@@ -64,23 +64,24 @@ export const REQUEST_TIMEOUT_MS = 30000;
 // Answers on a page that lists cars (vehicle data in its JSON-LD or
 // microdata, or at least two links on this website to car pages: an address
 // with a VIN in it, or one that reads like a car page) or on one car's own
-// page. The list to scan is the page it ran on when its own address reads
-// as used inventory, or when its title names used cars and not new ones
-// ("Used Vehicles for Sale" at "/inventory/", the list of a lot that sells
-// only used cars) on a page that is not the site's home page; else the used
-// inventory page it links to (a home page titled "New & Used Cars" with a
-// few featured cars is not the used list); else the page it ran on. The
-// used inventory page it links to is the link whose words say so ("Used",
-// "Shop pre-owned"), else one whose address is only inventory words
-// ("/used-vehicles/", "/inventory/?condition=used"), else any other address
-// with a used word, the shortest of each: a trade-in page
-// ("/sell-your-used-car/") or a page about one model ("/used-jeep-wrangler/")
-// comes last. On a used list opened past its first page, or sorted or
-// filtered, it is the same list with fewer of those parameters when the
-// page links to it (its "Used" link, its first page), so a scan reads the
-// whole list; a parameter is never removed by its name, so one that selects
-// used inventory stays. On a car's page it is the used inventory page it
-// links to (null when it links to none).
+// page. The list to scan is, in order: the page it ran on when its own
+// address reads as used inventory; the used inventory page it links to when
+// that link reads as the whole used list (its words say so, "Used", "Shop
+// pre-owned", or its address is only inventory words, "/used-vehicles/",
+// "/inventory/?condition=used"); the page it ran on when its title names
+// used cars and not new ones ("Used Vehicles for Sale" at "/inventory/",
+// the list of a lot that sells only used cars) and it is not the site's
+// home page (a home page titled "New & Used Cars" with a few featured cars
+// is not the used list); any other link with a used word in its address
+// (a trade-in page, "/sell-your-used-car/", a page about one model,
+// "/used-jeep-wrangler/", or about certified cars or one body style only);
+// else the page it ran on. The shortest link of each kind. On a used list
+// opened past its first page, or sorted or filtered, it is the same list
+// with fewer of those parameters when the page links to it (its "Used"
+// link, its first page), so a scan reads the whole list; a parameter is
+// never removed by its name, so one that selects used inventory stays. On a
+// car's page it is the used inventory page it links to, the same way (null
+// when it links to none).
 export function probeInPage() {
   // Facebook is where listings go, never a website to read. The popup never
   // offers a scan there; this probe refuses too, because any page with car
@@ -130,11 +131,11 @@ export function probeInPage() {
     try { p = decodeURIComponent(p); } catch (e) { /* as it is */ }
     return p.toLowerCase().split('/').filter(Boolean).map((s) => s.split(/[^a-z0-9]+/).filter(Boolean));
   };
-  const LIST_WORDS = new Set(['used', 'pre', 'owned', 'preowned', 'certified', 'cpo', 'inventory', 'vehicles', 'vehicle', 'cars', 'car', 'autos', 'auto', 'trucks', 'suvs', 'search', 'searchused', 'usedcars', 'usedvehicles', 'usedinventory', 'all', 'for', 'sale', 'forsale', 'shop', 'browse', 'view', 'index', 'default', 'htm', 'html', 'aspx', 'asp', 'php', 'jsp', 'cfm']);
+  const LIST_WORDS = new Set(['used', 'pre', 'owned', 'preowned', 'inventory', 'vehicles', 'vehicle', 'cars', 'car', 'autos', 'auto', 'search', 'searchused', 'usedcars', 'usedvehicles', 'usedinventory', 'all', 'for', 'sale', 'forsale', 'shop', 'browse', 'view', 'index', 'default', 'htm', 'html', 'aspx', 'asp', 'php', 'jsp', 'cfm']);
   const usedText = /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i;
   // 0: its words say used inventory; 1: its address is only inventory
-  // words; 2: any other address with a used word in it.
-  const usedRank = (u, text) => (usedText.test(text) ? 0 : pathWords(u).every((words) => words.every((w) => LIST_WORDS.has(w))) ? 1 : 2);
+  // words; 2: any other address with a used word in it, or the home page.
+  const usedRank = (u, text) => (!pathWords(u).length ? 2 : usedText.test(text) ? 0 : pathWords(u).every((words) => words.every((w) => LIST_WORDS.has(w))) ? 1 : 2);
   const samePage = (href) => {
     try {
       const u = new URL(href, pageAddress);
@@ -213,6 +214,7 @@ export function probeInPage() {
   if (!onePage && !aList) return null;
   if (onePage) return { kind: 'schemaOrg', origin: site, listUrl: usedLink || null };
   if (usedWords.test(readable(here))) return { kind: 'schemaOrg', origin: site, listUrl: wholeList ? wholeList.href : pageAddress };
+  if (usedLink && usedLinkRank < 2) return { kind: 'schemaOrg', origin: site, listUrl: usedLink };
   if (usedTitle && !atRoot) return { kind: 'schemaOrg', origin: site, listUrl: pageAddress };
   return { kind: 'schemaOrg', origin: site, listUrl: usedLink || pageAddress };
 }

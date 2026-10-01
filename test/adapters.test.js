@@ -583,7 +583,7 @@ test('schemaOrg probe: a list of cars, one car\'s page, a page that links to the
   // a lot that sells only used cars: its whole list at "/inventory/", titled for used cars, is the list,
   // whatever other address with a used word it links (a trade-in page, a page about one model)
   const cards = LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ');
-  for (const [label, extra] of [['a trade-in page', '<a href="/sell-your-used-car/">Sell us your car</a>'], ['a page about one model', '<a href="/used-jeep-wrangler/">Used Jeep Wrangler near you</a>'], ['a page about one used make', '<a href="/used-jeep/">Jeep</a>']]) {
+  for (const [label, extra] of [['a trade-in page', '<a href="/sell-your-used-car/">Sell us your car</a>'], ['a page about one model', '<a href="/used-jeep-wrangler/">Used Jeep Wrangler near you</a>'], ['a page about one used make', '<a href="/used-jeep/">Jeep</a>'], ['its certified cars only', '<a href="/certified-pre-owned/">Certified Pre-Owned</a>'], ['one body style', '<a href="/used-trucks/">Used Trucks</a>'], ['a "Used" link to the home page', '<a href="/">Pre-Owned</a>']]) {
     const usedOnly = `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title></head><body><a href="/financing/">Financing</a> ${extra} ${cards}</body></html>`;
     assert.deepEqual(await on('/inventory/', { html: usedOnly }), { ...SERVICE, listUrl: O + '/inventory/' }, `used-only lot with ${label}`);
   }
@@ -593,6 +593,9 @@ test('schemaOrg probe: a list of cars, one car\'s page, a page that links to the
   assert.deepEqual(await on('/index.html', { html: usedHome }), { ...SERVICE, listUrl: O + '/used/' });
   const both = `<!doctype html><html><head><title>New Cars | Used Cars | Sample Motors</title></head><body><a href="/used-vehicles/">Shop used</a> ${cards}</body></html>`;
   assert.deepEqual(await on('/inventory/', { html: both }), SERVICE);
+  // a page titled for used cars that links the whole used list (a specials page) is not the list: the list it links is
+  const specials = `<!doctype html><html><head><title>Used Car Specials | Sample Motors</title></head><body><a href="/used-vehicles/">Used</a> ${cards}</body></html>`;
+  assert.deepEqual(await on('/specials/', { html: specials }), SERVICE);
   // the link to the used list: the one whose words say so, else the one whose address is only inventory words,
   // before a shorter trade-in page or page about one model
   const nav = `<!doctype html><html><head><title>Sample Motors</title></head><body><a href="/sell-used/">Sell your car</a> <a href="/used-jeep/">Jeep</a> <a href="/inventory/?condition=pre-owned">Pre-Owned</a> ${cards}</body></html>`;
