@@ -32,8 +32,8 @@
 // is off, whatever this says. Turn both on together; with this false the
 // page keeps saying "ask whoever set Lot Sync up for your store".
 export const CONFIG = {
-  supabaseUrl: '',
-  supabaseAnonKey: '',
+  supabaseUrl: 'https://dblbfgfkmzlfdwzbcvpj.supabase.co',
+  supabaseAnonKey: 'sb_publishable_dFXfRnfVqhUqZKxM2r_ylw_6uU4d2bt',
   functionsUrl: '',
   supabaseJs: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm',
   selfServeSignup: false,
