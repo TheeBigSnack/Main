@@ -701,6 +701,24 @@ test('0004_billing.sql: RLS on, members read, nobody but the service role writes
   assert.match(sql, /else 'lapsed'/);
 });
 
+test('subscription_state(): its comment names who calls it, and no Edge Function does: they compute the same word in billing.mjs', () => {
+  const sql = read('../supabase/migrations/0004_billing.sql');
+  const head = sql.slice(sql.indexOf('-- subscription_state(dealership_id)'), sql.indexOf('create or replace function public.subscription_state'));
+  const comment = head.replace(/^-- ?/gm, '').replace(/\s+/g, ' ');
+  // a maintainer who changes the SQL rule must not believe /sync, /rewrite or billing follow it
+  const callers = ['sync', 'rewrite', 'billing'].filter((fn) => /\.rpc\(\s*['"]subscription_state['"]/.test(read(`../supabase/functions/${fn}/index.ts`)));
+  assert.deepEqual(callers, [], 'no Edge Function calls subscription_state()');
+  assert.doesNotMatch(comment, /The function calls it/, 'the comment does not say a function calls it');
+  assert.match(comment, /No Edge Function calls it/);
+  assert.match(comment, /subscriptionState\(\) and planOf\(\) in functions\/_shared\/billing\.mjs/);
+  assert.match(comment, /supabase\/tests\/billing\.sql and test\/billing\.test\.js/);
+  // and its real callers
+  assert.match(comment, /start_pilot\(\)/);
+  assert.match(comment, /usage_report\(\)/);
+  assert.match(read('../supabase/migrations/0008_usage.sql'), /public\.subscription_state\(d\.id\) as plan_state/);
+  assert.doesNotMatch(read('../extension/src/sync.js'), /\(subscription_state\(\) on the server\)/, 'the extension says planOf answers, the same rule');
+});
+
 // ---------- the function ----------
 
 test('billing/index.ts: the four routes, fetch not an SDK, the secret key only in the Authorization header', () => {

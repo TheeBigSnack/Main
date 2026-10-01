@@ -517,7 +517,7 @@ function showsChange(registry) {
   };
 }
 
-// The plan words the sync function answers (subscription_state() on the server).
+// The plan words the sync function answers (planOf() on the server, the same rule as subscription_state() in SQL).
 export const PLAN_STATES = Object.freeze(['none', 'pilot', 'active', 'lapsed']);
 
 // The dealership's plan as the function answers it ({ state, pilotEndsAt,
