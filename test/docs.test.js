@@ -16,7 +16,7 @@ import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
-import { listingStatus, MASS_DISAPPEARANCE_MIN_LOT } from '../extension/src/rescan.js';
+import { listingStatus, MASS_DISAPPEARANCE_MIN_LOT, diffScans } from '../extension/src/rescan.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
 
@@ -98,6 +98,17 @@ test('the adapter contract and help.md say a car whose own page could not be che
   assert.doesNotMatch(contract, /Anything else \(403, 429, 5xx/, 'the old whole-check rule for a 5xx is gone');
   assert.match(doc('help.md'), /whose own page could not be checked .* stays under \*\*Needs a look\*\* with the reason/);
   assert.match(read('../PILOT.md'), /neither does a scan that keeps the sold car under Needs a look because its page could not be checked/);
+});
+
+test('help.md gives the one-car-at-a-time sold check only for the standard-data reader, and the whole-check rule the others still use, as the code words it', () => {
+  const help = doc('help.md');
+  const own = help.split('\n').find((l) => /whose own page could not be checked/.test(l)) || '';
+  assert.match(own, /^- On a website Lot Current reads from the standard vehicle data on each car's page,/, 'the per-car rule is the standard-data reader\'s only');
+  // what every other reader still does when its check fails: no car is marked gone that scan
+  const one = { vin: 'V1', name: 'Car', decision: 'ready', price: 1 };
+  const held = diffScans({ vehicles: { V1: one } }, { vehicles: {} }, { confirm: { checked: [], notFound: [], error: 'HTTP 500' } }).needsALook[0].text;
+  const rest = help.split('\n').find((l) => l.includes(`"${held}"`)) || '';
+  assert.match(rest, /^- On Dealer Inspire, DealerOn and Dealer\.com websites, one failed check holds back every missing car for that scan/, `help.md names the readers that still show "${held}"`);
 });
 
 test('help.md is organised by what people are trying to do', () => {
