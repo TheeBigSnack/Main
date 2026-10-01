@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { loadFunction, invoke, fake, hermetic, functionsFetch, keysOf, SUPABASE_URL, SERVICE_KEY } from './functions/harness.mjs';
+import { loadFunction, invoke, fake, hermetic, functionsFetch, keysOf, SUPABASE_URL, ANON_KEY, SERVICE_KEY } from './functions/harness.mjs';
 import { runChecks } from '../scripts/check-deploy.mjs';
 import { PER_ADDRESS_PER_HOUR, PER_HOUR_TOTAL, LEAD_LIMITS } from '../supabase/functions/_shared/lead.mjs';
 
@@ -198,7 +198,7 @@ test('lead: a database failure, or a missing service key, is 500 with a sentence
 
 test('lead: scripts/check-deploy.mjs reads both lead lines as ok against the real handler', async () => {
   const lead = await loadFunction('lead', { LEAD_ORIGINS: SITE });
-  const findings = await runChecks({ fetchImpl: functionsFetch({ lead }), url: SUPABASE_URL, anonKey: 'anon', siteOrigin: SITE });
+  const findings = await runChecks({ fetchImpl: functionsFetch({ lead }), url: SUPABASE_URL, anonKey: ANON_KEY, siteOrigin: SITE });
   const mine = findings.filter((f) => f.check.startsWith('lead:'));
   assert.deepEqual(mine.map((f) => f.check), ['lead: refuses a page that is not the landing page', 'lead: answers the landing page\'s CORS preflight']);
   for (const f of mine) assert.equal(f.ok, true, `${f.check}: ${f.detail}`);
