@@ -52,6 +52,15 @@ export function listingBasis(entry, seen = [], basis = 'website') {
   return basis;
 }
 
+// The website's price now for a posted listing, on the basis the listing
+// carries (listingBasis): what Update price and My listings compare with the
+// listed price, and what Updated records, so a switch of Price to post never
+// reads as a price change in either place. `seen`: the scans the basis of an
+// entry without one is read from, oldest first (by default this one).
+export function listingWebsitePrice(entry, now, basis = 'website', seen = [now]) {
+  return basisPrice(now, listingBasis(entry, seen, basis));
+}
+
 // The compact per-car record kept between scans.
 export function snapshotEntry(v, assessment) {
   return {
@@ -192,7 +201,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     const mine = yours(vin);
     const nowPrice = basisPrice(now, basis);
     // a posted car's listing price, on the basis that listing was posted with
-    const listedNow = mine ? basisPrice(now, listingBasis(posted[vin], [before, now], basis)) : nowPrice;
+    const listedNow = mine ? listingWebsitePrice(posted[vin], now, basis, [before, now]) : nowPrice;
 
     if (mine && isPending(now) && !isPending(before)) {
       out.takeDown.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'sale-pending', text: 'Sale pending on the website', lastPrice: posted[vin].price });

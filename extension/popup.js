@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingWebsitePrice } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
@@ -636,7 +636,9 @@ function viewMine(l) {
     rows(
       l.mine.map((p) => {
         const now = p.now;
-        const site = now ? price(now) : null;
+        // the website's price on the basis this listing was posted with, so
+        // a switch of Price to post is not shown (or recorded) as a change
+        const site = now ? listingWebsitePrice(p, now, state.settings?.basis) : null;
         let pill = '<span class="pill good">Matches the website</span>';
         let extra = '';
         if (!now) pill = '<span class="pill bad">Not on the website at the last scan</span>';
@@ -800,7 +802,7 @@ function viewSettings() {
       ${!state.snapshot || showsLowerPrice(entries)
         ? `<label><input type="radio" name="basis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> <span>The lower second price the website shows${example ? ` (e.g. ${money(example.priceBeforeFees)}; usually the price before the doc fee)` : ''}</span></label>
       <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>
-      <p class="hint">This sets the price of cars posted from now on. A listing already posted stays on the price it was posted with (main or lower): Update price lists it only when the website changes that price, never because this setting changed.</p>`
+      <p class="hint">This sets the price of cars posted from now on. A listing already posted stays on the price it was posted with (main or lower): Update price and My listings show a price change for it only when the website changes that price, never because this setting changed.</p>`
         : ''}
       ${feeNote}
       ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}
