@@ -6,7 +6,7 @@ A Chrome extension for dealership salespeople. It reads your dealership website'
 
 ## Install (each tester, about 2 minutes)
 
-1. Unzip `lot-current-extension-<version>.zip` into a new folder that will stay put, like `Documents\Lot Current`. The zip holds the extension's files themselves (`manifest.json` and the rest), not a folder.
+1. Unzip `lot-current-extension-<version>.zip` into a new folder that will stay put, like `Documents\Lot Current`. The zip holds the extension's files themselves (`manifest.json` and the rest), not a folder. Already installed from a folder with the old name? Keep using that folder: Chrome ties the extension's saved data to its folder, so renaming or moving it starts over empty.
 2. In Chrome (version 116 or newer), go to `chrome://extensions`.
 3. Turn on **Developer mode** (top right).
 4. Click **Load unpacked** and choose that folder (the one that contains `manifest.json`).

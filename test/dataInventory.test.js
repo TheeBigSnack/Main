@@ -263,7 +263,7 @@ test('every outside host the shipped code names is listed, and every host listed
       const host = m[1].toLowerCase().replace(/^\*\./, '').replace(/\.$/, '');
       if (!host.includes('.') || /^[\d.]+$/.test(host)) continue; // a bare pattern, localhost, an address
       if (/\.(example|test|invalid|localhost)$/.test(host) || /(^|\.)example\.(com|org|net)$/.test(host)) continue; // placeholders
-      if (host === SITE_HOST) continue; // the website's own address, in its canonical and share tags
+      if (f.startsWith('site/') && host === SITE_HOST) continue; // the website's own address, in its canonical and share tags; anything else that calls it must be listed
       hosts.add(host);
     }
   }

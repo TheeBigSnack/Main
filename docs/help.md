@@ -13,7 +13,7 @@ Something not covered here? See `docs/support.md` for how to reach support and w
 
 ### Install (about two minutes)
 
-1. Your manager sends you `lot-current-extension-<version>.zip`. Unzip it into a new folder that will stay put, for example `Documents\Lot Current`. The zip holds the extension's files themselves (`manifest.json` and the rest), not a folder.
+1. Your manager sends you `lot-current-extension-<version>.zip`. Unzip it into a new folder that will stay put, for example `Documents\Lot Current`. Already installed from a folder with the old name? Keep using that folder: Chrome ties the extension's saved data to its folder, so renaming or moving it starts over empty. The zip holds the extension's files themselves (`manifest.json` and the rest), not a folder.
 2. In Chrome (version 116 or newer) go to `chrome://extensions`.
 3. Turn on **Developer mode** (top right).
 4. Click **Load unpacked** and choose the folder that contains `manifest.json`.

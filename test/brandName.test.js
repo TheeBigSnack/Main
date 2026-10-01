@@ -48,6 +48,7 @@ const FILES = walk(ROOT).map((p) => relative(ROOT, p).split('\\').join('/'));
 // versions keep the words they were released with.
 function unreleased(text) {
   const start = text.indexOf('## Unreleased');
+  assert.ok(start >= 0, 'CHANGELOG.md has an Unreleased section');
   const next = text.indexOf('\n## ', start + 1);
   return start < 0 ? '' : text.slice(start, next < 0 ? undefined : next);
 }
