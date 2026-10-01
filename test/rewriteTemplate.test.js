@@ -458,6 +458,34 @@ test('a claim the website itself makes passes, and the template built from such 
   assert.deepEqual(codesAfter('About twenty thousand miles.', plainCtx({ ...PLAIN(), mileage: 20000 })), []);
 });
 
+test('a write-up with markup inside a claim still backs the template that copies it', async () => {
+  for (const raw of ['Local trade with new <b>tires</b> and brakes. Garage kept.', 'Clean CARFAX.<br>Runs <strong>great</strong> and drives <em>smooth</em>.', 'Runs\n  great, with a <span class="x">new\n battery</span>.']) {
+    const v = { ...PLAIN(), descriptionRaw: raw };
+    const r = await generateDescription({ ...plainCtx(v), settings: {} });
+    assert.ok(r.narrative.length, raw);
+    assert.ok(r.text.includes(r.narrative[0].split('. ')[0]), `the template copies the write-up: ${raw}`);
+    assert.deepEqual(r.guardrails.problems, [], raw);
+  }
+});
+
+test('every claimed part is checked: a part the website names never covers one the text adds', () => {
+  const v = { ...PLAIN(), descriptionRaw: 'Local trade with new tires.' };
+  const c = plainCtx(v);
+  const said = (sentence) => runGuardrails(`${buildTemplateDescription(c)}\n${sentence}`, c).problems.filter((p) => p.code === 'unsupported-claim').map((p) => p.text);
+  assert.deepEqual(said('New tires all around.'), []);
+  assert.deepEqual(said('Local trade with new tires and new brakes, plus a new battery.'), [
+    'Says "new brakes", but the website says nothing about new or replaced parts for this car',
+    'Says "new battery", but the website says nothing about new or replaced parts for this car',
+  ]);
+  // each part once, however often it is said
+  assert.deepEqual(said('New brakes, new brakes and new tires.'), ['Says "New brakes", but the website says nothing about new or replaced parts for this car']);
+  // with no part in the website's words, each part the text adds is said
+  assert.deepEqual(runGuardrails(`${buildTemplateDescription(plainCtx())}\nNew tires and a new battery.`, plainCtx()).problems.filter((p) => p.code === 'unsupported-claim').map((p) => p.text), [
+    'Says "New tires", but the website says nothing about new or replaced parts for this car',
+    'Says "new battery", but the website says nothing about new or replaced parts for this car',
+  ]);
+});
+
 test('certified passes when the website lists the car as certified, whatever its write-up says', () => {
   for (const listed of [{ inventoryType: 'Certified Used' }, { readableType: 'Certified Pre-Owned' }, { urlConditionWord: 'certified used' }, { siteTitle: 'Certified Pre-Owned 2019 Ram 1500 Classic Express' }]) {
     assert.deepEqual(codesAfter('Certified pre-owned and ready to go.', plainCtx({ ...PLAIN(), ...listed })), [], JSON.stringify(listed));

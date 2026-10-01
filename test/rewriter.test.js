@@ -180,3 +180,16 @@ test('nothing about the car\'s type leaves the browser, so the service lets a dr
     for (const k of ['inventoryType', 'readableType', 'urlConditionWord', 'siteTitle', 'certified']) assert.ok(!(k in f), k);
   }
 });
+
+test('a Claude draft that adds parts to the one the write-up names falls back to the template', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const base = args({ dealer: example, priceNote: '' });
+  const template = (await generateDescription(base)).text;
+  assert.match(template, /Local trade with new tires\./);
+  const more = template.replace('Local trade with new tires.', 'Local trade with new tires and new brakes, plus a new battery.');
+  const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: more }) });
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Says "new brakes"/);
+  assert.match(r.note, /Says "new battery"/);
+  assert.equal(r.text, template);
+});

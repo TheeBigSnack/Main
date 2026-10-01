@@ -451,3 +451,19 @@ test('rewrite: scripts/check-deploy.mjs reads its rewrite lines as ok against th
   assert.deepEqual(mine.map((f) => f.check), ['rewrite: answers the extension\'s CORS preflight', 'rewrite: refuses a call with no user token']);
   for (const f of mine) assert.equal(f.ok, true, `${f.check}: ${f.detail}`);
 });
+
+test('rewrite: a draft that adds a part to the one the facts name is refused; each added part is named', async () => {
+  const facts = { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative: ['Local trade with new tires.'] }), origin: ORIGIN };
+  world();
+  anthropic(says(GOOD.replace('It is a comfortable, easy car', 'It has new tires and new brakes, plus a new battery, and is a comfortable, easy car')));
+  const r = await rewrite(await load(), TOKEN.u1, facts);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.text), [
+    'Says "new brakes", but the website says nothing about new or replaced parts for this car',
+    'Says "new battery", but the website says nothing about new or replaced parts for this car',
+  ]);
+  world();
+  anthropic(says(GOOD.replace('It is a comfortable, easy car', 'It has new tires and is a comfortable, easy car')));
+  const ok = await rewrite(await load(), TOKEN.u1, facts);
+  assert.deepEqual([ok.body.ok, ok.body.guardrails.problems], [true, []]);
+});

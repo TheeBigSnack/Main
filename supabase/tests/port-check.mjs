@@ -49,6 +49,7 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, like-new with a clean-title, zero accidents, great on gas and priced below market.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with only thirty thousand miles, twenty-five mpg, two owners and five grand off; this one is one careful owner, its sole owner.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, a single-owner truck with new rotors and a fresh inspection.').replace('Example Motors in Springfield', 'Certified Credit Motors in Thousand Oaks') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with new tires and new brakes, plus a new battery and new brakes; it runs great.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -58,6 +59,7 @@ const contexts = [
   { vehicle, dealer, salesperson: { name: 'Alex', title: 'Product  Specialist' }, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, urlConditionWord: 'certified used', descriptionRaw: 'Thirty thousand miles of service records. New tires and brakes, inspected, warranty included, non-smoker.' }, dealer: { name: 'Certified Credit Motors', city: 'Thousand Oaks' }, salesperson: { title: 'finance manager' }, priceNote: 'Financing through the dealership.', price: 28995 },
   { vehicle: { ...vehicle, inventoryType: 'Certified Used', features: ['Clean CARFAX', 'Garage Kept'] }, dealer, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, descriptionRaw: 'Local trade with new <b>tires</b>.<br>Runs\n <strong>great</strong>.' }, dealer, priceNote: '', price: 28995 },
   {},
 ];
 

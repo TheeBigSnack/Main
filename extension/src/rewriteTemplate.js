@@ -447,14 +447,23 @@ export const CLAIM_KINDS = Object.freeze([
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
 ]);
 
+// The write-up as the website shows it, and as the template copies it
+// (description.js splitSegments): split at its line breaks, markup set
+// aside, spacing made plain. A claim the template copies from "new
+// <b>tires</b>" is then found in its own source.
+function writeUpText(raw) {
+  if (typeof raw !== 'string') return raw;
+  return raw.split(/<br\s*\/?>/i).map((s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+}
+
 // The website's own words for this car, where its claims may come from.
 function claimSource({ vehicle = {}, priceNote = '' }) {
   const v = vehicle;
   const bits = [
     v.year, v.make, v.model, v.trim, v.name, v.engine, v.transmission, v.drivetrain, v.exteriorColor, v.interiorColor,
-    v.bodyType, v.fuelType, v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), priceNote,
+    v.bodyType, v.fuelType, writeUpText(v.descriptionRaw), ...(Array.isArray(v.features) ? v.features : []), priceNote,
   ];
-  return bits.filter((b) => b !== null && b !== undefined).join('\n');
+  return bits.filter((b) => b !== null && b !== undefined).map((b) => oneLine(b)).join('\n');
 }
 
 // The website lists the car as certified: its inventory type, the type it
@@ -476,15 +485,24 @@ function without(text, names) {
   return out;
 }
 
+// Every claim in the text, not only the first of each kind: one part the
+// website names ("new tires") never covers another the text adds ("new
+// brakes"). Each kind the sources don't make is said once; each new part
+// they don't name is said once.
 function claimProblems(text, ctx) {
   const source = claimSource(ctx);
   const problems = [];
   for (const kind of CLAIM_KINDS) {
-    const m = kind.re.exec(text);
-    if (!m) continue;
     if (kind.what === 'certification' && listedCertified(ctx.vehicle)) continue;
-    if (kind.re.test(source) && (!kind.part || new RegExp(`\\b${escapeRe(m[1].replace(/(?:ies|s)$/i, ''))}`, 'i').test(source))) continue;
-    problems.push({ code: 'unsupported-claim', text: `Says "${m[0]}", but the website says nothing about ${kind.what} for this car` });
+    const sourced = kind.re.test(source);
+    const said = new Set();
+    for (const m of String(text).matchAll(new RegExp(kind.re.source, 'gi'))) {
+      const part = kind.part ? m[1].replace(/(?:ies|s)$/i, '').toLowerCase() : '';
+      if (sourced && (!kind.part || new RegExp(`\\b${escapeRe(part)}`, 'i').test(source))) continue;
+      if (said.has(part)) continue;
+      said.add(part);
+      problems.push({ code: 'unsupported-claim', text: `Says "${m[0]}", but the website says nothing about ${kind.what} for this car` });
+    }
   }
   return problems;
 }
