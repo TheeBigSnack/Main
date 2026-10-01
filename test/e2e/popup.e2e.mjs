@@ -150,6 +150,9 @@ try {
   await popup.selectOption('#readySort', 'price');
   await popup.waitForFunction(() => document.querySelector('.rows .name')?.textContent.startsWith('2021'));
   assert.deepEqual(await names(), [SILVERADO, HELLCAT], 'price, low to high: $36,603 before $53,485');
+  // newest and price put the same car first, so the redraw above doesn't show
+  // the write has landed: wait for the stored order before closing the popup
+  await popup.waitForFunction(async (o) => (await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`]?.readySort === 'price', new URL(siteUrl).origin);
   await popup.close();
   popup = await openPopup();
   await tab(popup, 'ready').click();

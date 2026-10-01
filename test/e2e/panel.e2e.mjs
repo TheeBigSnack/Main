@@ -133,9 +133,16 @@ try {
 
   // the order is the popup's, and choosing one here is remembered for both
   await panel.selectOption('#panelSort', 'name');
-  await panel.waitForFunction(() => document.querySelector('#panelList .row .name')?.textContent.trim() === '2019 Ram 1500 Classic Express');
-  assert.equal(await panel.evaluate(async (o) => (await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`].readySort, origin), 'name');
-  assert.equal(await panel.evaluate(() => document.activeElement.id), 'panelSort');
+  // saving the order, redrawing and putting the focus back on the menu land in
+  // turns of their own, and the first row can be the same under the old order:
+  // wait for all three rather than read any of them once
+  await panel.waitForFunction(
+    async (o) =>
+      document.activeElement?.id === 'panelSort' &&
+      document.querySelector('#panelList .row .name')?.textContent.trim() === '2019 Ram 1500 Classic Express' &&
+      (await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`]?.readySort === 'name',
+    origin,
+  );
 
   // another website in the registry: the choice appears, and a website with no scan says how to start
   await panel.evaluate(async () => {
