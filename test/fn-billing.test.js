@@ -452,6 +452,32 @@ test('billing: an event signed over its raw body is applied to the dealership\'s
   assert.equal(fake.rows('billing_events').length, 1);
 });
 
+// The portal cancels at the period's end, so Stripe keeps the subscription
+// active until then: the row keeps the date it ends, and the manager card
+// says that date instead of a renewal.
+test('billing: a cancellation in the portal reaches the row and the card says when it ends; undoing it brings the renewal back', async () => {
+  const periodEnd = 1790000000;
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', status: 'active', current_period_end: iso(periodEnd * 1000), seats: 7, updated_at: iso(Date.now() - DAY) }] });
+  const handler = await load();
+  const now = Math.floor(Date.now() / 1000);
+  const cancel = subscriptionEvent({ id: 'evt_cancel', type: 'customer.subscription.updated', created: now }, { status: 'active', cancel_at_period_end: true, cancel_at: periodEnd });
+  const r = await deliver(handler, JSON.stringify(cancel));
+  assert.deepEqual([r.status, r.body.applied], [200, true]);
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.status, row.cancel_at], ['active', pgTime(iso(periodEnd * 1000))]);
+  const answer = (await status(handler, TOKEN.u2)).body;
+  assert.equal(answer.state, 'active', 'still paid up until the date it ends');
+  const card = billingCard(answer, { timeZone: 'UTC' });
+  assert.equal(card.line, `Subscribed: 7 seats, cancelled: it ends ${iso(periodEnd * 1000).slice(0, 10)}.`);
+  assert.equal(card.tone, 'warn');
+  assert.doesNotMatch(card.line, /renews|first charge/);
+
+  const undo = subscriptionEvent({ id: 'evt_undo', type: 'customer.subscription.updated', created: now + 1 }, { status: 'active', cancel_at_period_end: false, cancel_at: null });
+  assert.equal((await deliver(handler, JSON.stringify(undo))).status, 200);
+  assert.equal(fake.rows('subscriptions')[0].cancel_at, null);
+  assert.equal(billingCard((await status(handler, TOKEN.u2)).body, { timeZone: 'UTC' }).line, `Subscribed: 7 seats, renews ${iso(periodEnd * 1000).slice(0, 10)}.`);
+});
+
 test('billing: a missing, malformed, altered, stale or wrongly keyed signature is 400 and nothing is read; a rolled secret\'s second v1 is accepted', async () => {
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
   const handler = await load();

@@ -10,9 +10,10 @@
 // calendar day the daily cap counts (todayRange) and who takes a seat
 // (seatCount). No Stripe SDK anywhere.
 //
-// The row is public.subscriptions from migrations/0004_billing.sql:
+// The row is public.subscriptions from migrations/0004_billing.sql, with
+// cancel_at from 0009_cancel_at.sql:
 //   dealership_id, stripe_customer_id, stripe_subscription_id, status,
-//   pilot_ends_at, current_period_end, seats, updated_at
+//   pilot_ends_at, current_period_end, cancel_at, seats, updated_at
 //
 // The state a dealership is in, from the row (subscriptionState below and
 // subscription_state() in SQL, kept equal by supabase/tests/billing.sql):
@@ -468,6 +469,10 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
     patch.status = event.type === 'customer.subscription.deleted' ? 'canceled' : normalizeStatus(obj.status);
     const end = periodEndOf(obj);
     if (end) patch.current_period_end = end;
+    // A cancellation scheduled in the portal leaves the status trialing or
+    // active until the period ends; the date it ends is kept, and written on
+    // every subscription event, so undoing the cancellation clears it.
+    patch.cancel_at = unixToIso(obj.cancel_at) || (obj.cancel_at_period_end === true ? end : null);
     const seats = seatsOf(obj, Number.isInteger(included) ? included : PRICING.includedSalespeople, priceRooftop, priceSeat);
     if (seats !== null) patch.seats = seats;
     return patch;

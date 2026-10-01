@@ -320,6 +320,27 @@ test('billingCard: subscribed shows the seats and the renewal date; a trial says
   assert.deepEqual(card(status({ state: 'active', role: 'salesperson', canManageBilling: true, subscription: subRow({ status: 'active' }) })).buttons, [], 'a salesperson never gets a button, whatever the flags say');
 });
 
+test('billingCard: a subscription cancelled in Manage billing says the date it ends, never "renews" or "first charge"', () => {
+  const ids = { stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' };
+  const active = card(status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'active', ...ids, seats: 7, current_period_end: inDays(30), cancel_at: inDays(30) }) }));
+  assert.equal(active.label, 'Subscribed');
+  assert.equal(active.line, 'Subscribed: 7 seats, cancelled: it ends 2026-12-16.');
+  assert.equal(active.tone, 'warn');
+  assert.equal(active.detail, 'Stripe ends the subscription on that date. To keep it, undo the cancellation in Manage billing before then.');
+  assert.deepEqual(active.buttons.map((b) => b.action), ['portal'], 'Manage billing is where it is undone');
+  // cancelled during the pilot's trial: no charge is coming, so no "first charge"
+  const trial = card(status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'trialing', ...ids, seats: 5, current_period_end: inDays(12), pilot_ends_at: inDays(12), cancel_at: inDays(12) }) }));
+  assert.equal(trial.line, 'Subscribed: 5 seats, cancelled: it ends 2026-11-28.');
+  // a salesperson reads the line, without the manager's advice
+  const sp = card(status({ state: 'active', role: 'salesperson', subscription: subRow({ status: 'active', current_period_end: inDays(30), cancel_at: inDays(30) }) }));
+  assert.equal(sp.line, `Subscribed: ${pricing.includedSalespeople} seats, cancelled: it ends 2026-12-16.`);
+  assert.equal(sp.detail, '');
+  // undone in the portal (the webhook writes null): the renewal line is back
+  for (const undone of [null, undefined, '']) {
+    assert.equal(card(status({ state: 'active', subscription: subRow({ status: 'active', seats: 7, current_period_end: inDays(30), cancel_at: undone }) })).line, 'Subscribed: 7 seats, renews 2026-12-16.', String(undone));
+  }
+});
+
 test('billingCard: lapsed says so in the agreed words, why, and offers Subscribe (and Manage billing once a customer exists)', () => {
   const words = 'The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed.';
   const pilotOver = card(status({ state: 'lapsed', canSubscribe: true, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(-2) }) }));

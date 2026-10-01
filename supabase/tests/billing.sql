@@ -1,5 +1,5 @@
 -- Lot Current: billing checks (Milestone 5) against a running database with
--- the four migrations applied, in the shape of rls.sql: two dealerships
+-- the migrations applied, in the shape of rls.sql: two dealerships
 -- and their people straight in auth.users, the JWT claims set the way
 -- PostgREST does, DO blocks that raise on anything wrong, everything rolled
 -- back at the end. psql exits non-zero on the first failed assertion.
@@ -12,8 +12,10 @@
 -- What it proves: a manager starts the pilot once and only once; a
 -- salesperson cannot; members read their own dealership's row and nothing
 -- else; no signed-in user writes subscriptions or reads billing_events;
--- subscription_state() says none, pilot, active or lapsed the same way
--- functions/_shared/billing.mjs does; a customer shell does not block the
+-- a scheduled cancellation (cancel_at, 0009_cancel_at.sql) is read by
+-- members, written by no signed-in user, and leaves the state active until
+-- it ends; subscription_state() says none, pilot, active or lapsed the same
+-- way functions/_shared/billing.mjs does; a customer shell does not block the
 -- pilot; the anon key gets nothing.
 
 \set ON_ERROR_STOP on
@@ -44,9 +46,9 @@ insert into public.memberships (user_id, dealership_id, role, name) values
   (:'a_mgr',   :'dealer_a', 'manager',     'Jamie'),
   (:'b_mgr',   :'dealer_b', 'manager',     'Sam');
 
--- B already pays; C has only the shell of a row (a checkout opened and not finished)
-insert into public.subscriptions (dealership_id, stripe_customer_id, stripe_subscription_id, status, current_period_end, seats) values
-  (:'dealer_b', 'cus_b', 'sub_b', 'active', now() + interval '20 days', 7);
+-- B already pays, and has cancelled in the portal (it ends with the period); C has only the shell of a row (a checkout opened and not finished)
+insert into public.subscriptions (dealership_id, stripe_customer_id, stripe_subscription_id, status, current_period_end, cancel_at, seats) values
+  (:'dealer_b', 'cus_b', 'sub_b', 'active', now() + interval '20 days', now() + interval '20 days', 7);
 insert into public.subscriptions (dealership_id, stripe_customer_id) values
   (:'dealer_c', 'cus_c');
 
@@ -216,12 +218,24 @@ begin
   select count(*) into n from public.subscriptions;
   if n <> 1 then raise exception 'b_mgr should see only B''s row, saw %', n; end if;
   if (select seats from public.subscriptions where dealership_id = b) <> 7 then raise exception 'B''s seats should read 7'; end if;
+  -- the cancellation B scheduled: readable, still active until it ends, and not the manager's to change
+  if (select cancel_at from public.subscriptions where dealership_id = b) is distinct from (select current_period_end from public.subscriptions where dealership_id = b) then
+    raise exception 'b_mgr should read the date B''s subscription ends';
+  end if;
+  begin
+    update public.subscriptions set cancel_at = null where dealership_id = b;
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'b_mgr cleared the cancellation date'; end if;
+  exception when insufficient_privilege then
+    null;
+  end;
+  if (select cancel_at from public.subscriptions where dealership_id = b) is null then raise exception 'the cancellation date changed'; end if;
   -- a paying dealership cannot get a free pilot on top
   got := public.start_pilot(b);
   if (got ->> 'started')::boolean is not false or got ->> 'status' <> 'active' or got ->> 'state' <> 'active' then
     raise exception 'start_pilot on a paying dealership should change nothing, returned %', got;
   end if;
-  raise notice 'ok: b_mgr sees B active, nothing of A, and cannot add a pilot to a paid subscription';
+  raise notice 'ok: b_mgr sees B active with the date it ends, nothing of A, cannot change it, and cannot add a pilot to a paid subscription';
 end;
 $$;
 

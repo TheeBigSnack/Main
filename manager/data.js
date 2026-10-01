@@ -456,7 +456,14 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     tone = 'good';
     const seats = seatsPaid(sub);
     const who = seats !== null ? `: ${plural(seats, 'seat')}` : '';
-    const when = sub.current_period_end ? `, ${sub.status === 'trialing' ? 'first charge' : 'renews'} ${date(sub.current_period_end)}` : '';
+    let when = sub.current_period_end ? `, ${sub.status === 'trialing' ? 'first charge' : 'renews'} ${date(sub.current_period_end)}` : '';
+    // Cancelled in Manage billing: Stripe keeps the subscription trialing or
+    // active until it ends, so the status alone would still read as a renewal
+    if (ms(sub.cancel_at) !== null) {
+      when = `, cancelled: it ends ${date(sub.cancel_at)}`;
+      tone = 'warn';
+      if (manager) detail = 'Stripe ends the subscription on that date. To keep it, undo the cancellation in Manage billing before then.';
+    }
     line = `Subscribed${who}${when}.`;
   } else if (state === 'lapsed') {
     label = 'Lapsed';

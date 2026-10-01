@@ -19,6 +19,7 @@ What is here:
 | `migrations/0005_leads.sql` | `demo_requests`, the landing page's demo requests; no API role reads it. |
 | `migrations/0007_signup.sql` | Self-serve sign-up: `signup_settings` (the switch, off until you open it, and two limits), `signup_attempts`, `website_origin_of` and `create_dealership`; no API role reads either table (below, "Self-serve sign-up"). |
 | `migrations/0008_usage.sql` | The owner's usage report, `usage_report(since)`: one row per dealership with its plan and activity; no API role may call it (below, "Usage report"). |
+| `migrations/0009_cancel_at.sql` | `subscriptions.cancel_at`: the date a cancellation scheduled in the Billing Portal ends the subscription, so the manager view says so instead of a renewal. The first change made after the project applied the first eight; apply it (`db push`, or the workflow's database step) before deploying the `billing` function that writes it. |
 | `functions/lead/` | `/lead`: the landing page's demo form, anonymous, behind its origin, a honeypot and rate limits. |
 | `functions/rewrite/` | The rewrite service (replaces `backend/`): `/rewrite` and `/color` behind sign-in, a rate limit and a monthly cost cap. |
 | `functions/sync/` | `/sync`: the posted registry and the pilot numbers up, the dealership's current state down. |
@@ -50,7 +51,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    supabase db push
    ```
 
-   `db push` applies the eight migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
+   `db push` applies the nine migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file, as `0009_cancel_at.sql` is.
 
 3. **Sign-in settings** (Dashboard, Authentication):
    - Providers, Email: keep it on; passwords are never used, so "Confirm email" can be off (the magic link is the confirmation). A new hosted project starts with it on; either way works, because both sign-in templates carry the code and the link (below, "Sign-in emails").
@@ -191,6 +192,7 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
   -f supabase/migrations/0006_privacy.sql \
   -f supabase/migrations/0007_signup.sql \
   -f supabase/migrations/0008_usage.sql \
+  -f supabase/migrations/0009_cancel_at.sql \
   -f supabase/tests/rls.sql \
   -f supabase/tests/billing.sql \
   -f supabase/tests/privacy.sql \
@@ -267,7 +269,7 @@ Billing runs on Stripe: a subscription per rooftop per month, a free pilot perio
 | `migrations/0004_billing.sql` | `subscriptions` (one row per dealership: the pilot or the Stripe status), `billing_events` (every webhook event once), `subscription_state()` and `start_pilot()`, RLS. |
 | `functions/billing/` | `/checkout`, `/portal`, `/status` behind sign-in, `/webhook` behind Stripe's signature. Talks to Stripe's REST API with `fetch`; no SDK. |
 | `functions/_shared/billing.mjs` | The pure parts, plain JavaScript so Node tests them: the state machine, the line items, the form encoding, what each event does to the row, the signature check. |
-| `tests/billing.sql` | Proves the pilot rules and the wall between dealerships against a running database (same recipe as `rls.sql`, with `0004_billing.sql` added to the list). |
+| `tests/billing.sql` | Proves the pilot rules, the wall between dealerships and who may read and write a scheduled cancellation against a running database (same recipe as `rls.sql`, with `0004_billing.sql` and `0009_cancel_at.sql` added to the list). |
 | `test/billing.test.js` | The unit tests, in `npm test`. |
 
 ### What to create in Stripe, once
@@ -334,10 +336,10 @@ All three signed-in routes take `Authorization: Bearer <the user's access token>
 |---|---|---|
 | `none` | No row, or a row with only a customer id (a checkout opened and not finished). | Everything works (a dealership with no plan yet is still onboarding); the manager page offers "Start the free pilot" and "Subscribe". |
 | `pilot` | `pilot_ends_at` is in the future and nothing is paid. Stripe's word does not matter meanwhile: the free period was promised. | Everything works; the page shows the end date and "Subscribe". |
-| `active` | Stripe says `trialing` (a subscription whose first charge waits for the pilot to end) or `active`. | Everything works; the page shows the paid-through date, seats, and "Manage billing". |
+| `active` | Stripe says `trialing` (a subscription whose first charge waits for the pilot to end) or `active`. | Everything works; the page shows the paid-through date (or, once a cancellation is scheduled, the date it ends), seats, and "Manage billing". |
 | `lapsed` | Everything else: the pilot ended unpaid, `past_due`, `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, `paused`. | The page says so and offers "Subscribe" (and "Manage billing" when a customer exists). `/sync` and `/rewrite` answer 402 with `code: "lapsed"` and the plan and do nothing else: syncing and the description writer stop until a manager renews. The billing routes are never gated, so renewing always works. |
 
-The row: `status` (`pilot`, or a Stripe status, or null), `pilot_ends_at`, `current_period_end`, `seats` (the included count plus the quantity of every item whose price is tagged `lotcurrent` = `seat`, or, for an untagged price, is `STRIPE_PRICE_SEAT`, copied from Stripe by the webhook; the Billing card shows it against the salespeople, and nothing in Lot Current changes it in Stripe), `stripe_customer_id`, `stripe_subscription_id`, `updated_at`.
+The row: `status` (`pilot`, or a Stripe status, or null), `pilot_ends_at`, `current_period_end`, `cancel_at` (when Stripe will end a subscription whose cancellation the dealership scheduled in the Billing Portal, which cancels at the end of the paid period and keeps the status `trialing` or `active` until then; null otherwise, and cleared when the cancellation is undone), `seats` (the included count plus the quantity of every item whose price is tagged `lotcurrent` = `seat`, or, for an untagged price, is `STRIPE_PRICE_SEAT`, copied from Stripe by the webhook; the Billing card shows it against the salespeople, and nothing in Lot Current changes it in Stripe), `stripe_customer_id`, `stripe_subscription_id`, `updated_at`.
 
 ### How the free pilot starts
 

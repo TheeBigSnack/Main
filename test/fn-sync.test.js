@@ -609,6 +609,10 @@ test('the fake database models the migrations\' tables: the same columns, types,
       columns[name] = TYPES[type.replace(/\(.*$/, '')] + (/not null|primary key/.test(line) || identity ? '!' : '');
       if (/\bprimary key\b|\bunique\b/.test(line)) keys.push(name);
     }
+    // a column a later migration adds (alter table ... add column)
+    for (const a of sql.matchAll(new RegExp(`^alter table public\\.${table} add column (\\w+) (\\w+)([^;]*);`, 'gm'))) {
+      columns[a[1]] = TYPES[a[2]] + (/not null/.test(a[3]) ? '!' : '');
+    }
     assert.deepEqual(spec.columns, columns, `${table}: columns`);
     assert.deepEqual(spec.keys.map(keyText).sort(), keys.sort(), `${table}: unique keys`);
   }

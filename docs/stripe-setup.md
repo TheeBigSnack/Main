@@ -79,7 +79,7 @@ Signed in to the manager view as a manager of a test dealership:
 
 1. **Start the free pilot.** The Billing card shows the pilot's end date. No card is asked for.
 2. **Subscribe.** Stripe Checkout opens with the price. Pay with the test card `4242 4242 4242 4242`, any future date, any CVC, any ZIP. Back on the manager view the card says Subscribed, with the first charge at the end of the pilot.
-3. **Manage billing.** Stripe's portal opens with the card, the invoices and Cancel. Cancel, then come back: the card shows the end date. Renew from the portal if you want to keep testing.
+3. **Manage billing.** Stripe's portal opens with the card, the invoices and Cancel. Cancel, then come back: the card says "cancelled: it ends" with the date, instead of "first charge" or "renews". Undo the cancellation in the portal if you want to keep testing: the card goes back to the renewal date.
 4. **A failed payment.** With a second test dealership, start the pilot and subscribe with `4000 0000 0000 0341`: Checkout accepts it, because nothing is charged during the pilot, and any later charge to it fails. In the Stripe Dashboard open that subscription and end its trial now; the first charge fails. The card says the payment failed, and the extension stops syncing for that dealership until the card is updated in Manage billing (use 4242 there; Stripe retries the invoice).
 5. **The founding rate.** Dashboard, Product catalog, Coupons, `lotcurrent-founding`, add a promotion code (for example FOUNDING). On Checkout, "Add promotion code" takes it and the total drops.
 
