@@ -54,6 +54,21 @@ test('no workflow input or secret is written straight into a shell script; funct
   assert.match(supabase, /FUNCTIONS: \$\{\{ inputs\.functions \}\}/);
 });
 
+// A function from the repository may write a column only its migration adds
+// (0009_cancel_at.sql and billing): deployed before that migration, its
+// webhook answers 500 until database runs. The docs say database first; the
+// functions step enforces it, and asking db push needs the database password.
+test('the functions step deploys nothing while production has a migration to apply', () => {
+  const steps = supabase.split(/\n      - /);
+  const deploy = runText(steps.find((st) => /^name: Deploy the functions\n/.test(st)));
+  const check = deploy.indexOf('supabase db push --dry-run');
+  assert.ok(check > 0, 'the deploy step asks db push what it would apply');
+  assert.ok(check < deploy.indexOf('supabase functions deploy'), 'before deploying anything');
+  assert.match(deploy.slice(check), /if ! grep -q 'Remote database is up to date' "\$RUNNER_TEMP\/push-plan\.txt"; then\n[^\n]*::error::[^\n]*\n\s+exit 1\n\s+fi\n\s+for f in \$FUNCTIONS; do supabase functions deploy/);
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \]( \|\| \[ "\$STEP" = verify \])?; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'every step that reads the database needs its password');
+  assert.match(read('docs/production-setup.md'), /\*\*functions\*\* checks: it deploys nothing while a migration is still to be applied\./);
+});
+
 test('the Supabase CLI in the deploy is the one the CI stack job tests with', () => {
   const pin = (yml) => yml.match(/supabase\/setup-cli@v3\n\s+with:\n\s+version: ([\d.]+)/)[1];
   assert.equal(pin(supabase), pin(ci));

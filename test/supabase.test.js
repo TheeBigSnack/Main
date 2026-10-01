@@ -60,6 +60,32 @@ test('the migrations production applied (0001 to 0008) are the deployed files un
   assert.doesNotMatch(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/, 'the README no longer says to change a migration in place');
 });
 
+// The billing function writes a column only a migration after the applied
+// ones adds (subscriptions.cancel_at, 0009_cancel_at.sql). Deployed by hand
+// onto production without that push, every subscription event's upsert is
+// refused and the webhook answers 500. So every command block in the docs
+// that deploys billing pushes the migrations first, in the same block: the
+// Stripe walk-through's step 5 is also where its live switch sends the owner.
+test('every by-hand billing deploy in the docs applies the migrations first, in the same command block', () => {
+  const later = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter((f) => /^\d{4}_.+\.sql$/.test(f) && !Object.hasOwn(APPLIED_MIGRATIONS, f));
+  const added = later.flatMap((f) => [...read(`../supabase/migrations/${f}`).matchAll(/alter table public\.(\w+) add column (?:if not exists )?(\w+)/gi)].map((m) => m[2]));
+  assert.ok(added.includes('cancel_at'), 'a migration after the applied ones adds subscriptions.cancel_at');
+  assert.match(billingShared, /patch\.cancel_at = /, 'and the billing function writes it');
+  const docs = ['README.md', 'supabase/README.md', ...readdirSync(new URL('../docs/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
+  let deploys = 0;
+  for (const doc of docs) {
+    for (const [, block] of read(`../${doc}`).matchAll(/```[a-z]*\n([^]*?)```/g)) {
+      const lines = block.split('\n');
+      const at = lines.findIndex((l) => /^\s*supabase functions deploy billing\b/.test(l));
+      if (at < 0) continue;
+      deploys++;
+      assert.ok(lines.slice(0, at).some((l) => /^\s*supabase db push(\s|$)/.test(l)), `${doc}: a block deploys billing without supabase db push before it, so a project without ${later.join(', ')} gets a function that writes ${added.join(', ')}`);
+    }
+  }
+  assert.ok(deploys >= 2, 'supabase/README.md and docs/stripe-setup.md both deploy billing by hand');
+  assert.match(read('../docs/stripe-setup.md'), /`supabase db push` comes before the deploy, every time: the billing function writes `subscriptions\.cancel_at`/);
+});
+
 test('0001_schema.sql: every table gets RLS in 0002_rls.sql; listings carry the server\'s created_at next to the client\'s posted_at', () => {
   const tables = [...schema.matchAll(/^create table public\.(\w+) \(/gm)].map((m) => m[1]);
   assert.ok(tables.includes('listings') && tables.includes('invites'), tables.join(', '));
