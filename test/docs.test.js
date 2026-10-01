@@ -101,6 +101,19 @@ test('the adapter contract and help.md say a car whose own page could not be che
   assert.match(read('../PILOT.md'), /neither does a scan that keeps the sold car under Needs a look because its page could not be checked/);
 });
 
+test('the adapter contract says what the standard-data reader does with robots.txt, as the code does it', () => {
+  const contract = read('../extension/adapters/README.md');
+  const code = read('../extension/adapters/schemaOrg.js').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  if (!/disallow|crawl-?delay/i.test(code)) {
+    // robots.txt is read for its Sitemap lines only: the contract must not let a reader think its rules are obeyed
+    assert.match(contract, /`robots\.txt` is read only for its `Sitemap` lines[^.]*: its `Disallow` and `Crawl-delay` lines are not applied to these reads/);
+    assert.match(contract, /open question for the owner/);
+  } else {
+    assert.match(contract, /`Disallow`/, 'the reader now applies robots.txt rules: the contract must say how');
+  }
+  assert.match(read('../docs/data-inventory.md'), /`\/robots\.txt` \(read for its sitemap lines only\)/);
+});
+
 test('help.md gives the one-car-at-a-time sold check only for the standard-data reader, and the whole-check rule the others still use, as the code words it', () => {
   const help = doc('help.md');
   const own = help.split('\n').find((l) => /whose own page could not be checked/.test(l)) || '';

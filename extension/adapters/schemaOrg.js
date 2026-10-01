@@ -24,6 +24,9 @@
 //     and says so, and so do three car pages in a row that fail: it never
 //     retries harder and never tries to get past a refusal.
 //   - A car is called gone only when its own page says so (confirmOne).
+//   - robots.txt is read only for the sitemaps it names (sitemapAddresses):
+//     its Disallow and Crawl-delay lines are not applied. Whether they should
+//     be is the owner's open question (README.md).
 // schemaOrgParse.js reads a page; schemaOrgNormalize.js makes the flat vehicle.
 
 import { parseVehiclePage, extractJsonLd, decodeEntities } from './schemaOrgParse.js';
