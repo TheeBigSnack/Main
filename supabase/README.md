@@ -19,6 +19,7 @@ What is here:
 | `migrations/0005_leads.sql` | `demo_requests`, the landing page's demo requests; no API role reads it. |
 | `migrations/0007_signup.sql` | Self-serve sign-up: `signup_settings` (the switch, off until you open it, and two limits), `signup_attempts`, `website_origin_of` and `create_dealership`; no API role reads either table (below, "Self-serve sign-up"). |
 | `migrations/0008_usage.sql` | The owner's usage report, `usage_report(since)`: one row per dealership with its plan and activity; no API role may call it (below, "Usage report"). |
+| `migrations/0009_ui_post_attempts_read.sql` | Post attempts (time per post) are read by the salesperson who made them and the dealership's managers, no longer by every member; replaces 0002's select policy. |
 | `functions/lead/` | `/lead`: the landing page's demo form, anonymous, behind its origin, a honeypot and rate limits. |
 | `functions/rewrite/` | The rewrite service (replaces `backend/`): `/rewrite` and `/color` behind sign-in, a rate limit and a monthly cost cap. |
 | `functions/sync/` | `/sync`: the posted registry and the pilot numbers up, the dealership's current state down. |
@@ -50,7 +51,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    supabase db push
    ```
 
-   `db push` applies the eight migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
+   `db push` applies the nine migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
 
 3. **Sign-in settings** (Dashboard, Authentication):
    - Providers, Email: keep it on; passwords are never used, so "Confirm email" can be off (the magic link is the confirmation). A new hosted project starts with it on; either way works, because both sign-in templates carry the code and the link (below, "Sign-in emails").
@@ -189,11 +190,13 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
   -f supabase/migrations/0006_privacy.sql \
   -f supabase/migrations/0007_signup.sql \
   -f supabase/migrations/0008_usage.sql \
+  -f supabase/migrations/0009_ui_post_attempts_read.sql \
   -f supabase/tests/rls.sql \
   -f supabase/tests/billing.sql \
   -f supabase/tests/privacy.sql \
   -f supabase/tests/signup.sql \
   -f supabase/tests/usage.sql \
+  -f supabase/tests/attempts.sql \
   -f supabase/tests/concurrency.sql
 ```
 
