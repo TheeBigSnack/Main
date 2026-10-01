@@ -42,10 +42,11 @@ export function snapshot(items, settings = MY_STORE, takenAt = '2026-09-26T21:00
 // offers the functions chrome.scripting.executeScript copies into it:
 // window.SEARCH_SERVICE and IDPSearchServiceHelper backed by `records`, a
 // document with the og:site_name and a schema.org address, a location.
-// `withService: false` gives a page no adapter recognises. The result is a
-// vm sandbox for fakeChrome: injected functions run inside it, with nothing
-// else in scope, so one that reached outside its own body throws.
-export function fakeDealerPage({ records = [], origin = 'https://example-dealer.test', withService = true, name = 'Example Motors' } = {}) {
+// `withService: false` gives a page no adapter recognises; `withLd: false`
+// a page with no structured address, whose `bodyText` is all there is. The
+// result is a vm sandbox for fakeChrome: injected functions run inside it,
+// with nothing else in scope, so one that reached outside its own body throws.
+export function fakeDealerPage({ records = [], origin = 'https://example-dealer.test', withService = true, name = 'Example Motors', withLd = true, bodyText = 'USED AND CERTIFIED USED FOR SALE' } = {}) {
   const getListings = async (body) => {
     const f = body.filters || {};
     const list = records.filter((r) => (!f.type || f.type.includes(r.type)) && (!f.vin || f.vin.includes(r.vin)) && (!f.status || f.status.includes(r.status)));
@@ -61,9 +62,9 @@ export function fakeDealerPage({ records = [], origin = 'https://example-dealer.
   const ld = { '@context': 'https://schema.org', '@type': 'AutoDealer', name, telephone: '(555) 555-0100', address: { '@type': 'PostalAddress', streetAddress: '1 Example Way', addressLocality: 'Springfield', addressRegion: 'OH', postalCode: '43215' } };
   const document = {
     title: `Used Vehicles for Sale | ${name}`,
-    body: { innerText: 'USED AND CERTIFIED USED FOR SALE' },
+    body: { innerText: bodyText },
     querySelector: (sel) => (sel === 'meta[property="og:site_name"]' ? { content: name } : null),
-    querySelectorAll: (sel) => (sel === 'script[type="application/ld+json"]' ? [{ textContent: JSON.stringify(ld) }] : []),
+    querySelectorAll: (sel) => (sel === 'script[type="application/ld+json"]' && withLd ? [{ textContent: JSON.stringify(ld) }] : []),
   };
   const location = { origin, hostname: new URL(origin).hostname, href: origin + '/used-vehicles/' };
   return vm.createContext({ window, document, location, URL });
@@ -223,8 +224,12 @@ export function fakeSiteSearch(site, { delay = 0 } = {}) {
 // `path`, with the document calls the probes make (JSON-LD scripts,
 // itemtype elements, links with their absolute href and text) and a fetch
 // that answers from `site`. Like fakeDealerPage, a vm sandbox for
-// runInPage and fakeChrome.
-export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles/', origin = STANDARD_ORIGIN, html = null } = {}) {
+// runInPage and fakeChrome. The answer's body streams its text in chunks
+// (`body.getReader()`), as Chrome's fetch does, so the injected search reads
+// it the way it does in the browser; `stream: false` gives an answer with
+// only `text()`. `fetchCalls` lists the requests, `cancelled` the bodies the
+// page stopped reading.
+export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles/', origin = STANDARD_ORIGIN, html = null, stream = true, chunk = 65536 } = {}) {
   const url = new URL(path, origin).href;
   const source = html ?? (site.get(url) || {}).text ?? '';
   const scripts = [...source.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => ({ textContent: m[1] }));
@@ -232,10 +237,28 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
   const links = [...source.matchAll(/<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => ({ href: new URL(m[1].replace(/&amp;/g, '&'), url).href, textContent: m[2].replace(/<[^>]*>/g, '') }));
   const title = (/<title>([\s\S]*?)<\/title>/.exec(source) || [])[1] || '';
   const fetchCalls = [];
+  const cancelled = [];
+  const bodyOf = (href, text) => {
+    const bytes = new TextEncoder().encode(text || '');
+    let at = 0;
+    return {
+      getReader: () => ({
+        read: async () => {
+          if (at >= bytes.length) return { done: true, value: undefined };
+          const value = bytes.slice(at, at + chunk);
+          at += chunk;
+          return { done: false, value };
+        },
+        cancel: async () => { cancelled.push(href); },
+      }),
+    };
+  };
   const fetch = async (href, init) => {
     fetchCalls.push({ url: String(href), init });
     const got = site.get(String(href)) || httpError(404, 'Not found');
-    return { ok: got.ok, status: got.status, url: got.finalUrl || String(href), redirected: Boolean(got.redirected), headers: { get: (n) => (n.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+    const res = { ok: got.ok, status: got.status, url: got.finalUrl || String(href), redirected: Boolean(got.redirected), headers: { get: (n) => (n.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+    if (stream) res.body = bodyOf(String(href), got.text);
+    return res;
   };
   const document = {
     URL: url,
@@ -247,5 +270,6 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
   const location = { origin, hostname: new URL(origin).hostname, href: url };
   const context = vm.createContext({ window: {}, document, location, URL, fetch, setTimeout, clearTimeout, AbortController, TextDecoder });
   context.fetchCalls = fetchCalls;
+  context.cancelled = cancelled;
   return context;
 }

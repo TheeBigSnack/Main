@@ -8,6 +8,7 @@ import dealerInspire, { scan, getDetails, makeDirectSearch, detect, trimRecord, 
 import { ADAPTERS, detectAdapter, adapterById, adapterForService, unsupportedSiteMessage, platformNames } from '../extension/adapters/index.js';
 import { VEHICLE_FIELDS } from '../extension/src/vehicle.js';
 import { scanWithSearch, incompleteWarning, searchViaTab } from '../extension/src/scanRunner.js';
+import { probeSiteInPage } from '../extension/src/scan.js';
 import { withDefaults } from '../extension/src/settings.js';
 import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, MAX_FAILED_IN_A_ROW, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress } from '../extension/adapters/schemaOrg.js';
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
@@ -100,7 +101,39 @@ const PLATFORM_FIXTURES = {
 const CONTRACT = ['probeInPage', 'searchInPage', 'detect', 'origins', 'scanOptions', 'scan', 'getDetails', 'normalize', 'makeDirectSearch', 'photoOrigins'];
 const IN_PAGE = ['probeInPage', 'searchInPage'];
 const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`\\])\/\/[^\n]*$/gm, '$1');
-const stripStrings = (src) => src.replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g, '""');
+// Strings become "", except what a template literal interpolates: the code
+// inside each ${...} is kept (scanned the same way, so a string or template
+// inside it is handled too), since a name used there is reached like any other.
+function stripStrings(src) {
+  const n = src.length;
+  const quoted = (q, j) => { // index after the closing quote (a quote string never spans lines)
+    for (j += 1; j < n && src[j] !== q && src[j] !== '\n'; j += 1) if (src[j] === '\\') j += 1;
+    return j + 1;
+  };
+  const code = (j, inInterpolation) => { // [code with strings stripped, index of the closing brace or the end]
+    let out = '';
+    let depth = 0;
+    while (j < n) {
+      const c = src[j];
+      if (c === "'" || c === '"') { out += '""'; j = quoted(c, j); continue; }
+      if (c === '`') {
+        out += '""';
+        for (j += 1; j < n && src[j] !== '`'; j += 1) {
+          if (src[j] === '\\') { j += 1; continue; }
+          if (src[j] === '$' && src[j + 1] === '{') { const [inner, end] = code(j + 2, true); out += ' (' + inner + ') '; j = end; }
+        }
+        j += 1;
+        continue;
+      }
+      if (c === '{') depth += 1;
+      if (c === '}') { if (inInterpolation && depth === 0) return [out, j]; depth -= 1; }
+      out += c;
+      j += 1;
+    }
+    return [out, j];
+  };
+  return code(0, false)[0];
+}
 const KEYWORDS = new Set('async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield true false null undefined'.split(' '));
 
 // Every name declared at the top level of a module file: what an injected
@@ -136,15 +169,34 @@ test('every adapter has a PLATFORM and every function of the contract', () => {
   }
 });
 
+// The check itself: a function that reaches a name declared at the top of
+// its module, in plain code or inside a template literal's ${...}, is found.
+test('the self-containment check sees a module name used in code and inside ${...}, and not one inside a plain string', () => {
+  const outside = moduleScopeNames("const LIMIT = 3;\nconst ADDRESS_RE = /x/;\nexport function f() {}\n");
+  const reached = (fnSrc) => [...freeIdentifiers(fnSrc, 'g')].filter((id) => outside.has(id));
+  assert.deepEqual(reached('function g() { return ADDRESS_RE.exec(document.body.innerText); }'), ['ADDRESS_RE']);
+  assert.deepEqual(reached('function g(r) { r.cancel(`${f.name}: cut at ${LIMIT} characters`); }'), ['f', 'LIMIT']);
+  assert.deepEqual(reached('function g(r) { r.cancel(`a ${`nested ${LIMIT}`} b`); }'), ['LIMIT']);
+  assert.deepEqual(reached('function g(r) { const o = { a: 1 }; return `${o.a} ${({ b: 2 }).b}`; }'), []);
+  assert.deepEqual(reached("function g() { return 'LIMIT' + \"ADDRESS_RE\" + `f`; }"), []);
+});
+
+// Every function chrome.scripting.executeScript copies into a page: each
+// adapter's two, the neutral site probe (src/scan.js) and the Facebook form
+// functions (facebook/fillForm.js, every export of which is injected).
 test('the in-page functions are self-contained: no import, nothing from the module around them', async () => {
   const dir = new URL('../extension/adapters/', import.meta.url);
-  const files = readdirSync(dir).filter((f) => /\.js$/.test(f) && f !== 'index.js');
+  const files = readdirSync(dir).filter((f) => /\.js$/.test(f) && f !== 'index.js').map((f) => [new URL(f, dir), IN_PAGE]);
+  files.push([new URL('../extension/src/scan.js', import.meta.url), ['probeSiteInPage']]);
+  const fill = new URL('../extension/facebook/fillForm.js', import.meta.url);
+  files.push([fill, Object.keys(await import(fill))]);
   let checked = 0;
-  for (const file of files) {
-    const src = readFileSync(new URL(file, dir), 'utf8');
-    const mod = await import(new URL(file, dir));
+  for (const [url, names] of files) {
+    const file = url.pathname.split('/extension/').pop();
+    const src = readFileSync(url, 'utf8');
+    const mod = await import(url);
     const outside = moduleScopeNames(src);
-    for (const name of IN_PAGE) {
+    for (const name of names) {
       if (typeof mod[name] !== 'function') continue;
       const fnSrc = String(mod[name]);
       assert.ok(!/\bimport\b|\brequire\s*\(/.test(stripStrings(stripComments(fnSrc))), `${file} ${name} must not import`);
@@ -153,7 +205,18 @@ test('the in-page functions are self-contained: no import, nothing from the modu
       checked += 1;
     }
   }
-  assert.equal(checked, ADAPTERS.length * IN_PAGE.length, 'every adapter exports both in-page functions from its own file');
+  const fillNames = Object.keys(await import(fill));
+  assert.ok(fillNames.length >= 5 && fillNames.every((n) => /InPage$/.test(n)), 'fillForm.js exports only injected functions');
+  assert.equal(checked, ADAPTERS.length * IN_PAGE.length + 1 + fillNames.length, 'every adapter exports both in-page functions from its own file');
+});
+
+// The neutral probe's second way to the store's address, a line of the page
+// text, run where Chrome runs it: a page with no structured address.
+test('probeSiteInPage reads the address from the page text when the page has no structured address, in a bare page', async () => {
+  const page = fakeDealerPage({ records: [], withLd: false, bodyText: 'USED CARS\nVisit us at 200 Main Street, Springfield, OH 43215 today' });
+  const site = await runInPage(page, probeSiteInPage);
+  assert.deepEqual(site.address, { street: '200 Main Street', city: 'Springfield', state: 'OH', zip: '43215', phone: '', source: 'page text' });
+  assert.equal(site.name, 'Example Motors');
 });
 
 test('probeInPage and searchInPage run in a bare page with nothing else in scope', async () => {
@@ -543,10 +606,21 @@ test('schemaOrg in-page search: one GET on this website the way the page fetches
   const elsewhere = await runInPage(page, schemaOrg.searchInPage, { ...SERVICE, origin: 'https://another-dealer.test' }, { url: LIST });
   assert.equal(elsewhere.ok, false, 'a service for another website is refused in this tab');
   assert.equal(page.fetchCalls.length, 2, 'nothing refused was fetched');
-  // a page longer than the cap is cut, not refused
+  // a page longer than the cap is cut, not refused: read from the body's
+  // stream and the rest cancelled, as in Chrome, or from text() where a
+  // browser gives no stream; a multi-byte character split between two
+  // chunks still reads whole
   const big = new Map([[LIST, html('<html>' + 'x'.repeat(PAGE_TEXT_LIMIT + 10) + '</html>')]]);
-  const cut = await runInPage(fakeStandardPage({ site: big, html: '<html></html>' }), schemaOrg.searchInPage, SERVICE, { url: LIST });
+  const streamed = fakeStandardPage({ site: big, html: '<html></html>' });
+  const cut = await runInPage(streamed, schemaOrg.searchInPage, SERVICE, { url: LIST });
   assert.equal(cut.data.text.length, PAGE_TEXT_LIMIT);
+  assert.deepEqual(streamed.cancelled, [LIST], 'the stream past the cap is cancelled');
+  const whole = await runInPage(fakeStandardPage({ site: big, html: '<html></html>', stream: false }), schemaOrg.searchInPage, SERVICE, { url: LIST });
+  assert.equal(whole.data.text.length, PAGE_TEXT_LIMIT);
+  const accents = new Map([[LIST, html('<html>' + 'é'.repeat(5000) + '</html>')]]);
+  const split = fakeStandardPage({ site: accents, html: '<html></html>', chunk: 1001 });
+  assert.equal((await runInPage(split, schemaOrg.searchInPage, SERVICE, { url: LIST })).data.text, '<html>' + 'é'.repeat(5000) + '</html>');
+  assert.deepEqual(split.cancelled, [], 'a page under the cap is read to its end');
   // the in-page copy carries its own number: it must be the module's
   assert.match(String(schemaOrg.searchInPage), new RegExp(`const LIMIT = ${PAGE_TEXT_LIMIT};`));
 });
