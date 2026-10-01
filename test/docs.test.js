@@ -433,3 +433,13 @@ test('README\'s unit-test count is the number of tests npm test runs', () => {
   assert.ok(m, 'README.md no longer gives the unit-test count on its npm test line');
   assert.equal(Number(m[1]), count, `README.md says ${m[1]} unit tests, and test/*.test.js holds ${count}`);
 });
+
+// The side panel reads the car again when its read is older than
+// READ_MAX_AGE_MS (sidepanel.js); the help names the same number of minutes.
+test('the help gives the same age for a re-read of the car as the side panel uses', () => {
+  const panel = read('../extension/sidepanel.js');
+  const ms = Number(new Function(`return ${/const READ_MAX_AGE_MS = ([^;]+);/.exec(panel)[1]}`)());
+  assert.ok(ms > 0);
+  const help = doc('help.md');
+  assert.match(help, new RegExp(`read from the website more than ${ms / 60000} minutes ago`), 'help.md says when the car is read again');
+});

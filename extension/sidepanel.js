@@ -51,6 +51,7 @@ const state = {
   origin: null, vin: null, dealerTabId: null, windowId: null,
   settings: null, posted: {}, boilerplate: [], siteName: '',
   vehicle: null, price: null,
+  readAt: null, // when the car was last read and checked on the website (READ_MAX_AGE_MS)
   description: '', descriptionSource: 'template', note: '', guardrails: null,
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
@@ -155,7 +156,7 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -174,7 +175,7 @@ async function clearFlow() {
   if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
   if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
-    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
+    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, readAt: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
@@ -315,6 +316,104 @@ async function afterAllowPhotos(pattern, granted) {
 
 // ---------- the flow ----------
 
+// How long one read of the car counts as "at post time". Past this, Open the
+// Marketplace form and the dry run's Fill it in now read the car on the
+// website and check it again before anything is opened or filled
+// (carStillCurrent): a review left open for an hour, or one the panel
+// brought back the next day, is never filled from the old read.
+const READ_MAX_AGE_MS = 10 * 60 * 1000;
+
+// The car as the website shows it now, checked again (src/vehicleDetails.js
+// recheck): still there, still pre-owned and ready, still priced. Read
+// through the dealer tab when the post started from one that still shows this
+// website; otherwise straight from the extension, with the website
+// permission (readCarForPost). A failure stops the post with the reason
+// (block). Resolves { vehicle, price, noteApplies, readAt }, or null when stopped.
+async function readCarNow() {
+  const fresh = await readCarForPost({ tabId: state.dealerTabId ?? null, origin: state.origin, info: state.siteInfo, vin: state.vin, url: state.snapshotVehicles[state.vin]?.url });
+  if (!fresh.ok && fresh.needsPermission) {
+    state.blockedOrigins = fresh.origins;
+    await block(fresh.message, 'no-permission');
+    return null;
+  }
+  if (!fresh.ok) {
+    await block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
+    return null;
+  }
+  const check = recheck(fresh.vehicle, state.settings);
+  if (!check.ok) {
+    await block(check.message, 'check-' + check.assessment.decision);
+    return null;
+  }
+  // the store label the popup shows: settled over the lot's store names, not the adapter's brand-word guess for one record
+  fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
+  const price = basisPrice(fresh.vehicle, state.settings.basis); // the lower second price only when this car shows one
+  if (!price) {
+    await block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
+    return null;
+  }
+  return { vehicle: fresh.vehicle, price, noteApplies: !(state.settings.basis === 'beforeFees' && price === fresh.vehicle.price), readAt: new Date().toISOString() };
+}
+
+function takeCar(car) {
+  state.vehicle = car.vehicle;
+  state.vinCheck = { local: localVinCheck(car.vehicle), online: null };
+  state.price = car.price;
+  state.noteApplies = car.noteApplies;
+  state.readAt = car.readAt;
+}
+
+// No time recorded (a post saved before reads were timed) counts as old.
+function readIsOld() {
+  return !(Date.now() - Date.parse(state.readAt || '') < READ_MAX_AGE_MS);
+}
+
+// What the form would get from the car as it stands: every field but the
+// description (the person's own text), and the photos in order.
+function formValues() {
+  const l = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos() });
+  return { ...l.fields, photos: l.photos.join(' ') };
+}
+
+// Before Open the Marketplace form or Fill it in now: with a read older than
+// READ_MAX_AGE_MS, the car is read and checked on the website again. A car
+// that sold, turned new, went sale-pending or lost its price stops here
+// (block says why). One whose price or any form value changed goes back to
+// the review screen with the new values and the description's checks run
+// against them, and the status line says what changed: the person sees it
+// before anything is filled. Resolves true to go on.
+async function carStillCurrent() {
+  if (!readIsOld()) return true;
+  const was = state.step;
+  const before = { price: state.price, values: formValues() };
+  state.step = 'checking';
+  state.message = 'Checking the car on the website again before the form opens…';
+  setStatus('');
+  render();
+  const car = await readCarNow();
+  if (!car) return false;
+  const online = state.vinCheck && state.vinCheck.online;
+  takeCar(car);
+  const after = formValues();
+  const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
+  const changed = Object.keys({ ...before.values, ...after }).filter((k) => k !== 'description' && before.values[k] !== after[k]);
+  state.message = '';
+  if (!changed.length) {
+    if (state.vinCheck && online) state.vinCheck.online = online; // the same car: the NHTSA comparison still stands
+    state.step = was;
+    await saveFlow();
+    return true;
+  }
+  const said = changed.map((k) => (k === 'price' ? `price ${money(before.price)} to ${money(state.price)}` : k === 'photos' ? 'photos' : (labels[k] || k).toLowerCase()));
+  state.listing = null;
+  state.guardrails = runGuardrails(state.description, ctx());
+  state.step = 'review';
+  render();
+  setStatus(`The website changed this car since it was read (${said.join(', ')}). Check the review, then click Open the Marketplace form again.`, 'error');
+  await saveFlow();
+  return false;
+}
+
 async function startFlow(req) {
   await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
   endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
@@ -344,24 +443,9 @@ async function startFlow(req) {
   render();
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
 
-  // through the dealer tab when the post started from one that still shows
-  // this website; otherwise straight from the extension, with the website
-  // permission (src/vehicleDetails.js readCarForPost)
-  const fresh = await readCarForPost({ tabId: state.dealerTabId ?? null, origin: state.origin, info: state.siteInfo, vin: state.vin, url: state.snapshotVehicles[state.vin]?.url });
-  if (!fresh.ok && fresh.needsPermission) {
-    state.blockedOrigins = fresh.origins;
-    return block(fresh.message, 'no-permission');
-  }
-  if (!fresh.ok) return block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
-  const check = recheck(fresh.vehicle, state.settings);
-  if (!check.ok) return block(check.message, 'check-' + check.assessment.decision);
-  // the store label the popup shows: settled over the lot's store names, not the adapter's brand-word guess for one record
-  fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
-  state.vehicle = fresh.vehicle;
-  state.vinCheck = { local: localVinCheck(fresh.vehicle), online: null };
-  state.price = basisPrice(fresh.vehicle, state.settings.basis); // the lower second price only when this car shows one
-  state.noteApplies = !(state.settings.basis === 'beforeFees' && state.price === fresh.vehicle.price);
-  if (!state.price) return block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
+  const car = await readCarNow();
+  if (!car) return undefined; // stopped, and block() says why
+  takeCar(car);
 
   state.message = 'Writing the description…';
   render();
@@ -602,6 +686,7 @@ async function openForm({ probeOnly = false } = {}) {
     return;
   }
   if (descriptionStopped()) return;
+  if (!(await carStillCurrent())) return;
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
@@ -652,9 +737,10 @@ async function runFill() {
 }
 
 // Fill it in now, on the form the dry run opened: the same checks as Open
-// the Marketplace form before anything is typed.
+// the Marketplace form before anything is typed, the car's read included.
 async function fillFromProbe() {
   if (descriptionStopped()) return undefined;
+  if (!(await carStillCurrent())) return undefined;
   return runFill();
 }
 
@@ -1130,13 +1216,19 @@ function highlightsHtml() {
   </fieldset>`;
 }
 
+// A review or dry run on an old read of the car (left open, or brought back
+// when the panel reopened) says so: the car is read again before the form opens.
+const readAgainHtml = () => (readIsOld()
+  ? `<p class="hint" id="readAgain">Read from the website ${state.readAt ? esc(when(state.readAt)) : 'a while ago'}. Lot Current reads and checks it again before the form opens or fills.</p>`
+  : '');
+
 const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
 
 function viewReview() {
   const cap = dailyCap();
   const formOff = cap.reached || ruleProblems(state.guardrails).length > 0;
   const rw = state.settings.rewrite;
-  return `${carCard()}
+  return `${carCard()}${readAgainHtml()}
   <section>
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
     ${state.note ? `<div class="banner warn">${esc(state.note)}</div>` : ''}
@@ -1170,7 +1262,7 @@ function viewProbe() {
   const missing = p.missing || [];
   const controls = p.controls || [];
   const limit = p.photoLimit ? `${p.photoLimit.value}${p.photoLimit.verified ? '' : ' (unverified)'}` : '?';
-  return `${carCard()}
+  return `${carCard()}${readAgainHtml()}
   <div class="banner info">Nothing was filled. This is what Lot Current can see on the form (map ${esc(p.mapVersion || state.map.version)}, Lot Current ${esc(p.extensionVersion || VERSION)}).</div>
   ${p.error ? `<div class="banner bad">${esc(p.error)}</div>` : ''}
   ${languageHint(p.language, !found.some((f) => f.tag))}

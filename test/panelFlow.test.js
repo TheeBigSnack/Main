@@ -14,6 +14,11 @@ import { readFileSync } from 'node:fs';
 import { currentVin } from '../extension/src/queue.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData } from '../extension/src/listingData.js';
+import { recheck } from '../extension/src/vehicleDetails.js';
+import { basisPrice } from '../extension/src/rescan.js';
+import { shortLocation, storeNames } from '../extension/src/normalize.js';
+import { localVinCheck } from '../extension/src/vin.js';
+import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { vehicle } from './helpers.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
@@ -169,33 +174,44 @@ test('a load for a website the panel has moved away from is dropped, so its cars
 // guardrails and listing builder; the tab, the fill and the probe are stubs
 // that record they were reached. `description` is what the box holds.
 const DEALER = { name: 'Example Motors', city: 'Exampletown', state: 'PA', zip: '15000' };
-function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, check = null, car = vehicle('usedNormal') }) {
+const READ_MAX_AGE_MS = Number(new Function(`return ${/const READ_MAX_AGE_MS = ([^;]+);/.exec(src)[1]}`)());
+const FLOW_FIELDS = new Function(`return ${/const FLOW_FIELDS = (\[[^\]]*\]);/.exec(src)[1]}`)();
+function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, car = vehicle('usedNormal') }) {
   const v = car;
   const calls = [];
   const box = { value: description };
   const state = {
     origin: 'https://www.example-motors.test', vin: v.vin, step, vehicle: v, price: v.price, noteApplies: true, readAt,
     description, settings: { dealer: DEALER, defaults: {}, basis: 'website', priceNote: '', salesperson: { name: 'Pat', title: 'sales consultant', closingLine: '' }, dailyCap: 10 },
-    posted: {}, colorGuess: null, listing: null, snapshotVehicles: {}, siteInfo: null, dealerTabId: null, map: {},
+    posted: {}, colorGuess: null, listing: null, snapshotVehicles: {}, siteInfo: null, dealerTabId: 41, map: FORM_MAP, photoPick: null,
   };
   const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: '', price: state.price, closingLine: '' });
   // the dry run built the listing when it opened the form
   if (step === 'probe') state.listing = buildListingData(v, { dealer: DEALER, description, price: v.price, photos: [] });
-  const fns = compileMany(['descriptionStopped', 'openForm', 'fillFromProbe'], {
-    state, ctx, runGuardrails, ruleProblems, buildListingData,
+  const fns = compileMany(['resumeFlow', 'descriptionStopped', 'readIsOld', 'readCarNow', 'takeCar', 'formValues', 'carStillCurrent', 'openForm', 'fillFromProbe'], {
+    state, ctx, runGuardrails, ruleProblems, buildListingData, READ_MAX_AGE_MS, FLOW_FIELDS,
+    loadSaved: async () => true, startWatcher: () => calls.push('startWatcher'),
+    recheck, basisPrice, shortLocation, storeNames, localVinCheck, money: (n) => '$' + n.toLocaleString('en-US'),
+    block: async (message, code) => {
+      calls.push('block: ' + code);
+      Object.assign(state, { step: 'blocked', message });
+    },
     $: (id) => (id === 'description' && step === 'review' ? box : null),
     checksHtml: () => '', setFormButtons: () => calls.push('buttons'),
     setStatus: (text, kind) => calls.push(`status${kind ? '(' + kind + ')' : ''}: ${text}`),
     siteKeys: (o) => ({ posted: 'posted:' + o, sync: 'sync:' + o }),
     dailyCap: () => ({ reached: false, used: 0, cap: 10 }),
     pickedPhotos: () => [],
-    render: () => {}, saveFlow: async () => {}, pilotNote: async () => {}, notePostStep: () => {},
-    GLOBAL_KEYS: { devOverrides: 'devOverrides' }, FORM_MAP: {}, applyOverrides: (m) => m,
+    render: () => calls.push('render:' + state.step), saveFlow: async () => {}, pilotNote: async () => {}, notePostStep: () => {},
+    GLOBAL_KEYS: { devOverrides: 'devOverrides' }, FORM_MAP, applyOverrides: (m) => m,
     chrome: { storage: { local: { get: async () => ({}) } }, tabs: { create: async ({ url }) => { calls.push('tabs.create'); return { id: 77 }; } } },
     waitForTabLoad: async () => {}, sleep: async () => {},
     runFill: async () => calls.push(`runFill: ${state.listing.fields.description}`),
     runProbe: async () => calls.push('runProbe'),
-    readCarForPost: read || never('readCarForPost'), recheck: check || never('recheck'),
+    readCarForPost: async (req) => {
+      calls.push(`readCarForPost ${req.vin} tab ${req.tabId}`);
+      return (read || never('readCarForPost'))(req);
+    },
   });
   return { state, calls, fns, v };
 }
@@ -243,4 +259,92 @@ test('a description that breaks a posting rule is never typed into the form; a s
   edited.state.description = good.replaceAll(DEALER.name, 'the lot');
   await edited.fns.openForm();
   assert.ok(edited.calls.includes('tabs.create'), 'the box holds the good text');
+});
+
+test('an old read of the car is read and checked again before the form opens or fills: a car that changed on the website is never filled from the old read', async () => {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const opened = (calls) => calls.filter((c) => c === 'tabs.create' || c.startsWith('runFill') || c === 'runProbe');
+  const as = (patch) => async () => ({ ok: true, vehicle: { ...v, ...patch } });
+
+  // a fresh read: nothing is read again (the queue opens the form straight after its own read)
+  const fresh = formOpener({ description });
+  await fresh.fns.openForm();
+  assert.deepEqual(opened(fresh.calls), ['tabs.create', `runFill: ${description}`]);
+
+  // a review brought back the next day, or one saved before reads were timed: read again first, and filled when nothing changed
+  for (const readAt of [new Date(Date.now() - 26 * 3600 * 1000).toISOString(), null, 'garbage']) {
+    const o = formOpener({ description, readAt, read: as({}) });
+    await o.fns.openForm();
+    const read = o.calls.findIndex((c) => c.startsWith('readCarForPost'));
+    assert.ok(read >= 0 && read < o.calls.indexOf('tabs.create'), `read again before the tab opens (${readAt})`);
+    assert.equal(o.calls[read], `readCarForPost ${v.vin} tab 41`);
+    assert.ok(Date.now() - Date.parse(o.state.readAt) < 5000, 'the new read is recorded');
+    assert.deepEqual(o.calls.filter((c) => c.startsWith('render:')), ['render:checking', 'render:filling'], 'the panel says it is checking, then opens the form');
+  }
+  // the panel reopened on Monday's review, saved with Monday's read: read again before the form opens
+  assert.ok(FLOW_FIELDS.includes('readAt'), 'the read time is saved with the post');
+  const monday = formOpener({ description: '', step: 'idle', read: as({}) });
+  const saved = { vin: v.vin, vehicle: v, price: v.price, readAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(), description, step: 'review', map: FORM_MAP };
+  await monday.fns.resumeFlow(monday.state.origin, saved);
+  assert.equal(monday.state.step, 'review');
+  await monday.fns.openForm();
+  assert.ok(monday.calls.findIndex((c) => c.startsWith('readCarForPost')) < monday.calls.indexOf('tabs.create') && monday.calls.includes('tabs.create'));
+
+  // just inside the limit: no read
+  const inside = formOpener({ description, readAt: new Date(Date.now() - READ_MAX_AGE_MS + 60000).toISOString() });
+  await inside.fns.openForm();
+  assert.ok(inside.calls.includes('tabs.create'));
+
+  // the website now says new, or sale pending, or it is gone, or has no price: stopped, nothing opened
+  const stops = {
+    'retyped as new': [as({ inventoryType: 'New', readableType: 'New', urlConditionWord: 'new', siteTitle: 'New ' + v.name }), /^block: check-skip$/],
+    'sale pending': [as({ status: 'pend-sale' }), /^block: check-not-ready$/],
+    'gone from the website': [async () => ({ ok: false, notFound: true, message: 'This car is no longer on the website.' }), /^block: not-on-website$/],
+    'website unreachable': [async () => ({ ok: false, message: "Couldn't reach the website." }), /^block: site-unreachable$/],
+    'no price': [as({ price: null, priceBeforeFees: null }), /^block: (no-price|check-not-ready)$/], // the gate itself holds a car with no price
+  };
+  for (const [what, [read, code]] of Object.entries(stops)) {
+    for (const probeOnly of [false, true]) {
+      const o = formOpener({ description, readAt: hourAgo, read });
+      await o.fns.openForm({ probeOnly });
+      assert.deepEqual(opened(o.calls), [], `${what}: nothing opened`);
+      assert.ok(o.calls.some((c) => code.test(c)), `${what}: ${o.calls.join(' | ')}`);
+      assert.equal(o.state.step, 'blocked');
+    }
+    const p = formOpener({ description, readAt: hourAgo, step: 'probe', read });
+    await p.fns.fillFromProbe();
+    assert.deepEqual(opened(p.calls), [], `${what}: Fill it in now fills nothing`);
+  }
+
+  // the price dropped $1,500: back at review with the new price, said in the status line; nothing opened
+  const drop = formOpener({ description, readAt: hourAgo, read: as({ price: v.price - 1500 }) });
+  await drop.fns.openForm();
+  assert.deepEqual(opened(drop.calls), []);
+  assert.equal(drop.state.step, 'review');
+  assert.equal(drop.state.price, v.price - 1500);
+  assert.ok(drop.calls.some((c) => c.startsWith('status(error): The website changed this car since it was read (price $' + v.price.toLocaleString('en-US') + ' to $' + (v.price - 1500).toLocaleString('en-US') + ')')), drop.calls.join(' | '));
+  // and the next click goes on from the new read, with the new price
+  await drop.fns.openForm();
+  assert.deepEqual(opened(drop.calls), ['tabs.create', `runFill: ${description}`]);
+  assert.equal(drop.state.listing.fields.price, String(v.price - 1500));
+
+  // the mileage went up: the description's number no longer matches, so the checks stop the next click until it is fixed
+  const miles = formOpener({ description, readAt: hourAgo, read: as({ mileage: v.mileage + 250 }) });
+  await miles.fns.openForm();
+  assert.ok(miles.calls.some((c) => /^status\(error\): The website changed this car since it was read \(mileage\)/.test(c)), miles.calls.join(' | '));
+  assert.ok(ruleProblems(miles.state.guardrails).some((p) => p.code === 'unknown-number'));
+  await miles.fns.openForm();
+  assert.deepEqual(opened(miles.calls), [], 'the old mileage in the text is not filled');
+
+  // the dry run's Fill it in now on an old read: the same
+  const probe = formOpener({ description, readAt: hourAgo, step: 'probe', read: as({ price: v.price + 500 }) });
+  await probe.fns.fillFromProbe();
+  assert.deepEqual(opened(probe.calls), []);
+  assert.equal(probe.state.step, 'review');
+  const same = formOpener({ description, readAt: hourAgo, step: 'probe', read: as({}) });
+  await same.fns.fillFromProbe();
+  assert.deepEqual(opened(same.calls), [`runFill: ${description}`]);
+  assert.equal(same.state.step, 'probe', 'back on the dry run, which the fill then moves on');
 });
