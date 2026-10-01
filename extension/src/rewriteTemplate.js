@@ -197,10 +197,15 @@ function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = n
   return problems;
 }
 
-// A write-up sentence or a feature the template may copy: no price at all
-// (the price is the listing's own field), no price change, and no mileage
-// other than the website's.
-const narrativeSentenceOk = (sentence, vehicle) => !priceAndMileageProblems(sentence, { vehicle }).length;
+// A feature the template may name, or the start of a write-up sentence it
+// may copy: no price at all (the price is the listing's own field), no
+// price change, and no mileage other than the website's.
+const statesNoOtherNumbers = (text, vehicle) => !priceAndMileageProblems(text, { vehicle }).length;
+// A write-up sentence the template may copy: that, and nothing the checks
+// would refuse in the template's own text, a banned phrase ("no accidents",
+// "private sale") or "one owner" without the Carfax one-owner flag.
+const narrativeSentenceOk = (sentence, vehicle) =>
+  statesNoOtherNumbers(sentence, vehicle) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner);
 
 // The website's features a description can name as highlights: each once,
 // short enough to read in a list (40 characters or less), stating no price,
@@ -216,7 +221,7 @@ export function featureChoices(features) {
   for (const f of features) {
     if (typeof f !== 'string') continue;
     const t = f.replace(/\s+/g, ' ').trim();
-    if (!t || t.length > 40 || seen.has(t.toLowerCase()) || !narrativeSentenceOk(t, {})) continue;
+    if (!t || t.length > 40 || seen.has(t.toLowerCase()) || !statesNoOtherNumbers(t, {})) continue;
     seen.add(t.toLowerCase());
     clean.push(t);
   }
@@ -404,6 +409,7 @@ function emojiCount(text) {
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/\s+/g, '\\s+') + '\\b', 'i')]);
+const ONE_OWNER = /\b(one|1|single)[- ]owner\b/i;
 
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
@@ -447,7 +453,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(t)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
   }
-  if (/\b(one|1|single)[- ]owner\b/i.test(t) && !vehicle.carfaxOneOwner) {
+  if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
   // the dealership is always named: with no name set there is nothing to name it by

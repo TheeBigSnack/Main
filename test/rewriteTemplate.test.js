@@ -308,6 +308,20 @@ test('a model year, fuel economy, a warranty, a range or a weight is never read 
   assert.deepEqual(dollarAmounts('Was 31,995, now just $28,995. Internet price: 28,995. Priced at 26,673; yours for 28.5k.').map((a) => a.value), [31995, 28995, 28995, 26673, 28500]);
 });
 
+test('the template leaves out write-up sentences the checks would refuse: a banned phrase, or one owner without the Carfax flag', async () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  for (const sentence of ['Priced for our private sale event this weekend.', 'No accidents and runs perfect!', 'A one-owner truck, traded in here.']) {
+    const r = await generateDescription({ vehicle: { ...v, carfaxOneOwner: false, descriptionRaw: `${sentence} Rides on 20-inch wheels with the 8.4-inch touchscreen.` }, dealer: EXAMPLE, salesperson: SAM, price: v.price });
+    assert.ok(!r.text.includes(sentence), `the template leaves out: ${sentence}`);
+    assert.match(r.text, /Rides on 20-inch wheels/);
+    assert.deepEqual(r.guardrails.problems, [], sentence);
+  }
+  // with the Carfax one-owner flag the same sentence is the website's own fact
+  const flagged = await generateDescription({ vehicle: { ...v, carfaxOneOwner: true, descriptionRaw: 'A one-owner truck, traded in here. Rides on 20-inch wheels.' }, dealer: EXAMPLE, salesperson: SAM, price: v.price });
+  assert.match(flagged.text, /A one-owner truck, traded in here\./);
+  assert.deepEqual(flagged.guardrails.problems, []);
+});
+
 test('a feature stating a price or a mileage is never a highlight, so the template passes whatever the features', async () => {
   const features = ['Under 30,000 Miles', '$1,000 Below Market', 'Price Reduced', 'Range: 290 Miles', 'Free Oil Changes 2 Years or 24,000 Miles', '5 Miles to Empty Warning', 'Heated Seats', 'Backup Camera'];
   const choices = featureChoices(features);
