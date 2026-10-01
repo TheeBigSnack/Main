@@ -1214,6 +1214,13 @@ test('gettingStarted step 4: two different salespeople with a post in the past 7
   assert.equal(four([listing('s1', 5), listing('s2', 7 * 24 + 1)]).done, false, 'older than 7 days');
   assert.equal(four([listing('s1', 5), listing('s2', -2)]).done, false, 'stamped in the future');
   assert.equal(four([]).line, 'No salesperson has posted in the past 7 days.');
+  // someone removed from the dealership is not one of its salespeople posting, as in usage_report's active_salespeople
+  const afterRemoval = started({ memberships: [member('m1', 'manager'), member('s1', 'salesperson')], listings: [listing('s1', 5), listing('s2', 30)] });
+  assert.deepEqual([afterRemoval.steps[3].done, afterRemoval.steps[3].line], [false, 'One salesperson posted in the past 7 days; this step needs 2.'], 'a removed salesperson\'s post still counted');
+  assert.notEqual(afterRemoval.line, 'All four steps done');
+  assert.equal(four([listing('s1', 5), listing('x9', 6)]).done, false, 'an account that is not a member');
+  for (const f of ['docs/help.md', 'site-src/pages/for-managers.html']) assert.ok(read(f).includes('two different salespeople of the dealership posted in the past 7 days; a manager\'s own posts don\'t count, nor do those of someone no longer in the dealership'), `${f} defines the step as the card counts it`);
+  assert.match(read('supabase/migrations/0008_usage.sql'), /join public\.memberships m on m\.dealership_id = l\.dealership_id and m\.user_id = l\.user_id and m\.role = 'salesperson'/, 'the owner\'s measure counts members with the salesperson role');
   // a row with no account counts by the name the extension recorded, as the Salespeople table does
   assert.equal(four([listing('s1', 5), listing(null, 6, { salesperson: 'Pat' })]).done, true);
   assert.equal(four([listing(null, 6, { salesperson: 'Pat' }), listing(null, 7, { salesperson: 'pat ' })]).done, false, 'the same name twice');

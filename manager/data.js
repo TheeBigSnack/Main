@@ -996,8 +996,9 @@ const PLAN_STEP_CLOSED_LINES = Object.freeze({
  *   1. a plan: the billing state is pilot or active;
  *   2. someone invited: an open invite code, or more than one member;
  *   3. a car posted and synced: any listing;
- *   4. two salespeople posting: at least two different people, not managers
- *      of the dealership, with a listing posted in the past 7 days.
+ *   4. two salespeople posting: at least two different people who hold the
+ *      salesperson role in the dealership now, with a listing posted in the
+ *      past 7 days (a manager, or someone who has left, does not count).
  * @param {object} input
  *   billing:      GET .../billing/status's answer (or the sample's); null when it could not be read
  *   invites:      the open codes the page holds (list_invites plus the ones made since)
@@ -1029,13 +1030,15 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
     : open > 1 ? `${open} invite codes are open, waiting to be used.`
     : 'Nobody else is in the dealership yet: make an invite code for each salesperson in the Invite codes card.';
 
-  // who posted in the past 7 days, by account, else by the name the extension recorded; a manager's own posts do not count
-  const managers = new Set(M.filter((m) => m.role === 'manager').map((m) => m.user_id));
+  // who posted in the past 7 days, by account, else by the name the extension recorded. An account counts only
+  // while it holds the salesperson role here, as usage_report's active_salespeople (0008_usage.sql): a manager's
+  // own posts do not count, nor do those of someone no longer in the dealership (their cars stay on the page)
+  const salespeople = new Set(M.filter((m) => m.role === 'salesperson').map((m) => m.user_id));
   const posting = new Set();
   for (const l of L) {
     const at = ms(l.posted_at);
     if (at === null || at < t - WEEK_MS || at > t) continue;
-    if (l.user_id && managers.has(l.user_id)) continue;
+    if (l.user_id && !salespeople.has(l.user_id)) continue;
     posting.add(l.user_id ? `id:${l.user_id}` : `name:${text(l.salesperson, 60).toLowerCase() || NO_NAME}`);
   }
   const n = posting.size;
