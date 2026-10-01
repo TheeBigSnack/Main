@@ -227,9 +227,16 @@ const REMOTE_CODE = [
   { re: /\bimport\s*\(\s*[^"'`\s)]/, why: 'a dynamic import of a computed address' },
   { re: /\bimportScripts\s*\(/, why: 'importScripts' },
   { re: /(?:(?<![\w.$])|\b(?:window|globalThis|self)\.)eval\s*\(/, why: 'eval' },
+  // eval handed on as a value (`.then(eval)`, `(0, eval)(s)`, `window['eval']`).
+  // The hyphen keeps a CSP's 'unsafe-eval' text out of it.
+  { re: /(?:(?<![\w.$-])|\b(?:window|globalThis|self)\.)eval\b(?!\s*\()|\[\s*["'`]eval["'`]\s*\]/, why: 'eval used as a value' },
   { re: /(?<![\w.$])(?:new\s+)?Function\s*\(/, why: 'new Function' },
   { re: /\bset(?:Timeout|Interval)\s*\(\s*["'`]/, why: 'a timer given a string of code' },
   { re: /\.(?:innerHTML|outerHTML)\s*=[^;\n]*<script/i, why: 'a script written into the page' },
+  // The extension never builds a <script> element in code: one made by a
+  // function injected into a page would load whatever its src names.
+  { re: /\bcreateElement(?:NS)?\s*\([^)]*["'`]script["'`]\s*\)/i, why: 'a <script> element built in code' },
+  { re: /\bnew\s+(?:Shared)?Worker\s*\(\s*["'`](?:https?:)?\/\//, why: 'a worker from another host' },
 ];
 
 // A match on a comment line (// or a /* */ block's * line) is prose, not code.

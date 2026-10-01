@@ -121,8 +121,13 @@ test('code from outside the package is found, data requests and comments are not
   });
   const f = findRemoteCode(bad).join('\n');
   for (const re of [/a\.html:1: a <script> from another host/, /a\.html:1: a stylesheet/, /b\.js:1: an import from another host/, /b\.js:2: a dynamic import of a computed address/, /b\.js:3: eval/, /b\.js:4: new Function/, /b\.js:5: a timer/, /b\.js:6: importScripts/, /b\.js:7: eval[\s\S]*b\.js:7: eval/, /b\.js:8: an import from another host/, /b\.js:9: new Function/]) assert.match(f, re);
+  // The usual ways to load or run code that do not name eval( or an import.
+  const built = findRemoteCode(files({
+    'e.js': "const s = document.createElement('script'); s.src = 'https://cdn.example.com/a.js';\nfetch(u).then((r) => r.text()).then(eval);\n(0, eval)(code);\nwindow['eval'](code);\nnew Worker('https://cdn.example.com/w.js');\nconst t = document.createElementNS(ns, \"script\");\n",
+  })).join('\n');
+  for (const re of [/e\.js:1: a <script> element built in code/, /e\.js:2: eval used as a value/, /e\.js:3: eval used as a value/, /e\.js:4: eval used as a value/, /e\.js:5: a worker from another host/, /e\.js:6: a <script> element built in code/]) assert.match(built, re);
   const fine = files({
-    'c.js': "// eval(x) and new Function( in a comment\n/*\n * import('https://x')\n */\nconst r = await fetch('https://api.example.com/v1');\nconst e = obj.evaluate(1); retrieval(2);\nconst m = await import('./src/a.js');\n",
+    'c.js': "// eval(x) and new Function( in a comment\n/*\n * import('https://x')\n */\nconst r = await fetch('https://api.example.com/v1');\nconst e = obj.evaluate(1); retrieval(2);\nconst m = await import('./src/a.js');\nconst csp = \"script-src 'self' 'wasm-unsafe-eval'\";\nconst div = document.createElement('div');\nconst w = new Worker('./worker.js');\n",
     'd.html': '<!-- <script src="https://x"></script> --><a href="https://example.com">site</a><link rel="icon" href="icons/16.png">',
   });
   assert.deepEqual(findRemoteCode(fine), []);
@@ -288,4 +293,14 @@ test('the repository itself: nothing wrong with the package or the listing now',
   assert.deepEqual(conditions.filter((c) => /^Support and homepage names /.test(c)), [], 'strict mode can pass with the confirmed inbox');
   const before = readFileSync(new URL('../store/listing.md', import.meta.url), 'utf8').split('## Before submitting')[1] || '';
   assert.match(before, /- \[ \] The support address [^\n]*receives mail/, 'what the check cannot see, the mailbox, is a box on the list');
+});
+
+test('the remote-code answer says what store-check scans for, not that it catches every form', () => {
+  const doc = readFileSync(new URL('../store/submission.md', import.meta.url), 'utf8');
+  const row = doc.split('\n').find((l) => l.startsWith('| Are you using remote code?'));
+  assert.ok(row, 'store/submission.md has the remote-code row');
+  assert.doesNotMatch(row, /\b(?:fails on|catches|finds) (?:any|every|all)\b/i, 'a source-text scan cannot promise to catch every form');
+  assert.match(row, /cannot catch every form/);
+  const f = findRemoteCode(new Map([['x.js', Buffer.from("const s = document.createElement('script');\n")]]));
+  assert.equal(f.length, 1, 'a script element built in code, which the answer names, is caught');
 });
