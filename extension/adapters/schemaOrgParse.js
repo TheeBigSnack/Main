@@ -757,6 +757,7 @@ function factsFrom(doc, pageUrl, carOf = null) {
   let ogTitle = '';
   let canonical = null;
   let next = null;
+  let prev = null;
   const links = [];
   const carfaxLinks = [];
   // a Set beside each list: a page of thousands of links is read in one pass
@@ -772,6 +773,7 @@ function factsFrom(doc, pageUrl, carOf = null) {
     else if (t.open === 'meta' && !ogTitle && String(a.property || a.name || '').toLowerCase() === 'og:title') ogTitle = String(a.content || '').replace(/\s+/g, ' ').trim();
     else if (t.open === 'link' && relHas(a, 'canonical') && !canonical) canonical = absolute(a.href, base);
     if ((t.open === 'link' || t.open === 'a') && relHas(a, 'next') && !next) next = absolute(a.href, base);
+    if ((t.open === 'link' || t.open === 'a') && (relHas(a, 'prev') || relHas(a, 'previous')) && !prev) prev = absolute(a.href, base);
     if (t.open === 'a' || t.open === 'area' || t.open === 'iframe') {
       // parsed once, then read for its host, its origin and its address
       const u = urlOf(t.open === 'iframe' ? a.src : a.href, base);
@@ -795,7 +797,7 @@ function factsFrom(doc, pageUrl, carOf = null) {
     }
   }
   const seen = visibleText(doc.root, { struck: struckClasses(doc) });
-  return { title: ogTitle || title, canonical, next, links, carfaxLinks, text: seen.text, segments: seen.segments };
+  return { title: ogTitle || title, canonical, next, prev, links, carfaxLinks, text: seen.text, segments: seen.segments };
 }
 
 /**
@@ -804,6 +806,7 @@ function factsFrom(doc, pageUrl, carOf = null) {
  *                the site's name tacked on), else the <title>
  *   canonical    the rel=canonical address, absolute, or null
  *   next         the rel=next address (the next page of a list), or null
+ *   prev         the rel=prev (or rel=previous) address, or null
  *   links        every same-origin link, absolute, once each, in page order,
  *                without in-page fragments
  *   carfaxLinks  every link to a carfax.com page, once each

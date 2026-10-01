@@ -61,9 +61,15 @@ export const REQUEST_TIMEOUT_MS = 30000;
 // Answers on a page that lists cars (vehicle data in its JSON-LD or
 // microdata, or at least two links on this website to car pages: an address
 // with a VIN in it, or one that reads like a car page) or on one car's own
-// page. The list to scan is the page it ran on, unless that page doesn't
-// read as used inventory and links to a page that does; on a car's page it
-// is the used inventory page it links to (null when it links to none).
+// page. The list to scan is the page it ran on when its own address reads
+// as used inventory, else the used inventory page it links to (a home page
+// titled "New & Used Cars" with a few featured cars is not the used list),
+// else the page it ran on. On a used list opened past its first page, or
+// sorted or filtered, it is the same list with fewer of those parameters
+// when the page links to it (its "Used" link, its first page), so a scan
+// reads the whole list; a parameter is never removed by its name, so one
+// that selects used inventory stays. On a car's page it is the used
+// inventory page it links to (null when it links to none).
 export function probeInPage() {
   // Facebook is where listings go, never a website to read. The popup never
   // offers a scan there; this probe refuses too, because any page with car
@@ -134,15 +140,30 @@ export function probeInPage() {
     if (kinds.some((t) => TYPES.includes(t))) micro += 1;
   }
 
-  // Links on this website to car pages, and the best link to used inventory.
+  // The same list as this page with only some of its query parameters
+  // (each with this page's value): its first page, unsorted, unfiltered.
+  const hereParams = [...here.searchParams.entries()];
+  const fewerParams = (u) => {
+    if (isRoute(here) || u.pathname.replace(/\/+$/, '') !== here.pathname.replace(/\/+$/, '')) return false;
+    const theirs = [...u.searchParams.entries()];
+    return theirs.length < hereParams.length && theirs.every(([k, v]) => here.searchParams.getAll(k).includes(v));
+  };
+
+  // Links on this website to car pages, the best link to used inventory,
+  // and the same used list with fewer parameters.
   const carLinks = new Set();
   let usedLink = '';
+  let wholeList = null;
   for (const a of document.querySelectorAll('a[href]')) {
     let u;
     try { u = new URL(a.href, pageAddress); } catch (e) { continue; }
     if (u.origin !== here.origin || (u.protocol !== 'https:' && u.protocol !== 'http:')) continue;
     if (!isRoute(u)) u.hash = '';
     if (u.href === pageAddress) continue;
+    if (fewerParams(u) && usedWords.test(readable(u))) {
+      const count = [...u.searchParams.keys()].length;
+      if (!wholeList || count < wholeList.count || (count === wholeList.count && u.href.length < wholeList.href.length)) wholeList = { href: u.href, count };
+    }
     if (vinShaped(readable(u)) || carShaped(u)) carLinks.add(u.href);
     else if (usedWords.test(readable(u)) || /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i.test(String(a.textContent || ''))) {
       if (!usedLink || u.href.length < usedLink.length) usedLink = u.href;
@@ -156,8 +177,8 @@ export function probeInPage() {
   const aList = !onePage && (carLinks.size >= 2 || nodes.length > 0 || micro > 0);
   if (!onePage && !aList) return null;
   if (onePage) return { kind: 'schemaOrg', origin: site, listUrl: usedLink || null };
-  const usedHere = usedWords.test(readable(here)) || /\b(?:used|pre-?owned|certified)\b/i.test(String(document.title || ''));
-  return { kind: 'schemaOrg', origin: site, listUrl: usedHere || !usedLink ? pageAddress : usedLink };
+  if (!usedWords.test(readable(here))) return { kind: 'schemaOrg', origin: site, listUrl: usedLink || pageAddress };
+  return { kind: 'schemaOrg', origin: site, listUrl: wholeList ? wholeList.href : pageAddress };
 }
 
 // One GET of a page on this website, made the way the page's own fetch makes
@@ -866,6 +887,34 @@ async function confirmMissing(site, { vins, urls, records, origin, evidence, sam
   return confirm;
 }
 
+// ---------- the list's first page ----------
+
+// A list opened past its first page (page 2 of the used list, or a service
+// a probe stored from such a page) starts there, and rel=next only goes
+// forward: the list's first page is found by following its rel=prev links
+// back to a page without one. Those pages are read once (siteReader), and
+// the forward read takes them again from there. clean is false when the way
+// back could not be followed to its end (a page that failed, an address off
+// the website, a loop, more pages than the list may have): the read then
+// starts at the earliest page reached, and the scan says it is not complete.
+async function firstListPage(site, startHref, origin, maxPages) {
+  const seen = new Set();
+  let reached = startHref; // the earliest page that read
+  for (let at = startHref, n = 0; ; n += 1) {
+    seen.add(pageKey(at));
+    const page = pageOf(await site.read(at));
+    if (page.kind === 'blocked') return { stopped: page.message };
+    if (page.kind !== 'html') return { href: reached, clean: n === 0 }; // a failing start page: the forward read says so
+    reached = at;
+    const prevHref = page.parsed.facts.prev;
+    if (!prevHref) return { href: at, clean: true };
+    const prev = onSite(prevHref, null, origin);
+    if (prev && pageKey(prev.href) === pageKey(at)) return { href: at, clean: true }; // a page that names itself as the one before
+    if (!prev || seen.has(pageKey(prev.href)) || n + 1 >= maxPages) return { href: at, clean: false };
+    at = prev.href;
+  }
+}
+
 // ---------- scan ----------
 
 /**
@@ -898,16 +947,18 @@ export async function scan(search, options = {}) {
   const start = onSite(opts.listUrl, null, origin);
   if (!start) return fail('no-list', "Lot Current doesn't know this website's used inventory page yet. Open that page and click Scan website there.");
 
-  // 1. the list and its rel=next pages
+  // 1. the list from its first page, and its rel=next pages
+  const first = await firstListPage(site, start.href, origin, opts.maxListPages);
+  if (first.stopped) return fail('blocked', first.stopped);
   const visited = new Set();
   const byKey = new Map(); // car page key -> the list's data for it
   const byVin = new Map();
   const strong = new Map(); // car pages the list names by its data or with a VIN in the address
   const weak = new Map(); // links that only read like car pages
-  let listClean = true;
+  let listClean = first.clean;
   let listed = 0;
   let firstList = null;
-  for (let at = start.href, n = 0; ; n += 1) {
+  for (let at = first.href, n = 0; ; n += 1) {
     if (n >= opts.maxListPages) {
       listClean = false;
       break;
@@ -1156,8 +1207,10 @@ export async function getDetails(search, vin, options = {}) {
       ? { ok: false, message: "The car's page on the website has no vehicle data Lot Current can read." }
       : { ok: false, message: "Lot Current doesn't know where this car's page is. Scan the website again, then post." };
   }
+  const first = await firstListPage(site, start.href, origin, MAX_LIST_PAGES);
+  if (first.stopped) return { ok: false, message: `Couldn't read the inventory page (${first.stopped}).` };
   const visited = new Set();
-  for (let at = start.href, n = 0; n < MAX_LIST_PAGES; n += 1) {
+  for (let at = first.href, n = 0; n < MAX_LIST_PAGES; n += 1) {
     visited.add(pageKey(at));
     const got = await site.read(at);
     const page = pageOf(got);

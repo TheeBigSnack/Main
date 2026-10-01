@@ -569,7 +569,17 @@ test('schemaOrg probe: a list of cars, one car\'s page, a page that links to the
   const site = standardSite({ cars: LOT });
   const on = (path, options = {}) => runInPage(fakeStandardPage({ site, path, ...options }), schemaOrg.probeInPage);
   assert.deepEqual(await on('/used-vehicles/'), SERVICE, 'the list page it ran on');
-  assert.deepEqual(await on('/used-vehicles/?page=2'), { ...SERVICE, listUrl: O + '/used-vehicles/?page=2' });
+  assert.deepEqual(await on('/used-vehicles/?page=2'), SERVICE, 'page 2 of the list: the list from its start, through the page\'s own link to it');
+  assert.deepEqual(await on('/used-vehicles/?make=honda&sort=price', { html: site.get(LIST).text }), SERVICE, 'a sorted, filtered list: the whole list it links to');
+  // a home page titled for used cars, with a few featured cars: the used list it links to, not itself
+  const home = `<!doctype html><html><head><title>New &amp; Used Cars | Sample Motors</title></head><body><a href="/new-vehicles/">Shop new</a> <a href="/used-vehicles/">Shop used</a>${LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ')}</body></html>`;
+  assert.deepEqual(await on('/', { html: home }), SERVICE);
+  // a list whose query selects used cars keeps that parameter; only the page number goes
+  const byQuery = `<!doctype html><html><head><title>Inventory | Sample Motors</title></head><body><a href="/inventory/">All</a> <a href="/inventory/?condition=used">Used</a> <a href="/inventory/?condition=used&amp;page=1">1</a>${LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ')}</body></html>`;
+  assert.deepEqual(await on('/inventory/?condition=used&page=2', { html: byQuery }), { ...SERVICE, listUrl: O + '/inventory/?condition=used' });
+  // a list whose address has no used word and that links to no used page: the page it ran on, whatever its title
+  const plain = `<!doctype html><html><head><title>Used Cars | Sample Motors</title></head><body>${LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ')}</body></html>`;
+  assert.deepEqual(await on('/cars-for-sale/?page=2', { html: plain }), { ...SERVICE, listUrl: O + '/cars-for-sale/?page=2' });
   assert.deepEqual(await on(LOT[0].path), SERVICE, "a car's page: the used list it links to");
   const newList = standardListPage(LOT.slice(0, 3)).replace('Used Vehicles for Sale | Sample Motors', 'New Vehicles | Sample Motors');
   assert.deepEqual(await on('/new-vehicles/', { html: newList }), SERVICE, 'a list that is not the used one: the used list it links to');
@@ -679,6 +689,32 @@ test('schemaOrg scan: the list and its rel=next pages to the end, then each car\
   assert.match(drawn.message, /draws its list with scripts/);
   const unknown = await schemaOrg.scan(fakeSiteSearch(site), { origin: O, listUrl: null });
   assert.deepEqual([unknown.ok, unknown.error, unknown.requests], [false, 'no-list', 0]);
+});
+
+test('schemaOrg scan: a list opened past its first page is read from its first page, along its rel=prev links', async () => {
+  const cars = standardCars(10);
+  const site = standardSite({ cars, perPage: 4 }); // pages 1 to 3
+  for (const from of [LIST + '?page=2', LIST + '?page=3']) {
+    const search = fakeSiteSearch(site);
+    const res = await schemaOrg.scan(search, { origin: O, listUrl: from });
+    assert.deepEqual([res.ok, res.total, res.complete, res.records.length], [true, 10, true, 10], from);
+    assert.equal(search.calls.filter((u) => u.startsWith(LIST)).length, 3, 'each list page read once');
+  }
+  // the way back is broken: the read starts at the earliest page reached, and says it is not complete
+  const broken = standardSite({ cars, perPage: 4 });
+  broken.set(LIST, httpError(500));
+  const partial = await schemaOrg.scan(fakeSiteSearch(broken), { origin: O, listUrl: LIST + '?page=2' });
+  assert.deepEqual([partial.ok, partial.total, partial.complete], [true, 6, false]);
+  // a refusal on the way back stops the scan, as anywhere else
+  const refused = standardSite({ cars, perPage: 4 });
+  refused.set(LIST, httpError(429));
+  const stopped = await schemaOrg.scan(fakeSiteSearch(refused), { origin: O, listUrl: LIST + '?page=3' });
+  assert.deepEqual([stopped.ok, stopped.error], [false, 'blocked']);
+  // at post time the list is searched from its first page too
+  const post = fakeSiteSearch(site);
+  const d = await schemaOrg.getDetails(post, cars[0].vin, { origin: O, listUrl: LIST + '?page=3' });
+  assert.equal(d.ok, true);
+  assert.equal(schemaOrg.normalize(d.record).vin, cars[0].vin);
 });
 
 test('schemaOrg scan: the sitemap adds only addresses shaped like this lot\'s own car pages', async () => {

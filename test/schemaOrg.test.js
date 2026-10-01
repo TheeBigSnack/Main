@@ -158,12 +158,13 @@ test('microdataVehicles reads itemprop microdata into nodes of the same shape', 
 
 // ---------- page facts ----------
 
-test('pageFacts: the title, canonical, next page, same-origin links, Carfax links and only the visible text', () => {
+test('pageFacts: the title, canonical, next and previous page, same-origin links, Carfax links and only the visible text', () => {
   const f = pageFacts(html('graph-vdp.html'), civicUrl + '?from=search');
-  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'links', 'carfaxLinks', 'text', 'segments']);
+  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'prev', 'links', 'carfaxLinks', 'text', 'segments']);
   assert.equal(f.title, 'Used 2019 Honda Civic EX Sedan', 'the og:title, without the site name');
   assert.equal(f.canonical, civicUrl);
   assert.equal(f.next, null);
+  assert.equal(f.prev, null);
   assert.deepEqual(f.links, [SITE + '/', SITE + '/used-vehicles/', civicUrl + '?from=search'], 'absolute, once each, fragments dropped; mailto and other sites left out');
   assert.deepEqual(f.carfaxLinks, ['https://www.carfax.com/VehicleHistory/p/Report.cfx?partner=SMP_0&vin=2HGSAMPL8KH000101', 'https://www.carfax.com/value/']);
   assert.match(f.text, /Sample Motors Price \$ 19,995 41,230 miles/);
@@ -182,6 +183,8 @@ test('pageFacts: the title, canonical, next page, same-origin links, Carfax link
     SITE + '/used-vehicles/#/compare',
   ], 'the photo link and the "#photos" link are one page; a "#/" route is a page of its own');
   assert.equal(pageFacts('<a rel="next nofollow" href="p2">2</a>', SITE + '/list/').next, SITE + '/list/p2');
+  assert.equal(pageFacts('<link rel="prev" href="?page=1"><a rel="previous" href="p0">0</a>', SITE + '/list/?page=2').prev, SITE + '/list/?page=1');
+  assert.equal(pageFacts('<a rel="previous nofollow" href="p1">1</a>', SITE + '/list/').prev, SITE + '/list/p1');
   assert.equal(pageFacts(html('entities.html'), SITE + '/x/').title, 'Used 2020 GMC Sierra 1500 SLE & Z71');
   assert.match(pageFacts(html('entities.html'), SITE + '/x/').text, /Price: \$38,450 36,112 miles/, 'a non-breaking space is a space');
   // without a usable page address nothing can be called same-origin

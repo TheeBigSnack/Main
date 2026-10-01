@@ -157,12 +157,13 @@ ${carousel.length ? `<aside>${carousel.map((o) => `<a href="${escHtml(o.path)}">
 }
 
 // One page of the used list: the ItemList of its cars, a card per car that
-// shows its price, and rel=next when another page follows.
-export function standardListPage(cars, { origin = STANDARD_ORIGIN, next = null, numberOfItems = null, listData = true, noPrice = new Set() } = {}) {
+// shows its price, rel=next when another page follows and rel=prev when one
+// comes before.
+export function standardListPage(cars, { origin = STANDARD_ORIGIN, next = null, prev = null, numberOfItems = null, listData = true, noPrice = new Set() } = {}) {
   const list = { '@context': 'https://schema.org', '@type': 'ItemList', name: 'Used vehicles', itemListElement: cars.map((c, n) => ({ '@type': 'ListItem', position: n + 1, item: standardCarNode(c, origin, noPrice.has(c.vin) ? { price: undefined } : {}) })) };
   if (numberOfItems !== null) list.numberOfItems = numberOfItems;
   const cards = cars.map((c) => `<div class="card"><a href="${escHtml(c.path)}">Used ${c.year} ${c.make} ${c.model} ${c.trim}</a> <span>${noPrice.has(c.vin) ? 'Call for price' : money(c.price)}</span> <span>${c.miles.toLocaleString('en-US')} miles</span> <a href="https://www.carfax.com/VehicleHistory/p/Report.cfx?vin=${c.vin}">Carfax</a></div>`).join('\n');
-  return `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title>${next ? `<link rel="next" href="${escHtml(next)}">` : ''}${ldScript(DEALER_NODE)}${listData ? ldScript(list) : ''}</head>
+  return `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title>${prev ? `<link rel="prev" href="${escHtml(prev)}">` : ''}${next ? `<link rel="next" href="${escHtml(next)}">` : ''}${ldScript(DEALER_NODE)}${listData ? ldScript(list) : ''}</head>
 <body><h1>Used Vehicles for Sale</h1><nav><a href="/">Home</a> <a href="/new-vehicles/">New</a> <a href="/used-vehicles/">Used</a> <a href="/about/">About us</a></nav>
 ${cards}</body></html>`;
 }
@@ -183,7 +184,8 @@ export function standardSite({ cars = standardCars(6), perPage = 4, origin = STA
   for (let p = 1; p <= pages; p += 1) {
     const at = p === 1 ? origin + '/used-vehicles/' : `${origin}/used-vehicles/?page=${p}`;
     const next = p < pages ? `/used-vehicles/?page=${p + 1}` : null;
-    site.set(at, page(standardListPage(cars.slice((p - 1) * perPage, p * perPage), { origin, next, numberOfItems, listData, noPrice })));
+    const prev = p > 2 ? `/used-vehicles/?page=${p - 1}` : p === 2 ? '/used-vehicles/' : null;
+    site.set(at, page(standardListPage(cars.slice((p - 1) * perPage, p * perPage), { origin, next, prev, numberOfItems, listData, noPrice })));
   }
   for (const c of cars) site.set(origin + c.path, page(standardCarPage(c, { origin, price: noPrice.has(c.vin) ? null : c.price })));
   site.set(origin + '/', page(`<!doctype html><html><head><title>Sample Motors</title>${ldScript(DEALER_NODE)}</head><body><a href="/used-vehicles/">Shop used</a> <a href="/new-vehicles/">Shop new</a></body></html>`));
