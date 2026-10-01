@@ -580,6 +580,24 @@ test('schemaOrg probe: a list of cars, one car\'s page, a page that links to the
   // a list whose address has no used word and that links to no used page: the page it ran on, whatever its title
   const plain = `<!doctype html><html><head><title>Used Cars | Sample Motors</title></head><body>${LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ')}</body></html>`;
   assert.deepEqual(await on('/cars-for-sale/?page=2', { html: plain }), { ...SERVICE, listUrl: O + '/cars-for-sale/?page=2' });
+  // a lot that sells only used cars: its whole list at "/inventory/", titled for used cars, is the list,
+  // whatever other address with a used word it links (a trade-in page, a page about one model)
+  const cards = LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ');
+  for (const [label, extra] of [['a trade-in page', '<a href="/sell-your-used-car/">Sell us your car</a>'], ['a page about one model', '<a href="/used-jeep-wrangler/">Used Jeep Wrangler near you</a>'], ['a page about one used make', '<a href="/used-jeep/">Jeep</a>']]) {
+    const usedOnly = `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title></head><body><a href="/financing/">Financing</a> ${extra} ${cards}</body></html>`;
+    assert.deepEqual(await on('/inventory/', { html: usedOnly }), { ...SERVICE, listUrl: O + '/inventory/' }, `used-only lot with ${label}`);
+  }
+  // the home page is not the list whatever its title; nor is a page whose title names new cars as well
+  const usedHome = `<!doctype html><html><head><title>Used Cars for Sale | Sample Motors</title></head><body><a href="/inventory/">Our cars</a> <a href="/used/">Used</a> ${cards}</body></html>`;
+  assert.deepEqual(await on('/', { html: usedHome }), { ...SERVICE, listUrl: O + '/used/' });
+  const both = `<!doctype html><html><head><title>New Cars | Used Cars | Sample Motors</title></head><body><a href="/used-vehicles/">Shop used</a> ${cards}</body></html>`;
+  assert.deepEqual(await on('/inventory/', { html: both }), SERVICE);
+  // the link to the used list: the one whose words say so, else the one whose address is only inventory words,
+  // before a shorter trade-in page or page about one model
+  const nav = `<!doctype html><html><head><title>Sample Motors</title></head><body><a href="/sell-used/">Sell your car</a> <a href="/used-jeep/">Jeep</a> <a href="/inventory/?condition=pre-owned">Pre-Owned</a> ${cards}</body></html>`;
+  assert.deepEqual(await on('/', { html: nav }), { ...SERVICE, listUrl: O + '/inventory/?condition=pre-owned' }, 'a link whose words say used inventory');
+  const byAddress = `<!doctype html><html><head><title>Sample Motors</title></head><body><a href="/sell-used/">Sell your car</a> <a href="/used-jeep/">Jeep</a> <a href="/used-vehicles/">Inventory</a> ${cards}</body></html>`;
+  assert.deepEqual(await on('/', { html: byAddress }), SERVICE, 'an address of inventory words only');
   assert.deepEqual(await on(LOT[0].path), SERVICE, "a car's page: the used list it links to");
   const newList = standardListPage(LOT.slice(0, 3)).replace('Used Vehicles for Sale | Sample Motors', 'New Vehicles | Sample Motors');
   assert.deepEqual(await on('/new-vehicles/', { html: newList }), SERVICE, 'a list that is not the used one: the used list it links to');
@@ -715,6 +733,25 @@ test('schemaOrg scan: a list opened past its first page is read from its first p
   const d = await schemaOrg.getDetails(post, cars[0].vin, { origin: O, listUrl: LIST + '?page=3' });
   assert.equal(d.ok, true);
   assert.equal(schemaOrg.normalize(d.record).vin, cars[0].vin);
+  // a list whose first page names its last as the one before: read from where it was asked, complete only when every page was read
+  const round = standardSite({ cars, perPage: 4 });
+  round.set(LIST, { ...round.get(LIST), text: round.get(LIST).text.replace('<link rel="next"', '<link rel="prev" href="/used-vehicles/?page=3"><link rel="next"') });
+  const whole = await schemaOrg.scan(fakeSiteSearch(round), { origin: O, listUrl: LIST });
+  assert.deepEqual([whole.ok, whole.total, whole.complete], [true, 10, true], 'from its first page');
+  const part = await schemaOrg.scan(fakeSiteSearch(round), { origin: O, listUrl: LIST + '?page=2' });
+  assert.deepEqual([part.ok, part.total, part.complete], [true, 6, false], 'from page 2 the first page is never reached going forward, and the scan says so');
+});
+
+test('schemaOrg probe and scan: a lot that sells only used cars, its list at an address without a used word, is read whole', async () => {
+  const cars = standardCars(12);
+  const site = standardSite({ cars, perPage: 12 });
+  const list = standardListPage(cars).replaceAll('/used-vehicles/', '/inventory/').replace('</body>', '<a href="/sell-your-used-car/">Sell us your car</a> <a href="/used-jeep-wrangler/">Used Jeep Wrangler near you</a></body>');
+  site.set(O + '/inventory/', html(list));
+  site.set(O + '/sell-your-used-car/', html('<!doctype html><html><head><title>Sell us your car</title></head><body><form></form></body></html>'));
+  const service = await runInPage(fakeStandardPage({ site, path: '/inventory/', html: list }), schemaOrg.probeInPage);
+  assert.deepEqual(service, { ...SERVICE, listUrl: O + '/inventory/' });
+  const res = await schemaOrg.scan(fakeSiteSearch(site), schemaOrg.scanOptions(service));
+  assert.deepEqual([res.ok, res.total, res.complete, res.records.length], [true, 12, true, 12], res.message);
 });
 
 test('schemaOrg scan: the sitemap adds only addresses shaped like this lot\'s own car pages', async () => {

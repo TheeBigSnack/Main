@@ -65,14 +65,22 @@ export const REQUEST_TIMEOUT_MS = 30000;
 // microdata, or at least two links on this website to car pages: an address
 // with a VIN in it, or one that reads like a car page) or on one car's own
 // page. The list to scan is the page it ran on when its own address reads
-// as used inventory, else the used inventory page it links to (a home page
-// titled "New & Used Cars" with a few featured cars is not the used list),
-// else the page it ran on. On a used list opened past its first page, or
-// sorted or filtered, it is the same list with fewer of those parameters
-// when the page links to it (its "Used" link, its first page), so a scan
-// reads the whole list; a parameter is never removed by its name, so one
-// that selects used inventory stays. On a car's page it is the used
-// inventory page it links to (null when it links to none).
+// as used inventory, or when its title names used cars and not new ones
+// ("Used Vehicles for Sale" at "/inventory/", the list of a lot that sells
+// only used cars) on a page that is not the site's home page; else the used
+// inventory page it links to (a home page titled "New & Used Cars" with a
+// few featured cars is not the used list); else the page it ran on. The
+// used inventory page it links to is the link whose words say so ("Used",
+// "Shop pre-owned"), else one whose address is only inventory words
+// ("/used-vehicles/", "/inventory/?condition=used"), else any other address
+// with a used word, the shortest of each: a trade-in page
+// ("/sell-your-used-car/") or a page about one model ("/used-jeep-wrangler/")
+// comes last. On a used list opened past its first page, or sorted or
+// filtered, it is the same list with fewer of those parameters when the
+// page links to it (its "Used" link, its first page), so a scan reads the
+// whole list; a parameter is never removed by its name, so one that selects
+// used inventory stays. On a car's page it is the used inventory page it
+// links to (null when it links to none).
 export function probeInPage() {
   // Facebook is where listings go, never a website to read. The popup never
   // offers a scan there; this probe refuses too, because any page with car
@@ -108,6 +116,25 @@ export function probeInPage() {
     return /(?:^|[^a-z0-9])(?:19[5-9][0-9]|20[0-9][0-9])[-_+]+[a-z]/.test(p) && /(?:^|[^a-z])(?:inventory|vehicles?|vdp|details?|used|pre-?owned|preowned|certified|cpo|for-?sale|stock)(?:[^a-z]|$)/.test(p);
   };
   const usedWords = /(?:^|[^a-z])(?:used|pre-?owned|preowned)(?:[^a-z]|$)|used(?:cars|vehicles|inventory)|search-?used/;
+  // A title naming used cars and not new ones. "New & Used Cars", "New,
+  // Used and Certified" and "New Cars | Used Cars" name both; a place name
+  // ("Used Cars near New Haven") is not a new car.
+  const title = String(document.title || '');
+  const usedTitle = /\b(?:used|pre-?owned|preowned|certified)\b/i.test(title)
+    && !/\bnew\s*(?:,|&|&amp;|\+|\/|and|or)\s*(?:used|pre-?owned|preowned|certified)\b|\b(?:used|pre-?owned|preowned|certified)\s*(?:,|&|&amp;|\+|\/|and|or)\s*new\b|\bnew\s+(?:cars|vehicles|trucks|suvs|inventory)\b/i.test(title);
+  const routePath = (u) => (isRoute(u) ? u.hash.replace(/^#!?/, '').split('?')[0] : '');
+  const atRoot = here.pathname.replace(/\/+$/, '') === '' && routePath(here).replace(/\/+$/, '') === '';
+  // The words of an address's path, segment by segment.
+  const pathWords = (u) => {
+    let p = u.pathname + routePath(u);
+    try { p = decodeURIComponent(p); } catch (e) { /* as it is */ }
+    return p.toLowerCase().split('/').filter(Boolean).map((s) => s.split(/[^a-z0-9]+/).filter(Boolean));
+  };
+  const LIST_WORDS = new Set(['used', 'pre', 'owned', 'preowned', 'certified', 'cpo', 'inventory', 'vehicles', 'vehicle', 'cars', 'car', 'autos', 'auto', 'trucks', 'suvs', 'search', 'searchused', 'usedcars', 'usedvehicles', 'usedinventory', 'all', 'for', 'sale', 'forsale', 'shop', 'browse', 'view', 'index', 'default', 'htm', 'html', 'aspx', 'asp', 'php', 'jsp', 'cfm']);
+  const usedText = /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i;
+  // 0: its words say used inventory; 1: its address is only inventory
+  // words; 2: any other address with a used word in it.
+  const usedRank = (u, text) => (usedText.test(text) ? 0 : pathWords(u).every((words) => words.every((w) => LIST_WORDS.has(w))) ? 1 : 2);
   const samePage = (href) => {
     try {
       const u = new URL(href, pageAddress);
@@ -156,6 +183,7 @@ export function probeInPage() {
   // and the same used list with fewer parameters.
   const carLinks = new Set();
   let usedLink = '';
+  let usedLinkRank = 3;
   let wholeList = null;
   for (const a of document.querySelectorAll('a[href]')) {
     let u;
@@ -168,8 +196,12 @@ export function probeInPage() {
       if (!wholeList || count < wholeList.count || (count === wholeList.count && u.href.length < wholeList.href.length)) wholeList = { href: u.href, count };
     }
     if (vinShaped(readable(u)) || carShaped(u)) carLinks.add(u.href);
-    else if (usedWords.test(readable(u)) || /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i.test(String(a.textContent || ''))) {
-      if (!usedLink || u.href.length < usedLink.length) usedLink = u.href;
+    else if (usedWords.test(readable(u)) || usedText.test(String(a.textContent || ''))) {
+      const rank = usedRank(u, String(a.textContent || ''));
+      if (rank < usedLinkRank || (rank === usedLinkRank && u.href.length < usedLink.length)) {
+        usedLink = u.href;
+        usedLinkRank = rank;
+      }
     }
   }
 
@@ -180,8 +212,9 @@ export function probeInPage() {
   const aList = !onePage && (carLinks.size >= 2 || nodes.length > 0 || micro > 0);
   if (!onePage && !aList) return null;
   if (onePage) return { kind: 'schemaOrg', origin: site, listUrl: usedLink || null };
-  if (!usedWords.test(readable(here))) return { kind: 'schemaOrg', origin: site, listUrl: usedLink || pageAddress };
-  return { kind: 'schemaOrg', origin: site, listUrl: wholeList ? wholeList.href : pageAddress };
+  if (usedWords.test(readable(here))) return { kind: 'schemaOrg', origin: site, listUrl: wholeList ? wholeList.href : pageAddress };
+  if (usedTitle && !atRoot) return { kind: 'schemaOrg', origin: site, listUrl: pageAddress };
+  return { kind: 'schemaOrg', origin: site, listUrl: usedLink || pageAddress };
 }
 
 // One GET of a page on this website, made the way the page's own fetch makes
@@ -900,6 +933,10 @@ async function confirmMissing(site, { vins, urls, records, origin, evidence, sam
 // back could not be followed to its end (a page that failed, an address off
 // the website, a loop, more pages than the list may have): the read then
 // starts at the earliest page reached, and the scan says it is not complete.
+// A way back that comes round to the page it started from is a list whose
+// first page points to its last: the read starts where it was asked to, and
+// walked (every page the way back read) lets the scan say it is not
+// complete unless its forward read reaches each of them too.
 async function firstListPage(site, startHref, origin, maxPages) {
   const seen = new Set();
   let reached = startHref; // the earliest page that read
@@ -913,6 +950,7 @@ async function firstListPage(site, startHref, origin, maxPages) {
     if (!prevHref) return { href: at, clean: true };
     const prev = onSite(prevHref, null, origin);
     if (prev && pageKey(prev.href) === pageKey(at)) return { href: at, clean: true }; // a page that names itself as the one before
+    if (prev && n > 0 && pageKey(prev.href) === pageKey(startHref)) return { href: startHref, clean: true, walked: seen };
     if (!prev || seen.has(pageKey(prev.href)) || n + 1 >= maxPages) return { href: at, clean: false };
     at = prev.href;
   }
@@ -1003,6 +1041,8 @@ export async function scan(search, options = {}) {
     }
     at = next.href;
   }
+  // a list that goes round: complete only when the forward read reached every page the way back did
+  if (first.walked) for (const key of first.walked) if (!visited.has(key)) listClean = false;
 
   // 2. the car pages: the strong ones, and links that only read like car
   // pages when they have the shape of the strong ones
