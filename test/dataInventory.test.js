@@ -498,6 +498,32 @@ test('every recipient is named in the texts the inventory says, and the privacy 
   for (const b of bullets) assert.ok(all.some((r) => r.processor && r.name === b), `the privacy policy lists ${b} as a processor, and docs/data-inventory.md does not`);
 });
 
+// docs/production-setup.md chose one company per job: GitHub Pages for the
+// website, Cloudflare Pages for the manager view, Resend to send sign-in
+// email, and the domain's own mailbox for people writing in. One bracket
+// for two jobs ("sends the sign-in emails ... and holds our inbox") takes
+// one name when it is filled, and leaves the other company unlisted.
+test('the processors that host and send mail get one bracket per job, as docs/production-setup.md chose them', () => {
+  const setup = read('docs/production-setup.md');
+  assert.match(setup, /\| Sign-in email sender \| \*\*Resend\*\*/, 'production-setup.md changed the sign-in sender: update the inventory and this test');
+  assert.match(setup, /\| Manager view host \| \*\*Cloudflare Pages\*\*/, 'production-setup.md changed the manager view host: update the inventory and this test');
+  assert.match(setup, /Keep the mailbox for people writing to you/, 'production-setup.md no longer keeps a separate inbox: update the inventory and this test');
+  assert.doesNotMatch(inventory, /not decided yet/, 'the inventory says the manager view\'s host is undecided');
+  const bullets = [...section(policy, '## Processors').matchAll(/^- \*\*([^*]+)\*\*: (.*)$/gm)].map((m) => [m[1], m[2]]);
+  const names = bullets.map(([n]) => n);
+  for (const n of ['[website host]', '[manager view host]', '[sign-in email sender]', '[inbox provider]']) assert.ok(names.includes(n), `the privacy policy has no "- **${n}**" processor`);
+  for (const [n, says] of bullets) {
+    assert.ok(!(/sends the sign-in emails/.test(says) && /inbox/.test(says)), `${n} both sends the sign-in emails and holds the inbox`);
+    assert.ok(!(/our website/.test(says) && /manager view/.test(says)), `${n} serves both the website and the manager view`);
+  }
+  const list = onlyTable(section(inventory, '## Who receives data'), 'the recipients section');
+  const cells = (name) => (list.rows.find((r) => r[0] === name) || []).join(' | ');
+  assert.match(cells('[website host]'), /GitHub/);
+  assert.match(cells('[manager view host]'), /Cloudflare/);
+  assert.match(cells('[sign-in email sender]'), /Resend/);
+  assert.match(cells('[inbox provider]'), /support inbox/);
+});
+
 test('every Recipient cell names a recipient of the list, and every recipient receives something', () => {
   const names = new Set(recipients().map((r) => r.name));
   const used = new Set();

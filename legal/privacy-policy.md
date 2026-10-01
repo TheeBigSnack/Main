@@ -29,8 +29,10 @@ We do **not** collect Facebook passwords, cookies, session tokens, messages, buy
 - **Anthropic**: drafts descriptions and guesses colours through its API, only with the description writer on. It receives the rewrite request above and up to four photo addresses. Anthropic's API terms apply.
 - **Stripe**: billing. It receives the dealership's name and website address and a manager's email, and collects the card and billing details itself.
 - **Google**: Chrome's sync storage keeps the profile under the User's own Google account, and the Chrome Web Store distributes the extension; Google's terms apply. [Pending attorney answer: questions-for-attorney.md 8.8]
-- **[hosting provider]**: serves our website and the manager view; its access logs see visitors' IP addresses and browsers.
-- **[email provider]**: sends the sign-in emails (our database host's own sender does until we set this up) and holds our inbox.
+- **[website host]**: serves our website; its access logs see visitors' IP addresses and browsers.
+- **[manager view host]**: serves the manager view; its access logs see the IP addresses and browsers of the people who open it.
+- **[sign-in email sender]**: sends the sign-in emails, so it receives each person's email address and their sign-in code or link (our database host's own sender does until we set this up).
+- **[inbox provider]**: holds our inbox, with what people write to us and demo requests sent by email.
 
 Lot Current also reaches services that are not our processors: the dealership's website (with the inventory search it uses, if any), which Lot Current reads as the User's browser would; the photo servers the dealership's website names for its cars' photos, which may belong to another company, and from which Lot Current downloads a car's photos, without cookies, only when the User fills in a listing form or clicks Download photos, and whose photos the side panel shows as pictures, the way any web page shows a picture, while the User picks which ones to post (an https server Lot Current may not read yet is first asked for in Chrome's own prompt, from the User's click, and after a no its photos are not requested); and NHTSA, when the User checks a VIN.
 
