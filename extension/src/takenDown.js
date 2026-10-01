@@ -7,6 +7,13 @@
 // the sync function counts the day's posts (any status): a take-down never
 // frees a slot.
 //
+// The side panel reads it too, before a post (relistNotice): a car this
+// person took down while the website still listed it as ready may be a
+// delete and repost to bump the listing, which posting rule 3 forbids. The
+// review step says so and a queue waits there for the person. The post is
+// not refused: Facebook may have removed the listing, or the click was a
+// mistake.
+//
 // Each entry is { vin, postedAt, takenDownAt, stillListed }: stillListed is
 // whether the website still listed the car as ready to post when it was
 // taken down (stillListedNow). Kept in this browser only, under
@@ -21,7 +28,7 @@ export const MAX_ENTRIES = 500;
 const DAY_MS = 24 * 3600 * 1000;
 const ms = (x) => {
   if (x === null || x === undefined || x === '') return null;
-  const t = typeof x === 'number' ? x : Date.parse(x);
+  const t = x instanceof Date ? x.getTime() : typeof x === 'number' ? x : Date.parse(x);
   return Number.isNaN(t) ? null : t;
 };
 const iso = (x) => {
@@ -75,4 +82,16 @@ export function noteTakenDown(log, { vin, postedAt = null, stillListed = false }
     .sort((a, b) => ms(b.takenDownAt) - ms(a.takenDownAt))
     .slice(0, MAX_ENTRIES)
     .reverse();
+}
+
+// The latest take-down of this car, when the website still listed it as
+// ready then and it was within the last `days`; null otherwise (never taken
+// down, taken down because it sold or went sale pending, or long ago).
+export function relistNotice(log, vin, now = new Date(), days = KEEP_DAYS) {
+  const v = vinOf(vin);
+  const at = ms(now);
+  if (!v || at === null) return null;
+  const latest = takenDownList(log).filter((e) => e.vin === v).sort((a, b) => ms(b.takenDownAt) - ms(a.takenDownAt))[0];
+  if (!latest || !latest.stillListed || ms(latest.takenDownAt) < at - days * DAY_MS) return null;
+  return { takenDownAt: latest.takenDownAt, postedAt: latest.postedAt };
 }

@@ -1,11 +1,12 @@
 // The posts a salesperson took off their posted list (src/takenDown.js):
-// what one take-down keeps, whether the website still listed the car, and
-// the pruning. The daily cap's use of it is in test/cap.test.js, the
+// what one take-down keeps, whether the website still listed the car, the
+// pruning, and the notice before a car taken down while still listed is
+// posted again (the side panel's use is in test/panelFlow.test.js). The daily cap's use of it is in test/cap.test.js, the
 // popup's in test/popup.test.js.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { noteTakenDown, takenDownList, stillListedNow, KEEP_DAYS, MAX_ENTRIES } from '../extension/src/takenDown.js';
+import { noteTakenDown, takenDownList, stillListedNow, relistNotice, KEEP_DAYS, MAX_ENTRIES } from '../extension/src/takenDown.js';
 
 const T = (day, h = 9) => new Date(Date.UTC(2026, 10, day, h, 0)).toISOString(); // Nov <day> 2026
 const VIN = 'TESTVIN00000000A1';
@@ -52,4 +53,18 @@ test('the website still listed the car when it is in the last scan as ready and 
   assert.equal(stillListedNow(snapshot, null, 'TESTVIN00000000B2'), false, 'not ready to post');
   assert.equal(stillListedNow(snapshot, null, 'TESTVIN00000000C3'), false, 'gone from the website');
   assert.equal(stillListedNow(null, null, VIN), false, 'no scan');
+});
+
+test('relistNotice: the latest take-down of the car, only when the website still listed it then and within KEEP_DAYS', () => {
+  const now = T(20);
+  const bump = noteTakenDown(null, { vin: VIN, postedAt: T(12), stillListed: true }, T(18), T(18));
+  assert.deepEqual(relistNotice(bump, VIN.toLowerCase(), now), { takenDownAt: T(18), postedAt: T(12) });
+  assert.deepEqual(relistNotice(bump, VIN, new Date(now)), { takenDownAt: T(18), postedAt: T(12) }, 'a Date works as now');
+  assert.equal(relistNotice(bump, 'TESTVIN00000000B2', now), null, 'another car');
+  assert.equal(relistNotice(noteTakenDown(null, { vin: VIN, postedAt: T(12), stillListed: false }, T(18), T(18)), VIN, now), null, 'taken down because it sold or went sale pending');
+  assert.equal(relistNotice(bump, VIN, new Date(Date.parse(T(18)) + (KEEP_DAYS + 1) * 864e5)), null, 'long ago');
+  // the car sold and came back: the latest take-down (a sold car) decides
+  const cameBack = noteTakenDown(bump, { vin: VIN, postedAt: T(19), stillListed: false }, T(19, 15), T(19, 15));
+  assert.equal(relistNotice(cameBack, VIN, now), null);
+  assert.equal(relistNotice(null, VIN, now), null);
 });

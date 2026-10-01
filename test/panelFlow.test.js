@@ -6,12 +6,16 @@
 //     through a tab an earlier post or to-do item left behind;
 //   - a car already marked as posted never gets a second Marketplace form;
 //   - one list action at a time, with the action still called inside the click;
-//   - a load for a website the panel has moved away from is dropped.
+//   - a load for a website the panel has moved away from is dropped;
+//   - a car this person took down while the website still listed it reaches
+//     review with a notice (posting rule 3), and a queue waits there.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { currentVin } from '../extension/src/queue.js';
+import { noteTakenDown, relistNotice } from '../extension/src/takenDown.js';
+import { POSTING_RULES } from '../extension/src/postingRules.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -155,4 +159,66 @@ test('a load for a website the panel has moved away from is dropped, so its cars
   assert.deepEqual(Object.keys(state.posted), ['CCC']);
   assert.equal(state.siteName, C);
   assert.equal(state.siteInfo.name, C);
+});
+
+// startFlow from the request to review, every step past the posted check
+// stubbed to pass; canAutoOpen is the panel's own, so a queue opens the form
+// unless something holds the car at review.
+async function reviewWith(takenDown, { queue = true } = {}) {
+  const calls = [];
+  const state = {
+    origin: 'https://www.example-dealer.test', posted: {}, takenDown,
+    snapshotVehicles: { AAA: { name: '2020 Make Model' } },
+    settings: { salesperson: { name: 'Sam' }, basis: 'website' },
+  };
+  const canAutoOpen = compile('canAutoOpen', {
+    state, currentListing: () => ({ missing: [], assumed: [] }), dailyCap: () => ({ reached: false }), photoPatterns: () => [], refusedPhotoServers: new Set(),
+  });
+  const startFlow = compile('startFlow', {
+    state,
+    chrome: { storage: { local: { remove: async () => {} } } },
+    GLOBAL_KEYS: { postRequest: 'postRequest' },
+    endUpkeep: () => {}, clearFlow: async () => {}, loadSaved: async () => true, refreshGranted: async () => {},
+    nameOf: (vin) => state.snapshotVehicles[vin].name,
+    afterQueueStep: never('afterQueueStep'), block: never('block'),
+    setStatus: () => {}, render: () => {}, saveFlow: async () => {},
+    pilotNote: async () => {}, beginPost: () => null, notePostStep: () => null,
+    readCarForPost: async ({ vin }) => ({ ok: true, vehicle: { vin, name: '2020 Make Model', price: 20000, location: '' } }),
+    recheck: () => ({ ok: true }), shortLocation: () => '', storeNames: () => [],
+    localVinCheck: () => ({ ok: true }), basisPrice: (v) => v.price,
+    maybeGuessColors: async () => {},
+    generate: async () => { state.guardrails = { ok: true }; },
+    relistNotice, canAutoOpen,
+    openForm: async () => calls.push('openForm'),
+  });
+  await startFlow({ origin: state.origin, vin: 'aaa', dealerTabId: null, queue });
+  return { state, calls };
+}
+
+test('a car this person took down while the website still listed it reaches review with the notice, and a queue waits there', async () => {
+  const now = new Date();
+  const ago = (h) => new Date(now.getTime() - h * 3600e3).toISOString();
+  const bump = noteTakenDown(null, { vin: 'AAA', postedAt: ago(30), stillListed: true }, ago(2), ago(2));
+  const held = await reviewWith(bump);
+  assert.equal(held.state.step, 'review');
+  assert.deepEqual(held.state.relist, { takenDownAt: ago(2), postedAt: ago(30) });
+  assert.deepEqual(held.calls, [], 'the queue does not open the form by itself');
+
+  // a car taken down because it sold (and back on the website since), or never taken down: the queue goes on as before
+  for (const log of [noteTakenDown(null, { vin: 'AAA', postedAt: ago(30), stillListed: false }, ago(2), ago(2)), null]) {
+    const r = await reviewWith(log);
+    assert.equal(r.state.relist, null);
+    assert.deepEqual(r.calls, ['openForm']);
+  }
+
+  // what the review says: when, the rule, and that it is not refused
+  const relistHtml = compile('relistHtml', { state: { relist: { takenDownAt: '2026-10-01T15:00:00.000Z' } }, esc: (x) => String(x), when: () => 'Oct 1, 3:00 PM' });
+  const html = relistHtml();
+  assert.match(html, /id="relistNotice"/);
+  assert.match(html, /You took this car off your listings on Oct 1, 3:00 PM, while the website still listed it\./);
+  assert.match(html, /no deleting and reposting to bump a listing/);
+  assert.ok(POSTING_RULES.some((r) => r.text.includes('no deleting and reposting to bump a listing')), 'the words are the posting rules\' own');
+  assert.match(html, /Post it again only if the old listing is gone for another reason/);
+  assert.equal(compile('relistHtml', { state: { relist: null }, esc: String, when: String })(), '');
+  assert.match(fnText('viewReview'), /return `\$\{relistHtml\(\)\}\$\{carCard\(\)\}/, 'the review shows it first');
 });

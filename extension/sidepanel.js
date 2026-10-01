@@ -29,6 +29,7 @@ import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
+import { relistNotice } from './src/takenDown.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
@@ -59,6 +60,7 @@ const state = {
   photoPick: null, // the salesperson's pick of this car's photos, in order (src/photoPick.js); null: the website's first ones
   highlights: null, // the salesperson's pick of this car's features for the description (rewriteTemplate.js settleHighlights); null: the usual pick
   highlightsUsed: null, // the highlights the description on screen was written with
+  relist: null, // this car's take-down while the website still listed it (src/takenDown.js relistNotice): the review says so, a queue waits
   queue: null, // the batch queue (src/queue.js), shared with the popup
   queueMode: false, // this car is being posted as part of the queue
   drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
@@ -157,7 +159,7 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'relist', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -177,7 +179,7 @@ async function clearFlow() {
   if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
 
@@ -335,6 +337,8 @@ async function startFlow(req) {
   state.noteApplies = !(state.settings.basis === 'beforeFees' && state.price === fresh.vehicle.price);
   if (!state.price) return block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
 
+  // taken down by this person while the website still listed it: possibly a delete and repost (posting rule 3)
+  state.relist = relistNotice(state.takenDown, state.vin);
   state.message = 'Writing the description…';
   render();
   await maybeGuessColors();
@@ -359,6 +363,7 @@ const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date
 // the make) holds a queued car at review, where the assumed list is shown.
 function canAutoOpen() {
   if (!state.guardrails || !state.guardrails.ok) return false;
+  if (state.relist) return false; // the person sees the take-down notice first
   if (state.vinCheck && state.vinCheck.local && !state.vinCheck.local.ok) return false;
   const listing = currentListing();
   const blockers = listing.missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
@@ -1091,12 +1096,21 @@ function highlightsHtml() {
   </fieldset>`;
 }
 
+// A car this person took off their listings while the website still listed
+// it: re-posting it may be the delete and repost that posting rule 3 forbids.
+// Said, never refused: the old listing may be gone for another reason.
+function relistHtml() {
+  const r = state.relist;
+  if (!r) return '';
+  return `<div class="banner warn" id="relistNotice" role="alert">You took this car off your listings on ${esc(when(r.takenDownAt))}, while the website still listed it. The posting rules say: no deleting and reposting to bump a listing. Post it again only if the old listing is gone for another reason, such as Facebook removing it or a Taken down clicked by mistake.</div>`;
+}
+
 const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
 
 function viewReview() {
   const cap = dailyCap();
   const rw = state.settings.rewrite;
-  return `${carCard()}
+  return `${relistHtml()}${carCard()}
   <section>
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
     ${state.note ? `<div class="banner warn">${esc(state.note)}</div>` : ''}
