@@ -109,6 +109,8 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rp
       const q = { table, eq: [], order: [], range: null, limit: null, count: null };
       const builder = {
         select(_cols, opts) { q.count = (opts && opts.count) || null; return builder; },
+        update(patch) { q.update = patch; return builder; },
+        delete() { q.delete = true; return builder; },
         eq(col, value) { q.eq.push([col, value]); return builder; },
         order(col, opts) { q.order.push([col, !opts || opts.ascending !== false]); return builder; },
         limit(n) { q.limit = n; return builder; },
@@ -121,6 +123,8 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rp
   function run(q) {
     requests.push(q);
     const all = (tables[q.table] || []).filter((r) => q.eq.every(([c, v]) => r[c] === v));
+    if (q.update) { for (const r of all) Object.assign(r, q.update); return { data: all.map((r) => ({ ...r })), error: null }; }
+    if (q.delete) { tables[q.table] = (tables[q.table] || []).filter((r) => !all.includes(r)); return { data: all.map((r) => ({ ...r })), error: null }; }
     const sorted = [...all].sort((a, b) => {
       for (const [col, asc] of q.order) {
         const x = String(a[col] ?? '');
@@ -442,6 +446,57 @@ test('a dealership picked and loaded: the header, the picker, the plan, the team
   await settle();
   assert.equal(client.requests.find((r) => r.rpc === 'start_pilot').args.dealership_id, BRAVO);
   assert.equal(client.requests.find((r) => r.rpc === 'create_invite').args.dealership_id, BRAVO);
+});
+
+// ---------- an answer after another dealership was picked ----------
+
+const NO_PLAN = { ok: true, role: 'manager', state: 'none', canStartPilot: true, subscription: null };
+
+test('Start the free pilot answering after another dealership was picked: it started where it was pressed, and its note stays off the other card', async () => {
+  for (const order of ['the pick loads first', 'the pilot answers first']) {
+    let pilotAnswers = null;
+    let bravoAnswers = null;
+    const client = fakeClient({ session: ME, tables: twoDealerships(), rpcs: { start_pilot: (args) => new Promise((resolve) => { pilotAnswers = () => resolve({ data: { dealership_id: args.dealership_id, started: true }, error: null }); }) } });
+    const slowBravo = order === 'the pilot answers first';
+    const fetchImpl = (url) => (slowBravo && url.includes(`dealershipId=${BRAVO}`) ? new Promise((resolve) => { bravoAnswers = () => resolve(answer(200, NO_PLAN)); }) : answer(200, NO_PLAN));
+    const page = await openPage(PAGE, { client, fetchImpl });
+    assert.equal(page.elements.get('dealer').textContent, 'Alpha Motors', order);
+    page.click({ action: 'billing', billing: 'pilot' }, 'Start the free pilot');
+    await settle();
+    const sel = page.elements.get('pickDealer');
+    sel.value = BRAVO;
+    sel.listeners.change();
+    await settle();
+    pilotAnswers();
+    await settle();
+    if (bravoAnswers) bravoAnswers();
+    await settle();
+    assert.equal(client.requests.find((r) => r.rpc === 'start_pilot').args.dealership_id, ALPHA, `${order}: the pilot is Alpha's`);
+    assert.equal(page.elements.get('dealer').textContent, 'Bravo Auto', `${order}: the pick is kept`);
+    assert.doesNotMatch(main(page), /The free pilot has started/, `${order}: not on Bravo's page`);
+    assert.doesNotMatch(page.elements.get('billing')?.outerHTML || '', /The free pilot has started/, `${order}: not on a redrawn Billing card`);
+  }
+});
+
+test('a role change answering while another dealership loads: the change is made where it was pressed, the pick is kept, and its sentence stays off the other card', async () => {
+  const client = fakeClient({ session: ME, tables: twoDealerships() });
+  let bravoAnswers = null;
+  const fetchImpl = (url) => (url.includes(`dealershipId=${BRAVO}`) ? new Promise((resolve) => { bravoAnswers = () => resolve(answer(200, PILOT)); }) : answer(200, PILOT));
+  const page = await openPage(PAGE, { client, fetchImpl });
+  const sel = page.elements.get('pickDealer');
+  sel.value = BRAVO;
+  sel.listeners.change();
+  await settle();
+  assert.equal(page.elements.get('dealer').textContent, 'Alpha Motors', 'Bravo is still loading');
+  page.click({ action: 'role', user: 'u-sam', to: 'manager' }, 'Make manager');
+  await settle();
+  const change = client.requests.find((r) => r.table === 'memberships' && r.update);
+  assert.deepEqual([change.update, change.eq], [{ role: 'manager' }, [['user_id', 'u-sam'], ['dealership_id', ALPHA]]], 'the change is for the dealership on screen when it was pressed');
+  bravoAnswers();
+  await settle();
+  assert.equal(page.elements.get('dealer').textContent, 'Bravo Auto', 'the pick is not undone by a reload of Alpha');
+  assert.match(main(page), /Riley/);
+  assert.doesNotMatch(main(page), /Sam is now a manager/, 'Alpha\'s sentence is not on Bravo\'s Team card');
 });
 
 // ---------- back from Stripe ----------

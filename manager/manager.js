@@ -345,6 +345,9 @@ function renderTeam() {
 // shows (data.js teamChangeNote): no row means nothing changed. The reload
 // after it has its own sentence, so a failed read never reads as a failed
 // change.
+// A change answers after the manager may have picked another dealership: its
+// sentence is then about a card no longer shown, so it is dropped, and the
+// pick is not undone by a reload of the old one.
 async function onTeam(kind, userId, to) {
   state.teamError = '';
   const member = (state.data?.memberships || []).find((m) => m.user_id === userId);
@@ -359,19 +362,23 @@ async function onTeam(kind, userId, to) {
     state.teamNote = kind === 'remove' ? `Sample data: "Remove" would take ${who} out of the dealership and cancel the codes they made. Nothing is called here.` : `Sample data: this would make ${who} a ${to}. Nothing is called here.`;
     return renderTeam();
   }
+  const dealershipId = state.dealershipId; // the dealership on screen when it was pressed
   try {
     const q = state.supabase.from('memberships');
     const { data, error } = kind === 'remove'
-      ? await q.delete().eq('user_id', userId).eq('dealership_id', state.dealershipId).select('user_id')
-      : await q.update({ role: to }).eq('user_id', userId).eq('dealership_id', state.dealershipId).select('user_id');
+      ? await q.delete().eq('user_id', userId).eq('dealership_id', dealershipId).select('user_id')
+      : await q.update({ role: to }).eq('user_id', userId).eq('dealership_id', dealershipId).select('user_id');
     if (error) throw new Error(error.message);
+    if (shownOrPicked() !== dealershipId) return;
     state.teamNote = teamChangeNote(kind, member && member.name, to, data);
   } catch (e) {
-    state.teamError = `Couldn't change the team: ${(e && e.message) || e}`;
+    const said = `Couldn't change the team: ${(e && e.message) || e}`;
+    if (shownOrPicked() !== dealershipId) return setStatus(said, true); // not on another dealership's Team card
+    state.teamError = said;
     return renderTeam();
   }
   try {
-    await loadLive();
+    await loadLive(dealershipId);
   } catch (e) {
     setStatus('');
     state.teamError = `Couldn't refresh the page afterwards: ${(e && e.message) || e}. Reload the page to see the team as it is now.`;
@@ -710,8 +717,10 @@ async function onBilling(kind, btn) {
   setStatus('');
   try {
     if (kind === 'pilot') {
-      const { data, error } = await state.supabase.rpc('start_pilot', { dealership_id: state.dealershipId });
+      const dealershipId = state.dealershipId; // the dealership on screen when it was pressed
+      const { data, error } = await state.supabase.rpc('start_pilot', { dealership_id: dealershipId });
       if (error) throw new Error(error.message);
+      if (shownOrPicked() !== dealershipId) return; // another dealership was picked since: the sentence is not about it
       state.billingNote = data && data.started === false ? 'The pilot was not started again; the plan below is where the dealership stands.' : 'The free pilot has started.';
       return reloadBilling();
     }
@@ -851,13 +860,24 @@ async function connect() {
 // them, and an older one's answer, or its error, is dropped. Until then the
 // page and its buttons stay on the dealership already shown.
 let loads = 0;
+let loading = null; // { seq, wanted }: the dealership the latest load opens, while it runs
 async function loadLive(wanted = state.dealershipId) {
   const seq = ++loads;
+  loading = { seq, wanted };
   try {
     return await loadDealership(wanted, () => seq === loads);
   } catch (e) {
     if (seq === loads) throw e;
+  } finally {
+    if (loading && loading.seq === seq) loading = null;
   }
+}
+
+// The dealership a button's answer is for when it comes back: the one a load
+// still running is opening (a manager's pick), else the one on screen. An
+// answer about another one leaves the page alone.
+function shownOrPicked() {
+  return loading && loading.seq === loads ? loading.wanted : state.dealershipId;
 }
 
 async function loadDealership(wanted, current) {

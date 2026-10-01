@@ -878,14 +878,15 @@ test('teamChangeNote: the Team card claims a change only when the database answe
 test('the Team card changes only a member\'s role or removes them, through the rows RLS lets a manager touch', () => {
   const js = read('manager/manager.js');
   assert.match(js, /from\('memberships'\)/);
-  assert.match(js, /q\.update\(\{ role: to \}\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)\.select\('user_id'\)/, 'the update answers the changed row');
-  assert.match(js, /q\.delete\(\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)\.select\('user_id'\)/, 'the delete answers the removed row');
+  assert.match(js, /q\.update\(\{ role: to \}\)\.eq\('user_id', userId\)\.eq\('dealership_id', dealershipId\)\.select\('user_id'\)/, 'the update answers the changed row');
+  assert.match(js, /q\.delete\(\)\.eq\('user_id', userId\)\.eq\('dealership_id', dealershipId\)\.select\('user_id'\)/, 'the delete answers the removed row');
   assert.match(js, /const \{ data, error \} = kind === 'remove'/);
   assert.match(js, /state\.teamNote = teamChangeNote\(kind, member && member\.name, to, data\);/, 'the sentence follows the rows that came back');
   // the reload after a change is outside the change's try: a failed read has its own sentence
   const onTeam = js.slice(js.indexOf('async function onTeam('), js.indexOf('\nfunction renderInvites('));
-  const failed = onTeam.indexOf("state.teamError = `Couldn't change the team:");
-  const reload = onTeam.indexOf('await loadLive();');
+  assert.match(onTeam, /const dealershipId = state\.dealershipId;/, 'the change is for the dealership on screen when it was pressed');
+  const failed = onTeam.indexOf("const said = `Couldn't change the team:");
+  const reload = onTeam.indexOf('await loadLive(dealershipId);');
   assert.ok(failed > 0 && reload > failed, 'loadLive runs after the change\'s catch, not inside its try');
   assert.match(onTeam.slice(failed, reload), /return renderTeam\(\);\n {2}\}\n {2}try \{\n {4}$/, 'a refused change returns; the reload has a try of its own');
   assert.match(onTeam.slice(reload), /catch \(e\) \{[\s\S]*state\.teamError = `Couldn't refresh the page afterwards: /);
