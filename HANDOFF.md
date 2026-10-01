@@ -435,6 +435,8 @@ The owner's request (2026-10-01, verbatim intent): turn the landing page into a 
 - **Closing line**: `settings.salesperson.closingLine` (follows the synced profile; the wizard keeps it). `checkClosingLine`: no money, no digits except a phone number, no banned phrase, no one-owner claim, no shouting, at most one emoji, 30 words. The template puts it after the sign-off in place of the `cta` block; the rewrite service never receives it (`ensureClosingLine` adds it before the VIN line); `runGuardrails(text, { closingLine })` leaves it out of the word count and number check and runs `checkClosingLine` on it. Settings refuses to save a failing line.
 - Not done: the wizard's You step does not ask for the closing line (Settings only); `npm run screenshots` was not rerun (the site screenshots belong with PR #1's rename); the attorney packet copies of the privacy texts in the project folder predate the one-sentence photo-thumbnail addition.
 
+---
+
 ## 16. The 2026-10-01 rename and website session (a Claude cloud session in the Lot Current project)
 
 Started from the project's setup card ("Deploy the website at lotcurrent.com"). The owner's display name in the project is Brandon. All work is on branch `claude/project-thread-07xsyj`, in **draft pull request #1** (https://github.com/TheeBigSnack/Main/pull/1) into the default branch `claude/fervent-fermi-exkhz9`. **Merging #1 deploys the site to lotcurrent.com**; the owner was told that and asked to merge it themselves (outward-facing).
