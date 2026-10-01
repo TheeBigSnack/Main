@@ -161,6 +161,21 @@ export function trimRecord(r, { fullRecords = false } = {}) {
   };
 }
 
+// The cars in one answer of the search service. A 200 is not always a list:
+// a page helper that swallowed its own error, a session that ran out or an
+// error object answer 200 too, and reading one of those as "no cars" would
+// call the whole lot, or every car looked up by VIN, gone. So an answer
+// without a `listings` array is an error, and an empty list counts only when
+// the answer also says the search matched nothing (total_vehicle_count 0);
+// `emptyNeedsZero` is off for a later page of the paged read, where an empty
+// page is the service's unstable paging, not the lot.
+export function listingsOf(data, { emptyNeedsZero = true } = {}) {
+  const list = data && Array.isArray(data.listings) ? data.listings : null;
+  if (!list) throw new Error('the inventory search answered without a list of cars');
+  if (emptyNeedsZero && !list.length && data.total_vehicle_count !== 0) throw new Error('the inventory search answered with no cars and without saying it found none');
+  return list;
+}
+
 /**
  * Reads the used and certified inventory. The service's paging isn't stable
  * (the same car can show up on two pages while another is skipped), so: ask
@@ -206,8 +221,8 @@ export async function scan(search, options = {}) {
         const body = { page, perPage: opts.perPage, filters, requestedFields: FIELDS };
         if (sort) body.sort = sort;
         const data = await call(body);
+        const list = listingsOf(data, { emptyNeedsZero: requests === 1 }); // the first answer says what the lot is
         if (typeof data.total_vehicle_count === 'number') total = data.total_vehicle_count;
-        const list = Array.isArray(data.listings) ? data.listings : [];
         for (const r of list) {
           if (r && r.vin && !byVin.has(String(r.vin).toUpperCase())) byVin.set(String(r.vin).toUpperCase(), trimRecord(r, opts));
         }
@@ -227,7 +242,7 @@ export async function scan(search, options = {}) {
       const batch = toCheck.slice(i, i + 50);
       const data = await call({ page: 1, perPage: 100, filters: { vin: batch, status }, requestedFields: FIELDS });
       const found = new Set();
-      for (const r of Array.isArray(data.listings) ? data.listings : []) {
+      for (const r of listingsOf(data)) { // an answer that is not a list stops the check: nothing is marked gone
         if (!r || !r.vin) continue;
         const vin = String(r.vin).toUpperCase();
         found.add(vin);

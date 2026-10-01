@@ -16,7 +16,7 @@ import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
-import { listingStatus } from '../extension/src/rescan.js';
+import { listingStatus, MASS_DISAPPEARANCE_MIN_LOT } from '../extension/src/rescan.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
 
@@ -83,6 +83,12 @@ test('help.md names every state My listings can show a posted car in, as the cod
   ];
   assert.equal(new Set(states.map((s) => s.text)).size, states.length);
   for (const s of states) assert.ok(help.includes(`"${s.text}"`), `docs/help.md does not name the My listings state "${s.text}"`);
+});
+
+test('help.md and README give the "vanished at once" rule with the lot size it starts at', () => {
+  const floor = String(MASS_DISAPPEARANCE_MIN_LOT);
+  assert.match(doc('help.md'), new RegExp(`on a lot of ${floor} cars or more, if more than half of it disappears between scans, nothing is marked gone`));
+  assert.match(read('../README.md'), new RegExp(`If more than half the cars of a lot of ${floor} or more vanish between scans, nothing is marked gone`));
 });
 
 test('help.md is organised by what people are trying to do', () => {

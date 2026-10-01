@@ -7,7 +7,7 @@ import { startMockSite } from './e2e/mock-dealer-site.mjs';
 import dealerInspire, { scan, getDetails, makeDirectSearch, detect, trimRecord, FIELDS, probeInPage, searchInPage, origins, scanOptions, photoOrigins } from '../extension/adapters/dealerInspire.js';
 import { ADAPTERS, detectAdapter, adapterById, adapterForService, unsupportedSiteMessage, platformNames } from '../extension/adapters/index.js';
 import { VEHICLE_FIELDS } from '../extension/src/vehicle.js';
-import { scanWithSearch, incompleteWarning } from '../extension/src/scanRunner.js';
+import { scanWithSearch, incompleteWarning, searchViaTab } from '../extension/src/scanRunner.js';
 import { withDefaults } from '../extension/src/settings.js';
 import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, MAX_FAILED_IN_A_ROW, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress } from '../extension/adapters/schemaOrg.js';
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
@@ -395,6 +395,52 @@ test('a failing service is reported, not guessed around', async () => {
   assert.equal(partial.confirm.error, null);
 });
 
+// A 200 that is not a list of cars (an error object, a page helper that
+// resolved nothing) on a lot too small for the "more than half vanished"
+// rule: nothing may be called gone, and the scan that read it is not saved.
+test('a Dealer Inspire answer that is not a list of cars never makes a car gone, on a 3-car or a 9-car lot, through the page\'s helper or the direct search', async () => {
+  const lotOf = (n) => Array.from({ length: n }, (_, i) => ({ ...fixtures.usedNormal, vin: `1C6RR7FT0KS64${1000 + i}`, stock: `S${i}` }));
+  const site = { origin: 'https://x', host: 'x', name: 'Test', title: 't', adapter: 'dealerInspire' };
+  const service = { search: 'https://x/api/v1/listings/1', apiKey: 'k' };
+  const bad = [{ error: 'upstream timeout' }, {}, { total_vehicle_count: 5 }, { listings: [] }, { total_vehicle_count: 4, listings: [] }];
+  for (const n of [3, 9]) {
+    const lot = lotOf(n);
+    const settings = withDefaults({});
+    const first = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(lot), site, settings });
+    assert.equal(Object.keys(first.snapshot.vehicles).length, n);
+    const posted = { [lot[0].vin]: { name: 'a', price: 27163 }, [lot[1].vin]: { name: 'b', price: 27163 } };
+    for (const answer of bad) {
+      // every answer is this one: the scan fails, so nothing is saved or flagged
+      const viaDirect = makeDirectSearch(service, async () => ({ ok: true, status: 200, json: async () => answer }));
+      const page = fakeDealerPage({ records: lot });
+      page.window.IDPSearchServiceHelper = { getListings: async () => answer };
+      globalThis.chrome = fakeChrome(page);
+      try {
+        for (const [how, search] of [['direct', viaDirect], ['helper', searchViaTab(1, dealerInspire, service)]]) {
+          const out = await scanWithSearch({ adapter: dealerInspire, search, site, settings, prevSnapshot: first.snapshot, posted });
+          assert.equal(out.ok, false, `${n} cars, ${how}, ${JSON.stringify(answer)}`);
+          assert.match(out.message, /Couldn't read the inventory: the inventory search answered/);
+        }
+      } finally {
+        delete globalThis.chrome;
+      }
+      // the lot reads, but the VIN lookup for the two posted cars missing from it answers this: nothing is gone
+      const listed = fakeSearch(lot.slice(2));
+      const search = async (body) => (body.filters.vin ? answer : listed(body));
+      const out = await scanWithSearch({ adapter: dealerInspire, search, site, settings, prevSnapshot: first.snapshot, posted });
+      assert.equal(out.ok, true);
+      assert.match(out.res.confirm.error, /the inventory search answered/);
+      assert.deepEqual(out.diff.takeDown, [], `${n} cars, VIN lookup answering ${JSON.stringify(answer)}`);
+      assert.deepEqual(out.diff.needsALook.map((x) => x.vin).sort(), [lot[0].vin, lot[1].vin].sort());
+      assert.match(out.diff.warnings.join(' '), /Couldn't double-check missing cars .*Nothing was marked as gone/);
+    }
+    // a lot that really is empty says so (a count of 0), and is read as empty
+    const empty = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch([]), site, settings, prevSnapshot: first.snapshot, posted });
+    assert.equal(empty.ok, true);
+    assert.deepEqual([empty.res.confirm.error, empty.res.confirm.notFound.length], [null, n], 'the VIN lookup said 0 too');
+  }
+});
+
 test('getDetails: one car, every photo, any type', async () => {
   const search = fakeSearch(records);
   const r = await getDetails(search, fixtures.usedNormal.vin.toLowerCase());
@@ -760,15 +806,15 @@ test('a scan that did not read everything says which way: cars missing, pages th
   const none = { checked: [], notFound: [], error: null };
   // "double-checked" only when the check ran and checked a car
   assert.equal(incompleteWarning({ records: [1, 2], total: 3 }), 'The website returned 2 of 3 cars.');
-  assert.equal(incompleteWarning({ records: [1, 2], total: 3, confirm: checked }), 'The website returned 2 of 3 cars. Missing cars were double-checked one by one.');
+  assert.equal(incompleteWarning({ records: [1, 2], total: 3, confirm: checked }), 'The website returned 2 of 3 cars. Missing cars were looked up again on the website.');
   assert.equal(incompleteWarning({ records: [1, 2], total: 3, confirm: failed }), 'The website returned 2 of 3 cars.');
   assert.equal(incompleteWarning({ records: [1, 2, 3], total: 3, confirm: none }), "Some of the website's pages could not be read this time.");
-  assert.equal(incompleteWarning({ records: [1, 2, 3], total: 3, confirm: checked }), "Some of the website's pages could not be read this time. Missing cars were double-checked one by one.");
+  assert.equal(incompleteWarning({ records: [1, 2, 3], total: 3, confirm: checked }), "Some of the website's pages could not be read this time. Missing cars were looked up again on the website.");
   assert.equal(incompleteWarning({ records: [1, 2], unread: ['A'], total: 3 }), "One car's page could not be read this time, so that car shows what the last scan read.");
   assert.equal(incompleteWarning({ records: [1], unread: ['A', 'B'], total: 4, confirm: failed }), 'The website returned 3 of 4 cars.');
   // pages the page limit left were never asked for: not "could not be read"
   assert.equal(incompleteWarning({ records: [1, 2], total: 6, leftForLater: 4 }), "This lot has more car pages than one scan reads, so 4 cars' pages were left for the next scan.");
-  assert.equal(incompleteWarning({ records: [1, 2], unread: ['A'], total: 3, leftForLater: 1, confirm: checked }), "This lot has more car pages than one scan reads, so one car's page was left for the next scan. A car whose page was not read this time shows what the last scan read. Missing cars were double-checked one by one.");
+  assert.equal(incompleteWarning({ records: [1, 2], unread: ['A'], total: 3, leftForLater: 1, confirm: checked }), "This lot has more car pages than one scan reads, so one car's page was left for the next scan. A car whose page was not read this time shows what the last scan read. Missing cars were looked up again on the website.");
 
   const cars = standardCars(4);
   const siteMap = standardSite({ cars });
@@ -796,7 +842,7 @@ test('a scan that did not read everything says which way: cars missing, pages th
   sold.set(LIST + '?page=2', httpError(500));
   for (const c of six.slice(4)) sold.set(O + c.path, httpError(404));
   const day2b = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(sold), site, settings, posted, prevSnapshot: day1.snapshot, options: schemaOrg.scanOptions(SERVICE) });
-  assert.equal(day2b.diff.warnings[0], "Some of the website's pages could not be read this time. Missing cars were double-checked one by one.");
+  assert.equal(day2b.diff.warnings[0], "Some of the website's pages could not be read this time. Missing cars were looked up again on the website.");
   assert.deepEqual(day2b.diff.takeDown.map((t) => t.vin).sort(), [six[4].vin, six[5].vin].sort());
 });
 

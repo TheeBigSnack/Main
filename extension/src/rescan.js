@@ -11,12 +11,17 @@
 //                and posted cars the pre-owned check now holds back (every scan)
 //
 // A car is only called gone when the website's own search can't find its VIN.
-// If more than half the lot disappears at once, nothing is marked gone: that
-// is almost always a website hiccup, not a sales record.
+// If more than half of a lot of 10 or more disappears at once, nothing is
+// marked gone: that is almost always a website hiccup, not a sales record.
 
 import { DECISION } from './classify.js';
 
 export const MASS_DISAPPEARANCE_SHARE = 0.5;
+// The share rule applies from this many cars in the last scan up. Below it a
+// lot that really sells half its cars in one rescan would otherwise never be
+// saved again (an unreliable scan is not saved); a small lot relies on the
+// adapter refusing an answer that is not a list (adapters/README.md).
+export const MASS_DISAPPEARANCE_MIN_LOT = 10;
 
 // The price to post. 'beforeFees' means the lower second price the website
 // shows; when this car has none below its main price, the main price is used
@@ -167,7 +172,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   const notFound = new Set(confirm && !confirm.error ? confirm.notFound || [] : []);
   const checked = new Set(confirm && !confirm.error ? confirm.checked || [] : []);
   const missingFromLastScan = missing.filter((vin) => prevVehicles[vin]).length;
-  const massDisappearance = out.counts.previous >= 10 && missingFromLastScan > out.counts.previous * MASS_DISAPPEARANCE_SHARE;
+  const massDisappearance = out.counts.previous >= MASS_DISAPPEARANCE_MIN_LOT && missingFromLastScan > out.counts.previous * MASS_DISAPPEARANCE_SHARE;
 
   if (confirm && confirm.error && missing.length) {
     out.warnings.push(`Couldn't double-check missing cars (${confirm.error}). Nothing was marked as gone.`);

@@ -149,7 +149,7 @@ export function incompleteWarning(res) {
   const found = res.records.length + kept;
   const left = Number(res.leftForLater) || 0;
   const c = res.confirm;
-  const doubleChecked = c && !c.error && Array.isArray(c.checked) && c.checked.length ? ' Missing cars were double-checked one by one.' : '';
+  const doubleChecked = c && !c.error && Array.isArray(c.checked) && c.checked.length ? ' Missing cars were looked up again on the website.' : '';
   if (left) {
     const those = left === 1 ? "one car's page was" : `${left} cars' pages were`;
     const shows = kept ? ' A car whose page was not read this time shows what the last scan read.' : '';
