@@ -41,6 +41,10 @@ const LABELS = [
   'Clear everything for this website',
   'Forget my synced profile',
   'Allow automatic rescans',
+  'Use these highlights',
+  'Make cover',
+  'Untick all',
+  'Your closing line (optional)',
 ];
 
 test('the four launch-kit files exist and are not stubs', () => {

@@ -115,3 +115,26 @@ test('the request goes to /rewrite with the service key', async () => {
   assert.equal(JSON.parse(seen.init.body).make, 'Ram');
   assert.deepEqual({ ok: r.ok, text: r.text, model: r.model }, { ok: true, text: 'draft', model: 'm' });
 });
+
+test('the salesperson\'s closing line never goes to the service and is added to its draft before the VIN', async () => {
+  const line = 'Ask for me by name when you come in.';
+  let sent = null;
+  const capture = async (url, init) => { sent = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ ok: true, text: draft }) }; };
+  const template = (await generateDescription(args())).text;
+  const draft = template.replace(/^VIN .*\n?/m, '');
+  const r = await generateDescription(args({ settings: on, salesperson: { ...ME, closingLine: line }, fetchImpl: capture }));
+  assert.ok(!JSON.stringify(sent).includes(line), 'the closing line left the browser');
+  assert.equal(r.source, 'claude');
+  assert.match(r.text, /Ask for me by name when you come in\.\nVIN 1C6RR7FT0KS643289\.$/);
+  assert.ok(r.guardrails.ok, JSON.stringify(r.guardrails.problems));
+});
+
+test('the salesperson\'s highlights are the features the service sees', async () => {
+  const f = rewriteFacts({ vehicle: vehicle('usedNormal', { features: ['Backup Camera', 'Bluetooth', 'Tow Package'] }), highlights: ['tow package', 'Made up feature'] });
+  assert.deepEqual(f.features, ['Tow Package']);
+  assert.equal(f.highlightsPicked, true);
+  assert.match(buildRewritePrompt(f).system, /If highlightsPicked is true[^\n]*name exactly the ones in "features", in the order given, and no others/);
+  const all = rewriteFacts({ vehicle: vehicle('usedNormal', { features: ['Backup Camera', 'Bluetooth'] }) });
+  assert.deepEqual(all.features, ['Backup Camera', 'Bluetooth'], 'no pick: the whole list, as before');
+  assert.ok(!('highlightsPicked' in all));
+});

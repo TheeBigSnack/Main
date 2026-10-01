@@ -71,7 +71,7 @@ try {
       [`settings:${origin}`]: {
         myStores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg'],
         basis: 'website',
-        salesperson: { name: 'Roger', title: 'sales consultant' },
+        salesperson: { name: 'Roger', title: 'sales consultant', closingLine: 'Ask for me by name when you come in.' },
         // No ZIP on purpose: the location must still land in the right state.
         dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', state: 'PA', zip: '' },
         priceNote: 'Price includes the $490 doc fee; tax and tags extra.',
@@ -131,6 +131,8 @@ try {
   assert.match(draft, /Price includes the \$490 doc fee; tax and tags extra\./);
   assert.match(draft, /I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\./);
   assert.match(draft, /VIN 1C6RR7FT0KS643289\./);
+  assert.match(draft, /\nAsk for me by name when you come in\.$/, "the salesperson's closing line ends it");
+  assert.doesNotMatch(draft, /Message me to set up a test drive/, 'in place of the stock invitation');
   assert.match(await panel.textContent('#checks'), /All checks passed/);
   assert.match(await panel.textContent('#assumed'), /Vehicle condition[\s\S]*Very good[\s\S]*Title status[\s\S]*Clean[\s\S]*default/);
   assert.equal(await panel.$('#leftBlank'), null, 'nothing is left blank when defaults are set');
@@ -140,8 +142,38 @@ try {
   assert.match(await panel.textContent('#cap'), /0 of 10 posts today/);
   await panel.screenshot({ path: join(shots, 'post-2-review.png'), fullPage: true });
 
+  // ---- 2b. The salesperson picks the photos and the highlights ----
+  assert.match(await panel.textContent('#photoPickSummary'), /3 of 3 photos picked/);
+  // with nothing ticked the form does not open
+  await panel.click('#photosNone');
+  await panel.waitForFunction(() => /No photos picked/.test(document.getElementById('photoPickSummary').textContent));
+  const pagesBefore = context.pages().length;
+  await panel.click('#openForm');
+  await panel.waitForFunction(() => /No photos are ticked/.test(document.getElementById('status').textContent));
+  assert.equal(context.pages().length, pagesBefore, 'no form tab opened');
+  await panel.click('#photosDefault');
+  await panel.waitForFunction(() => /3 of 3 photos picked/.test(document.getElementById('photoPickSummary').textContent));
+  await panel.uncheck('#photo-2');
+  await panel.waitForFunction(() => /2 of 3 photos picked/.test(document.getElementById('photoPickSummary').textContent));
+  assert.equal(await panel.evaluate(() => document.activeElement.id), 'photo-2', 'focus stays on the box just unticked');
+  await panel.click('#photoCover-1');
+  await panel.waitForFunction(() => /Photo 2, cover/.test(document.getElementById('photoName-1').textContent));
+  assert.match(await panel.textContent('#photoName-0'), /Photo 1, attached 2nd/);
+  assert.match(await panel.textContent('#photoCount'), /2 picked/);
+  const highlightBefore = draft.match(/Highlights: [^\n]*/)[0];
+  assert.equal(highlightBefore, 'Highlights: Backup Camera, Tow Package, 4WD, Bluetooth, Keyless Entry, Power Windows.');
+  await panel.uncheck('#feature-5'); // Power Windows
+  await panel.check('#feature-6'); // Cruise Control
+  await panel.waitForSelector('#highlightsChanged');
+  await panel.click('#useHighlights');
+  await panel.waitForFunction(() => /Highlights: Backup Camera, Tow Package, 4WD, Bluetooth, Keyless Entry, Cruise Control\./.test(document.getElementById('description').value));
+  assert.match(await panel.textContent('#checks'), /All checks passed/);
+  assert.equal(await panel.$('#highlightsChanged'), null);
+  const picked = await panel.inputValue('#description');
+  await panel.screenshot({ path: join(shots, 'post-2b-picked.png'), fullPage: true });
+
   // ---- 3. The salesperson edits the description; the edit is what gets posted ----
-  const edited = draft + '\nCall or message me any time.';
+  const edited = picked + '\nCall or message me any time.';
   await panel.fill('#description', edited);
   await panel.waitForFunction(() => /All checks passed/.test(document.querySelector('#checks')?.textContent || ''));
 
@@ -185,7 +217,7 @@ try {
     location: 'Waynesburg, Pennsylvania', // not the Ohio one the page suggests first
     condition: 'Very good', titleStatus: 'Clean', // the dealership's defaults
     cleanTitle: true, // the live form's checkbox, labelled only by nearby text
-    photos: '3 photos',
+    photos: '2 photos', // the two picked
     popupsOpen: 0, // the slow Year list was waited for, used, and closed
   });
   assert.equal(await fb.inputValue('#description'), edited);
@@ -193,7 +225,14 @@ try {
   assert.match(results, /Filled in\s*17/);
   assert.doesNotMatch(results, /Needs a click/);
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
-  assert.match(await panel.textContent('#photos'), /3 of 3 attached/);
+  assert.match(await panel.textContent('#photos'), /2 of 2 attached/);
+  // in the order picked: photo 2 as the cover, then photo 1
+  const flowPhotos = await panel.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const key = Object.keys(all).find((k) => k.startsWith('postFlow:'));
+    return all[key].listing.photos.map((u) => u.split('/').pop());
+  });
+  assert.deepEqual(flowPhotos, ['2.png', '1.png']);
   assert.equal(await publishCount(dealer), '0', 'the extension must not publish');
 
   // ---- 5. The person clicks Publish (the test stands in for the salesperson) ----
