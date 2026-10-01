@@ -366,7 +366,7 @@ function renderInvites() {
 function viewData() {
   state.mode = 'view';
   const d = state.data;
-  const s = summarize({ ...d, now: new Date().toISOString() });
+  const s = summarize({ ...d, wholeTeam: myRole() === 'manager', now: new Date().toISOString() }); // a manager reads every membership row
   const dealer = d.dealership?.name || 'Your dealership';
   setDealer(dealer);
   const who = state.mock ? 'Sample data' : esc(state.session?.user?.email || '');
@@ -393,11 +393,11 @@ function viewData() {
 
   const car = (o) => `<td class="name">${o.listingUrl ? `<a href="${esc(o.listingUrl)}" target="_blank" rel="noopener">${esc(o.name)}</a>` : esc(o.name)}<div class="sub">${esc(o.salesperson || 'no salesperson on record')} · ${esc(o.vin)}</div></td>`;
   const age = (o) => `<td class="n">${pill(o.overdue ? 'bad' : '', hrs(o.hoursOpen))}</td>`;
-  const sold = `<section><h2>Sold cars still listed ${pill(s.soldStillListed.length ? (s.soldStillListed.some((o) => o.overdue) ? 'bad' : 'warn') : 'good', String(s.soldStillListed.length))}</h2>
+  const sold = `<section><h2>Sold cars still listed ${pill(s.soldStillListed.length ? (s.soldStillListed.some((o) => o.overdue) ? 'bad' : 'warn') : s.clear.sold.tone, String(s.soldStillListed.length))}</h2>
     ${s.soldStillListed.length
       ? `<div class="scroll"><table class="stats" id="soldStillListed"><thead><tr><th>Car</th><th class="n">Open for</th></tr></thead><tbody>${s.soldStillListed.map((o) => `<tr>${car(o)}${age(o)}</tr>`).join('')}</tbody></table></div>
          <p class="hint">Longest first. Red past ${OVERDUE_HOURS} hours. Hours run from the scan that flagged the car; the salesperson sees the same item on their To do tab.</p>`
-      : '<p class="empty">Every sold car is off Marketplace.</p>'}
+      : `<p class="empty">${esc(s.clear.sold.line)}</p>`}
     ${s.takeDowns.done ? `<p class="hint">${s.takeDowns.done} taken down so far, median ${hrs(s.takeDowns.medianHours)} after the flagging scan${s.takeDowns.cleared ? `; ${s.takeDowns.cleared} cleared by the website (the car came back)` : ''}.</p>` : ''}
   </section>`;
 
@@ -406,15 +406,22 @@ function viewData() {
     const dir = both ? (o.toPrice < o.fromPrice ? 'down' : 'up') : '';
     return `<td class="n">${money(o.fromPrice)} <span class="arrow">→</span> <span class="${dir}">${money(o.toPrice)}</span></td>`;
   };
-  const prices = `<section><h2>Price changes not yet updated ${pill(s.priceMismatches.length ? (s.priceMismatches.some((o) => o.overdue) ? 'bad' : 'warn') : 'good', String(s.priceMismatches.length))}</h2>
+  const prices = `<section><h2>Price changes not yet updated ${pill(s.priceMismatches.length ? (s.priceMismatches.some((o) => o.overdue) ? 'bad' : 'warn') : s.clear.price.tone, String(s.priceMismatches.length))}</h2>
     ${s.priceMismatches.length
       ? `<div class="scroll"><table class="stats" id="priceMismatches"><thead><tr><th>Car</th><th class="n">Listing → website</th><th class="n">Open for</th></tr></thead><tbody>${s.priceMismatches.map((o) => `<tr>${car(o)}${priceCell(o)}${age(o)}</tr>`).join('')}</tbody></table></div>
          <p class="hint">The listing price must match the website; the salesperson updates it from their To do tab. Red past ${OVERDUE_HOURS} hours.</p>`
-      : '<p class="empty">Every listing shows the website price.</p>'}
+      : `<p class="empty">${esc(s.clear.price.line)}</p>`}
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
+  // listings up from people no longer in the dealership (a manager's view only): nobody's extension rescans them
+  const unwatched = s.unwatched.length
+    ? `<section id="unwatched"><h2>Listings nobody's extension watches ${pill('warn', String(s.unwatched.length))}</h2>
+    <div class="scroll"><table class="stats"><thead><tr><th>Car</th><th class="n">Posted</th></tr></thead><tbody>${s.unwatched.map((o) => `<tr>${car(o)}<td class="n">${esc(fmtLocal(o.postedAt))}</td></tr>`).join('')}</tbody></table></div>
+    <p class="hint">Posted by people who are no longer in the dealership's Lot Current account. Lot Current still counts them as up, but no extension rescans them now, so a sale or a price change on them is not flagged here, and Lot Current cannot see whether they are still on Marketplace.</p></section>`
+    : '';
+
+  $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>` + unwatched;
   const sel = $('pickDealer');
   if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; state.teamNote = ''; state.teamError = ''; state.teamConfirm = ''; loadLive().catch((e) => viewError(e.message)); });
 }

@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -1149,4 +1149,49 @@ test('readAll: a failed page is an error, never a short list; a row seen twice i
   assert.equal(got.length, 1500);
   const endless = async (from) => ({ data: [{ id: `x${from}` }], error: null, count: null });
   await assert.rejects(readAll(endless, { pageRows: 1, maxPages: 5 }), /more than 5 pages/);
+});
+
+// ---------- what an empty list may say ----------
+
+test('an empty sold or price list says only that nothing is flagged, and why that is worth less: no scan, an old scan, listings nobody watches', () => {
+  const D = 'd1';
+  const members = [{ user_id: 'u-sam', dealership_id: D, role: 'salesperson', name: 'Sam' }, { user_id: 'u-jamie', dealership_id: D, role: 'manager', name: 'Jamie' }];
+  const car = (n, user, over = {}) => ({ id: `l${n}`, dealership_id: D, user_id: user, vin: `TESTVIN${String(n).padStart(10, '0')}`, name: `Car ${n}`, price: 20000, posted_at: ago(100 + n), status: 'listed', salesperson: user === 'u-sam' ? 'Sam' : 'Riley', listing_url: `https://www.facebook.com/marketplace/item/${n}/`, ...over });
+  const scan = (hoursAgo) => [{ taken_at: ago(hoursAgo), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0 }];
+  const listings = [car(1, 'u-sam'), car(2, 'u-sam'), car(3, 'u-riley'), car(4, 'u-riley'), car(5, 'u-riley', { status: 'taken_down', taken_down_at: ago(5) })];
+  const never = ['Every sold car is off Marketplace', 'Every listing shows the website price'];
+
+  // no scan yet: no all-clear, and the pill is not green
+  const none = summarize({ listings: listings.slice(0, 2), memberships: members, wholeTeam: true, now: NOW, timeZone: 'UTC' });
+  assert.equal(none.lastScan, null);
+  assert.equal(none.clear.sold.tone, '');
+  assert.match(none.clear.sold.line, /^No sold car is flagged on a synced listing\. Each salesperson's extension checks their own listings when it rescans\. No scan is recorded yet, so nothing has been checked\.$/);
+  assert.equal(none.clear.price.tone, '');
+  assert.match(none.clear.price.line, /^No price change is flagged on a synced listing\./);
+
+  // an old scan: amber, with how old
+  const old = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(60), wholeTeam: true, now: NOW, timeZone: 'UTC' });
+  assert.equal(old.lastScan.stale, true);
+  assert.equal(old.clear.sold.tone, 'warn');
+  assert.match(old.clear.sold.line, /The last scan is 60 h old, so a car sold since then is not flagged yet\./);
+  assert.match(old.clear.price.line, /so a price that changed since then is not flagged yet\./);
+
+  // a removed salesperson's cars that are up: named, amber, even with a fresh scan; a taken-down one is not
+  const gone = summarize({ listings, memberships: members, scans: scan(1), wholeTeam: true, now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(gone.unwatched.map((o) => [o.name, o.salesperson]), [['Car 4', 'Riley'], ['Car 3', 'Riley']], 'longest up first');
+  assert.equal(gone.unwatched[0].listingUrl, 'https://www.facebook.com/marketplace/item/4/');
+  assert.equal(gone.clear.sold.tone, 'warn');
+  assert.match(gone.clear.sold.line, /2 listings are up from people no longer in the dealership, and nobody's extension watches them \(below\)\./);
+  assert.match(clearLine('sold', { stale: false, hoursAgo: 1 }, 1).line, /One listing is up from people no longer in the dealership, and nobody's extension watches it \(below\)\./);
+  // a salesperson reads only their own membership row: nobody else's car is called unwatched for them
+  assert.deepEqual(summarize({ listings, memberships: [members[0]], scans: scan(1), now: NOW }).unwatched, []);
+
+  // a fresh scan, every listing someone's: the one green case, still saying only what is known
+  const fine = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(1), wholeTeam: true, now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(fine.unwatched, []);
+  assert.deepEqual(fine.clear.sold, { tone: 'good', line: 'No sold car is flagged on a synced listing. Each salesperson\'s extension checks their own listings when it rescans.' });
+  for (const s of [none, old, gone, fine]) for (const k of ['sold', 'price']) for (const w of never) assert.ok(!s.clear[k].line.includes(w));
+  const js = read('manager/manager.js');
+  for (const w of never) assert.ok(!js.includes(w), `manager.js no longer says "${w}"`);
+  assert.match(js, /wholeTeam: myRole\(\) === 'manager'/, 'only a manager\'s read of the memberships is the whole team');
 });

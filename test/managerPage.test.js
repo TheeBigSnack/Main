@@ -7,7 +7,7 @@
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, copyFileSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -249,4 +249,41 @@ test('loadLive reads every row past the API\'s 1,000-row cap: the oldest open ta
   assert.ok(todoReads.length >= 2, 'more than one request');
   assert.ok(todoReads.every((q) => q.range), 'each request asks for a range');
   assert.deepEqual(todoReads[0].order.at(-1), ['id', true], 'the order ends on a unique column, so pages neither overlap nor skip');
+});
+
+// ---------- what the page says when nothing is flagged ----------
+
+test('nothing flagged, no scan yet, and a removed salesperson\'s cars still up: no all-clear, no green pill, and those cars are named', async () => {
+  const D = 'd1';
+  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600 * 1000).toISOString();
+  const listings = [1, 2, 3, 4, 5].map((n) => ({ id: `l${n}`, dealership_id: D, user_id: n <= 2 ? 'u-sam' : 'u-gone', vin: `TESTVIN${String(n).padStart(10, '0')}`, name: `Car ${n}`, price: 20000 + n, posted_at: at(50 + n), status: 'listed', salesperson: n <= 2 ? 'Sam' : 'Riley', listing_url: `https://www.facebook.com/marketplace/item/${n}/` }));
+  const tables = {
+    dealerships: [{ id: D, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+    memberships: [{ user_id: 'u-manager', dealership_id: D, role: 'manager', name: 'Jamie' }, { user_id: 'u-sam', dealership_id: D, role: 'salesperson', name: 'Sam' }],
+    listings,
+    todo_items: [],
+    post_attempts: [],
+    scan_summaries: [],
+  };
+  const billing = () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } });
+  const page = await openPage(PAGE, { client: fakeClient({ session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } }, tables }), fetchImpl: billing });
+  const html = main(page);
+  assert.ok(!html.includes('Every sold car is off Marketplace'));
+  assert.ok(!html.includes('Every listing shows the website price'));
+  assert.match(html, /Sold cars still listed <span class="pill warn">0<\/span>/, 'amber, never green, with no scan and cars nobody watches');
+  assert.match(html, /No sold car is flagged on a synced listing\.[^<]*No scan is recorded yet/);
+  assert.match(html, /No price change is flagged on a synced listing\./);
+  const unwatched = html.slice(html.indexOf('id="unwatched"'));
+  assert.ok(html.includes('id="unwatched"'), 'the removed salesperson\'s cars get their own list');
+  assert.match(unwatched, /Listings nobody's extension watches <span class="pill warn">3<\/span>/);
+  for (const n of [3, 4, 5]) assert.match(unwatched, new RegExp(`>Car ${n}</a><div class="sub">Riley · TESTVIN`));
+  assert.ok(!/>Car [12]</.test(unwatched), 'a member\'s cars are not in it');
+
+  // with a fresh scan and the cars all members', the green pill comes back, still saying only what is known
+  const fresh = { ...tables, listings: listings.slice(0, 2), scan_summaries: [{ id: 's1', dealership_id: D, taken_at: at(1), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0 }] };
+  const ok = main(await openPage(PAGE, { client: fakeClient({ session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } }, tables: fresh }), fetchImpl: billing }));
+  assert.match(ok, /Sold cars still listed <span class="pill good">0<\/span>/);
+  assert.match(ok, /<p class="empty">No sold car is flagged on a synced listing\. Each salesperson&#39;s extension checks their own listings when it rescans\.<\/p>/);
+  assert.ok(!ok.includes('id="unwatched"'));
+  assert.ok(readFileSync(join(root, 'docs/help.md'), 'utf8').includes('**Listings nobody\'s extension watches**'), 'docs/help.md names the list as the page labels it');
 });

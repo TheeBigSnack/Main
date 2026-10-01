@@ -44,7 +44,11 @@
 //   - "Sold cars still listed" are the open take-down items (todo_items, kind
 //     takeDown, no done_at). A scan summary carries counts, not VINs, so
 //     "listings the latest scan no longer has" cannot be derived here; the
-//     extension's rescan decides that and writes the to-do item.
+//     extension's rescan decides that and writes the to-do item, and only
+//     for the salesperson's own listings. So an empty list says only that
+//     nothing is flagged, never that every sold car is off Marketplace:
+//     clearLine() words it, with what it rests on (no scan yet, an old
+//     scan, listings nobody's extension watches).
 //   - A to-do item names no salesperson; the listing with the same VIN does,
 //     so each item is joined to its listing for the name and the link.
 //   - Posts are counted from listings (the posted registry: one row per
@@ -154,10 +158,14 @@ function peopleOf(memberships, listings, attempts) {
 /**
  * @param {object} input
  *   listings, todoItems, postAttempts, scans, memberships: rows as above
+ *   wholeTeam: true when `memberships` is every member of the dealership (a
+ *              manager reads them all; a salesperson reads only their own
+ *              row), so a listing whose user is not among them belongs to
+ *              someone no longer in the dealership
  *   now:      ISO time the ages count from (default: the clock)
  *   timeZone: IANA zone for the last-scan line (default: this computer's)
  */
-export function summarize({ listings, todoItems, postAttempts, scans, memberships, now = nowIso(), timeZone } = {}) {
+export function summarize({ listings, todoItems, postAttempts, scans, memberships, wholeTeam = false, now = nowIso(), timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
@@ -246,6 +254,16 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
   for (const s of S) if (ms(s.taken_at) !== null && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
   const lastScan = last ? scanLine(last, nowAt, zone) : null;
 
+  // ----- listings nobody's extension watches -----
+  // up, and posted by someone who is no longer a member: their extension
+  // stopped syncing when they were removed, and a rescan only flags its own
+  // salesperson's listings, so nothing flags a sale or a price change on them
+  const members = new Set(M.map((m) => m.user_id).filter(Boolean));
+  const unwatched = !wholeTeam ? [] : L
+    .filter((l) => isListed(l) && !(l.user_id && members.has(l.user_id)))
+    .map((l) => ({ vin: vinOf(l), name: text(l.name, 80) || vinOf(l), salesperson: text(l.salesperson, 60), listingUrl: l.listing_url ? String(l.listing_url) : '', postedAt: l.posted_at || null, hoursUp: hoursBetween(l.posted_at, nowAt) }))
+    .sort((a, b) => (b.hoursUp ?? -1) - (a.hoursUp ?? -1) || a.name.localeCompare(b.name));
+
   return {
     now: nowAt,
     timeZone: zone,
@@ -256,9 +274,41 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     totals,
     soldStillListed,
     priceMismatches,
+    unwatched,
+    clear: { sold: clearLine('sold', lastScan, unwatched.length), price: clearLine('price', lastScan, unwatched.length) },
     takeDowns: flagStats(T.filter((f) => f.kind === 'takeDown')),
     priceUpdates: flagStats(T.filter((f) => f.kind === 'price')),
   };
+}
+
+// What an empty "Sold cars still listed" or "Price changes not yet updated"
+// says, and its pill's tone. Only what the rows support: nothing is flagged
+// on a synced listing, each salesperson's extension checks only their own
+// listings, and why that is worth less when there is no scan yet, the last
+// one is old, or some listings are up with nobody watching them. 'good' only
+// when none of those holds; 'warn' for an old scan or unwatched listings; ''
+// when nothing has been scanned yet.
+const CLEAR_WORDS = Object.freeze({
+  sold: { none: 'No sold car is flagged on a synced listing.', since: 'a car sold since then' },
+  price: { none: 'No price change is flagged on a synced listing.', since: 'a price that changed since then' },
+});
+export function clearLine(kind, lastScan, unwatchedCount = 0) {
+  const w = CLEAR_WORDS[kind] || CLEAR_WORDS.sold;
+  const parts = [w.none, 'Each salesperson\'s extension checks their own listings when it rescans.'];
+  let tone = 'good';
+  if (!lastScan) {
+    parts.push('No scan is recorded yet, so nothing has been checked.');
+    tone = '';
+  } else if (lastScan.stale) {
+    parts.push(`The last scan is ${typeof lastScan.hoursAgo === 'number' ? `${lastScan.hoursAgo} h` : 'hours'} old, so ${w.since} is not flagged yet.`);
+    tone = 'warn';
+  }
+  const n = count(unwatchedCount) || 0;
+  if (n) {
+    parts.push(`${n === 1 ? 'One listing is' : `${n} listings are`} up from people no longer in the dealership, and nobody's extension watches ${n === 1 ? 'it' : 'them'} (below).`);
+    tone = 'warn';
+  }
+  return { tone, line: parts.join(' ') };
 }
 
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
