@@ -85,7 +85,7 @@ async function main() {
         await img.decode().catch(() => {});
         return img.naturalWidth;
       });
-      if (icon !== 128) throw new Error(`${name}: the icon did not load (extension/icons/icon128.png)`);
+      if (!icon) throw new Error(`${name}: the mark did not load (site/favicon.svg)`);
       const layout = await page.evaluate(() => {
         const rowsOf = (el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
         const box = document.querySelector('main').getBoundingClientRect();

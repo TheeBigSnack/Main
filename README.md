@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 785 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 800 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # six e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data
@@ -115,6 +115,9 @@ npm run test:site     # every page of site/ in headless Chromium: no console err
 npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (every page of the website, manager view, popup, side panel, the sandbox page)
 npm run test:sql      # the Supabase SQL checks on a local Postgres (PGHOST etc.; CI runs them on Postgres 16)
 npm run check-deploy  # after the Supabase deploy: a checklist of what the live project lets a stranger do (supabase/README.md step 6)
+npm run store-check   # the Chrome Web Store preflight: manifest limits, no code from another host, every module present, the packed zip equals extension/, listing text and image sizes; lists what is still open before a submission (-- --strict: exit 1 while anything is; store/submission.md)
+npm run store-screenshots  # fits the owner's captures in store/screenshots/raw/ onto 1280x800 (store/screenshots.md; both folders stay out of git)
+npm run extension-icon  # redraws extension/icons/icon128.png from site/favicon.svg with the store's 16-pixel transparent margin
 npm run release -- 0.6.0  # stamp a new version in the three files, test and pack; prints the commit, tag and upload steps (docs/release.md)
 npm run survey -- <used-inventory URL> [...]  # a polite look at a real dealer website: its platform, its markup, and what Lot Current reads from it (docs/survey.md; reports in survey-out/)
 ```

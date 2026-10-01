@@ -10,6 +10,7 @@ Context: Lot Current is a Chrome extension that reads a car dealership's own web
 - What is the exposure for Lot Current (the company) and for the salespeople (personal accounts) if Meta disagrees, and how should the Terms, the Posting Rules and the marketing wording describe that risk honestly?
 - Commerce Policies: Marketplace does not allow dealers to list new vehicles and requires vehicle listings to be accurate. Anything else in the vehicle-listing rules we should enforce in the software (e.g. what "condition" and "title status" must mean)?
 - Marketing wording: may we say "a person publishes every post" and "no bots" as a differentiator? Anything to avoid?
+- Chrome Web Store: Google's Developer Agreement (section 4.4.1, as published in Google's developer documentation) forbids an item that knowingly violates a third party's terms of service or accesses a third party's services in an unauthorized manner. Given Meta's "automated means" clause, can we sign that agreement and submit Lot Current as designed (it fills the form; the person publishes), and is there anything the listing or the product should say or change before we do? (`store/submission.md`)
 
 ## 2. The founder's employment at the pilot dealer
 
@@ -39,6 +40,7 @@ Context: Lot Current is a Chrome extension that reads a car dealership's own web
 - Entity formation (LLC in Pennsylvania?) and timing relative to the pilot and IP questions above.
 - Insurance: technology errors and omissions and cyber liability; what limits are sensible for a pilot-stage product.
 - Pennsylvania sales tax on software subscriptions (canned software / SaaS treatment) and what to collect from dealers.
+- Chrome Web Store trader declaration (EU Digital Services Act): a business that sells to dealerships declares itself a trader, and Google verifies and then shows the trader's legal name, address, phone number and email on the store listing. Before the company exists, whose name and address go there, can a mailing address or registered agent stand in for a home address, and should we limit distribution to the United States until this is settled? (`store/submission.md`)
 
 ## 7. Employees posting from personal accounts
 

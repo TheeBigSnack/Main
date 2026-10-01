@@ -461,6 +461,12 @@ Started from the project's setup card ("Deploy the website at lotcurrent.com"). 
 
 ---
 
+## 17. Chrome Web Store preparation (2026-10-01, a thread in the Lot Current project, branch `claude/project-thread-83i5nv`, stacked on the rename branch of section 16)
+
+- **What landed:** `npm run store-check` (`scripts/store-check.mjs`, tested in `test/storeCheck.test.js`, run by CI's pack job): failures for anything wrong now in the package or the listing, and a "not ready to submit" list for what still waits on the owner or the attorney (`-- --strict` fails on those too). `store/submission.md` walks the dashboard tab by tab and names the source file for every answer; `store/screenshots.md` is the shot list, and `npm run store-screenshots` fits the owner's captures onto 1280 x 800 (both folders git-ignored, since they come from a real dealership and a real account). The 128 icon now has the store's 16-pixel transparent margin (`npm run extension-icon`); the promo tiles draw the mark from `site/favicon.svg`. Reviewer test instructions are in `store/listing.md` (one bracket: a public dealership page the owner picks with that dealer's OK). Two attorney questions were added to `legal/questions-for-attorney.md` (sections 1 and 6): Google's Developer Agreement clause on third parties' terms against Meta's "automated means" clause, and the trader declaration's public name and address before the company exists. The attorney packet in the project's shared folder (`launch/attorney/`) was not changed; it needs the same two questions before it is sent.
+- **Policy facts** came from the published source of Google's Web Store docs and search results quoting the live pages (the live pages are blocked here). Unconfirmed: the fee amount, the detailed description's length limit (the check uses 16,000 as a guard), and whether trader details show only in the EU.
+- **Still the owner's:** the developer account and fee, 2-Step Verification, the trader declaration (after the attorney), the five real screenshots, the reviewer page, Search Console verification if the Official URL is wanted, the decision on dropping `https://vehicle-images.carscommerce.inc/*` before the store release, and pressing Submit (Unlisted). `npm run store-check` lists the rest.
+
 ## 11. Quick reference
 ```
 # tests

@@ -111,6 +111,7 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm run pack
+      - run: npm run store-check
       - uses: actions/upload-artifact@v4
         with:
           name: extension-zip

@@ -65,7 +65,7 @@ test('the tile names neither Facebook, Meta nor Marketplace and uses only the ex
   assert.doesNotMatch(visible(tile), /facebook|marketplace|\bmeta\b/i);
   // the icon is the extension's own, from the repo, and nothing is loaded from elsewhere
   const srcs = [...tile.matchAll(/<img[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(srcs, ['../../extension/icons/icon128.png']);
+  assert.deepEqual(srcs, ['../../site/favicon.svg']);
   assert.ok(existsSync(path('../store/images/' + srcs[0])), 'the icon path resolves');
   assert.doesNotMatch(tile, /https?:\/\/|<script|<link/i, 'tile.html loads nothing');
   // every colour is one of the landing page's, so no brand colour of anyone else's slips in

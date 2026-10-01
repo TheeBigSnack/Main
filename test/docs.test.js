@@ -304,7 +304,7 @@ test('the files support.md and the launch checklist say hold the support address
       for (const p of paths) {
         const url = new URL('../' + p, import.meta.url);
         assert.ok(existsSync(url), `${p}, named in docs/${name}, does not exist`);
-        assert.match(readFileSync(url, 'utf8'), /support@|\[support email\]/, `docs/${name} says the support address lives in ${p}, which has no support address or bracket for one`);
+        assert.match(readFileSync(url, 'utf8'), /[\w.+-]+@[\w-]+\.[\w.]+|\[support email\]/, `docs/${name} says the support address lives in ${p}, which has no support address or bracket for one`);
       }
     }
   }
