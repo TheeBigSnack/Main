@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  Lot Sync manager view (Milestone 4): who posted what, sold cars still
+  Lot Current manager view (Milestone 4): who posted what, sold cars still
   listed and for how long, price changes not yet updated; and, from
   Milestone 5, the Billing card (the free pilot, Subscribe and Manage
   billing through Stripe) and, for managers, the Invite codes card (Invite
@@ -25,14 +25,14 @@
   <!-- Scripts only from this folder and the one CDN config.js names; calls only to this origin and Supabase.
        Change the CDN host here too if config.js's supabaseJs moves, and add a functionsUrl host to connect-src. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; img-src 'self' data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
-  <title>Lot Sync manager view</title>
+  <title>Lot Current manager view</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="manager.css">
 </head>
 <body>
   <header class="top">
     <div class="brand">
-      <h1 class="title">Lot Sync</h1>
+      <h1 class="title">Lot Current</h1>
       <div class="site" id="dealer">Manager view</div>
     </div>
     <div class="top-actions" id="actions"></div>
@@ -42,7 +42,7 @@
     <p class="empty">Loading…</p>
     <noscript><p class="empty">This page needs JavaScript.</p></noscript>
   </main>
-  <footer class="foot">Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places salespeople post.</footer>
+  <footer class="foot">Lot Current is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places salespeople post.</footer>
   <script type="module" src="manager.js"></script>
 </body>
 </html>

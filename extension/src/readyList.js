@@ -4,10 +4,10 @@
 // A car's date on the lot comes from the website when it gives one
 // (dateInStock, kept in the snapshot), else from the scan that first saw the
 // car (firstSeenAt, carried from one snapshot to the next; null for a car
-// that was already on the website at Lot Sync's first scan). The date keeps
+// that was already on the website at Lot Current's first scan). The date keeps
 // its source and the words say which: "on the website since ..." may count
-// days on the lot, "Lot Sync first saw it ..." never does, because the car
-// may have sat on the lot long before Lot Sync looked. Nothing here guesses
+// days on the lot, "Lot Current first saw it ..." never does, because the car
+// may have sat on the lot long before Lot Current looked. Nothing here guesses
 // a date: a car with neither is not new and sorts after the dated ones.
 
 import { basisPrice } from './rescan.js';
@@ -73,7 +73,7 @@ function parse(value, { calendar = false } = {}) {
  * When the car came onto the lot, as far as anything knows:
  * { at (ms), source: 'website' | 'lotSync', dateOnly }, or null when
  * neither the website nor a scan says (the car was already there when Lot
- * Sync first scanned the website, or the saved entry predates the dates).
+ * Current first scanned the website, or the saved entry predates the dates).
  * Only the website's date can be a calendar date; a sighting is a moment,
  * even one that fell on midnight.
  */
@@ -136,9 +136,9 @@ export function shortDate(when, { now = Date.now(), locale = undefined, dateOnly
 export function dateLine(entry, { now = Date.now(), locale = undefined } = {}) {
   if (!entry || typeof entry !== 'object') return '';
   const d = lotDate(entry);
-  if (!d) return 'no date on the website, and Lot Sync did not see it arrive';
+  if (!d) return 'no date on the website, and Lot Current did not see it arrive';
   const when = shortDate(d.at, { now, locale, dateOnly: d.dateOnly });
-  if (d.source === 'lotSync') return `Lot Sync first saw it ${when}`;
+  if (d.source === 'lotSync') return `Lot Current first saw it ${when}`;
   const n = daysOnLot(entry, now);
   const onLot = n === 0 ? 'under a day on the lot' : `${n} day${n === 1 ? '' : 's'} on the lot`;
   return `on the website since ${when} · ${onLot}`;

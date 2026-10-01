@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lot Sync website check (`npm run test:site`): serves site/ the way GitHub
+// Lot Current website check (`npm run test:site`): serves site/ the way GitHub
 // Pages does and opens every page of the site map (scripts/site-pages.mjs)
 // in headless Chromium, at a desktop and a phone width, failing on anything
 // a visitor's browser would complain about. Nothing is mocked: the committed

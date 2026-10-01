@@ -68,7 +68,7 @@ export function startServer({ port = 0, host = '127.0.0.1', root = ROOT, quiet =
   return new Promise((ok, fail) => {
     server.on('error', fail);
     server.listen(port, host, () => {
-      if (!quiet) console.log(`Lot Sync test drive: http://${host}:${server.address().port}/demo/`);
+      if (!quiet) console.log(`Lot Current test drive: http://${host}:${server.address().port}/demo/`);
       ok(server);
     });
   });

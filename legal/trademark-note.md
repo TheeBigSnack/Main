@@ -1,6 +1,6 @@
 DRAFT: starting point for attorney review. Not legal advice.
 
-# Trademark note: Facebook, Marketplace, Meta, and "Lot Sync"
+# Trademark note: Facebook, Marketplace, Meta, and "Lot Current"
 
 ## Using Meta's names
 
@@ -15,11 +15,12 @@ DRAFT: starting point for attorney review. Not legal advice.
 
 Same rule: plain names, descriptive use only ("uses the Carfax one-owner flag the website shows"), no logos, no implied partnership.
 
-## "Lot Sync"
+## "Lot Current"
 
-- Before launch: a clearance search on "Lot Sync" / "LotSync" in the USPTO database (classes 9 and 42, software and SaaS), state registrations, domains and app stores, and common-law use in the automotive software space. Similar names in dealer software are likely; an attorney should assess the risk of confusion.
-- If clear: consider an intent-to-use application in classes 9 and 42, and register the domain and handles. If not: pick a new name before any public marketing, since the name is not yet in use.
-- Use the same spelling everywhere (the product currently shows "Lot Sync" in the UI and "LotSync" in some documents; pick one).
+- The product and the business were first called "Lot Sync". On 2026-10-01 the name was found in use by LotSync LLC, which sells dealership software (inventory management and Facebook marketing) to the same customers, with websites at lot-sync.com and lotsync.ai; `lotsync.com` is registered by someone else. To avoid confusion in the same market, the product was renamed **Lot Current** the same day and `lotcurrent.com` was registered. Before that registration, `lotcurrent.com`, `.ai`, `.co` and `.net` had no DNS records. No trademark database was searched.
+- Before launch: a clearance search on "Lot Current" in the USPTO database (classes 9 and 42, software and SaaS), state registrations, domains and app stores, and common-law use in the automotive software space. An attorney should assess the risk of confusion; a second rename is possible if the search finds a conflict.
+- If clear: consider an intent-to-use application in classes 9 and 42, and register the matching handles.
+- Use the same spelling everywhere: "Lot Current", two words, both capitalised. Internal identifiers that people never see (storage keys, alarm names, environment variable names) keep the old `lotsync` spelling so existing installs keep their data.
 
 ## Marketing claims
 

@@ -55,10 +55,10 @@ export async function updateKey(key, change, storage) {
 }
 
 // chrome.storage.local has a fixed quota (10 MB without unlimitedStorage,
-// which Lot Sync does not ask for); a set beyond it rejects with a message
+// which Lot Current does not ask for); a set beyond it rejects with a message
 // naming the quota. This is what the popup, the panel and the worker show
 // instead of an unhandled rejection.
-export const STORAGE_FULL = "Couldn't save: Chrome's storage for Lot Sync is full. Clear the numbers on the Numbers tab, or open an old dealership website and click Clear everything for this website in Settings.";
+export const STORAGE_FULL = "Couldn't save: Chrome's storage for Lot Current is full. Clear the numbers on the Numbers tab, or open an old dealership website and click Clear everything for this website in Settings.";
 
 export function storageErrorText(e) {
   const msg = String((e && e.message) || e || '');

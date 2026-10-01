@@ -1,21 +1,18 @@
-# Lot Sync
+# Lot Current
 
-> Lot Sync is a Chrome extension for dealership salespeople: it fills in the Facebook Marketplace vehicle listing from the dealership's own website, photos included, and a person checks it and clicks Publish. Lot Sync never publishes anything itself.
+> Lot Current is a Chrome extension for dealership salespeople: it fills in the Facebook Marketplace vehicle listing from the dealership's own website, photos included, and a person checks it and clicks Publish. Lot Current never publishes anything itself.
 
-Lot Sync is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used only as the names of the places salespeople post. The prices on the pricing page are planned prices, confirmed with each dealership before any paid subscription starts.
+Lot Current is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used only as the names of the places salespeople post. The prices on the pricing page are planned prices, confirmed with each dealership before any paid subscription starts.
 
 ## Pages
 
-- [Home](/): Lot Sync fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.
-- [How it works](/how-it-works/): Lot Sync reads your website's used inventory, fills in the Marketplace form for each pre-owned car, and rescans to show what sold or changed price.
-- [Pricing](/pricing/): Lot Sync is priced per rooftop per month, with a free pilot first; the planned prices are confirmed with you before any paid subscription starts.
-- [FAQ](/faq/): Straight answers about Lot Sync: whether it is allowed on Facebook, what it reads, where your data is, and why you click Publish, never the tool.
-- [For managers](/for-managers/): The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.
-- [Support](/support/): How to get help with Lot Sync, what to send with a report, what support never asks for, and how to ask for your data to be exported or deleted.
+- [Home](https://lotcurrent.com/): Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.
+- [How it works](https://lotcurrent.com/how-it-works/): Lot Current reads your website's used inventory, fills in the Marketplace form for each pre-owned car, and rescans to show what sold or changed price.
+- [Pricing](https://lotcurrent.com/pricing/): Lot Current is priced per rooftop per month, with a free pilot first; the planned prices are confirmed with you before any paid subscription starts.
+- [FAQ](https://lotcurrent.com/faq/): Straight answers about Lot Current: whether it is allowed on Facebook, what it reads, where your data is, and why you click Publish, never the tool.
+- [For managers](https://lotcurrent.com/for-managers/): The manager view will show who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.
+- [Support](https://lotcurrent.com/support/): How to get help with Lot Current, what to send with a report, what support never asks for, and how to ask for your data to be exported or deleted.
 
 ## Legal
 
-- [Legal documents](/legal/): The Lot Sync Terms of Service, the Privacy Policy and the posting rules for salespeople, each on its own page.
-- [Terms of service](/legal/terms/): The Terms of Service for the Lot Sync browser extension and its related services, for the dealership that subscribes and the people it authorises.
-- [Privacy policy](/legal/privacy/): The Lot Sync Privacy Policy: what we collect, why, who processes it, how long we keep it and how to reach us.
-- [Posting rules](/legal/posting-rules/): The posting rules every salesperson reads before using Lot Sync: you publish every post, pre-owned cars only, the website price, facts only.
+- [Legal documents](https://lotcurrent.com/legal/): The Lot Current Terms of Service, the Privacy Policy and the posting rules for salespeople, each on its own page.

@@ -41,11 +41,11 @@ test('the package script exists and the packed zip is ignored by git', () => {
   assert.match(pkg.engines.node, />=22/);
 });
 
-test('the Web Store listing draft quotes the manifest description word for word and promises nothing Lot Sync cannot', () => {
+test('the Web Store listing draft quotes the manifest description word for word and promises nothing Lot Current cannot', () => {
   const listing = read('../store/listing.md');
   assert.ok(listing.includes(manifest.description), 'store/listing.md must contain the manifest description verbatim: the manifest is the one source');
-  assert.match(listing, /Lot Sync is not affiliated with Meta Platforms, Inc\./);
-  assert.match(listing, /You click Publish\. Lot Sync never does\./);
+  assert.match(listing, /Lot Current is not affiliated with Meta Platforms, Inc\./);
+  assert.match(listing, /You click Publish\. Lot Current never does\./);
   assert.match(listing, /legal\/chrome-web-store-privacy\.md/);
   // one justification per permission and host permission, from the manifest's own list
   for (const p of [...manifest.permissions, ...manifest.host_permissions, ...manifest.optional_host_permissions]) assert.ok(listing.includes('`' + p + '`'), `store/listing.md does not justify "${p}"`);

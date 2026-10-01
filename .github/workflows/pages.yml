@@ -1,15 +1,17 @@
-# Deploys the website (site/) to GitHub Pages: on every push to the default
-# branch and by hand (Actions, Pages, Run workflow). Pages must be set to the
-# GitHub Actions source once (docs/website.md). The claude/* and other work
-# branches never deploy. Nothing is built: site/ is committed as served, and
-# the two --check runs refuse the deploy when a committed page differs from
-# what its generator would write (someone edited an output by hand, or
-# changed site/config.js, a fragment or a legal text without rerunning it).
+# Deploys the website (site/) to GitHub Pages at https://lotcurrent.com: on
+# every push to the repository's default branch and by hand (Actions, Pages,
+# Run workflow, on the default branch). Pages is set to the GitHub Actions
+# source with the custom domain and Enforce HTTPS (docs/website.md). The
+# default branch is read from the repository, never written here, so renaming
+# it needs no change; a push to any other branch starts the workflow and the
+# job is skipped. Nothing is built: site/ is committed as served, and the two
+# --check runs refuse the deploy when a committed page differs from what its
+# generator would write (someone edited an output by hand, or changed
+# site/config.js, a fragment or a legal text without rerunning it).
 name: Pages
 
 on:
   push:
-    branches: [master]   # the repository's default branch; confirm under Settings, General, Default branch
   workflow_dispatch:
 
 # The deploy reads the checkout and asks GitHub's OIDC provider for the
@@ -20,13 +22,15 @@ permissions:
   id-token: write
 
 # One deploy at a time, and a running one finishes: Pages does not take a
-# cancelled deploy well.
+# cancelled deploy well. Runs on other branches (skipped) get a group of their
+# own, so they never queue behind a deploy or push a waiting one out.
 concurrency:
-  group: pages
+  group: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'pages' || format('pages-skipped-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   deploy:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -40,9 +44,9 @@ jobs:
       # Both checks need only Node: no npm ci, no browser.
       - run: node scripts/site-pages.mjs --check
       - run: node scripts/legal-pages.mjs --check
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

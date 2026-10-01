@@ -29,7 +29,7 @@
 // is the switch in the database (signup_settings.open, supabase/README.md
 // "Self-serve sign-up"), and create_dealership refuses everyone while that
 // is off, whatever this says. Turn both on together; with this false the
-// page keeps saying "ask whoever set Lot Sync up for your store".
+// page keeps saying "ask whoever set Lot Current up for your store".
 export const CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',

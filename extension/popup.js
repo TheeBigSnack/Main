@@ -386,7 +386,7 @@ function setupBanner() {
     ? '<b>Set-up is not finished.</b> Pick up where you left off in the side panel.'
     : "<b>First time here?</b> Set-up runs in the side panel: your store, your name, the store's address, the price to post, automatic rescans, the posting rules and the Terms of Service.";
   const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields">Not now</button>' : '';
-  return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Sync'}</button>${later}</div></div>`;
+  return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Current'}</button>${later}</div></div>`;
 }
 
 // When automatic rescans are switched on but cannot run, say so here rather than nowhere.
@@ -394,7 +394,7 @@ function scheduleBanner() {
   const s = state.site;
   if (!s || !s.auto) return '';
   if (state.rescanPermission === false) {
-    return `<div class="banner warn" id="scheduleWarning">Automatic rescans are on, but Lot Sync has no permission to read this website in the background, so they can't run. <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></div>`;
+    return `<div class="banner warn" id="scheduleWarning">Automatic rescans are on, but Lot Current has no permission to read this website in the background, so they can't run. <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></div>`;
   }
   if (s.lastError && (!s.lastScan || String(s.lastAttempt || '') > String(s.lastScan))) {
     return `<div class="banner warn" id="scheduleWarning">The last automatic rescan (${esc(when(s.lastAttempt))}) failed: ${esc(s.lastError)}</div>`;
@@ -661,20 +661,20 @@ const FIELD_LABELS = Object.fromEntries(FORM_MAP.fields.map((f) => [f.key, f.lab
 const secs = (s) => (typeof s === 'number' ? `${s} s` : '—');
 const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
 
-// The Numbers tab: what the pilot agreement lets Lot Sync record, for the
+// The Numbers tab: what the pilot agreement lets Lot Current record, for the
 // weekly check-in and the manager: time per post, fields that could not be
 // filled, how long sold cars and price changes stayed on the salesperson's
 // listings. Kept in this browser, per website; Download CSV is how it leaves,
 // and with accounts the posts and the to-do items also sync (src/sync.js).
 function viewPilot() {
   const synced = accountsConfigured() ? ' While you are signed in, the posts and the to-do items also sync to your dealership\'s account for the manager view.' : '';
-  const lead = `<p class="lead">The numbers your dealership sees, kept in this browser per website: how long each post takes, which form fields Lot Sync couldn't fill, and how long sold cars and price changes stayed on your listings.${synced} No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
+  const lead = `<p class="lead">The numbers your dealership sees, kept in this browser per website: how long each post takes, which form fields Lot Current couldn't fill, and how long sold cars and price changes stayed on your listings.${synced} No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
   if (!hasPilotData(state.pilot)) return lead + empty('Nothing recorded yet. The numbers start with the first post through the side panel.');
   const s = summarizePilot(state.pilot, { labels: FIELD_LABELS });
   const stat = (k, v) => `<tr><td>${k}</td><td class="n">${v}</td></tr>`;
   const notPosted = s.posts.skipped + s.posts.blocked + s.posts.notPosted + s.posts.abandoned;
   const posts = `<h3>Posts <span class="pill ${s.posts.posted ? 'good' : ''}">${s.posts.posted}</span></h3><table class="stats" id="pilotPosts">
-    ${stat('Posted through Lot Sync', s.posts.posted)}
+    ${stat('Posted through Lot Current', s.posts.posted)}
     ${stat('Median time per post <span class="hint">(from the click on Post to "It\'s posted", your review included)</span>', secs(s.posts.medianSeconds))}
     ${stat('Within 60 seconds', s.posts.under60Share === null ? '—' : `${s.posts.under60} of ${s.posts.posted} (${s.posts.under60Share}%)`)}
     ${stat('Fastest / slowest', `${secs(s.posts.fastestSeconds)} / ${secs(s.posts.slowestSeconds)}`)}
@@ -690,7 +690,7 @@ function viewPilot() {
     ? `<table class="stats" id="pilotFields"><tr><th>Field</th><th class="n">Not filled</th><th class="n">Changed by the form afterwards</th></tr>${failing.map((f) => `<tr><td>${esc(f.label)}</td><td class="n">${f.failures} of ${f.attempts} (${f.failureRate}%)</td><td class="n">${f.changed}</td></tr>`).join('')}</table><p class="hint">"Not filled" counts a field that needed a click or couldn't be filled. Copy the side panel's report when it happens; each fix is one line in formMap.js.</p>`
     : `<p class="hint" id="pilotFields">${s.fills.attempts ? 'Every field filled every time.' : 'No form filled yet.'}</p>`);
   const flagTable = (title, t, id) => `<h3>${esc(title)} <span class="pill ${t.open ? 'warn' : t.flagged ? 'good' : ''}">${t.flagged}</span></h3><table class="stats" id="${id}">
-    ${stat('Done', `${t.done}${t.done ? ` (${t.detected} seen on the listing by Lot Sync)` : ''}`)}
+    ${stat('Done', `${t.done}${t.done ? ` (${t.detected} seen on the listing by Lot Current)` : ''}`)}
     ${stat('Median time open, from the scan that flagged it', hrs(t.medianHours))}
     ${stat('Longest', hrs(t.longestHours))}
     ${stat('Still open', t.open ? t.openItems.map((o) => `${esc(o.name)} (${hrs(o.hoursOpen)})`).join('<br>') : '0')}
@@ -741,7 +741,7 @@ function accountFieldset() {
   const last = ss.lastSyncAt ? `Last sync ${esc(when(ss.lastSyncAt))}` : 'Not synced yet';
   const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}` : '';
   const syncHint = state.origin
-    ? `<p class="hint" id="syncStatus">${last}${failed}. Lot Sync also syncs after every rescan and after each post you record.</p>`
+    ? `<p class="hint" id="syncStatus">${last}${failed}. Lot Current also syncs after every rescan and after each post you record.</p>`
     : `<p class="hint" id="syncStatus">Open your dealership's website to sync its listings.</p>`;
   return `<fieldset><legend>Account</legend>
     <p id="accountStatus">Signed in as <b>${esc(email)}</b>${dealership}${planLine}</p>
@@ -771,7 +771,7 @@ function viewSettings() {
     : '';
   const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
   return `<form id="settings" class="settings">
-    <p class="hint" id="version">Lot Sync ${esc(version)} · form map ${esc(FORM_MAP.version)}</p>
+    <p class="hint" id="version">Lot Current ${esc(version)} · form map ${esc(FORM_MAP.version)}</p>
     <fieldset><legend>You</legend>
       ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name"')}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
@@ -819,12 +819,12 @@ function viewSettings() {
       ${!state.site
         ? '<p class="hint">Scan this website once first. Then the permission to read it in the background can be granted here.</p>'
         : state.rescanPermission
-          ? '<p class="hint">Permission to read this website in the background: granted. Lot Sync only reads the website then; it never touches Facebook on its own.</p>'
+          ? '<p class="hint">Permission to read this website in the background: granted. Lot Current only reads the website then; it never touches Facebook on its own.</p>'
           : '<p class="hint">Needs permission to read this website in the background (Chrome will ask). <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></p>'}
     </fieldset>
     ${accountFieldset()}
     <fieldset><legend>Description writer (optional)</legend>
-      <label><input type="checkbox" name="rewriteEnabled" ${s.rewrite.enabled ? 'checked' : ''} /> <span>Use the Lot Sync rewrite service (Claude) for first drafts</span></label>
+      <label><input type="checkbox" name="rewriteEnabled" ${s.rewrite.enabled ? 'checked' : ''} /> <span>Use the Lot Current rewrite service (Claude) for first drafts</span></label>
       ${field('Service address', 'rewriteEndpoint', s.rewrite.endpoint, 'type="url" placeholder="http://localhost:8787"')}
       ${usesAccountRewrite(s)
         ? `<p class="hint" id="rewriteKeyHint">Your sign-in is the key: nothing to type here while you are signed in and the address is your account's rewrite service.</p>`
@@ -837,7 +837,7 @@ function viewSettings() {
         : `<p class="hint" id="legalLinks"><a href="${esc(LEGAL.termsUrl)}" target="_blank" rel="noopener">Terms of Service</a> · <a href="${esc(LEGAL.privacyUrl)}" target="_blank" rel="noopener">Privacy Policy</a></p>
       ${legalIsCurrent(s.legal)
         ? `<p class="hint" id="legalStatus">Accepted ${esc(dateOnly(s.legal.acceptedAt))} (version ${esc(s.legal.version)}).</p>`
-        : `<p class="hint" id="legalStatus">${s.legal.acceptedAt ? `You accepted version ${esc(s.legal.version || 'unknown')} on ${esc(dateOnly(s.legal.acceptedAt))}; the current version is ${esc(LEGAL.version)}` : 'Not accepted yet'}: ${state.wizardDone ? 'tick here to accept.' : 'run Set up Lot Sync, or tick here.'}</p>
+        : `<p class="hint" id="legalStatus">${s.legal.acceptedAt ? `You accepted version ${esc(s.legal.version || 'unknown')} on ${esc(dateOnly(s.legal.acceptedAt))}; the current version is ${esc(LEGAL.version)}` : 'Not accepted yet'}: ${state.wizardDone ? 'tick here to accept.' : 'run Set up Lot Current, or tick here.'}</p>
       <label><input type="checkbox" name="legalAccept" /> <span>I have read and accept the Terms of Service and the Privacy Policy</span></label>`}`}
     </fieldset>
     <div class="actions"><button type="submit" class="plain">Save settings</button><span class="hint" id="saved"></span></div>
@@ -881,8 +881,8 @@ function problemReport() {
   const keysOf = (list) => (Array.isArray(list) && list.length ? list.filter((k) => typeof k === 'string').join(', ') : 'none');
   const permission = state.rescanPermission === null ? 'unknown' : state.rescanPermission ? 'granted' : 'not granted';
   return [
-    'Lot Sync problem report',
-    `Lot Sync version: ${version || 'unknown'}`,
+    'Lot Current problem report',
+    `Lot Current version: ${version || 'unknown'}`,
     `Form map version: ${FORM_MAP.version}`,
     `Website: ${state.origin || 'none open'}`,
     `Adapter: ${site.adapter || 'unknown'}`,
@@ -963,7 +963,7 @@ async function onPanelClick(ev) {
         opened = false;
       }
       await chrome.storage.local.set({ [GLOBAL_KEYS.postRequest]: { origin: state.origin, vin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
-      setStatus(opened ? `Continue in the side panel: ${entry.name}` : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue posting this car.');
+      setStatus(opened ? `Continue in the side panel: ${entry.name}` : 'Open the Lot Current side panel (Chrome menu → Side panel) to continue posting this car.');
       return;
     }
     case 'queue':
@@ -1008,7 +1008,7 @@ async function onPanelClick(ev) {
         return;
       }
       if (btn.dataset.action === 'queue') state.picked.clear(); // the queue has them
-      if (!opened) setStatus('Open the Lot Sync side panel (Chrome menu → Side panel) to work through the queue.');
+      if (!opened) setStatus('Open the Lot Current side panel (Chrome menu → Side panel) to work through the queue.');
       else setStatus(`Queue of ${queue.vins.length}: continue in the side panel.`);
       render();
       return;
@@ -1031,7 +1031,7 @@ async function onPanelClick(ev) {
         opened = false;
       }
       await chrome.storage.local.set({ [GLOBAL_KEYS.upkeepRequest]: item });
-      setStatus(opened ? `Continue in the side panel: ${item.name}` : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue.');
+      setStatus(opened ? `Continue in the side panel: ${item.name}` : 'Open the Lot Current side panel (Chrome menu → Side panel) to continue.');
       return;
     }
     case 'setup': {
@@ -1043,7 +1043,7 @@ async function onPanelClick(ev) {
         opened = false;
       }
       await chrome.storage.local.set({ [GLOBAL_KEYS.setupRequest]: { origin: state.origin, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() } });
-      setStatus(opened ? 'Continue in the side panel.' : 'Open the Lot Sync side panel (Chrome menu → Side panel) to continue set-up.');
+      setStatus(opened ? 'Continue in the side panel.' : 'Open the Lot Current side panel (Chrome menu → Side panel) to continue set-up.');
       return;
     }
     case 'skipSetup':
@@ -1204,7 +1204,7 @@ async function syncNow() {
 
 // On sign-in the rewrite service's address becomes the account's own
 // function. Whether it is used stays the person's choice: the "Use the Lot
-// Sync rewrite service" box is not ticked for them. The key field goes away
+// Current rewrite service" box is not ticked for them. The key field goes away
 // (the sign-in is the key; the panel reads the token where it needs it), and
 // a key typed for a self-hosted backend is kept in case they switch back.
 async function pointRewriteAtAccount() {
@@ -1341,7 +1341,7 @@ async function onSettingsSubmit(ev) {
     }
     if (!state.rescanPermission) {
       state.settings.autoRescan = false;
-      message = 'Saved, but automatic rescans stay off: Lot Sync was not allowed to read this website in the background.';
+      message = 'Saved, but automatic rescans stay off: Lot Current was not allowed to read this website in the background.';
     }
   }
   if (state.settings.autoRescan && !state.site) {

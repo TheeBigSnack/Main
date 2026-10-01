@@ -4,7 +4,7 @@ Every version ships the same way. A person writes the release notes, `npm run re
 
 ## The checklist, in order
 
-1. **The CHANGELOG entry.** At the top of `CHANGELOG.md`, above the last version, a heading in the usual format, `## 0.6.0 (2026-10-12, <what the release is>)`, then its Added, Changed and Fixed lines. For a new major or minor version, also change the README's first line to `# Lot Sync (v0.6)`. These two files may stay uncommitted until step 4; everything else must be committed before step 2.
+1. **The CHANGELOG entry.** At the top of `CHANGELOG.md`, above the last version, a heading in the usual format, `## 0.6.0 (2026-10-12, <what the release is>)`, then its Added, Changed and Fixed lines. For a new major or minor version, also change the README's first line to `# Lot Current (v0.6)`. These two files may stay uncommitted until step 4; everything else must be committed before step 2.
 2. **`npm run release -- 0.6.0`** (or `-- patch`, `-- minor`, `-- major`). Run it with `--dry-run` first: it prints each line it would change and writes nothing. Keep the `--`: without it npm takes `--dry-run` as its own option, and the script then treats that as a dry run too. The script refuses, and writes nothing, when:
    - git shows an uncommitted change outside `CHANGELOG.md` and `README.md`;
    - the version is not greater than the current one, or `extension/manifest.json`, `package.json` and `package-lock.json` disagree about the current one;
@@ -18,11 +18,11 @@ Every version ships the same way. A person writes the release notes, `npm run re
    ```
    git add CHANGELOG.md README.md extension/manifest.json package.json package-lock.json
    git commit -m "Release 0.6.0"
-   git tag -a v0.6.0 -m "Lot Sync 0.6.0"
+   git tag -a v0.6.0 -m "Lot Current 0.6.0"
    git push --follow-tags
    ```
 
-5. **Upload the zip.** In the Chrome Web Store Developer Dashboard: Lot Sync, Package, Upload new package, choose `dist/lot-sync-extension-0.6.0.zip`, then Submit for review. Upload the zip the script packed from the tagged files, not one rebuilt later. The first submission also needs every box in `store/listing.md`, "Before submitting", ticked.
+5. **Upload the zip.** In the Chrome Web Store Developer Dashboard: Lot Current, Package, Upload new package, choose `dist/lot-current-extension-0.6.0.zip`, then Submit for review. Upload the zip the script packed from the tagged files, not one rebuilt later. The first submission also needs every box in `store/listing.md`, "Before submitting", ticked.
 6. **Unlisted first.** Visibility is Unlisted for the pilot and the design partners. It goes Public only after the review passes and the owner says so. Check the visibility on the Distribution page before submitting an update.
 7. **Testers on the zip** get the same file. The README's "Update" section says how to replace the files and reload.
 

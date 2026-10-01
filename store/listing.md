@@ -1,12 +1,12 @@
 # Chrome Web Store listing: draft
 
-The text and the answers for the Developer Dashboard, kept here so they are reviewed like code. `test/manifest.test.js` checks that the summary below is the manifest's description word for word, that every permission in `extension/manifest.json` is justified here, and that nothing here promises what Lot Sync cannot promise. The submission itself is Milestone 5 (PLAN.md): unlisted first.
+The text and the answers for the Developer Dashboard, kept here so they are reviewed like code. `test/manifest.test.js` checks that the summary below is the manifest's description word for word, that every permission in `extension/manifest.json` is justified here, and that nothing here promises what Lot Current cannot promise. The submission itself is Milestone 5 (PLAN.md): unlisted first.
 
 Placeholders in [brackets] and the `lotsync.example` addresses are filled in when the website and the support inbox exist. The addresses are the same as in `extension/src/legalLinks.js`, which the set-up wizard and Settings link to; change both together.
 
 ## Item name
 
-Lot Sync
+Lot Current
 
 ## Summary
 
@@ -16,9 +16,9 @@ Pre-fills Marketplace listings from your dealership's pre-owned inventory for yo
 
 ## Detailed description
 
-Lot Sync is for car dealership salespeople who list their store's used cars on Facebook Marketplace from their own accounts. It reads your dealership website's used inventory, checks that every car is really pre-owned, pre-fills a Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
+Lot Current is for car dealership salespeople who list their store's used cars on Facebook Marketplace from their own accounts. It reads your dealership website's used inventory, checks that every car is really pre-owned, pre-fills a Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
-You click Publish. Lot Sync never does. It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. The one thing it does on its own, and only if you allow it, is re-read your dealership's website every 3 hours while Chrome is open to keep your to-do count current; it never touches Facebook then.
+You click Publish. Lot Current never does. It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. The one thing it does on its own, and only if you allow it, is re-read your dealership's website every 3 hours while Chrome is open to keep your to-do count current; it never touches Facebook then.
 
 What it does
 
@@ -39,17 +39,17 @@ What it won't do
 What it needs
 
 - Chrome 116 or newer.
-- A dealership website Lot Sync can read. Today that is Dealer Inspire websites that use the Cars Commerce inventory search; other platforms come later.
-- Your own Facebook account, signed in as usual. Lot Sync never sees the login.
-- A dealership that has signed up for Lot Sync, and your manager's go-ahead. Your dealership stands behind every listing: the price, the fees and the dealer identification are its responsibility under advertising law.
+- A dealership website Lot Current can read. Today that is Dealer Inspire websites that use the Cars Commerce inventory search; other platforms come later.
+- Your own Facebook account, signed in as usual. Lot Current never sees the login.
+- A dealership that has signed up for Lot Current, and your manager's go-ahead. Your dealership stands behind every listing: the price, the fees and the dealer identification are its responsibility under advertising law.
 
-Meta's Terms prohibit accessing its products "using automated means" without permission. Having a person click Publish is the most careful design available, but it is not a guarantee: we make no promise about how Meta treats any account or listing, and if Facebook ever warns you about your listings, stop and tell your manager. Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.
+Meta's Terms prohibit accessing its products "using automated means" without permission. Having a person click Publish is the most careful design available, but it is not a guarantee: we make no promise about how Meta treats any account or listing, and if Facebook ever warns you about your listings, stop and tell your manager. Lot Current is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.
 
 Support: [support email]. Terms of Service and Privacy Policy: [links, same as below].
 
 ## Category
 
-Productivity. Lot Sync is a work tool for people who sell cars: it prepares listings and keeps them accurate. Shopping is the other candidate because the listings end up on Marketplace, but that category is for extensions that help people buy (price comparison, coupons), and a reviewer landing there would expect one. If the dashboard asks for a subcategory, choose the one nearest to workflow tools.
+Productivity. Lot Current is a work tool for people who sell cars: it prepares listings and keeps them accurate. Shopping is the other candidate because the listings end up on Marketplace, but that category is for extensions that help people buy (price comparison, coupons), and a reviewer landing there would expect one. If the dashboard asks for a subcategory, choose the one nearest to workflow tools.
 
 ## Language
 
@@ -71,13 +71,13 @@ Until then, `npm run screenshots` draws five draft images at 1280 x 800 from the
 
 ## Promo tile
 
-Small promo tile, 440 x 280 (the dashboard says which sizes it takes at submission; the 1400 x 560 marquee is optional): the Lot Sync icon and name on a plain background with the one line "You click Publish. Lot Sync never does." No Facebook or Meta logo, wordmark, brand colour or screenshot in the tile (`legal/trademark-note.md`).
+Small promo tile, 440 x 280 (the dashboard says which sizes it takes at submission; the 1400 x 560 marquee is optional): the Lot Current icon and name on a plain background with the one line "You click Publish. Lot Current never does." No Facebook or Meta logo, wordmark, brand colour or screenshot in the tile (`legal/trademark-note.md`).
 
 Drafts of both are generated by `node scripts/store-images.mjs` into `store/images/`: `promo-small-440x280.png` and `promo-marquee-1400x560.png`, drawn from `store/images/tile.html`. They show the extension's own icon (`extension/icons/icon128.png`), the name and that line in white on the product's green, and nothing else. The script stops when the page's text differs from the line above, and checks each file's width and height in its PNG header before writing it; `test/storeImages.test.js` checks the sizes, that each file is under 1 MB, and that the page has no other words. To change the line, change it here and in `tile.html` together, then run the script again. The owner may replace either file with their own design under the same name and size, within the rules above.
 
 ## Single purpose
 
-Lot Sync helps a car dealership salesperson prepare Facebook Marketplace listings for the dealership's pre-owned vehicles from the dealership's own website inventory, and tells them when a listed car sold or changed price. The person publishes every listing.
+Lot Current helps a car dealership salesperson prepare Facebook Marketplace listings for the dealership's pre-owned vehicles from the dealership's own website inventory, and tells them when a listed car sold or changed price. The person publishes every listing.
 
 ## Permission justifications
 
@@ -91,7 +91,7 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 |---|---|
 | `activeTab` | Reads the inventory search on the dealership website tab the person is looking at when they click Scan. |
 | `scripting` | Runs the read-only scan in that tab, and fills the Marketplace create-listing form the person opened when they click Post. |
-| `storage` | Scans, settings, the posted list and the usage numbers, per website, and the Lot Sync sign-in session, in the person's browser; the profile (name, role, dealership details, listing defaults, the rewrite-service address, the Terms acceptance) in Chrome's sync storage under their own Google account, removable in Settings. |
+| `storage` | Scans, settings, the posted list and the usage numbers, per website, and the Lot Current sign-in session, in the person's browser; the profile (name, role, dealership details, listing defaults, the rewrite-service address, the Terms acceptance) in Chrome's sync storage under their own Google account, removable in Settings. |
 | `sidePanel` | The guided post flow and the set-up wizard run in the side panel so they stay open while the person moves between the dealership tab and the Marketplace tab. |
 | `alarms` | Re-reads a dealership website the person allowed every 3 hours while Chrome is open, to keep the to-do count on the icon current; it never touches Facebook. |
 | `notifications` | One desktop notification when a background rescan adds to the person's to-do list; off in Settings if they prefer. |
@@ -102,7 +102,7 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 
 ## Privacy practices
 
-The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, what the extension sends and to whom, the data-use ticks, the Limited Use certifications and "no remote code"; all of it follows `docs/data-inventory.md`. In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off, and, once Lot Sync accounts are set up, the email address they sign in with); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); personal communications, health and financial, no. Authentication information [Pending attorney answer: questions-for-attorney.md 8.1], location [Pending attorney answer: questions-for-attorney.md 8.2], web history [Pending attorney answer: questions-for-attorney.md 8.3] and user activity [Pending attorney answer: questions-for-attorney.md 8.4] wait for the attorney's answers, and so does the submission. What leaves the browser: reads of the dealership's website, requests for the car's photos to the servers the website names for them when the person fills a form or downloads the photos, the VIN to NHTSA when the person asks, the car's facts to Anthropic through our rewrite service only with the description writer on, and, when the person signs in, their posted list, post timings, to-do items and scan counts to their dealership's records. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotsync.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
+The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, what the extension sends and to whom, the data-use ticks, the Limited Use certifications and "no remote code"; all of it follows `docs/data-inventory.md`. In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off, and, once Lot Current accounts are set up, the email address they sign in with); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); personal communications, health and financial, no. Authentication information [Pending attorney answer: questions-for-attorney.md 8.1], location [Pending attorney answer: questions-for-attorney.md 8.2], web history [Pending attorney answer: questions-for-attorney.md 8.3] and user activity [Pending attorney answer: questions-for-attorney.md 8.4] wait for the attorney's answers, and so does the submission. What leaves the browser: reads of the dealership's website, requests for the car's photos to the servers the website names for them when the person fills a form or downloads the photos, the VIN to NHTSA when the person asks, the car's facts to Anthropic through our rewrite service only with the description writer on, and, when the person signs in, their posted list, post timings, to-do items and scan counts to their dealership's records. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotsync.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
 
 ## Support and homepage
 
@@ -123,5 +123,5 @@ The three document addresses must equal `LEGAL` in `extension/src/legalLinks.js`
 - [ ] The photo-host permission checked by hand in real Chrome (`docs/launch-checklist.md`), and a decision on whether `https://vehicle-images.carscommerce.inc/*` leaves `host_permissions` at this release (PLAN.md, "Decided by the owner on 2026-09-29"); if it does, change the manifest, `legal/chrome-web-store-privacy.md` and this file together.
 - [ ] `npm test` and `npm run test:e2e` green, then `npm run pack`: the zip in `dist/` is what the dashboard takes, and the version in `manifest.json`, `package.json` and `package-lock.json` is one and the same (tested).
 - [ ] Visibility: Unlisted for the pilot and the design partners; Public only after the review passes and the owner says so.
-- [ ] The summary above still equals the manifest description (tested), and the detailed description says who publishes, that Lot Sync is not affiliated with Meta Platforms, Inc., and nothing about what will happen to anyone's account.
+- [ ] The summary above still equals the manifest description (tested), and the detailed description says who publishes, that Lot Current is not affiliated with Meta Platforms, Inc., and nothing about what will happen to anyone's account.
 - [ ] Every [bracketed] placeholder filled in, and no Meta logo, wordmark or brand colour in the icon, the tile or the screenshots.

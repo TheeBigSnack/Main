@@ -102,7 +102,7 @@ test('changelogHasVersion finds the "## x.y.z (" heading and nothing else', () =
 
 test('the README title check matches test/docs.test.js', () => {
   const [major, minor] = CURRENT.split('.');
-  assert.equal(readmeTitle(CURRENT), `# Lot Sync (v${major}.${minor})`);
+  assert.equal(readmeTitle(CURRENT), `# Lot Current (v${major}.${minor})`);
   assert.ok(readmeTitleFits(REAL['README.md'], CURRENT));
   assert.ok(readmeTitleFits(REAL['README.md'], bump(CURRENT, 'patch')), 'a patch keeps the title');
   assert.equal(readmeTitleFits(REAL['README.md'], bump(CURRENT, 'minor')), false);
@@ -116,8 +116,8 @@ test('dirtyPaths lets the release notes through and nothing else', () => {
 });
 
 test('the zip name is the one scripts/pack.mjs writes, and the upload steps come from store/listing.md', () => {
-  assert.equal(zipPath('0.6.0'), 'dist/lot-sync-extension-0.6.0.zip');
-  assert.ok(read('scripts/pack.mjs').includes("join(root, 'dist', `lot-sync-extension-${manifest.version}.zip`)"), 'pack.mjs changed the zip name: change zipPath too');
+  assert.equal(zipPath('0.6.0'), 'dist/lot-current-extension-0.6.0.zip');
+  assert.ok(read('scripts/pack.mjs').includes("join(root, 'dist', `lot-current-extension-${manifest.version}.zip`)"), 'pack.mjs changed the zip name: change zipPath too');
   const boxes = submitSteps(REAL['store/listing.md']);
   assert.ok(boxes.length >= 3, 'store/listing.md has a "Before submitting" checklist');
   assert.ok(boxes.some((b) => b.includes('npm run pack')));
@@ -133,9 +133,9 @@ test('the next steps print the commit, tag and upload for a person to run', () =
   assert.match(text, /npm run test:demo/);
   assert.match(text, /git add CHANGELOG\.md README\.md extension\/manifest\.json package\.json package-lock\.json/);
   assert.match(text, /git commit -m "Release 0\.6\.0"/);
-  assert.match(text, /git tag -a v0\.6\.0 -m "Lot Sync 0\.6\.0"/);
+  assert.match(text, /git tag -a v0\.6\.0 -m "Lot Current 0\.6\.0"/);
   assert.match(text, /git push --follow-tags/);
-  assert.match(text, /Upload dist\/lot-sync-extension-0\.6\.0\.zip/);
+  assert.match(text, /Upload dist\/lot-current-extension-0\.6\.0\.zip/);
   assert.match(text, /Unlisted/);
   assert.match(text, /Before submitting/);
 });
@@ -214,7 +214,7 @@ test('a new minor without the README title is refused; with it, the release goes
   const next = bump(CURRENT, 'minor');
   const w = world({ changelogEntry: next });
   assert.equal(release(['minor'], w.io), 1);
-  assert.match(w.err(), new RegExp(`README\\.md does not open with "# Lot Sync \\(v${next.split('.').slice(0, 2).join('\\.')}\\)"`));
+  assert.match(w.err(), new RegExp(`README\\.md does not open with "# Lot Current \\(v${next.split('.').slice(0, 2).join('\\.')}\\)"`));
   assert.deepEqual(w.writes, []);
   const ok = world({ status: ' M CHANGELOG.md\n M README.md\n', changelogEntry: next, readme: REAL['README.md'].replace(readmeTitle(CURRENT), readmeTitle(next)) });
   assert.equal(release(['minor'], ok.io), 0, ok.err());
@@ -254,7 +254,7 @@ test('a release writes the three files, runs the tests and the pack, then prints
   const lock = JSON.parse(w.files['package-lock.json']);
   assert.equal(lock.version, next);
   assert.equal(lock.packages[''].version, next);
-  assert.ok(w.out().includes(`Lot Sync ${next} is packed: ${zipPath(next)}`));
+  assert.ok(w.out().includes(`Lot Current ${next} is packed: ${zipPath(next)}`));
   assert.match(w.out(), /Nothing was committed, tagged, pushed or uploaded/);
 });
 

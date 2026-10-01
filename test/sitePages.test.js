@@ -22,11 +22,12 @@ import { dirname, join, normalize, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   PAGES, REDIRECTS, NAV, LINE, FOOTER_LINE, FORBIDDEN, PILOT, THEME_COLOR, TITLE_SUFFIX, TITLE_MAX, DESCRIPTION_MAX,
-  fullTitle, rootFor, cspFor, socialAlt, ancestorsOf, textOf, isPlaceholderHost, validateSite, siteUrlReport,
+  fullTitle, rootFor, cspFor, socialAlt, ancestorsOf, textOf, isPlaceholderHost, validateSite, siteUrlReport, listedPages,
 } from '../scripts/site-pages.mjs';
 import { pngSize, parseIco } from '../scripts/favicons.mjs';
 import { MIME, ROOT_FILES, MISSING_PATHS, resolvePath, startPagesServer } from '../scripts/site-check.mjs';
 import { SITE } from '../site/config.js';
+const LEGAL_DRAFT = JSON.parse(readFileSync(new URL('../legal/legal-status.json', import.meta.url), 'utf8')).draft === true;
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const SITE_DIR = join(root, 'site');
@@ -143,7 +144,8 @@ test('canonical, share and favicon tags follow the siteUrl state on every page; 
     const notFound = p.kind === 'notFound';
     const canonical = links(html).filter((l) => l.rel === 'canonical').map((l) => l.href);
     assert.deepEqual(canonical, set && !notFound ? [SITE.siteUrl + p.path] : [], `${p.file}: canonical ${set ? 'is siteUrl + path' : 'is left out while siteUrl is not set'}`);
-    assert.deepEqual(meta(html, 'robots'), notFound ? ['noindex'] : [], `${p.file}: robots noindex on the 404 page only`);
+    const draftLegal = p.kind === 'legal' && LEGAL_DRAFT;
+    assert.deepEqual(meta(html, 'robots'), notFound || draftLegal ? ['noindex'] : [], `${p.file}: robots noindex on the 404 page and on a legal text still marked draft, nowhere else`);
     const og = Object.fromEntries(metas(html).filter((m) => m.property && m.property.startsWith('og:')).map((m) => [m.property, m.content]));
     const tw = Object.fromEntries(metas(html).filter((m) => m.name && m.name.startsWith('twitter:')).map((m) => [m.name, m.content]));
     if (notFound) {
@@ -154,7 +156,7 @@ test('canonical, share and favicon tags follow the siteUrl state on every page; 
     }
     const short = fullTitle(p).slice(0, -TITLE_SUFFIX.length);
     assert.equal(og['og:type'], 'website', `${p.file}: og:type`);
-    assert.equal(og['og:site_name'], 'Lot Sync', `${p.file}: og:site_name`);
+    assert.equal(og['og:site_name'], 'Lot Current', `${p.file}: og:site_name`);
     assert.equal(og['og:title'], short, `${p.file}: og:title`);
     assert.equal(og['og:description'], p.description, `${p.file}: og:description`);
     assert.equal(tw['twitter:card'], 'summary_large_image', `${p.file}: twitter:card`);
@@ -192,7 +194,7 @@ test('the site nav, the breadcrumbs and the footer are the same on every page, m
     assert.match(html, /<a class="skip" href="#main">Skip to content<\/a>/, `${p.file}: the skip link`);
     assert.match(html, /<main id="main">/, `${p.file}: the main landmark`);
     const header = between(html, '<header class="top">', '</header>');
-    assert.ok(header.includes(`<a class="brand" href="${r}">Lot Sync <small>`), `${p.file}: the brand link goes to the home page`);
+    assert.ok(header.includes(`<a class="brand" href="${r}">Lot Current <small>`), `${p.file}: the brand link goes to the home page`);
     const nav = between(header, '<nav aria-label="Site">', '</nav>');
     const items = [...nav.matchAll(/<li><a href="([^"]*)"( aria-current="page")?>([^<]*)<\/a><\/li>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
     assert.deepEqual(items, NAV.map((n) => [href(n.path), n.nav, n === p]), `${p.file}: the nav is NAV in order, aria-current on this page only`);
@@ -292,7 +294,7 @@ test('robots.txt allows everything and names the sitemap once there is one; llms
   assert.deepEqual(robots.slice(2).filter(Boolean), SITE.siteUrl ? [`Sitemap: ${SITE.siteUrl}/sitemap.xml`] : [], 'the Sitemap line exists exactly when siteUrl is set');
   const llms = read('site/llms.txt');
   const lines = llms.split('\n');
-  assert.equal(lines[0], '# Lot Sync', 'an H1 first');
+  assert.equal(lines[0], '# Lot Current', 'an H1 first');
   assert.equal(lines[1], '');
   assert.match(lines[2], /^> \S/, 'a blockquote summary second');
   assert.match(lines[2], /clicks Publish/, 'the summary says who publishes');
@@ -310,7 +312,7 @@ test('robots.txt allows everything and names the sitemap once there is one; llms
     assert.equal(m[3], page.description, `${m[2]}: described with its description`);
     listed.push(page.path);
   }
-  assert.deepEqual(listed, PAGES.filter((p) => p.sitemap).map((p) => p.path), 'exactly the public pages, in map order, and not the 404 page');
+  assert.deepEqual(listed, listedPages(LEGAL_DRAFT).map((p) => p.path), 'exactly the public pages, in map order, not the 404 page and not a legal text still marked draft');
   assert.ok(lines.findIndex((l) => l.startsWith(`- [Legal documents](${SITE.siteUrl}/legal/): `)) > lines.indexOf('## Legal'), 'the legal pages sit under ## Legal');
   assert.ok(lines.findIndex((l) => l.startsWith(`- [Support](${SITE.siteUrl}/support/): `)) < lines.indexOf('## Legal'), 'the other pages sit under ## Pages');
   for (const f of ['site/robots.txt', 'site/llms.txt']) assert.ok(read(f).endsWith('\n') && !read(f).includes('\r'), `${f} ends with a newline`);
@@ -333,7 +335,7 @@ test('siteUrl is not set: the site is not ready to publish', (t) => {
   if (set) {
     const xml = read('site/sitemap.xml');
     assert.match(xml, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
-    assert.deepEqual([...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]), PAGES.filter((p) => p.sitemap).map((p) => SITE.siteUrl + p.path), 'the sitemap lists exactly the public pages');
+    assert.deepEqual([...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]), listedPages(LEGAL_DRAFT).map((p) => SITE.siteUrl + p.path), 'the sitemap lists exactly the public pages, without draft legal texts');
     assert.doesNotMatch(xml, /<lastmod>|<changefreq>|<priority>/, 'no invented dates or priorities');
     assert.equal(read('site/CNAME'), new URL(SITE.siteUrl).hostname + '\n', 'CNAME is the host');
     for (const r of REDIRECTS) assert.ok(read(r.file).includes(`<link rel="canonical" href="${SITE.siteUrl}${r.target}">`), `${r.file} carries the new address as canonical`);
@@ -372,15 +374,15 @@ test('the structured data on every page parses, names schema.org as its vocabula
     if (p.slug === 'home') {
       const org = data['@graph'][0];
       assert.equal(org['@type'], businessFilled ? 'LocalBusiness' : 'Organization');
-      assert.equal(org.name, businessFilled ? SITE.business.name.trim() : 'Lot Sync');
+      assert.equal(org.name, businessFilled ? SITE.business.name.trim() : 'Lot Current');
       if (businessFilled) {
         assert.equal(org.address['@type'], 'PostalAddress');
         for (const k of ['streetAddress', 'addressLocality', 'addressRegion', 'postalCode', 'addressCountry']) assert.equal(org.address[k], SITE.business[k].trim(), `LocalBusiness ${k} is config.js's`);
       }
       const web = data['@graph'].find((n) => n['@type'] === 'WebSite');
-      assert.equal(web.name, 'Lot Sync');
+      assert.equal(web.name, 'Lot Current');
       const app = data['@graph'].find((n) => n['@type'] === 'SoftwareApplication');
-      assert.equal(app.name, 'Lot Sync');
+      assert.equal(app.name, 'Lot Current');
       assert.equal(app.applicationCategory, 'BusinessApplication');
       assert.equal(app.operatingSystem, 'Chrome');
       assert.equal(app.description, p.description);
@@ -525,7 +527,9 @@ test('site/config.js validates, holds no placeholder, and the demo form and the 
   }
   const config = read('site/config.js');
   assert.doesNotMatch(config, /\.example\b|example\.(com|org|net)|yourdomain|placeholder/i, 'config.js carries no placeholder, in its values or its comments');
-  assert.doesNotMatch(config, /mailto:[^'\s]+@/, 'config.js carries no inbox until the owner has one');
+  // an inbox only on the site's own domain, and none before the site has one
+  const domain = SITE.siteUrl ? new URL(SITE.siteUrl).hostname.replace(/^www\./, '') : null;
+  for (const m of config.matchAll(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)) assert.equal(m[1].toLowerCase(), domain, `config.js names an inbox on ${m[1]}, not the site's own domain`);
   // the home page's demo form: in the HTML in every state (test/fn-lead.test.js reads its field names); hidden with the note while closed
   const html = htmlOf(home);
   const form = tagsOf(html, 'form')[0];
@@ -603,7 +607,7 @@ test('honest on every page: who clicks Publish, nothing guaranteed, the non-affi
     const text = visibleText(PAGES.find((p) => p.slug === slug));
     assert.match(text, /Is this allowed on Facebook\?/, `${slug}: the question asked straight`);
     assert.match(text, /clicks? Publish/, `${slug}: the person clicks Publish`);
-    assert.match(text, /Lot Sync never does|never clicks Publish/, `${slug}: Lot Sync never does`);
+    assert.match(text, /Lot Current never does|never clicks Publish/, `${slug}: Lot Current never does`);
     assert.match(text, /safest design available/, `${slug}: the honest line`);
     assert.match(text, /not a guarantee/, `${slug}: not a guarantee`);
   }
@@ -699,5 +703,10 @@ test('the browser checks cover every page: npm run test:site and npm run test:a1
   const a11yAt = ci.indexOf('- run: npm run test:a11y');
   const siteAt = ci.indexOf('- run: npm run test:site');
   assert.ok(a11yAt > 0 && siteAt > a11yAt, 'the demo job runs test:site after test:a11y');
-  assert.match(read('.github/workflows/pages.yml'), /node scripts\/site-pages\.mjs --check[\s\S]*node scripts\/legal-pages\.mjs --check/, 'the Pages workflow refuses to deploy stale pages');
+  const pages = read('.github/workflows/pages.yml');
+  assert.match(pages, /node scripts\/site-pages\.mjs --check[\s\S]*node scripts\/legal-pages\.mjs --check/, 'the Pages workflow refuses to deploy stale pages');
+  // it deploys from the repository's default branch, whatever its name, and only from there
+  assert.doesNotMatch(pages, /branches:/, 'no branch name is written into the Pages workflow');
+  assert.match(pages, /^ {4}if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)$/m, 'the deploy job runs only on the default branch');
+  assert.match(pages, /path: site\n/, 'it deploys site/ and nothing else');
 });
