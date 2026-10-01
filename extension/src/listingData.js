@@ -54,10 +54,46 @@ const BRANDED = new RegExp(
     ')\\b',
   'i',
 );
+// Mentions of those words that are about something else, read as no brand:
+// a program or a finance offer ("qualifies for the CARFAX Buyback
+// Guarantee", "3-day buyback", "lien-free title", "we pay off your lien",
+// "the lien on your trade"). A "buyback program" or a "lien payoff" stays a
+// mention: either can be this car's own history.
+const NOT_A_BRAND = new RegExp(
+  [
+    'buy[\\s-]?back\\s+(?:guarantee|protection|pledge)',
+    '\\d+[\\s-]*days?\\s+buy[\\s-]?back',
+    '\\blien[\\s-]*free',
+    'free\\s+(?:and|&)\\s+clear\\s+of\\s+(?:all\\s+|any\\s+)?liens?',
+    "\\b(?:your|trade(?:[\\s-]?in)?(?:['\u2019]s)?)\\s+lien",
+    '\\blien\\s+on\\s+your\\b',
+  ].join('|'),
+  'gi',
+);
+// A mention the same clause denies: "no salvage history", "never a
+// buyback", "not a rebuilt title", "without flood damage", "has never been
+// flooded". Only a few small words may stand between the denial and the
+// word, and any punctuation ends it, so "No accidents, salvage title",
+// "Do not miss this rebuilt title" and "Not salvage, but rebuilt" are still
+// brands. A list joined by "or"/"nor" carries the denial ("no salvage or
+// flood damage"); "and" does not.
+const FILLER = '(?:a|an|any|the|been|ever|prior|previous|previously|known|reported|history|of|record|records|sign|signs|evidence)';
+const DENIED = new RegExp(`\\b(?:no|never|not|without|zero|free\\s+of|(?:is|was|has|have|had)n['\u2019]t)\\s+(?:${FILLER}\\s+)*$`, 'i');
+const DENIAL_GOES_ON = new RegExp(`^\\s+(?:or|nor)\\s+(?:${FILLER}\\s+)*$`, 'i');
 export function brandedTitleSignal(v = {}) {
-  const hay = [v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), v.name, v.trim, v.siteTitle].filter(Boolean).join(' ');
-  const m = BRANDED.exec(hay);
-  return m ? m[1] : '';
+  // each part read on its own: a denial never reaches from one feature or field into the next
+  const hay = [v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), v.name, v.trim, v.siteTitle].filter(Boolean).join(' | ');
+  const text = hay.replace(NOT_A_BRAND, (s) => '#'.repeat(s.length));
+  let deniedUpTo = -1;
+  for (const m of text.matchAll(new RegExp(BRANDED.source, 'gi'))) {
+    const before = text.slice(Math.max(0, m.index - 80), m.index);
+    if (DENIED.test(before) || (deniedUpTo >= 0 && DENIAL_GOES_ON.test(text.slice(deniedUpTo, m.index)))) {
+      deniedUpTo = m.index + m[0].length;
+      continue;
+    }
+    return m[1];
+  }
+  return '';
 }
 
 // What kind of vehicle this is, by Marketplace's vehicle types. Lot Current

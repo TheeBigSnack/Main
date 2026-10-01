@@ -141,6 +141,61 @@ test('a branded title is caught in the usual ways a website writes it, and ordin
   }
 });
 
+test('a denied mention or a program or finance offer is not a brand; the same words stated of the car still are', () => {
+  // a clean car: the dealership's Clean default stands and the box is ticked
+  const notBrands = [
+    'No accidents, no salvage history, never a buyback.',
+    'Carfax shows no flood damage.',
+    'Without flood damage.',
+    'Not a rebuilt title.',
+    'Never salvaged, never rebuilt.',
+    'Has never been flooded.',
+    "Isn't a lemon.",
+    'No salvage or flood damage.',
+    'No lien on the title.',
+    'Clean title, no lemon buyback, no flood damage.',
+    'This vehicle qualifies for the CARFAX Buyback Guarantee.', // the lot-wide line many websites add to every used car
+    'Ask about our 3-day buyback guarantee.',
+    'AutoCheck Buyback Protection included.',
+    'We will pay off your lien!',
+    "We'll pay off the lien on your trade.",
+    'Lien-free title in hand.',
+    'Free and clear of all liens.',
+  ];
+  for (const words of notBrands) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded], ['Clean', 'yes', ''], words);
+  }
+  // a brand the text states is still read, even near a denial or a program word
+  const brands = {
+    'This vehicle has a rebuilt title.': 'rebuilt', // a lot-wide line like this one still counts
+    'No accidents, salvage title.': 'salvage',
+    'No accidents salvage title': 'salvage',
+    'Do not miss this rebuilt title truck.': 'rebuilt',
+    'Not salvage, but rebuilt.': 'rebuilt',
+    'Not salvage but rebuilt.': 'rebuilt',
+    'No warranty. Salvage title.': 'Salvage',
+    'No hassle, salvage title.': 'salvage',
+    'No accidents reported, but this is a rebuilt title.': 'rebuilt',
+    'Never a buyback guarantee on a salvage title.': 'salvage',
+    'Manufacturer buyback program vehicle.': 'buyback',
+    'Lien payoff in process.': 'Lien',
+    'Lien on title.': 'Lien',
+    'Qualifies for the CARFAX Buyback Guarantee. Lemon law buyback.': 'Lemon law buyback',
+    'No salvage and flood damage repaired.': 'flood damage',
+  };
+  for (const [words, signal] of Object.entries(brands)) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), signal, words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle], ['', 'no'], words);
+  }
+  // a denial never reaches from one feature or field into the next
+  assert.equal(brandedTitleSignal({ features: ['Backup Camera', 'No', 'Salvage Title'] }), 'Salvage');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Runs great, no', features: ['Rebuilt Title'] }), 'Rebuilt');
+  assert.equal(brandedTitleSignal({ features: ['No Accidents', 'No Salvage History'] }), '');
+});
+
 test('blank values are reported, never guessed', () => {
   const v = vehicle('usedNoCarfax', { styles: { interior_color: 'Titanium' }, mechanical: { fuel_type: 'Unknown' } });
   const d = buildListingData(v, { dealer: {}, price: null });
