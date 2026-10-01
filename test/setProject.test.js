@@ -64,7 +64,8 @@ test('setField refuses a file it cannot read the one line from, and quotes what 
 test('the supabase-js address is pinned to an exact version; a bare major or a tag is not', () => {
   assert.ok(isPinnedClient(CONFIG.supabaseJs), CONFIG.supabaseJs);
   assert.ok(isPinnedClient('./vendor/supabase-js-2.117.2.js'));
-  for (const loose of ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@latest/+esm', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm', 'https://esm.sh/@supabase/supabase-js@2.117.2', '']) {
+  // a CDN is refused even pinned: the page's policy allows scripts from its own origin only
+  for (const loose of ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@latest/+esm', 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm', 'https://esm.sh/@supabase/supabase-js@2.117.2', './vendor/supabase-js.js', './vendor/supabase-js-2.js', './vendor/other.js', '../vendor/supabase-js-2.117.2.js', '']) {
     assert.equal(isPinnedClient(loose), false, loose);
   }
 });

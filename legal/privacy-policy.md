@@ -29,7 +29,6 @@ We do **not** collect Facebook passwords, cookies, session tokens, messages, buy
 - **Anthropic**: drafts descriptions and guesses colours through its API, only with the description writer on. It receives the rewrite request above and up to four photo addresses. Anthropic's API terms apply.
 - **Stripe**: billing. It receives the dealership's name and website address and a manager's email, and collects the card and billing details itself.
 - **Google**: Chrome's sync storage keeps the profile under the User's own Google account, and the Chrome Web Store distributes the extension; Google's terms apply. [Pending attorney answer: questions-for-attorney.md 8.8]
-- **jsDelivr**: serves the database library the manager view loads, unless we serve that file ourselves; like any download, it sees the manager's IP address and browser. [Pending attorney answer: questions-for-attorney.md 8.8]
 - **[hosting provider]**: serves our website and the manager view; its access logs see visitors' IP addresses and browsers.
 - **[email provider]**: sends the sign-in emails (our database host's own sender does until we set this up) and holds our inbox.
 

@@ -14,7 +14,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
@@ -833,16 +834,18 @@ test('sign-in comes back as a PKCE code to the page\'s own address, and the page
   const csp = (html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
   assert.ok(csp, 'index.html carries a CSP');
   const script = (csp.match(/script-src ([^;]+)/) || [])[1] || '';
-  assert.match(script, /'self'/);
-  assert.doesNotMatch(script, /\*|'unsafe-inline'|'unsafe-eval'|data:/, 'no wildcard or inline script source');
-  assert.ok(script.includes(new URL(CONFIG.supabaseJs).origin), 'the CDN the client loads from is the one script host allowed');
-  assert.match(csp, /connect-src 'self' https:\/\/\*\.supabase\.co/);
+  // scripts from this origin alone: any other host that serves code of anyone's choosing (a CDN of every npm
+  // package and GitHub file) would let one missed esc() load an attacker's script with the manager's session
+  assert.equal(script.trim(), "'self'", 'scripts from the page\'s own origin only');
+  assert.match(CONFIG.supabaseJs, /^\.\/vendor\//, 'the client is served next to the page, so \'self\' covers it');
+  assert.equal((csp.match(/connect-src ([^;]+)/) || [])[1], "'self' https://*.supabase.co", 'calls only to this origin and Supabase');
+  assert.doesNotMatch(csp, /jsdelivr|unpkg|esm\.sh|cdnjs|skypack/i);
   assert.match(csp, /object-src 'none'/);
   assert.match(csp, /base-uri 'none'/);
   assert.doesNotMatch(read('manager/manager.js') + read('manager/data.js'), /style="/, 'no inline style: style-src is \'self\'');
 });
 
-test('config.js: six fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {
+test('config.js: six fields, empty means not configured, the client is served next to the page, the functions default to the project\'s own', () => {
   assert.deepEqual(Object.keys(CONFIG).sort(), ['billing', 'functionsUrl', 'selfServeSignup', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
   assert.equal(CONFIG.selfServeSignup, false, 'the form stays hidden until the owner opens sign-up');
   // billing is off until docs/stripe-setup.md step 5 deploys the function, and that step is what turns it on
@@ -854,10 +857,47 @@ test('config.js: six fields, empty means not configured, the client comes from t
   assert.equal(typeof CONFIG.supabaseUrl, 'string');
   assert.equal(typeof CONFIG.supabaseAnonKey, 'string');
   assert.equal(CONFIG.functionsUrl, '', 'empty: the project\'s own /functions/v1');
-  assert.match(CONFIG.supabaseJs, /^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/);
+  assert.equal(CONFIG.supabaseJs, `./vendor/${SUPABASE_JS.file}`);
   const js = read('manager/manager.js');
   assert.match(js, /CONFIG\.supabaseUrl && CONFIG\.supabaseAnonKey/, 'an empty url means not configured');
   assert.match(js, /trimSlash\(CONFIG\.functionsUrl\) \|\| trimSlash\(CONFIG\.supabaseUrl\) \+ '\/functions\/v1'/, 'the function base is the configured one, else the project URL plus /functions/v1');
+});
+
+// The supabase-js the page runs: the npm package's own one-file build
+// (package/dist/umd/supabase.js of @supabase/supabase-js@2.117.2, whose
+// tarball matched the registry's integrity value), byte for byte, then one
+// line that makes it an ES module. A changed byte is a different client
+// running with the manager's session, so it fails here until the hash is
+// moved on purpose (manager/config.js says how).
+const SUPABASE_JS = Object.freeze({
+  file: 'supabase-js-2.117.2.js',
+  upstreamSha256: '59d39487c3589843b410322d8a3d562ce022aba1e5ccb16898ef3fb2a0da2ecd',
+  tail: '\n// Lot Current: the build above is a script that defines `supabase`; this line makes it the ES module manager.js imports.\nexport const { createClient } = supabase;\n',
+});
+
+test('the vendored supabase-js is the npm build unchanged plus one export line, loads as the module the page imports, and carries its licenses', async () => {
+  const bytes = readFileSync(join(root, 'manager/vendor', SUPABASE_JS.file));
+  const text = bytes.toString('utf8');
+  assert.ok(text.endsWith(SUPABASE_JS.tail), 'the one added line is the last');
+  const upstream = bytes.subarray(0, bytes.length - Buffer.byteLength(SUPABASE_JS.tail));
+  assert.equal(createHash('sha256').update(upstream).digest('hex'), SUPABASE_JS.upstreamSha256, 'the build itself is unchanged');
+  assert.doesNotMatch(text, /\bimport\s*\(|^\s*import\s/m, 'one file: it fetches no other module');
+  assert.deepEqual(readdirSync(join(root, 'manager/vendor')).sort(), ['LICENSES.txt', SUPABASE_JS.file], 'nothing else is served from vendor/');
+  // the page's import(), and the client it makes, here with a fetch that never leaves the test
+  const mod = await import(pathToFileURL(join(root, 'manager/vendor', SUPABASE_JS.file)).href);
+  assert.deepEqual(Object.keys(mod), ['createClient']);
+  const calls = [];
+  const client = mod.createClient('https://abcdefghijklmnopqrst.supabase.co', 'sb_publishable_test', { auth: { flowType: 'pkce', persistSession: false }, global: { fetch: async (url) => { calls.push(String(url)); return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }); } } });
+  const { error } = await client.auth.signInWithOtp({ email: 'manager@example.test', options: { emailRedirectTo: 'https://manage.example.test/' } });
+  assert.equal(error, null);
+  assert.deepEqual(calls.map((u) => new URL(u).pathname), ['/auth/v1/otp']);
+  assert.equal(typeof globalThis.supabase, 'undefined', 'it leaves no global behind');
+  // the licenses of what the build bundles travel with it
+  const licenses = readFileSync(join(root, 'manager/vendor/LICENSES.txt'), 'utf8');
+  for (const name of ['@supabase/supabase-js', '@supabase/auth-js', '@supabase/postgrest-js', '@supabase/realtime-js', '@supabase/storage-js', '@supabase/functions-js', '@supabase/phoenix', 'iceberg-js', 'tslib']) assert.ok(licenses.includes(name), name);
+  assert.match(licenses, /Copyright \(c\) 2020 Supabase/);
+  assert.match(licenses, /Copyright \(c\) 2014 Chris McCord/);
+  assert.match(licenses, /Copyright \(c\) Microsoft Corporation\./);
 });
 
 test('the page types no price: the pilot length and the included seats come from the status answer', () => {

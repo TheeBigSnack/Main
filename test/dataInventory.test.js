@@ -54,9 +54,17 @@ function walk(dir, out = []) {
 
 // The code that ships: the extension, the manager view, the website and the
 // Edge Functions (backend/ talks to Anthropic through its SDK and names no host).
+// manager/vendor/ is left out: it is supabase-js's own build, served next to
+// the page instead of from a CDN, unchanged and pinned by its hash
+// (test/manager.test.js). Its text names hosts in error messages it never
+// contacts and storage of features the page does not use; what it does for
+// the page (the session in localStorage, the calls to the project) is in the
+// manager view's rows, as it was when a CDN served it.
+const VENDORED = /^manager\/vendor\//;
 const SHIPPED = [...walk('extension'), ...walk('manager'), ...walk('site'), ...walk('supabase/functions'), ...walk('backend')]
   .filter((f) => /\.(js|mjs|ts|html)$/.test(f) || f === 'extension/manifest.json')
-  .filter((f) => !/package(-lock)?\.json$/.test(f));
+  .filter((f) => !/package(-lock)?\.json$/.test(f))
+  .filter((f) => !VENDORED.test(f));
 const source = (f) => (/\.html$/.test(f) ? stripHtmlComments(read(f)) : /\.json$/.test(f) ? read(f) : stripComments(read(f)));
 
 // The text from a heading to the next heading of the same or a higher level.

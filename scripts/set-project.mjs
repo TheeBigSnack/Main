@@ -12,8 +12,9 @@
 //
 // --check is what the manager view's deploy workflow runs first: both files
 // filled, the same project and key, a browser-safe key, and the supabase-js
-// address pinned to an exact version (the page runs it with the manager's
-// session, so a new release must not reach it unreviewed).
+// address pinned to an exact version served from the page's own folder (the
+// page runs it with the manager's session, so a new release must not reach it
+// unreviewed, and its Content-Security-Policy allows scripts from 'self' only).
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -43,12 +44,12 @@ export function keyProblem(key) {
   return '';
 }
 
-// supabase-js from jsDelivr at an exact version (…@2.117.2/+esm), or a copy
-// served next to the page (./vendor/…). A bare major (@2) or a tag is not pinned.
+// supabase-js as the copy served next to the page at an exact version
+// (./vendor/supabase-js-2.117.2.js). A CDN address is refused even when it is
+// pinned: the page's Content-Security-Policy allows scripts from its own
+// origin only, so the page would not load it (manager/config.js says why).
 export function isPinnedClient(address) {
-  const a = String(address || '');
-  if (/^\.\/vendor\/[\w.-]+\.js$/.test(a)) return true;
-  return /^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@\d+\.\d+\.\d+\/\+esm$/.test(a);
+  return /^\.\/vendor\/supabase-js-\d+\.\d+\.\d+\.js$/.test(String(address || ''));
 }
 
 const quote = (v) => `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -84,7 +85,7 @@ export function readiness({ account = {}, manager = {} } = {}) {
   const kp = keyProblem(manager.supabaseAnonKey);
   if (kp) problems.push(`manager/config.js supabaseAnonKey: ${kp}`);
   if (aUrl !== mUrl || account.anonKey !== manager.supabaseAnonKey) problems.push('extension/src/accountConfig.js and manager/config.js name different projects or keys: run npm run set-project');
-  if (!isPinnedClient(manager.supabaseJs)) problems.push(`manager/config.js supabaseJs is not pinned to an exact version: ${manager.supabaseJs || '(empty)'}`);
+  if (!isPinnedClient(manager.supabaseJs)) problems.push(`manager/config.js supabaseJs is not pinned to an exact version served from manager/vendor/: ${manager.supabaseJs || '(empty)'}`);
   if (manager.functionsUrl) problems.push('manager/config.js functionsUrl is set: the page\'s Content-Security-Policy and this check expect the project\'s own /functions/v1');
   return problems;
 }
