@@ -78,7 +78,7 @@ function fields(form) {
 function mailtoFor(data) {
   const lines = Object.entries(data).filter(([k]) => k !== 'company_url').map(([k, v]) => `${k}: ${v}`);
   const sep = SITE.demoMailto.includes('?') ? '&' : '?';
-  return `${SITE.demoMailto}${sep}subject=${encodeURIComponent('Lot Current demo request')}&body=${encodeURIComponent(lines.join('\n'))}`;
+  return `${SITE.demoMailto}${sep}subject=${encodeURIComponent('Lot Current demo request')}&body=${encodeURIComponent(lines.join('\r\n'))}`;
 }
 
 // The demo request form is open once config.js names an endpoint or an
