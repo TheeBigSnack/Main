@@ -123,7 +123,7 @@ export function probeInPage() {
   const usedTitle = /\b(?:used|pre-?owned|preowned|certified)\b/i.test(title)
     && !/\bnew\s*(?:,|&|&amp;|\+|\/|and|or)\s*(?:used|pre-?owned|preowned|certified)\b|\b(?:used|pre-?owned|preowned|certified)\s*(?:,|&|&amp;|\+|\/|and|or)\s*new\b|\bnew\s+(?:cars|vehicles|trucks|suvs|inventory)\b/i.test(title);
   const routePath = (u) => (isRoute(u) ? u.hash.replace(/^#!?/, '').split('?')[0] : '');
-  const atRoot = here.pathname.replace(/\/+$/, '') === '' && routePath(here).replace(/\/+$/, '') === '';
+  const atRoot = /^\/?(?:(?:index|default|home)(?:\.[a-z]+)?\/?)?$/i.test(here.pathname) && routePath(here).replace(/\/+$/, '') === '';
   // The words of an address's path, segment by segment.
   const pathWords = (u) => {
     let p = u.pathname + routePath(u);
@@ -1408,12 +1408,15 @@ export async function getDetails(search, vin, options = {}) {
     // shows the car. A file is passed over; a page that fails ends the
     // search with its error, since the car's own page may be the one failing.
     const withVin = page.parsed.facts.links.map((h) => onSite(h, null, origin)).filter((u) => u && !fileAddress(u.href) && vinInAddress(u.href) === wanted);
-    const links = [...withVin.filter((u) => vinInPath(u.href) === wanted), ...withVin.filter((u) => vinInPath(u.href) !== wanted)].slice(0, MAX_ADDRESSES_PER_CAR);
+    const ordered = [...withVin.filter((u) => vinInPath(u.href) === wanted), ...withVin.filter((u) => vinInPath(u.href) !== wanted)];
+    const links = ordered.slice(0, MAX_ADDRESSES_PER_CAR);
     for (const link of links) {
       const r = await carFromPage(site, wanted, link.href);
       if (r.record) return done(r.record);
       if (r.error && !r.file) return { ok: false, message: r.error };
     }
+    // links left unread may hold its page: never "gone" on that
+    if (ordered.length > links.length && !listedNode) return { ok: false, message: "Couldn't tell which of this car's links on the website is its page. Scan the website again, then post." };
     if (links.length && !listedNode) return done(null);
     if (listedNode) return done(listRecord({ node: listedNode, page: listPage, facts: page.parsed.facts }, links.length ? links[0].href : listPage, false));
     const next = page.parsed.facts.next ? onSite(page.parsed.facts.next, null, origin) : null;

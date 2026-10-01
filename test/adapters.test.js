@@ -590,6 +590,7 @@ test('schemaOrg probe: a list of cars, one car\'s page, a page that links to the
   // the home page is not the list whatever its title; nor is a page whose title names new cars as well
   const usedHome = `<!doctype html><html><head><title>Used Cars for Sale | Sample Motors</title></head><body><a href="/inventory/">Our cars</a> <a href="/used/">Used</a> ${cards}</body></html>`;
   assert.deepEqual(await on('/', { html: usedHome }), { ...SERVICE, listUrl: O + '/used/' });
+  assert.deepEqual(await on('/index.html', { html: usedHome }), { ...SERVICE, listUrl: O + '/used/' });
   const both = `<!doctype html><html><head><title>New Cars | Used Cars | Sample Motors</title></head><body><a href="/used-vehicles/">Shop used</a> ${cards}</body></html>`;
   assert.deepEqual(await on('/inventory/', { html: both }), SERVICE);
   // the link to the used list: the one whose words say so, else the one whose address is only inventory words,
@@ -1120,6 +1121,12 @@ test('schemaOrg scan: a car with more addresses than one scan reads, none of tho
   const res = await schemaOrg.scan(search, schemaOrg.scanOptions(SERVICE));
   assert.deepEqual([res.ok, res.total, res.complete], [true, 2, false], res.message);
   assert.equal(search.calls.length, 1 + 2 * MAX_ADDRESSES_PER_CAR, 'never more than the most addresses per car');
+  // at post time too: never more, and a car whose page may be among the links not read is not called gone
+  const post = fakeSiteSearch(m);
+  const d = await schemaOrg.getDetails(post, cars[0].vin, schemaOrg.scanOptions(SERVICE));
+  assert.equal(d.ok, false);
+  assert.match(d.message, /Scan the website again/);
+  assert.equal(post.calls.length, 1 + MAX_ADDRESSES_PER_CAR);
 });
 
 test('schemaOrg getDetails: the car\'s own page from the address the last scan kept; the list when that page is unknown', async () => {
