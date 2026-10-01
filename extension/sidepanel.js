@@ -530,19 +530,14 @@ async function rewriteWithKey(rewrite) {
   return { ...rw, key: rewriteKeyFor({ rewrite: rw, session: s.ok ? s.session : null, config: ACCOUNT }) };
 }
 
-// The vehicle as the description writer should see it: a guessed color
-// fills in only where the website gives none.
-function vehicleForText() {
-  const v = state.vehicle;
-  const g = state.colorGuess || {};
-  return { ...v, exteriorColor: v.exteriorColor || g.exterior || '', interiorColor: v.interiorColor || g.interior || '' };
-}
-
+// The description is written from the website's record only (CLAUDE.md
+// rule 6). A colour guessed from the photos goes on the form's colour
+// fields, listed there as assumed, and never into the text as a fact.
 async function generate({ useClaude } = {}) {
   const s = state.settings;
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
   const settings = { ...s, rewrite };
-  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
+  const r = await generateDescription({ vehicle: state.vehicle, dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
   state.highlightsUsed = settleHighlights(state.highlights, state.vehicle.features);
   state.description = r.text;
   state.descriptionSource = r.source;
@@ -1715,8 +1710,7 @@ async function onClick(ev) {
     case 'guessColors': {
       btn.disabled = true;
       setStatus('Looking at the photos…');
-      await maybeGuessColors(true);
-      await generate();
+      await maybeGuessColors(true); // the form's colour fields only: the description stays as it is
       setStatus(state.colorGuess && state.colorGuess.error ? '' : 'Colors guessed from the photos; check them on the form.');
       render();
       return saveFlow();

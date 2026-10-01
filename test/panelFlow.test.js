@@ -544,3 +544,54 @@ test('one click on Open the Marketplace form opens one form: a second click whil
   assert.equal(await stopped(), undefined);
   assert.equal(state.opening, false);
 });
+
+// ---------- a colour guessed from the photos goes on the form, never into the description ----------
+import * as rewriter from '../extension/src/rewriter.js';
+
+// A top-level function compiled with the given scope, plus the panel's own
+// top-level helpers it calls that the scope does not stub, compiled from the source too.
+function compileWithOwnHelpers(name, scope) {
+  const own = [...new Set([...fnText(name).matchAll(/\b([A-Za-z_]\w*)\(/g)].map((m) => m[1]))]
+    .filter((n) => n !== name && !(n in scope) && new RegExp(`^(async )?function ${n}\\(`, 'm').test(src));
+  const names = Object.keys(scope);
+  return new Function(...names, `${own.map(fnText).join('\n')}\n${fnText(name)}\nreturn ${name};`)(...names.map((n) => scope[n]));
+}
+
+test('a colour guessed from the photos goes on the form, never into the description', async () => {
+  const car = { ...CAR, exteriorColor: '', interiorColor: '' }; // the website gives no colour
+  const guess = { exterior: 'Gray', interior: 'Black', confidence: 'low' };
+  const written = async (rewrite) => {
+    const seen = [];
+    const state = { settings: { ...SETTINGS, rewrite }, vehicle: car, price: 20986, noteApplies: true, colorGuess: guess, boilerplate: [], origin: 'https://www.example-dealer.test', highlights: null };
+    const generate = compileWithOwnHelpers('generate', {
+      state,
+      rewriteWithKey: async (rw) => rw,
+      generateDescription: (args) => {
+        seen.push(args.vehicle);
+        return rewriter.generateDescription({ ...args, fetchImpl: async (_url, init) => { seen.push(JSON.parse(init.body)); return { ok: false, status: 503, json: async () => ({}) }; } });
+      },
+      noteFor: () => '',
+      settleHighlights: template.settleHighlights,
+      LAPSED_MESSAGE: 'lapsed', LAPSED_SENTENCE: 'Lapsed',
+    });
+    await generate();
+    return { seen, description: state.description };
+  };
+  for (const rewrite of [{ enabled: false }, { enabled: true, endpoint: 'https://rewrite.example.test', key: 'k' }]) {
+    const { seen, description } = await written(rewrite);
+    assert.equal(seen.length, rewrite.enabled ? 2 : 1, 'the writer ran, and with the service on the facts went to it');
+    for (const facts of seen) {
+      assert.equal(facts.exteriorColor || '', '', `the writer is given the website's exterior colour only (${rewrite.enabled ? 'rewrite service' : 'template'})`);
+      assert.equal(facts.interiorColor || '', '', `the writer is given the website's interior colour only (${rewrite.enabled ? 'rewrite service' : 'template'})`);
+    }
+    assert.doesNotMatch(description, /\bGray\b|\bBlack\b/, 'the guess is not stated in the description');
+  }
+  // the guess still goes on the form's colour fields, listed as assumed with its confidence
+  const listing = listingData.buildListingData(car, { guesses: guess, price: 20986 });
+  assert.deepEqual([listing.fields.exteriorColor, listing.fields.interiorColor], ['Gray', 'Black']);
+  assert.match(listing.assumed.find((a) => a.key === 'exteriorColor').why, /guessed from the photos \(low confidence\)/);
+  // "Guess from the photos" changes the form's colours only: it does not rewrite the description (or the person's edits to it)
+  const click = src.slice(src.indexOf("case 'guessColors':"), src.indexOf('case ', src.indexOf("case 'guessColors':") + 5));
+  assert.ok(click.includes('maybeGuessColors(true)'), 'the click asks for a guess');
+  assert.doesNotMatch(click, /\bgenerate\(/, 'the click does not write the description again');
+});

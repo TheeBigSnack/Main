@@ -28,7 +28,7 @@ From then on the side panel's first draft comes from Claude, and "Rewrite with C
 
 ## Colors from the photos
 
-`POST /color` with `{ "photos": [up to 4 https addresses], "options": [Facebook's color words] }` asks Claude to look at the photos and pick the exterior and interior color from the list, answering `{ ok, exterior, interior, confidence }`. The extension calls it only for a car whose website record gives no usable color, shows the answer as a guess with its confidence, and never overrides a color the website does state. Each call is about 4 photos of input, roughly $0.006 on Haiku 4.5.
+`POST /color` with `{ "photos": [up to 4 https addresses], "options": [Facebook's color words] }` asks Claude to look at the photos and pick the exterior and interior color from the list, answering `{ ok, exterior, interior, confidence }`. The extension calls it only for a car whose website record gives no usable color, shows the answer as a guess with its confidence, puts it on the form's color fields only (never into the description), and never overrides a color the website does state. Each call is about 4 photos of input, roughly $0.006 on Haiku 4.5.
 
 ## Model
 
