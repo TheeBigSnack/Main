@@ -352,6 +352,30 @@ test('nothing flagged, no scan yet, and a removed salesperson\'s cars still up: 
   assert.ok(readFileSync(join(root, 'docs/help.md'), 'utf8').includes('**Listings nobody\'s extension watches**'), 'docs/help.md names the list as the page labels it');
 });
 
+// ---------- in no dealership yet ----------
+
+// Until sign-up opens, the owner's first-manager code (and every code a
+// manager makes) is redeemed in the extension alone: the page never calls
+// redeem_invite. Someone holding a code who opens the page first is told
+// where it goes, under the extension's own labels, not only to ask the
+// person who just gave it to them.
+test('signed in and in no dealership, with sign-up closed: the page says where an invite code goes, with the extension\'s labels, and whom to ask otherwise', async () => {
+  const client = fakeClient({ session: { access_token: 'tok', user: { id: 'u-new', email: 'new.manager@example.test' } }, tables: { dealerships: [] } });
+  const page = await openPage(PAGE, { client });
+  const html = main(page);
+  assert.match(html, /Your account is not a member of any dealership yet\./);
+  assert.match(html, /If you were given an invite code: in the Lot Current extension, sign in under Settings, Account with this same email, enter the code under Invite code and click Join, then reload this page\./);
+  assert.match(html, /Otherwise ask whoever set Lot Current up for your store to add you\./);
+  assert.match(html, /data-action="signout">Sign out</);
+  assert.ok(!client.requests.some((r) => r.rpc === 'redeem_invite'), 'the page redeems no code itself');
+  // the words it names are the extension's own
+  const popup = readFileSync(join(root, 'extension/popup.js'), 'utf8');
+  assert.match(popup, /<legend>Account<\/legend>/);
+  assert.match(popup, /field\('Invite code', 'inviteCode'/);
+  assert.match(popup, /data-action="accountJoin">Join</);
+  assert.match(readFileSync(join(root, 'docs/help.md'), 'utf8'), /sends you an invite code, and the page says where it goes: in the extension, sign in under \*\*Settings\*\*, \*\*Account\*\* with the same email you use here, enter the code under \*\*Invite code\*\*, click \*\*Join\*\*, then reload the manager view/);
+});
+
 // ---------- signing out ----------
 
 test('Sign out ends this browser\'s session only, so the person\'s extension and other browsers stay signed in', async () => {

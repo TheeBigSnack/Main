@@ -37,7 +37,8 @@
 // is the switch in the database (signup_settings.open, supabase/README.md
 // "Self-serve sign-up"), and create_dealership refuses everyone while that
 // is off, whatever this says. Turn both on together; with this false the
-// page keeps saying "ask whoever set Lot Current up for your store".
+// page says where an invite code goes (the extension's Settings, Account,
+// Join) or to ask whoever set Lot Current up for the store.
 //
 // billing turns the Billing card's calls to the billing function on. Leave it
 // false until that function is deployed with its Stripe secrets and this

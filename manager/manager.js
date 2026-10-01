@@ -43,8 +43,9 @@
 // the address the same way.
 //
 // Self-serve sign-up: a signed-in person in no dealership sees the Start your
-// dealership form when config.js's selfServeSignup is on (otherwise the old
-// "ask whoever set Lot Current up" line). It calls create_dealership() in the
+// dealership form when config.js's selfServeSignup is on (otherwise a line
+// that says where an invite code goes, the extension's Settings, Account, or
+// whom to ask). It calls create_dealership() in the
 // database, which is the real gate: it refuses while the owner has sign-up
 // switched off, and its refusal is a sentence the form shows as it comes.
 // ?mock=signup shows the form with create_dealership answered in this page.
@@ -905,7 +906,8 @@ async function loadDealership(wanted, current) {
     state.data = null;
     // the flag only shows the form; create_dealership refuses while the owner's switch in the database is off
     if (CONFIG.selfServeSignup) return viewSignup();
-    $('main').innerHTML = '<p class="empty">Your account is not a member of any dealership yet. Ask whoever set Lot Current up for your store to add you.</p><div class="toolbar"><button type="button" class="ghost" data-action="signout">Sign out</button></div>';
+    // a manager or salesperson holding an invite code joins in the extension, the only place a code is redeemed
+    $('main').innerHTML = '<p class="empty">Your account is not a member of any dealership yet. If you were given an invite code: in the Lot Current extension, sign in under Settings, Account with this same email, enter the code under Invite code and click Join, then reload this page. Otherwise ask whoever set Lot Current up for your store to add you.</p><div class="toolbar"><button type="button" class="ghost" data-action="signout">Sign out</button></div>';
     setActions(`<span class="who">${esc(state.session?.user?.email || '')}</span>`);
     state.mode = 'view';
     return;

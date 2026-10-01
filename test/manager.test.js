@@ -1251,7 +1251,7 @@ test('the page: the Start your dealership form behind the flag, the rpc with the
   const js = read('manager/manager.js');
   assert.match(js, /client\.rpc\('create_dealership', \{ name, website, your_name: yourName \}\)/, 'the database function, through the client, with the contract\'s three parameters');
   assert.match(js, /if \(CONFIG\.selfServeSignup\) return viewSignup\(\);/, 'the flag only decides whether the form shows');
-  assert.match(js, /Your account is not a member of any dealership yet\. Ask whoever set Lot Current up for your store to add you\./, 'with the flag off the page says what it said');
+  assert.match(js, /Your account is not a member of any dealership yet\. If you were given an invite code: in the Lot Current extension, sign in under Settings, Account with this same email, enter the code under Invite code and click Join, then reload this page\. Otherwise ask whoever set Lot Current up for your store to add you\./, 'with the flag off the page says where an invite code goes, then whom to ask');
   const view = js.slice(js.indexOf('function viewSignup()'), js.indexOf('function originNoteHtml('));
   assert.ok(view.length > 500, 'viewSignup moved: update this test');
   for (const [id, words] of [['suName', 'W.name'], ['suWebsite', 'W.website'], ['suYou', 'W.yourName']]) {
