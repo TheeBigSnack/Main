@@ -80,6 +80,9 @@ Click the Lot Sync icon, then **Settings**. The first line reads "Lot Sync <vers
 7. The panel notices the listing page and shows "Looks like it posted". Click **It's posted, record it**. If it did not notice, paste the listing's address into **Listing link (optional)** first. If you closed the tab without publishing, click **It didn't post**; nothing is recorded.
 8. The car now shows under **My listings**, and every rescan watches it. Click **Post another car** to go on.
 
+**Post the next car from the side panel.** You don't have to go back to the popup or keep the dealership website open. When the panel has nothing under way, it shows its own **Ready to post** list for the website you last scanned: the same cars, order and **New** pills as the popup's tab, with a line saying when the last scan was, how many cars are ready and how many more posts the daily cap allows today. Click **Post** next to a car; the panel re-checks it on the website and goes on from step 3. **Sort** and the search box work as on the popup (Escape clears the search), **Rescan the website** reads the website again from here, and with more than one website set up on this computer a **Website** menu picks which one. A car saved as a Facebook draft shows "Draft on Facebook" instead of **Post**, and at the daily cap the **Post** buttons go away.
+- The first time you post or rescan from the panel without the dealership website open in a tab, Chrome asks to let Lot Sync read the website (see "When Chrome asks for a permission"). If you said no, the panel stops with **Allow reading [website]**, which asks again and re-checks the same car, or open the website's used inventory page and post from the popup there.
+
 Already listed a car by hand? Click **Mark posted** next to it on Ready to post, so rescans watch that listing too. A posted car shows **Posted ✓**; clicking that unmarks it.
 
 First run on a new machine: on the review screen, **Open the form and check fields only (nothing filled)** opens the form and only reports which fields Lot Sync can find. From there: **Fill it in now**, **Check again**, **Copy report** or **Back**.
@@ -88,6 +91,7 @@ First run on a new machine: on the review screen, **Open the form and check fiel
 
 - On **Ready to post**, tick the cars you want, or tick **Select the next N** to take the first N in the order shown (after the search box, if you typed in it); the hint next to it says "Ticks the next N in this order". A tick stays while you search for the next car (the hint says how many ticked cars the search box is hiding), **Post N cars** counts every ticked car, and the queue takes them all in the order shown. The button reads **Post selected** until you tick, then **Post N cars**. Click it.
 - On **To do**, **Queue all N ready arrivals** queues the new arrivals that are ready.
+- In the side panel's own **Ready to post** list, **Post the next N** queues the first N cars in the order shown (after the search box), skipping drafts, never more than the day's remaining cap.
 - The side panel takes the cars one at a time. A car that passes every check opens and fills the Marketplace form straight away. A car with a warning stops at the review screen so you see it. So does a car whose photos sit on a server Chrome has not been asked about yet: Chrome only asks when you click, so click **Open the Marketplace form**.
 - For each car: check the form and click **Publish** on Facebook. The panel notices the listing and loads the next car. If it did not notice, click **It's posted, next car**. Prefer drafts? Click Facebook's **Save draft**, then **Saved as draft, next car**. **Skip, next car** moves on without posting. A car the re-check blocks offers **Skip this car, next**.
 - The queue bar at the top of the panel: **Post next car**, **Pause**, **Resume**, **Skip this car**, **Stop queue**, and **Clear queue** when it is finished. In the popup, the Ready to post tab shows the same queue with **Continue in the side panel**, **Stop the queue** and **Clear**.
@@ -180,9 +184,10 @@ Before a first day of posting, delete any old Marketplace drafts.
 
 ## When Chrome asks for a permission
 
-Chrome only asks because you clicked something in Lot Sync. Four cases:
+Chrome only asks because you clicked something in Lot Sync. Five cases:
 
 - **Allow automatic rescans** (in set-up, on the To do tab or in Settings): permission to read your dealership's website and its inventory service in the background, for the 3-hourly rescans. Allow it, or decline and scan by hand; the popup then says "Not allowed, so automatic rescans stay off."
+- **Post**, **Post the next N** or **Rescan the website** in the side panel's own list, when the dealership website is not open in a tab: the same permission, so the panel can re-check the car or rescan without the tab. If you already allowed automatic rescans, Chrome does not ask again. Decline and the panel says "Not allowed, so Lot Sync can't read [website] from the side panel"; open the website's used inventory page and post from the popup there instead, or click **Allow reading [website]** to be asked again.
 - **Check with NHTSA (free government decoder)** in the side panel: permission to reach `vpic.nhtsa.dot.gov` for the VIN decode. Decline and the VIN is simply not checked online.
 - **Photos from a server** in the side panel: permission to download a car's photos from the server they sit on, when it is not the photo host Chrome showed at install. Chrome asks when you click **Open the Marketplace form** (or **Fill it in now**, **Fill again** or **Download photos**) for the first car with photos there, one prompt for all of that car's servers. Lot Sync only asks for the servers that car's own photos are on, only over https, and never for Facebook. Decline and the form still fills; those photos are not attached, and **Allow photos from [server]** asks again.
 - At install, Chrome shows what the extension can read: `www.facebook.com/marketplace` and the dealer photo host.
@@ -196,7 +201,7 @@ Lot Sync never asks for your Facebook password, cookies or tokens, in Chrome's p
 - "Couldn't reach the dealership tab" during set-up: open the used inventory page, click the Lot Sync icon and click **Continue set-up**.
 - A warning that many cars vanished at once: if more than half the lot disappears between scans, nothing is marked gone and the last good scan is kept. Scan again later; if it repeats, tell support.
 - "Automatic rescans are on, but Lot Sync has no permission to read this website in the background": click **Allow automatic rescans** on the banner.
-- "The last automatic rescan failed": the website could not be read at that moment. A scan by hand still works; if it keeps failing, send the message to support.
+- "The last automatic rescan failed" (or "The last rescan from the side panel failed"): the website could not be read at that moment. A scan by hand still works; if it keeps failing, send the message to support.
 
 ## When the description writer is off
 

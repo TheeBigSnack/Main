@@ -11,14 +11,16 @@
 
 import { markPosted, basisPrice } from './src/rescan.js';
 import { shortLocation, storeNames } from './src/normalize.js';
-import { fetchVehicleDetails, recheck } from './src/vehicleDetails.js';
+import { readCarForPost, recheck } from './src/vehicleDetails.js';
+import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins } from './src/panelList.js';
+import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
-import { currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
+import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
@@ -62,6 +64,12 @@ const state = {
   drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
   snapshotVehicles: {}, // names for the queue bar
   syncState: null, // this website's sync state (src/sync.js nextSyncState): the server's count of today's posts feeds the cap
+  sites: {}, // the site registry (src/scanRunner.js rememberSite): every website this computer has read, for the list's website choice
+  siteInfo: null, // this website's registry entry: its adapter and service, so a car can be read without the dealer tab
+  snapshotTakenAt: null, // when the saved snapshot behind the list was taken
+  listFilter: '', // the list's search box, kept while the panel is open
+  blockedOrigins: null, // the website permission a post stopped on (src/vehicleDetails.js needsPermission)
+  rescanning: false,
   step: 'idle', message: '', doneAt: null,
   map: FORM_MAP,
 };
@@ -109,8 +117,11 @@ const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet 
 
 async function loadSaved() {
   const k = siteKeys(state.origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync]);
-  state.siteName = data[k.snapshot]?.site?.name || state.origin;
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, GLOBAL_KEYS.sites]);
+  state.sites = data[GLOBAL_KEYS.sites] || {};
+  state.siteInfo = state.sites[state.origin] || null;
+  state.siteName = data[k.snapshot]?.site?.name || state.siteInfo?.name || state.origin;
+  state.snapshotTakenAt = data[k.snapshot]?.takenAt || null;
   const site = data[k.snapshot]?.site || { name: state.siteName };
   state.settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), { ...site, origin: state.origin }) || withDefaults({}, site);
   state.posted = data[k.posted] || {};
@@ -131,7 +142,7 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -151,7 +162,7 @@ async function clearFlow() {
   if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
     vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
 
@@ -276,7 +287,14 @@ async function startFlow(req) {
   render();
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
 
-  const fresh = await fetchVehicleDetails(state.dealerTabId, state.vin, { url: state.snapshotVehicles[state.vin]?.url });
+  // through the dealer tab when the post started from one that still shows
+  // this website; otherwise straight from the extension, with the website
+  // permission (src/vehicleDetails.js readCarForPost)
+  const fresh = await readCarForPost({ tabId: state.dealerTabId ?? null, origin: state.origin, info: state.siteInfo, vin: state.vin, url: state.snapshotVehicles[state.vin]?.url });
+  if (!fresh.ok && fresh.needsPermission) {
+    state.blockedOrigins = fresh.origins;
+    return block(fresh.message, 'no-permission');
+  }
   if (!fresh.ok) return block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok) return block(check.message, 'check-' + check.assessment.decision);
@@ -765,9 +783,105 @@ function sourcePill() {
   return `<span class="pill ${tone}">${esc(label)}</span>`;
 }
 
+// ---------- the panel's own Ready to post list ----------
+// What the popup's Ready tab lists (src/panelList.js readyRows), so the next
+// car can be posted from here: on Facebook, after the last one, with the
+// dealership website closed. Post re-checks the car on the website first,
+// through the extension's own read when there is no dealer tab (the website
+// permission automatic rescans use; Chrome asks for it from the click).
+
+const hostOf = (origin) => {
+  try {
+    return new URL(origin).host;
+  } catch (e) {
+    return String(origin || '');
+  }
+};
+// The patterns reading this website from here needs, and which of them
+// Chrome has not granted yet (kept in memory, so a click can ask first).
+const siteNeeds = () => siteReadOrigins(state.origin, state.siteInfo);
+const siteMissing = () => missingOrigins(siteNeeds(), grantedOrigins);
+
+// Asks Chrome for the website permission, first thing in a click (Chrome
+// prompts only during one; see askForPhotos). Resolves true when it is
+// granted, or when nothing is needed because the website is not in the
+// registry (the read then says what to do instead).
+async function askForSite(origins = siteMissing()) {
+  if (!origins.length) return true;
+  setStatus(`Chrome will ask to let Lot Sync read ${hostOf(state.origin)} from the side panel (the same permission automatic rescans use).`);
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins });
+  } catch (e) {
+    setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
+    return false;
+  }
+  await refreshGranted();
+  if (!granted) {
+    setStatus(`Not allowed, so Lot Sync can't read ${hostOf(state.origin)} from the side panel. Open the website's used inventory page and scan or post from the popup there instead.`, 'error');
+    return false;
+  }
+  setStatus('');
+  return true;
+}
+
+const readyNow = (now = Date.now()) => readyRows({ vehicles: state.snapshotVehicles }, { posted: state.posted, drafts: state.drafts, settings: state.settings || {}, filter: state.listFilter, now });
+
+function siteChoiceHtml() {
+  const choices = siteChoices(state.sites);
+  if (choices.length < 2) return '';
+  return `<label class="control"><span>Website</span><select id="panelSite">${choices.map((c) => `<option value="${esc(c.origin)}" ${c.origin === state.origin ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>`;
+}
+
+// canPost: false at the day's cap, when the row shows no Post button.
+function listRowHtml(r, { canPost = true } = {}) {
+  const e = r.entry;
+  const name = /^https?:\/\//i.test(e.url || '') ? `<a class="name" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(r.name)}</a>` : `<span class="name">${esc(r.name)}</span>`;
+  const pill = r.isNew ? ' <span class="pill good new">New</span>' : '';
+  const facts = [e.stock && 'Stock ' + esc(e.stock), typeof e.mileage === 'number' ? miles(e.mileage) : '', esc(e.locationShort || '')].filter(Boolean).join(' · ');
+  let action = '';
+  if (r.draft) action = '<span class="pill warn" title="Saved as a draft on Facebook: publish it there, then mark it posted in the popup">Draft on Facebook</span>';
+  else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
+  return `<li class="row"><div class="main">${name}${pill}<div class="sub">${facts}</div><div class="when">${esc(r.line)}</div></div><div class="price">${money(r.price)}</div>${action}</li>`;
+}
+
+// The list itself, redrawn on its own as the search box changes.
+function listBodyHtml(list, cap) {
+  if (!list.total) return '<div class="empty">No cars are ready to post right now.</div>';
+  if (!list.rows.length) return '<div class="empty">No cars match</div>';
+  return `<ul class="rows">${list.rows.map((r) => listRowHtml(r, { canPost: !cap.reached })).join('')}</ul>`;
+}
+
+function queueOfferHtml(list, cap) {
+  const q = state.queue;
+  if (cap.reached || (q && q.status !== 'done')) return ''; // a queue under way has its own bar
+  const vins = nextToPost(list.rows, cap.remaining);
+  if (vins.length < 2) return '';
+  return `<div class="toolbar"><button type="button" class="small go" id="panelQueue" data-n="${vins.length}">Post the next ${vins.length}</button><span class="hint">In the order shown, one at a time: you check each form and click Publish.</span></div>`;
+}
+
 function viewIdle() {
-  return `<p class="lead">Open your dealership's used inventory page, click the Lot Sync icon, pick a car on <b>Ready to post</b> and click <b>Post</b>. This panel then pre-fills the Marketplace form for you to check and publish.</p>
-  <p class="hint">Facebook and Marketplace are named here only as the places you post. Lot Sync is not affiliated with Meta.</p>`;
+  const intro = `<p class="lead">Open your dealership's used inventory page, click the Lot Sync icon and click <b>Scan website</b>. The cars ready to post then show here and on the popup's <b>Ready to post</b> tab; <b>Post</b> pre-fills the Marketplace form for you to check and publish.</p>`;
+  const notAffiliated = '<p class="hint">Facebook and Marketplace are named here only as the places you post. Lot Sync is not affiliated with Meta.</p>';
+  if (!state.origin || !Object.keys(state.snapshotVehicles || {}).length) return `${siteChoiceHtml() ? `<div class="toolbar listControls">${siteChoiceHtml()}</div>` : ''}${intro}${notAffiliated}`;
+  const cap = dailyCap();
+  const list = readyNow();
+  const order = sortOrder(state.settings && state.settings.readySort);
+  const meta = `Last scan ${esc(when(state.snapshotTakenAt))} · ${list.total} ready to post · ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today`;
+  const rescanLabel = state.rescanning ? 'Rescanning…' : 'Rescan the website';
+  return `<section id="panelReady" aria-labelledby="panelReadyLabel">
+    <h3 id="panelReadyLabel">Ready to post</h3>
+    <div class="meta" id="panelMeta">${meta}</div>
+    ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
+    <div class="toolbar listControls">
+      ${siteChoiceHtml()}
+      <label class="control"><span>Sort</span><select id="panelSort">${SORT_ORDERS.map((o) => `<option value="${o.id}" ${o.id === order ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>
+      <button type="button" class="small" id="panelRescan" ${state.rescanning ? 'disabled' : ''}>${rescanLabel}</button>
+    </div>
+    <div class="toolbar listControls"><label class="control grow"><span class="sr">Search</span><input type="search" id="panelSearch" value="${esc(state.listFilter)}" placeholder="Search: stock number, last 6 of the VIN, year, make or model" autocomplete="off" spellcheck="false" /></label></div>
+    <div id="panelList">${queueOfferHtml(list, cap)}${listBodyHtml(list, cap)}</div>
+    <p class="hint">Post re-checks the car on the website first, so a car that sold or changed since the last scan is stopped. You check every form and click Publish yourself.</p>
+  </section>${notAffiliated}`;
 }
 
 function viewChecking() {
@@ -775,10 +889,14 @@ function viewChecking() {
 }
 
 function viewBlocked() {
+  // stopped for the website permission: one click asks Chrome and re-checks the same car
+  const allow = Array.isArray(state.blockedOrigins) && state.blockedOrigins.length
+    ? `<button type="button" class="primary" id="allowSite">Allow reading ${esc(hostOf(state.origin))}</button>`
+    : '';
   const buttons = state.queueMode
-    ? `<button type="button" class="primary" id="skipBlocked">Skip this car, next</button><button type="button" class="plain" id="queueStop">Stop queue</button>`
-    : `<button type="button" class="plain" id="back">Back</button>`;
-  return `<div class="banner bad">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
+    ? `${allow}<button type="button" class="${allow ? 'plain' : 'primary'}" id="skipBlocked">Skip this car, next</button><button type="button" class="plain" id="queueStop">Stop queue</button>`
+    : `${allow}<button type="button" class="plain" id="back">Back</button>`;
+  return `<div class="banner bad" id="blocked">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
 const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
@@ -1083,6 +1201,32 @@ function viewDone() {
   <button type="button" class="primary wide" id="postAnother">Post another car</button>`;
 }
 
+// The control that had the keyboard (by id) and its caret, so a redraw of
+// the list the person did not ask for (a rescan, a post recorded in the
+// popup, a sync) never throws them out of the search box.
+function focusNow() {
+  const el = document.activeElement;
+  if (!el || !el.id || !$('panel').contains(el)) return null;
+  let start = null;
+  let end = null;
+  try {
+    start = el.selectionStart;
+    end = el.selectionEnd;
+  } catch (e) { /* a control without a caret */ }
+  return { id: el.id, start, end };
+}
+
+function refocus(kept) {
+  const el = kept && $(kept.id);
+  if (!el) return;
+  el.focus();
+  if (typeof kept.start === 'number' && typeof el.setSelectionRange === 'function') {
+    try {
+      el.setSelectionRange(kept.start, kept.end);
+    } catch (e) { /* not a text box */ }
+  }
+}
+
 function render() {
   $('site').textContent = state.siteName || '';
   const views = { idle: viewIdle, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone, wizard: wizardHtml };
@@ -1094,7 +1238,18 @@ function render() {
     $('panel').innerHTML = upkeepHtml();
     return;
   }
+  const kept = state.step === 'idle' && $('panelReady') ? focusNow() : null; // the list redrawn under the person
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
+  if (kept) refocus(kept);
+}
+
+// The list part only, after a keystroke in the search box: the box keeps its focus and caret.
+function renderList() {
+  const box = $('panelList');
+  if (!box || state.step !== 'idle') return render();
+  const cap = dailyCap();
+  const list = readyNow();
+  box.innerHTML = queueOfferHtml(list, cap) + listBodyHtml(list, cap);
 }
 
 const upkeepCtx = {
@@ -1148,6 +1303,120 @@ async function openWizard(req) {
   await startWizard(req);
   state.step = 'wizard';
   render();
+}
+
+// ---------- posting from the panel's list ----------
+
+// Post on a car in the panel's own list. Chrome's prompt for the website, when
+// it is missing, comes first in the click; then the same flow as the popup's
+// Post, with no dealer tab: the car is read straight from the website.
+async function postFromList(vin) {
+  if (!(await askForSite())) return undefined;
+  const entry = state.snapshotVehicles[vin];
+  if (!entry || state.posted[vin]) return render(); // posted or gone meanwhile: the list is redrawn
+  const cap = dailyCap();
+  if (cap.reached) {
+    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+    return render();
+  }
+  return startFlow({ origin: state.origin, vin, dealerTabId: null, windowId: panelWindowId, at: Date.now() });
+}
+
+// "Post the next N": a queue of the first N cars in the order shown, walked
+// the way the popup's queue is (src/queue.js), with no dealer tab.
+async function queueFromList() {
+  if (!(await askForSite())) return undefined;
+  const key = siteKeys(state.origin).queue;
+  const stored = (await chrome.storage.local.get(key))[key] || null;
+  if (stored && stored.status !== 'done') {
+    state.queue = stored; // one started in the popup meanwhile: its bar takes over
+    setStatus('A queue is already under way: continue it from the bar above, or stop it first.', 'error');
+    return render();
+  }
+  const cap = dailyCap();
+  const made = createQueue(nextToPost(readyNow().rows, cap.remaining), { remaining: cap.remaining, dealerTabId: null, windowId: panelWindowId });
+  if (!made.ok) {
+    setStatus(made.error, 'error');
+    return render();
+  }
+  state.queue = made.queue;
+  try {
+    await ownSet({ [key]: made.queue });
+  } catch (e) {
+    state.queue = stored;
+    setStatus(storageErrorText(e), 'error');
+    return render();
+  }
+  setStatus(`Queue of ${made.queue.vins.length}: the first car is being checked on the website.`);
+  return startNextInQueue();
+}
+
+// Rescan the website from here: the service worker's own rescan (the same
+// read automatic rescans make, background.js runRescan), so the list shows
+// what sold, what changed price and what arrived since the last scan.
+async function rescanFromList() {
+  if (!(await askForSite())) return undefined;
+  const origin = state.origin;
+  const host = hostOf(origin);
+  state.rescanning = true;
+  setStatus(`Reading ${host}…`);
+  render();
+  let r;
+  try {
+    r = await chrome.runtime.sendMessage({ type: 'rescanNow', origin, reason: 'panel' });
+  } catch (e) {
+    r = { ok: false, error: String((e && e.message) || e) };
+  }
+  state.rescanning = false;
+  if (state.origin !== origin) return render(); // the website choice moved on meanwhile
+  if (r && r.ok) {
+    const warning = Array.isArray(r.warnings) && r.warnings.length ? ` ${r.warnings[0]}` : '';
+    const todo = r.count ? ` ${r.count} of your listings need${r.count === 1 ? 's' : ''} attention: see To do in the popup.` : '';
+    setStatus(`Rescanned ${host}: ${r.cars} used car${r.cars === 1 ? '' : 's'}.${todo}${warning}`);
+  } else {
+    setStatus(`The rescan didn't finish: ${(r && r.error) || "no answer from Lot Sync's background worker"}`, 'error');
+  }
+  if (state.step !== 'idle') return undefined;
+  await loadSaved(); // the worker saved the new scan (the storage change usually brought it already)
+  return render();
+}
+
+// Another website from the list's choice. Only from the list itself, so a
+// post, a set-up or an upkeep under way is never pulled onto another website.
+async function chooseSite(origin) {
+  if (state.step !== 'idle' || !origin || origin === state.origin) return;
+  state.origin = origin;
+  state.listFilter = '';
+  try {
+    await chrome.storage.local.set({ [GLOBAL_KEYS.lastPostOrigin]: origin });
+  } catch (e) { /* only which website the panel opens on next time */ }
+  await loadSaved();
+  setStatus('');
+  render();
+  if ($('panelSite')) $('panelSite').focus();
+}
+
+// The list's order is the popup's Ready tab order (settings.readySort, per
+// website), written under the settings key's lock like every shared key.
+async function changeSort(value) {
+  const order = sortOrder(value);
+  const site = { name: state.siteName };
+  try {
+    const saved = await updateKey(siteKeys(state.origin).settings, (s) => ({ ...withDefaults(s || state.settings || {}, site), readySort: order }), panelStorage);
+    state.settings = withDefaults(saved, site);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+  }
+  render();
+  if ($('panelSort')) $('panelSort').focus();
+}
+
+// The website permission a post stopped on: asked from this click, then the
+// same car is checked again (in a queue, the queue goes on from it).
+async function allowSiteAndRetry() {
+  const origins = Array.isArray(state.blockedOrigins) && state.blockedOrigins.length ? state.blockedOrigins : siteNeeds();
+  if (!(await askForSite(missingOrigins(origins, grantedOrigins).length ? origins : []))) return undefined;
+  return startFlow({ origin: state.origin, vin: state.vin, dealerTabId: null, windowId: state.windowId || panelWindowId, queue: state.queueMode, at: Date.now() });
 }
 
 // ---------- events ----------
@@ -1207,6 +1476,11 @@ async function onPickChange(target) {
 
 let inputTimer = null;
 function onInput(ev) {
+  if (ev.target.id === 'panelSearch') {
+    state.listFilter = ev.target.value;
+    renderList();
+    return;
+  }
   if (ev.target.id !== 'description') return;
   clearTimeout(inputTimer);
   inputTimer = setTimeout(() => {
@@ -1248,7 +1522,11 @@ async function onClick(ev) {
     return afterPhotoPick(btn.id);
   }
   if (state.step === 'upkeep' && (await handleUpkeepClick(btn.id, upkeepCtx))) return undefined;
+  if (btn.dataset.postVin !== undefined && state.step === 'idle') return postFromList(btn.dataset.postVin);
   switch (btn.id) {
+    case 'panelQueue': return state.step === 'idle' ? queueFromList() : undefined;
+    case 'panelRescan': return state.step === 'idle' ? rescanFromList() : undefined;
+    case 'allowSite': return state.step === 'blocked' ? allowSiteAndRetry() : undefined;
     case 'openForm':
       await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
       if (noPhotosPicked()) return setStatus(NO_PHOTOS_TEXT, 'error');
@@ -1370,6 +1648,21 @@ const handlers = { [GLOBAL_KEYS.postRequest]: startFlow, [GLOBAL_KEYS.setupReque
 const INPUT_STEPS = ['review', 'publish'];
 const OWN_VIEW_STEPS = ['wizard', 'upkeep'];
 function adoptChanges(changes) {
+  // the site registry: a website scanned or set up elsewhere, its service and permission state
+  if (changes[GLOBAL_KEYS.sites]) {
+    state.sites = changes[GLOBAL_KEYS.sites].newValue || {};
+    state.siteInfo = state.origin ? state.sites[state.origin] || null : null;
+    if (!state.origin && state.step === 'idle') {
+      // the first scan on this computer: the list opens on that website
+      const origin = defaultOrigin(state.sites, null);
+      if (origin) {
+        state.origin = origin;
+        loadSaved().then(() => { if (state.step === 'idle' && state.origin === origin) render(); });
+      }
+      return;
+    }
+    if (state.step === 'idle') render(); // the website choice
+  }
   if (!state.origin) return;
   const k = siteKeys(state.origin);
   const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -1385,6 +1678,17 @@ function adoptChanges(changes) {
   };
   take(k.posted, 'posted', {});
   take(k.drafts, 'drafts', {});
+  // a new scan (the popup, the worker's rescan): the list follows it
+  if (changes[k.snapshot]) {
+    const snap = changes[k.snapshot].newValue || null;
+    const vehicles = (snap && snap.vehicles) || {};
+    if (!same(vehicles, state.snapshotVehicles) || (snap && snap.takenAt) !== state.snapshotTakenAt) {
+      state.snapshotVehicles = vehicles;
+      state.snapshotTakenAt = (snap && snap.takenAt) || null;
+      if (snap && snap.site && snap.site.name) state.siteName = snap.site.name;
+      touched = true;
+    }
+  }
   take(k.sync, 'syncState', null); // the server's count of today's posts feeds the cap line
   if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
     state.settings = withDefaults(changes[k.settings].newValue, { name: state.siteName });
@@ -1422,7 +1726,17 @@ async function init() {
   $('panel').addEventListener('input', onInput);
   $('panel').addEventListener('change', (ev) => {
     if (state.step === 'wizard') handleWizardChange(ev.target);
+    else if (ev.target.id === 'panelSite') chooseSite(ev.target.value);
+    else if (ev.target.id === 'panelSort') changeSort(ev.target.value);
     else onPickChange(ev.target);
+  });
+  $('panel').addEventListener('keydown', (ev) => {
+    // Escape clears the list's search box, as on the popup's Ready tab
+    if (ev.key !== 'Escape' || ev.target.id !== 'panelSearch' || !ev.target.value) return;
+    ev.preventDefault();
+    ev.target.value = '';
+    state.listFilter = '';
+    renderList();
   });
   await refreshGranted();
   // a permission granted or removed elsewhere (the popup, chrome://extensions) counts from the next click
@@ -1444,7 +1758,7 @@ async function init() {
       handlers[name](req);
     }
   });
-  const stored = await chrome.storage.local.get([...REQUEST_KEYS, GLOBAL_KEYS.lastPostOrigin]);
+  const stored = await chrome.storage.local.get([...REQUEST_KEYS, GLOBAL_KEYS.lastPostOrigin, GLOBAL_KEYS.sites]);
   // the newest request for this window wins; every request key is cleared
   // once one is acted on, so nothing stale fires on a later panel load
   const pending = REQUEST_KEYS.map((name) => ({ name, req: stored[name] })).filter(({ req }) => forThisWindow(req) && isFresh(req)).sort((a, b) => (b.req.at || 0) - (a.req.at || 0));
@@ -1467,7 +1781,11 @@ async function init() {
       state.step = 'wizard';
       return render();
     }
-    state.origin = lastPostOrigin;
+  }
+  // the list opens on the website the panel last worked on, else the one scanned last (src/panelList.js defaultOrigin)
+  const origin = defaultOrigin(stored[GLOBAL_KEYS.sites], lastPostOrigin);
+  if (origin) {
+    state.origin = origin;
     await loadSaved();
   }
   render();

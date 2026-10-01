@@ -397,7 +397,8 @@ function scheduleBanner() {
     return `<div class="banner warn" id="scheduleWarning">Automatic rescans are on, but Lot Sync has no permission to read this website in the background, so they can't run. <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></div>`;
   }
   if (s.lastError && (!s.lastScan || String(s.lastAttempt || '') > String(s.lastScan))) {
-    return `<div class="banner warn" id="scheduleWarning">The last automatic rescan (${esc(when(s.lastAttempt))}) failed: ${esc(s.lastError)}</div>`;
+    const what = s.lastReason === 'panel' ? 'rescan from the side panel' : 'automatic rescan';
+    return `<div class="banner warn" id="scheduleWarning">The last ${what} (${esc(when(s.lastAttempt))}) failed: ${esc(s.lastError)}</div>`;
   }
   return '';
 }

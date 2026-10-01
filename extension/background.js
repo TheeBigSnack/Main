@@ -203,10 +203,11 @@ async function hasPermission(info, adapter) {
 export const NO_PERMISSION = 'Lot Sync has no permission to read this website in the background. Click Allow automatic rescans in Settings.';
 export const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
 
-// A failed attempt is recorded so the popup can show that the schedule is not working.
-async function noteFailure(origin, info, error) {
+// A failed attempt is recorded so the popup can show that the schedule is not
+// working, with what asked for it (the alarm, or the side panel's Rescan).
+async function noteFailure(origin, info, error, reason = 'alarm') {
   try {
-    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), lastAttempt: new Date().toISOString(), lastError: error } }));
+    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), lastAttempt: new Date().toISOString(), lastError: error, lastReason: reason } }));
   } catch (e) { /* the registry could not be written either; the result still says what failed */ }
   return { ok: false, error };
 }
@@ -219,11 +220,11 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   const info = sites[origin];
   if (!info || !info.service) return { ok: false, error: 'This website has not been scanned from the popup yet.' };
   const adapter = adapterById(info.adapter);
-  if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`);
-  if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION);
+  if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`, reason);
+  if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION, reason);
   const k = siteKeys(origin);
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff, k.boilerplate]);
-  if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS);
+  if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS, reason);
   const site = { ...(info.site || {}), origin, name: info.name, adapter: info.adapter };
   const settings = withDefaults(data[k.settings], site);
   const now = new Date().toISOString();
@@ -233,13 +234,13 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   } catch (e) {
     out = { ok: false, message: String((e && e.message) || e) };
   }
-  if (!out.ok) return noteFailure(origin, info, out.message);
+  if (!out.ok) return noteFailure(origin, info, out.message, reason);
   const save = { [k.diff]: out.diff, [k.boilerplate]: out.boilerplate };
   if (!out.diff.unreliable) save[k.snapshot] = out.snapshot;
   try {
     await chrome.storage.local.set(save);
   } catch (e) {
-    return noteFailure(origin, info, storageErrorText(e)); // the quota, most likely: the popup's To do shows it as the last error
+    return noteFailure(origin, info, storageErrorText(e), reason); // the quota, most likely: the popup's To do shows it as the last error
   }
   await recordFlags(origin, out.diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   const count = todoCountFor(out.diff);
@@ -249,7 +250,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   try {
     await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count } }));
   } catch (e) {
-    return noteFailure(origin, info, storageErrorText(e));
+    return noteFailure(origin, info, storageErrorText(e), reason);
   }
   await updateBadge();
   // the dealership's shared registry, once accounts exist: recorded on the site entry, never a reason for the rescan to fail

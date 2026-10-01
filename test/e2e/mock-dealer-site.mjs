@@ -54,6 +54,7 @@ export const SCENARIOS = {
 };
 
 let current = 'day1';
+let directSearches = 0;
 
 // The real site's `description` field mixes a lot-wide disclaimer, feature
 // bullets, and (on some cars) a genuine write-up; `features` is a clean list.
@@ -126,6 +127,7 @@ export function startMockSite(port = 0) {
     // The search service's own endpoint, as the extension's background rescan
     // calls it directly (POST, JSON, x-api-key).
     if (req.method === 'POST' && /^\/api\/v1\/listings\/\d+\/search$/.test(url.pathname)) {
+      directSearches += 1;
       let raw = '';
       req.on('data', (c) => { raw += c; });
       req.on('end', () => {
@@ -144,6 +146,11 @@ export function startMockSite(port = 0) {
     if (url.pathname.startsWith('/photo/')) {
       res.writeHead(200, { 'content-type': 'image/png' });
       return res.end(PNG);
+    }
+    // how many searches reached the service directly (not through the page's helper): the side panel's tabless reads count here
+    if (url.pathname === '/direct-count') {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      return res.end(String(directSearches));
     }
     if (url.pathname === '/scenario') {
       current = url.searchParams.get('name') || 'day1';

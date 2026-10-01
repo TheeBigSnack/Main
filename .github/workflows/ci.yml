@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        flow: [popup, post, queue, wizard, upkeep, standard]
+        flow: [popup, post, queue, wizard, upkeep, standard, panel]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
