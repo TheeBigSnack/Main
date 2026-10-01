@@ -447,3 +447,16 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
     source: { vehicleType: v.bodyType || '', bodyStyle: v.bodyType || '', bodyType: v.bodyType || '', exteriorColor: v.exteriorColor || '', interiorColor: v.interiorColor || '', fuelType: v.fuelType || '', transmission: v.transmission || '' },
   };
 }
+
+// What the website changed between two reads of the same car, in the fields
+// the form gets: [{ key, was, now }]. The description is left aside (it is
+// the salesperson's text, checked on its own against the newer read). The
+// side panel reads the car again before a fill when its last read is old,
+// and goes back to the review on any change, so the form never gets an
+// earlier price, mileage or title answer.
+export function listingChanges(before, after) {
+  const a = (before && before.fields) || {};
+  const b = (after && after.fields) || {};
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => k !== 'description');
+  return keys.filter((k) => String(a[k] ?? '') !== String(b[k] ?? '')).map((k) => ({ key: k, was: String(a[k] ?? ''), now: String(b[k] ?? '') }));
+}

@@ -3,7 +3,8 @@
 // tab (a popup would close).
 //
 // Steps: checking (fresh fetch + re-check) -> review (description, fields)
-// -> filling (opens the Marketplace form, fills it, attaches photos)
+// -> filling (opens the Marketplace form, fills it, attaches photos; a car
+// read more than a few minutes earlier is read and checked again first)
 // -> publish (the salesperson checks the form and clicks Publish themselves)
 // -> done (the post is recorded in the same list the popup uses).
 //
@@ -17,7 +18,7 @@ import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails, blockingProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
-import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
+import { buildListingData, listingChanges, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
@@ -51,6 +52,7 @@ const state = {
   origin: null, vin: null, dealerTabId: null, windowId: null,
   settings: null, posted: {}, boilerplate: [], siteName: '',
   vehicle: null, price: null,
+  readAt: null, // when the car was last read from the website (ms): a fill reads it again when this is old (readAgainIfStale)
   description: '', descriptionSource: 'template', note: '', guardrails: null,
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
@@ -155,7 +157,7 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -174,7 +176,7 @@ async function clearFlow() {
   if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
   if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
-    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
+    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, readAt: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
@@ -328,6 +330,7 @@ async function startFlow(req) {
   // the store label the popup shows: settled over the lot's store names, not the adapter's brand-word guess for one record
   fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
   state.vehicle = fresh.vehicle;
+  state.readAt = Date.now();
   state.vinCheck = { local: localVinCheck(fresh.vehicle), online: null };
   state.price = basisPrice(fresh.vehicle, state.settings.basis); // the lower second price only when this car shows one
   state.noteApplies = !(state.settings.basis === 'beforeFees' && state.price === fresh.vehicle.price);
@@ -561,6 +564,71 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
   });
 }
 
+// How long a read of the car is good for a fill. The side panel re-reads
+// and re-checks the car at post time (CLAUDE.md rule 3), and the price on
+// the form is the website's (rule 4): a car that waited at review longer
+// than this, or a post that came back after the panel was closed, is read
+// again before the form is filled.
+const READ_FRESH_MS = 5 * 60 * 1000;
+
+// Before a fill: the car as the website shows it now, when the last read is
+// older than READ_FRESH_MS. Resolves true when the fill can go on. A car
+// that can't be posted any more (sold, sale-pending, new, no price, not
+// readable) stops the post as at its start; a change to anything the form
+// gets (src/listingData.js listingChanges) takes the panel back to the
+// review with the new values and says what changed, so the person sees it
+// (and the description's checks run against the new read) before filling.
+async function readAgainIfStale() {
+  if (typeof state.readAt === 'number' && state.readAt > 0 && Date.now() - state.readAt < READ_FRESH_MS) return true;
+  setStatus('Checking the car on the website again before the form is filled…');
+  const url = (state.vehicle && state.vehicle.url) || state.snapshotVehicles[state.vin]?.url;
+  const fresh = await readCarForPost({ tabId: state.dealerTabId ?? null, origin: state.origin, info: state.siteInfo, vin: state.vin, url });
+  if (!fresh.ok && fresh.needsPermission) {
+    state.blockedOrigins = fresh.origins;
+    await block(fresh.message, 'no-permission');
+    return false;
+  }
+  if (!fresh.ok) {
+    await block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
+    return false;
+  }
+  const check = recheck(fresh.vehicle, state.settings);
+  if (!check.ok) {
+    await block(check.message, 'check-' + check.assessment.decision);
+    return false;
+  }
+  const price = basisPrice(fresh.vehicle, state.settings.basis);
+  if (!price) {
+    await block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
+    return false;
+  }
+  fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
+  const formOf = (v, p) => buildListingData(v, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, price: p });
+  const changes = listingChanges(formOf(state.vehicle, state.price), formOf(fresh.vehicle, price));
+  state.vehicle = fresh.vehicle;
+  state.price = price;
+  state.noteApplies = !(state.settings.basis === 'beforeFees' && price === fresh.vehicle.price);
+  state.vinCheck = { ...(state.vinCheck || {}), local: localVinCheck(fresh.vehicle) };
+  state.readAt = Date.now();
+  state.guardrails = runGuardrails(state.description, ctx());
+  if (!changes.length) {
+    setStatus('');
+    return true;
+  }
+  const said = changes.map((c) => {
+    const label = { price: 'Price', mileage: 'Mileage' }[c.key] || ((state.map && state.map.fields.find((f) => f.key === c.key)) || {}).label || c.key;
+    const shown = (x) => (c.key === 'price' && x ? money(Number(x)) : x || 'nothing');
+    return `${label} ${shown(c.was)} → ${shown(c.now)}`;
+  });
+  state.listing = null;
+  state.step = 'review';
+  state.message = '';
+  render();
+  setStatus(`The website changed since this car was read: ${said.join('; ')}. Nothing was filled: check the review (the description too), then open the form again.`, 'error');
+  await saveFlow();
+  return false;
+}
+
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
 // Every description names the dealership (rule 5): with no dealership name
@@ -601,6 +669,7 @@ async function openForm({ probeOnly = false } = {}) {
   }
   const box = $('description');
   if (box) state.description = box.value;
+  if (!probeOnly && !(await readAgainIfStale())) return undefined;
   const blocked = probeOnly ? '' : fillBlocker(state.description);
   if (blocked) {
     // the checks line shows the same problems, current with what is typed
@@ -636,6 +705,7 @@ async function openForm({ probeOnly = false } = {}) {
 }
 
 async function runFill() {
+  if (!(await readAgainIfStale())) return undefined;
   const blocked = fillBlocker(state.listing && state.listing.fields && state.listing.fields.description);
   if (blocked) {
     if (state.step === 'filling') {

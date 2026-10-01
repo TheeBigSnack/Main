@@ -195,9 +195,10 @@ test('the panel checks every description against the salesperson\'s own role', (
 });
 
 // The rest of the checks, passing, for the tests about the dealership's name
-// alone (fillBlocker runs them after the name; the tests further down run the real ones).
-const PASSING_CHECKS_NAMES = ['runGuardrails', 'blockingProblems', 'ctx'];
-const PASSING_CHECKS = [() => ({ ok: true, problems: [], words: 80 }), (g) => g.problems, () => ({})];
+// alone (fillBlocker runs them after the name, and every fill reads the car
+// again when its last read is old; the tests further down run the real ones).
+const PASSING_CHECKS_NAMES = ['runGuardrails', 'blockingProblems', 'ctx', 'readAgainIfStale'];
+const PASSING_CHECKS = [() => ({ ok: true, problems: [], words: 80 }), (g) => g.problems, () => ({}), async () => true];
 
 // dealerNamed and NO_DEALER_TEXT as sidepanel.js writes them, with fillBlocker when it is defined.
 function dealerChecks() {
@@ -350,9 +351,9 @@ test('Open the Marketplace form, Fill it in now and Fill again all refuse a desc
   const opened = async (description) => {
     const said = [];
     const state = { origin: 'https://www.example-dealer.test', settings: SETTINGS, vehicle: CAR, price: 20986, noteApplies: true, description, posted: {}, syncState: null };
-    const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'checksHtml', 'buildListingData', 'pickedPhotos', 'runGuardrails', 'blockingProblems', 'usableClosingLine', `${dealerChecks()}\n${noteLine}\n${ctxLine}\n${fnText('openForm')}\nreturn openForm;`)(
+    const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'checksHtml', 'buildListingData', 'pickedPhotos', 'runGuardrails', 'blockingProblems', 'usableClosingLine', 'readAgainIfStale', `${dealerChecks()}\n${noteLine}\n${ctxLine}\n${fnText('openForm')}\nreturn openForm;`)(
       state, (text, tone) => said.push([text, tone]), () => ({ posted: 'p', sync: 's' }), { storage: { local: { get: async () => ({}) } } }, () => ({ reached: false }), () => null, () => '',
-      never('buildListingData'), never('pickedPhotos'), ...checks,
+      never('buildListingData'), never('pickedPhotos'), ...checks, async () => true,
     );
     try {
       await openForm();
@@ -371,11 +372,133 @@ test('Open the Marketplace form, Fill it in now and Fill again all refuse a desc
   const typed = [];
   const state = { settings: SETTINGS, vehicle: CAR, price: 20986, noteApplies: true, listing: { fields: { description: bad } }, step: 'filling', map: { fields: [], photoLimitDefault: 20 } };
   const said = [];
-  const runFill = new Function('state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', 'runGuardrails', 'blockingProblems', 'usableClosingLine', `${dealerChecks()}\n${noteLine}\n${ctxLine}\n${fnText('runFill')}\nreturn runFill;`)(
-    state, (text, tone) => said.push([text, tone]), () => {}, { scripting: { executeScript: async (inj) => { typed.push(inj.args[1].fields.description); return [{ result: {} }]; } } }, never('saveFlow'), function fillFormInPage() {}, ...checks,
+  const runFill = new Function('state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', 'runGuardrails', 'blockingProblems', 'usableClosingLine', 'readAgainIfStale', `${dealerChecks()}\n${noteLine}\n${ctxLine}\n${fnText('runFill')}\nreturn runFill;`)(
+    state, (text, tone) => said.push([text, tone]), () => {}, { scripting: { executeScript: async (inj) => { typed.push(inj.args[1].fields.description); return [{ result: {} }]; } } }, never('saveFlow'), function fillFormInPage() {}, ...checks, async () => true,
   );
   await runFill();
   assert.deepEqual(typed, []);
   assert.equal(state.step, 'review', 'back to the description');
   assert.match(said[0][0], /Says "warranty"/);
+});
+
+// ---------- the car is read again before a fill when the last read is old ----------
+import * as rescan from '../extension/src/rescan.js';
+import * as details from '../extension/src/vehicleDetails.js';
+import * as normalize from '../extension/src/normalize.js';
+import * as listingData from '../extension/src/listingData.js';
+import * as vinModule from '../extension/src/vin.js';
+import { vehicle as fixtureVehicle } from './helpers.js';
+
+// readAgainIfStale as sidepanel.js writes it, over the real checks, with the website read stubbed.
+function staleReader(state, read) {
+  const calls = { reads: 0, blocked: [], said: [], saved: 0 };
+  const consts = ['READ_FRESH_MS', 'money', 'ctx', 'noteFor'].map((n) => {
+    const m = src.match(new RegExp(`^const ${n} = .*;$`, 'm'));
+    assert.ok(m, `${n} is defined`);
+    return m[0];
+  }).join('\n');
+  const scope = {
+    state,
+    readCarForPost: async (req) => { calls.reads += 1; calls.req = req; return read(); },
+    recheck: details.recheck,
+    basisPrice: rescan.basisPrice,
+    shortLocation: normalize.shortLocation,
+    storeNames: normalize.storeNames,
+    buildListingData: listingData.buildListingData,
+    listingChanges: listingData.listingChanges,
+    localVinCheck: vinModule.localVinCheck,
+    runGuardrails: template.runGuardrails,
+    usableClosingLine: template.usableClosingLine,
+    block: async (message, code) => { calls.blocked.push(code); state.step = 'blocked'; state.message = message; },
+    setStatus: (text, tone) => calls.said.push([text, tone]),
+    render: () => {},
+    saveFlow: async () => { calls.saved += 1; },
+  };
+  const names = Object.keys(scope);
+  const fn = new Function(...names, `${consts}\n${fnText('readAgainIfStale')}\nreturn readAgainIfStale;`)(...names.map((n) => scope[n]));
+  return { run: fn, calls };
+}
+
+const FRESH_CAR = () => fixtureVehicle('usedNormal'); // pre-owned, ready, 27163 / 26673, 20,986 miles
+const reviewState = (extra = {}) => {
+  const v = FRESH_CAR();
+  return {
+    origin: 'https://www.example-dealer.test', vin: v.vin, dealerTabId: 7, siteInfo: null, snapshotVehicles: {},
+    settings: { ...SETTINGS, basis: 'website', myStores: [], defaults: { titleStatus: 'Clean', condition: 'Very good' } },
+    vehicle: v, price: 27163, noteApplies: true, description: 'x', step: 'review', colorGuess: null, vinCheck: null, listing: { fields: {} },
+    ...extra,
+  };
+};
+
+test('a post whose car was read a while ago (or before the panel was closed) reads it again before the form is filled', async () => {
+  // read just now (the queue opens the form straight after reading): not read twice
+  const now = staleReader(reviewState({ readAt: Date.now() }), () => { throw new Error('read'); });
+  assert.equal(await now.run(), true);
+  assert.equal(now.calls.reads, 0);
+
+  // a flow saved before reads were timed, or one left at review for days: read again; unchanged, the fill goes on
+  for (const readAt of [undefined, null, Date.now() - 3 * 24 * 3600 * 1000]) {
+    const state = reviewState({ readAt });
+    const same = staleReader(state, () => ({ ok: true, vehicle: FRESH_CAR() }));
+    assert.equal(await same.run(), true, String(readAt));
+    assert.equal(same.calls.reads, 1);
+    assert.deepEqual([same.calls.req.vin, same.calls.req.origin, same.calls.req.tabId], [state.vin, state.origin, 7]);
+    assert.ok(Date.now() - state.readAt < 1000, 'the read is timed');
+    assert.equal(state.step, 'review');
+  }
+
+  // the website dropped the price meanwhile: back to the review with the new price, nothing filled
+  const state = reviewState({ readAt: Date.now() - 3600 * 1000, step: 'filling' });
+  const dropped = staleReader(state, () => ({ ok: true, vehicle: { ...FRESH_CAR(), price: 26163, priceBeforeFees: 25673 } }));
+  assert.equal(await dropped.run(), false);
+  assert.equal(state.step, 'review');
+  assert.equal(state.price, 26163);
+  assert.equal(state.vehicle.price, 26163);
+  assert.equal(state.listing, null, 'the listing is built again from the new read');
+  assert.match(dropped.calls.said.at(-1)[0], /^The website changed since this car was read: Price \$27,163 → \$26,163\./);
+  assert.equal(dropped.calls.said.at(-1)[1], 'error');
+  assert.ok(dropped.calls.saved >= 1);
+
+  // a new mileage: back to the review, and the description's old mileage now fails its check
+  const miles = reviewState({ readAt: 0, description: '2019 Ram 1500 Classic Express with 20,986 miles.' });
+  const moved = staleReader(miles, () => ({ ok: true, vehicle: { ...FRESH_CAR(), mileage: 21500 } }));
+  assert.equal(await moved.run(), false);
+  assert.match(moved.calls.said.at(-1)[0], /Mileage 20986 → 21500/);
+  assert.ok(miles.guardrails.problems.some((p) => p.code === 'mileage-mismatch'));
+});
+
+test('a car that sold, went sale-pending, turned new or lost its price since it was read is stopped before the form is filled', async () => {
+  const cases = [
+    [() => ({ ok: false, notFound: true, message: 'Not on the website any more.' }), 'not-on-website'],
+    [() => ({ ok: false, message: 'The website did not answer.' }), 'site-unreachable'],
+    [() => ({ ok: false, needsPermission: true, origins: ['https://www.example-dealer.test/*'], message: 'Allow reading.' }), 'no-permission'],
+    [() => ({ ok: true, vehicle: { ...FRESH_CAR(), status: 'pend-sale' } }), 'check-not-ready'],
+    [() => ({ ok: true, vehicle: { ...FRESH_CAR(), inventoryType: 'New', urlConditionWord: 'new', siteTitle: 'New 2019 Ram 1500 Classic Express' } }), 'check-skip'],
+    [() => ({ ok: true, vehicle: { ...FRESH_CAR(), price: null, priceBeforeFees: null } }), 'check-not-ready'],
+  ];
+  for (const [read, code] of cases) {
+    const state = reviewState({ readAt: 0 });
+    const r = staleReader(state, read);
+    assert.equal(await r.run(), false, code);
+    assert.deepEqual(r.calls.blocked, [code]);
+    assert.equal(state.step, 'blocked');
+    if (code === 'no-permission') assert.deepEqual(state.blockedOrigins, ['https://www.example-dealer.test/*']);
+  }
+});
+
+test('Open the Marketplace form and every fill read the car again first; a post started now records when it read the car', async () => {
+  assert.match(fnText('openForm'), /if \(!probeOnly && !\(await readAgainIfStale\(\)\)\) return undefined;[\s\S]*fillBlocker\(state\.description\)/);
+  assert.match(fnText('runFill'), /^async function runFill\(\) \{\n\s*if \(!\(await readAgainIfStale\(\)\)\) return undefined;/);
+  assert.match(fnText('startFlow'), /state\.readAt = Date\.now\(\);/);
+  assert.match(src, /^const FLOW_FIELDS = \[[^\]]*'readAt'/m);
+  assert.match(fnText('clearFlow'), /readAt: null/);
+  // a read that took the panel back to the review (or stopped the post) opens no form and types nothing
+  const state = { origin: 'https://www.example-dealer.test', settings: SETTINGS, vehicle: CAR, price: 20986, noteApplies: true, description: CLEAN, posted: {}, syncState: null, listing: { fields: { description: CLEAN } }, step: 'probe', map: { fields: [] } };
+  const stale = async () => false;
+  const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'readAgainIfStale', 'fillBlocker', `${dealerChecks().replace(/function fillBlocker[\s\S]*$/, '')}\n${fnText('openForm')}\nreturn openForm;`)(
+    state, never('setStatus'), () => ({ posted: 'p', sync: 's' }), { storage: { local: { get: async () => ({}) } } }, () => ({ reached: false }), () => null, stale, never('fillBlocker'),
+  );
+  assert.equal(await openForm(), undefined);
+  const runFill = new Function('state', 'readAgainIfStale', 'fillBlocker', 'chrome', `${fnText('runFill')}\nreturn runFill;`)(state, stale, never('fillBlocker'), { scripting: { executeScript: never('executeScript') } });
+  assert.equal(await runFill(), undefined);
 });

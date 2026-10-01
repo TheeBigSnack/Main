@@ -217,3 +217,19 @@ test('location: only a suggestion in the right state may be picked (there are se
   assert.equal(Object.keys(STATE_NAMES).length, 56); // 50 states, DC, five territories
   assert.equal(buildListingData(vehicle('usedNormal'), { dealer: DEALER }).match.location.strict, true);
 });
+
+// ---------- what a second read of the car changes on the form ----------
+import * as listing from '../extension/src/listingData.js';
+
+test('listingChanges: the form fields a fresh read of the car changes, the description aside', () => {
+  const v = vehicle('usedNormal');
+  const build = (car, price, description = 'x') => buildListingData(car, { dealer: { city: 'Springfield', state: 'OH' }, price, description, defaults: { titleStatus: 'Clean', condition: 'Very good' } });
+  assert.equal(typeof listing.listingChanges, 'function');
+  assert.deepEqual(listing.listingChanges(build(v, 27163), build(v, 27163, 'another description')), [], 'the same car: nothing changed');
+  assert.deepEqual(listing.listingChanges(build(v, 27163), build(v, 26163)), [{ key: 'price', was: '27163', now: '26163' }]);
+  assert.deepEqual(listing.listingChanges(build(v, 27163), build({ ...v, mileage: 21500, exteriorColor: 'Black' }, 27163)).map((c) => c.key), ['mileage', 'exteriorColor']);
+  // a branded title the website now mentions takes the title default off
+  const branded = listing.listingChanges(build(v, 27163), build({ ...v, descriptionRaw: 'Rebuilt title.' }, 27163));
+  assert.ok(branded.some((c) => c.key === 'titleStatus' || c.key === 'cleanTitle'), JSON.stringify(branded));
+  assert.deepEqual(listing.listingChanges(null, build(v, 27163)).map((c) => c.key).includes('price'), true, 'no earlier listing: everything is new');
+});
