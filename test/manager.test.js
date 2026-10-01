@@ -721,6 +721,20 @@ test('the manager page carries no pilot-dealer value and no Meta-affiliation wor
   assert.match(read('manager/index.html'), /Lot Current is not affiliated with Meta Platforms, Inc\./);
 });
 
+// Any address gets an account from the sign-in form (sign-up is on, and the
+// extension's own sign-in creates the account before an invite is redeemed),
+// so the hint says what row-level security actually limits: who sees the
+// numbers, not who can sign in.
+test('the sign-in hint says any address can get a link and only people a dealership added see its numbers', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /<p class="hint">Any email address can get a link, but only people a dealership has added see its numbers\. If the link does not arrive, check the spam folder, then ask whoever set Lot Current up for your store\.<\/p>/);
+  assert.doesNotMatch(js, /can sign in\./, 'no claim that the form is closed to outsiders');
+  // the claim rests on the link request creating the account, as the extension's does
+  assert.match(js, /signInWithOtp\(\{ email, options: \{ emailRedirectTo: pageUrl\(\) \} \}\)/);
+  assert.doesNotMatch(js, /shouldCreateUser/);
+  assert.match(read('extension/src/account.js'), /create_user: true/);
+});
+
 test('the page is relative, mobile-friendly, and offers what the brief names', () => {
   const html = read('manager/index.html');
   assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1">/);

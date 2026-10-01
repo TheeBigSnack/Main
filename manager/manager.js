@@ -162,7 +162,7 @@ function viewSignIn(note = '') {
         <input type="email" name="email" required autocomplete="email" placeholder="you@yourdealership.com" aria-label="Your email">
         <button type="submit" class="primary">Send me a sign-in link</button>
       </form>
-      <p class="hint">Only people the dealership's Lot Current account lists can sign in. If the link does not arrive, check the spam folder, then ask whoever set Lot Current up for your store.</p>
+      <p class="hint">Any email address can get a link, but only people a dealership has added see its numbers. If the link does not arrive, check the spam folder, then ask whoever set Lot Current up for your store.</p>
       <div class="toolbar"><button type="button" class="ghost" data-action="mock">Try with sample data instead</button></div>
     </div>`;
   $('signin').addEventListener('submit', onSendLink);
