@@ -748,9 +748,14 @@ test('sign-in comes back as a PKCE code to the page\'s own address, and the page
   assert.doesNotMatch(read('manager/manager.js') + read('manager/data.js'), /style="/, 'no inline style: style-src is \'self\'');
 });
 
-test('config.js: five fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {
-  assert.deepEqual(Object.keys(CONFIG).sort(), ['functionsUrl', 'selfServeSignup', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
+test('config.js: six fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {
+  assert.deepEqual(Object.keys(CONFIG).sort(), ['billing', 'functionsUrl', 'selfServeSignup', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
   assert.equal(CONFIG.selfServeSignup, false, 'the form stays hidden until the owner opens sign-up');
+  // billing is off until docs/stripe-setup.md step 5 deploys the function, and that step is what turns it on
+  assert.equal(CONFIG.billing, false, 'no billing function is deployed yet (docs/production-setup.md step 3: it comes with Stripe)');
+  assert.match(read('manager/config.js'), /docs\/stripe-setup\.md step 5/);
+  assert.match(read('docs/stripe-setup.md'), /`billing: true` in `manager\/config\.js`/, 'the step that deploys billing turns the card on');
+  assert.match(read('manager/manager.js'), /const billingOpen = \(\) => CONFIG\.billing === true;/, 'only a true turns the calls on');
   assert.match(read('manager/config.js'), /signup_settings\.open[\s\S]*"Self-serve sign-up"/, 'the comment names the switch in the database that is the real gate');
   assert.equal(typeof CONFIG.supabaseUrl, 'string');
   assert.equal(typeof CONFIG.supabaseAnonKey, 'string');
@@ -1049,6 +1054,11 @@ test('gettingStarted on the ?mock=1 sample: all four done, so the card is one li
   // and without a dealership id, or with junk, it neither throws nor counts anything
   assert.doesNotThrow(() => gettingStarted());
   assert.equal(gettingStarted({ billing: 'x', invites: 'x', memberships: 'x', listings: 'x', now: 'not a time' }).done, 0);
+  // before billing opens the plan step is left out, whatever the plan, so nothing points at a card that cannot do it
+  const closed = gettingStarted({ ...d, billing: null, dealershipId: d.dealership.id, now: NOW, billingOpen: false });
+  assert.deepEqual(closed.steps.map((s) => s.key), ['invite', 'firstCar', 'twoPosting']);
+  assert.equal(closed.line, 'All three steps done');
+  assert.ok(!closed.steps.some((s) => s.action && s.action.target === 'billing'));
 });
 
 test('the page: the Start your dealership form behind the flag, the rpc with the three fields, a live region, and every box labelled', () => {

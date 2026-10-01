@@ -31,10 +31,18 @@
 // "Self-serve sign-up"), and create_dealership refuses everyone while that
 // is off, whatever this says. Turn both on together; with this false the
 // page keeps saying "ask whoever set Lot Current up for your store".
+//
+// billing turns the Billing card's calls to the billing function on. Leave it
+// false until that function is deployed with its Stripe secrets and this
+// page's address is in ALLOWED_ORIGINS (docs/stripe-setup.md step 5, which
+// then turns it on): until then the page calls no billing route, reads the
+// plan straight from the database, says billing is not open yet with no
+// button, and Getting started leaves out its plan step.
 export const CONFIG = {
   supabaseUrl: 'https://dblbfgfkmzlfdwzbcvpj.supabase.co',
   supabaseAnonKey: 'sb_publishable_dFXfRnfVqhUqZKxM2r_ylw_6uU4d2bt',
   functionsUrl: '',
   supabaseJs: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm',
   selfServeSignup: false,
+  billing: false,
 };

@@ -13,6 +13,11 @@
 //     a note, not a failure, and so is the webhook's 500 that says
 //     STRIPE_WEBHOOK_SECRET is not set yet; rerun it after those sections and
 //     their lines read ok;
+//   - with LOTSYNC_MANAGER_ORIGIN (the manager view's address, no path), billing
+//     answers that page's CORS preflight: the page calls billing from a
+//     browser, so its origin must be in the ALLOWED_ORIGINS secret, or every
+//     call fails there while the extension's lines read ok (a note until
+//     billing is deployed);
 //   - with LOTSYNC_TEST_TOKEN (the access token of a signed-in test account
 //     that belongs to no dealership), /sync answers 403, and eleven wrong
 //     invite codes end in the throttle's P0005, which proves the misses are
@@ -22,6 +27,7 @@
 //   (both default to extension/src/accountConfig.js)
 //   optional: LOTSYNC_TEST_TOKEN=<a non-member's access token>
 //             LOTSYNC_SITE_ORIGIN=https://<where site/ is hosted>
+//             LOTSYNC_MANAGER_ORIGIN=https://<where the manager view is hosted>
 //
 // It reads and never writes: the only thing it changes is the test
 // account's own invite-miss count (only with LOTSYNC_TEST_TOKEN). It keeps
@@ -140,10 +146,10 @@ const header = (h, name) => (h && typeof h.get === 'function' ? h.get(name) : nu
 
 /**
  * Runs every check against the live project and returns the findings.
- * @param {object} deps  { fetchImpl, url, anonKey, testToken?, siteOrigin?, configs? }
+ * @param {object} deps  { fetchImpl, url, anonKey, testToken?, siteOrigin?, managerOrigin?, configs? }
  * @returns {Promise<{ check, ok, detail, warnOnly? }[]>}
  */
-export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, testToken = '', siteOrigin = '', configs = null } = {}) {
+export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, testToken = '', siteOrigin = '', managerOrigin = '', configs = null } = {}) {
   const base = trimUrl(url);
   const out = configs ? configFindings(configs) : [];
   if (!base || !anonKey) {
@@ -176,6 +182,12 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
     out.push(notDeployedYet(f.name, pre.status, { check: `${f.name}: answers the extension's CORS preflight`, ok: pre.status >= 200 && pre.status < 300 && header(pre.headers, 'access-control-allow-origin') === EXTENSION_ORIGIN, detail: `${pre.status}, allow-origin ${header(pre.headers, 'access-control-allow-origin') || 'none'}` }));
     const bare = await call(fetchImpl, `${base}/functions/v1/${f.path}`, { method: f.method, headers: { apikey: anonKey, 'Content-Type': 'application/json', Origin: EXTENSION_ORIGIN }, body: f.body ? JSON.stringify(f.body) : undefined });
     out.push(notDeployedYet(f.name, bare.status, { check: `${f.name}: refuses a call with no user token`, ok: bare.status === 401, detail: String(bare.status) }));
+  }
+  // the manager view calls billing from its own origin, which only ALLOWED_ORIGINS lets through
+  if (managerOrigin) {
+    const pre = await call(fetchImpl, `${base}/functions/v1/billing/status`, { method: 'OPTIONS', headers: { Origin: managerOrigin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization, apikey' } });
+    const allow = header(pre.headers, 'access-control-allow-origin');
+    out.push(notDeployedYet('billing', pre.status, { check: 'billing: answers the manager view\'s CORS preflight', ok: pre.status >= 200 && pre.status < 300 && allow === managerOrigin, detail: `${pre.status}, allow-origin ${allow || 'none'} (is ${managerOrigin} in ALLOWED_ORIGINS?)` }));
   }
   // An unsigned event gets 400 once the signing secret is set. Before that the
   // function itself answers 500 naming STRIPE_WEBHOOK_SECRET (billing is
@@ -236,6 +248,7 @@ async function main() {
     anonKey: process.env.LOTSYNC_ANON_KEY || ACCOUNT.anonKey,
     testToken: process.env.LOTSYNC_TEST_TOKEN || '',
     siteOrigin: trimUrl(process.env.LOTSYNC_SITE_ORIGIN || ''),
+    managerOrigin: trimUrl(process.env.LOTSYNC_MANAGER_ORIGIN || ''),
     configs: { account: ACCOUNT, manager: CONFIG, site: SITE },
   });
   const { text, failed } = report(findings);

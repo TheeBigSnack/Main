@@ -510,6 +510,31 @@ export function billingBody(route, status, { returnUrl = '', dealershipId = '' }
   return body;
 }
 
+// Before billing opens (manager/config.js billing false: the billing
+// function comes with Stripe, docs/stripe-setup.md step 5) the page does not
+// call it. It reads the plan as row-level security lets a member, the row and
+// subscription_state() (the word /sync serves by), and closedBillingStatus()
+// shapes them like the function's answer with `open: false` and nothing to
+// press. The card then says billing is not open yet instead of offering a
+// pilot or a payment it cannot start; a pilot the owner recorded by
+// agreement shows with its end date.
+export const BILLING_CLOSED_LINE = 'Billing is not open yet, so there is no plan to start or pay for here, and nothing is charged.';
+export const BILLING_CLOSED_ASK = 'Billing is not open yet: ask your Lot Current contact.';
+export function closedBillingStatus(word, row) {
+  return {
+    state: PLAN_STATES.includes(word) ? word : 'unknown',
+    open: false,
+    role: '',
+    subscription: row && typeof row === 'object' && !Array.isArray(row) ? row : null,
+    canStartPilot: false,
+    canSubscribe: false,
+    canManageBilling: false,
+    pilotDays: null,
+    includedSalespeople: null,
+    salespeople: null,
+  };
+}
+
 // Why a plan has lapsed, from the Stripe status on the row; a pilot that
 // ran out is worded from its end date instead.
 const LAPSED_WHY = Object.freeze({
@@ -558,6 +583,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
   const date = (iso) => fmtLocalDate(iso, zone);
   const manager = s.role === 'manager';
   const state = PLAN_STATES.includes(s.state) ? s.state : 'unknown';
+  const billingOpen = s.open !== false; // closedBillingStatus: billing not open yet
   const pilotDays = num(s.pilotDays) ?? num(p.pilotDays);
   const includedSalespeople = num(s.includedSalespeople) ?? num(p.includedSalespeople);
   const salespeople = salespeopleIn(s);
@@ -565,7 +591,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
   // buttons only for a manager and a state this page knows: a word the page
   // cannot read is a page and a function that disagree, and nothing to press
   const buttons = [];
-  if (manager && state !== 'unknown') {
+  if (manager && state !== 'unknown' && billingOpen) {
     if (s.canStartPilot) buttons.push({ ...BILLING_BUTTONS.pilot });
     if (s.canSubscribe) buttons.push({ ...BILLING_BUTTONS.subscribe });
     if (s.canManageBilling) buttons.push({ ...BILLING_BUTTONS.portal });
@@ -577,7 +603,11 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
   let detail = '';
   let daysLeft = null;
 
-  if (state === 'none') {
+  if (state === 'none' && !billingOpen) {
+    label = 'Not open yet';
+    tone = '';
+    line = BILLING_CLOSED_LINE;
+  } else if (state === 'none') {
     label = 'No plan yet';
     tone = '';
     const terms = [
@@ -626,6 +656,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     line = 'The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed.';
     const pilotEnd = ms(sub.pilot_ends_at);
     detail = LAPSED_WHY[sub.status] || (pilotEnd !== null && pilotEnd <= t ? `The free pilot ended ${date(sub.pilot_ends_at)}.` : '');
+    if (!billingOpen) detail = [detail, BILLING_CLOSED_ASK].filter(Boolean).join(' '); // nothing here can renew it yet
   }
 
   const open = hasOpenSubscription(sub);
@@ -887,7 +918,8 @@ export function signupRefusal(error) {
 // ---------- getting started ----------
 
 // The Getting started card (managers only): four steps from a new
-// dealership to plan milestone M6's "at least two active salespeople", each
+// dealership to plan milestone M6's "at least two active salespeople" (three
+// before billing opens: the plan step waits for it), each
 // done or not from rows the page already reads. The first two are done on
 // this page, so each carries the id of the card that does it; the other two
 // happen in the salespeople's extensions.
@@ -921,9 +953,11 @@ const PLAN_STEP_LINES = Object.freeze({
  *   listings:     the dealership's listings
  *   dealershipId: the chosen dealership; rows of another one are left out
  *   now:          ISO time "the past 7 days" counts back from (default: the clock)
+ *   billingOpen:  false before billing opens (manager/config.js billing):
+ *                 step 1 is left out, since nothing on the page can do it
  * @returns {{ steps: { key, title, done, line, action: { target, label } | null }[], done, total, allDone, line }}
  */
-export function gettingStarted({ billing, invites, memberships, listings, dealershipId = '', now = nowIso() } = {}) {
+export function gettingStarted({ billing, invites, memberships, listings, dealershipId = '', now = nowIso(), billingOpen = true } = {}) {
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
   const ours = (r) => !dealershipId || !r.dealership_id || r.dealership_id === dealershipId;
@@ -957,14 +991,15 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
     : 'No salesperson has posted in the past 7 days.';
 
   const steps = [
-    step('plan', plan === 'pilot' || plan === 'active', PLAN_STEP_LINES[plan]),
+    ...(billingOpen === false ? [] : [step('plan', plan === 'pilot' || plan === 'active', PLAN_STEP_LINES[plan])]),
     step('invite', M.length > 1 || open > 0, inviteLine),
     step('firstCar', L.length > 0, L.length ? `${plural(L.length, 'car')} posted and synced so far.` : 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs.'),
     step('twoPosting', n >= ACTIVE_SALESPEOPLE, postingLine),
   ];
   const done = steps.filter((s) => s.done).length;
   const allDone = done === steps.length;
-  return { steps, done, total: steps.length, allDone, line: allDone ? 'All four steps done' : `${done} of ${steps.length} done` };
+  const all = ['', 'one', 'two', 'three', 'four'][steps.length] || String(steps.length);
+  return { steps, done, total: steps.length, allDone, line: allDone ? `All ${all} steps done` : `${done} of ${steps.length} done` };
 }
 
 // ---------- the spreadsheet ----------

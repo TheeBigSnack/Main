@@ -10,6 +10,7 @@ import { runChecks, report, nothingRead, notDeployedYet, configFindings, keyKind
 const URL_ = 'https://abcd.supabase.co';
 const KEY = 'sb_publishable_check-deploy-tests';
 const SITE = 'https://lotsync.example';
+const MANAGER = 'https://app.lotsync.example';
 
 // A fake Supabase that behaves like a correct deploy, with switches to break it.
 function fakeProject(broken = {}) {
@@ -52,7 +53,9 @@ function fakeProject(broken = {}) {
       return reply(400, { ok: false, error: 'the Stripe signature does not match' });
     }
     if (u.pathname.startsWith('/functions/v1/')) {
-      if (method === 'OPTIONS') return reply(204, null, origin === EXTENSION_ORIGIN && !broken.noCors ? { 'access-control-allow-origin': origin } : {});
+      // ALLOWED_ORIGINS names the manager view unless broken.noManagerCors
+      const allowed = (origin === EXTENSION_ORIGIN && !broken.noCors) || (origin === MANAGER && !broken.noManagerCors);
+      if (method === 'OPTIONS') return reply(204, null, allowed ? { 'access-control-allow-origin': origin } : {});
       if (anonCall) return reply(broken.gatewayOpen ? 200 : 401, { ok: false });
       return reply(403, { ok: false, error: 'not a member' });
     }
@@ -245,4 +248,23 @@ test('with a publishable key no request carries it after Bearer, so a 401 is a r
   await runChecks({ fetchImpl, url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE });
   assert.ok(sent.length > TABLES.length);
   assert.deepEqual(sent.filter((a) => a.includes(KEY)), []);
+});
+
+// The manager view calls billing from its own origin: the extension's
+// preflight passing says nothing about it, and a missing ALLOWED_ORIGINS
+// shows up only there.
+test('with the manager view\'s origin, billing\'s preflight from it is checked: ok when ALLOWED_ORIGINS names it, a failure when not, a note before billing is deployed', async () => {
+  const name = 'billing: answers the manager view\'s CORS preflight';
+  const good = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
+  assert.equal(good.find((f) => f.check === name).ok, true);
+  assert.equal(report(good).failed, 0);
+  const refused = await runChecks({ fetchImpl: fakeProject({ noManagerCors: true }), url: URL_, anonKey: KEY, managerOrigin: MANAGER, configs });
+  const f = refused.find((x) => x.check === name);
+  assert.deepEqual([f.ok, f.warnOnly], [false, undefined], 'a failure, not a note');
+  assert.equal(f.detail, `204, allow-origin none (is ${MANAGER} in ALLOWED_ORIGINS?)`);
+  assert.ok(refused.find((x) => x.check === "billing: answers the extension's CORS preflight").ok, 'the extension\'s line alone would read ok');
+  const later = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing'] }), url: URL_, anonKey: KEY, managerOrigin: MANAGER, configs });
+  assert.equal(later.find((x) => x.check === name).warnOnly, true);
+  // without the origin the line is not there
+  assert.equal(good.length - 1, (await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs })).length);
 });

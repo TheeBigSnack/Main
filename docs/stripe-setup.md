@@ -67,11 +67,15 @@ supabase secrets set STRIPE_SECRET_KEY=sk_test_...
 supabase secrets set STRIPE_PRICE_ROOFTOP=price_... STRIPE_PRICE_SEAT=price_... STRIPE_PORTAL_CONFIGURATION=bpc_...
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...
 supabase secrets set ALLOWED_RETURN_ORIGINS=https://<the manager view's address>
+supabase secrets set ALLOWED_ORIGINS=https://<the manager view's address>
 supabase functions deploy billing --no-verify-jwt
+$env:LOTSYNC_MANAGER_ORIGIN = 'https://<the manager view's address>'
 npm run check-deploy
 ```
 
-The second and third lines are the ones step 3 and step 4 printed. `ALLOWED_RETURN_ORIGINS` is the manager view's address with no path; it must also be in `ALLOWED_ORIGINS`. Leave `STRIPE_AUTOMATIC_TAX` unset for now (the last section). `check-deploy` should now show every billing line as ok.
+The second and third lines are the ones step 3 and step 4 printed. `ALLOWED_RETURN_ORIGINS` and `ALLOWED_ORIGINS` are both the manager view's address with no path: the first lets Stripe send a manager back there, the second lets the page call the billing function at all (the extension is always allowed). If `ALLOWED_ORIGINS` already lists other addresses, keep them in the same line, comma-separated. Leave `STRIPE_AUTOMATIC_TAX` unset for now (the last section). `check-deploy` should now show every billing line as ok, including "billing: answers the manager view's CORS preflight" (on macOS or Linux: `LOTSYNC_MANAGER_ORIGIN=https://<the manager view's address> npm run check-deploy`).
+
+Then the manager view's Billing card is turned on: **[Claude]** sets `billing: true` in `manager/config.js` and commits, and the Manager view workflow deploys the page (`docs/production-setup.md` step 6). Until then the page calls no billing route: its Billing card says billing is not open yet, with no button, and Getting started has three steps.
 
 ## 6. Try it as a manager would [owner, about 15 minutes]
 

@@ -11,6 +11,10 @@
 // through POST .../billing/checkout and /portal: the function answers an
 // address and the page goes there. Subscribe asks for a seat per salesperson
 // the card shows, never fewer than the plan includes (data.js billingBody).
+// Until config.js turns billing on (it comes with Stripe, docs/stripe-setup.md
+// step 5) the page never calls the billing function: it reads the plan from
+// the database as row-level security allows a member, and the card says
+// billing is not open yet (data.js closedBillingStatus), with no button.
 // Stripe sends the manager back to this page with ?billing=success or
 // ?billing=canceled, which becomes one note, and with ?dealership=<id>, so
 // the page opens the dealership that paid (or opened the portal) and puts
@@ -49,7 +53,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, authQueryError, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, closedBillingStatus, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, authQueryError, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -57,6 +61,7 @@ const secs = (s) => (typeof s === 'number' ? `${s} s` : '—');
 const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
 const money = (n) => (typeof n === 'number' ? '$' + n.toLocaleString('en-US') : '—');
 const configured = () => Boolean(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);
+const billingOpen = () => CONFIG.billing === true; // the billing function is deployed with its secrets
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
 // Where the Edge Functions answer: config.js's functionsUrl, else the
 // project's own /functions/v1 (the extension derives it the same way).
@@ -237,6 +242,7 @@ function gettingStartedHtml() {
     listings: state.data.listings,
     dealershipId: state.dealershipId,
     now: new Date().toISOString(),
+    billingOpen: state.mock || billingOpen(), // the sample shows the whole page
   });
   if (g.allDone) return `<section class="card slim" id="gettingStarted"><h2>Getting started ${pill('good', g.line)}</h2></section>`;
   const steps = g.steps.map((s) => `<li><div class="row"><span class="name">${esc(s.title)}</span>${pill(s.done ? 'good' : '', s.done ? 'Done' : 'To do')}${s.action ? `<button type="button" class="ghost" data-action="goto" data-target="${esc(s.action.target)}">${esc(s.action.label)}</button>` : ''}</div><p class="hint">${esc(s.line)}</p></li>`).join('');
@@ -743,15 +749,31 @@ async function callFunction(method, path, body = null) {
   return a;
 }
 
-// GET .../billing/status for one dealership; a failure becomes the card's
-// error line, never the page's.
+// GET .../billing/status for one dealership, or before billing opens the
+// plan as the database shows it to a member (readPlan); a failure becomes
+// the card's error line, never the page's.
 async function loadBilling(dealershipId) {
   try {
-    const status = await callFunction('GET', `billing/status?dealershipId=${encodeURIComponent(dealershipId)}`);
+    const status = billingOpen() ? await callFunction('GET', `billing/status?dealershipId=${encodeURIComponent(dealershipId)}`) : await readPlan(dealershipId);
     return { status, error: '' };
   } catch (e) {
     return { status: null, error: (e && e.message) || String(e) };
   }
+}
+
+// Before billing opens: the dealership's subscriptions row (a member reads
+// their own dealership's, 0004_billing.sql) and subscription_state(), the
+// word /sync serves by, so a pilot the owner recorded by agreement shows
+// with its end date. No billing function, so nothing a browser's origin
+// could be refused for.
+async function readPlan(dealershipId) {
+  const [row, word] = await Promise.all([
+    state.supabase.from('subscriptions').select('*').eq('dealership_id', dealershipId),
+    state.supabase.rpc('subscription_state', { dealership_id: dealershipId }),
+  ]);
+  if (row.error) throw new Error(row.error.message);
+  if (word.error) throw new Error(word.error.message);
+  return closedBillingStatus(word.data, Array.isArray(row.data) ? row.data[0] || null : null);
 }
 
 async function reloadBilling() {

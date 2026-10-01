@@ -598,4 +598,9 @@ test('billing: scripts/check-deploy.mjs reads its billing lines as ok against th
   findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY })).filter((f) => f.check === 'billing: the webhook refuses an unsigned event');
   assert.deepEqual(findings.map((f) => [f.ok, f.warnOnly]), [[false, true]]);
   assert.match(findings[0].detail, /STRIPE_WEBHOOK_SECRET is not set yet/);
+  // the manager view's own origin: ok while ALLOWED_ORIGINS names it, a failure when it does not
+  const fromPage = async (vars) => (await runChecks({ fetchImpl: functionsFetch({ billing: await load(vars) }), url: SUPABASE_URL, anonKey: ANON_KEY, managerOrigin: MANAGER_PAGE })).find((f) => f.check === 'billing: answers the manager view\'s CORS preflight');
+  assert.equal((await fromPage({})).ok, true);
+  const refused = await fromPage({ ALLOWED_ORIGINS: undefined });
+  assert.deepEqual([refused.ok, refused.warnOnly], [false, undefined], refused.detail);
 });

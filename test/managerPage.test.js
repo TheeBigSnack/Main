@@ -22,7 +22,9 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 copyFileSync(join(root, 'manager/manager.js'), join(dir, 'manager.js'));
 copyFileSync(join(root, 'manager/data.js'), join(dir, 'data.js'));
 writeFileSync(join(dir, 'fake-supabase.mjs'), 'export function createClient(...args) { return globalThis.__managerPageTest.createClient(...args); }\n');
-writeFileSync(join(dir, 'config.js'), `export const CONFIG = ${JSON.stringify({ supabaseUrl: PROJECT, supabaseAnonKey: ANON, functionsUrl: '', supabaseJs: pathToFileURL(join(dir, 'fake-supabase.mjs')).href, selfServeSignup: false })};\n`);
+// config.js is one module for every copy of the page, so it hands out one object each case may change (openPage's billing)
+globalThis.__managerPageConfig = { supabaseUrl: PROJECT, supabaseAnonKey: ANON, functionsUrl: '', supabaseJs: pathToFileURL(join(dir, 'fake-supabase.mjs')).href, selfServeSignup: false, billing: true };
+writeFileSync(join(dir, 'config.js'), 'export const CONFIG = globalThis.__managerPageConfig;\n');
 
 // ---------- the browser, as far as the page uses it ----------
 
@@ -143,7 +145,8 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rp
 }
 
 let copies = 0;
-async function openPage(href, { client, fetchImpl } = {}) {
+async function openPage(href, { client, fetchImpl, billing = true } = {}) {
+  globalThis.__managerPageConfig.billing = billing;
   const page = browser(href);
   globalThis.fetch = async (url, init = {}) => {
     page.fetches.push({ url: String(url), init });
@@ -371,6 +374,7 @@ test('Sign out ends this browser\'s session only, so the person\'s extension and
 const ALPHA = 'aaaaaaaa-0000-4000-8000-000000000001';
 const BRAVO = 'bbbbbbbb-0000-4000-8000-000000000002';
 const ME = { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } };
+const DAY = 24 * 3600 * 1000;
 const twoDealerships = () => ({
   dealerships: [
     { id: ALPHA, name: 'Alpha Motors', website_origin: 'https://www.alpha-motors.test' },
@@ -485,4 +489,49 @@ test('a return that names a dealership the person is not in: the first opens, wi
   assert.equal(page.elements.get('dealer').textContent, 'Alpha Motors');
   assert.doesNotMatch(main(page), /Checkout is done/, 'the note is not about this dealership');
   assert.equal(page.href, PAGE);
+});
+
+// ---------- before billing opens ----------
+
+// config.js billing false: the billing function is not deployed yet (it
+// comes with Stripe). The page must not call it, show an error for it, or
+// send the manager to a card that cannot do the step.
+test('before billing opens: no billing route is called, the card says billing is not open yet with nothing to press, and Getting started has no plan step', async () => {
+  const client = fakeClient({
+    session: ME,
+    tables: { ...twoDealerships(), subscriptions: [] },
+    rpcs: { subscription_state: () => ({ data: 'none', error: null }) },
+  });
+  const page = await openPage(PAGE, { client, billing: false });
+  assert.equal(page.elements.get('dealer').textContent, 'Alpha Motors');
+  assert.equal(page.fetches.filter((f) => f.url.includes('/functions/v1/billing')).length, 0, 'the billing function is never called');
+  const html = main(page);
+  const billingCardHtml = html.slice(html.indexOf('<section class="card" id="billing">'), html.indexOf('</section>', html.indexOf('id="billing"')));
+  assert.match(billingCardHtml, /Billing <span class="pill ">Not open yet<\/span>/);
+  assert.match(billingCardHtml, /Billing is not open yet, so there is no plan to start or pay for here, and nothing is charged\./);
+  assert.doesNotMatch(billingCardHtml, /Couldn&#39;t read the plan|Couldn't read the plan|<button/, 'no error and no button');
+  assert.doesNotMatch(html, /Start the free pilot or subscribe|Go to Billing/, 'Getting started leaves the plan step out');
+  assert.match(html, /Getting started <span class="pill ">1 of 3 done<\/span>/);
+  assert.ok(client.requests.some((r) => r.rpc === 'subscription_state' && r.args.dealership_id === ALPHA), 'the plan comes from the database');
+  assert.ok(client.requests.some((r) => r.table === 'subscriptions' && r.eq.some(([c, v]) => c === 'dealership_id' && v === ALPHA)));
+});
+
+test('before billing opens: a pilot the owner recorded by agreement shows with its end date, and a lapsed one says whom to ask', async () => {
+  const end = new Date(Date.now() + 20.5 * DAY).toISOString();
+  const pilot = fakeClient({
+    session: ME,
+    tables: { ...twoDealerships(), subscriptions: [{ dealership_id: ALPHA, status: 'pilot', pilot_ends_at: end }] },
+    rpcs: { subscription_state: () => ({ data: 'pilot', error: null }) },
+  });
+  const html = main(await openPage(PAGE, { client: pilot, billing: false }));
+  assert.match(html, /Billing <span class="pill good">Free pilot<\/span><\/h2><p class="plan">Free pilot: 21 days left \(ends /);
+  assert.doesNotMatch(html, /data-action="billing"/);
+  const lapsed = fakeClient({
+    session: ME,
+    tables: { ...twoDealerships(), subscriptions: [{ dealership_id: ALPHA, status: 'pilot', pilot_ends_at: new Date(Date.now() - 2 * DAY).toISOString() }] },
+    rpcs: { subscription_state: () => ({ data: 'lapsed', error: null }) },
+  });
+  const lapsedHtml = main(await openPage(PAGE, { client: lapsed, billing: false }));
+  assert.match(lapsedHtml, /Billing is not open yet: ask your Lot Current contact\./);
+  assert.doesNotMatch(lapsedHtml, /data-action="billing"/, 'nothing to press that would call a function that is not there');
 });
