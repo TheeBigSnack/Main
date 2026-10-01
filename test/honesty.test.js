@@ -32,6 +32,9 @@ const AFFILIATION_CLAIMS = [
   "Facebook's official listing helper.",
   'Built with Meta.',
   'Lot Current works with Meta.',
+  'Meta has approved Lot Current.',
+  'Lot Current is an authorized Facebook Marketplace tool.',
+  'Recognized by Meta.',
 ];
 
 // Promises and made-up numbers that customer-facing copy may not make.
@@ -46,6 +49,23 @@ const CUSTOMER_CLAIMS = [
   'No ban risk, ever.',
   "Salespeople don't get banned.",
   "Facebook won't restrict your account.",
+  'Lot Current keeps your Facebook account safe, and your account is 100% safe with us.',
+  'Lot Current keeps your Facebook account safe.',
+  'Your account is 100% safe with us.',
+  'Your account is completely safe.',
+  'Your account will be totally safe.',
+  'Your profile is always protected.',
+  'Safe for your Facebook account.',
+  'Safe to use on Facebook.',
+  'Protects your account from bans.',
+  "Safeguards every salesperson's profile.",
+  'Zero risk to your account.',
+  'Your account is never at risk.',
+  'Avoid Facebook bans.',
+  'Helps prevent account restrictions.',
+  'Ban protection included.',
+  'Completely secure.',
+  'Undetectable by Facebook.',
   'Salespeople post 30 cars a day with Lot Current.',
   'Dealerships sell their used cars 3 days faster.',
   'Trusted by 140 dealerships.',
@@ -53,6 +73,13 @@ const CUSTOMER_CLAIMS = [
   'Post twice as fast.',
   'Save 6 hrs/week.',
   'It saves you 5 hours every week.',
+  'Saves salespeople 6 hours every week.',
+  'Over 1,000 cars posted.',
+  '500+ listings posted.',
+  'Hundreds of dealers trust Lot Current.',
+  'Cut posting time by 90%.',
+  '50% less time posting.',
+  'Get 50 more leads a month.',
 ];
 
 // Lines today's copy uses, which must stay allowed.
@@ -70,6 +97,11 @@ const HONEST = [
   'Each salesperson may record 10 posts a day unless the dealership changes it.',
   'A founding-dealer rate for the first five stores.',
   'You click Publish. Lot Current never does.',
+  "Your account is not guaranteed to be safe, and we won't say it is.",
+  "No tool can say a person's account isn't at risk; Facebook decides.",
+  'Rescans run every 3 hours while Chrome is open to keep your to-do count current.',
+  'If that line says more than 6 hours ago on a working day, nobody had it on.',
+  "Chrome's sync storage keeps the profile under the User's own Google account.",
 ];
 
 test('every affiliation or approval claim fails, in any document', () => {
@@ -119,4 +151,7 @@ test('docs/website.md says what the website\'s honesty check reads, and that it 
   assert.doesNotMatch(doc, /the honesty rules of `CLAUDE\.md` over every page's text/, 'the old claim that npm test enforces the rules themselves');
   assert.match(doc, /honesty word lists in `test\/honesty\.js`.{0,200}image alt text.{0,80}`llms\.txt`/, 'names the lists and the surfaces they read');
   assert.match(doc, /not every possible one, so new copy still needs a person to read it/, 'says a word list is not a proof');
+  // the price rule is not run over image alt text (test/sitePages.test.js), so the doc must not say it is
+  assert.doesNotMatch(doc, /no price that is not in `pricing\.json`\) over every page's text, image alt text/, 'the old claim that alt text is price-checked');
+  assert.match(doc, /no dollar figure that is not in `pricing\.json` in the same places except image alt text/, 'says where the price rule does not read');
 });

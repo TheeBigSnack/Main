@@ -13,8 +13,10 @@ import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 
 // Saying Lot Current is affiliated with, approved by or a partner of Meta.
 export const AFFILIATION = [
-  /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended) (by|for|on) (meta|facebook|marketplace)\b/i,
-  /\b(meta|facebook|marketplace)[- ](approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended)\b/i,
+  /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed) (by|for|on) (meta|facebook|marketplace)\b/i,
+  /\b(meta|facebook|marketplace)[- ](approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
+  /\b(meta|facebook) (has|have|had) (approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
+  /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|accredited) (meta|facebook|marketplace)\b/i,
   /\b(meta|facebook)['’]s (approval|endorsement|blessing)\b/i,
   /\b(meta|facebook)(['’]s)?( [a-z]+){0,2} partners?\b/i,
   /\bpartner(ed|ship|s)? (with|of) (meta|facebook)\b/i,
@@ -32,7 +34,7 @@ export const CLAIMS = [
   /(customers|dealers|salespeople) (say|love|report)/i,
   /\b(five|5) stars?\b/i,
   /\d+\s*(%|percent|x|times) (faster|more|fewer)/i,
-  /\b(hours?|hrs?)\s*(a|per|each|\/)\s*(day|week|month)\b/i,
+  /\b(hours?|hrs?)\s*(a|per|each|every|\/)\s*(day|week|month)\b/i,
   /industry[- ]leading/i,
   /best[- ]in[- ]class/i,
   /\b#1\b/,
@@ -41,17 +43,30 @@ export const CLAIMS = [
 // What no document may say, internal ones included.
 export const NEVER = [...AFFILIATION, ...CLAIMS];
 
-// Promises about what happens to a salesperson's Facebook account.
+// Up to three words that are not a negation: what "is 100% safe" and "will be
+// totally safe" put between the verb and "safe" ("is not safe" is no promise).
+const UP_TO_THREE_WORDS = String.raw`(?: (?!(?:not|never|no)\b|\w*n['’]t\b)[\w%'’-]+){0,3}`;
+
+// Promises about what happens to a salesperson's Facebook account. A sentence
+// that names one only to deny it is passed to honestyProblems as a denial.
 export const SAFETY = [
   /never (be|get) restricted/i,
-  /\b(account|profile)s? (is|are|stays?|will (be|stay|remain)|remains?) (safe|protected|secure)\b/i,
+  new RegExp(String.raw`\b(account|profile)s? (is|are|stays?|will|remains?|should|would)\b${UP_TO_THREE_WORDS} (safe|protected|secure)\b`, 'i'),
+  /\b(keeps?|keeping|kept)( [\w'’-]+){0,3} (account|profile)s? (safe|protected|secure|in good standing|from)\b/i,
+  /\b(protects?|protecting|shields?|shielding|safeguards?|safeguarding)( [\w'’-]+){0,3} (account|profile)s?\b(?! (data|information|details|settings)\b)/i,
+  /\b(safe|safer|protected|secure) (for|on|with|to use (on|with|for)) (your |their |a |the )?((facebook|meta|marketplace) )?(account|profile|facebook|meta|marketplace)s?\b/i,
+  /(\b(completely|totally|perfectly|entirely|absolutely|fully)|\b100\s?%) (safe|secure|protected)\b/i,
   /\b(safe|protected|immune) from (bans?|blocks?|restrictions?|suspensions?)\b/i,
+  /\b(avoid|avoids|avoiding|prevent|prevents|preventing)( [\w'’-]+){0,2} (bans?|blocks?|restrictions?|suspensions?)\b/i,
+  /\b(ban|block|account|restriction|suspension)[- ](protection|shield|insurance)\b/i,
   /\bno (ban|block|restriction|suspension)s? risk\b/i,
   /\b(ban|block)[- ]?(proof|free)\b/i,
   /\b(won't|will not|never|can't|cannot|don't|doesn't) (get|be) (banned|blocked|restricted|suspended)\b/i,
   /\b(meta|facebook|marketplace) (won't|will not|will never|never|can't|cannot) (ban|block|restrict|suspend)\b/i,
   /\brisk[- ]free\b/i,
-  /\bno risk\b/i,
+  /\b(no|zero|without any) risk\b/i,
+  /\b(never|not) (be )?at risk\b/i,
+  /\bundetect(able|ed)\b/i,
 ];
 
 // Numbers of customers, posts or time saved that nobody has measured. A count
@@ -60,10 +75,14 @@ export const SAFETY = [
 export const NUMBERS = [
   /\btrusted by\b/i,
   /(?<!\bfirst )\b\d[\d,]*\+?\s*(dealers|dealerships|stores|rooftops|customers|users)\b/i,
-  new RegExp(`\\b(?!${DEFAULT_DAILY_CAP} posts (a|per) day\\b)\\d[\\d,]*\\+?\\s*(cars|vehicles|listings|posts|sales|leads)\\s*(a|per|each|every|\\/)\\s*(day|week|month|year)\\b`, 'i'),
+  new RegExp(`\\b(?!${DEFAULT_DAILY_CAP} posts (a|per) day\\b)\\d[\\d,]*\\+?\\s*((more|extra|additional|new)\\s+)?(cars|vehicles|listings|posts|sales|leads)\\s*(a|per|each|every|\\/)\\s*(day|week|month|year)\\b`, 'i'),
+  /(\b(over|more than|nearly|almost|upwards of) \d[\d,]*\+?|\b\d[\d,]*\+)\s*(cars|vehicles|listings|posts|sales|leads|salespeople)\b/i,
+  /\b(hundreds|thousands|dozens|millions) of (cars|vehicles|listings|posts|sales|leads|dealers|dealerships|stores|rooftops|customers|users|salespeople)\b/i,
+  /\b(cut|cuts|cutting|reduce|reduces|reducing|slash|slashes|lower|lowers|boost|boosts|increase|increases|double|doubles|improve|improves)\b[^.]{0,40}\bby \d+\s*(%|percent)/i,
+  /\b\d+\s*(%|percent) (less|faster|quicker|shorter|more|fewer)\b/i,
   /\b\d+\s*(days?|hours?|hrs?|minutes?|mins?)\s*(faster|sooner|quicker)\b/i,
   /\b(twice|three times|four times|ten times|\d+x) as (fast|quick|many|much)\b/i,
-  /\bsaves? (you |them )?(up to )?\d+\s*(hours?|hrs?|minutes?|mins?)\b/i,
+  /\bsav(e|es|ed|ing) ([\w'’-]+ ){0,2}(up to |over |about |nearly |around )?\d+\s*(hours?|hrs?|minutes?|mins?)\b/i,
 ];
 
 // What customer-facing copy may not say either (the positioning names some
