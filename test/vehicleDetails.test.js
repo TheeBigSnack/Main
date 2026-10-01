@@ -142,7 +142,7 @@ test('with the permission, the car is read straight from the inventory service, 
   await withFetch(async () => ({ ok: false, status: 503 }), async () => {
     const down = await fetchVehicleDetailsDirect(DEALER, DI_INFO, fixtures.usedNormal.vin, { contains: async () => true });
     assert.equal(down.ok, false);
-    assert.match(down.message, /^Couldn't read the .*503\. If the website keeps turning Lot Sync away, open its used inventory page and click Post in the popup\.$/);
+    assert.match(down.message, /^Couldn't read the .*503\. If the website keeps turning Lot Current away, open its used inventory page and click Post in the popup\.$/);
   });
 });
 

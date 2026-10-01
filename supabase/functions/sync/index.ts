@@ -1,4 +1,4 @@
-// Lot Sync sync function (Milestone 4). One POST …/sync carries the
+// Lot Current sync function (Milestone 4). One POST …/sync carries the
 // salesperson's own posted registry, the pilot's post attempts and to-do
 // flags that changed since the last sync, and this scan's counts; the
 // function writes them for the caller's dealership (matched by the website

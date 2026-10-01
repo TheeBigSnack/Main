@@ -1,5 +1,5 @@
 {
-  "name": "lot-sync",
+  "name": "lot-current",
   "version": "0.5.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,9 @@
     "demo": "node demo/serve.mjs",
     "screenshots": "node scripts/screenshots.mjs",
     "store-images": "node scripts/store-images.mjs",
+    "store-check": "node scripts/store-check.mjs",
+    "store-screenshots": "node scripts/store-screenshots.mjs",
+    "extension-icon": "node scripts/extension-icon.mjs",
     "legal-pages": "node scripts/legal-pages.mjs",
     "site-pages": "node scripts/site-pages.mjs",
     "favicons": "node scripts/favicons.mjs",
@@ -18,6 +21,7 @@
     "test:sql": "node scripts/sql-test.mjs",
     "test:stack": "node scripts/stack-test.mjs",
     "check-deploy": "node scripts/check-deploy.mjs",
+    "stripe-setup": "node scripts/stripe-setup.mjs",
     "test:demo": "node demo/drive.mjs",
     "test:a11y": "node scripts/a11y.mjs",
     "test:site": "node scripts/site-check.mjs",
@@ -29,8 +33,11 @@
     "test:e2e:wizard": "node test/e2e/wizard.e2e.mjs",
     "test:e2e:upkeep": "node test/e2e/upkeep.e2e.mjs",
     "test:e2e:standard": "node test/e2e/standard.e2e.mjs",
+    "test:e2e:platforms": "node test/e2e/platforms.e2e.mjs",
     "test:e2e:panel": "node test/e2e/panel.e2e.mjs",
-    "survey": "node scripts/survey.mjs"
+    "survey": "node scripts/survey.mjs",
+    "set-project": "node scripts/set-project.mjs",
+    "check-hosting": "node scripts/check-hosting.mjs"
   },
   "devDependencies": {
     "playwright": "^1.56.0"

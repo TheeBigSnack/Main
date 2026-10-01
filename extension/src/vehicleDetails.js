@@ -17,6 +17,7 @@
 
 import { probeTab, searchViaTab, detectAdapter } from './scanRunner.js';
 import { adapterById, adapterForService } from '../adapters/index.js';
+import { SITES_KEY } from './storageKeys.js';
 import { assessVehicle, DECISION } from './classify.js';
 import { siteReadOrigins } from './panelList.js';
 
@@ -62,12 +63,30 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
     return { ok: false, tabUnusable: true, message: "Couldn't reach the dealership website tab. Open the used inventory page and click Post again. (" + errText(e) + ')' };
   }
   const adapter = probe && detectAdapter(probe);
-  if (!adapter) return { ok: false, tabUnusable: true, message: "This tab isn't a dealership inventory page Lot Sync can read. Open the used inventory page and click Post again." };
+  if (!adapter) return { ok: false, tabUnusable: true, message: "This tab isn't a dealership inventory page Lot Current can read. Open the used inventory page and click Post again." };
   if (origin && probe.site && probe.site.origin && probe.site.origin !== origin) {
     return { ok: false, tabUnusable: true, message: `The dealership tab now shows ${hostOf(probe.site.origin)}, not ${hostOf(origin)}. Open ${hostOf(origin)}'s used inventory page and click Post again.` };
   }
-  const r = await readOne(adapter, searchViaTab(tabId, adapter, probe.service), wanted, withUrl(adapter, probe.service, url));
+  // What the probe could not see on this page (a car's own page has no
+  // inventory list to find) comes from the service the last scan of this
+  // website stored, when the same adapter read it; what the probe did see wins.
+  const service = await withStoredService(probe, adapter);
+  const r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
   return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
+}
+
+async function withStoredService(probe, adapter) {
+  const probed = probe.service || {};
+  try {
+    const origin = probe.site && probe.site.origin;
+    const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
+    const stored = origin && sites[origin];
+    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return probed;
+    const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+    return { ...stored.service, ...seen };
+  } catch (e) {
+    return probed;
+  }
 }
 
 /**
@@ -84,10 +103,10 @@ export async function fetchVehicleDetailsDirect(origin, info, vin, { url = null,
   const wanted = String(vin || '').toUpperCase();
   const host = hostOf(origin);
   if (!info || !info.service) {
-    return { ok: false, message: `Lot Sync hasn't read ${host} on this computer yet. Open its used inventory page, click Scan website in the popup, then try again.` };
+    return { ok: false, message: `Lot Current hasn't read ${host} on this computer yet. Open its used inventory page, click Scan website in the popup, then try again.` };
   }
   const adapter = (info.adapter && adapterById(info.adapter)) || adapterForService(info.service);
-  if (!adapter) return { ok: false, message: `Lot Sync can't read ${host} any more. Open its used inventory page and click Scan website in the popup.` };
+  if (!adapter) return { ok: false, message: `Lot Current can't read ${host} any more. Open its used inventory page and click Scan website in the popup.` };
   const origins = siteReadOrigins(origin, { ...info, adapter: adapter.PLATFORM.id });
   let granted = false;
   try {
@@ -100,11 +119,11 @@ export async function fetchVehicleDetailsDirect(origin, info, vin, { url = null,
       ok: false,
       needsPermission: true,
       origins,
-      message: `To re-check this car on ${host} from here, Chrome has to let Lot Sync read the website (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
+      message: `To re-check this car on ${host} from here, Chrome has to let Lot Current read the website (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
     };
   }
   const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url));
-  if (!r.ok && !r.notFound) return { ...r, message: `${sentence(r.message)} If the website keeps turning Lot Sync away, open its used inventory page and click Post in the popup.` };
+  if (!r.ok && !r.notFound) return { ...r, message: `${sentence(r.message)} If the website keeps turning Lot Current away, open its used inventory page and click Post in the popup.` };
   return r.ok ? { ...r, site: info.site || { origin, name: info.name || host }, via: 'direct' } : r;
 }
 

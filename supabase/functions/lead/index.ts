@@ -1,4 +1,4 @@
-// Lot Sync lead function: a demo request from the landing page (PLAN.md M5).
+// Lot Current lead function: a demo request from the landing page (PLAN.md M5).
 //
 //   POST …/lead  { name, dealership, website, email, phone?, message?, company_url? }
 //     -> 200 { ok: true }                      stored (or a bot's honeypot: stored nowhere, same answer)
@@ -53,7 +53,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const headers = cors(origin, allowed);
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
   if (req.method !== 'POST') return answer(405, { ok: false, error: 'POST only' }, headers);
-  if (!originAllowed(origin, allowed)) return answer(403, { ok: false, error: 'demo requests come from the Lot Sync website only' }, headers);
+  if (!originAllowed(origin, allowed)) return answer(403, { ok: false, error: 'demo requests come from the Lot Current website only' }, headers);
   if (!brake.allow(await addressKey(req.headers))) return answer(429, { ok: false, error: 'too many requests from here; please try again in an hour or email us' }, headers);
 
   const read = await readJson(req, BODY_LIMIT);

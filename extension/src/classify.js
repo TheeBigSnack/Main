@@ -17,7 +17,7 @@
 //
 // Not a car: a trailer, RV, powersport vehicle or boat (listingData.js's
 // readVehicleKind, from the website's body style or a make that builds only
-// those) goes to "needs a look" whatever its condition, since Lot Sync fills in
+// those) goes to "needs a look" whatever its condition, since Lot Current fills in
 // only Marketplace's car/truck and motorcycle forms. A new one is still skipped.
 //
 // Ready check (only for cars that pass the gate): photos, a price, on the lot,
@@ -130,12 +130,12 @@ export function readyBlockers(v, settings = {}) {
   return blockers;
 }
 
-// A vehicle of a kind Lot Sync doesn't fill in, with the reason in the
+// A vehicle of a kind Lot Current doesn't fill in, with the reason in the
 // website's own words; null for a car, truck or motorcycle.
 export function notACar(v = {}) {
   const k = readVehicleKind(v);
   if (FORM_KINDS.includes(k.kind)) return null;
-  return { kind: k.kind, reason: `The website's ${k.from} makes it ${k.name}. Lot Sync fills in only Marketplace's car/truck and motorcycle forms, so it stays off the posting list.` };
+  return { kind: k.kind, reason: `The website's ${k.from} makes it ${k.name}. Lot Current fills in only Marketplace's car/truck and motorcycle forms, so it stays off the posting list.` };
 }
 
 export function assessVehicle(v, settings = {}) {

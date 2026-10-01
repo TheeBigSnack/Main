@@ -1,6 +1,6 @@
 # Onboarding emails for a store-wide install
 
-Three short emails for a dealership that has finished its pilot and is putting Lot Sync on every salesperson's machine, with the used car manager leading: one to the manager before anything is installed, one to each salesperson, and a day-7 check-in to the manager. Sent by the owner. Fill in the brackets; every count or price that is not a bracket is quoted from `marketing/pricing.json` (`includedSalespeople`, `extraSalespersonMonthly`) and checked by `test/marketing.test.js`. The pilot's own emails are in `onboarding-emails.md`.
+Three short emails for a dealership that has finished its pilot and is putting Lot Current on every salesperson's machine, with the used car manager leading: one to the manager before anything is installed, one to each salesperson, and a day-7 check-in to the manager. Sent by the owner. Fill in the brackets; every count or price that is not a bracket is quoted from `marketing/pricing.json` (`includedSalespeople`, `extraSalespersonMonthly`) and checked by `test/marketing.test.js`. The pilot's own emails are in `onboarding-emails.md`.
 
 Before the first email goes out (`supabase/README.md`, "The first dealership and its manager"): the dealership's account exists with its website and the manager is on it as its manager. The manager makes the salespeople's single-use invite codes in the manager view (**Invite a salesperson** in its Invite codes card calls `create_invite`), and the email to the manager says so; the owner can make them instead with the same function in the SQL editor while signed in as the manager, which the email offers in one clause. `[code]` in the salesperson email is the code made for that person: fill it in when the manager has passed the codes on, or write "the code [manager] gives you" in its place. The Web Store link is the unlisted listing's address (`store/listing.md`); the manager view address is wherever `manager/` is hosted.
 
@@ -8,17 +8,17 @@ Before the first email goes out (`supabase/README.md`, "The first dealership and
 
 ## To the manager: what happens next
 
-**Subject:** Lot Sync: what happens next at [dealership]
+**Subject:** Lot Current: what happens next at [dealership]
 
 Hi [name],
 
 Thanks for signing. Here is the whole roll-out in one email, so nothing is a surprise.
 
-**1. The account.** I have set up [dealership]'s Lot Sync account with [website address] as its website and added you as its manager. Nothing from the pilot is lost: each pilot salesperson's posted list and numbers sync into the account the first time they sign in.
+**1. The account.** I have set up [dealership]'s Lot Current account with [website address] as its website and added you as its manager. Nothing from the pilot is lost: each pilot salesperson's posted list and numbers sync into the account the first time they sign in.
 
 **2. Invite codes.** Each salesperson joins the account with an invite code that works once and for 7 days. You make the codes yourself in the manager view (step 4): under **Invite codes**, click **Invite a salesperson** and the code appears with a **Copy** button and the sentence to send with it. One code per person, [N] in all; a code belongs to one person, so please don't forward one. The card lists every code nobody has used yet, with the day it expires, and **Revoke** cancels one that went to the wrong person. A code you made stops working if you ever leave the store's account or stop being a manager. If you would rather I did it, send me the list (name and work email) and I will make the codes and email each person theirs. Either way, every salesperson gets the install steps below from me.
 
-**3. Install.** Each salesperson installs Lot Sync from the Chrome Web Store at [Web Store link], about two minutes, then runs set-up on [website address], which asks them to sign in with a code sent to their email (no password) and enter their invite code. My email to them walks through it step by step, and I'm reachable on [install day] for anyone who gets stuck.
+**3. Install.** Each salesperson installs Lot Current from the Chrome Web Store at [Web Store link], about two minutes, then runs set-up on [website address], which asks them to sign in with a code sent to their email (no password) and enter their invite code. My email to them walks through it step by step, and I'm reachable on [install day] for anyone who gets stuck.
 
 **4. The manager view.** [manager view address] shows who posted what, which sold cars are still listed and for how long, and which price changes haven't reached the listing yet. Sign in with your email address: click **Send me a sign-in link** and open the link on the same device. There is no password. The view reads only what the salespeople's extensions record: VINs, listing links, prices and times. Nothing from Facebook beyond the listing links they saved, and never a description or a buyer.
 
@@ -30,7 +30,7 @@ Thanks for signing. Here is the whole roll-out in one email, so nothing is a sur
 
 I'll write on day 7 with the three numbers to look at in the manager view.
 
-Two things I will keep saying: Lot Sync never clicks Publish, and it never asks anyone for their Facebook login. Having a person click Publish is the safest way to do this, not a guarantee. Lot Sync is not affiliated with Meta.
+Two things I will keep saying: Lot Current never clicks Publish, and it never asks anyone for their Facebook login. Having a person click Publish is the safest way to do this, not a guarantee. Lot Current is not affiliated with Meta.
 
 [your name]
 [phone]
@@ -39,27 +39,27 @@ Two things I will keep saying: Lot Sync never clicks Publish, and it never asks 
 
 ## To each salesperson: install, sign in, first car
 
-**Subject:** Lot Sync: install, sign in and your first car (about fifteen minutes)
+**Subject:** Lot Current: install, sign in and your first car (about fifteen minutes)
 
 Hi [name],
 
-[Manager] has put Lot Sync on for everyone at [dealership]. It fills in a Facebook Marketplace listing from the website in about ten seconds; you check it and click Publish yourself. Here is the whole set-up.
+[Manager] has put Lot Current on for everyone at [dealership]. It fills in a Facebook Marketplace listing from the website in about ten seconds; you check it and click Publish yourself. Here is the whole set-up.
 
-**1. Install (2 minutes).** Open [Web Store link] in Chrome, click **Add to Chrome**, then **Add extension**. Chrome says the extension can read and change data on www.facebook.com/marketplace and on the dealership's photo host; that is what filling the form and attaching the photos needs. It never reads your Facebook password, cookies or messages. Then click the puzzle-piece icon in Chrome's toolbar and pin **Lot Sync**.
+**1. Install (2 minutes).** Open [Web Store link] in Chrome, click **Add to Chrome**, then **Add extension**. Chrome says the extension can read and change data on www.facebook.com/marketplace and on the dealership's photo host; that is what filling the form and attaching the photos needs. It never reads your Facebook password, cookies or messages. Then click the puzzle-piece icon in Chrome's toolbar and pin **Lot Current**.
 
-**2. Set-up (about 7 minutes).** Open [dealership used inventory URL], click the Lot Sync icon, and on the **To do** tab click **Set up Lot Sync**. The side panel walks you through: reading the website, your store, your name and role, signing in and joining the store (step 3), the store's address (already filled from the website), the price to post and the price note that goes into every description (a suggested sentence is shown; only your store can say whether it is true), permission for automatic rescans (say yes so your To do list stays current), the posting rules and the Terms. Please read the rules once; they are short and they matter. The price note can be changed later under **Settings**.
+**2. Set-up (about 7 minutes).** Open [dealership used inventory URL], click the Lot Current icon, and on the **To do** tab click **Set up Lot Current**. The side panel walks you through: reading the website, your store, your name and role, signing in and joining the store (step 3), the store's address (already filled from the website), the price to post and the price note that goes into every description (a suggested sentence is shown; only your store can say whether it is true), permission for automatic rescans (say yes so your To do list stays current), the posting rules and the Terms. Please read the rules once; they are short and they matter. The price note can be changed later under **Settings**.
 
-**3. Sign in and join the store when set-up asks.** Right after your name and role, set-up asks you to sign in. Type your work email and click **Send me a sign-in code**, enter the six-digit code from the email and click **Sign in**. There is no password. Then enter your invite code, **[code]**, and click **Join**. It works once, for 7 days, and it is yours alone; if it has expired, ask [manager] for a new one. From then on your posted list syncs to the store's account: [manager] sees who posted what, and you can see which cars a colleague has already listed. If you skip this during set-up, do it later: click the Lot Sync icon, then **Settings**, and use the same boxes under **Account**.
+**3. Sign in and join the store when set-up asks.** Right after your name and role, set-up asks you to sign in. Type your work email and click **Send me a sign-in code**, enter the six-digit code from the email and click **Sign in**. There is no password. Then enter your invite code, **[code]**, and click **Join**. It works once, for 7 days, and it is yours alone; if it has expired, ask [manager] for a new one. From then on your posted list syncs to the store's account: [manager] sees who posted what, and you can see which cars a colleague has already listed. If you skip this during set-up, do it later: click the Lot Current icon, then **Settings**, and use the same boxes under **Account**.
 
-**4. Your first car.** First, on Facebook Marketplace, open Your listings, then Drafts, and delete any old drafts: Facebook sometimes puts a saved draft back onto a new listing form. Then click the Lot Sync icon on the inventory page, **Ready to post**, then **Post** on a car. Read the description in the side panel (edit it if you like), click **Open the Marketplace form**, check every field on Facebook, especially condition and title, and click Publish yourself. Back in the panel, click **It's posted, record it**. The daily cap is [10]; it's a safety setting, not a target.
+**4. Your first car.** First, on Facebook Marketplace, open Your listings, then Drafts, and delete any old drafts: Facebook sometimes puts a saved draft back onto a new listing form. Then click the Lot Current icon on the inventory page, **Ready to post**, then **Post** on a car. Read the description in the side panel (edit it if you like), click **Open the Marketplace form**, check every field on Facebook, especially condition and title, and click Publish yourself. Back in the panel, click **It's posted, record it**. The daily cap is [10]; it's a safety setting, not a target.
 
 Three sentences that matter:
 
-- **You click Publish. Lot Sync never does.** It fills in the form and opens pages; nothing is posted or edited while you're away.
+- **You click Publish. Lot Current never does.** It fills in the form and opens pages; nothing is posted or edited while you're away.
 - **Keep prices honest.** The price is the website price, and it changes only when the website changes. No made-up drops, no deleting and relisting to bump a car.
 - **Clear the To do tab the day items appear.** When a car sells, click **Open listing** and mark it sold on Facebook yourself. When a price changes, click **Open & update price** and click Update yourself.
 
-If the panel ever shows **Couldn't fill**, copy the report with the button and send it to [support email]. Meta's Terms prohibit automated access without permission; having you click Publish is the safest way to do this, not a guarantee, and if Facebook ever warns you about your listings, stop and tell [manager]. Lot Sync is not affiliated with Meta.
+If the panel ever shows **Couldn't fill**, copy the report with the button and send it to blawrence@lotcurrent.com. Meta's Terms prohibit automated access without permission; having you click Publish is the safest way to do this, not a guarantee, and if Facebook ever warns you about your listings, stop and tell [manager]. Lot Current is not affiliated with Meta.
 
 [your name]
 [phone]
@@ -68,7 +68,7 @@ If the panel ever shows **Couldn't fill**, copy the report with the button and s
 
 ## Day 7, to the manager: three numbers
 
-**Subject:** Lot Sync: week one at [dealership], three numbers
+**Subject:** Lot Current: week one at [dealership], three numbers
 
 Hi [name],
 
@@ -82,10 +82,10 @@ A week in. Open the manager view at [manager view address] and look at three thi
 
 Above the table, the last-scan line says when a salesperson's extension last read the website. Rescans run every 3 hours while someone's Chrome is open with rescans allowed; if that line says more than 6 hours ago on a working day, nobody's Chrome had it on.
 
-Two things the view can't show: a car listed by hand without clicking Mark posted in Lot Sync isn't watched, so a sold one won't appear here; and the numbers are what the extensions recorded, nothing from Facebook itself. **Download CSV** at the top gives you the same rows in a spreadsheet.
+Two things the view can't show: a car listed by hand without clicking Mark posted in Lot Current isn't watched, so a sold one won't appear here; and the numbers are what the extensions recorded, nothing from Facebook itself. **Download CSV** at the top gives you the same rows in a spreadsheet.
 
 Can we take ten minutes on [day] to go over it? Bring anything the salespeople have run into; every Couldn't fill report fixes something.
 
-Lot Sync is not affiliated with Meta. A person clicks Publish every time and Lot Sync never does; that is the safest design available, not a guarantee.
+Lot Current is not affiliated with Meta. A person clicks Publish every time and Lot Current never does; that is the safest design available, not a guarantee.
 
 [your name]

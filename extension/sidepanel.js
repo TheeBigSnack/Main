@@ -44,7 +44,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VERSION = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
 // Facebook draws its form in the account's language; the form map is English.
 const languageHint = (lang, nothingFound) => (lang && !/^en\b/i.test(lang) && nothingFound
-  ? `<div class="banner warn" id="languageHint">Your Facebook is set to "${esc(lang)}". Lot Sync's form map is English only for now: switch Facebook to English (Settings > Language), then try again.</div>`
+  ? `<div class="banner warn" id="languageHint">Your Facebook is set to "${esc(lang)}". Lot Current's form map is English only for now: switch Facebook to English (Settings > Language), then try again.</div>`
   : '');
 
 const state = {
@@ -238,10 +238,10 @@ const hostList = (patterns) => {
   const hosts = patterns.map(patternHost);
   return hosts.length > 1 ? `${hosts.slice(0, -1).join(', ')} and ${hosts[hosts.length - 1]}` : hosts.join('');
 };
-const askSentence = (patterns) => `Chrome will ask to let Lot Sync download this car's photos from ${hostList(patterns)}.`;
+const askSentence = (patterns) => `Chrome will ask to let Lot Current download this car's photos from ${hostList(patterns)}.`;
 
 // Asks Chrome, in one request, for every server this car's photos sit on
-// that Lot Sync can't download from yet. It runs first in a click handler,
+// that Lot Current can't download from yet. It runs first in a click handler,
 // before anything else is awaited: Chrome shows its prompt only during the
 // salesperson's click, and the click stops counting after a few seconds of
 // waiting. Everything it needs is in memory. again: also a server refused
@@ -662,7 +662,7 @@ async function attachPhotos(only = null) {
   const isRefused = (u) => refused.some((p) => patternCovers(p, u));
   for (const url of urls.filter(isRefused)) state.photos.failed.push({ url, error: 'not allowed in Chrome', refused: true });
   urls = urls.filter((u) => !isRefused(u));
-  // Nor from Facebook's own servers, which Lot Sync never reads from
+  // Nor from Facebook's own servers, which Lot Current never reads from
   // (src/photoHosts.js): those photos are left out and said so.
   const fromFacebook = (u) => isFacebookServer(u);
   for (const url of urls.filter(fromFacebook)) state.photos.failed.push({ url, error: "on Facebook's servers", facebook: true });
@@ -793,7 +793,7 @@ async function downloadPhotos() {
   }
   const left = all.length - urls.length - onFacebook.length;
   let note = left ? ` Photos from ${hostList(refused)} were not allowed, so ${left === 1 ? 'one was' : `${left} were`} not downloaded.` : '';
-  if (onFacebook.length) note += ` ${onFacebook.length === 1 ? 'One is' : `${onFacebook.length} are`} on Facebook's own servers, which Lot Sync doesn't download from.`;
+  if (onFacebook.length) note += ` ${onFacebook.length === 1 ? 'One is' : `${onFacebook.length} are`} on Facebook's own servers, which Lot Current doesn't download from.`;
   setStatus(`${n} of ${all.length} photos downloaded to your Downloads folder.${note}`);
 }
 
@@ -836,7 +836,7 @@ const siteMissing = () => missingOrigins(siteNeeds(), grantedOrigins);
 // registry (the read then says what to do instead).
 async function askForSite(origins = siteMissing()) {
   if (!origins.length) return true;
-  setStatus(`Chrome will ask to let Lot Sync read ${hostOf(state.origin)} from the side panel (the same permission automatic rescans use).`);
+  setStatus(`Chrome will ask to let Lot Current read ${hostOf(state.origin)} from the side panel (the same permission automatic rescans use).`);
   promptOpen = true;
   let granted = false;
   try {
@@ -849,7 +849,7 @@ async function askForSite(origins = siteMissing()) {
   }
   await refreshGranted();
   if (!granted) {
-    setStatus(`Not allowed, so Lot Sync can't read ${hostOf(state.origin)} from the side panel. Open the website's used inventory page and scan or post from the popup there instead.`, 'error');
+    setStatus(`Not allowed, so Lot Current can't read ${hostOf(state.origin)} from the side panel. Open the website's used inventory page and scan or post from the popup there instead.`, 'error');
     return false;
   }
   setStatus('');
@@ -906,8 +906,8 @@ function queueOfferHtml(list, cap) {
 }
 
 function viewIdle() {
-  const intro = `<p class="lead">Open your dealership's used inventory page, click the Lot Sync icon and click <b>Scan website</b>. The cars ready to post then show here and on the popup's <b>Ready to post</b> tab; <b>Post</b> pre-fills the Marketplace form for you to check and publish.</p>`;
-  const notAffiliated = '<p class="hint">Facebook and Marketplace are named here only as the places you post. Lot Sync is not affiliated with Meta.</p>';
+  const intro = `<p class="lead">Open your dealership's used inventory page, click the Lot Current icon and click <b>Scan website</b>. The cars ready to post then show here and on the popup's <b>Ready to post</b> tab; <b>Post</b> pre-fills the Marketplace form for you to check and publish.</p>`;
+  const notAffiliated = '<p class="hint">Facebook and Marketplace are named here only as the places you post. Lot Current is not affiliated with Meta.</p>';
   if (!state.origin || !Object.keys(state.snapshotVehicles || {}).length) return `${siteChoiceHtml() ? `<div class="toolbar listControls">${siteChoiceHtml()}</div>` : ''}${intro}${notAffiliated}`;
   const cap = dailyCap();
   const list = readyNow();
@@ -1006,7 +1006,7 @@ function vinCheckHtml() {
 // address, a colour shade name, an electric car's single-speed gearbox), a
 // colour guessed from the photos, or the dealership's defaults for the two
 // fields the website can't give. Below it, what is left for the person: no
-// default, a branded title, or a vehicle kind Lot Sync doesn't fill in.
+// default, a branded title, or a vehicle kind Lot Current doesn't fill in.
 function assumptionsHtml() {
   const l = currentListing();
   let html = '';
@@ -1108,7 +1108,7 @@ function viewReview() {
     ${highlightsHtml()}
   </section>
   ${photoPickHtml()}
-  <section><h3>What Lot Sync will fill in</h3>${fieldsTable()}</section>
+  <section><h3>What Lot Current will fill in</h3>${fieldsTable()}</section>
   ${vinCheckHtml()}
   ${assumptionsHtml()}
   <section>
@@ -1128,7 +1128,7 @@ function viewProbe() {
   const controls = p.controls || [];
   const limit = p.photoLimit ? `${p.photoLimit.value}${p.photoLimit.verified ? '' : ' (unverified)'}` : '?';
   return `${carCard()}
-  <div class="banner info">Nothing was filled. This is what Lot Sync can see on the form (map ${esc(p.mapVersion || state.map.version)}, Lot Sync ${esc(p.extensionVersion || VERSION)}).</div>
+  <div class="banner info">Nothing was filled. This is what Lot Current can see on the form (map ${esc(p.mapVersion || state.map.version)}, Lot Current ${esc(p.extensionVersion || VERSION)}).</div>
   ${p.error ? `<div class="banner bad">${esc(p.error)}</div>` : ''}
   ${languageHint(p.language, !found.some((f) => f.tag))}
   <section id="probeResults">
@@ -1157,7 +1157,7 @@ function copyBtn(text) {
 
 const allowButton = (pattern) => `<button type="button" class="plain" data-allow-photos="${esc(pattern)}">Allow photos from ${esc(patternHost(pattern))}</button>`;
 
-// The servers of the photos that didn't come which Lot Sync still may not download from.
+// The servers of the photos that didn't come which Lot Current still may not download from.
 const blockedPatterns = () => (state.photos ? photoPatterns(state.photos.failed.map((f) => f.url)) : []);
 
 // Said before the click that asks: which servers Chrome's prompt will name,
@@ -1182,12 +1182,12 @@ function photosHtml() {
   const onFacebook = p.failed.filter((f) => f.facebook).length;
   const others = p.failed.filter((f) => !f.facebook && !blocked.some((b) => patternCovers(b, f.url))).length;
   if (others) html += `<p class="hint">${others} couldn't be downloaded.</p>`;
-  if (onFacebook) html += `<p class="hint">${onFacebook === 1 ? 'One is' : `${onFacebook} are`} on Facebook's own servers, which Lot Sync doesn't download from.</p>`;
+  if (onFacebook) html += `<p class="hint">${onFacebook === 1 ? 'One is' : `${onFacebook} are`} on Facebook's own servers, which Lot Current doesn't download from.</p>`;
   for (const pattern of blocked) {
     const mine = p.failed.filter((f) => patternCovers(pattern, f.url));
     const host = esc(patternHost(pattern));
     const what = mine.length === 1 ? 'the photo from it is' : `the ${mine.length} photos from it are`;
-    const why = mine.some((f) => f.refused) ? `Photos from ${host} were not allowed` : `Lot Sync has no permission to download photos from ${host} yet`;
+    const why = mine.some((f) => f.refused) ? `Photos from ${host} were not allowed` : `Lot Current has no permission to download photos from ${host} yet`;
     html += `<div class="banner warn">${why}, so ${what} not attached. ${allowButton(pattern)}</div>`;
   }
   if (p.error) html += `<div class="banner warn">${esc(p.error)} Use <b>Download photos</b> and add them by hand.</div>`;
@@ -1199,11 +1199,11 @@ function viewPublish() {
   const skipped = f.skipped || [];
   const pre = f.preexisting || [];
   const preexisting = pre.length
-    ? `<div class="banner bad" id="preexisting"><b>This form already held another vehicle before Lot Sync filled it:</b> ${pre.map((p) => `${esc(p.label)} "${esc(p.shown)}"`).join(', ')}. That is probably a draft Facebook restored. Lot Sync replaced the fields it manages (check each one below), but photos and anything else from that draft may still be on the form. Remove them, or discard the draft on Facebook and click <b>Fill again</b>, before you publish.</div>`
+    ? `<div class="banner bad" id="preexisting"><b>This form already held another vehicle before Lot Current filled it:</b> ${pre.map((p) => `${esc(p.label)} "${esc(p.shown)}"`).join(', ')}. That is probably a draft Facebook restored. Lot Current replaced the fields it manages (check each one below), but photos and anything else from that draft may still be on the form. Remove them, or discard the draft on Facebook and click <b>Fill again</b>, before you publish.</div>`
     : '';
   const changed = f.changedAfterFill || [];
   const changedBanner = changed.length
-    ? `<div class="banner bad" id="changedAfterFill"><b>Facebook changed ${changed.map((c) => `${esc(c.label)} to "${esc(c.was)}"`).join(', ')} a few seconds after Lot Sync filled it.</b> That is a saved draft being restored over the form. Lot Sync set ${changed.every((c) => c.held) ? 'them again and they held' : 'them again, but not all of them held (see Couldn\'t fill)'}. Check every field below, and delete that draft on Facebook (Marketplace → Your listings → Drafts) so it stops coming back.</div>`
+    ? `<div class="banner bad" id="changedAfterFill"><b>Facebook changed ${changed.map((c) => `${esc(c.label)} to "${esc(c.was)}"`).join(', ')} a few seconds after Lot Current filled it.</b> That is a saved draft being restored over the form. Lot Current set ${changed.every((c) => c.held) ? 'them again and they held' : 'them again, but not all of them held (see Couldn\'t fill)'}. Check every field below, and delete that draft on Facebook (Marketplace → Your listings → Drafts) so it stops coming back.</div>`
     : '';
   const d = state.detected;
   let detect = '';
@@ -1419,7 +1419,7 @@ async function rescanFromList() {
     const todo = r.count ? ` ${r.count} of your listings need${r.count === 1 ? 's' : ''} attention: see To do in the popup.` : '';
     setStatus(`Rescanned ${host}: ${r.cars} used car${r.cars === 1 ? '' : 's'}.${todo}${warning}`);
   } else {
-    setStatus(`The rescan didn't finish: ${(r && r.error) || "no answer from Lot Sync's background worker"}`, 'error');
+    setStatus(`The rescan didn't finish: ${(r && r.error) || "no answer from Lot Current's background worker"}`, 'error');
   }
   if (state.step !== 'idle') return undefined;
   await loadSaved(); // the worker saved the new scan (the storage change usually brought it already)

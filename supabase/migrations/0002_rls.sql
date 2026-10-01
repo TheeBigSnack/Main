@@ -1,4 +1,4 @@
--- Lot Sync, Milestone 4: row-level security.
+-- Lot Current, Milestone 4: row-level security.
 --
 -- The rule in one line: a signed-in person sees their own dealership and
 -- nothing else. Salespeople write their own rows, managers can change any row
@@ -75,7 +75,7 @@ alter table public.invite_misses enable row level security;
 -- ---------------------------------------------------------------------------
 -- Table privileges. Supabase grants the API roles broad privileges on new
 -- tables and sequences by default; this narrows them to what the policies
--- below can ever allow, and gives the anon key nothing at all (Lot Sync has
+-- below can ever allow, and gives the anon key nothing at all (Lot Current has
 -- no signed-out reads). Stated explicitly so the same file also works on a
 -- plain Postgres (supabase/tests/local-shim.sql).
 -- ---------------------------------------------------------------------------

@@ -74,7 +74,7 @@ const publishCount = async () => (await fetch(`${marketOrigin}/publish-count`)).
 try {
   const ext = await context.newPage();
   await ext.goto('chrome://extensions');
-  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Sync').id);
+  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Current').id);
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
 
@@ -147,7 +147,7 @@ try {
   assert.equal(decision('wrangler'), 'not-ready');
   assert.ok(car('wrangler').blockers.includes('no-photos'));
   assert.equal(decision('outback'), 'review', '12 miles on a used car');
-  // the trade-in trailer: held for a person to look at, never offered as a car (Lot Sync fills in only the car/truck and motorcycle forms)
+  // the trade-in trailer: held for a person to look at, never offered as a car (Lot Current fills in only the car/truck and motorcycle forms)
   assert.equal(decision('trailer'), 'review', 'the trailer waits on Needs a look');
   assert.match(car('trailer').reason, /makes it a trailer/);
   // the new car in the Sorento's carousel is not part of the used lot, and nothing else crept in
@@ -267,7 +267,7 @@ try {
   const afterBad = await stored(popup, 'diff');
   assert.deepEqual(vinsOf(afterBad.takeDown), [], 'nothing is marked gone while the server fails');
   assert.deepEqual(vinsOf(afterBad.needsALook), [V.accord], 'the missing Accord waits for a later rescan, and nothing else is flagged');
-  assert.match(afterBad.warnings.join(' '), /Couldn't double-check missing cars \(The website asked Lot Sync to slow down \(HTTP 429\)\)\. Nothing was marked as gone\./);
+  assert.match(afterBad.warnings.join(' '), /Couldn't double-check missing cars \(The website asked Lot Current to slow down \(HTTP 429\)\)\. Nothing was marked as gone\./);
   // the Sorento's page answered 500: it keeps what its page said last time, not the list's thinner data
   assert.match(afterBad.warnings[0], /One car's page could not be read this time/);
   const sorentoBad = (await stored(popup, 'snapshot')).vehicles[V.sorento];

@@ -1,4 +1,4 @@
--- Lot Sync, Milestone 5: self-serve sign-up (PLAN.md M5: a new dealer can
+-- Lot Current, Milestone 5: self-serve sign-up (PLAN.md M5: a new dealer can
 -- subscribe, start a pilot period and manage billing without help).
 --
 -- Until now a dealership existed only because the owner created it in SQL
@@ -81,7 +81,7 @@ revoke all on public.signup_attempts from public, anon, authenticated, service_r
 revoke all on sequence public.signup_attempts_id_seq from public, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- website_origin_of(address): the origin Lot Sync keeps for a website
+-- website_origin_of(address): the origin Lot Current keeps for a website
 -- address a person typed (dealerships.website_origin, the key the extension
 -- syncs under), or null when the address is refused. The same rule as
 -- websiteOrigin() in manager/data.js; test/fixtures/website-origins.json is
@@ -192,7 +192,7 @@ comment on function public.website_origin_of(text) is 'The origin kept for a typ
 -- message, details, hint } body PostgREST gives a raised error, so the
 -- attempt row a taken website writes survives the call and the throttle
 -- counts it. Everything else is raised before anything is written.
--- P0009 tells anyone signed in that a website already has a Lot Sync
+-- P0009 tells anyone signed in that a website already has a Lot Current
 -- dealership. That is accepted: the person needs to know to ask its manager
 -- for an invite, and the throttle (5 an hour per account, counted before
 -- anything is looked up and again under the lock) and per_account (an
@@ -216,8 +216,8 @@ declare
   uid uuid := auth.uid();
   ws constant text := '[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+';
   controls constant text := '[\u0001-\u001f\u007f-\u009f]';
-  closed constant text := 'sign-up is not open: you join Lot Sync with an invite code, from Lot Sync or from your dealership''s manager';
-  taken constant text := 'that website already has a Lot Sync dealership: ask its manager for an invite code (if nobody there uses Lot Sync, write to Lot Sync support)';
+  closed constant text := 'sign-up is not open: you join Lot Current with an invite code, from Lot Current or from your dealership''s manager';
+  taken constant text := 'that website already has a Lot Current dealership: ask its manager for an invite code (if nobody there uses Lot Current, write to Lot Current support)';
   settings public.signup_settings%rowtype;
   dealer_name text;
   person_name text;
@@ -275,11 +275,11 @@ begin
   end if;
   select count(*) into n from public.signup_attempts a where a.user_id = uid and a.outcome = 'created';
   if n >= settings.per_account then
-    raise exception 'this account has already started a dealership; a second one is set up by Lot Sync: write to Lot Sync support' using errcode = 'P0010';
+    raise exception 'this account has already started a dealership; a second one is set up by Lot Current: write to Lot Current support' using errcode = 'P0010';
   end if;
   select count(*) into n from public.signup_attempts a where a.outcome = 'created' and a.at > now() - interval '24 hours';
   if n >= settings.per_day then
-    raise exception 'no more new dealerships can start today; try again tomorrow, or write to Lot Sync support' using errcode = 'P0011';
+    raise exception 'no more new dealerships can start today; try again tomorrow, or write to Lot Current support' using errcode = 'P0011';
   end if;
 
   -- f. a website that already has a dealership. The stored origin is

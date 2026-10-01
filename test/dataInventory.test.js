@@ -1,4 +1,4 @@
-// docs/data-inventory.md lists everything Lot Sync stores or sends, read
+// docs/data-inventory.md lists everything Lot Current stores or sends, read
 // from the code, and the privacy texts are checked against it. These tests
 // keep the page true as the code grows: each fails when the code gains
 // something the page does not name (a chrome.storage key or area, a table or
@@ -25,8 +25,12 @@ import { syncPayload } from '../extension/src/sync.js';
 import { noteFlags } from '../extension/src/pilot.js';
 import { neededPatterns } from '../extension/src/photoHosts.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
+import { SITE } from '../site/config.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+// The website's own host once siteUrl is set: the pages name it in their
+// canonical and share addresses, and it is this site, not an outside host.
+const SITE_HOST = SITE.siteUrl ? new URL(SITE.siteUrl).hostname : null;
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
 const inventory = read('docs/data-inventory.md');
 const policy = read('legal/privacy-policy.md');
@@ -131,8 +135,12 @@ test('the extension, the manager view and the website keep nothing in the browse
     assert.equal(hit, null, `${f} uses ${hit && hit[0]}: add it to docs/data-inventory.md and the privacy policy, then change this test`);
   }
   for (const f of SHIPPED.filter((x) => x.startsWith('site/') && x.endsWith('.html'))) {
-    const hit = source(f).match(/<(script|link|img|iframe)\b[^>]*\b(src|href)="(https?:)?\/\/[^"]*"/i);
-    assert.equal(hit, null, `${f} loads ${hit && hit[0]} from another host: the inventory says the website loads nothing from elsewhere`);
+    // A canonical link names the page's own address on the site's own host;
+    // the browser loads nothing from it.
+    const hits = [...source(f).matchAll(/<(script|link|img|iframe)\b[^>]*\b(src|href)="((?:https?:)?\/\/[^"]*)"/gi)]
+      .filter((m) => !(/^<link\s+rel="canonical"/i.test(m[0]) && SITE_HOST && new URL(m[3], 'https://x').hostname === SITE_HOST))
+      .map((m) => m[0]);
+    assert.deepEqual(hits, [], `${f} loads ${hits[0]} from another host: the inventory says the website loads nothing from elsewhere`);
   }
   const css = read('site/site.css');
   assert.doesNotMatch(css, /@import|url\(\s*['"]?(https?:)?\/\//i, 'site/site.css loads something from another host');
@@ -221,7 +229,7 @@ test('supabase/README.md and the auth.ts header name every table the functions r
 });
 
 test('every view the migrations create is named in the database section', () => {
-  const db = section(inventory, "## Lot Sync's database (Supabase)");
+  const db = section(inventory, "## Lot Current's database (Supabase)");
   const views = MIGRATIONS.flatMap((f) => [...read('supabase/migrations/' + f).matchAll(/^create (?:or replace )?view public\.(\w+)/gm)].map((m) => m[1]));
   assert.ok(views.length >= 2);
   for (const v of views) assert.ok(db.includes('`' + v + '`'), `docs/data-inventory.md does not name the view ${v}`);
@@ -255,6 +263,7 @@ test('every outside host the shipped code names is listed, and every host listed
       const host = m[1].toLowerCase().replace(/^\*\./, '').replace(/\.$/, '');
       if (!host.includes('.') || /^[\d.]+$/.test(host)) continue; // a bare pattern, localhost, an address
       if (/\.(example|test|invalid|localhost)$/.test(host) || /(^|\.)example\.(com|org|net)$/.test(host)) continue; // placeholders
+      if (f.startsWith('site/') && host === SITE_HOST) continue; // the website's own address, in its canonical and share tags; anything else that calls it must be listed
       hosts.add(host);
     }
   }
@@ -454,7 +463,7 @@ test('the photos go to whatever https server the website names, and the inventor
   assert.match(photoRows[0][to], /photo servers the dealership's website names[^|]*another company[^|]*Chrome's own prompt, from the user's click/, 'the Web Store answers do not say the photos go to any server the website names, asked for from the click');
   for (const r of sends.rows) assert.doesNotMatch(r[to], /image host/, 'a Web Store answer still names "the image host" as a recipient');
   // the privacy policy's services that are not processors
-  const others = policy.split('\n').find((l) => l.startsWith('Lot Sync also reaches services that are not our processors'));
+  const others = policy.split('\n').find((l) => l.startsWith('Lot Current also reaches services that are not our processors'));
   assert.ok(others, 'the privacy policy no longer names the services that are not processors');
   assert.match(others, /photo servers the dealership's website names[^;]*another company[^;]*Download photos[^;]*Chrome's own prompt/, 'the privacy policy does not say the photos come from any server the website names, from the User\'s click');
   assert.doesNotMatch(others, /image host/, 'the privacy policy still names one image host');

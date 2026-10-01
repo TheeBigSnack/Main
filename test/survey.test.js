@@ -258,10 +258,10 @@ test('verdictFor: reads it, partly, doesn\'t read it, and not surveyed, each wit
   assert.match(scripted.gaps.join(), /only after scripts run/);
   const fewer = verdictFor({ ...base, list: { server: { carLinks: 20 }, rendered: { carLinks: 20 } }, lotSync: { ...ok, carCount: 3, withPrice: 3, withMileage: 3, withPhotos: 3 } });
   assert.match(fewer.gaps[0], /read 3 cars, but the list's first page alone links to 20/);
-  const unsupported = verdictFor({ ...base, lotSync: { attempted: true, ok: false, message: "Lot Sync can't read the cars on this page." } });
-  assert.deepEqual([unsupported.verdict, unsupported.why], ["doesn't read it", "Lot Sync can't read the cars on this page."]);
+  const unsupported = verdictFor({ ...base, lotSync: { attempted: true, ok: false, message: "Lot Current can't read the cars on this page." } });
+  assert.deepEqual([unsupported.verdict, unsupported.why], ["doesn't read it", "Lot Current can't read the cars on this page."]);
   assert.equal(verdictFor({ ...base, lotSync: { ...ok, carCount: 0 } }).verdict, "doesn't read it");
-  const drawn = verdictFor({ ...base, list: { server: { carLinks: 0 }, rendered: { carLinks: 2 } }, lotSync: { attempted: true, ok: false, message: 'Lot Sync found no links to car pages on the inventory page.' } });
+  const drawn = verdictFor({ ...base, list: { server: { carLinks: 0 }, rendered: { carLinks: 2 } }, lotSync: { attempted: true, ok: false, message: 'Lot Current found no links to car pages on the inventory page.' } });
   assert.equal(drawn.verdict, "doesn't read it");
   assert.match(drawn.gaps[1], /only after scripts run/, 'the anatomy says why');
   const refused = verdictFor({ ...base, stopped: { at: 'list page', reason: 'the website refused the list page (HTTP 403)' }, lotSync: { attempted: false } });

@@ -61,7 +61,7 @@ const SILVERADO = '3GCUYGED0MG244585';
 try {
   const ext = await context.newPage();
   await ext.goto('chrome://extensions');
-  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Sync').id);
+  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Current').id);
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
   const get = async (path) => (await context.request.get(`${path.startsWith('http') ? '' : origin}${path}`)).text();

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lot Sync deploy smoke test: run it once the Supabase project is deployed
+// Lot Current deploy smoke test: run it once the Supabase project is deployed
 // (supabase/README.md, "Check the deploy"). It looks at the live project from
 // the outside, the way a browser or a stranger would, and prints a checklist:
 //
@@ -52,6 +52,47 @@ export const DEPLOYED_LATER = Object.freeze({
 
 const trimUrl = (u) => String(u || '').trim().replace(/\/+$/, '');
 
+// What kind of API key a string is. Supabase's new keys are plain strings
+// (sb_publishable_..., sb_secret_...); the legacy anon and service_role keys
+// are JWTs whose payload names the role. Only a publishable or anon key may
+// sit in a file a browser reads; a secret or service_role key there bypasses
+// row-level security for anyone who opens the extension or the page.
+export function keyKind(key) {
+  const k = String(key || '').trim();
+  if (!k) return 'none';
+  if (k.startsWith('sb_publishable_')) return 'publishable';
+  if (k.startsWith('sb_secret_')) return 'secret';
+  const parts = k.split('.');
+  if (parts.length === 3) {
+    try {
+      const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+      if (payload && payload.role === 'anon') return 'anon';
+      if (payload && payload.role === 'service_role') return 'service_role';
+    } catch { /* not a JWT */ }
+  }
+  return 'unknown';
+}
+export const isBrowserSafeKey = (key) => ['publishable', 'anon'].includes(keyKind(key));
+
+// The headers that call the API with a key and no user. A publishable key
+// goes on apikey only: the platform reads anything after Bearer as a JWT and
+// would answer 401 "Invalid JWT", which every "anon reads nothing" line would
+// then count as a pass for the wrong reason. A legacy anon key is a JWT and
+// goes on both, as supabase-js sends it.
+export function keyHeaders(key) {
+  return keyKind(key) === 'anon' ? { apikey: key, Authorization: `Bearer ${key}` } : { apikey: key };
+}
+
+// A key in a config file: browser-safe, or a failure that says what to do.
+function keyFinding(file, key) {
+  const kind = keyKind(key);
+  if (kind === 'none') return null;
+  if (kind === 'secret' || kind === 'service_role') return { check: `${file} holds a key a browser may see`, ok: false, detail: `it holds the ${kind} key: take it out now, roll that key in the Dashboard (Project settings, API keys) and put the publishable key in its place` };
+  if (kind === 'anon') return { check: `${file} uses the publishable key`, ok: false, warnOnly: true, detail: 'it holds the legacy anon key, which Supabase retires by the end of 2026: switch to the publishable key (npm run set-project)' };
+  if (kind === 'unknown') return { check: `${file} holds a key a browser may see`, ok: false, detail: 'not a publishable key (sb_publishable_...) or an anon key' };
+  return { check: `${file} holds a key a browser may see`, ok: true, detail: 'publishable' };
+}
+
 // A read the anon key must not get anything from: refused (401, 403) or an
 // empty list. Never a 404: every name in TABLES is a table in the schema the
 // API exposes, so a 404 means the table is missing (a migration not pushed),
@@ -76,6 +117,7 @@ export function configFindings({ account = {}, manager = {}, site = {} } = {}) {
   const mgr = trimUrl(manager.supabaseUrl);
   out.push({ check: 'extension/src/accountConfig.js is filled in', ok: Boolean(url && account.anonKey), detail: url ? url : 'url and anonKey are empty' });
   out.push({ check: 'manager/config.js is filled in', ok: Boolean(mgr && manager.supabaseAnonKey), detail: mgr || 'supabaseUrl and supabaseAnonKey are empty' });
+  for (const f of [keyFinding('extension/src/accountConfig.js', account.anonKey), keyFinding('manager/config.js', manager.supabaseAnonKey)]) if (f) out.push(f);
   out.push({ check: 'the extension and the manager view name the same project and key', ok: Boolean(url) && url === mgr && account.anonKey === manager.supabaseAnonKey, detail: url === mgr ? '' : `${url || '(empty)'} vs ${mgr || '(empty)'}` });
   const lead = String(site.demoEndpoint || '');
   out.push({ check: 'site/config.js sends demo requests to this project\'s lead function', ok: Boolean(url) && lead === `${url}/functions/v1/lead`, detail: lead || 'demoEndpoint is empty: the form opens the mail app' , warnOnly: true });
@@ -108,7 +150,11 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
     out.push({ check: 'a project URL and anon key to test with', ok: false, detail: 'set LOTSYNC_URL and LOTSYNC_ANON_KEY, or fill extension/src/accountConfig.js' });
     return out;
   }
-  const anon = { apikey: anonKey, Authorization: `Bearer ${anonKey}` };
+  if (!isBrowserSafeKey(anonKey)) {
+    out.push({ check: 'the key to test with is a publishable or anon key', ok: false, detail: `it is ${keyKind(anonKey) === 'unknown' ? 'neither' : `the ${keyKind(anonKey)} key, which skips row-level security, so the checks below would prove nothing`}` });
+    return out;
+  }
+  const anon = keyHeaders(anonKey);
 
   // the API answers at all
   const health = await call(fetchImpl, `${base}/auth/v1/health`, { headers: { apikey: anonKey } });

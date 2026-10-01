@@ -54,11 +54,11 @@ export function snapshotEntry(v, assessment) {
   };
 }
 
-// When Lot Sync first saw this car: carried over from the last saved
+// When Lot Current first saw this car: carried over from the last saved
 // snapshot; this scan's time for a VIN that was not in it; null on a first
-// scan (no last snapshot), meaning the car was already there when Lot Sync
+// scan (no last snapshot), meaning the car was already there when Lot Current
 // started, so nothing is ever "new" by first sighting on a first scan. An
-// entry saved before this field existed carries null too: Lot Sync did not
+// entry saved before this field existed carries null too: Lot Current did not
 // see that car arrive either. A car the last snapshot still names among its
 // missing pages (it left the list on the scan before, confirmed gone or
 // not, or is posted and gone: scanRunner.js snapshotOf) was known before,

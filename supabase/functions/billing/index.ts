@@ -1,4 +1,4 @@
-// Lot Sync billing on Stripe as a Supabase Edge Function (Milestone 5). A
+// Lot Current billing on Stripe as a Supabase Edge Function (Milestone 5). A
 // dealership is billed per rooftop per month; a manager starts a free pilot
 // period without a card (start_pilot() in SQL), subscribes from the manager
 // page through Stripe Checkout, and changes the card or cancels in Stripe's
@@ -33,7 +33,7 @@ import { requireUser, membershipsOf, serviceClient, env, type Membership, type D
 import {
   PRICING, HANDLED_EVENTS,
   subscriptionState, statusAnswer, seatCount, checkoutRefusal, normalizeSeats, checkoutLineItems, checkoutSessionParams, trialEndFor,
-  allowedReturnUrl, parseAllowedOrigins, formEncode, applyStripeEvent, verifyStripeSignature,
+  automaticTaxOn, portalSessionParams, allowedReturnUrl, parseAllowedOrigins, formEncode, applyStripeEvent, verifyStripeSignature,
 } from '../_shared/billing.mjs';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
@@ -42,6 +42,8 @@ const config = {
   webhookSecret: env('STRIPE_WEBHOOK_SECRET'),
   priceRooftop: env('STRIPE_PRICE_ROOFTOP'),
   priceSeat: env('STRIPE_PRICE_SEAT'),
+  portalConfiguration: env('STRIPE_PORTAL_CONFIGURATION'), // optional: the account's default portal settings without it
+  automaticTax: automaticTaxOn(env('STRIPE_AUTOMATIC_TAX')), // optional: off until the attorney says what to collect
   allowedReturnOrigins: parseAllowedOrigins(env('ALLOWED_RETURN_ORIGINS')),
   stripeUrl: 'https://api.stripe.com',
   timeoutMs: 20_000,
@@ -210,7 +212,7 @@ async function salespeopleOf(client: SupabaseClient, dealershipId: string, role:
 // Which dealership a Stripe object belongs to: the row that already carries
 // its customer or subscription id, else the dealership id Checkout put in
 // the subscription's metadata, else the customer's metadata, fetched. Null
-// when Stripe is talking about something that is not a Lot Sync dealership.
+// when Stripe is talking about something that is not a Lot Current dealership.
 async function dealershipFor(service: SupabaseClient, obj: Row): Promise<{ id: string; row: Row | null } | null> {
   const customer = typeof obj.customer === 'string' ? obj.customer : isRecord(obj.customer) && typeof obj.customer.id === 'string' ? obj.customer.id : '';
   const byCustomer = await findRow(service, 'stripe_customer_id', customer);
@@ -280,7 +282,7 @@ async function webhook(req: Request): Promise<Response> {
       const target = await dealershipFor(service, obj);
       if (!target) {
         attached = false;
-        console.log(`${new Date().toISOString()} ${type} ${eventId}: no Lot Sync dealership for this customer; recorded, not applied`);
+        console.log(`${new Date().toISOString()} ${type} ${eventId}: no Lot Current dealership for this customer; recorded, not applied`);
       } else {
         const patch = applyStripeEvent(target.row, event, { included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
         if (patch) {
@@ -359,7 +361,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (route === 'portal') {
       const customer = row && typeof row.stripe_customer_id === 'string' ? row.stripe_customer_id : '';
       if (!customer) return json(req, 404, { ok: false, error: 'this dealership has no billing account yet: subscribe first' });
-      const session = await stripe('POST', '/v1/billing_portal/sessions', { customer, return_url: returnUrl }, crypto.randomUUID());
+      const session = await stripe('POST', '/v1/billing_portal/sessions', portalSessionParams({ customerId: customer, returnUrl, configuration: config.portalConfiguration }), crypto.randomUUID());
       return json(req, 200, { ok: true, url: String(session.url || '') });
     }
 
@@ -376,7 +378,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const lineItems = checkoutLineItems({ seats, included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
     const customerId = await ensureCustomer(service, dealership, row, caller.user.email);
     const trialEnd = state === 'pilot' && row ? trialEndFor(row.pilot_ends_at) : null;
-    const params = checkoutSessionParams({ customerId, dealershipId: dealership.id, lineItems, returnUrl, trialEnd });
+    const params = checkoutSessionParams({ customerId, dealershipId: dealership.id, lineItems, returnUrl, trialEnd, automaticTax: config.automaticTax });
     const session = await stripe('POST', '/v1/checkout/sessions', params, crypto.randomUUID());
     console.log(`${new Date().toISOString()} checkout ${dealership.id} seats ${seats}${trialEnd ? ' trial to ' + new Date(trialEnd * 1000).toISOString() : ''}`);
     return json(req, 200, { ok: true, url: String(session.url || '') });

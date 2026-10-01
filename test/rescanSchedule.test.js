@@ -17,8 +17,8 @@ test('the badge counts only the salesperson\'s own to-dos', () => {
 
 test('a notification only when the count went up', () => {
   assert.equal(notificationFor(0, 0), null);
-  assert.deepEqual(notificationFor(0, 2), { title: 'Lot Sync', message: '2 of your listings need attention' });
-  assert.deepEqual(notificationFor(0, 1), { title: 'Lot Sync', message: '1 of your listings needs attention' });
+  assert.deepEqual(notificationFor(0, 2), { title: 'Lot Current', message: '2 of your listings need attention' });
+  assert.deepEqual(notificationFor(0, 1), { title: 'Lot Current', message: '1 of your listings needs attention' });
   assert.equal(notificationFor(2, 2), null);
   assert.equal(notificationFor(3, 1), null);
   assert.deepEqual(notificationFor(undefined, 1).message, '1 of your listings needs attention');
@@ -135,7 +135,7 @@ test('performScan on a Dealer Inspire look-alike: neutral probe, the adapter\'s 
     const no = await performScan({ tabId: 3, origin });
     assert.equal(no.ok, false);
     assert.equal(no.message, UNSUPPORTED_MESSAGE);
-    assert.match(no.message, /What it reads today: Dealer Inspire; Standard vehicle data \(schema\.org\)\./);
+    assert.match(no.message, /What it reads today: Dealer Inspire; DealerOn; Dealer.com; Standard vehicle data \(schema\.org\)\./);
     assert.ok(!/Dealer Inspire's search service/.test(no.message));
   } finally {
     delete globalThis.chrome;

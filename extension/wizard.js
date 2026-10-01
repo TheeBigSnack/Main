@@ -102,7 +102,7 @@ async function findDealerTab() {
   return wiz.dealerTabId;
 }
 
-export const TAB_GONE = "Couldn't reach the dealership tab. Open the used inventory page, click the Lot Sync icon and click Continue set-up.";
+export const TAB_GONE = "Couldn't reach the dealership tab. Open the used inventory page, click the Lot Current icon and click Continue set-up.";
 
 // Reads the website with the settings so far (defaults on the first pass) and saves the result.
 async function runScan(ctx) {
@@ -155,7 +155,7 @@ export function wizardHtml() {
   const error = wiz.error ? `<div class="banner bad">${esc(wiz.error)}</div>` : '';
   switch (wiz.step) {
     case 'welcome':
-      return `${progress}<h3>Set up Lot Sync for this dealership</h3>
+      return `${progress}<h3>Set up Lot Current for this dealership</h3>
         <p>In a few steps: read the website, pick your store, your name,${accountsConfigured() ? " your dealership's account (optional)," : ''} the store's address, the price to post, permission for automatic rescans, the posting rules, and the Terms of Service and Privacy Policy.</p>
         <p class="hint">Keep the dealership's used inventory page open in this window while you do this.</p>
         ${nav(false, 'Start')}`;
@@ -238,7 +238,7 @@ export function wizardHtml() {
     case 'permission': {
       const origins = originsFor(wiz.site, wiz.service);
       return `${progress}<h3>Automatic rescans</h3>
-        <p>Every 3 hours while Chrome is open, Lot Sync can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update. For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background. Chrome will ask.</p>
+        <p>Every 3 hours while Chrome is open, Lot Current can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update. For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background. Chrome will ask.</p>
         ${wiz.granted ? '<div class="banner good">Permission granted. Automatic rescans are on.</div>' : `<div class="actions"><button type="button" class="primary" id="wizGrant">Allow automatic rescans</button></div><p class="hint">Or skip: the Scan button in the popup still works by hand.</p>`}
         <label class="block"><input type="checkbox" id="wizNotify" ${s.notify !== false ? 'checked' : ''} /> Show a desktop notification when listings need attention</label>
         ${nav(true, wiz.granted ? 'Next' : 'Skip for now')}`;
@@ -249,7 +249,7 @@ export function wizardHtml() {
         <label class="block"><input type="checkbox" id="wizRulesRead" ${wiz.rulesRead ? 'checked' : ''} /> I have read the posting rules and will follow them</label>
         ${nav(true, 'Next', 'wizNext', !wiz.rulesRead)}`;
     case 'terms': {
-      const summary = `<p>In short: Lot Sync reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login. You publish every post yourself. Lot Sync is not affiliated with Meta Platforms, Inc.</p>`;
+      const summary = `<p>In short: Lot Current reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login. You publish every post yourself. Lot Current is not affiliated with Meta Platforms, Inc.</p>`;
       if (!legalHosted()) {
         // The documents are not published yet: nobody is asked to accept what they cannot read.
         return `${progress}<h3>Terms and privacy</h3>
@@ -264,7 +264,7 @@ export function wizardHtml() {
         ${nav(true, wiz.busy ? 'Finishing…' : 'Finish set-up', 'wizFinish', !wiz.termsAccepted || wiz.busy)}${error}`;
     }
     case 'done':
-      return `${progress}<div class="banner good"><b>Set up.</b> ${wiz.scan ? `${wiz.scan.ready} car${wiz.scan.ready === 1 ? ' is' : 's are'} ready to post.` : ''} Click the Lot Sync icon and open <b>Ready to post</b>.${wiz.granted ? ' Automatic rescans are on; the icon shows your to-do count.' : ''}</div>
+      return `${progress}<div class="banner good"><b>Set up.</b> ${wiz.scan ? `${wiz.scan.ready} car${wiz.scan.ready === 1 ? ' is' : 's are'} ready to post.` : ''} Click the Lot Current icon and open <b>Ready to post</b>.${wiz.granted ? ' Automatic rescans are on; the icon shows your to-do count.' : ''}</div>
         <div class="actions"><button type="button" class="primary" id="wizClose">Close</button></div>`;
     default:
       return '';
@@ -442,7 +442,7 @@ export async function handleWizardClick(id, ctx) {
     case 'wizQuit':
     case 'wizClose':
       await endWizard();
-      ctx.setStatus(id === 'wizQuit' ? 'Set-up stopped. The popup offers Set up Lot Sync again until it is finished; Settings has the same fields.' : '');
+      ctx.setStatus(id === 'wizQuit' ? 'Set-up stopped. The popup offers Set up Lot Current again until it is finished; Settings has the same fields.' : '');
       ctx.onClose();
       return true;
     default:

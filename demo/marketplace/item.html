@@ -16,7 +16,7 @@
     Delete. A deleted or unknown listing reads "This content isn't available
     right now."
   -->
-  <div class="sample">Sample Marketplace listing for the Lot Sync sandbox. This is not Facebook.</div>
+  <div class="sample">Sample Marketplace listing for the Lot Current sandbox. This is not Facebook.</div>
   <header class="mp"><div class="logo">Sample Marketplace</div><nav><a href="selling.html">Your listings</a><a href="create.html">Create listing</a></nav></header>
   <main id="main"></main>
   <script src="marketplace.js"></script>
@@ -38,7 +38,7 @@
         <h1>${esc(l.title)}</h1>
         <div class="price">${mp.money(l.price)}</div>
         ${l.sold ? '<p class="badge sold">Sold</p>' : ''}
-        <div class="listing-photo">${l.photos ? `${l.photos} photo${l.photos === 1 ? '' : 's'} attached by Lot Sync` : 'No photos'}</div>
+        <div class="listing-photo">${l.photos ? `${l.photos} photo${l.photos === 1 ? '' : 's'} attached by Lot Current` : 'No photos'}</div>
         <p class="hint">${esc(l.location || '')}${l.mileage ? ' · ' + Number(l.mileage).toLocaleString('en-US') + ' miles' : ''}${l.vin ? ' · VIN ' + esc(l.vin) : ''} · listing ${esc(l.id)}</p>
         <div class="description">${esc(l.description || '')}</div>
         <p class="hint">Sold as-is with any remaining factory warranty. Message the seller with questions.</p>

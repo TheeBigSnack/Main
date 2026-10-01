@@ -49,7 +49,7 @@ test('each row carries the popup\'s New pill and date line, and a draft is liste
   assert.equal(row.BBB.isNew, false);
   assert.equal(row.CCC.isNew, true, 'a sighting inside the window');
   assert.match(row.AAA.line, /^on the website since .* · 2 days on the lot$/);
-  assert.match(row.CCC.line, /^Lot Sync first saw it /);
+  assert.match(row.CCC.line, /^Lot Current first saw it /);
   assert.equal(row.BBB.draft, true);
   assert.equal(row.AAA.draft, false);
   assert.equal(readyRows(s, { settings: { newDays: 1 }, now: NOW }).rows.find((r) => r.vin === 'AAA').isNew, false, 'the website\'s own window setting');

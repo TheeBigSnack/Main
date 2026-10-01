@@ -94,7 +94,7 @@ test('sync: no token and a rejected token are 401; the token is checked with the
   assert.equal(fake.calls.length, 1, 'nothing read after the refusal');
   const unset = await loadFunction('sync', { SUPABASE_ANON_KEY: undefined });
   const r = await sync(unset, TOKEN.u1);
-  assert.deepEqual([r.status, r.body.error], [500, 'the function is missing SUPABASE_URL or SUPABASE_ANON_KEY']);
+  assert.deepEqual([r.status, r.body.error], [500, 'the function is missing SUPABASE_URL or a publishable key (SUPABASE_PUBLISHABLE_KEYS or SUPABASE_ANON_KEY)']);
 });
 
 test('sync: a person in no dealership, or in another one, is 403; the origin is matched without case or a trailing slash; none is 400', async () => {

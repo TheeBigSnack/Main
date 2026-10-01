@@ -1,4 +1,4 @@
-// Drives the Lot Sync test drive (demo/) the way a person would, in headless
+// Drives the Lot Current test drive (demo/) the way a person would, in headless
 // Chromium, and checks every step: scan, Post, the side panel's re-check and
 // description, the sample Marketplace form filling itself, the person's own
 // click on Publish (this script stands in for the person; the extension never
@@ -189,7 +189,7 @@ try {
   assert.match(await text(popup.locator('.rows')), /2020 Ford F-150 XLT[\s\S]*Posted ✓/);
   await popupTab('pilot').click();
   const pilot1 = await text(popup.locator('.panel'));
-  assert.match(pilot1, /Posted through Lot Sync\s*1\b/);
+  assert.match(pilot1, /Posted through Lot Current\s*1\b/);
   assert.match(pilot1, /Every field filled every time/);
   await shot(page, 'drive-07-pilot.png', { fullPage: true });
 
@@ -249,7 +249,7 @@ try {
   assert.equal(await badge(), '2', 'the toolbar icon carries the to-do count');
   await shot(page, 'drive-10-day2-todo.png', { fullPage: true });
 
-  // ---- 8. Update the price: the person clicks Edit listing, Lot Sync fills the box, the person clicks Update ----
+  // ---- 8. Update the price: the person clicks Edit listing, Lot Current fills the box, the person clicks Update ----
   await popup.locator('button[data-action="upkeep"][data-kind="price"]').click();
   const lst = await tabFrame(5);
   await panel.locator('#priceWaiting').waitFor({ timeout: 20000 });
@@ -272,7 +272,7 @@ try {
   await popupTab('mine').click();
   assert.match(await text(popup.locator('.panel')), /2019 Honda Civic EX[\s\S]*Listed \$18,995/);
 
-  // ---- 9. Take the sold car down: the person clicks Mark as sold, Lot Sync notices ----
+  // ---- 9. Take the sold car down: the person clicks Mark as sold, Lot Current notices ----
   await popupTab('todo').click();
   await popup.locator('button[data-action="upkeep"][data-kind="takeDown"]').click();
   const sold = await tabFrame(6);
@@ -292,7 +292,7 @@ try {
   await page.waitForFunction(() => document.getElementById('badge').hidden, null, { timeout: 5000 });
   await popupTab('pilot').click();
   const pilot2 = await text(popup.locator('.panel'));
-  assert.match(pilot2, /Posted through Lot Sync\s*2\b/);
+  assert.match(pilot2, /Posted through Lot Current\s*2\b/);
   assert.match(pilot2, /Sold cars to take down\s*1\b/);
   assert.match(pilot2, /Price changes\s*1\b/);
   await shot(page, 'drive-13-pilot-day2.png', { fullPage: true });
@@ -391,7 +391,7 @@ try {
     return pattern;
   });
   await panel.locator('button[data-post-vin="1FMSAMPL5JU000205"]').click(); // Post on the Escape
-  await panel.locator('#status').filter({ hasText: /Not allowed, so Lot Sync can't read .* from the side panel/ }).waitFor();
+  await panel.locator('#status').filter({ hasText: /Not allowed, so Lot Current can't read .* from the side panel/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.__lotSyncHub.permissionRequests), [[sitePattern]], 'asked for the website only, from the click');
   assert.equal(await panel.locator('#panelReady').count(), 1, 'nothing was started');
   await page.evaluate(() => { window.__lotSyncHub.permissionAnswer = true; }); // this time the person allows it
@@ -417,7 +417,7 @@ try {
   assert.match(stdTodo, /Take down\s*1[\s\S]*2019 Honda Civic EX[\s\S]*Gone from the website/);
   assert.match(stdTodo, /Update price\s*1[\s\S]*2020 Honda Accord Sport[\s\S]*\$23,495 → \$22,495/);
   // this website gives no in-stock dates, so the arrival carries the scan that first saw it, and never a count of days on the lot
-  assert.match(stdTodo, /New arrivals\s*1[\s\S]*2021 Hyundai Tucson SEL[\s\S]*Lot Sync first saw it /);
+  assert.match(stdTodo, /New arrivals\s*1[\s\S]*2021 Hyundai Tucson SEL[\s\S]*Lot Current first saw it /);
   assert.doesNotMatch(stdTodo, /on the lot/);
   assert.match(stdTodo, /Just became ready\s*1[\s\S]*2016 Jeep Wrangler Sport/);
   assert.equal(await text(popupTab('todo').locator('.count')), '2');

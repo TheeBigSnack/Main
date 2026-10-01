@@ -67,7 +67,7 @@ export function tileText(html) {
 async function main() {
   const line = promoLine(readFileSync(listing, 'utf8'));
   const text = tileText(readFileSync(tile, 'utf8'));
-  if (text !== `Lot Sync ${line}`) throw new Error(`store/images/tile.html says "${text}"; it must say the name and the listing's line, "Lot Sync ${line}", and nothing else`);
+  if (text !== `Lot Current ${line}`) throw new Error(`store/images/tile.html says "${text}"; it must say the name and the listing's line, "Lot Current ${line}", and nothing else`);
 
   const { chromium } = await import('playwright');
   const DEFAULT_CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -85,7 +85,7 @@ async function main() {
         await img.decode().catch(() => {});
         return img.naturalWidth;
       });
-      if (icon !== 128) throw new Error(`${name}: the icon did not load (extension/icons/icon128.png)`);
+      if (!icon) throw new Error(`${name}: the mark did not load (site/favicon.svg)`);
       const layout = await page.evaluate(() => {
         const rowsOf = (el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
         const box = document.querySelector('main').getBoundingClientRect();

@@ -1,0 +1,13 @@
+# Response headers for the manager view where it is hosted (Cloudflare Pages
+# reads this file; docs/production-setup.md). The policy is index.html's own
+# meta Content-Security-Policy plus what only a header can say: no site may
+# frame the page (frame-ancestors), so a click on Remove or Invite can't be
+# hijacked. test/productionSetup.test.js keeps the two policies in step.
+# The sign-in link comes back with a one-time code in the address, so no
+# referrer leaves the page.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; img-src 'self' data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()

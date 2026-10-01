@@ -1,4 +1,4 @@
--- Lot Sync: self-serve sign-up (0007_signup.sql) against a running database
+-- Lot Current: self-serve sign-up (0007_signup.sql) against a running database
 -- with the migrations applied, in the shape of rls.sql: people straight in
 -- auth.users, the JWT claims set the way PostgREST does, DO blocks that
 -- raise on anything wrong, everything in one transaction rolled back at the
@@ -281,7 +281,7 @@ do $$
 declare
   got jsonb := pg_temp.sign_up('New Motors', 'www.new-motors.test', 'Pat');
 begin
-  if got ->> 'raised' is distinct from 'P0008' or got ->> 'message' not like 'sign-up is not open%invite code%from Lot Sync or from your dealership''s manager' then
+  if got ->> 'raised' is distinct from 'P0008' or got ->> 'message' not like 'sign-up is not open%invite code%from Lot Current or from your dealership''s manager' then
     raise exception 'a sign-up while closed was answered with %', got;
   end if;
   raise notice 'ok: while sign-up is closed, P0008 points at an invite code';
@@ -477,7 +477,7 @@ declare
 begin
   got := pg_temp.sign_up('Copy Motors', 'https://WWW.Existing-Motors.test/inventory', 'Lee');
   if got is distinct from jsonb_build_object('code', 'P0009', 'details', null, 'hint', null, 'status', '400',
-       'message', 'that website already has a Lot Sync dealership: ask its manager for an invite code (if nobody there uses Lot Sync, write to Lot Sync support)') then
+       'message', 'that website already has a Lot Current dealership: ask its manager for an invite code (if nobody there uses Lot Current, write to Lot Current support)') then
     raise exception 'a taken website was answered with %', got;
   end if;
   if exists (select 1 from public.dealerships) or exists (select 1 from public.memberships) then
@@ -575,7 +575,7 @@ do $$
 declare
   got jsonb := pg_temp.sign_up('Sixth Motors', 'www.sixth-motors.test', 'Sky');
 begin
-  if got ->> 'raised' is distinct from 'P0011' or got ->> 'message' <> 'no more new dealerships can start today; try again tomorrow, or write to Lot Sync support' then
+  if got ->> 'raised' is distinct from 'P0011' or got ->> 'message' <> 'no more new dealerships can start today; try again tomorrow, or write to Lot Current support' then
     raise exception 'the fourth sign-up in 24 hours with per_day 3 was answered with %', got;
   end if;
   raise notice 'ok: per_day refuses with P0011';

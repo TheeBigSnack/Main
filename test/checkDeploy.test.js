@@ -5,10 +5,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runChecks, report, nothingRead, notDeployedYet, configFindings, TABLES, EXTENSION_ORIGIN, DEPLOYED_LATER } from '../scripts/check-deploy.mjs';
+import { runChecks, report, nothingRead, notDeployedYet, configFindings, keyKind, keyHeaders, isBrowserSafeKey, TABLES, EXTENSION_ORIGIN, DEPLOYED_LATER } from '../scripts/check-deploy.mjs';
 
 const URL_ = 'https://abcd.supabase.co';
-const KEY = 'anon-key';
+const KEY = 'sb_publishable_check-deploy-tests';
 const SITE = 'https://lotsync.example';
 
 // A fake Supabase that behaves like a correct deploy, with switches to break it.
@@ -20,13 +20,16 @@ function fakeProject(broken = {}) {
     const headers = init.headers || {};
     const origin = headers.Origin || '';
     const auth = headers.Authorization || '';
+    const anonCall = !auth || auth === `Bearer ${KEY}`;
     const reply = (status, body, h = {}) => ({ status, headers: new Map(Object.entries(h)), text: async () => (body === null ? '' : JSON.stringify(body)) });
+    // the platform reads whatever follows Bearer as a JWT: a publishable key there is refused before anything else
+    if (/^Bearer sb_/.test(auth)) return reply(401, { message: 'Invalid JWT' });
     // a function that is not deployed: the gateway's own 404, preflight included
     const fn = u.pathname.startsWith('/functions/v1/') ? u.pathname.split('/')[3] : '';
     if ((broken.notDeployed || []).includes(fn)) return reply(404, { code: 'NOT_FOUND', message: 'Requested function was not found' });
     if (u.pathname === '/auth/v1/health') return reply(200, { name: 'GoTrue' });
     if (u.pathname.startsWith('/rest/v1/rpc/redeem_invite')) {
-      if (auth === `Bearer ${KEY}`) return reply(broken.anonRedeem ? 400 : 401, { code: 'P0002', message: 'that invite code is not valid' });
+      if (anonCall) return reply(broken.anonRedeem ? 400 : 401, { code: 'P0002', message: 'that invite code is not valid' });
       if (misses.n >= 10) return reply(400, { code: 'P0005', message: 'too many attempts; try again in an hour' });
       if (!broken.missesRolledBack) misses.n += 1;
       return reply(400, { code: 'P0002', message: 'that invite code is not valid' });
@@ -50,7 +53,7 @@ function fakeProject(broken = {}) {
     }
     if (u.pathname.startsWith('/functions/v1/')) {
       if (method === 'OPTIONS') return reply(204, null, origin === EXTENSION_ORIGIN && !broken.noCors ? { 'access-control-allow-origin': origin } : {});
-      if (!auth.startsWith('Bearer ') || auth === `Bearer ${KEY}`) return reply(broken.gatewayOpen ? 200 : 401, { ok: false });
+      if (anonCall) return reply(broken.gatewayOpen ? 200 : 401, { ok: false });
       return reply(403, { ok: false, error: 'not a member' });
     }
     return reply(404, null);
@@ -171,4 +174,75 @@ test('the config files must name one project; an empty demo endpoint is only a n
   assert.equal(empty.filter((f) => !f.ok && !f.warnOnly).length, 3);
   const local = configFindings({ account: { url: 'http://127.0.0.1:54321', anonKey: KEY }, manager: { supabaseUrl: 'http://127.0.0.1:54321', supabaseAnonKey: KEY }, site: {} });
   assert.equal(local.find((f) => /hosted/.test(f.check)).ok, false);
+});
+
+// A legacy key as Supabase made them: a JWT whose payload names the role (the signature is not checked here).
+const jwt = (role) => ['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', Buffer.from(JSON.stringify({ iss: 'supabase', ref: 'abcd', role })).toString('base64url'), 'signature'].join('.');
+
+test('keyKind tells the browser-safe keys from the secret ones, the legacy JWTs included', () => {
+  assert.equal(keyKind('sb_publishable_abc'), 'publishable');
+  assert.equal(keyKind('  sb_publishable_abc  '), 'publishable');
+  assert.equal(keyKind('sb_secret_abc'), 'secret');
+  assert.equal(keyKind(jwt('anon')), 'anon');
+  assert.equal(keyKind(jwt('service_role')), 'service_role');
+  assert.equal(keyKind(jwt('authenticated')), 'unknown', 'a user\'s token is not a project key');
+  for (const k of ['', null, undefined]) assert.equal(keyKind(k), 'none');
+  for (const k of ['anon-key', 'a.b.c', 'eyJ.notbase64!.x']) assert.equal(keyKind(k), 'unknown', k);
+  assert.deepEqual(['sb_publishable_a', jwt('anon'), 'sb_secret_a', jwt('service_role'), 'x'].map(isBrowserSafeKey), [true, true, false, false, false]);
+});
+
+test('keyHeaders: a publishable key goes on apikey only, never after Bearer; a legacy anon JWT on both', () => {
+  assert.deepEqual(keyHeaders('sb_publishable_a'), { apikey: 'sb_publishable_a' });
+  assert.deepEqual(keyHeaders(jwt('anon')), { apikey: jwt('anon'), Authorization: `Bearer ${jwt('anon')}` });
+});
+
+test('a secret key in a config file fails the run and says to roll it; the legacy anon key is a note', () => {
+  for (const secret of ['sb_secret_leaked', jwt('service_role')]) {
+    const f = configFindings({ account: { url: URL_, anonKey: secret }, manager: { supabaseUrl: URL_, supabaseAnonKey: KEY }, site: {} });
+    const bad = f.find((x) => x.check === 'extension/src/accountConfig.js holds a key a browser may see');
+    assert.equal(bad.ok, false);
+    assert.ok(!bad.warnOnly, 'a failure, not a note');
+    assert.match(bad.detail, /roll that key/);
+    assert.doesNotMatch(bad.detail, /sb_secret_leaked|signature/, 'the key itself is never printed');
+  }
+  const legacy = configFindings({ account: { url: URL_, anonKey: jwt('anon') }, manager: { supabaseUrl: URL_, supabaseAnonKey: jwt('anon') }, site: {} });
+  const note = legacy.filter((x) => /uses the publishable key/.test(x.check));
+  assert.equal(note.length, 2);
+  assert.ok(note.every((x) => !x.ok && x.warnOnly && /end of 2026/.test(x.detail)));
+  const fine = configFindings({ account: { url: URL_, anonKey: KEY }, manager: { supabaseUrl: URL_, supabaseAnonKey: KEY }, site: {} });
+  assert.deepEqual(fine.filter((x) => /key a browser may see/.test(x.check)).map((x) => x.ok), [true, true]);
+});
+
+test('runChecks refuses to test with a secret key (it skips row-level security) and calls nothing', async () => {
+  let called = 0;
+  for (const key of ['sb_secret_x', jwt('service_role'), 'not-a-key']) {
+    const findings = await runChecks({ fetchImpl: async () => { called += 1; }, url: URL_, anonKey: key });
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].ok, false);
+    assert.doesNotMatch(findings[0].detail, /sb_secret_x|signature/);
+  }
+  assert.equal(called, 0);
+});
+
+test('a legacy anon key still gets every line ok against a correct project', async () => {
+  const LEGACY = jwt('anon');
+  const project = fakeProject();
+  // the fake knows KEY; a call carrying the legacy JWT on both headers is the same anonymous call
+  const fetchImpl = (url, init = {}) => {
+    const h = { ...(init.headers || {}) };
+    if (h.Authorization === `Bearer ${LEGACY}`) delete h.Authorization;
+    if (h.apikey === LEGACY) h.apikey = KEY;
+    return project(url, { ...init, headers: h });
+  };
+  const findings = await runChecks({ fetchImpl, url: URL_, anonKey: LEGACY, testToken: 'user-token', siteOrigin: SITE });
+  assert.deepEqual(findings.filter((f) => !f.ok), []);
+});
+
+test('with a publishable key no request carries it after Bearer, so a 401 is a real refusal and not "Invalid JWT"', async () => {
+  const sent = [];
+  const project = fakeProject();
+  const fetchImpl = (url, init = {}) => { sent.push((init.headers || {}).Authorization || ''); return project(url, init); };
+  await runChecks({ fetchImpl, url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE });
+  assert.ok(sent.length > TABLES.length);
+  assert.deepEqual(sent.filter((a) => a.includes(KEY)), []);
 });

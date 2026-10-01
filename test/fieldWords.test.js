@@ -144,7 +144,7 @@ test('a trailer, RV, powersport vehicle or boat never reaches the car form', () 
     const v = vehicle('usedNormal', { body_details: { type: body } });
     const a = assessVehicle(v, {});
     assert.equal(a.decision, DECISION.REVIEW, body);
-    assert.equal(a.reason, `The website's body style "${body}" makes it ${name}. Lot Sync fills in only Marketplace's car/truck and motorcycle forms, so it stays off the posting list.`);
+    assert.equal(a.reason, `The website's body style "${body}" makes it ${name}. Lot Current fills in only Marketplace's car/truck and motorcycle forms, so it stays off the posting list.`);
     // the post-time re-check says the same, not that the details stopped adding up
     const r = recheck(v, {});
     assert.equal(r.ok, false);

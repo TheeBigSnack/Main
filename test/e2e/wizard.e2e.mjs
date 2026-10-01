@@ -64,7 +64,7 @@ const watch = (p) => {
 try {
   const ext = await context.newPage();
   await ext.goto('chrome://extensions');
-  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Sync').id);
+  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Current').id);
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
 
@@ -95,7 +95,7 @@ try {
   panelRef = panel;
   await panel.goto(extUrl('sidepanel.html'));
   await panel.waitForSelector('#wizNext');
-  assert.match(await panel.textContent('#panel'), /Set up Lot Sync for this dealership/);
+  assert.match(await panel.textContent('#panel'), /Set up Lot Current for this dealership/);
   assert.match(await panel.textContent('#panel'), stepOf('welcome'));
   await panel.click('#wizNext'); // -> read the website (runs by itself)
   await panel.waitForSelector('.banner.good', { timeout: 30000 });

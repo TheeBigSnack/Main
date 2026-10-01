@@ -47,6 +47,30 @@ export function env(name: string, fallback = ''): string {
   return v === undefined || v === '' ? fallback : v;
 }
 
+// The project's two API keys. Supabase is retiring the legacy anon and
+// service_role keys by the end of 2026 in favour of publishable
+// (sb_publishable_...) and secret (sb_secret_...) keys; the runtime hands the
+// new ones over as JSON objects keyed by name (SUPABASE_PUBLISHABLE_KEYS,
+// SUPABASE_SECRET_KEYS; the first one created is named "default") and keeps
+// the legacy ones in SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY while
+// they last. The new key wins when there is one, so turning the legacy keys
+// off in the Dashboard needs no redeploy (docs/production-setup.md).
+export function keyFromSet(json: string): string {
+  if (!json) return '';
+  try {
+    const set = JSON.parse(json);
+    if (!isRecord(set)) return '';
+    const named = typeof set.default === 'string' ? set.default : '';
+    if (named) return named;
+    const first = Object.values(set).find((v) => typeof v === 'string' && v);
+    return typeof first === 'string' ? first : '';
+  } catch {
+    return '';
+  }
+}
+export const publishableKey = (): string => keyFromSet(env('SUPABASE_PUBLISHABLE_KEYS')) || env('SUPABASE_ANON_KEY');
+export const secretKey = (): string => keyFromSet(env('SUPABASE_SECRET_KEYS')) || env('SUPABASE_SERVICE_ROLE_KEY');
+
 const clientOptions = (token?: string) => ({
   ...(token ? { global: { headers: { Authorization: `Bearer ${token}` } } } : {}),
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -61,8 +85,8 @@ export async function requireUser(req: Request): Promise<AuthResult> {
   if (!m) return { ok: false, status: 401, error: 'sign in to use this (no token was sent)' };
   const token = m[1].trim();
   const url = env('SUPABASE_URL');
-  const anon = env('SUPABASE_ANON_KEY');
-  if (!url || !anon) return { ok: false, status: 500, error: 'the function is missing SUPABASE_URL or SUPABASE_ANON_KEY' };
+  const anon = publishableKey();
+  if (!url || !anon) return { ok: false, status: 500, error: 'the function is missing SUPABASE_URL or a publishable key (SUPABASE_PUBLISHABLE_KEYS or SUPABASE_ANON_KEY)' };
   const client = createClient(url, anon, clientOptions(token));
   const { data, error } = await client.auth.getUser(token);
   if (error || !data.user) return { ok: false, status: 401, error: 'sign in again (the token was rejected or has expired)' };
@@ -109,7 +133,7 @@ export async function subscriptionRowOf(client: SupabaseClient, dealershipId: st
 // Bypasses row-level security. Only for the tables above, only in here.
 export function serviceClient(): SupabaseClient {
   const url = env('SUPABASE_URL');
-  const key = env('SUPABASE_SERVICE_ROLE_KEY');
-  if (!url || !key) throw new Error('the function is missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+  const key = secretKey();
+  if (!url || !key) throw new Error('the function is missing SUPABASE_URL or a secret key (SUPABASE_SECRET_KEYS or SUPABASE_SERVICE_ROLE_KEY)');
   return createClient(url, key, clientOptions());
 }
