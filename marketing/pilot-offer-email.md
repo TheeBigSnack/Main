@@ -10,7 +10,7 @@ Hi [name],
 
 I've built a Chrome extension called Lot Current that fills in a Facebook Marketplace vehicle listing from your own website inventory in about ten seconds: photos, price, VIN, description, the lot. The salesperson checks it and clicks Publish themselves, every time. Then it re-reads the website every few hours and tells them the same day when a car sells or the price changes, and opens the listing so they can fix it.
 
-It only lets pre-owned cars at your store through, the price is always the website price, and every description names the dealership. It never clicks Publish, never asks for anyone's Facebook login, and doesn't do anything in the background except read your website.
+It only lets pre-owned cars at your store through, the price is always the website price, and every description names the dealership. It never clicks Publish and never asks for anyone's Facebook login. In the background it re-reads your website and, while a salesperson is signed in to a Lot Current account, sends the results (their posted list, post records, to-do items and the scan's counts) to your dealership's account; it never touches Facebook on its own.
 
 I'd like to run a 30-day pilot at [dealership] with [two or three] salespeople, with your sign-off. It's free. During the pilot it records how long each post takes, anything it couldn't fill in, and how long sold cars stayed listed, and I'd go over those numbers with you each week. No customer data is collected.
 

@@ -427,15 +427,28 @@ test('README\'s unit-test count is the number of tests npm test runs', () => {
 // background.js ends with syncSite, which sends the posted list, the post
 // attempts, the to-do items and the scan's counts to the dealership's
 // account. Every text that tells a person what Lot Current does on its own
-// names both, and none says it only reads the website.
+// names both, and none says it only reads the website: not the texts that
+// describe the rescan, and not the marketing kit a dealer reads first.
+// (site-src's "It only reads your own public website" is about the popup's
+// Scan website button, which uploads nothing, so the website is not held to
+// this.)
+const ONLY_READS = /one thing it does on its own|only read[s]? (your|the)[^.]*website|except (to )?read/i;
 test('every text that says what Lot Current does on its own names the upload a signed-in rescan sends', () => {
   const bg = read('../extension/background.js');
   const rescan = bg.slice(bg.indexOf('async function runRescan'), bg.indexOf('async function rescanDueSites'));
   assert.ok(rescan.length > 100 && /\bsyncSite\(/.test(rescan), 'the background rescan no longer syncs: change these texts with it');
   const TEXTS = ['../README.md', '../store/listing.md', '../docs/help.md', '../extension/popup.js', '../legal/chrome-web-store-privacy.md'];
+  const MARKETING = readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`);
+  assert.ok(MARKETING.includes('../marketing/pilot-offer-email.md'));
+  for (const rel of [...TEXTS, ...MARKETING]) {
+    for (const line of read(rel).split('\n')) {
+      assert.doesNotMatch(line, ONLY_READS, `${rel} says the background rescan only reads the website: "${line.trim().slice(0, 120)}"`);
+      // a line that says what the automatic rescan reads says what it sends
+      if (/\b(automatic rescans?|in the background it) (re-)?read/i.test(line)) assert.match(line, /signed in to a Lot Current account, (it also )?sends? (that rescan's |the )results/, `${rel}: "${line.trim().slice(0, 90)}..." leaves out what a signed-in rescan sends`);
+    }
+  }
   for (const rel of TEXTS) {
     const text = read(rel);
-    assert.doesNotMatch(text, /one thing it does on its own|only reads the website/i, `${rel} says the rescan only reads the website`);
     // the lines that describe the unattended rescan: "every 3 hours" with what it never does then, or the Settings hint once the permission is granted
     const lines = text.split('\n').filter((l) => (/every 3 hours while Chrome is open/.test(l) && /never (touches Facebook|opens or reads Marketplace)/i.test(l)) || /in the background: granted/.test(l));
     assert.ok(lines.length >= 1, `${rel} no longer describes the background rescan`);

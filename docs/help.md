@@ -234,7 +234,7 @@ A web page your Lot Current contact gives you the address of. It shows your whol
 ## What Lot Current never does
 
 - Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it, and a test that fails if any appears.
-- Post or edit in the background or while you are away. Automatic rescans only read your dealership's website.
+- Post or edit in the background or while you are away. Automatic rescans read your dealership's website and, while you are signed in to a Lot Current account, send that rescan's results to your dealership's account; they never touch Facebook.
 - Post new, demo or loaner cars, or anything the pre-owned check cannot confirm.
 - Invent prices or price drops. The listed price is the website price, and price changes only mirror the website.
 - Make claims the website's data does not support, or hide that the car is at a dealership.
