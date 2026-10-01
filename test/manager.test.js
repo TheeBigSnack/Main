@@ -1050,6 +1050,46 @@ test('gettingStarted step 1: the free pilot or a subscription; none, lapsed or a
   assert.match(plan('gold').line, /could not be read/);
 });
 
+test('a lapsed plan Stripe still holds open says what renews it, Manage billing, never Subscribe, in Getting started and on the Billing card', async () => {
+  const { statusAnswer } = await import('../supabase/functions/_shared/billing.mjs');
+  const answer = (row) => ({ ...status(), ...statusAnswer(row, { role: 'manager', now: NOW }), role: 'manager' });
+  const open = (st) => answer(subRow({ status: st, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }));
+  const failed = 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.';
+  const expect = {
+    past_due: ['The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.', `The last payment did not go through. ${failed}`],
+    unpaid: ['The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.', `The last payment did not go through. ${failed}`],
+    incomplete: ['The first payment did not go through: open Manage billing in the Billing card, or ask your Lot Current contact.', 'The first payment did not go through. Open Manage billing to check the card, or ask your Lot Current contact.'],
+    paused: ['The subscription is paused: ask your Lot Current contact, or open Manage billing in the Billing card.', 'The subscription is paused. Ask your Lot Current contact, or open Manage billing.'],
+  };
+  for (const [st, [stepLine, detail]] of Object.entries(expect)) {
+    const s = open(st);
+    const c = card(s);
+    assert.equal(c.state, 'lapsed', st);
+    assert.deepEqual(c.buttons.map((b) => b.label), ['Manage billing'], `${st}: the card offers Manage billing alone`);
+    assert.equal(c.detail, detail, `${st}: the card says what Manage billing is for`);
+    const step = started({ billing: s }).steps[0];
+    assert.deepEqual([step.done, step.line, step.action], [false, stepLine, { target: 'billing', label: 'Go to Billing' }], st);
+    assert.doesNotMatch(step.line, /subscribe/i, `${st}: no Subscribe to press`);
+    if (st !== 'past_due' && st !== 'unpaid') assert.doesNotMatch(`${step.line} ${c.detail}`, /retr|starts again/, `${st}: no retry promised`);
+  }
+  // with no customer to open the portal for, both say whom to ask
+  const noPortal = { ...open('past_due'), canManageBilling: false };
+  assert.equal(card(noPortal).detail, 'The last payment did not go through. Ask your Lot Current contact.');
+  assert.equal(started({ billing: noPortal }).steps[0].line, 'The plan has lapsed: ask your Lot Current contact.');
+  // a subscription that is over (cancelled, a pilot that ran out) is renewed by Subscribe, as before
+  for (const row of [subRow({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }), subRow({ status: 'pilot', pilot_ends_at: inDays(-2) })]) {
+    const s = answer(row);
+    assert.equal(s.canSubscribe, true);
+    assert.equal(started({ billing: s }).steps[0].line, 'The plan has lapsed: subscribe in the Billing card and syncing starts again.');
+    assert.ok(card(s).buttons.some((b) => b.action === 'subscribe'));
+    assert.doesNotMatch(card(s).detail, /Manage billing|contact/);
+  }
+  // an answer that offers neither never asks for Subscribe
+  assert.equal(started({ billing: { state: 'lapsed', role: 'manager', canSubscribe: false } }).steps[0].line, 'The plan has lapsed: ask your Lot Current contact.');
+  // a salesperson's card names no button
+  assert.equal(card({ ...open('past_due'), role: 'salesperson' }).detail, 'The last payment did not go through.');
+});
+
 test('gettingStarted step 2: an open invite code of this dealership, or a second member', () => {
   const invite = (over) => started(over).steps[1];
   assert.equal(invite({ invites: [{ code: 'ABCDEF012345', role: 'salesperson', dealership_id: D1, created_at: ago(1) }] }).done, true);

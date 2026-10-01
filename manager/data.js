@@ -558,6 +558,28 @@ const LAPSED_WHY = Object.freeze({
   paused: 'The subscription is paused.',
 });
 
+// What renews a lapsed plan that Stripe still holds open (hasOpenSubscription:
+// a payment that did not go through, a first payment not finished, a pause).
+// Subscribe is not it: the billing function refuses a second Checkout next to
+// an open subscription and offers no Subscribe button. A failed renewal is
+// fixed by the card in Manage billing; a pause or an unfinished first payment
+// promises no retry. `card` follows the Billing card's why-line, `step` is the
+// Getting started line; with no Manage billing to offer, both say whom to ask.
+const LAPSED_OPEN = Object.freeze({
+  past_due: Object.freeze({ card: 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.', step: 'The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.' }),
+  unpaid: Object.freeze({ card: 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.', step: 'The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.' }),
+  incomplete: Object.freeze({ card: 'Open Manage billing to check the card, or ask your Lot Current contact.', step: 'The first payment did not go through: open Manage billing in the Billing card, or ask your Lot Current contact.' }),
+  paused: Object.freeze({ card: 'Ask your Lot Current contact, or open Manage billing.', step: 'The subscription is paused: ask your Lot Current contact, or open Manage billing in the Billing card.' }),
+});
+const LAPSED_ASK = Object.freeze({ card: 'Ask your Lot Current contact.', step: 'The plan has lapsed: ask your Lot Current contact.' });
+// The renewal words for a lapsed status answer, or null when Subscribe is
+// the way (the plan is not held open and the answer offers Subscribe).
+function lapsedRenewal(s) {
+  const sub = s.subscription && typeof s.subscription === 'object' ? s.subscription : {};
+  if (hasOpenSubscription(sub)) return (s.canManageBilling && LAPSED_OPEN[sub.status]) || LAPSED_ASK;
+  return s.canSubscribe ? null : LAPSED_ASK;
+}
+
 // The local calendar date alone (2026-12-05), for a plan line.
 export function fmtLocalDate(iso, timeZone) {
   return fmtLocal(iso, timeZone).slice(0, 10);
@@ -670,6 +692,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     const pilotEnd = ms(sub.pilot_ends_at);
     detail = LAPSED_WHY[sub.status] || (pilotEnd !== null && pilotEnd <= t ? `The free pilot ended ${date(sub.pilot_ends_at)}.` : '');
     if (!billingOpen) detail = [detail, BILLING_CLOSED_ASK].filter(Boolean).join(' '); // nothing here can renew it yet
+    else if (manager && hasOpenSubscription(sub)) detail = [detail, lapsedRenewal(s).card].filter(Boolean).join(' '); // held open: Manage billing, never Subscribe
   }
 
   const open = hasOpenSubscription(sub);
@@ -1011,7 +1034,9 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
     : 'No salesperson has posted in the past 7 days.';
 
   const closed = billingOpen === false;
-  const planStep = step('plan', plan === 'pilot' || plan === 'active', (closed && PLAN_STEP_CLOSED_LINES[plan]) || PLAN_STEP_LINES[plan]);
+  // a lapsed plan says "subscribe" only when the Billing card offers Subscribe; one Stripe holds open is renewed in Manage billing
+  const renewal = !closed && plan === 'lapsed' ? lapsedRenewal(billing) : null;
+  const planStep = step('plan', plan === 'pilot' || plan === 'active', (closed && PLAN_STEP_CLOSED_LINES[plan]) || renewal?.step || PLAN_STEP_LINES[plan]);
   if (closed) planStep.title = PLAN_STEP_CLOSED_TITLE;
 
   const steps = [
