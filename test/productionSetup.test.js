@@ -127,9 +127,28 @@ test('the Stripe test runs on a test dealership made for it, and the sync check 
   assert.match(six, /a made-up website such as `https:\/\/billing-test\.invalid`/);
   assert.match(six, /With a second test dealership, made the same way with another made-up website/);
   assert.match(stripe.slice(stripe.indexOf('## Later: switching to live mode')), /Use one that was never used in test mode, and delete the test dealerships step 6 made \(`select public\.delete_dealership\('<id>', '<its website_origin exactly as stored>'\);`/);
+  assert.match(six, /redeem the code with a test address of your own \(the extension's Settings, Account\), not the one `check-deploy` signs in with/, 'check-deploy\'s address must stay in no dealership, and its wrong codes throttle it');
   const setup = read('docs/production-setup.md');
-  const check = setup.split('\n').find((l) => l.startsWith('3. **[Owner]** On two computers'));
-  assert.match(check, /two test addresses of your own and two salesperson codes made for the test/);
-  assert.match(check, /never the code kept for the manager/);
-  assert.match(check, /before the store's manager first signs in, delete the dealership .*make it again with step 5's three statements, and give the manager the new code/);
+  const step7 = setup.slice(setup.indexOf('## Step 7.'), setup.indexOf('\n---', setup.indexOf('## Step 7.')));
+  assert.match(step7, /^1\. \*\*\[Claude\]\*\* Prepares the first SQL statement of `supabase\/README\.md` step 5 for the pilot dealership, the dealership alone/m, 'no manager code or pilot dates before the check: 3 deletes the row');
+  const check = step7.slice(step7.indexOf('3. **[Owner]** On two computers'));
+  assert.match(check, /test addresses of your own, not step 2's, and codes made for the test with step 5's invite statement: two salesperson codes .* and a manager code for the address you open the manager view with/);
+  assert.match(check, /delete the dealership\*\* \(`supabase\/README\.md`, "Delete": `select public\.delete_dealership\('<id>', '<its website_origin exactly as stored>'\);`\) and make it again with step 5's three statements/i);
+  assert.match(check, /^\d\. \*\*\[Owner\]\*\* On two computers.*So when the check is done, before the store's manager first signs in:$/m);
+});
+
+// review: deleting and remaking the pilot dealership cleared only the server; a test computer's browser
+// still held the test's posts and post timings, and its first sync to the remade dealership, under any
+// account, sends them again (post attempts carry no account, and sign-out starts a first sync)
+test('the sync check clears each test computer before the pilot uses it, with the buttons the popup has', () => {
+  const setup = read('docs/production-setup.md');
+  const step7 = setup.slice(setup.indexOf('## Step 7.'), setup.indexOf('\n---', setup.indexOf('## Step 7.')));
+  const check = step7.slice(step7.indexOf('3. **[Owner]** On two computers'));
+  assert.match(check, /a browser can send the test's posts and post timings to whichever dealership it next signs in to on that website, even under another account/);
+  assert.match(check, /\*\*On each test computer\*\*, open the store's website and, in Lot Current's Settings, click \*\*Sign out\*\*, then \*\*Clear everything for this website\*\* \(and \*\*Forget my synced profile\*\* if you typed a test name there\), before anyone uses that browser for the pilot\. Or run the check in a Chrome profile made for it, and remove that profile afterwards\./);
+  assert.ok(check.indexOf('**On each test computer**') < check.indexOf('**Delete the dealership**'), 'the computers are cleared before the dealership is made again');
+  const popup = read('extension/popup.js');
+  for (const [action, label] of [['accountSignOut', 'Sign out'], ['clear', 'Clear everything for this website'], ['forgetProfile', 'Forget my synced profile']]) {
+    assert.ok(popup.includes(`data-action="${action}">${label}</button>`), `the popup's Settings has ${label}`);
+  }
 });

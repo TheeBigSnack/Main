@@ -271,7 +271,7 @@ test('every pilot reaches the retention line: its clock starts when the owner ma
   assert.match(pilot, /record the end in the database that day \(`supabase\/README\.md`, "A pilot ended early"\)/, 'PILOT.md records a stop or an early end');
   assert.match(pilot, /those records are the CSVs the owner collected and, for a dealership on accounts, its rows in the database/, 'the database rows are pilot records too');
   assert.match(read('../docs/launch-checklist.md'), /an early end recorded the day the notice comes/);
-  assert.match(read('../docs/production-setup.md'), /Prepares the three SQL statements of `supabase\/README\.md` step 5 for the pilot dealership \(the dealership, the manager's invite code, and its pilot row/, 'the production steps run the pilot row too');
+  assert.match(read('../docs/production-setup.md'), /make it again with step 5's three statements: the dealership, the manager's invite code, which you keep for the manager, and its pilot row with the signed agreement's start date and length\. If the agreement is not signed yet, run the pilot row the day it is; until then the weekly list of dealerships with no plan/, 'the production steps run the pilot row too, or the no-plan list shows the dealership until they do');
 });
 
 // review: asking for a sign-in code creates an account for any address typed, and one that never joined a
