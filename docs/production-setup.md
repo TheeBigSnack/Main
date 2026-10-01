@@ -55,14 +55,15 @@ Put them on the environment, not under the repository's own Secrets: a repositor
 
 The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, from the repository's **Actions** tab or by Claude through GitHub. It refuses to start unless the committed config files name the project in `SUPABASE_PROJECT_REF`, and it ends every run with `npm run check-deploy`.
 
-1. **plan**: shows the eight migrations it would apply. Changes nothing.
+1. **plan**: shows the migrations in `supabase/migrations` the project has not applied yet. Changes nothing.
 2. **database**: applies them.
 
    After plan and database the outside check prints some `FAIL` lines on purpose (no tables yet, then no functions yet); the run stays green. From functions on, a `FAIL` turns the run red.
-3. **functions** with `rewrite sync`: deploys the description writer and the sync between machines. (`billing` comes with Stripe, `lead` when the website's demo form opens.)
-4. **check**: the outside check on its own, any time.
+3. **functions**: deploys the functions named in the box. The default is all four: `rewrite` (the description writer), `sync` (the sync between machines), `billing` (Stripe) and `lead` (the website's demo form). Each one's settings stay where `supabase/README.md` puts them; a function without its secrets answers with what is missing.
+4. **verify**: compares production with the repository and changes nothing. It fails, and prints the difference, when production has applied other migrations than the ones in `supabase/migrations`, when its public schema differs from the one those migrations build (a table, column, policy or function changed by hand), or when a deployed function's source differs from `supabase/functions`. Run it before the first deploy from this workflow, and again after anything is changed outside it: a deploy from a laptop with the Supabase CLI, or an edit in the Dashboard's SQL editor or Table editor. `check-deploy` cannot see any of that: it only looks at the project from the outside.
+5. **check**: the outside check on its own, any time.
 
-After step 3, `check-deploy` should show no `FAIL`; the billing and lead lines read `note` until those functions are deployed.
+After step 3, `check-deploy` should show no `FAIL`; the billing webhook line reads `note` until `STRIPE_WEBHOOK_SECRET` is set.
 
 The description writer needs an Anthropic API key only if you turn Claude-written descriptions on; the built-in template writer works without it. That is a separate money decision (capped at $25 a month in the settings); without the key the extension simply uses the template.
 
@@ -121,7 +122,7 @@ In the Supabase Dashboard, **Authentication**:
 | File | What it does |
 |---|---|
 | `scripts/set-project.mjs` (`npm run set-project`) | Writes the project URL and publishable key into both config files; `--check` says whether the manager view may deploy |
-| `.github/workflows/supabase.yml` | The by-hand database and functions deploy, ending in `check-deploy` |
+| `.github/workflows/supabase.yml` | The by-hand database and functions deploy, and **verify**, the read-only comparison of production with the repository; every run ends in `check-deploy` |
 | `.github/workflows/manager.yml` | The manager view's deploy to Cloudflare Pages |
 | `manager/_headers` | The manager view's security headers on Cloudflare (the page's own policy plus "no site may frame this page") |
 | `scripts/check-hosting.mjs` (`npm run check-hosting`) | The outside check for the hosted manager view (address, headers, project, CNAME) and the sender's DNS records; the Manager view workflow runs it after every deploy, and on its own with **Check only** |

@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const html = read('manager/index.html');
@@ -64,6 +64,53 @@ test('no workflow input or secret is written straight into a shell script; funct
   }
   assert.match(supabase, /case "\$f" in\n\s+rewrite\|sync\|billing\|lead\) ;;\n\s+\*\) echo "::error::/);
   assert.match(supabase, /FUNCTIONS: \$\{\{ inputs\.functions \}\}/);
+});
+
+// The function folders the repository deploys (supabase/functions, less _shared)
+const FUNCTION_DIRS = readdirSync(new URL('../supabase/functions/', import.meta.url), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && d.name !== '_shared').map((d) => d.name).sort();
+// A Supabase CLI (or other) command that changes the project, its secrets or its data
+const WRITES = /\bsupabase (db push(?! --dry-run)|db reset|db pull|migration (repair|up|squash|fetch)|functions (deploy|delete)|secrets (set|unset)|config push|storage (cp|mv|rm)|seed)\b|\bpsql\b|\bcurl\b/;
+
+test('verify compares production with the repository, and nothing it runs can write to the project', () => {
+  // Production was deployed by hand before this workflow first ran; plan only lists migration versions and check-deploy only probes from outside
+  assert.match(supabase, /options: \[plan, database, functions, verify, check\]/, 'verify is one of the choices');
+  const steps = supabase.split(/\n      - /);
+  const ifOf = (step) => (step.match(/^\s+if: (.+)$/m) || [, ''])[1];
+  const verify = steps.filter((st) => ifOf(st) === "inputs.step == 'verify'");
+  const said = runText(verify.join('\n'));
+  for (const cmd of ['supabase migration list --linked', 'supabase db push --dry-run', 'supabase db diff --linked --schema public', 'supabase functions download "$f" --project-ref "$PROJECT_REF"']) {
+    assert.ok(said.includes(cmd), `verify runs ${cmd}`);
+  }
+  assert.doesNotMatch(said, WRITES, 'verify writes nothing');
+  assert.match(said, /Remote database is up to date[\s\S]*exit 1/, 'migrations not applied turn the run red');
+  assert.match(said, /grep -q '\[\^\[:space:\]\]' "\$RUNNER_TEMP\/schema-diff\.sql"[\s\S]*exit 1/, 'a schema difference turns the run red');
+  assert.match(said, /for dir in supabase\/functions\/\*\/; do[\s\S]*_shared[\s\S]*git diff --quiet -- supabase\/functions[\s\S]*exit "\$status"/, 'every function folder is compared, and a difference turns the run red');
+  // the only steps that write run for database or functions alone, so plan, verify and check never reach them
+  for (const st of steps.filter((x) => WRITES.test(runText(x)))) {
+    assert.ok(["inputs.step == 'database'", "inputs.step == 'functions'"].includes(ifOf(st)), `${st.split('\n')[0]} writes and must run for database or functions only`);
+  }
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = verify \]; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'verify needs the database password to read the schema');
+});
+
+test('the functions box deploys every function in supabase/functions by default, and accepts no other name', () => {
+  assert.deepEqual(FUNCTION_DIRS, ['billing', 'lead', 'rewrite', 'sync'], 'a new function folder: add it to the default and the case below');
+  const box = supabase.match(/      functions:\n        description: .+\n        type: string\n        default: (.+)\n/);
+  assert.ok(box, 'the functions input');
+  assert.deepEqual(box[1].trim().split(/\s+/).sort(), FUNCTION_DIRS, 'the default deploys all of them: production runs all of them');
+  const allowed = supabase.match(/case "\$f" in\n\s+([a-z|]+)\) ;;/)[1].split('|').sort();
+  assert.deepEqual(allowed, FUNCTION_DIRS);
+});
+
+test('the docs say what verify compares and when to run it', () => {
+  const doc = read('docs/production-setup.md');
+  assert.match(doc, /\*\*verify\*\*: compares production with the repository and changes nothing\./);
+  assert.match(doc, /Run it before the first deploy from this workflow, and again after anything is changed outside it/);
+  assert.match(doc, /\*\*functions\*\*: deploys the functions named in the box\. The default is all four/);
+  assert.doesNotMatch(doc, /\*\*functions\*\* with `rewrite sync`/);
+  const readme = read('supabase/README.md');
+  assert.match(readme, /\*\*verify\*\* step \(`\.github\/workflows\/supabase\.yml`/);
+  assert.match(readme, /Run it after anything deployed by hand/);
 });
 
 test('the Supabase CLI in the deploy is the one the CI stack job tests with', () => {

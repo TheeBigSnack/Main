@@ -6,12 +6,19 @@
 #              apply (supabase db push --dry-run); changes nothing
 #   database   applies them (supabase db push)
 #   functions  deploys the functions named in the second box (default:
-#              rewrite sync; billing and lead come later, supabase/README.md)
+#              all four, rewrite sync billing lead)
+#   verify     compares production with the repository and changes
+#              nothing: the migrations it has recorded (migration list and
+#              db push --dry-run), its public schema against the one the
+#              migrations build (db diff), and each deployed function's
+#              source against supabase/functions (functions download, then
+#              git diff). Run it before the first deploy from here and after
+#              anything was changed by hand (docs/production-setup.md, step 3)
 #   check      only the outside check (npm run check-deploy)
 #
 # Every step ends with npm run check-deploy against the project the
-# committed config files name (only functions and check fail on it; before
-# the functions exist some of its lines fail by design), and refuses to start when those files name a
+# committed config files name (only functions, verify and check fail on it;
+# before the functions exist some of its lines fail by design), and refuses to start when those files name a
 # different project from SUPABASE_PROJECT_REF, so a deploy can only reach the
 # project the extension and the manager view talk to.
 #
@@ -33,12 +40,12 @@ on:
       step:
         description: What to do
         type: choice
-        options: [plan, database, functions, check]
+        options: [plan, database, functions, verify, check]
         default: plan
       functions:
         description: Functions to deploy (functions step only)
         type: string
-        default: rewrite sync
+        default: rewrite sync billing lead
 
 permissions:
   contents: read
@@ -50,7 +57,9 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # verify starts a local database in Docker on the runner for db diff,
+    # which takes a few minutes
+    timeout-minutes: 30
     environment:
       name: production
     env:
@@ -75,7 +84,7 @@ jobs:
           if [ "$STEP" != check ]; then
             if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then echo "::error::the secret SUPABASE_ACCESS_TOKEN is not set"; exit 1; fi
           fi
-          if [ "$STEP" = plan ] || [ "$STEP" = database ]; then
+          if [ "$STEP" = plan ] || [ "$STEP" = database ] || [ "$STEP" = verify ]; then
             if [ -z "$SUPABASE_DB_PASSWORD" ]; then echo "::error::the secret SUPABASE_DB_PASSWORD is not set"; exit 1; fi
           fi
       - name: Link the project
@@ -99,10 +108,66 @@ jobs:
             esac
           done
           for f in $FUNCTIONS; do supabase functions deploy "$f" --project-ref "$PROJECT_REF" --use-api; done
+      # verify: three read-only comparisons. Each prints what differs and
+      # turns the run red; none of them writes to the project.
+      - name: "verify: production has applied exactly the migrations in supabase/migrations"
+        if: inputs.step == 'verify'
+        run: |
+          set -o pipefail
+          supabase migration list --linked
+          # a version production has and the folder lacks makes the dry run fail; one the folder has and production lacks is listed
+          supabase db push --dry-run 2>&1 | tee "$RUNNER_TEMP/push-plan.txt"
+          if ! grep -q 'Remote database is up to date' "$RUNNER_TEMP/push-plan.txt"; then
+            echo "::error::production has not applied every migration in supabase/migrations: db push would apply what is listed above"
+            exit 1
+          fi
+      - name: "verify: production's public schema is the one the migrations build"
+        if: inputs.step == 'verify'
+        run: |
+          supabase db diff --linked --schema public > "$RUNNER_TEMP/schema-diff.sql"
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/schema-diff.sql"; then
+            cat "$RUNNER_TEMP/schema-diff.sql"
+            echo "::error::production's public schema differs from what supabase/migrations builds: the SQL above is the difference (a table, column, policy or function changed by hand)"
+            exit 1
+          fi
+          echo "No difference in the public schema."
+      # Each function is downloaded over its own folder in this throwaway
+      # checkout and compared with git, then the checkout is put back, so one
+      # function's copy of a _shared file never hides another's. A folder the
+      # download does not refill shows as deleted, so a download that lands
+      # somewhere else fails rather than passes. Line endings are not
+      # behaviour: a function deployed from a Windows checkout compares equal.
+      - name: "verify: each deployed function's source is the one in supabase/functions"
+        if: inputs.step == 'verify'
+        run: |
+          status=0
+          for dir in supabase/functions/*/; do
+            f=$(basename "$dir")
+            if [ "$f" = _shared ]; then continue; fi
+            rm -rf "supabase/functions/$f"
+            supabase functions download "$f" --project-ref "$PROJECT_REF"
+            find supabase/functions -type f -exec sed -i 's/\r$//' {} +
+            if git diff --quiet -- supabase/functions; then
+              echo "$f: the deployed source matches the repository"
+            else
+              echo "::error::$f: the deployed source differs from the repository (below: - is the repository, + is production)"
+              git diff --stat -- supabase/functions
+              git diff -- supabase/functions
+              status=1
+            fi
+            extra=$(git ls-files --others --exclude-standard -- supabase/functions)
+            if [ -n "$extra" ]; then
+              echo "$f: the download also wrote files the repository does not have (not compared):"
+              echo "$extra"
+            fi
+            git checkout -q -- supabase/functions
+            git clean -fdq -- supabase/functions
+          done
+          exit "$status"
       # Before the functions are deployed (plan, database) some lines are
       # expected to fail: tables missing before the first push, sync and
       # rewrite missing before theirs. The output still shows, and the run
-      # stays green; on functions and check a FAIL turns the run red.
+      # stays green; on functions, verify and check a FAIL turns the run red.
       - name: Check the project from the outside
         continue-on-error: ${{ inputs.step == 'plan' || inputs.step == 'database' }}
         run: npm run check-deploy
