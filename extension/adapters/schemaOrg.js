@@ -353,6 +353,55 @@ export function vinInAddress(href) {
   return vinsInAddress(href)[0] || '';
 }
 
+// The VIN in an address's path, leaving its query out: a form about a car
+// ("/finance/apply/?vin=...") carries the VIN only in its query.
+function vinInPath(href) {
+  try {
+    const u = new URL(String(href));
+    u.search = '';
+    return vinInAddress(u.href);
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * One address per car. A list's card often links forms and files about its
+ * car as well as the car's page ("Get pre-approved", "Check availability", a
+ * window sticker), each with the car's VIN in its query; only the car's page
+ * is read, so a form is not fetched on every scan and a file does not pass
+ * for a failing page. For each VIN with several addresses in `cars` (page
+ * key -> address) the one kept is, in order: the address the list's own
+ * data names for that car (named: page key -> VIN), one with the VIN in its
+ * path rather than only in its query, the page the last read of the car came
+ * from (lastSeen), else the first the list links. A lot whose car pages are
+ * addressed by a VIN in the query keeps them: a car with one address keeps it.
+ */
+export function oneAddressPerCar(cars, { named = new Map(), lastSeen = {} } = {}) {
+  const byVin = new Map();
+  let order = 0;
+  for (const [key, href] of cars) {
+    const vin = named.get(key) || vinInAddress(href);
+    if (!vin) continue;
+    if (!byVin.has(vin)) byVin.set(vin, []);
+    byVin.get(vin).push({ key, href, order: (order += 1) });
+  }
+  for (const [vin, all] of byVin) {
+    if (all.length < 2) continue;
+    const last = lastSeen && lastSeen[vin] && typeof lastSeen[vin].url === 'string' ? pageKey(lastSeen[vin].url) : '';
+    const rank = (a) => [named.get(a.key) === vin ? 0 : 1, vinInPath(a.href) === vin ? 0 : 1, last && a.key === last ? 0 : 1, a.order];
+    const better = (a, b) => {
+      const ra = rank(a);
+      const rb = rank(b);
+      for (let i = 0; i < ra.length; i += 1) if (ra[i] !== rb[i]) return ra[i] < rb[i];
+      return false;
+    };
+    const keep = all.reduce((best, a) => (better(a, best) ? a : best));
+    for (const a of all) if (a !== keep) cars.delete(a.key);
+  }
+  return cars;
+}
+
 /** An address that reads like a car's page without a VIN in it: a model year joined to words, under an inventory word. */
 export function looksLikeCarAddress(href) {
   const p = addressText(href).toLowerCase();
@@ -484,7 +533,7 @@ function judge(answer, origin) {
 function pageOf(outcome) {
   if (outcome.kind !== 'page') return outcome;
   if (!outcome.read) {
-    if (!isHtmlAnswer(outcome.contentType, outcome.text)) outcome.read = { kind: 'error', message: `not a web page (${outcome.contentType || 'no type'})` };
+    if (!isHtmlAnswer(outcome.contentType, outcome.text)) outcome.read = { kind: 'error', message: `not a web page (${outcome.contentType || 'no type'})`, notWebPage: true };
     else {
       const parsed = parseVehiclePage(outcome.text, outcome.finalUrl, { carKey: carKeys(outcome.finalUrl, outcome.cars) });
       outcome.read = isBotCheck(parsed) ? { kind: 'blocked', message: STOPPED.check } : { kind: 'html', parsed, truncated: outcome.text.length >= PAGE_TEXT_LIMIT };
@@ -903,8 +952,12 @@ export async function scan(search, options = {}) {
 
   // 2. the car pages: the strong ones, and links that only read like car
   // pages when they have the shape of the strong ones
+  const lastSeen = opts.lastSeen && typeof opts.lastSeen === 'object' ? opts.lastSeen : {};
+  const named = new Map(); // car page key -> the VIN the list's data gives it
+  for (const [key, listedCar] of byKey) if (listedCar.vin) named.set(key, listedCar.vin);
   const cars = new Map();
   for (const [key, href] of strong) if (!visited.has(key)) cars.set(key, href);
+  oneAddressPerCar(cars, { named, lastSeen });
   const strongShape = cars.size >= 2 ? learnCarAddressShape([...cars.values()]) : null;
   for (const [key, href] of weak) if (!visited.has(key) && !cars.has(key) && (cars.size < 2 || matchesCarAddressShape(href, strongShape))) cars.set(key, href);
 
@@ -917,6 +970,7 @@ export async function scan(search, options = {}) {
       const key = pageKey(href);
       if (!visited.has(key) && !cars.has(key)) cars.set(key, href);
     }
+    oneAddressPerCar(cars, { named, lastSeen });
   }
   // what a car page read from here on knows of the others (carKeys)
   const knownCars = new Map();
@@ -932,7 +986,6 @@ export async function scan(search, options = {}) {
   }
 
   // 3. which car pages to read
-  const lastSeen = opts.lastSeen && typeof opts.lastSeen === 'object' ? opts.lastSeen : {};
   const firstScan = Object.keys(lastSeen).length === 0;
   const posted = new Set((Array.isArray(opts.postedVins) ? opts.postedVins : []).map((v) => String(v || '').toUpperCase()));
   const plan = [];
@@ -976,6 +1029,7 @@ export async function scan(search, options = {}) {
   let stopped = null;
   let readErrors = 0;
   let failedInARow = 0;
+  let notCarPages = 0;
   const pagesRead = new Set();
   const evidence = { ownNode: false };
   await twoAtATime(reading, async (item) => {
@@ -989,6 +1043,13 @@ export async function scan(search, options = {}) {
     if (page.kind === 'gone') {
       failedInARow = 0;
       return true; // its page is gone: a car from the last scan is checked below
+    }
+    if (page.notWebPage && !item.listedCar && !(item.vin && lastSeen[item.vin])) {
+      // a file (a window sticker, a brochure) at an address neither the
+      // list's data nor the last scan knows a car by: a link that is not a
+      // car's page, so not a car and not the website failing
+      notCarPages += 1;
+      return true;
     }
     if (page.kind !== 'html') {
       // the scan is not complete, and the car is still on the list
@@ -1032,7 +1093,7 @@ export async function scan(search, options = {}) {
   for (const vin of confirm.checked) if (!confirm.notFound.includes(vin)) pagesRead.add(vin);
 
   const complete = listClean && sitemapClean && readErrors === 0 && leftForLater === 0;
-  const out = { ok: true, fetchedAt: new Date().toISOString(), total: cars.size, complete, requests: site.requests, records: [...records.values()], confirm };
+  const out = { ok: true, fetchedAt: new Date().toISOString(), total: cars.size - notCarPages, complete, requests: site.requests, records: [...records.values()], confirm };
   if (unread.size) out.unread = [...unread];
   const readCars = [...pagesRead].filter((vin) => records.has(vin));
   if (readCars.length) out.pagesRead = readCars;
@@ -1103,7 +1164,9 @@ export async function getDetails(search, vin, options = {}) {
     if (page.kind !== 'html') return { ok: false, message: `Couldn't read the inventory page (${page.message || `HTTP ${page.status}`}).` };
     const listedNode = page.parsed.vehicles.find((x) => nodeVin(x) === wanted) || null;
     const listPage = got.finalUrl;
-    const link = (listedNode && onSite(firstText(listedNode.url), listPage, origin)) || page.parsed.facts.links.map((h) => onSite(h, null, origin)).find((u) => u && vinInAddress(u.href) === wanted) || null;
+    // the car's page, not a form with its VIN in the query (oneAddressPerCar)
+    const withVin = page.parsed.facts.links.map((h) => onSite(h, null, origin)).filter((u) => u && vinInAddress(u.href) === wanted);
+    const link = (listedNode && onSite(firstText(listedNode.url), listPage, origin)) || withVin.find((u) => vinInPath(u.href) === wanted) || withVin[0] || null;
     if (link) {
       const r = await carFromPage(site, wanted, link.href);
       if (r.error) return { ok: false, message: r.error };

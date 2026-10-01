@@ -863,6 +863,71 @@ test('schemaOrg rescan: reads new, posted and unpriced cars and those whose list
   assert.deepEqual(out.boilerplate, lines, 'the lot\'s lines are kept when most descriptions were not read this time');
 });
 
+test('schemaOrg scan: one address per car; forms and files that carry a car\'s VIN in their query are never read as its page', async () => {
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const pdf = { ok: true, status: 200, contentType: 'application/pdf', text: '' };
+  const leadForm = html('<!doctype html><html><head><title>Get pre-approved</title></head><body><form><input name="name"></form><p>This site is protected by reCAPTCHA.</p></body></html>');
+  const isForm = (u) => /\/(?:finance|window-sticker)\//.test(u);
+  // every card also links a finance form (before or after the car's own link) and a window sticker, each with the VIN in its query
+  const withForms = (siteMap, cars, { first = false } = {}) => {
+    for (const [at, answer] of siteMap) {
+      if (!at.startsWith(LIST)) continue;
+      let text = answer.text;
+      for (const c of cars) {
+        const forms = `<a href="/finance/apply/?vin=${c.vin}">Get pre-approved</a> <a href="/window-sticker/?vin=${c.vin}">Window sticker</a>`;
+        const own = `<a href="${c.path.replace(/&/g, '&amp;')}">`;
+        text = first ? text.replace(own, forms + ' ' + own) : text.replace(`?vin=${c.vin}">Carfax</a>`, `?vin=${c.vin}">Carfax</a> ${forms}`);
+      }
+      siteMap.set(at, { ...answer, text });
+    }
+    for (const c of cars) {
+      siteMap.set(`${O}/finance/apply/?vin=${c.vin}`, leadForm);
+      siteMap.set(`${O}/window-sticker/?vin=${c.vin}`, pdf);
+    }
+    return siteMap;
+  };
+  const cars = standardCars(6);
+  for (const listData of [true, false]) {
+    for (const first of [false, true]) {
+      const search = fakeSiteSearch(withForms(standardSite({ cars, listData }), cars, { first }));
+      const res = await schemaOrg.scan(search, schemaOrg.scanOptions(SERVICE));
+      const label = `list data ${listData}, forms ${first ? 'first' : 'last'}`;
+      assert.equal(res.ok, true, `${label}: ${res.message}`);
+      assert.deepEqual([res.total, res.complete, res.records.length], [6, true, 6], label);
+      assert.deepEqual(search.calls.filter(isForm), [], `${label}: no form or sticker is read`);
+    }
+  }
+  // a rescan with nothing changed reads the list only, as on a lot without the forms
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(withForms(standardSite({ cars }), cars)), site, settings, options: schemaOrg.scanOptions(SERVICE) });
+  const again = fakeSiteSearch(withForms(standardSite({ cars }), cars));
+  const day2 = await scanWithSearch({ adapter: schemaOrg, search: again, site, settings, prevSnapshot: day1.snapshot, options: schemaOrg.scanOptions(SERVICE) });
+  assert.equal(day2.ok, true);
+  assert.deepEqual(again.calls, [LIST, LIST + '?page=2'], 'nothing changed: only the list is read');
+  // a lot whose car pages are addressed by the VIN in the query keeps them, and still leaves the forms
+  const byQuery = cars.map((c) => ({ ...c, path: `/vehicle-details/?vin=${c.vin}` }));
+  for (const listData of [true, false]) {
+    const search = fakeSiteSearch(withForms(standardSite({ cars: byQuery, listData }), byQuery));
+    const res = await schemaOrg.scan(search, schemaOrg.scanOptions(SERVICE));
+    assert.deepEqual([res.ok, res.total, res.complete, res.records.length], [true, 6, true, 6], `?vin= car pages, list data ${listData}`);
+    assert.deepEqual(search.calls.filter(isForm), []);
+    assert.equal(search.calls.filter((u) => u.includes('/vehicle-details/')).length, 6);
+  }
+  // window stickers of cars that are not on the list (the only address for their VIN): files, not cars and not a failing website
+  const others = standardCars(3, { from: 50 });
+  const stray = standardSite({ cars });
+  stray.set(LIST, { ...stray.get(LIST), text: stray.get(LIST).text.replace('</body>', others.map((o) => `<a href="/window-sticker/?vin=${o.vin}">Sticker</a>`).join(' ') + '</body>') });
+  for (const o of others) stray.set(`${O}/window-sticker/?vin=${o.vin}`, pdf);
+  const strayRes = await schemaOrg.scan(fakeSiteSearch(stray), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([strayRes.ok, strayRes.total, strayRes.complete, strayRes.records.length], [true, 6, true, 6], strayRes.message);
+  // at post time, the car's page from a list without data, even when a form with its VIN comes first
+  const post = fakeSiteSearch(withForms(standardSite({ cars, listData: false }), cars, { first: true }));
+  const d = await schemaOrg.getDetails(post, cars[1].vin, schemaOrg.scanOptions(SERVICE));
+  assert.equal(d.ok, true);
+  assert.equal(schemaOrg.normalize(d.record).vin, cars[1].vin);
+  assert.deepEqual(post.calls, [LIST, O + cars[1].path]);
+});
+
 test('schemaOrg getDetails: the car\'s own page from the address the last scan kept; the list when that page is unknown', async () => {
   const cars = standardCars(6);
   const siteMap = standardSite({ cars });
