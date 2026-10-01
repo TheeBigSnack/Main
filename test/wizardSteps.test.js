@@ -129,7 +129,7 @@ test('the step\'s words are the ones Settings\' Account section uses', () => {
 test('the Terms step\'s summary says what syncs to the dealership\'s account while signed in, when accounts are set up', () => {
   const withAccounts = termsSummary(true);
   assert.match(withAccounts, /keeps its data in your browser/);
-  assert.match(withAccounts, /While you are signed in, your posted list, those post timings and your to-do items also sync to your dealership's account/);
+  assert.match(withAccounts, /While you are signed in, your posted list, those post timings, your to-do items and each scan's counts also sync to your dealership's account/);
   assert.doesNotMatch(termsSummary(false), /sync|account/i, 'with no account server nothing can sync, so the summary says nothing about it');
   for (const s of [withAccounts, termsSummary(false)]) {
     assert.match(s, /You publish every post yourself\./);

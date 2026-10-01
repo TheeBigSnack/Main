@@ -38,7 +38,7 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
-8. **Numbers** shows the numbers the pilot agreement lets Lot Current record, kept in this browser: how long each post took (from the click on Post to "It's posted", your review included), which form fields it couldn't fill, and how long sold cars and price changes stayed on your listings. **Download CSV** gives your manager the spreadsheet; **Copy summary** is for the weekly check-in. No customer data, nothing from Facebook beyond your own listings, and never the description text. `PILOT.md` defines each number.
+8. **Numbers** shows the numbers the pilot agreement lets Lot Current record, kept in this browser and, while you are signed in, also in your dealership's account (all but the fields it couldn't fill, which stay in the browser): how long each post took (from the click on Post to "It's posted", your review included), which form fields it couldn't fill, and how long sold cars and price changes stayed on your listings. **Download CSV** gives your manager the spreadsheet; **Copy summary** is for the weekly check-in. No customer data, nothing from Facebook beyond your own listings, and never the description text. `PILOT.md` defines each number.
 
 ### Several cars at once (the queue)
 

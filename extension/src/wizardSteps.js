@@ -106,7 +106,7 @@ export function accountStepModel({ configured = false, session = null, joined = 
 // the browser when it also goes to the dealership's account.
 export function termsSummary(configured = false) {
   const synced = configured
-    ? ' While you are signed in, your posted list, those post timings and your to-do items also sync to your dealership\'s account for the manager view.'
+    ? ' While you are signed in, your posted list, those post timings, your to-do items and each scan\'s counts also sync to your dealership\'s account for the manager view.'
     : '';
   return `In short: Lot Current reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login.${synced} You publish every post yourself. Lot Current is not affiliated with Meta Platforms, Inc.`;
 }

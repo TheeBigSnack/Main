@@ -126,7 +126,7 @@ Notes:
 
 ## The Numbers tab
 
-**Numbers** shows the numbers the pilot agreement lets Lot Current record, kept in this browser, per website:
+**Numbers** shows the numbers the pilot agreement lets Lot Current record, kept in this browser, per website, and, while you are signed in, also in your dealership's account (all but the fields it couldn't fill, which stay in the browser):
 
 - how long each post took, from the click on **Post** to **It's posted, record it**, your review included;
 - which form fields Lot Current could not fill, by field name only;
