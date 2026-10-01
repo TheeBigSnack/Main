@@ -134,21 +134,35 @@ test('the Stripe test runs on a test dealership made for it, and the sync check 
   const check = step7.slice(step7.indexOf('3. **[Owner]** On two computers'));
   assert.match(check, /test addresses of your own, not step 2's, and codes made for the test with step 5's invite statement: two salesperson codes .* and a manager code for the address you open the manager view with/);
   assert.match(check, /delete the dealership\*\* \(`supabase\/README\.md`, "Delete": `select public\.delete_dealership\('<id>', '<its website_origin exactly as stored>'\);`\) and make it again with step 5's three statements/i);
-  assert.match(check, /^\d\. \*\*\[Owner\]\*\* On two computers.*So when the check is done, before the store's manager first signs in:$/m);
+  assert.match(check, /^\d\. \*\*\[Owner\]\*\* On two computers.*a test browser keeps its copy of the test afterwards\. So:$/m);
 });
 
 // review: deleting and remaking the pilot dealership cleared only the server; a test computer's browser
 // still held the test's posts and post timings, and its first sync to the remade dealership, under any
-// account, sends them again (post attempts carry no account, and sign-out starts a first sync)
-test('the sync check clears each test computer before the pilot uses it, with the buttons the popup has', () => {
+// account, sends them again (post attempts carry no account, and sign-out starts a first sync).
+// Review, round 3: clearing the browser is no fix on the owner's own computer at the store. The check
+// sends that browser's real posts into the test dealership, and Clear everything then deletes the real
+// posted list and Numbers, so nothing flags a real listing when its car sells. The check runs in a Chrome
+// profile made for it, records its car without publishing it, and that profile is deleted afterwards.
+test('the sync check runs in Chrome profiles made for it, never in a browser with real listings, and leaves nothing behind', () => {
   const setup = read('docs/production-setup.md');
   const step7 = setup.slice(setup.indexOf('## Step 7.'), setup.indexOf('\n---', setup.indexOf('## Step 7.')));
   const check = step7.slice(step7.indexOf('3. **[Owner]** On two computers'));
-  assert.match(check, /a browser can send the test's posts and post timings to whichever dealership it next signs in to on that website, even under another account/);
-  assert.match(check, /\*\*On each test computer\*\*, open the store's website and, in Lot Current's Settings, click \*\*Sign out\*\*, then \*\*Clear everything for this website\*\* \(and \*\*Forget my synced profile\*\* if you typed a test name there\), before anyone uses that browser for the pilot\. Or run the check in a Chrome profile made for it, and remove that profile afterwards\./);
-  assert.ok(check.indexOf('**On each test computer**') < check.indexOf('**Delete the dealership**'), 'the computers are cleared before the dealership is made again');
+  assert.match(check, /A browser's first sync to a dealership sends, under whichever account is signed in, the post timings, the to-do items and the posts not synced yet that it holds for that website, and a test browser keeps its copy of the test afterwards\./);
+  const profile = check.indexOf('**Run the check in a Chrome profile made for it** on each computer');
+  assert.ok(profile > 0, 'the check runs in a Chrome profile made for it');
+  assert.match(check, /add a Chrome profile without signing in to Chrome there, so Chrome sync stays off and a test name typed in Settings never reaches your synced profile, and load Lot Current into it as `README\.md` says/);
+  assert.match(check, /Never run the check in a browser that has used Lot Current on the store's website, such as your own at the store\. The check would send that browser's real posts and post timings into the test dealership, to be deleted with it\./);
+  assert.match(check, /\*\*Clear everything for this website\*\* removes everything Lot Current holds for the website in that browser, the real posted list and Numbers included, after which nothing flags those listings when a car sells or its price changes\./, 'clearing a browser is said to delete its real data too');
+  assert.match(check, /If the check already ran in such a browser, stop and ask Claude before clearing anything or deleting the dealership\./);
+  assert.match(check, /\*\*Record the test's car with Mark posted\*\* \(Ready to post tab\), not by publishing it on Marketplace\. If a test car was published, take that listing down on Facebook yourself before the profile goes: nothing will flag it afterwards\./);
+  const done = check.indexOf('**When the check is done**, before the store\'s manager first signs in, **delete the Chrome profile made for the check on each test computer**. That removes everything Lot Current kept in it.');
+  const remake = check.indexOf('**Delete the dealership**');
+  assert.ok(profile < done && done > 0 && done < remake, 'the profiles are made before the check and deleted before the dealership is made again');
+  assert.doesNotMatch(check, /On each test computer\*\*, open the store's website/, 'clearing a browser in place is not the way');
   const popup = read('extension/popup.js');
-  for (const [action, label] of [['accountSignOut', 'Sign out'], ['clear', 'Clear everything for this website'], ['forgetProfile', 'Forget my synced profile']]) {
-    assert.ok(popup.includes(`data-action="${action}">${label}</button>`), `the popup's Settings has ${label}`);
-  }
+  assert.ok(popup.includes('data-action="clear">Clear everything for this website</button>'), 'the popup\'s Settings has Clear everything for this website');
+  assert.match(popup, /data-action="post" [^>]*>Mark posted<\/button>/, 'the Ready to post tab has Mark posted');
+  assert.match(popup, /\['ready', 'Ready to post'\]/, 'the tab is called Ready to post');
+  assert.match(read('README.md'), /Click \*\*Load unpacked\*\*/, 'README.md says how to load Lot Current');
 });

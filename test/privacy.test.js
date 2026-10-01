@@ -286,7 +286,7 @@ test('accounts that never joined are listed and deleted in the weekly run, and t
   for (const table of ['memberships m', 'signup_attempts a', 'invites i', 'listings l', 'post_attempts p', 'rewrite_usage r']) {
     assert.ok(s.includes(`and not exists (select 1 from public.${table} where `), `the list keeps an account with a row in ${table.split(' ')[0]}`);
   }
-  assert.match(s, /lower\(u\.email\) <> lower\('<your own test address, docs\/production-setup\.md step 7>'\)/, 'the owner\'s own test account stays');
+  assert.match(s, /lower\(u\.email\) <> lower\('<your own test address, docs\/production-setup\.md step 7, item 2>'\)/, 'the owner\'s own test account stays');
   assert.match(s, /delete from auth\.users u where u\.id in \('<id>', '<id>'\);/);
   assert.match(s, /Do not use `forget_person` for these/, 'not forget_person: it also deletes the demo requests');
   assert.match(policy, /An account that was only used to ask for a sign-in code \(it never joined a dealership or tried to start one\) holds only its email address, its sign-in times and sessions, and the sign-in log's entries for it \(with the IP address\), and is deleted within a week after it is 30 days old\. \[Pending attorney answer: questions-for-attorney\.md 8\.5\]/);

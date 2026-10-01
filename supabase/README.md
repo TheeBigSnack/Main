@@ -557,7 +557,7 @@ For each one on a pilot agreement whose pilot has ended or that has stopped, rec
 select u.id, u.email, u.created_at
 from auth.users u
 where u.created_at < now() - interval '30 days'
-  and lower(u.email) <> lower('<your own test address, docs/production-setup.md step 7>')
+  and lower(u.email) <> lower('<your own test address, docs/production-setup.md step 7, item 2>')
   and not exists (select 1 from public.memberships m where m.user_id = u.id)
   and not exists (select 1 from public.signup_attempts a where a.user_id = u.id)
   and not exists (select 1 from public.invites i where i.used_by = u.id or i.created_by = u.id)
