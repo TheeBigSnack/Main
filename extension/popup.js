@@ -799,7 +799,8 @@ function viewSettings() {
       <label><input type="radio" name="basis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> <span>The website's main price${example ? ` (e.g. ${money(example.price)} "${esc(example.priceLabel)}")` : ''}</span></label>
       ${!state.snapshot || showsLowerPrice(entries)
         ? `<label><input type="radio" name="basis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> <span>The lower second price the website shows${example ? ` (e.g. ${money(example.priceBeforeFees)}; usually the price before the doc fee)` : ''}</span></label>
-      <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>`
+      <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>
+      <p class="hint">This sets the price of cars posted from now on. A listing already posted stays on the price it was posted with (main or lower): Update price lists it only when the website changes that price, never because this setting changed.</p>`
         : ''}
       ${feeNote}
       ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}

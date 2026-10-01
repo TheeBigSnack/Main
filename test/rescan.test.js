@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingBasis, snapshotEntry, makeSnapshot, firstSeenAt } from '../extension/src/rescan.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
@@ -184,11 +184,57 @@ test('a colleague\'s entry (mine: false, merged in by sync) is never yours: no t
 test('posted-listing bookkeeping', () => {
   const s = snapshot(LOT);
   let posted = markPosted({}, s.vehicles[VIN.ram], 'website', '2026-09-26T21:00:00.000Z');
-  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' });
+  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, basis: 'website', postedAt: '2026-09-26T21:00:00.000Z' });
   posted = markPriceUpdated(posted, VIN.ram, 26163, '2026-09-27T21:00:00.000Z');
   assert.equal(posted[VIN.ram].price, 26163);
   posted = markTakenDown(posted, VIN.ram);
   assert.deepEqual(posted, {});
+});
+
+// Rule 4: price changes only mirror the website. A listing keeps the price
+// basis it was posted with, so the dealer switching Settings (Price to post)
+// never turns a listing into a price change the website didn't make.
+// A copy of a snapshot with one car's website prices changed.
+const repriced = (s, vin, price, priceBeforeFees) => ({ ...s, vehicles: { ...s.vehicles, [vin]: { ...s.vehicles[vin], price, priceBeforeFees } } });
+const moves = (d) => d.priceUpdates.map(({ vin, from, to, change, yours }) => ({ vin, from, to, change, yours }));
+const AT = '2026-09-26T21:00:00.000Z';
+
+test('a posted listing keeps the price basis it was posted with: switching the setting is not a price change', () => {
+  const s = snapshot(LOT); // the Ram: 27,163 main, 26,673 before fees
+  for (const [postedAs, setting] of [['website', 'beforeFees'], ['beforeFees', 'website']]) {
+    const posted = markPosted({}, s.vehicles[VIN.ram], postedAs, AT);
+    assert.equal(posted[VIN.ram].basis, postedAs, 'the entry records the basis');
+    const d = diffScans(s, snapshot(LOT), { posted, confirm: confirmed(), basis: setting });
+    assert.deepEqual(moves(d), [], `posted at the ${postedAs} price, setting now ${setting}, website unchanged: nothing to update`);
+  }
+  // a real drop on the website still shows, at the price of the basis the listing carries
+  const posted = markPosted({}, s.vehicles[VIN.ram], 'website', AT);
+  const dropped = repriced(snapshot(LOT), VIN.ram, 26163, 25673);
+  assert.deepEqual(moves(diffScans(s, dropped, { posted, confirm: confirmed(), basis: 'beforeFees' })), [{ vin: VIN.ram, from: 27163, to: 26163, change: -1000, yours: true }]);
+  // updating the listing keeps its basis, so the next scan has nothing left
+  const updated = markPriceUpdated(posted, VIN.ram, 26163, '2026-09-27T21:00:00.000Z');
+  assert.equal(updated[VIN.ram].basis, 'website');
+  assert.deepEqual(moves(diffScans(dropped, dropped, { posted: updated, confirm: confirmed(), basis: 'beforeFees' })), []);
+  // a car nobody posted is compared scan to scan under the current setting, as before
+  assert.deepEqual(moves(diffScans(s, dropped, { confirm: confirmed(), basis: 'beforeFees' })), [{ vin: VIN.ram, from: 26673, to: 25673, change: -1000, yours: false }]);
+});
+
+test('a listing posted before the basis was recorded: its basis is the website price it carries', () => {
+  const s = snapshot(LOT);
+  const entry = (price) => ({ [VIN.ram]: { name: 'Ram', price, postedAt: AT } });
+  assert.equal(listingBasis(entry(27163)[VIN.ram], [s.vehicles[VIN.ram]], 'beforeFees'), 'website');
+  assert.equal(listingBasis(entry(26673)[VIN.ram], [s.vehicles[VIN.ram]], 'website'), 'beforeFees');
+  assert.equal(listingBasis({ price: 26673, basis: 'website' }, [s.vehicles[VIN.ram]], 'beforeFees'), 'website', 'a recorded basis wins');
+  assert.equal(listingBasis({ price: 20000 }, [{ price: 20000 }], 'beforeFees'), 'beforeFees', 'both bases give the same price: the setting');
+  assert.deepEqual(moves(diffScans(s, snapshot(LOT), { posted: entry(27163), confirm: confirmed(), basis: 'beforeFees' })), []);
+  assert.deepEqual(moves(diffScans(s, snapshot(LOT), { posted: entry(26673), confirm: confirmed(), basis: 'website' })), []);
+  // with no earlier scan (a first scan) the car as the website shows it now decides
+  assert.deepEqual(moves(diffScans(null, snapshot(LOT), { posted: entry(27163), basis: 'beforeFees' })), []);
+  // a real drop still shows, at the listing's own basis
+  const dropped = repriced(snapshot(LOT), VIN.ram, 26163, 25673);
+  assert.deepEqual(moves(diffScans(s, dropped, { posted: entry(26673), confirm: confirmed(), basis: 'website' })), [{ vin: VIN.ram, from: 26673, to: 25673, change: -1000, yours: true }]);
+  // a listing price that matches no website price is a real difference: compared under the setting, as before
+  assert.deepEqual(moves(diffScans(s, snapshot(LOT), { posted: entry(28000), confirm: confirmed(), basis: 'beforeFees' })), [{ vin: VIN.ram, from: 28000, to: 26673, change: -1327, yours: true }]);
 });
 
 // ---------- the same rules for a website read from its own pages ----------
