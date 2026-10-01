@@ -22,7 +22,10 @@ export const NOT_TO_CUSTOMERS = Object.freeze([/testimonial/i, /never (be|get) r
 // the ones above.
 export const ACCOUNT_PROMISES = Object.freeze([
   /\b(won't|will not|never|can't|cannot|can not) (be |get )?(banned|restricted|blocked|suspended|disabled|flagged)\b/i,
-  /\baccounts?\b[^.]{0,40}\b(protected|safe|secure|in good standing)\b/i,
+  /\b(never|won't|will not)\b[^.]{0,30}\bban(s|ned)?\b/i,
+  /\bban[- ]?free\b|\bno bans?\b|\bzero risk\b/i,
+  /\b(accounts?|profiles?)\b[^.]{0,40}\b(protected|safe|secure|in good standing)\b/i,
+  /\bsafe\b[^.]{0,30}\b(accounts?|profiles?)\b/i,
   /\bin good standing\b/i,
 ]);
 

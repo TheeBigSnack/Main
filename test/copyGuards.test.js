@@ -36,6 +36,33 @@ test('every account promise is caught on its own and inside the store listing, t
   }
 });
 
+// A second review found these passing the shared guard: a ban promised away,
+// "no risk" in other words, and "safe" before the account or a profile.
+const MORE_PROMISES = [
+  'Facebook will never ban you for using Lot Current.',
+  'No bans, ever.',
+  'Ban-free posting.',
+  'Zero risk to your Facebook account.',
+  'It is 100% safe for your account.',
+  'Your profile is safe with Lot Current.',
+];
+
+test('a ban promised away, zero risk, and a safe account or profile are caught, alone and in the help doc and a sales email', () => {
+  const help = read('../docs/help.md');
+  const email = read('../marketing/pilot-offer-email.md');
+  for (const s of MORE_PROMISES) {
+    assert.notDeepEqual(copyProblems(s), [], s);
+    assert.notDeepEqual(copyProblems(`${help}\n${s}\n`), [], `docs/help.md with: ${s}`);
+    assert.notDeepEqual(copyProblems(`${email}\n${s}\n`), [], `the pilot offer email with: ${s}`);
+  }
+  // the honest lines about safety still pass
+  for (const s of [
+    'Having a person click Publish is the safest design available, but it isn\'t a guarantee.',
+    'The daily cap is a safety setting.',
+    'Facebook can still restrict an account, and no tool can honestly promise otherwise.',
+  ]) assert.deepEqual(copyProblems(s), [], s);
+});
+
 test('the honest lines pass: the denials of a guarantee, a promise, an affiliation', () => {
   for (const s of [
     'Meta doesn\'t publish its limits; this is a safety setting, not a guarantee.',
