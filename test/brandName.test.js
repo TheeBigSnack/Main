@@ -33,8 +33,10 @@ const VISIBLE = /^(extension\/[^/]+\.html|extension\/manifest\.json|site\/|site-
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // a skipped folder may be a symbolic link (a worktree's node_modules), and git tracks none
+    if (SKIP_DIRS.has(entry.name) || entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name), out);
+      walk(join(dir, entry.name), out);
     } else if (TEXT.has(extname(entry.name)) && entry.name !== 'package-lock.json') {
       out.push(join(dir, entry.name));
     }
