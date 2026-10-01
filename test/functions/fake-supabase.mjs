@@ -310,6 +310,30 @@ function filterValue(table, column, value) {
   return value === null ? null : stored(table, column, value);
 }
 
+// Rows that tie on every ORDER BY key come back from Postgres in no set
+// order, and a LIMIT/OFFSET page may break the ties differently from the
+// page before it (a bounded top-N sort for one, a full sort for the next),
+// so a paged read whose last key is not unique can repeat some rows and lose
+// others. The fake does the same to a paged read: it shuffles the rows,
+// seeded by the page's offset, before its stable sort, so each page breaks
+// ties its own way and only a unique last key (the id) makes the pages fit.
+function shuffled(rows, seed) {
+  const out = [...rows];
+  let s = (seed * 2654435761 + 1013904223) >>> 0;
+  const next = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 function ordered(table, rows, order) {
   const out = [...rows];
   for (const { column, ascending } of [...order].reverse()) {
@@ -384,7 +408,8 @@ function runSelect(q) {
   const rows = tableOf(q.table);
   const filters = q.filters.map((f) => ({ ...f, value: f.op === 'in' ? f.value.map((v) => filterValue(q.table, f.column, v)) : f.op === 'is' || f.op === 'not.is' ? null : filterValue(q.table, f.column, f.value) }));
   for (const o of q.order) columnOf(q.table, o.column);
-  const hits = ordered(q.table, rows.filter((r) => matches(q.table, r, filters)), q.order);
+  const found = rows.filter((r) => matches(q.table, r, filters));
+  const hits = ordered(q.table, q.range ? shuffled(found, q.range[0]) : found, q.order);
   const count = q.count === 'exact' ? hits.length : null;
   const page = (q.range ? hits.slice(q.range[0], q.range[1] + 1) : hits).slice(0, fake.maxRows);
   const data = page.map((r) => project(q.table, r, q.columns));

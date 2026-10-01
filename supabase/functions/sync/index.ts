@@ -511,12 +511,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // 6. the dealership's current state: every listing that is up, the
     //    take-downs since the last sync, less the margin (the last 90 days
     //    for a machine that never synced), every open to-do item and the
-    //    ones closed since then
+    //    ones closed since then; each read ends its order with the
+    //    id, so the pages of one read fit together: rows that tie on the
+    //    stamp (a chunk of take-downs shares one) would otherwise come back
+    //    in a different order on each page, some twice and some not at all
     const cutoff = since ? new Date(Date.parse(since) - CUTOFF_MARGIN_MS).toISOString() : new Date(Date.now() - TAKEN_DOWN_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
-    const listed = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'listed').order('posted_at', { ascending: false }).range(from, to));
-    const down = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'taken_down').gte('taken_down_at', cutoff).order('taken_down_at', { ascending: false }).range(from, to));
-    const open = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).is('done_at', null).order('flagged_at', { ascending: false }).range(from, to));
-    const closed = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).not('done_at', 'is', null).gte('done_at', cutoff).order('done_at', { ascending: false }).range(from, to));
+    const listed = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'listed').order('posted_at', { ascending: false }).order('id').range(from, to));
+    const down = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'taken_down').gte('taken_down_at', cutoff).order('taken_down_at', { ascending: false }).order('id').range(from, to));
+    const open = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).is('done_at', null).order('flagged_at', { ascending: false }).order('id').range(from, to));
+    const closed = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).not('done_at', 'is', null).gte('done_at', cutoff).order('done_at', { ascending: false }).order('id').range(from, to));
 
     // 7. the caller's posts in the calendar day they sent, for the daily
     //    cap: their own rows only (the cap is per salesperson), any status

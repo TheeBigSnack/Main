@@ -442,13 +442,15 @@ test('sync: to-do items: a new flag goes in, an upload closes an open one, a clo
 const ranges = (table, match) => fake.queries(table, 'select').filter((c) => c.columns === '*' && c.filters.some(match)).map((c) => c.range);
 
 test('sync: every listed row and every page comes back past 1,000 rows; VINs are looked up 100 at a time and found again on the next upload', async () => {
-  world({ rows: { listings: Array.from({ length: 1001 }, (_, i) => listing({ vin: `OTHER${String(i).padStart(12, '0')}`, user_id: U2 })) } });
+  const same = at(-3000); // one posting time for all 1,001: the order by posted_at ties
+  world({ rows: { listings: Array.from({ length: 1001 }, (_, i) => listing({ vin: `OTHER${String(i).padStart(12, '0')}`, user_id: U2, posted_at: same, created_at: same })) } });
   const handler = await load();
   const posted = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [VIN(i), { price: 1000 + i, postedAt: at(-100 - i) }]));
   const r = await sync(handler, TOKEN.u1, { posted });
   assert.equal(r.status, 200);
   assert.equal(r.body.counts.listingsInserted, 150);
   assert.equal(r.body.listings.length, 1151);
+  assert.deepEqual(new Set(r.body.listings.map((l) => l.id)), new Set(fake.rows('listings').map((l) => l.id)), 'every row once, none twice: 1,001 rows share one posted_at, and the pages fit only with the id as the last key');
   assert.deepEqual(ranges('listings', (f) => f.value === 'listed'), [[0, 999], [1000, 1999]], 'two pages of listed rows');
   const lookups = fake.queries('listings', 'select').filter((c) => c.filters.some((f) => f.op === 'in'));
   assert.deepEqual(lookups.map((c) => c.filters.find((f) => f.op === 'in').value.length), [100, 50]);
@@ -458,15 +460,20 @@ test('sync: every listed row and every page comes back past 1,000 rows; VINs are
 
 test('sync: take-downs, open and closed to-do items past 1,000 rows come back whole, page by page', async () => {
   const id = (prefix, i) => `${prefix}${String(i).padStart(13, '0')}`;
-  const down = Array.from({ length: 1001 }, (_, i) => listing({ vin: id('DOWN', i), user_id: U2, status: 'taken_down', taken_down_at: at(-30) }));
-  const open = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('OPEN', i), kind: 'price', flagged_at: at(-30), from_price: 2, to_price: 1 }));
-  const closed = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('DONE', i), kind: 'takeDown', flagged_at: at(-40), done_at: at(-30), how: 'manual' }));
+  const [t30, t40] = [at(-30), at(-40)]; // one stamp per kind: every order key ties
+  const down = Array.from({ length: 1001 }, (_, i) => listing({ vin: id('DOWN', i), user_id: U2, status: 'taken_down', taken_down_at: t30 }));
+  const open = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('OPEN', i), kind: 'price', flagged_at: t30, from_price: 2, to_price: 1 }));
+  const closed = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('DONE', i), kind: 'takeDown', flagged_at: t40, done_at: t30, how: 'manual' }));
   world({ rows: { listings: down, todo_items: [...open, ...closed] } });
   const handler = await load();
   const r = await sync(handler, TOKEN.u1, { since: at(-35) });
   assert.equal(r.status, 200);
   assert.equal(r.body.listings.length, 1001);
   assert.equal(r.body.todoItems.length, 2002);
+  // each kind shares one stamp (a chunk of take-downs is stamped once), so only the id as the last key keeps
+  // the second page from repeating rows of the first and losing others
+  assert.deepEqual(new Set(r.body.listings.map((l) => l.vin)), new Set(down.map((l) => l.vin)), 'every take-down once');
+  assert.deepEqual(new Set(r.body.todoItems.map((t) => t.vin)), new Set([...open, ...closed].map((t) => t.vin)), 'every open and closed to-do item once');
   assert.deepEqual(ranges('listings', (f) => f.value === 'taken_down'), [[0, 999], [1000, 1999]]);
   assert.deepEqual(ranges('todo_items', (f) => f.op === 'is'), [[0, 999], [1000, 1999]]);
   assert.deepEqual(ranges('todo_items', (f) => f.op === 'not.is'), [[0, 999], [1000, 1999]]);
