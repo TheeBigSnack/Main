@@ -24,7 +24,7 @@ import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.j
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
-import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
+import { localVinCheck, decodeVinOnline, compareVin, compareSummary, NHTSA_ORIGIN } from './src/vin.js';
 import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
@@ -1115,9 +1115,9 @@ function vinCheckHtml() {
   if (!local.ok) html += `<div class="banner warn">The VIN and the website disagree. Check the car before posting; the website's inventory may need a fix.</div>`;
   if (on && on.ok) {
     html += `<table class="fields"><tr><td></td><td><b>Website</b></td><td><b>VIN (NHTSA)</b></td></tr>${on.compare.rows
-      .map((r) => `<tr class="${r.verdict === 'differ' ? 'missing' : ''}"><td>${esc(r.field)}</td><td>${esc(r.website) || '—'}</td><td>${esc(r.vin) || '—'} ${r.verdict === 'agree' ? '✓' : r.verdict === 'differ' ? '✗' : ''}</td></tr>`)
+      .map((r) => `<tr class="${r.verdict === 'differ' ? 'missing' : ''}"><td>${esc(r.field)}</td><td>${esc(r.website) || '—'}</td><td>${esc(r.vin) || '—'} ${r.verdict === 'agree' ? '✓' : r.verdict === 'differ' ? '✗' : r.verdict === 'partly' ? '(partly)' : ''}</td></tr>`)
       .join('')}</table>
-      <p class="hint">${on.compare.ok ? 'NHTSA agrees with the website on everything it knows about this VIN.' : `${on.compare.differ.length} difference(s) between the website and the VIN: check the car before posting.`}</p>`;
+      ${compareSummary(on.compare).map((line) => `<p class="hint">${esc(line)}</p>`).join('')}`;
   } else if (on && !on.ok) {
     html += `<div class="banner warn">NHTSA check failed: ${esc(on.error)}</div>`;
   }

@@ -226,12 +226,37 @@ const titleWords = (s) => String(s || '').toLowerCase().replace(/[/,&+]/g, ' ').
 // Every run of consecutive words written together: "Rav 4" gives rav, rav4 and 4.
 const wordRuns = (words) => words.flatMap((_, i) => words.slice(i).map((__, j) => words.slice(i, i + j + 1).join('')));
 
+// The website model's words that nothing NHTSA decoded confirms: not a word
+// of its model (alone or run together, "Rav 4" for "RAV4"), its series or
+// trim, nor the make ("Ram 1500" for "1500"). "Grand" in "Grand Cherokee"
+// against a decoded "Cherokee" is one; so is "1500" in "Silverado 1500"
+// when the decode puts it nowhere.
+function unconfirmedModelWords(model, decoded, make) {
+  const confirmed = new Set([...wordRuns(titleWords(decoded.model)), ...titleWords(decoded.series), ...titleWords(decoded.trim), ...titleWords(decoded.make), ...titleWords(make)]);
+  // the website's own words, as it writes them, beside their plain forms
+  const shown = String(model || '').replace(/[/,&+]/g, ' ').split(/\s+/).filter((t) => titleWords(t).length);
+  const words = shown.map((t) => titleWords(t).join(''));
+  const covered = words.map(() => false);
+  for (let i = 0; i < words.length; i += 1) {
+    for (let j = i; j < words.length; j += 1) {
+      if (confirmed.has(words.slice(i, j + 1).join(''))) for (let k = i; k <= j; k += 1) covered[k] = true;
+    }
+  }
+  return shown.filter((_, i) => !covered[i]);
+}
+
 // Website record vs the NHTSA decode, field by field. verdict: 'agree' |
-// 'differ' | 'unknown' (one side is blank). Model and body are compared
-// loosely because the two sides word them differently.
+// 'differ' | 'partly' | 'unknown' (one side is blank). Model and body are
+// compared loosely because the two sides word them differently. The model
+// differs when the decode names a word the website's model and trim don't;
+// when the website's model only adds words the decode doesn't confirm
+// ("Grand Cherokee" for a decoded "Cherokee", "Silverado 1500" for
+// "Silverado"), it is 'partly', with those words in the row's `extra`: not a
+// difference, since the two sides word models differently, but not an
+// agreement either.
 export function compareVin(vehicle = {}, decoded = {}) {
   const rows = [];
-  const add = (field, website, vin, verdict) => rows.push({ field, website: website || '', vin: vin || '', verdict });
+  const add = (field, website, vin, verdict, extra) => rows.push({ field, website: website || '', vin: vin || '', verdict, ...(extra ? { extra } : {}) });
   const v = (a, b, agree) => (!a || !b ? 'unknown' : agree ? 'agree' : 'differ');
 
   add('Year', vehicle.year, decoded.year, v(vehicle.year, decoded.year, vehicle.year === decoded.year));
@@ -242,7 +267,10 @@ export function compareVin(vehicle = {}, decoded = {}) {
   // each decoded word is one of the website's (or starts one of its model's words), or
   // the decoded model is the website's words run together ("RAV4" and "Rav 4", "F-150" and "F 150")
   const modelAgree = decodedWords.length > 0 && (decodedWords.every((w) => siteWords.includes(w) || titleWords(model).some((x) => x.startsWith(w))) || wordRuns(siteWords).includes(decodedWords.join('')));
-  add('Model', model, decoded.model, v(model, decoded.model, modelAgree));
+  const extra = modelAgree ? unconfirmedModelWords(model, decoded, vehicle.make) : [];
+  const modelVerdict = v(model, decoded.model, modelAgree);
+  if (modelVerdict === 'agree' && extra.length) add('Model', model, decoded.model, 'partly', extra);
+  else add('Model', model, decoded.model, modelVerdict);
   const bodyW = normalizeBodyStyle(vehicle.bodyType);
   const bodyV = normalizeBodyStyle(decoded.bodyClass) || (/pickup|truck/i.test(decoded.bodyClass) ? 'Truck' : /sport utility|suv|crossover/i.test(decoded.bodyClass) ? 'SUV' : '');
   add('Body', vehicle.bodyType, decoded.bodyClass, v(bodyW, bodyV, bodyW === bodyV));
@@ -257,5 +285,21 @@ export function compareVin(vehicle = {}, decoded = {}) {
   add('Engine', vehicle.engine, decoded.engine, 'info');
 
   const differ = rows.filter((r) => r.verdict === 'differ');
-  return { rows, ok: differ.length === 0, differ, agree: rows.filter((r) => r.verdict === 'agree').length };
+  return { rows, ok: differ.length === 0, differ, partly: rows.filter((r) => r.verdict === 'partly'), agree: rows.filter((r) => r.verdict === 'agree').length };
+}
+
+// What the side panel says under the comparison: the differences, then
+// each row NHTSA only partly confirms, by name, and that it agrees on the
+// rest only when nothing is left to look at.
+export function compareSummary(compare = {}) {
+  const differ = Array.isArray(compare.differ) ? compare.differ : [];
+  const partly = Array.isArray(compare.partly) ? compare.partly : [];
+  const lines = [];
+  if (differ.length) lines.push(`${differ.length} difference(s) between the website and the VIN: check the car before posting.`);
+  for (const r of partly) {
+    lines.push(`NHTSA's ${r.field.toLowerCase()} is "${r.vin}"; the website says "${r.website}", and NHTSA does not confirm "${r.extra.join(' ')}". Check the car before posting.`);
+  }
+  if (!lines.length) lines.push('NHTSA agrees with the website on everything it knows about this VIN.');
+  else if (!differ.length) lines.push('NHTSA agrees with the website on everything else it knows about this VIN.');
+  return lines;
 }

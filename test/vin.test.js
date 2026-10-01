@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { vinCheckDigit, checkVinFormat, modelYearFromVin, modelYearReadings, manufacturerFromVin, MANUFACTURERS, localVinCheck, decodeVinOnline, compareVin, normalizeVin } from '../extension/src/vin.js';
+import { vinCheckDigit, checkVinFormat, modelYearFromVin, modelYearReadings, manufacturerFromVin, MANUFACTURERS, localVinCheck, decodeVinOnline, compareVin, compareSummary, normalizeVin } from '../extension/src/vin.js';
 import { fixtures, vehicle } from './helpers.js';
 
 test('every real VIN from the site has a correct check digit and decodes to its model year', () => {
@@ -131,12 +131,44 @@ test('website vs VIN comparison: agreement, a difference, and blanks', async () 
 
 test('the model is compared without its punctuation: "F150" and "F-150", "CRV" and "CR-V", "Rav 4" and "RAV4" agree; another model still differs', () => {
   const verdict = (model, decodedModel, trim = '') => compareVin({ model, trim }, { model: decodedModel }).rows.find((r) => r.field === 'Model').verdict;
-  const agree = [['F150', 'F-150'], ['F-150', 'F150'], ['CRV', 'CR-V'], ['CX5', 'CX-5'], ['HRV', 'HR-V'], ['Rav 4', 'RAV4'], ['RAV4', 'RAV 4'], ['F 150', 'F-150'], ['Ram 1500', '1500'], ['Silverado 1500', 'Silverado'], ['1500 Classic', '1500 Classic']];
+  const agree = [['F150', 'F-150'], ['F-150', 'F150'], ['CRV', 'CR-V'], ['CX5', 'CX-5'], ['HRV', 'HR-V'], ['Rav 4', 'RAV4'], ['RAV4', 'RAV 4'], ['F 150', 'F-150'], ['1500 Classic', '1500 Classic']];
   for (const [website, decodedModel] of agree) assert.equal(verdict(website, decodedModel), 'agree', `${website} / ${decodedModel}`);
   assert.equal(verdict('F150', 'F-150', 'XLT'), 'agree', 'the trim beside the model');
   for (const [website, decodedModel] of [['F-150', 'F-250'], ['F150', 'F-250'], ['Grand Cherokee', 'Wrangler'], ['Sierra 2500HD', 'Sierra 1500'], ['CX-5', 'CX-9']]) {
     assert.equal(verdict(website, decodedModel), 'differ', `${website} / ${decodedModel}`);
   }
+});
+
+test('a website model with words the decode does not confirm is only partly confirmed, never "agrees"', () => {
+  const model = (vehicle, decoded) => compareVin(vehicle, decoded).rows.find((r) => r.field === 'Model');
+  const pairs = [['Grand Cherokee', 'Cherokee', ['Grand']], ['Bronco Sport', 'Bronco', ['Sport']], ['Transit Connect', 'Transit', ['Connect']], ['Grand Highlander', 'Highlander', ['Grand']], ['Grand Caravan', 'Caravan', ['Grand']], ['Santa Fe Sport', 'Santa Fe', ['Sport']], ['Silverado 1500', 'Silverado', ['1500']], ['Wrangler Unlimited', 'Wrangler', ['Unlimited']]];
+  for (const [website, decodedModel, extra] of pairs) {
+    const c = compareVin({ year: 2019, make: 'Example', model: website }, { year: 2019, make: 'EXAMPLE', model: decodedModel });
+    const row = c.rows.find((r) => r.field === 'Model');
+    assert.equal(row.verdict, 'partly', `${website} / ${decodedModel}`);
+    assert.deepEqual(row.extra, extra, `${website} / ${decodedModel}`);
+    // not a difference: the two sides word models differently, so nothing turns red
+    assert.equal(c.ok, true);
+    assert.deepEqual(c.partly, [row]);
+    const summary = compareSummary(c);
+    assert.ok(!summary.some((line) => /agrees with the website on everything it knows/.test(line)), summary.join(' '));
+    assert.deepEqual(summary, [`NHTSA's model is "${decodedModel}"; the website says "${website}", and NHTSA does not confirm "${extra.join(' ')}". Check the car before posting.`, 'NHTSA agrees with the website on everything else it knows about this VIN.']);
+  }
+  // a word NHTSA does decode, in the model, its series or trim, or the make, is confirmed
+  assert.equal(model({ make: 'Ram', model: 'Ram 1500' }, { make: 'RAM', model: '1500' }).verdict, 'agree');
+  assert.equal(model({ make: 'Chevrolet', model: 'Silverado 1500' }, { make: 'CHEVROLET', model: 'Silverado', series: '1500' }).verdict, 'agree');
+  assert.equal(model({ make: 'Jeep', model: 'Wrangler Unlimited' }, { make: 'JEEP', model: 'Wrangler', trim: 'Unlimited Sahara' }).verdict, 'agree');
+  assert.equal(model({ make: 'Toyota', model: 'Rav 4' }, { make: 'TOYOTA', model: 'RAV4' }).verdict, 'agree');
+  // the other way round is still a difference
+  assert.equal(model({ make: 'Jeep', model: 'Cherokee' }, { make: 'JEEP', model: 'Grand Cherokee' }).verdict, 'differ');
+  // nothing to look at: the usual line; a difference: the count first
+  assert.deepEqual(compareSummary(compareVin({ year: 2019, make: 'Ram', model: '1500' }, { year: 2019, make: 'RAM', model: '1500' })), ['NHTSA agrees with the website on everything it knows about this VIN.']);
+  const both = compareSummary(compareVin({ year: 2018, make: 'Jeep', model: 'Grand Cherokee' }, { year: 2019, make: 'JEEP', model: 'Cherokee' }));
+  assert.equal(both.length, 2);
+  assert.match(both[0], /^1 difference\(s\) between the website and the VIN/);
+  assert.match(both[1], /does not confirm "Grand"/);
+  // a comparison saved before rows could be partly reads as before
+  assert.deepEqual(compareSummary({ ok: true, differ: [] }), ['NHTSA agrees with the website on everything it knows about this VIN.']);
 });
 
 test('a check-digit typo is caught whatever country built the car; a correct non-North-American VIN passes', () => {
