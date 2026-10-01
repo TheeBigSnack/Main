@@ -10,7 +10,7 @@ import { VEHICLE_FIELDS } from '../extension/src/vehicle.js';
 import { scanWithSearch, incompleteWarning, searchViaTab } from '../extension/src/scanRunner.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
 import { withDefaults } from '../extension/src/settings.js';
-import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, MAX_FAILED_IN_A_ROW, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress } from '../extension/adapters/schemaOrg.js';
+import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, ROBOTS_TEXT_LIMIT, MAX_FAILED_IN_A_ROW, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress } from '../extension/adapters/schemaOrg.js';
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
 import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, dealerOnPath, dealerComPath, platformSearch, fakePlatformPage } from './platformSites.js';
 import { fixtures, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage } from './helpers.js';
@@ -704,6 +704,24 @@ test('schemaOrg scan: the sitemap adds only addresses shaped like this lot\'s ow
   const tiny = standardSite({ cars: cars.slice(0, 1), sitemap: true });
   const t = await scanSite(tiny, { sitemap: true });
   assert.deepEqual([t.ok, t.total, t.complete], [true, 1, false]);
+});
+
+test('schemaOrg robots.txt: read for its Sitemap lines in linear time, and only as far as search engines read it', async () => {
+  const cars = standardCars(8);
+  const withRobots = (text) => {
+    const site = standardSite({ cars, perPage: 8, sitemap: true, numberOfItems: 8 });
+    site.set(LIST, html(standardListPage(cars.slice(0, 5), { numberOfItems: 8 }))); // 5 of 8 on the list: the sitemap is read
+    site.set(O + '/robots.txt', { ok: true, status: 200, contentType: 'text/plain', text });
+    return site;
+  };
+  // a long run of blank lines (CRLF) before the next rule, then an indented Sitemap line
+  const started = Date.now();
+  const padded = await scanSite(withRobots('\r\n'.repeat(60000) + 'User-agent: *\r\nDisallow: /cart/\r\n\t Sitemap :  ' + O + '/sitemap.xml\r\n'));
+  assert.ok(Date.now() - started < 2000, `a robots.txt of 60,000 blank lines took ${Date.now() - started} ms`);
+  assert.deepEqual([padded.ok, padded.total, padded.complete], [true, 8, true], 'the Sitemap line after the blank lines is still read');
+  // a Sitemap line past ROBOTS_TEXT_LIMIT is ignored, as search engines ignore it
+  const long = await scanSite(withRobots('#'.repeat(ROBOTS_TEXT_LIMIT) + '\nSitemap: ' + O + '/sitemap.xml\n'));
+  assert.deepEqual([long.ok, long.total], [true, 5]);
 });
 
 // A car from the last scan is gone from the list; its own page decides.

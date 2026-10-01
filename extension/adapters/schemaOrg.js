@@ -50,6 +50,9 @@ export const MAX_CAR_PAGES = 600;
 // of the lot is not asked for.
 export const MAX_FAILED_IN_A_ROW = 3;
 export const MAX_SITEMAPS = 5;
+// The most of robots.txt read for its Sitemap lines: what search engines read
+// of it (500 KiB); the rest of a longer file is ignored, as they ignore it.
+export const ROBOTS_TEXT_LIMIT = 512000;
 export const MAX_SITEMAP_ADDRESSES = 20000;
 export const REQUEST_TIMEOUT_MS = 30000;
 
@@ -671,7 +674,9 @@ async function sitemapAddresses(site, origin, shape) {
   if (robots.kind === 'gone') return { found, clean: true }; // no robots.txt, so no sitemap is named
   if (robots.kind !== 'page') return { found, clean: false };
   const queue = [];
-  for (const m of robots.text.matchAll(/^\s*sitemap\s*:\s*(\S+)/gim)) {
+  // spaces and tabs only around the words: a whitespace class that also
+  // takes line breaks makes a long run of blank lines take quadratic time
+  for (const m of robots.text.slice(0, ROBOTS_TEXT_LIMIT).matchAll(/^[ \t]*sitemap[ \t]*:[ \t]*(\S+)/gim)) {
     const u = onSite(m[1], origin, origin);
     if (u && !queue.includes(u.href)) queue.push(u.href);
   }
