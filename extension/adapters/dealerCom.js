@@ -102,7 +102,27 @@ export async function searchInPage(service, request) {
     try {
       const res = await fetch(target.href, init);
       const contentType = (res.headers && res.headers.get('content-type')) || '';
-      const text = String(await res.text()).slice(0, LIMIT);
+      // the body up to the limit, without reading the rest
+      let text = '';
+      if (res.body && typeof res.body.getReader === 'function' && typeof TextDecoder === 'function') {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            text += decoder.decode();
+            break;
+          }
+          text += decoder.decode(chunk.value, { stream: true });
+          if (text.length >= LIMIT) {
+            reader.cancel().catch(() => {});
+            break;
+          }
+        }
+        text = text.slice(0, LIMIT);
+      } else {
+        text = String(await res.text()).slice(0, LIMIT);
+      }
       let json = null;
       if (/json/i.test(contentType) || /^\s*[[{]/.test(text)) {
         try { json = JSON.parse(text); } catch (e) { json = null; }

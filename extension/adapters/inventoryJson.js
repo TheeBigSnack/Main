@@ -367,6 +367,7 @@ const N = {
   model: ['model', 'modelname'],
   trim: ['trim', 'trimname', 'trimlevel'],
   mileage: ['odometer', 'mileage', 'miles', 'odometervalue'],
+  mileageUnit: ['odometerunit', 'odometerunits', 'mileageunit', 'mileageunits', 'odometerunitofmeasure', 'distanceunit'],
   url: ['link', 'detailurl', 'detailsurl', 'vdpurl', 'detailpageurl', 'url', 'href'],
   images: ['images', 'photos', 'imageurls', 'photourls', 'pictures', 'photo', 'image', 'imageurl', 'photourl'],
   photoCount: ['photocount', 'imagecount', 'numberofphotos', 'numberofimages', 'photoscount'],
@@ -418,6 +419,46 @@ function carfaxOf(card, vin) {
   return found;
 }
 
+const MILE_UNITS = new Set(['mi', 'mile', 'miles', 'smi']);
+const KILOMETRE_UNITS = new Set(['km', 'kms', 'kmt', 'kilometer', 'kilometers', 'kilometre', 'kilometres']);
+
+/**
+ * The odometer reading in miles, and why there is none when there is none.
+ * A number the record gives with no unit is miles, as these US platforms
+ * send it; one written with a unit ("31,207 miles", "31,207 mi") or beside a
+ * unit field counts only when that unit is miles. Kilometres are never
+ * turned into miles, and any other unit or text is no mileage, so the car
+ * waits on Needs a look (classify.js) instead of going out with a wrong
+ * figure.
+ * @param {object} card
+ * @returns {{ value: number|null, reason: string }}
+ */
+export function mileageOf(card) {
+  const raw = pick(card, N.mileage);
+  if (raw === undefined) return { value: null, reason: 'the list gives no mileage' };
+  let value = null;
+  let unit = '';
+  if (typeof raw === 'number') value = Number.isFinite(raw) ? raw : null;
+  else if (isPlain(raw)) {
+    const inner = raw.value ?? raw.amount;
+    value = typeof inner === 'number' && Number.isFinite(inner) ? inner : toNumber(textOf(inner).replace(/,/g, ''));
+    unit = textOf(raw.unit ?? raw.unitCode ?? raw.unitText ?? raw.units ?? '');
+  } else {
+    // a mileage written out is short: a number and at most a unit
+    const written = textOf(raw);
+    const m = written.length <= 40 ? written.match(/^(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*([a-z.]*)$/i) : null;
+    if (m) {
+      value = toNumber(m[1].replace(/,/g, ''));
+      unit = m[2];
+    }
+  }
+  if (value === null || value < 0) return { value: null, reason: 'the mileage is not a number' };
+  const u = (unit || textOf(pick(card, N.mileageUnit))).toLowerCase().replace(/\.$/, '');
+  if (!u || MILE_UNITS.has(u)) return { value, reason: '' };
+  if (KILOMETRE_UNITS.has(u)) return { value: null, reason: 'the mileage is in kilometres' };
+  return { value: null, reason: 'the list does not say the mileage is in miles' };
+}
+
 // A date the website gives, kept only when it reads as one.
 function dateOf(value) {
   const s = textOf(value);
@@ -452,7 +493,13 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   }
   const certified = truthy(pick(card, N.certified));
   const condition = conditionOf(card);
-  const inventoryType = certified && !/new/i.test(condition) ? 'Certified Used' : condition || null;
+  // A demo or loaner word in the condition counts like the platform's own
+  // flag, and a certified flag never renames it: a certified service loaner
+  // stays a loaner for the pre-owned gate (classify.js), which sends it to
+  // Needs a look or keeps it off Marketplace.
+  const demoWord = /\b(?:demo|demonstrator)\b/i.test(condition);
+  const loanerWord = /\b(?:loaner|courtesy)\b/i.test(condition);
+  const inventoryType = certified && !/\bnew\b/i.test(condition) && !demoWord && !loanerWord ? 'Certified Used' : condition || null;
   const title = textOf(pick(card, N.title));
   const location = textOf(pick(card, N.location, { nested: true })) || null;
   const prices = choosePrices(labeledPrices(card), { dealer: location || '' });
@@ -461,7 +508,7 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   const counted = toNumber(textOf(pick(card, N.photoCount)));
   const status = textOf(pick(card, N.status));
   const statusLabel = textOf(pick(card, N.statusLabel));
-  const mileage = toNumber(textOf(pick(card, N.mileage)).replace(/[^0-9.]/g, ''));
+  const mileage = mileageOf(card).value;
   const described = page && typeof page.description === 'string' ? page.description : textOf(pick(card, N.description));
   const inTransit = truthy(pick(card, N.inTransit)) || /transit/i.test(`${status} ${statusLabel}`);
 
@@ -480,8 +527,8 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
     readableType: null,
     url,
     urlConditionWord: conditionWordFromPath(url),
-    isDemo: truthy(pick(card, N.demo)),
-    isLoaner: truthy(pick(card, N.loaner)),
+    isDemo: truthy(pick(card, N.demo)) || demoWord,
+    isLoaner: truthy(pick(card, N.loaner)) || loanerWord,
     carfaxUrl: (page && page.carfaxUrl) || carfaxOf(card, vin),
     carfaxOneOwner: false, // never inferred: only a Carfax report says one owner
     mileage,
@@ -543,9 +590,10 @@ export function photoOriginsOf(records) {
 //                          (1-based), from the address the page itself
 //                          called; firstCount is how many cars page 1 held
 //   pagePhotos(html, vin, pageUrl)   the photo addresses its car pages carry
-//   pageGapMs              the fixed gap between two car-page reads the
-//                          website asks for (0: none); options.pageGapMs
-//                          overrides it (the tests)
+//   pageGapMs              the fixed gap between two car-page reads when
+//                          the website's robots.txt can't be read (0: none;
+//                          a readable robots.txt decides otherwise);
+//                          options.pageGapMs overrides both (the tests)
 // Requests go one at a time, with no pauses between list pages and nothing random about
 // their timing. A refusal (403, 429, 503) stops the scan and says so; nothing is
 // retried and nothing is worked around.
@@ -556,6 +604,41 @@ export const MAX_INVENTORY_PAGES = 30;
 // many cars at once is more likely a website hiccup than a sales day, and
 // with a fixed gap between page reads the check stays short.
 export const MAX_CONFIRM_PAGES = 12;
+
+// The longest fixed gap one scan keeps between two car-page reads. A website
+// whose robots.txt asks for more gets one car page per scan instead, so
+// nothing is read faster than it asks and a scan stays short.
+export const MAX_PAGE_GAP_MS = 10000;
+
+/**
+ * The Crawl-delay a robots.txt gives every robot (a group naming
+ * User-agent: *), in seconds, or null when it gives none.
+ * @param {string} text
+ */
+export function crawlDelaySeconds(text) {
+  let agents = [];
+  let inRules = false;
+  let delay = null;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = /^\s*([a-z-]+)\s*:\s*(.*?)\s*$/i.exec(line.replace(/#.*/, ''));
+    if (!m) continue;
+    const field = m[1].toLowerCase();
+    if (field === 'user-agent') {
+      if (inRules) {
+        agents = [];
+        inRules = false;
+      }
+      agents.push(m[2]);
+      continue;
+    }
+    inRules = true;
+    if (field === 'crawl-delay' && agents.includes('*')) {
+      const n = Number(m[2]);
+      if (Number.isFinite(n) && n >= 0) delay = Math.max(delay ?? 0, n);
+    }
+  }
+  return delay;
+}
 
 const REFUSED = { 401: 'asked for a sign-in (401)', 403: 'turned the read away (403)', 429: 'asked for fewer requests (429)', 503: 'said it is unavailable right now (503)' };
 
@@ -657,18 +740,50 @@ export async function scanInventory(search, options, platform) {
   // or a failed request sets confirm.error, and the rescan then marks
   // nothing gone at all.
   const confirm = { checked: [], notFound: [], error: null };
-  const toCheck = [...new Set((confirmVins || []).map((v) => String(v).toUpperCase()))].filter((v) => !byVin.has(v));
-  // A website that asks automated readers for a gap between page reads
-  // (DealerOn's robots.txt: Crawl-delay 10) gets it, the same fixed gap
-  // every time; nothing about the timing is varied.
-  const gap = Number.isFinite(options.pageGapMs) ? options.pageGapMs : Number(platform.pageGapMs) || 0;
+  const pageOf = (vin) => {
+    const href = confirmUrls && confirmUrls[vin];
+    try {
+      const url = href ? new URL(href, origin) : null;
+      return url && url.origin === origin ? url : null;
+    } catch (e) {
+      return null;
+    }
+  };
+  const toCheck = [...new Set((confirmVins || []).map((v) => String(v).toUpperCase()))].filter((v) => !byVin.has(v) && pageOf(v));
+  // The gap between two car-page reads is the Crawl-delay the website's own
+  // robots.txt asks every robot for, read once when more than one page is
+  // to be read; none when it asks for none; the platform's usual gap when
+  // robots.txt can't be read (DealerOn's sites ask for 10 seconds). The same
+  // fixed gap every time; nothing about the timing is varied. A website that
+  // asks for more than MAX_PAGE_GAP_MS gets one car page per scan.
+  let gap = 0;
+  let pageLimit = MAX_CONFIRM_PAGES;
+  if (Number.isFinite(options.pageGapMs)) gap = options.pageGapMs;
+  else if (toCheck.length > 1) {
+    let rules;
+    try {
+      rules = await call(origin + '/robots.txt');
+    } catch (e) {
+      rules = null;
+    }
+    const where = rules && rules.finalUrl ? originOf(rules.finalUrl) : origin;
+    if (rules && REFUSED[rules.status]) {
+      confirm.error = `robots.txt: the website ${REFUSED[rules.status]}`;
+      pageLimit = 0;
+    } else if (rules && where === origin && (rules.status === 404 || rules.status === 410)) {
+      gap = 0; // no robots.txt, no rules
+    } else if (rules && where === origin && rules.ok) {
+      const asked = crawlDelaySeconds(typeof rules.text === 'string' ? rules.text : '');
+      gap = asked === null ? 0 : Math.round(asked * 1000);
+    } else {
+      gap = Number(platform.pageGapMs) || 0;
+    }
+  }
+  if (gap > MAX_PAGE_GAP_MS) pageLimit = Math.min(pageLimit, 1);
   let pagesRead = 0;
   for (const vin of toCheck) {
-    if (pagesRead >= MAX_CONFIRM_PAGES) break;
-    const href = confirmUrls && confirmUrls[vin];
-    let url = null;
-    try { url = href ? new URL(href, origin) : null; } catch (e) { url = null; }
-    if (!url || url.origin !== origin) continue;
+    if (pagesRead >= pageLimit) break;
+    const url = pageOf(vin);
     let answer;
     try {
       if (pagesRead > 0 && gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
@@ -741,6 +856,25 @@ export async function detailsFor(search, vin, options, platform) {
   return { ok: true, record: page ? { ...found, page } : found, fetchedAt: res.fetchedAt };
 }
 
+// A response body up to the limit, without reading the rest.
+export async function cappedText(res, limit) {
+  if (res.body && typeof res.body.getReader === 'function' && typeof TextDecoder === 'function') {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let out = '';
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return out + decoder.decode();
+      out += decoder.decode(chunk.value, { stream: true });
+      if (out.length >= limit) {
+        reader.cancel().catch(() => {});
+        return out.slice(0, limit);
+      }
+    }
+  }
+  return String(await res.text()).slice(0, limit);
+}
+
 // A search(request) from the service worker: one GET on the website, without the browser's cookies, no
 // header of its own, never off the website.
 export function directSearch(service, fetchImpl = globalThis.fetch) {
@@ -754,7 +888,7 @@ export function directSearch(service, fetchImpl = globalThis.fetch) {
     try {
       const res = await fetchImpl(target.href, { credentials: 'omit', signal: ctrl.signal });
       const contentType = (res.headers && typeof res.headers.get === 'function' && res.headers.get('content-type')) || '';
-      const text = String(await res.text()).slice(0, 3000000);
+      const text = await cappedText(res, 3000000);
       let json = null;
       if (/json/i.test(contentType) || /^\s*[[{]/.test(text)) {
         try { json = JSON.parse(text); } catch (e) { json = null; }

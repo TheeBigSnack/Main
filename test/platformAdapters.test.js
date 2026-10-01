@@ -10,7 +10,7 @@ import dealerOn, { pageAddress as dealerOnPage, pagePhotos } from '../extension/
 import dealerCom, { pageAddress as dealerComPage } from '../extension/adapters/dealerCom.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
-import { keyName, pick, findCards, totalCount, labeledPrices, choosePrices, priceKind, imageUrls, normalizeInventoryRecord, MAX_INVENTORY_PAGES } from '../extension/adapters/inventoryJson.js';
+import { keyName, pick, findCards, totalCount, labeledPrices, choosePrices, priceKind, imageUrls, normalizeInventoryRecord, MAX_INVENTORY_PAGES, mileageOf, cappedText, crawlDelaySeconds, scanInventory, MAX_PAGE_GAP_MS } from '../extension/adapters/inventoryJson.js';
 import { assessVehicle, DECISION, checkPreOwned } from '../extension/src/classify.js';
 import { basisPrice } from '../extension/src/rescan.js';
 import { feeGap, withDefaults } from '../extension/src/settings.js';
@@ -553,4 +553,141 @@ test('at post time from a car\'s own page, the list address comes from the last 
   } finally {
     globalThis.chrome = prev;
   }
+});
+
+// ---------- from the full review (2026-10-01) ----------
+
+test('a certified loaner or demo keeps its word: the gate never sees it as Certified Used', () => {
+  const [c] = platformCars(1, { from: 500 });
+  for (const word of ['Loaner', 'Service Loaner', 'Demo', 'Courtesy Vehicle']) {
+    const record = { ...dealerComRecord({ ...c, certified: true }), inventoryType: word, link: '/certified/' + c.make + '/x.htm' };
+    const v = normalizeInventoryRecord(record, { origin: DEALERCOM_ORIGIN });
+    assert.equal(v.inventoryType, word, `${word}: the condition word is kept`);
+    assert.equal(v.isDemo || v.isLoaner, true, `${word}: flagged like the platform's own flag`);
+    const verdict = assessVehicle(v, withDefaults({})).decision;
+    assert.ok(verdict === DECISION.REVIEW || verdict === DECISION.SKIP, `${word} + certified is ${verdict}, never ready`);
+    assert.notEqual(checkPreOwned(v).verdict, 'pre-owned');
+  }
+  const plain = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: true }), inventoryType: 'used' }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(plain.inventoryType, 'Certified Used', 'a certified used car is still Certified Used');
+  assert.deepEqual([plain.isDemo, plain.isLoaner], [false, false]);
+  const fresh = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: true }), inventoryType: 'new' }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(fresh.inventoryType, 'new', 'a certified flag never makes a new car used');
+});
+
+test('mileage is kept only in miles: kilometres and other units are no mileage, with the reason', () => {
+  const [c] = platformCars(1, { from: 510 });
+  const base = dealerComRecord(c);
+  const read = (odometer, extra = {}) => mileageOf({ ...base, odometer, ...extra });
+  assert.deepEqual(read(31207), { value: 31207, reason: '' }, 'a bare number is miles');
+  assert.deepEqual(read('31,207'), { value: 31207, reason: '' });
+  assert.deepEqual(read('31,207 miles'), { value: 31207, reason: '' });
+  assert.deepEqual(read('31,207 mi.'), { value: 31207, reason: '' });
+  assert.deepEqual(read('64,120 km'), { value: null, reason: 'the mileage is in kilometres' });
+  assert.deepEqual(read('64120 KM'), { value: null, reason: 'the mileage is in kilometres' });
+  assert.deepEqual(read(64120, { odometerUnit: 'km' }), { value: null, reason: 'the mileage is in kilometres' }, 'a unit field beside a bare number');
+  assert.deepEqual(read({ value: 64120, unit: 'kilometres' }), { value: null, reason: 'the mileage is in kilometres' });
+  assert.deepEqual(read({ value: 31207, unit: 'mi' }), { value: 31207, reason: '' });
+  assert.deepEqual(read('1,250 hours'), { value: null, reason: 'the list does not say the mileage is in miles' });
+  assert.deepEqual(read('about 30k'), { value: null, reason: 'the mileage is not a number' });
+  assert.equal(mileageOf({ vin: c.vin }).reason, 'the list gives no mileage');
+  const v = normalizeInventoryRecord({ ...base, odometer: '64,120 km' }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(v.mileage, null, 'never posted as 64,120 miles');
+  assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, 'no mileage waits on Needs a look');
+});
+
+// A body read in chunks that counts what was read and whether the read was cut off.
+function streamedResponse(chunks, { contentType = 'text/html' } = {}) {
+  const state = { reads: 0, cancelled: false };
+  const encoder = new TextEncoder();
+  const body = {
+    getReader: () => ({
+      read: async () => {
+        if (state.reads >= chunks.length) return { done: true, value: undefined };
+        return { done: false, value: encoder.encode(chunks[state.reads++]) };
+      },
+      cancel: async () => { state.cancelled = true; },
+    }),
+  };
+  const res = { ok: true, status: 200, url: '', redirected: false, headers: { get: (n) => (n.toLowerCase() === 'content-type' ? contentType : null) }, body, text: async () => { throw new Error('read whole'); } };
+  return { res, state };
+}
+
+test('responses are read only up to the 3 MB limit, in the page and in the worker', async () => {
+  const mb = 'x'.repeat(1000000);
+  const small = streamedResponse(['ab', 'cd', 'ef']);
+  assert.equal(await cappedText(small.res, 3), 'abc');
+  assert.equal(small.state.cancelled, true, 'the rest is never read');
+  const whole = streamedResponse(['ab', 'cd']);
+  assert.equal(await cappedText(whole.res, 10), 'abcd');
+  assert.equal(whole.state.cancelled, false);
+  for (const a of [dealerOn, dealerCom]) {
+    const origin = a === dealerOn ? DEALERON_ORIGIN : DEALERCOM_ORIGIN;
+    const page = fakePlatformPage({ origin });
+    const big = streamedResponse(Array.from({ length: 10 }, () => mb));
+    page.fetch = async (href) => ({ ...big.res, url: String(href) });
+    page.TextDecoder = TextDecoder;
+    const got = await runInPage(page, a.searchInPage, { kind: a.PLATFORM.id, origin }, { url: origin + '/big' });
+    assert.equal(got.ok, true);
+    assert.equal(got.data.text.length, 3000000, `${a.PLATFORM.name}: cut at the limit`);
+    assert.ok(big.state.reads <= 3 && big.state.cancelled, `${a.PLATFORM.name}: stopped reading at the limit (${big.state.reads} chunks)`);
+  }
+  const worker = streamedResponse(Array.from({ length: 10 }, () => mb));
+  const direct = dealerCom.makeDirectSearch(comService, async (url) => ({ ...worker.res, url }));
+  const answer = await direct({ url: DEALERCOM_ORIGIN + '/big' });
+  assert.equal(answer.text.length, 3000000);
+  assert.ok(worker.state.reads <= 3 && worker.state.cancelled, 'the worker stops reading at the limit too');
+});
+
+test('crawlDelaySeconds reads the delay robots.txt gives every robot, and nothing else', () => {
+  assert.equal(crawlDelaySeconds('User-agent: *\nCrawl-delay: 10\nDisallow: /x'), 10);
+  assert.equal(crawlDelaySeconds('User-agent: SomeBot\nCrawl-delay: 60\n\nUser-agent: *\nDisallow: /x'), null, 'a delay for a named robot only');
+  assert.equal(crawlDelaySeconds('User-agent: SomeBot\nUser-agent: *\ncrawl-delay : 2.5 # please'), 2.5, 'a group naming several robots, any case, a comment');
+  assert.equal(crawlDelaySeconds('User-agent: *\nCrawl-delay: soon'), null);
+  assert.equal(crawlDelaySeconds(''), null);
+  assert.equal(crawlDelaySeconds(null), null);
+});
+
+test('the gap between car-page reads is the Crawl-delay of the website\'s own robots.txt, read once; a refusal there checks nothing', async () => {
+  const [a, b, c] = platformCars(3, { from: 520 });
+  const confirmUrls = Object.fromEntries([a, b, c].map((x) => [x.vin, DEALERCOM_ORIGIN + dealerComPath(x)]));
+  const run = async (robots, platformGap = 0) => {
+    const site = dealerComSite({ cars: platformCars(2), gone: [a, b, c] });
+    if (robots) site.set(DEALERCOM_ORIGIN + '/robots.txt', robots);
+    const search = platformSearch(site);
+    const times = [];
+    const timed = async (r) => { times.push({ url: r.url, at: Date.now() }); return search(r); };
+    const platform = { pageAddress: dealerComPage, pagePhotos: () => [], pageGapMs: platformGap };
+    const res = await scanInventory(timed, { ...dealerCom.scanOptions(comService), confirmVins: [a.vin, b.vin, c.vin], confirmUrls }, platform);
+    const pages = times.filter((t) => Object.values(confirmUrls).includes(t.url));
+    const gaps = pages.slice(1).map((t, i) => t.at - pages[i].at);
+    return { res, times, pages, gaps };
+  };
+  const text = (body) => ({ ok: true, status: 200, contentType: 'text/plain', text: body });
+
+  const asked = await run(text('User-agent: *\nCrawl-delay: 0.06\n'));
+  assert.equal(asked.times.filter((t) => t.url.endsWith('/robots.txt')).length, 1, 'robots.txt read once');
+  assert.deepEqual(asked.res.confirm.notFound, [a.vin, b.vin, c.vin]);
+  assert.ok(asked.gaps.every((g) => g >= 55), `every gap kept (${asked.gaps})`);
+
+  const none = await run(null, 0);
+  assert.deepEqual(none.res.confirm.notFound, [a.vin, b.vin, c.vin], 'no robots.txt (404): no rules, no gap');
+
+  const unreadable = await run({ ok: false, status: 500, contentType: 'text/plain', text: '' }, 60);
+  assert.ok(unreadable.gaps.every((g) => g >= 55), `an unreadable robots.txt keeps the platform's own gap (${unreadable.gaps})`);
+
+  const slow = await run(text('User-agent: *\nCrawl-delay: 30\n'));
+  assert.ok(30000 > MAX_PAGE_GAP_MS);
+  assert.equal(slow.pages.length, 1, 'a website asking for more than the longest gap gets one car page per scan');
+  assert.deepEqual(slow.res.confirm.notFound, [a.vin]);
+  assert.equal(slow.res.confirm.error, null, 'the rest wait unconfirmed, not an error');
+
+  const refused = await run({ ok: false, status: 429, contentType: 'text/plain', text: '' });
+  assert.equal(refused.pages.length, 0, 'no car page after robots.txt asked for fewer requests');
+  assert.match(refused.res.confirm.error, /robots\.txt.*429/);
+
+  const oneSearch = platformSearch(dealerComSite({ cars: platformCars(2), gone: [a] }));
+  const one = await scanInventory(oneSearch, { ...dealerCom.scanOptions(comService), confirmVins: [a.vin], confirmUrls }, { pageAddress: dealerComPage, pagePhotos: () => [], pageGapMs: 0 });
+  assert.deepEqual(one.confirm.notFound, [a.vin]);
+  assert.ok(!oneSearch.calls.some((u) => u.endsWith('/robots.txt')), 'one car page needs no robots.txt');
 });

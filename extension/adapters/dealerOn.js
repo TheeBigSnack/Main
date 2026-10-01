@@ -91,7 +91,27 @@ export async function searchInPage(service, request) {
     try {
       const res = await fetch(target.href, init);
       const contentType = (res.headers && res.headers.get('content-type')) || '';
-      const text = String(await res.text()).slice(0, LIMIT);
+      // the body up to the limit, without reading the rest
+      let text = '';
+      if (res.body && typeof res.body.getReader === 'function' && typeof TextDecoder === 'function') {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            text += decoder.decode();
+            break;
+          }
+          text += decoder.decode(chunk.value, { stream: true });
+          if (text.length >= LIMIT) {
+            reader.cancel().catch(() => {});
+            break;
+          }
+        }
+        text = text.slice(0, LIMIT);
+      } else {
+        text = String(await res.text()).slice(0, LIMIT);
+      }
       let json = null;
       if (/json/i.test(contentType) || /^\s*[[{]/.test(text)) {
         try { json = JSON.parse(text); } catch (e) { json = null; }
@@ -156,10 +176,11 @@ export function pagePhotos(html, vin, pageUrl) {
   return [...found.entries()].sort((a, b) => a[0] - b[0]).map(([, href]) => href);
 }
 
-// DealerOn's robots.txt asks for 10 seconds between automated reads
-// (Crawl-delay: 10 on the DealerOn sites in the page-text survey). The list itself takes
-// a few requests; the car pages read one by one (a missing car's sold
-// check) keep that gap.
+// The gap between car pages read one by one (a missing car's sold check)
+// is the Crawl-delay the website's own robots.txt asks for, read at the scan
+// (inventoryJson.js scanInventory). This is only the gap kept when
+// robots.txt can't be read: the DealerOn sites in the page-text survey asked
+// for 10 seconds. The list itself takes a few requests and does not wait.
 export const PAGE_GAP_MS = 10000;
 
 const PLATFORM_READING = { pageAddress, pagePhotos, pageGapMs: PAGE_GAP_MS };
