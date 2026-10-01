@@ -414,6 +414,102 @@ test('a website read from its pages: a car read from the list is priced from its
   assert.equal((await rescanOf(same, null)).vehicles.find((v) => v.vin === cars[0].vin).price, 15000);
 });
 
+// Real tiles and cards link to more than the car's page: a "Check
+// availability" form, financing, a trade-in page. Those links don't make a
+// card something else: it is still that car's card.
+const extraLinks = {
+  'a contact link': () => ' <a href="/contact-us/">Check availability</a>',
+  'a finance link': () => ' <a href="/finance/apply/">Get pre-approved</a>',
+  'a form with its VIN': (c) => ` <a href="/contact-us/?vin=${c.vin}">Ask about it</a>`,
+};
+const withExtraLinks = (html, cars, extra) => {
+  let k = 0;
+  return html.replace(/<\/div>/g, () => extra(cars[k++]) + '</div>');
+};
+
+test('a website read from its pages: a car read from the list keeps the list\'s price when its card also links to a contact form, financing or a form with its VIN', async () => {
+  const cars = standardCars(4);
+  for (const [name, extra] of Object.entries(extraLinks)) {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STD.listUrl, htmlAnswer(withExtraLinks(standardListPage(cars), cars, extra)));
+    // the car pages carry no markup of their own: the list's data is all there is
+    for (const c of cars) site.set(STANDARD_ORIGIN + c.path, htmlAnswer(standardCarPage(c).replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '')));
+    const out = await rescanOf(site, null);
+    assert.deepEqual(out.vehicles.map((v) => v.price), cars.map((c) => c.price), name);
+    assert.deepEqual(Object.values(out.snapshot.vehicles).map((e) => e.decision), cars.map(() => 'ready'), name);
+  }
+});
+
+test('a website read from its pages: on a lot whose cards link to more than the car, a later scan still takes unchanged cars from the list instead of reading every car page again', async () => {
+  const cars = standardCars(24);
+  const site = () => {
+    const s = standardSite({ cars, perPage: 30 });
+    s.set(STD.listUrl, htmlAnswer(withExtraLinks(standardListPage(cars), cars, extraLinks['a finance link'])));
+    return s;
+  };
+  const first = await rescanOf(site(), null);
+  assert.equal(first.res.requests, 25, 'the first scan reads the list and every car page');
+  const second = await rescanOf(site(), first.snapshot);
+  assert.equal(second.res.requests, 1, 'the second reads only the list');
+  assert.equal(second.diff.priceUpdates.length + second.diff.needsALook.length, 0);
+});
+
+test('a website read from its pages: another car\'s tile at the old price is not this car\'s price when the tile also links to a contact form or a form with its VIN, or is the only other car on the page', async () => {
+  const cars = standardCars(6);
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  const tile = (c, price, extra) => `<div class="tile"><a href="${c.path}">${c.year} ${c.make} ${c.model}</a> <span>$${price.toLocaleString('en-US')}</span>${extra(c)}</div>`;
+  const asides = {};
+  for (const [name, extra] of Object.entries(extraLinks)) asides[`two tiles, each with ${name}`] = `<aside>${tile(cars[1], 15000, extra)}${tile(cars[2], 17000, extra)}</aside>`;
+  asides['one tile, with a contact link'] = `<section><h2>You may also like</h2>${tile(cars[1], 15000, extraLinks['a contact link'])}</section>`;
+  asides['one tile, with a form with its VIN'] = `<section><h2>You may also like</h2>${tile(cars[1], 15000, extraLinks['a form with its VIN'])}</section>`;
+  for (const [name, aside] of Object.entries(asides)) {
+    const site = standardSite({ cars, perPage: 10 });
+    // the page now says $14,000; its markup still says $15,000, the other car's price
+    const html = standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', aside + '<a href="/used-vehicles/">');
+    site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(html));
+    const out = await rescanOf(site, first.snapshot, posted);
+    assert.equal(out.snapshot.vehicles[cars[0].vin].price, null, name);
+    assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']], name);
+  }
+});
+
+test('a website read from its pages: on a lot whose car addresses carry no VIN, a tile for a car the list does not name (a new car, another store\'s) at the old price is not this car\'s price', async () => {
+  const cars = standardCars(6).map((c) => ({ ...c, path: `/used/${c.year}-${c.make}-${c.model}-${c.stock}/`.toLowerCase() }));
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  assert.equal(first.snapshot.vehicles[cars[0].vin].price, 15000);
+  const elsewhere = '<aside><div class="tile"><a href="/new/2027-kia-telluride-n5000/">2027 Kia Telluride</a> <span>$15,000</span> <a href="/contact-us/">Ask about it</a></div></aside>';
+  const site = standardSite({ cars, perPage: 10 });
+  site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', elsewhere + '<a href="/used-vehicles/">')));
+  const out = await rescanOf(site, first.snapshot, posted);
+  assert.equal(out.snapshot.vehicles[cars[0].vin].price, null);
+  assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']]);
+});
+
+test('a website read from its pages: a car\'s own price stays its own when its price box also links to a model search, another address of the same car, or a page of its own', async () => {
+  const cars = standardCars(4);
+  const c = cars[0];
+  const boxes = {
+    'a "See all" search for its model': `<a href="/used-vehicles/${c.year}-${c.make}-${c.model}/">See all ${c.year} ${c.make} ${c.model}</a>`.toLowerCase(),
+    'another address of the same car': `<a href="/used/${c.year}-${c.make}-${c.model}-${c.stock}/">Share</a>`.toLowerCase(),
+    'its print page': `<a href="${c.path}?print=1">Print</a>`,
+  };
+  for (const [name, link] of Object.entries(boxes)) {
+    const html = standardCarPage(c, { carousel: [cars[1], cars[2]] }).replace(/<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, `<section class="info"><p>Our price $1</p><p>$2</p>${link}</section>`);
+    // read in a scan, which knows the lot's car addresses
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STANDARD_ORIGIN + c.path, htmlAnswer(html));
+    const out = await rescanOf(site, null);
+    const v = out.vehicles.find((x) => x.vin === c.vin);
+    assert.equal(v.price, c.price, `scan: ${name}`);
+    assert.equal(v.mileage, c.miles, `scan: ${name}`);
+    // and at post time, from the car's page alone
+    const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
+    assert.equal(schemaOrg.normalize(one.record).price, c.price, `post time: ${name}`);
+  }
+});
+
 // ---------- the dates the snapshot keeps for the Ready and To do tabs ----------
 // (src/readyList.js reads them: the website's own in-stock date, and when
 // Lot Current first saw the car, carried from one saved snapshot to the next)

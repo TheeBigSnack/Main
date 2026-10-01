@@ -338,16 +338,30 @@ function addressText(href) {
   }
 }
 
+// Every VIN an address carries, upper case, once each.
+function vinsInAddress(href) {
+  const out = new Set();
+  for (const m of addressText(href).matchAll(VIN_IN_ADDRESS)) if (/[A-Za-z]/.test(m[1])) out.add(m[1].toUpperCase());
+  return [...out];
+}
+
 /** The VIN in a car page's address ("/used-2019-honda-civic-2hgsampl8kh000101/"), upper case, or ''. */
 export function vinInAddress(href) {
-  for (const m of addressText(href).matchAll(VIN_IN_ADDRESS)) if (/[A-Za-z]/.test(m[1])) return m[1].toUpperCase();
-  return '';
+  return vinsInAddress(href)[0] || '';
 }
 
 /** An address that reads like a car's page without a VIN in it: a model year joined to words, under an inventory word. */
 export function looksLikeCarAddress(href) {
   const p = addressText(href).toLowerCase();
   return /(?:^|[^a-z0-9])(?:19[5-9][0-9]|20[0-9][0-9])[-_+]+[a-z]/.test(p) && /(?:^|[^a-z])(?:inventory|vehicles?|vdp|details?|used|pre-?owned|preowned|certified|cpo|for-?sale|stock)(?:[^a-z]|$)/.test(p);
+}
+
+// For the cards of a page (carKeys): an address that reads like any car's
+// page, a new car's ("/new/2027-...") as well as a used one's.
+function readsLikeAnyCar(href) {
+  if (looksLikeCarAddress(href)) return true;
+  const p = addressText(href).toLowerCase();
+  return /(?:^|[^a-z0-9])(?:19[5-9][0-9]|20[0-9][0-9])[-_+]+[a-z]/.test(p) && /(?:^|[^a-z])new(?:[^a-z]|$)/.test(p);
 }
 
 /**
@@ -462,12 +476,14 @@ function judge(answer, origin) {
 
 // A page's cars and facts, read once however many times it is asked for.
 // A bot check reads as a stop; anything that isn't a web page as an error.
+// Its text is cut into cards by car with what the scan knows of this
+// website's car pages by then (carKeys, siteReader's cars).
 function pageOf(outcome) {
   if (outcome.kind !== 'page') return outcome;
   if (!outcome.read) {
     if (!isHtmlAnswer(outcome.contentType, outcome.text)) outcome.read = { kind: 'error', message: `not a web page (${outcome.contentType || 'no type'})` };
     else {
-      const parsed = parseVehiclePage(outcome.text, outcome.finalUrl);
+      const parsed = parseVehiclePage(outcome.text, outcome.finalUrl, { carKey: carKeys(outcome.finalUrl, outcome.cars) });
       outcome.read = isBotCheck(parsed) ? { kind: 'blocked', message: STOPPED.check } : { kind: 'html', parsed, truncated: outcome.text.length >= PAGE_TEXT_LIMIT };
     }
   }
@@ -476,10 +492,15 @@ function pageOf(outcome) {
 
 // Every page read once per scan: the requests are counted, and a page asked
 // for twice (a missing car's page this scan already read) is not fetched again.
+// `cars` is what the scan has learned of this website's car pages once it
+// has read the list (scan step 2): known, each car page's key -> its car,
+// and shape, the shape of their addresses. A page read after that is cut
+// into cards with it (pageOf).
 function siteReader(search, origin) {
   const answers = new Map();
   const reader = {
     requests: 0,
+    cars: { known: null, shape: null },
     async read(href) {
       const key = pageKey(href);
       if (answers.has(key)) return answers.get(key);
@@ -491,6 +512,7 @@ function siteReader(search, origin) {
         answer = { failed: String((e && e.message) || e) };
       }
       const outcome = judge(answer, origin);
+      if (outcome.kind === 'page') outcome.cars = reader.cars;
       answers.set(key, outcome);
       return outcome;
     },
@@ -512,25 +534,71 @@ async function twoAtATime(items, work) {
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker));
 }
 
+// Which car a link on a page goes to, for the cards schemaOrgParse.js cuts
+// the page's text into (a car's tile in a "similar vehicles" carousel, its
+// card on a list): all of a card's links to one car make one card, and a
+// link to anything else (a contact form, financing, a search) shapes none.
+// A link goes to a car when its address carries one VIN (that car: a
+// "Check availability" form with the VIN in its query goes with the car's
+// page; an address with several VINs, a comparison, is none of them); when
+// this page's markup names a car at that address (by its VIN, else by the
+// address); when the scan's list named it as a car page (cars.known); or
+// when it reads like a car page, new or used (readsLikeAnyCar), unless this
+// website's car addresses carry their VIN: then a VIN-less address that
+// only reads like one ("See all 2016 Honda Civic", another address of this
+// same car) goes to no car. Whether they do is the shape of the car
+// addresses the list linked to (cars.shape), else of the cars this page's
+// markup names, else this page's own address when it carries a VIN;
+// without any of those, such a link counts as a car's. Keys: "vin:" and the
+// VIN, else the page's key.
+function carKeys(pageUrl, cars) {
+  const known = cars && cars.known instanceof Map ? cars.known : null;
+  return (vehicles) => {
+    const origin = originOf(pageUrl);
+    const named = new Map();
+    for (const node of Array.isArray(vehicles) ? vehicles : []) {
+      const at = onSite(firstText(node && node.url), pageUrl, origin);
+      const key = at ? pageKey(at.href) : '';
+      const vin = nodeVin(node);
+      if (key && !named.has(key)) named.set(key, vin ? 'vin:' + vin : key);
+    }
+    const shape = (cars && cars.shape) || learnCarAddressShape([...named.keys()]);
+    const vinPages = shape ? shape.vin : Boolean(vinInAddress(pageUrl));
+    const carOf = (href) => {
+      const vins = vinsInAddress(href);
+      if (vins.length) return vins.length === 1 ? 'vin:' + vins[0] : null;
+      const key = pageKey(href);
+      if (!key) return null;
+      if (named.has(key)) return named.get(key);
+      if (known && known.has(key)) return known.get(key);
+      return !vinPages && readsLikeAnyCar(href) ? key : null;
+    };
+    const seen = new Map(); // a page links to one car many times
+    return (href) => {
+      if (seen.has(href)) return seen.get(href);
+      const car = carOf(href);
+      if (seen.size < 100000) seen.set(href, car);
+      return car;
+    };
+  };
+}
+
 // What normalize needs from a page besides the car's node, with the text
 // its price and mileage are checked against cut down to this car's own
 // (schemaOrgParse.js visibleText gives the page's text in segments, each
-// tied to the card it sits in). On the car's own page: the page without
-// the cards of the other cars it links to, so a "similar vehicles" tile at
-// the price this car's markup still carries does not pass for this car's
-// price. For a car read from a list (list: true): its own card, the one
-// around its link; a car without one has no text, so the list's data shows
-// no price and its own page is read instead. A link is this car's when it
-// is one of its addresses or carries its VIN; another car's when it carries
-// another VIN, reads like a car's page, or is a car page the list named
-// (isCar).
-function factsForCar(facts, { urls = [], vin = '', list = false, isCar = null } = {}) {
+// tied to the car whose card holds it, as carKeys names cars). On the car's
+// own page: the page without other cars' cards, so a "similar vehicles"
+// tile at the price this car's markup still carries does not pass for this
+// car's price. For a car read from a list (list: true): its own card; a car
+// without one has no text, so the list's data shows no price and its own
+// page is read instead. A card is this car's when its car is this VIN or
+// one of this car's addresses.
+function factsForCar(facts, { urls = [], vin = '', list = false } = {}) {
   const out = { title: facts.title, text: facts.text, carfaxLinks: facts.carfaxLinks };
   if (!Array.isArray(facts.segments)) return out;
-  const keys = new Set(urls.filter((u) => typeof u === 'string' && u).map(pageKey));
-  const own = (href) => keys.has(pageKey(href)) || (Boolean(vin) && vinInAddress(href) === vin);
-  const otherCar = (href) => !own(href) && (Boolean(vinInAddress(href)) || looksLikeCarAddress(href) || Boolean(isCar && isCar(href)));
-  const kept = list ? facts.segments.filter((g) => g.link && own(g.link)) : facts.segments.filter((g) => !g.link || !otherCar(g.link));
+  const own = new Set(urls.filter((u) => typeof u === 'string' && u).map(pageKey).filter(Boolean));
+  if (vin) own.add('vin:' + vin);
+  const kept = list ? facts.segments.filter((g) => g.car !== null && own.has(g.car)) : facts.segments.filter((g) => g.car === null || own.has(g.car));
   out.text = kept.map((g) => g.text).join(' ');
   return out;
 }
@@ -845,6 +913,15 @@ export async function scan(search, options = {}) {
       if (!visited.has(key) && !cars.has(key)) cars.set(key, href);
     }
   }
+  // what a car page read from here on knows of the others (carKeys)
+  const knownCars = new Map();
+  for (const [key, href] of cars) {
+    const listedCar = byKey.get(key);
+    const vin = (listedCar && listedCar.vin) || vinInAddress(href);
+    knownCars.set(key, vin ? 'vin:' + vin : key);
+  }
+  site.cars.known = knownCars;
+  site.cars.shape = learnCarAddressShape([...cars.values()]);
   if (!cars.size) {
     return fail('no-cars', `Lot Current found no links to car pages on the inventory page (${firstList}). A page that draws its list with scripts shows none to Lot Current's plain read of it.`);
   }
@@ -924,7 +1001,7 @@ export async function scan(search, options = {}) {
     const node = carOnPage(page.parsed.vehicles, { vin: item.vin, pageUrl: got.finalUrl });
     if (node && nodeVin(node)) {
       evidence.ownNode = true;
-      item.record = { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts, { urls: [got.finalUrl, item.href], vin: nodeVin(node), isCar: (href) => cars.has(pageKey(href)) }) };
+      item.record = { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts, { urls: [got.finalUrl, item.href], vin: nodeVin(node) }) };
     } else if (item.listedCar && item.listedCar.vin) {
       item.record = listRecord(item.listedCar, item.href, true); // the page doesn't mark the car up; the list does
     } else if (page.truncated) readErrors += 1;
