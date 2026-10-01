@@ -61,6 +61,6 @@ We will post changes here and update the date; material changes will be notified
 
 ## Contact
 
-[Lot Current entity name], [postal address], [privacy email].
+[Lot Current entity name], [postal address], blawrence@lotcurrent.com.
 
 Lot Current is not affiliated with Meta Platforms, Inc.
