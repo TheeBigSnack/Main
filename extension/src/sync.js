@@ -6,7 +6,7 @@
 //   const body = syncPayload({ origin, posted, pilot, scan, since, known: state.known, userId });
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
 //   posted = mergeRegistry(posted, response, { since, userId, sent: body.posted });
-//   pilot  = mergeFlags(pilot, response);
+//   pilot  = mergeFlags(pilot, response, { posted, userId }); // posted: the merged registry
 //   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId })
 //            // since, known, dealership id and role, the plan, the server's count of today's posts
 //
@@ -405,15 +405,22 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
 
 /**
  * Closes local to-do flags that were closed on another machine (the same
- * VIN, kind and flagging time, done on the server). Nothing is added or
- * reopened: a flag belongs to the salesperson's own listing and only their
- * machines carry it. Returns the pilot record (unchanged when nothing matched).
+ * VIN, kind and flagging time, done on the server). Nothing is reopened: a
+ * flag belongs to the salesperson's own listing and only their machines
+ * carry it. With `posted` (the registry after mergeRegistry) and the
+ * caller's `userId`, an open item on one of the caller's own listings that
+ * this machine does not hold (it was cleared here, with Clear everything for
+ * this website, or this machine never had it) is taken in with its flagging
+ * time: the server closes an item only when an upload closes that flag, so
+ * without it the item would stay open on the manager's list for good while
+ * the next scan here opened a second one. Returns the pilot record
+ * (unchanged when nothing matched).
  * `remote` is the sync answer ({ todoItems: [...] }) or a plain array.
  */
-export function mergeFlags(pilot, remote) {
+export function mergeFlags(pilot, remote, { posted = null, userId = '' } = {}) {
   const p = withPilotDefaults(pilot);
-  const done = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && t.done_at);
-  if (!done.length || !p.flags.length) return p;
+  const rows = rowsOf(remote, 'todoItems').filter((t) => isObject(t));
+  const done = rows.filter((t) => t.done_at);
   let touched = false;
   const flags = p.flags.map((f) => {
     if (f.doneAt) return f;
@@ -423,6 +430,24 @@ export function mergeFlags(pilot, remote) {
     const at = isoOrNull(t.done_at);
     return { ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) };
   });
+  // the caller's own listings, by VIN, with when each was posted: an item
+  // flagged before that post was made belongs to an earlier listing of the car
+  const own = new Map(Object.entries(isObject(posted) ? posted : {}).filter(([, e]) => isObject(e) && isOwn(e, userId)).map(([key, e]) => [vinOf(e.vin || key), ms(e.postedAt)]));
+  for (const t of rows) {
+    const vin = vinOf(t.vin);
+    const flaggedAt = isoOrNull(t.flagged_at);
+    if (t.done_at || !own.has(vin) || !flaggedAt || !FLAG_KINDS.includes(t.kind)) continue;
+    if (own.get(vin) !== null && ms(flaggedAt) < own.get(vin)) continue;
+    if (flags.some((f) => vinOf(f.vin) === vin && f.kind === t.kind && sameMoment(f.flaggedAt, flaggedAt))) continue;
+    touched = true;
+    flags.push({
+      vin,
+      kind: t.kind,
+      name: text(t.name, 80),
+      flaggedAt,
+      ...(t.kind === 'price' ? { from: intOrNull(t.from_price), to: intOrNull(t.to_price) } : {}),
+    });
+  }
   return touched ? { ...p, flags } : p;
 }
 

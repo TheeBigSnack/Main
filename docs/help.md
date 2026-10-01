@@ -140,7 +140,7 @@ It never records buyers, messages, the description text or anything from your Fa
 
 - **Download CSV** saves the spreadsheet to your Downloads folder; that is what your manager collects.
 - **Copy summary** copies a short text for the weekly check-in.
-- **Clear the numbers** needs two clicks (the button changes to "Click again to clear the numbers").
+- **Clear the numbers** needs two clicks (the button changes to "Click again to clear the numbers"). It keeps the to-do items still open (and a post under way), so they close as usual once you have dealt with them; while you are signed in, it does not remove what has already synced to your dealership's account.
 - The numbers also prune themselves each time one is recorded: each list (post attempts, form fills, to-do items) keeps its newest 500 entries and nothing older than 90 days. An open to-do item stays until it is closed. Download the CSV before then if your manager wants the full record.
 
 ## Settings
@@ -258,8 +258,8 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 **To clear it:**
 
-- **Settings**, **Saved data**, **Clear everything for this website**. Click twice; the button changes to "Click again to clear everything". This removes everything above for this website, takes the website off the automatic rescan list and its count off the icon. The synced profile stays.
-- **Numbers**, **Clear the numbers** (two clicks) clears only the numbers for this website.
+- **Settings**, **Saved data**, **Clear everything for this website**. Click twice; the button changes to "Click again to clear everything". This removes everything above for this website, takes the website off the automatic rescan list and its count off the icon. The synced profile stays. While you are signed in, it does not remove what has synced to your dealership's account: the next sync brings your posted list and its open to-do items back to this computer.
+- **Numbers**, **Clear the numbers** (two clicks) clears only the numbers for this website, except the to-do items still open.
 - "Couldn't save: Chrome's storage for Lot Current is full. Clear the numbers on the Numbers tab, or open an old dealership website and click Clear everything for this website in Settings." Chrome gives Lot Current 10 MB for every website together, and each website's scans, drafts and numbers count toward it. First click **Clear the numbers** on the **Numbers** tab (download the CSV first if your manager still needs it). If that is not enough, open a dealership website you no longer post from, click the Lot Current icon, then **Settings**, **Saved data**, **Clear everything for this website**. Then do again what you were doing when the message appeared.
 - Removing the extension at `chrome://extensions` removes what it kept on this computer.
 

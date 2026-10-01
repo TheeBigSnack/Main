@@ -19,6 +19,7 @@ import { LAPSED_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
 import { syncOnce, LAPSED_MESSAGE as EXTENSION_LAPSED_MESSAGE } from '../extension/src/accountFlow.js';
 import { sessionFromTokenResponse, storeSession, ACCOUNT_KEY } from '../extension/src/account.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
+import { noteFlags, resolveFlag, clearNumbers } from '../extension/src/pilot.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -551,6 +552,46 @@ test('sync: the extension\'s syncOnce against the real handler: the registry goe
   assert.equal(r2.ok, true, r2.error);
   assert.equal(r2.counts.takenDown, 1);
   assert.equal(fake.rows('listings').find((l) => l.vin === VIN(2)).status, 'taken_down');
+});
+
+// The dealership's copy of a to-do item is closed only by an upload of that
+// flag closed. A machine that dropped the open flag (Clear the numbers, or
+// Clear everything for this website) opened a second item at its next scan
+// and closed only that one: the first stayed on the manager's list for good.
+test('sync: an open to-do item outlives Clear the numbers and Clear everything for this website; the later Taken down closes the dealership\'s item and leaves none open', async () => {
+  const config = { url: SUPABASE_URL, anonKey: ANON_KEY, functionsUrl: '' };
+  const K = siteKeys(ORIGIN);
+  const sold = { takeDown: [{ vin: VIN(1), name: 'My car', yours: true, why: 'gone' }], priceUpdates: [], warnings: [] };
+  const nothing = { takeDown: [], priceUpdates: [], warnings: [] };
+  for (const clear of ['Clear the numbers', 'Clear everything for this website']) {
+    world();
+    const fetchImpl = functionsFetch({ sync: await load() });
+    const storage = await signedIn(TOKEN.u1, U1);
+    const round = async () => { const r = await syncOnce({ origin: ORIGIN, deps: { config, fetchImpl, storage, now: Date.now() } }); assert.equal(r.ok, true, r.error); };
+    storage.data[K.posted] = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: at(-600) } };
+    const first = at(-180);
+    storage.data[K.pilot] = noteFlags(null, sold, { at: first }); // a rescan three hours ago flagged the sold car
+    await round();
+    assert.equal(fake.rows('todo_items').filter((t) => !t.done_at).length, 1, `${clear}: the manager's list has the item`);
+
+    if (clear === 'Clear the numbers') {
+      storage.data[K.pilot] = clearNumbers(storage.data[K.pilot]); // what the Numbers tab's button writes
+    } else {
+      for (const key of Object.values(K)) delete storage.data[key];
+      storage.data[K.pilot] = noteFlags(storage.data[K.pilot], nothing, { at: at(-60) }); // the next scan, with no posted list, flags nothing
+      await round(); // the posted list and the open item come back
+      assert.ok(storage.data[K.posted][VIN(1)], `${clear}: the listing came back from the dealership's records`);
+    }
+    storage.data[K.pilot] = noteFlags(storage.data[K.pilot], sold, { at: at(-30) }); // the website still lists the car as sold
+    await round();
+    // the salesperson takes the listing down and ticks Taken down
+    storage.data[K.pilot] = resolveFlag(storage.data[K.pilot], VIN(1), null, { at: at(-1), how: 'manual' });
+    delete storage.data[K.posted][VIN(1)];
+    await round();
+    const items = fake.rows('todo_items');
+    assert.deepEqual(items.map((t) => [t.vin, t.kind, Date.parse(t.flagged_at), Boolean(t.done_at), t.how]), [[VIN(1), 'takeDown', Date.parse(first), true, 'manual']], `${clear}: one item, the first one, closed by the Taken down`);
+    assert.equal(storage.data[K.pilot].flags.filter((f) => !f.doneAt).length, 0, `${clear}: nothing open here either`);
+  }
 });
 
 test('sync: the extension reads the handler\'s 402, 403 and 401 the way it is written to: lapsed keeps the session, a stranger is told, a rejected token signs out', async () => {

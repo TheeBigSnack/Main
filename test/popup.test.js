@@ -8,6 +8,7 @@ import { fixtures, raw, vehicle, sampleVin, MY_STORE } from './helpers.js';
 import { PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
 import { POSTING_RULES } from '../extension/src/postingRules.js';
+import { noteFlags, resolveFlag, beginPost, endPost, noteFill } from '../extension/src/pilot.js';
 
 const k = siteKeys(POPUP_ORIGIN);
 
@@ -209,4 +210,32 @@ test('saving Settings or signing in before the website\'s first scan leaves the 
   assert.equal(p.local[k.settings].dealer.name, STORE);
   assert.deepEqual(p.local[k.settings].myStores, [STORE]);
   assert.equal(p.local[k.settings].salesperson.name, 'Sam', 'what the person typed stays');
+});
+
+// Clear the numbers is what the storage-full message sends people to. An
+// open to-do item is still on To do, and its synced copy on the manager's
+// list closes only when this computer closes it, so it stays.
+test('Clear the numbers keeps the to-do items still open, says so, and clears the rest', async () => {
+  const sold = vehicle('usedNormal');
+  const other = vehicle('certified');
+  let pilot = noteFlags(null, { takeDown: [{ vin: sold.vin, name: sold.name, yours: true, why: 'gone' }, { vin: other.vin, name: other.name, yours: true, why: 'gone' }], priceUpdates: [], warnings: [] }, { at: '2026-10-01T09:00:00.000Z' });
+  pilot = resolveFlag(pilot, other.vin, null, { at: '2026-10-01T10:00:00.000Z', how: 'manual' });
+  pilot = endPost(beginPost(pilot, { vin: other.vin, name: other.name, salesperson: 'Sam', at: '2026-09-30T09:00:00.000Z' }), other.vin, 'posted', { at: '2026-09-30T09:01:00.000Z' });
+  pilot = noteFill(pilot, { vin: other.vin, fill: { filled: [{ key: 'price' }] }, at: '2026-09-30T09:00:30.000Z' });
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.pilot]: pilot } });
+  await p.tab('pilot');
+  assert.match(p.panel(), /id="pilotClearNote">Clear the numbers keeps the to-do items still open, so they close as usual once done\. It does not remove what has already synced to your dealership's account\./);
+  await p.click('pilotClear');
+  await p.click('pilotClear'); // "Click again to clear the numbers"
+  assert.equal(p.status(), 'The numbers for this website were cleared. The to-do item still open stays until it is done.');
+  const kept = p.local[k.pilot];
+  assert.deepEqual(kept.flags, [pilot.flags[0]], 'the open item stays with its flagging time');
+  assert.deepEqual([kept.posts, kept.fills], [[], []], 'the finished post and the fill are gone');
+
+  // nothing open: the key goes, as before
+  const q = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.pilot]: resolveFlag(pilot, sold.vin, null, { at: '2026-10-01T11:00:00.000Z' }) } });
+  await q.click('pilotClear');
+  await q.click('pilotClear');
+  assert.equal(q.status(), 'The numbers for this website were cleared.');
+  assert.equal(q.local[k.pilot], undefined);
 });

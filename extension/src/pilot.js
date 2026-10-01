@@ -190,6 +190,17 @@ export function resolveFlag(pilot, vin, kind = null, { at = nowIso(), how = 'man
   return touched ? { ...p, flags } : p;
 }
 
+// "Clear the numbers" (the Numbers tab): the finished records go, what is
+// still under way stays. An open to-do flag is the item still on To do, and
+// once synced the dealership's copy of it is closed only by an upload of
+// this flag closed (src/sync.js), so dropping it would leave that copy open
+// on the manager's list for good while the next scan opened a second one. A
+// post attempt the side panel is still on stays so its end is recorded.
+export function clearNumbers(pilot) {
+  const p = withPilotDefaults(pilot);
+  return { ...p, posts: p.posts.filter((a) => !a.endedAt), fills: [], flags: p.flags.filter(flagOpen) };
+}
+
 // ---------- the numbers ----------
 
 export function median(values) {

@@ -433,3 +433,12 @@ test('README\'s unit-test count is the number of tests npm test runs', () => {
   assert.ok(m, 'README.md no longer gives the unit-test count on its npm test line');
   assert.equal(Number(m[1]), count, `README.md says ${m[1]} unit tests, and test/*.test.js holds ${count}`);
 });
+
+// Clear the numbers keeps the to-do items still open (src/pilot.js
+// clearNumbers): the texts that say what it deletes say what it keeps.
+test('every text that says what Clear the numbers deletes says the to-do items still open stay', () => {
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/data-inventory.md', '../docs/help.md']) {
+    const sentences = read(rel).split(/(?<=\.)\s+|\n/);
+    assert.ok(sentences.some((t) => /Clear the numbers/.test(t) && /still open/.test(t)), `${rel} does not say Clear the numbers keeps the to-do items still open`);
+  }
+});

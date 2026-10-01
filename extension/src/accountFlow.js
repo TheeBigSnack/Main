@@ -338,9 +338,11 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
       held = merged;
       return same(merged, current || {}) ? undefined : merged;
     }, storage);
+    // closed flags close here; an open item on one of the person's own
+    // listings that this machine does not hold (cleared here) is taken in
     await updateKey(k.pilot, (current) => {
       const before = withPilotDefaults(current);
-      const merged = mergeFlags(before, answer);
+      const merged = mergeFlags(before, answer, { posted: held, userId });
       return same(merged, before) ? undefined : merged;
     }, storage);
     // A state gone by now means a clear landed after the merge: nothing is

@@ -235,7 +235,7 @@ test('mergeRegistry: the same post read listed and then taken down in one answer
   assert.deepEqual(mergeRegistry({}, { listings: [down, listed] }, { userId: U1 }), {}, 'in either order');
 });
 
-test('mergeFlags: a flag closed on another machine closes here; nothing is added or reopened', () => {
+test('mergeFlags: a flag closed on another machine closes here; nothing is reopened, and without the registry nothing is added', () => {
   let pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [{ vin: VIN_B, name: 'B', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
   const remote = {
     todoItems: [
@@ -256,6 +256,41 @@ test('mergeFlags: a flag closed on another machine closes here; nothing is added
   const again = mergeFlags(pilot, { todoItems: [{ vin: VIN_B, kind: 'price', flagged_at: T(0), done_at: T(50), how: 'detected' }] });
   assert.equal(again.flags.find((f) => f.vin === VIN_B).doneAt, T(10));
   assert.deepEqual(mergeFlags(pilot, null), pilot, 'no answer: the same record back');
+});
+
+// A machine that no longer holds an open item (Clear the numbers before it
+// kept open items, Clear everything for this website) would open a second
+// one at its next scan and close only that one: the first stayed open on
+// the manager's list for good. It takes the item in instead.
+test('mergeFlags: an open item on one of the caller\'s own listings that this machine does not hold is taken in with its flagging time', () => {
+  const posted = {
+    [VIN_A]: { name: 'A', price: 20000, postedAt: T(-60), userId: U1 },
+    [VIN_B]: { name: 'B', price: 21000, postedAt: T(-60) },
+    [VIN_C]: { name: 'C', price: 22000, postedAt: T(-60), userId: U2, mine: false },
+    TESTVIN00000000D4: { name: 'D', price: 23000, postedAt: T(5), userId: U1 },
+  };
+  const remote = {
+    todoItems: [
+      { dealership_id: D, vin: VIN_A.toLowerCase(), kind: 'takeDown', name: 'A', flagged_at: T(0), done_at: null, how: null },
+      { dealership_id: D, vin: VIN_B, kind: 'price', name: 'B', flagged_at: T(0), done_at: null, how: null, from_price: 21000, to_price: 20500 },
+      { dealership_id: D, vin: VIN_C, kind: 'takeDown', name: 'C', flagged_at: T(0), done_at: null, how: null }, // a colleague's listing
+      { dealership_id: D, vin: 'TESTVIN00000000D4', kind: 'takeDown', name: 'D', flagged_at: T(0), done_at: null, how: null }, // flagged before this post of the car
+      { dealership_id: D, vin: VIN_B, kind: 'takeDown', name: 'B', flagged_at: T(1), done_at: T(2), how: 'manual' }, // closed
+      { dealership_id: D, vin: VIN_A, kind: 'bogus', flagged_at: T(0), done_at: null },
+    ],
+  };
+  const merged = mergeFlags(null, remote, { posted, userId: U1 });
+  assert.deepEqual(merged.flags, [
+    { vin: VIN_A, kind: 'takeDown', name: 'A', flaggedAt: T(0) },
+    { vin: VIN_B, kind: 'price', name: 'B', flaggedAt: T(0), from: 21000, to: 20500 },
+  ]);
+  // held already (open or closed here): not taken in twice, never reopened
+  assert.deepEqual(mergeFlags(merged, remote, { posted, userId: U1 }), merged);
+  const closedHere = resolveFlag(merged, VIN_A, null, { at: T(9), how: 'manual' });
+  assert.deepEqual(mergeFlags(closedHere, remote, { posted, userId: U1 }), closedHere);
+  // and it closes the dealership's item it came from
+  const up = syncPayload({ origin: ORIGIN, posted, pilot: closedHere, since: null, userId: U1, now: new Date(T(10)) });
+  assert.deepEqual(up.pilot.flags.filter((f) => f.doneAt).map((f) => [f.vin, f.kind, f.flaggedAt]), [[VIN_A, 'takeDown', T(0)]]);
 });
 
 test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {

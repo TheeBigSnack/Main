@@ -9,11 +9,11 @@ import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP } from './facebook/formMap.js';
-import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
+import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData, clearNumbers } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
@@ -738,7 +738,8 @@ function viewPilot() {
     ${stat('Still open', t.open ? t.openItems.map((o) => `${esc(o.name)} (${hrs(o.hoursOpen)})`).join('<br>') : '0')}
     ${t.cleared ? stat('Cleared by the website (the car came back, or the price went back)', t.cleared) : ''}
   </table>`;
-  const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear the numbers</button></div>`;
+  const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear the numbers</button></div>
+    <p class="hint" id="pilotClearNote">Clear the numbers keeps the to-do items still open, so they close as usual once done.${accountsConfigured() ? ' It does not remove what has already synced to your dealership\'s account.' : ''}</p>`;
   return lead + toolbar + posts + fields + flagTable('Sold cars to take down', s.takeDowns, 'pilotTakeDowns') + flagTable('Price changes', s.priceUpdates, 'pilotPrices');
 }
 
@@ -891,7 +892,7 @@ function viewSettings() {
     </fieldset>
     <div class="actions"><button type="submit" class="plain">Save settings</button><span class="hint" id="saved"></span></div>
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
-      <p class="hint">Scans and your posted list are kept in this browser, separately for each website. When you are signed in, your posted list, post timings, to-do items and scan counts also sync to your dealership's account.</p>
+      <p class="hint">Scans and your posted list are kept in this browser, separately for each website. When you are signed in, your posted list, post timings, to-do items and scan counts also sync to your dealership's account. Clearing this website does not remove them there: while you are signed in, the next sync brings your posted list and its open to-do items back.</p>
       <button type="button" class="danger" data-action="clear">Clear everything for this website</button>
       <p class="hint">Your profile (name, role, closing line, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
       <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>
@@ -1196,9 +1197,23 @@ async function onPanelClick(ev) {
         return;
       }
       pilotClearArmed = false;
-      state.pilot = null;
-      await ownRemove([siteKeys(state.origin).pilot]);
-      setStatus('The numbers for this website were cleared.');
+      // The to-do items still open, and a post under way, stay (src/pilot.js
+      // clearNumbers): the item stays on To do, and its synced copy on the
+      // manager's list closes only when this computer closes it.
+      try {
+        const key = siteKeys(state.origin).pilot;
+        const left = await withLock(key, async () => {
+          const kept = clearNumbers((await chrome.storage.local.get(key))[key]);
+          if (hasPilotData(kept)) await ownSet({ [key]: kept });
+          else await ownRemove([key]);
+          return kept;
+        });
+        state.pilot = hasPilotData(left) ? left : null;
+        const open = left.flags.length;
+        setStatus(`The numbers for this website were cleared.${open ? ` ${open === 1 ? 'The to-do item still open stays' : `The ${open} to-do items still open stay`} until ${open === 1 ? 'it is' : 'they are'} done.` : ''}`);
+      } catch (e) {
+        setStatus(storageErrorText(e), 'error');
+      }
       break;
     case 'clear':
       if (!clearArmed) {
