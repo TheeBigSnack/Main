@@ -28,22 +28,27 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { runSetup, secretsCommands, webhookSecretLines } from './stripe-setup-lib.mjs';
 
+// A flag given with no value (last on the line, `--site-url=`, or followed by
+// another flag) goes in `missing`, so the run refuses instead of treating it
+// as not given.
 export function parseArgs(argv) {
-  const out = { apply: false, live: false, reprice: false, webhookUrl: '', siteUrl: '', productName: 'Lot Current', unknown: [] };
+  const out = { apply: false, live: false, reprice: false, webhookUrl: '', siteUrl: '', productName: 'Lot Current', unknown: [], missing: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    const value = () => {
+    const value = (flag, fallback = '') => {
       const [, inline] = a.split(/=(.*)/s);
-      if (inline !== undefined) return inline;
-      i += 1;
-      return argv[i] ?? '';
+      const next = argv[i + 1];
+      const given = inline !== undefined ? inline : next !== undefined && !next.startsWith('--') ? argv[(i += 1)] : '';
+      if (given.trim()) return given;
+      out.missing.push(flag);
+      return fallback;
     };
     if (a === '--apply') out.apply = true;
     else if (a === '--live') out.live = true;
     else if (a === '--reprice') out.reprice = true;
-    else if ((a === '--webhook-url' || a.startsWith('--webhook-url='))) out.webhookUrl = value();
-    else if ((a === '--site-url' || a.startsWith('--site-url='))) out.siteUrl = value();
-    else if ((a === '--product-name' || a.startsWith('--product-name='))) out.productName = value();
+    else if ((a === '--webhook-url' || a.startsWith('--webhook-url='))) out.webhookUrl = value('--webhook-url');
+    else if ((a === '--site-url' || a.startsWith('--site-url='))) out.siteUrl = value('--site-url');
+    else if ((a === '--product-name' || a.startsWith('--product-name='))) out.productName = value('--product-name', out.productName);
     else out.unknown.push(a);
   }
   return out;
@@ -53,6 +58,10 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.unknown.length) {
     console.error(`unknown option: ${args.unknown.join(' ')} (see the top of scripts/stripe-setup.mjs)`);
+    process.exit(2);
+  }
+  if (args.missing.length) {
+    console.error(`${args.missing.join(', ')} needs a value, so nothing was read or changed (see the top of scripts/stripe-setup.mjs)`);
     process.exit(2);
   }
   const pricing = JSON.parse(readFileSync(new URL('../marketing/pricing.json', import.meta.url), 'utf8'));

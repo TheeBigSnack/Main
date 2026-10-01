@@ -6,6 +6,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   keyMode, webhookUrlFor, wantedObjects, runSetup, secretsCommands, webhookSecretLines, priceMismatch, portalMismatch, webhookMismatch,
   LOOKUP_KEYS, FOUNDING_COUPON_ID, TAG,
@@ -124,7 +126,27 @@ test('stripe setup: key modes, webhook addresses and options', () => {
   assert.equal(webhookUrlFor(HOOK), HOOK);
   for (const bad of ['', 'http://x.supabase.co/functions/v1/billing/webhook', 'https://x.supabase.co/functions/v1/billing', 'https://u:p@x.co/billing/webhook', 'https://x.co/billing/webhook?a=1', 'ABC']) assert.equal(webhookUrlFor(bad), null, bad);
   assert.deepEqual(parseArgs(['--webhook-urlX', 'y'])['unknown'], ['--webhook-urlX', 'y']);
-  assert.deepEqual(parseArgs(['--apply', '--webhook-url', REF, '--site-url=https://a.example', '--nope']), { apply: true, live: false, reprice: false, webhookUrl: REF, siteUrl: 'https://a.example', productName: 'Lot Current', unknown: ['--nope'] });
+  assert.deepEqual(parseArgs(['--apply', '--webhook-url', REF, '--site-url=https://a.example', '--nope']), { apply: true, live: false, reprice: false, webhookUrl: REF, siteUrl: 'https://a.example', productName: 'Lot Current', unknown: ['--nope'], missing: [] });
+});
+
+// A --site-url with nothing after it once counted as no flag at all: the run
+// went on and only noted "no --site-url given".
+test('stripe setup: a flag given with no value is refused before anything is read', () => {
+  for (const argv of [['--site-url'], ['--site-url='], ['--site-url=  '], ['--site-url', '--apply']]) {
+    assert.deepEqual(parseArgs(argv).missing, ['--site-url'], JSON.stringify(argv));
+  }
+  assert.equal(parseArgs(['--site-url', '--apply']).apply, true, 'the next flag is not taken as the value');
+  assert.deepEqual(parseArgs(['--webhook-url', '--product-name=']).missing, ['--webhook-url', '--product-name']);
+  assert.equal(parseArgs(['--product-name=']).productName, 'Lot Current');
+  assert.deepEqual(parseArgs(['--site-url', 'https://a.example', '--product-name', 'Lot Current Test']).missing, []);
+  // the command itself stops with exit 2 and names the flag; no key is set, so nothing could reach Stripe
+  const env = { ...process.env };
+  delete env.STRIPE_SECRET_KEY;
+  delete env.NODE_TEST_CONTEXT;
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL('../scripts/stripe-setup.mjs', import.meta.url)), '--apply', '--site-url'], { encoding: 'utf8', env });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /^--site-url needs a value, so nothing was read or changed/);
+  assert.equal(r.stdout, '');
 });
 
 test('stripe setup: the wanted objects carry the numbers in marketing/pricing.json and the events the webhook handles', () => {
