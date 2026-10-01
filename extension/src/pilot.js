@@ -1,5 +1,6 @@
-// Pilot numbers (Milestone 3): what the pilot agreement lets Lot Current record,
-// kept per dealer website in this browser only:
+// Pilot numbers (Milestone 3): the measures pilot agreement section 2 names,
+// kept per dealer website in this browser (and, while signed in, the post
+// attempts and the to-do flags in the dealership's account, src/sync.js):
 //   - time per post: from the click on Post to "It's posted", including the
 //     salesperson's review and their own Publish click;
 //   - which form fields could not be filled, per fill attempt (field keys
@@ -7,8 +8,14 @@
 //   - how long a sold car or a price change stayed on the salesperson's
 //     listing: from the scan that flagged it to the moment Lot Current saw the
 //     change on the listing or the person ticked the item off.
-// No customer or buyer data, and nothing from Facebook beyond what the posted
-// registry already holds. Everything here is pure; updatePilot at the end is
+// Each record also carries what identifies it, which section 2's list does
+// not spell out (legal/questions-for-attorney.md 9.1) and the privacy
+// policy's Usage numbers row does: the car's VIN and name, a post attempt the
+// salesperson's name from Settings, its queue flag and the reason it stopped,
+// a price change the website's old and new price (test/pilotDisclosure.test.js
+// holds the full field list). No customer or buyer data, and nothing from
+// Facebook beyond what the posted registry already holds. Everything here is
+// pure; updatePilot at the end is
 // the one storage helper the popup, the side panel and the worker share, and
 // it runs under the key's lock (src/storage.js) so those three never
 // overwrite each other's writes. Times are stored as ISO; only the CSV and
