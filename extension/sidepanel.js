@@ -28,7 +28,7 @@ import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/
 import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
-import { watchForListing, isNewListingFromForm } from './facebook/detectPost.js';
+import { watchForListing, isNewListingFromForm, onCreatePage } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
@@ -791,7 +791,7 @@ async function openForm({ probeOnly = false } = {}) {
     await sleep(state.map.settleMs ?? FORM_MAP.settleMs);
     if (dropped()) return;
     if (probeOnly) await runProbe();
-    else await runFill();
+    else await runFill({ opened: true });
   } catch (e) {
     if (dropped()) return;
     state.step = 'review';
@@ -802,14 +802,56 @@ async function openForm({ probeOnly = false } = {}) {
   }
 }
 
-async function runFill() {
+// The page an address shows, without its query: origin and path.
+function pageOf(url) {
+  try {
+    const u = new URL(String(url || ''));
+    return u.origin + u.pathname.replace(/\/+$/, '');
+  } catch (e) {
+    return '';
+  }
+}
+
+// Whether the post's Marketplace tab still shows its form, read just before
+// anything is typed or attached into a form that was opened earlier (Fill
+// again, Fill it in now, each batch of photos, Allow photos). The tab is an
+// ordinary tab: the person can move it to a listing or another listing's
+// edit form, and a tab id kept from before Chrome restarted can name another
+// tab. The form is the map's create page, or the page this post's fill or
+// dry run found the form's fields on. Nothing is typed or attached elsewhere.
+async function formTabShows(tabId) {
+  if (typeof tabId !== 'number') return false;
+  let url = '';
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    url = (tab && tab.url) || '';
+  } catch (e) {
+    return false;
+  }
+  if (!url) return false;
+  if (onCreatePage(url, state.map.createUrl)) return true;
+  const fill = state.fill && ((state.fill.filled || []).length || (state.fill.partial || []).length) ? state.fill.url : '';
+  const probe = state.probe && (state.probe.found || []).length ? state.probe.url : '';
+  return [fill, probe].map(pageOf).filter(Boolean).includes(pageOf(url));
+}
+const FORM_GONE_TEXT = "Nothing was filled: the tab Lot Current opened for this car no longer shows its Marketplace form. Go back to the form in that tab, then try again.";
+
+// opened: the form was opened for this car a moment ago (openForm), and is
+// filled as it loaded; any later fill checks the tab first (formTabShows).
+async function runFill({ opened = false } = {}) {
   const run = flowRun;
   const { map, listing } = state;
+  const tabId = state.fbTabId;
+  if (!opened && !(await formTabShows(tabId))) {
+    if (run === flowRun) setStatus(FORM_GONE_TEXT, 'error');
+    return undefined;
+  }
+  if (run !== flowRun || state.fbTabId !== tabId) return undefined;
   state.message = 'Filling in the form…';
   render();
   let fill;
   try {
-    const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields, match: state.listing.match || {} }] });
+    const [inj] = await chrome.scripting.executeScript({ target: { tabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields, match: state.listing.match || {} }] });
     fill = (inj && inj.result) || { filled: [], partial: [], blocked: [], photoLimit: { value: map.photoLimitDefault, verified: false } };
   } catch (e) {
     // e.g. no permission for this page: the form is open, so let the salesperson copy everything by hand
@@ -819,7 +861,7 @@ async function runFill() {
       photoLimit: { value: map.photoLimitDefault, verified: false },
     };
   }
-  if (run !== flowRun) return; // the post was dropped while the form filled: nothing of it lands in the next car's, and no photos follow
+  if (run !== flowRun || state.fbTabId !== tabId) return; // the post was dropped while the form filled: nothing of it lands in the next car's, and no photos follow
   state.fill = fill;
   state.step = 'publish';
   state.detected = null;
@@ -875,9 +917,13 @@ async function runProbe() {
 }
 
 // only: photos to try again (after Allow photos), added to what is already
-// attached; otherwise the car's photos up to the form's limit.
+// attached; otherwise the car's photos up to the form's limit. Each batch
+// goes to the tab this run began with, only while it still shows the form
+// (formTabShows), and only while this run's photo count is still the one on
+// screen: a post dropped, a Fill again or It didn't post meanwhile ends it.
 async function attachPhotos(only = null) {
   const run = flowRun; // the post was dropped meanwhile: no more photos, and nothing written into the next car's post
+  const tabId = state.fbTabId;
   const limit = (state.fill && state.fill.photoLimit && state.fill.photoLimit.value) || state.map.photoLimitDefault;
   let urls = state.listing.photos.slice(0, limit);
   if (only && state.photos) {
@@ -898,36 +944,44 @@ async function attachPhotos(only = null) {
   const fromFacebook = (u) => isFacebookServer(u);
   for (const url of urls.filter(fromFacebook)) state.photos.failed.push({ url, error: "on Facebook's servers", facebook: true });
   urls = urls.filter((u) => !fromFacebook(u));
+  const mine = state.photos;
+  const current = () => run === flowRun && state.photos === mine && state.fbTabId === tabId;
   render();
-  for (let i = 0; i < urls.length && !state.photos.error; i += 4) {
+  for (let i = 0; i < urls.length && !mine.error; i += 4) {
     const batch = urls.slice(i, i + 4);
     let res;
     try {
       res = await chrome.runtime.sendMessage({ type: 'downloadPhotos', urls: batch, offset: i });
     } catch (e) {
-      if (run !== flowRun) return;
-      state.photos.error = 'Downloading photos failed: ' + ((e && e.message) || e);
+      if (!current()) return;
+      mine.error = 'Downloading photos failed: ' + ((e && e.message) || e);
       break;
     }
-    if (run !== flowRun) return;
+    if (!current()) return;
     const photos = (res && res.photos) || [];
-    for (const p of photos.filter((p) => !p.ok)) state.photos.failed.push({ url: p.url, error: p.error });
+    for (const p of photos.filter((p) => !p.ok)) mine.failed.push({ url: p.url, error: p.error });
     const good = photos.filter((p) => p.ok).map(({ name, type, dataUrl }) => ({ name, type, dataUrl }));
     if (good.length) {
+      const onForm = await formTabShows(tabId);
+      if (!current()) return;
+      if (!onForm) {
+        mine.error = "The tab no longer shows this car's Marketplace form, so the rest of the photos were not attached.";
+        break;
+      }
       try {
-        const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: attachPhotosInPage, args: [state.map, good] });
-        if (run !== flowRun) return;
+        const [inj] = await chrome.scripting.executeScript({ target: { tabId }, func: attachPhotosInPage, args: [state.map, good] });
+        if (!current()) return;
         const r = inj && inj.result;
-        if (r && r.ok) state.photos.attached += r.attached;
-        else state.photos.error = (r && r.reason) || "couldn't attach the photos";
+        if (r && r.ok) mine.attached += r.attached;
+        else mine.error = (r && r.reason) || "couldn't attach the photos";
       } catch (e) {
-        if (run !== flowRun) return;
-        state.photos.error = 'Attaching photos failed: ' + ((e && e.message) || e);
+        if (!current()) return;
+        mine.error = 'Attaching photos failed: ' + ((e && e.message) || e);
       }
     }
     render();
   }
-  state.photos.done = true;
+  mine.done = true;
   render();
   await saveFlow();
 }

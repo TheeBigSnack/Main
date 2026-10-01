@@ -23,7 +23,7 @@ import { draftRecord } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
 import { FORM_MAP, applyOverrides } from '../extension/facebook/formMap.js';
-import { isNewListingFromForm } from '../extension/facebook/detectPost.js';
+import { isNewListingFromForm, onCreatePage } from '../extension/facebook/detectPost.js';
 import { vehicle } from './helpers.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
@@ -670,10 +670,11 @@ test('a post dropped while its form loads, fills or gets its photos, or while it
       listing: buildListingData(v, { dealer: DEALER, description, price: v.price, photos: ['https://img.example.test/1.jpg', 'https://img.example.test/2.jpg'] }),
       fill: null, photos: null,
     };
-    const fns = compileMany(['runFill', 'attachPhotos', 'clearFlow'], {
-      state, flowRun: 0, watcher: null, FORM_MAP, VERSION: '0.0.0',
+    const fns = compileMany(['runFill', 'attachPhotos', 'clearFlow', 'formTabShows', 'pageOf'], {
+      state, flowRun: 0, watcher: null, FORM_MAP, VERSION: '0.0.0', onCreatePage, FORM_GONE_TEXT: 'gone',
       fillFormInPage: () => {}, attachPhotosInPage: () => {},
       chrome: {
+        tabs: { get: async (id) => ({ id, url: FORM_MAP.createUrl }) },
         scripting: { executeScript: (opts) => { calls.push('executeScript ' + (opts.args[1] && opts.args[1].fields ? 'fill' : 'photos')); return wait('inject', [{ result: opts.args[1] && opts.args[1].fields ? { filled: [], partial: [], blocked: [], photoLimit: { value: 20, verified: true } } : { ok: true, attached: 1 } }]); } },
         runtime: { sendMessage: (msg) => { calls.push('download ' + msg.urls.length); return wait('download', { photos: msg.urls.map((url) => ({ ok: true, url, name: 'p.jpg', type: 'image/jpeg', dataUrl: 'data:' })) }); } },
         storage: { local: { remove: async () => {} } },
@@ -719,6 +720,100 @@ test('a post dropped while its form loads, fills or gets its photos, or while it
   answer.resolve({ text: 'B written late', source: 'template', note: '', guardrails: 'B checks' });
   await text;
   assert.deepEqual([state.description, state.guardrails], ['C text', 'C checks'], 'the next car keeps its own text');
+});
+
+// Fill again, Fill it in now, Allow photos and each batch of photos act on
+// a form opened earlier: they go to the tab the run began with, only while
+// that tab still shows the form (formTabShows), and a batch that lands after
+// It didn't post, a Fill again or a new form for the car is dropped. The tab
+// can be moved to another listing's edit form, and a late photo download must
+// never reach another car's form. runFill, attachPhotos and formTabShows as
+// written; Chrome's tabs, downloads and injections are stand-ins.
+function formTabPanel({ photos = 6 } = {}) {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const calls = [];
+  const downloads = [];
+  const tabs = { 77: FORM_MAP.createUrl, 88: FORM_MAP.createUrl };
+  const urls = Array.from({ length: photos }, (_, i) => `https://img.example.test/${i + 1}.jpg`);
+  const state = {
+    origin: 'https://www.example-motors.test', vin: v.vin, step: 'publish', fbTabId: 77, map: FORM_MAP, settings: { basis: 'website' },
+    listing: buildListingData(v, { dealer: DEALER, description, price: v.price, photos: urls }),
+    fill: { url: FORM_MAP.createUrl, filled: [{ key: 'vin' }], partial: [], blocked: [], photoLimit: { value: 20, verified: true } }, photos: null, probe: null,
+  };
+  const fns = compileMany(['runFill', 'attachPhotos', 'formTabShows', 'pageOf'], {
+    state, flowRun: 0, FORM_MAP, VERSION: '0.0.0', onCreatePage, FORM_GONE_TEXT: 'form gone',
+    fillFormInPage: 'fill', attachPhotosInPage: 'photos',
+    chrome: {
+      tabs: { get: async (id) => { calls.push('tabs.get ' + id); if (!(id in tabs)) throw new Error('No tab with id: ' + id); return { id, url: tabs[id] }; } },
+      scripting: {
+        executeScript: async (opts) => {
+          const what = opts.func === 'fill' ? 'fill' : `photos ${opts.args[1].map((f) => f.name).join(',')}`;
+          calls.push(`inject ${opts.target.tabId}: ${what}`);
+          return [{ result: opts.func === 'fill' ? { url: tabs[opts.target.tabId], filled: [{ key: 'vin' }], partial: [], blocked: [], photoLimit: { value: 20, verified: true } } : { ok: true, attached: opts.args[1].length } }];
+        },
+      },
+      runtime: { sendMessage: (msg) => new Promise((resolve) => downloads.push(() => resolve({ photos: msg.urls.map((url) => ({ ok: true, url, name: url.split('/').pop(), type: 'image/jpeg', dataUrl: 'data:' })) }))) },
+    },
+    render: () => {}, saveFlow: async () => {}, pilotNote: async () => {}, noteFill: (p) => p, notePostStep: (p) => p,
+    setStatus: (text, kind) => calls.push(`status${kind ? '(' + kind + ')' : ''}: ${text}`),
+    startWatcher: () => calls.push('startWatcher'), photoPatterns: () => [], refusedPhotoServers: new Set(), patternCovers: () => false, isFacebookServer: () => false,
+  });
+  const tick = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+  return { state, calls, fns, tabs, tick, next: async () => { await tick(); downloads.shift()(); await tick(); } };
+}
+
+test('photos and later fills go only to this car\'s form, in the tab the run began with, while it still shows the form', async () => {
+  const injected = (p) => p.calls.filter((c) => c.startsWith('inject'));
+
+  // the person moves the form's tab to another listing's edit form between two batches
+  const moved = formTabPanel();
+  const a = moved.fns.attachPhotos();
+  await moved.next();
+  moved.tabs[77] = 'https://www.facebook.com/marketplace/edit/?listing_id=111';
+  await moved.next();
+  await a;
+  assert.deepEqual(injected(moved), ['inject 77: photos 1.jpg,2.jpg,3.jpg,4.jpg'], 'nothing attached to the other listing');
+  assert.match(moved.state.photos.error, /no longer shows this car's Marketplace form/);
+  assert.equal(moved.state.photos.done, true);
+
+  // It didn't post, then Open the Marketplace form again: the first run's late batch never reaches the new form
+  const again = formTabPanel();
+  const first = again.fns.attachPhotos();
+  await again.next();
+  Object.assign(again.state, { photos: null, fbTabId: 88 }); // notPosted, then a new tab for the car
+  await again.next();
+  await first; // no error thrown on the dropped photo count
+  assert.deepEqual(injected(again), ['inject 77: photos 1.jpg,2.jpg,3.jpg,4.jpg'], 'the late batch is dropped, not attached to tab 88');
+  assert.equal(again.state.photos, null);
+
+  // Fill again (and Fill it in now) on a tab that shows something else: nothing typed
+  const elsewhere = formTabPanel();
+  elsewhere.tabs[77] = 'https://www.facebook.com/marketplace/item/111/';
+  await elsewhere.fns.runFill();
+  assert.deepEqual(injected(elsewhere), []);
+  assert.ok(elsewhere.calls.includes('status(error): form gone'));
+  delete elsewhere.tabs[77]; // closed, or an id from before Chrome restarted
+  await elsewhere.fns.runFill();
+  assert.deepEqual(injected(elsewhere), []);
+
+  // on the form (the map's create page, or the page the fill found the form on): filled, into that tab
+  const onForm = formTabPanel({ photos: 1 });
+  const filling = onForm.fns.runFill();
+  await onForm.next();
+  await filling;
+  assert.deepEqual(injected(onForm), ['inject 77: fill', 'inject 77: photos 1.jpg']);
+  const rewritten = formTabPanel({ photos: 0 });
+  rewritten.tabs[77] = 'https://www.facebook.com/marketplace/create/item?category=vehicles';
+  rewritten.state.fill.url = 'https://www.facebook.com/marketplace/create/item?category=vehicles&step=1';
+  await rewritten.fns.runFill();
+  assert.deepEqual(injected(rewritten), ['inject 77: fill'], 'the page the fill found the form on counts as the form');
+
+  // a form opened a moment ago for this car is filled as it loaded, with no check first
+  const opened = formTabPanel({ photos: 0 });
+  opened.tabs[77] = 'https://www.facebook.com/marketplace/create/item';
+  await opened.fns.runFill({ opened: true });
+  assert.deepEqual(opened.calls.filter((c) => c.startsWith('inject') || c.startsWith('tabs.get')), ['inject 77: fill']);
 });
 
 // A post request (the popup's Post, its Continue in the side panel, the queue

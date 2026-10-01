@@ -340,6 +340,7 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
     hostList: (patterns) => patterns.map(patternHost).join(', '),
     sleep: async () => {},
     flowRun: 0, // the post under way (sidepanel.js clearFlow); nothing drops it here
+    formTabShows: async () => true, // the form's tab still shows the form (tested in panelFlow.test.js)
     document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
     status: '',
   };
