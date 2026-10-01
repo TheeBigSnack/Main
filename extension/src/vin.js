@@ -64,39 +64,50 @@ export function modelYearFromVin(vin) {
 
 // Manufacturer groups by the first characters of the VIN (the WMI). Not
 // every code in the world, just enough to catch a wrong make on a US lot.
-// More specific prefixes come first.
+// Each row lists plain prefixes, and the longest prefix that matches wins,
+// whatever the row order: a plant code such as 3CZ (Honda, Mexico) or 1YV
+// (Mazda, AutoAlliance) is never read as the shorter 3C (Stellantis) or 1Y
+// (General Motors). A plant that builds for more than one maker lists every
+// make it builds (KNM: Renault Samsung, which built the Nissan Rogue; 3MY:
+// Mazda de Mexico, which built the Toyota Yaris sedan and the Scion iA; JF1:
+// Subaru, which builds the Toyota 86 and the Scion FR-S).
 export const MANUFACTURERS = Object.freeze([
-  [/^(1HD|5HD)/, 'Harley-Davidson', ['harley-davidson', 'harley davidson', 'harley']],
-  [/^(5NP|5NM|KMH|KMT|KM8|KNA|KND|KNM|5XY|5XX|3KP|KMU|5NT)/, 'Hyundai Motor Group', ['hyundai', 'kia', 'genesis']],
-  [/^(1N|3N|JN|5N1|5N3)/, 'Nissan', ['nissan', 'infiniti', 'datsun']],
-  [/^(1C|2C|3C|1B|2B|3B|1A|1J|1P|2P|3P|ZFA|ZAR|ZAC)/, 'Stellantis', ['chrysler', 'dodge', 'jeep', 'ram', 'fiat', 'alfa romeo', 'plymouth', 'eagle']],
-  [/^(1F|2F|3F|1L|5L|1ZV|1M)/, 'Ford', ['ford', 'lincoln', 'mercury']],
-  [/^(1G|2G|3G|1Y|5Y4|W06)/, 'General Motors', ['chevrolet', 'chevy', 'gmc', 'buick', 'cadillac', 'pontiac', 'saturn', 'hummer', 'oldsmobile', 'saab']],
-  [/^(1H|2H|19X|19U|5FN|5FP|5FR|5J6|5J8|7FA|JH|SHH|SHS|3CZ|3HG|2HN|2HK|2HG)/, 'Honda', ['honda', 'acura']],
-  [/^(4T|5T|JT|2T|3TM|3TY|JTD|JTH|JTJ|JTE|JTN|5YF|58A|JF1|JF2)/, 'Toyota', ['toyota', 'lexus', 'scion', 'subaru']],
-  [/^(JF|4S)/, 'Subaru', ['subaru']],
-  [/^(JM|3MZ|3MY|1YV|4F|7MZ|JM1|JM3)/, 'Mazda', ['mazda']],
-  [/^(WBA|WBS|WBX|WBY|5UX|5YM|4US|WMW|WB1|3MW)/, 'BMW', ['bmw', 'mini']],
-  [/^(WDD|WDC|WDB|W1K|W1N|W1V|4JG|55S|WDF|W1Z)/, 'Mercedes-Benz', ['mercedes-benz', 'mercedes']],
-  [/^(WVW|WVG|3VW|1VW|WV1|WV2|WV3|9BW)/, 'Volkswagen', ['volkswagen', 'vw']],
-  [/^(WAU|WA1|WUA|TRU|WAP)/, 'Audi', ['audi']],
-  [/^(YV|LYV|7JR|LVY)/, 'Volvo', ['volvo']],
-  [/^(SAJ|SAL|SAD|SAT)/, 'Jaguar Land Rover', ['jaguar', 'land rover', 'range rover']],
-  [/^(5YJ|7SA|7G2|XP7|LRW)/, 'Tesla', ['tesla']],
-  [/^(JYA|JY4)/, 'Yamaha', ['yamaha']],
-  [/^(JKA|JKB|JKS)/, 'Kawasaki', ['kawasaki']],
-  [/^(JS1|JS3|2S3)/, 'Suzuki', ['suzuki']],
-  [/^ZDM/, 'Ducati', ['ducati']],
-  [/^56K/, 'Indian', ['indian']],
-  [/^SMT/, 'Triumph', ['triumph']],
-  [/^(ZD4|ZAP)/, 'Piaggio', ['aprilia', 'vespa', 'moto guzzi']],
-  [/^(WB1|WB3)/, 'BMW Motorrad', ['bmw', 'bmw motorrad']],
+  [['1HD', '5HD'], 'Harley-Davidson', ['harley-davidson', 'harley davidson', 'harley']],
+  [['5NP', '5NM', 'KMH', 'KMT', 'KM8', 'KNA', 'KND', '5XY', '5XX', '3KP', 'KMU', '5NT'], 'Hyundai Motor Group', ['hyundai', 'kia', 'genesis']],
+  [['KNM'], 'Renault Samsung', ['nissan', 'renault']],
+  [['1N', '3N', 'JN', '5N1', '5N3'], 'Nissan', ['nissan', 'infiniti', 'datsun']],
+  [['1C', '2C', '3C', '1B', '2B', '3B', '1A', '1J', '1P', '2P', '3P', 'ZFA', 'ZAR', 'ZAC'], 'Stellantis', ['chrysler', 'dodge', 'jeep', 'ram', 'fiat', 'alfa romeo', 'plymouth', 'eagle']],
+  [['1F', '2F', '3F', '1L', '5L', '1ZV', '1M'], 'Ford', ['ford', 'lincoln', 'mercury']],
+  [['1G', '2G', '3G', '1Y', '5Y4', 'W06', '2CN', '2CK', '2CT'], 'General Motors', ['chevrolet', 'chevy', 'gmc', 'buick', 'cadillac', 'pontiac', 'saturn', 'hummer', 'oldsmobile', 'saab']],
+  [['1H', '2H', '19X', '19U', '5FN', '5FP', '5FR', '5J6', '5J8', '7FA', 'JH', 'SHH', 'SHS', '3CZ', '3HG', '2HN', '2HK', '2HG'], 'Honda', ['honda', 'acura']],
+  [['4T', '5T', 'JT', '2T', '3TM', '3TY', 'JTD', 'JTH', 'JTJ', 'JTE', 'JTN', '5YF', '58A'], 'Toyota', ['toyota', 'lexus', 'scion', 'subaru']],
+  [['JF', '4S'], 'Subaru', ['subaru', 'toyota', 'scion']],
+  [['JM', '3MZ', '1YV', '4F', '7MZ', 'JM1', 'JM3'], 'Mazda', ['mazda']],
+  [['3MY'], 'Mazda', ['mazda', 'toyota', 'scion']],
+  [['WBA', 'WBS', 'WBX', 'WBY', '5UX', '5YM', '4US', 'WMW', '3MW'], 'BMW', ['bmw', 'mini']],
+  [['WDD', 'WDC', 'WDB', 'W1K', 'W1N', 'W1V', '4JG', '55S', 'WDF', 'W1Z'], 'Mercedes-Benz', ['mercedes-benz', 'mercedes']],
+  [['WVW', 'WVG', '3VW', '1VW', 'WV1', 'WV2', 'WV3', '9BW'], 'Volkswagen', ['volkswagen', 'vw']],
+  [['WAU', 'WA1', 'WUA', 'TRU', 'WAP'], 'Audi', ['audi']],
+  [['YV', 'LYV', '7JR', 'LVY'], 'Volvo', ['volvo']],
+  [['SAJ', 'SAL', 'SAD', 'SAT'], 'Jaguar Land Rover', ['jaguar', 'land rover', 'range rover']],
+  [['5YJ', '7SA', '7G2', 'XP7', 'LRW'], 'Tesla', ['tesla']],
+  [['JYA', 'JY4'], 'Yamaha', ['yamaha']],
+  [['JKA', 'JKB', 'JKS'], 'Kawasaki', ['kawasaki']],
+  [['JS1', 'JS3', '2S3'], 'Suzuki', ['suzuki']],
+  [['ZDM'], 'Ducati', ['ducati']],
+  [['56K'], 'Indian', ['indian']],
+  [['SMT'], 'Triumph', ['triumph']],
+  [['ZD4', 'ZAP'], 'Piaggio', ['aprilia', 'vespa', 'moto guzzi']],
+  [['WB1', 'WB3'], 'BMW Motorrad', ['bmw', 'bmw motorrad']],
 ]);
 
 export function manufacturerFromVin(vin) {
   const v = normalizeVin(vin);
-  for (const [re, group, makes] of MANUFACTURERS) if (re.test(v)) return { group, makes };
-  return null;
+  let best = null;
+  for (const [prefixes, group, makes] of MANUFACTURERS) {
+    for (const p of prefixes) if (v.startsWith(p) && (!best || p.length > best.prefix.length)) best = { prefix: p, group, makes };
+  }
+  return best ? { group: best.group, makes: best.makes } : null;
 }
 
 const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();

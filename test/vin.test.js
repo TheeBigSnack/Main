@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { vinCheckDigit, checkVinFormat, modelYearFromVin, manufacturerFromVin, localVinCheck, decodeVinOnline, compareVin, normalizeVin } from '../extension/src/vin.js';
+import { vinCheckDigit, checkVinFormat, modelYearFromVin, manufacturerFromVin, MANUFACTURERS, localVinCheck, decodeVinOnline, compareVin, normalizeVin } from '../extension/src/vin.js';
 import { fixtures, vehicle } from './helpers.js';
 
 test('every real VIN from the site has a correct check digit and decodes to its model year', () => {
@@ -41,6 +41,41 @@ test('manufacturer groups from the VIN', () => {
   assert.equal(manufacturerFromVin('5N1AT2MV0FC000000').group, 'Nissan');
   assert.equal(manufacturerFromVin('1G1ZD5ST0JF000000').group, 'General Motors');
   assert.equal(manufacturerFromVin('XXXXXXXXXXXXXXXXX'), null);
+});
+
+test('a plant code is read by its longest prefix: common cars built where another maker\'s short code matches are not flagged', () => {
+  // each VIN has a correct check digit and model year
+  const agree = [
+    ['KNMAT2MV6FP500001', 'Nissan', 2015, 'Renault Samsung'], // Rogue built in Busan
+    ['3CZRU6H55GM700001', 'Honda', 2016, 'Honda'], // HR-V built in Mexico, not Stellantis's 3C
+    ['1YVHP80C495M00001', 'Mazda', 2009, 'Mazda'], // Mazda6 from AutoAlliance, not GM's 1Y
+    ['3MYDLBYV4KY500001', 'Toyota', 2019, 'Mazda'], // Yaris sedan built by Mazda de Mexico
+    ['3MYDLBZV1GY100001', 'Scion', 2016, 'Mazda'], // Scion iA, same plant
+    ['2CNALDEW8A6200001', 'Chevrolet', 2010, 'General Motors'], // Equinox from GM's Canadian plant, not Stellantis's 2C
+    ['2CTALDEW7A6200001', 'GMC', 2010, 'General Motors'], // Terrain, same plant
+    ['JF1ZNAA10D1700001', 'Scion', 2013, 'Subaru'], // FR-S built by Subaru
+  ];
+  for (const [vin, make, year, group] of agree) {
+    const r = localVinCheck({ vin, make, year });
+    assert.equal(r.ok, true, `${make} ${vin}: ${r.problems.map((p) => p.detail).join('; ')}`);
+    assert.equal(r.manufacturer, group, vin);
+  }
+  // the plants' own makes still agree, and a make none of them builds is still flagged
+  assert.equal(localVinCheck({ vin: '3MYDLBYV4KY500001', make: 'Mazda', year: 2019 }).ok, true);
+  assert.equal(localVinCheck({ vin: 'KNMAT2MV6FP500001', make: 'Kia', year: 2015 }).ok, false);
+  assert.equal(localVinCheck({ vin: '3CZRU6H55GM700001', make: 'Jeep', year: 2016 }).ok, false);
+});
+
+test('no prefix in the manufacturer table is hidden by another row', () => {
+  const owner = new Map();
+  for (const [prefixes, group] of MANUFACTURERS) {
+    for (const p of prefixes) {
+      assert.ok(!owner.has(p) || owner.get(p) === group, `${p} is listed for both ${owner.get(p)} and ${group}`);
+      owner.set(p, group);
+      const vin = (p + '0'.repeat(17)).slice(0, 17);
+      assert.equal(manufacturerFromVin(vin).group, group, `${p} resolves to ${group}, the row that lists it`);
+    }
+  }
 });
 
 test('local check: the Ram agrees on year and maker; a wrong year or make is flagged', () => {
