@@ -364,7 +364,11 @@ create policy "members read their dealership's rewrite usage"
 -- with code P0002, so a guess learns nothing, not even that a code once
 -- existed. Every miss is counted in invite_misses, and after 10 misses
 -- inside an hour the function raises 'too many attempts; try again in an
--- hour' (P0005) before it looks anything up.
+-- hour' (P0005) before it looks anything up. One account's calls take
+-- turns at the throttle (a transaction lock per account, taken before the
+-- count): calls sent together would otherwise each count before any of
+-- them had written its miss, and every one of them would be looked up
+-- (supabase/tests/concurrency.sql).
 -- The miss is answered, not raised: PostgREST runs the call in one
 -- transaction and rolls it back on an error, which would take the row that
 -- counts the miss with it. So the function sets response.status to 400 and
@@ -391,9 +395,13 @@ begin
     raise exception 'not signed in' using errcode = '42501';
   end if;
 
-  -- the throttle, before anything is looked up; misses older than an hour
-  -- no longer count and are dropped, everyone's, so an account that never
-  -- tries again does not keep its misses
+  -- the throttle, before anything is looked up, one call of this account at
+  -- a time: the lock is held until this call's transaction ends, so the
+  -- next call's count, a statement that starts after it gets the lock, sees
+  -- this call's miss. Misses older than an hour no longer count and are
+  -- dropped, everyone's, so an account that never tries again does not
+  -- keep its misses
+  perform pg_advisory_xact_lock(hashtext('redeem_invite'), hashtext(uid::text));
   delete from public.invite_misses where invite_misses.at < now() - interval '1 hour';
   select count(*) into misses from public.invite_misses where invite_misses.user_id = uid;
   if misses >= 10 then
