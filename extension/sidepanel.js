@@ -53,6 +53,7 @@ const state = {
   settings: null, posted: {}, boilerplate: [], siteName: '',
   vehicle: null, price: null,
   readAt: null, // when the car was last read from the website (ms): a fill reads it again when this is old (readAgainIfStale)
+  opening: false, // Open the Marketplace form is running its checks (openForm): a second click meanwhile does nothing
   description: '', descriptionSource: 'template', note: '', guardrails: null,
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
@@ -656,27 +657,36 @@ function fillBlocker(description) {
   return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. Fix the description (or use Reset to template) first.`;
 }
 
+// One form per click: the checks below can take a trip to the website (the
+// car read again) while the button is still on screen, so a second click
+// then does nothing, and neither does one that lands once the form is open.
 async function openForm({ probeOnly = false } = {}) {
-  if (!probeOnly && !dealerNamed()) return setStatus(NO_DEALER_TEXT, 'error');
-  const k = siteKeys(state.origin);
-  const fresh = await chrome.storage.local.get([k.posted, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
-  state.posted = fresh[k.posted] || state.posted;
-  state.syncState = fresh[k.sync] || state.syncState;
-  const cap = dailyCap();
-  if (cap.reached) {
-    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
-    return;
-  }
-  const box = $('description');
-  if (box) state.description = box.value;
-  if (!probeOnly && !(await readAgainIfStale())) return undefined;
-  const blocked = probeOnly ? '' : fillBlocker(state.description);
-  if (blocked) {
-    // the checks line shows the same problems, current with what is typed
-    state.guardrails = runGuardrails(state.description, ctx());
-    const checks = $('checks');
-    if (checks) checks.outerHTML = checksHtml(state.guardrails);
-    return setStatus(blocked, 'error');
+  if (state.opening || state.step === 'filling' || state.step === 'publish') return undefined;
+  state.opening = true;
+  try {
+    if (!probeOnly && !dealerNamed()) return setStatus(NO_DEALER_TEXT, 'error');
+    const k = siteKeys(state.origin);
+    const fresh = await chrome.storage.local.get([k.posted, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
+    state.posted = fresh[k.posted] || state.posted;
+    state.syncState = fresh[k.sync] || state.syncState;
+    const cap = dailyCap();
+    if (cap.reached) {
+      setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+      return undefined;
+    }
+    const box = $('description');
+    if (box) state.description = box.value;
+    if (!probeOnly && !(await readAgainIfStale())) return undefined;
+    const blocked = probeOnly ? '' : fillBlocker(state.description);
+    if (blocked) {
+      // the checks line shows the same problems, current with what is typed
+      state.guardrails = runGuardrails(state.description, ctx());
+      const checks = $('checks');
+      if (checks) checks.outerHTML = checksHtml(state.guardrails);
+      return setStatus(blocked, 'error');
+    }
+  } finally {
+    state.opening = false; // released before the step below moves on, with no wait in between
   }
   state.guardrails = runGuardrails(state.description, ctx());
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });

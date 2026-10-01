@@ -502,3 +502,39 @@ test('Open the Marketplace form and every fill read the car again first; a post 
   const runFill = new Function('state', 'readAgainIfStale', 'fillBlocker', 'chrome', `${fnText('runFill')}\nreturn runFill;`)(state, stale, never('fillBlocker'), { scripting: { executeScript: never('executeScript') } });
   assert.equal(await runFill(), undefined);
 });
+
+test('one click on Open the Marketplace form opens one form: a second click while the checks run, or once the form is open, does nothing', async () => {
+  let release;
+  const reads = [];
+  const built = [];
+  const state = { origin: 'https://www.example-dealer.test', settings: { dealer: { name: 'Example Motors' } }, description: 'A fine truck. Sales consultant at Example Motors.', posted: {}, syncState: null, step: 'review' };
+  const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'checksHtml', 'buildListingData', 'pickedPhotos', 'render', ...PASSING_CHECKS_NAMES, `${dealerChecks()}\n${fnText('openForm')}\nreturn openForm;`)(
+    state, (text) => assert.equal(text, '', 'no message: nothing stops this click'), () => ({ posted: 'p', sync: 's' }), { storage: { local: { get: async () => ({}) } } }, () => ({ reached: false }), () => null, () => '',
+    () => { built.push(state.description); return {}; },
+    () => [],
+    () => { throw new Error('rendered'); }, // the step after the listing is built: the form opens
+    PASSING_CHECKS[0], PASSING_CHECKS[1], PASSING_CHECKS[2],
+    () => { reads.push(1); return new Promise((resolve) => { release = resolve; }); }, // the car read again: a trip to the website
+  );
+  const first = openForm().catch((e) => e.message);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(reads.length, 1, 'the first click is reading the car again');
+  assert.equal(await openForm(), undefined, 'a second click meanwhile does nothing');
+  assert.equal(reads.length, 1);
+  release(true);
+  assert.equal(await first, 'rendered');
+  assert.deepEqual([built.length, state.step, state.opening], [1, 'filling', false], 'one listing built, one form opening');
+  assert.equal(await openForm(), undefined, 'a click that lands once the form is opening does nothing');
+  state.step = 'publish';
+  assert.equal(await openForm(), undefined, 'nor once it is filled');
+  assert.deepEqual([reads.length, built.length], [1, 1]);
+  // a click whose checks stopped it leaves the button working
+  state.step = 'review';
+  release = null;
+  const stopped = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'checksHtml', 'buildListingData', 'pickedPhotos', ...PASSING_CHECKS_NAMES, `${dealerChecks()}\n${fnText('openForm')}\nreturn openForm;`)(
+    state, never('setStatus'), () => ({ posted: 'p', sync: 's' }), { storage: { local: { get: async () => ({}) } } }, () => ({ reached: false }), () => null, () => '', never('buildListingData'), never('pickedPhotos'),
+    PASSING_CHECKS[0], PASSING_CHECKS[1], PASSING_CHECKS[2], async () => false,
+  );
+  assert.equal(await stopped(), undefined);
+  assert.equal(state.opening, false);
+});
