@@ -76,7 +76,7 @@ Press **Submit for review** only when `npm run store-check -- --strict` passes a
 | Spam and abuse | Sending messages or posts for the user without letting them confirm the content | The person reviews every field and clicks Publish themselves; the extension has no code to publish (`test/posting.test.js`) |
 | Developer Agreement and third-party terms | Google's agreement forbids an item that knowingly violates a third party's terms of service; Meta's Terms prohibit automated access without permission | Not something the code can settle: it is on the attorney's list (`legal/questions-for-attorney.md`, section 1) and must be answered before the owner accepts the agreement and submits |
 | Use of permissions | Asking for more than the feature needs | Every permission is justified per pattern, and `test/manifest.test.js` fails on any permission not in the approved list. Dropping the static photo host before the store release is the owner's open decision (`store/listing.md`, Before submitting) |
-| Remote code, obfuscation | Code from another host, or code made hard to read | None: plain, unminified ES modules, checked by `npm run store-check` |
+| Remote code, obfuscation | Code from another host, or code made hard to read | None: plain, unminified ES modules. `npm run store-check` scans the source text for the usual forms, which cannot catch every one (the remote-code answer above says which it looks for) |
 | Missing privacy policy or mismatched disclosures | User data handled without a matching policy | The policy, the store answers and the data inventory follow one another; the policy is published as final only after the attorney's approval |
 
 ## After a rejection

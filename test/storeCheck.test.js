@@ -301,6 +301,10 @@ test('the remote-code answer says what store-check scans for, not that it catche
   assert.ok(row, 'store/submission.md has the remote-code row');
   assert.doesNotMatch(row, /\b(?:fails on|catches|finds) (?:any|every|all)\b/i, 'a source-text scan cannot promise to catch every form');
   assert.match(row, /cannot catch every form/);
+  // the review-risk table says the same, not that the check settles it
+  const risk = doc.split('\n').find((l) => l.startsWith('| Remote code, obfuscation'));
+  assert.ok(risk, 'store/submission.md has the remote-code review risk');
+  assert.match(risk, /cannot catch every one/);
   const f = findRemoteCode(new Map([['x.js', Buffer.from("const s = document.createElement('script');\n")]]));
   assert.equal(f.length, 1, 'a script element built in code, which the answer names, is caught');
 });
