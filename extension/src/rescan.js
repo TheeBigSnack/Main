@@ -196,9 +196,10 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
       if (was && !nowPrice) {
         out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, text: `Website no longer shows a price (${now.priceLabel || 'call for price'})` });
       } else if (was && nowPrice && was !== nowPrice) {
-        // why 'basis': the price to post changed in Settings, not on the website (basisOnlyChange)
+        // why 'basis': the price to post changed in Settings, not on the website (basisOnlyChange).
+        // basis: the one `to` was taken at, recorded with it when the item is acted on, even after Settings changes it
         const why = mine && basisOnlyChange(posted[vin], now, basis) ? { why: 'basis' } : {};
-        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was, ...why });
+        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was, basis: normBasis(basis), ...why });
       }
     }
 

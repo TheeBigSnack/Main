@@ -148,6 +148,18 @@ export function priceStepModel(entries, basis = 'website') {
   };
 }
 
+// Said before "Price to post" changes (Settings and set-up's Price step),
+// given how many of the person's own listings this website has. Only a
+// listing whose car shows a lower second price moves: a car with none is
+// posted at the main price under either choice. Plain text, no markup.
+export function basisChangeWarning(n) {
+  if (!n) return '';
+  const lead = n === 1
+    ? 'You have one posted listing on this website. If its car shows a lower second price, changing the price to post changes its price too: after the next rescan it is listed'
+    : `You have ${n} posted listings on this website. Changing the price to post changes the price of each one whose car shows a lower second price: after the next rescan each of those is listed`;
+  return `${lead} under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.`;
+}
+
 export async function loadProfile(storage) {
   try {
     const area = storage || chrome.storage.sync;

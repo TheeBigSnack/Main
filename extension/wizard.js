@@ -12,7 +12,7 @@
 // keeps it).
 
 import { performScan, rememberSite } from './src/scanRunner.js';
-import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
+import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeWarning } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation, storeNames, matchStore } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -270,7 +270,7 @@ export function wizardHtml() {
         ? `<label class="block"><input type="radio" name="wizBasis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> The website's main price${ex ? ` (e.g. ${money(ex.price)} "${esc(ex.priceLabel)}")` : ''}</label>
         <label class="block"><input type="radio" name="wizBasis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> The lower second price the website shows${ex ? ` (e.g. ${money(ex.priceBeforeFees)}; usually the price before the doc fee)` : ''}</label>
         <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>${wiz.ownListings ? `
-        <p class="hint" id="wizBasisWarning">You have ${wiz.ownListings === 1 ? 'one posted listing' : `${wiz.ownListings} posted listings`} on this website. Changing the price to post changes ${wiz.ownListings === 1 ? 'its' : 'their'} price too: each one is then listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.</p>` : ''}`
+        <p class="hint" id="wizBasisWarning">${basisChangeWarning(wiz.ownListings)}</p>` : ''}`
         : `<p>Cars are posted at the website's main price; this website shows no lower second price to choose instead.</p>`;
       const gapNote = ex ? `<p class="hint">On this website the main price is usually ${money(pm.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>` : '';
       return `${progress}<h3>The price to post</h3>

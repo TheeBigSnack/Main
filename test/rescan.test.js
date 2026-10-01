@@ -122,6 +122,30 @@ test('"before fees" price basis compares the price without the doc fee', () => {
 // old basis to the new one: the listings must follow the chosen basis, so
 // each still comes up to edit, but nothing changed on the website. Those
 // items carry why 'basis', and they are never counted as price changes.
+// A price item names the basis its new price was taken at. Acted on after
+// "Price to post" changed (the item was listed before), the listing is
+// recorded at that basis, and the next scan under the new one sees a basis
+// change, not a website price change.
+test('a price item carries the basis its price was taken at, so acting on it after a basis change is not counted as a website change', () => {
+  const s = snapshot(LOT);
+  const posted = markPosted({}, s.vehicles[VIN.ram], 'website', '2026-09-26T21:00:00.000Z'); // $27,163
+  const dropped = structuredClone(s);
+  Object.assign(dropped.vehicles[VIN.ram], { price: 26663, priceBeforeFees: 26173 }); // the website dropped $500, still with a lower second price
+  const item = diffScans(s, dropped, { posted, confirm: confirmed(), basis: 'website' }).priceUpdates.find((u) => u.vin === VIN.ram);
+  assert.deepEqual([item.from, item.to, item.basis, item.why], [27163, 26663, 'website', undefined]);
+  assert.equal(diffScans(s, dropped, { posted, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates.find((u) => u.vin === VIN.ram).basis, 'beforeFees');
+
+  // the basis changes to beforeFees; the person then acts on the item listed before
+  const updated = markPriceUpdated(posted, VIN.ram, item.to, '2026-09-27T10:00:00.000Z', item.basis);
+  const next = diffScans(dropped, dropped, { posted: updated, confirm: confirmed(), basis: 'beforeFees' });
+  assert.deepEqual(next.priceUpdates.map((u) => [u.from, u.to, u.why]), [[26663, 26173, 'basis']], 'only the move to the new basis is left');
+  assert.equal(noteFlags(null, next).flags.filter((f) => f.kind === 'price').length, 0, 'never counted as a price change');
+
+  // recorded with the basis in force instead, the same listing reads as a website change that never happened
+  const wrong = markPriceUpdated(posted, VIN.ram, item.to, '2026-09-27T10:00:00.000Z', 'beforeFees');
+  assert.equal(diffScans(dropped, dropped, { posted: wrong, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates[0].why, undefined);
+});
+
 test('a price basis changed in Settings is told apart from a website price change, and never counted as one', () => {
   const s = snapshot(LOT);
   const ram = s.vehicles[VIN.ram]; // $27,163, or $26,673 before the fee

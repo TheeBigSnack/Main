@@ -2,7 +2,7 @@ import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, basisOnlyChange, stampBasis } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeWarning, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -468,7 +468,9 @@ function viewTodo(l) {
   const all = d?.priceUpdates || [];
   const updates = all.filter((p) => p.why !== 'basis');
   const basisChanges = all.filter((p) => p.why === 'basis'); // src/rescan.js basisOnlyChange: only the price to post changed
-  const priceButtons = (p) => `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`;
+  // data-basis: the basis the scan took `to` at, recorded with it even when Settings changed since (buttonBasis)
+  const basisAttr = (p) => (p.basis ? ` data-basis="${esc(p.basis)}"` : '');
+  const priceButtons = (p) => `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}"${basisAttr(p)} title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}"${basisAttr(p)}>Updated</button></span>`;
   if (updates.length) {
     parts.push(
       section('Update price', 'warn', updates.map((p) =>
@@ -869,15 +871,25 @@ function viewSettingsWithoutSite() {
   </form>`;
 }
 
+// The basis a price button's price was taken at: a To do item's own (the
+// scan's, src/rescan.js diffScans), so acting on an item listed before
+// "Price to post" changed records the price with the basis it really is;
+// else (My listings, priced from this scan) the basis in force now.
+function buttonBasis(btn) {
+  const b = btn && btn.dataset && btn.dataset.basis;
+  return b === 'website' || b === 'beforeFees' ? b : state.settings?.basis || 'website';
+}
+
 // The person's own listings on this website (a colleague's are theirs to keep up).
 const ownListings = () => Object.values(state.posted || {}).filter((p) => p && p.mine !== false).length;
 
 // Said before a change of "Price to post" is saved: each listing posted
 // under the old choice has to be edited by hand to the new one.
+// Drawn only beside the choice of the lower second price: on a website that
+// shows none there is no other basis to change to.
 function basisWarning() {
-  const n = ownListings();
-  if (!n) return '';
-  return `<p class="hint" id="basisWarning">You have ${n === 1 ? 'one posted listing' : `${n} posted listings`} on this website. Changing the price to post changes ${n === 1 ? 'its' : 'their'} price too: after the next rescan each one is listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.</p>`;
+  const text = basisChangeWarning(ownListings());
+  return text ? `<p class="hint" id="basisWarning">${text}</p>` : '';
 }
 
 function viewSettings() {
@@ -924,10 +936,10 @@ function viewSettings() {
       <label><input type="radio" name="basis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> <span>The website's main price${example ? ` (e.g. ${money(example.price)} "${esc(example.priceLabel)}")` : ''}</span></label>
       ${!state.snapshot || showsLowerPrice(entries)
         ? `<label><input type="radio" name="basis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> <span>The lower second price the website shows${example ? ` (e.g. ${money(example.priceBeforeFees)}; usually the price before the doc fee)` : ''}</span></label>
-      <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>`
+      <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>
+      ${basisWarning()}`
         : ''}
       ${feeNote}
-      ${basisWarning()}
       ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}
       <p class="hint">Honest prices: the listed price always equals the website price. This note explains what it includes.${suggested ? ` Suggested: "${esc(suggested)}"` : ''}</p>
     </fieldset>
@@ -1165,7 +1177,7 @@ async function onPanelClick(ev) {
       // sees the change. The person clicks Update / Mark as sold / Delete.
       if (!state.tab) return;
       const p = state.posted[vin] || {};
-      const item = { origin: state.origin, vin, kind: btn.dataset.kind, price: Number(btn.dataset.price) || null, basis: state.settings?.basis || 'website', listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
+      const item = { origin: state.origin, vin, kind: btn.dataset.kind, price: Number(btn.dataset.price) || null, basis: buttonBasis(btn), listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
       let opened = true;
       try {
         await chrome.sidePanel.open({ windowId: state.tab.windowId }); // straight from the click
@@ -1228,7 +1240,7 @@ async function onPanelClick(ev) {
       notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
       break;
     case 'priceUpdated':
-      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price), undefined, state.settings?.basis)))) break; // the new price is the basis in force now
+      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price), undefined, buttonBasis(btn))))) break; // recorded with the basis the price was taken at
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
       notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
       break;
@@ -1522,13 +1534,19 @@ async function onSettingsSubmit(ev) {
     state.settings.autoRescan = false;
     message = 'Saved, but automatic rescans need one scan of this website first.';
   }
+  const basisChanged = state.settings.basis !== prev.basis;
+  // Listings that record no basis were posted under the one in force until
+  // now (src/rescan.js stampBasis). Stamped before the new basis is saved, so
+  // a background rescan in between never reads them under the new one as a
+  // website price change; true whether or not the save below goes through.
+  if (basisChanged) await update('posted', (p) => stampBasis(p, prev.basis));
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
   await saveProfile(state.settings, undefined, state.origin); // the person's explicit save is what (re)creates the synced profile
-  if (state.settings.basis !== prev.basis) {
-    // listings that record no basis were posted under the one in force until now (src/rescan.js stampBasis)
-    await update('posted', (p) => stampBasis(p, prev.basis));
+  if (basisChanged) {
     const n = ownListings();
-    if (n) message += ` After the next rescan, ${n === 1 ? 'your posted listing is' : `your ${n} posted listings are`} listed under To do to edit to the new price to post.`;
+    if (n) message += n === 1
+      ? ' After the next rescan, your posted listing is listed under To do to edit to the new price to post, if its car shows a lower second price.'
+      : ` After the next rescan, each of your ${n} posted listings whose car shows a lower second price is listed under To do to edit to the new price to post.`;
   }
   await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');
