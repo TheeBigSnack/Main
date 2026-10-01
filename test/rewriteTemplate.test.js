@@ -62,6 +62,26 @@ test('a sparse car (no features, no write-up, no Carfax) is still long enough', 
   assert.match(text, /Sales consultant at Ron Lewis\./);
 });
 
+test('a sparse car still reaches the word minimum, with or without the salesperson\'s name or closing line, at a dealership with a short name', () => {
+  // nothing but the year, make, model, trim, mileage and VIN: no features, write-up, colours, mechanicals, stock or Carfax
+  const full = vehicle('usedNormal');
+  const sparse = { vin: full.vin, year: full.year, make: full.make, model: full.model, trim: full.trim, mileage: full.mileage, price: full.price, features: [] };
+  const bare = { vin: full.vin, year: full.year, make: full.make, price: full.price };
+  for (const v of [sparse, bare]) {
+    for (const dealer of [{ name: 'Sample Motors' }, { name: 'Ace' }, { name: 'Sample Motors', city: 'Springfield' }]) {
+      for (const salesperson of [{}, { name: 'Pat' }, { name: 'Pat', closingLine: 'Ask for me by name.' }, { closingLine: 'Ask for me by name; I am in Monday to Saturday.' }]) {
+        for (const priceNote of ['', 'Tax and tags extra.']) {
+          const c = { vehicle: v, dealer, salesperson, priceNote, price: v.price, closingLine: salesperson.closingLine || '' };
+          const text = buildTemplateDescription(c);
+          const g = runGuardrails(text, c);
+          assert.deepEqual(g.problems, [], `${JSON.stringify({ dealer, salesperson, priceNote, bare: v === bare })}\n${text}`);
+          if (salesperson.closingLine) assert.ok(text.endsWith(`\n${salesperson.closingLine}`), `the closing line still ends it:\n${text}`);
+        }
+      }
+    }
+  }
+});
+
 test('a wordy write-up and lots of features are trimmed to the limit', () => {
   const narrative = [
     'This striking 2016 Dodge Challenger SRT Hellcat delivers premium performance wrapped in sophisticated style, with a supercharged engine that makes every drive an event. ' +

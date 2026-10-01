@@ -376,12 +376,16 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'priceNote', keep: 'always', text: String(priceNote || '').trim() },
     // with no dealership name set the checks stop the description; the sign-off still never reads "at ."
     { id: 'signoff', keep: 'always', text: `${person ? `I'm ${person}, ${title}` : capitalize(title)}${dealerName ? ` at ${dealerName}` : ''}.` },
-    { id: 'closing', keep: 'always', text: closing },
-    // the salesperson's own closing line takes the place of the stock invitation
-    { id: 'cta', keep: 'optional', text: closing ? '' : 'Message me to set up a test drive or ask a question.' },
+    // the salesperson's own closing line takes the place of the stock invitation,
+    // which then comes back only when the text runs short (the closing line is not counted)
+    { id: 'cta', keep: closing ? 'filler' : 'optional', text: 'Message me to set up a test drive or ask a question.' },
     { id: 'more', keep: 'filler', text: 'Happy to send more photos or answer any questions.' },
     { id: 'visit', keep: 'filler', text: dealerName ? `Come take a look in person at ${dealerName}.` : '' },
     { id: 'reply', keep: 'filler', text: "Message me here on Marketplace and I'll get right back to you." },
+    // the last filler names nothing, so a sparse car at a dealership with a short name still reaches the minimum
+    { id: 'see', keep: 'filler', text: 'Let me know a good time to come see it.' },
+    // the salesperson's own line ends every description, after any filler
+    { id: 'closing', keep: 'always', text: closing },
   ].filter((b) => b.text);
 
   const on = new Set(blocks.filter((b) => b.keep !== 'filler').map((b) => b.id));
