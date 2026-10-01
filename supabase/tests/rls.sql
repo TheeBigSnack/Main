@@ -197,6 +197,28 @@ begin
   if n <> 1 then raise exception 'a_sales should see only their own membership, saw % rows', n; end if;
   raise notice 'ok: a_sales sees only their own membership';
 
+  -- the column grants (update (name, role) on memberships, update (name) on dealerships) leave only the
+  -- policies between a salesperson and a role or a name: none of these may change a row, so a later
+  -- policy that lets a member edit their own row fails here, not in production
+  update public.memberships set role = 'manager' where user_id = auth.uid();
+  get diagnostics n = row_count;
+  if n <> 0 or (select role from public.memberships where user_id = auth.uid() and dealership_id = a) is distinct from 'salesperson' then
+    raise exception 'a_sales made themselves a manager';
+  end if;
+  update public.memberships set name = 'Renamed';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales renamed a member (% rows)', n; end if;
+  delete from public.memberships where user_id <> auth.uid();
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales removed another member (% rows)', n; end if;
+  delete from public.memberships where user_id = auth.uid();
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales removed their own membership'; end if;
+  update public.dealerships set name = 'Renamed by a salesperson' where id = a;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales renamed their dealership'; end if;
+  raise notice 'ok: a_sales changes no role, no name and no membership, and cannot rename A';
+
   -- cannot insert into B
   begin
     insert into public.listings (dealership_id, user_id, vin, name, price, posted_at)
