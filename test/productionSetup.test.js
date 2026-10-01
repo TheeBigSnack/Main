@@ -167,23 +167,27 @@ test('docs/production-setup.md names every piece it relies on, and says the secr
 // Supabase's CAPTCHA protection refuses /auth/v1/otp without a captcha token,
 // and neither the extension's code request nor the manager view's link
 // request sends one: a doc that tells the owner to turn it on would stop
-// every new sign-in. The check lifts itself once client code sends a token.
+// every new sign-in. Once client code sends a token this check fails, so the
+// docs' advice changes with it.
+// Lot Current's own code only: the manager view's vendored supabase-js
+// (manager/vendor/) can send a token, which says nothing about whether the
+// page passes one, and reading it would switch the check off for good.
 test('no doc tells the owner to turn CAPTCHA on while neither sign-in request sends a captcha token', () => {
-  const code = ['extension', 'manager']
-    .flatMap((dir) => readdirSync(new URL(`../${dir}/`, import.meta.url), { recursive: true }).filter((f) => /\.(m?js|html)$/.test(f)).map((f) => read(`${dir}/${f}`)))
-    .join('\n');
+  const own = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url), { recursive: true }).filter((f) => /\.(m?js|html)$/.test(f) && !/(^|[\\/])vendor[\\/]/.test(f));
+  assert.ok(readdirSync(new URL('../manager/vendor/', import.meta.url)).some((f) => /^supabase-js-.+\.js$/.test(f)) && !own('manager').some((f) => f.includes('supabase-js')), 'the vendored library is left out');
+  const code = ['extension', 'manager'].flatMap((dir) => own(dir).map((f) => read(`${dir}/${f}`))).join('\n');
+  assert.ok(code.includes('signInWithOtp') && code.includes('/auth/v1/otp'), 'both sign-in requests are in the code read');
   const sendsToken = /captcha_?token|gotrue_meta_security/i.test(code);
+  assert.equal(sendsToken, false, 'a sign-in request now sends a captcha token: update the CAPTCHA advice in docs/production-setup.md and supabase/README.md, then this check');
   const docs = ['docs/production-setup.md', 'supabase/README.md', 'docs/stack-test.md', 'docs/launch-checklist.md', 'docs/release.md', 'README.md', 'PILOT.md'];
   const turnOn = /\b(?:turn|switch)\s+on\b|\b(?:turn|switch)\s+(?:\*\*)?captcha\b[^.]*?\bon\b|\benabl/i;
-  if (!sendsToken) {
-    for (const doc of docs) {
-      for (const sentence of read(doc).split(/(?<=[.!?])\s+|\n/).filter((x) => /captcha/i.test(x))) {
-        assert.doesNotMatch(sentence, turnOn, `${doc} tells the owner to turn CAPTCHA on, and no client sends a captcha token: "${sentence.trim()}"`);
-      }
+  for (const doc of docs) {
+    for (const sentence of read(doc).split(/(?<=[.!?])\s+|\n/).filter((x) => /captcha/i.test(x))) {
+      assert.doesNotMatch(sentence, turnOn, `${doc} tells the owner to turn CAPTCHA on, and no client sends a captcha token: "${sentence.trim()}"`);
     }
-    assert.match(read('docs/production-setup.md'), /leave CAPTCHA off\. Neither the extension nor the manager view sends a captcha token/);
-    assert.match(read('supabase/README.md'), /Leave \*\*CAPTCHA protection\*\* \(Authentication, Attack protection\) off: neither/);
   }
+  assert.match(read('docs/production-setup.md'), /leave CAPTCHA off\. Neither the extension nor the manager view sends a captcha token/);
+  assert.match(read('supabase/README.md'), /Leave \*\*CAPTCHA protection\*\* \(Authentication, Attack protection\) off: neither/);
   // the old instruction, in either doc's words, as a failing example
   assert.match('5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.', turnOn);
   assert.match('and turn on **CAPTCHA protection** (Authentication, Attack protection) once the manager page is public.', turnOn);
