@@ -508,7 +508,7 @@ where public.subscription_state(d.id) = 'lapsed'
 order by ended_about;
 ```
 
-Each row is a dealership whose free pilot ended unpaid or whose Stripe subscription was cancelled or expired. `past_due`, `unpaid` and `paused` are left out: those have not ended, Stripe is still collecting. Offer each one's managers an export, delete it within 30 days of `ended_about`, and forget the accounts its answer lists in `accounts_without_a_dealership` (step 4): with no dealership they serve no purpose.
+Each row is a dealership whose free pilot ended unpaid or whose Stripe subscription was cancelled or expired. `past_due` and `unpaid` are left out: the subscription is still open (Stripe is retrying a `past_due` invoice; an `unpaid` one is retried no more but can still be paid in Manage billing), so it has not ended. With Stripe's **If all retries for a payment fail** set to **Cancel the subscription** (`docs/stripe-setup.md` step 3), a dealership that stops paying reaches `canceled` when the retries run out and is listed here then; on any other choice it would never be listed. `paused` does not arise with this setup: Checkout takes a card for the pilot and the Billing Portal offers no pause. Offer each one's managers an export, delete it within 30 days of `ended_about`, and forget the accounts its answer lists in `accounts_without_a_dealership` (step 4): with no dealership they serve no purpose.
 
 ### Forget a person: the person asked
 

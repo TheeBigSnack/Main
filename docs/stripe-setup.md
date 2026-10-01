@@ -50,6 +50,8 @@ It prints a `supabase secrets set ...` line with the ids. Keep it for step 5. Ru
 
 The prices are a hypothesis until a dealer pays. If `pricing.json` changes, `npm run stripe-setup` reports the difference and changes nothing; `npm run stripe-setup -- --apply --reprice` makes the new price (subscribers already paying keep theirs), and the printed line has the new id to set.
 
+**One setting by hand: when a card keeps failing.** The script does not read or set it, and its output has a `failed payments` note to remind you. In the Stripe Dashboard, Settings, Billing, Subscriptions and emails (newer Dashboards put it under Billing, Revenue recovery, Retries), find what happens when all retries for a payment fail and set **If all retries for a payment fail** to **Cancel the subscription**. Then a dealership that stops paying ends when Stripe's retries run out: its subscription becomes `canceled`, it appears on the weekly retention list (`supabase/README.md`, "The retention line"), and its records are deleted within 30 days, as the Privacy Policy says. Left on "mark the subscription as unpaid" or "leave the subscription past-due", a dealership that never pays again never ends, never appears on that list, and its records are kept with no end date.
+
 ## 4. Create the webhook [owner runs]
 
 With the Supabase project's ref (the 20 letters in `https://<ref>.supabase.co`; the project exists, and its address is the `url` in `extension/src/accountConfig.js`):
@@ -93,8 +95,9 @@ Not before the company exists and the attorney has answered the sales-tax questi
 2. Sales tax, as the attorney advises. If tax is to be collected: turn on Stripe Tax, set the default tax behavior to exclusive and add the registrations in the Dashboard (Stripe Tax charges a fee per transaction: decide with the price), then `supabase secrets set STRIPE_AUTOMATIC_TAX=true`. Checkout then asks for the billing address and adds the tax. Until the word `true` is set, no tax is added.
 3. With the live secret key (`sk_live_`): `npm run stripe-setup -- --apply --live --webhook-url <ref>`. The `--live` flag is required; without it a live key is refused before anything is read.
 4. Set the printed ids, the new webhook secret and the live key in the function secrets, as in step 5; `npm run check-deploy`.
-5. Optional and safer: instead of the full live secret key, give the function a restricted key that may only write customers, Checkout Sessions and portal sessions (Developers, API keys, Create restricted key; check the permission names on that screen). The setup script itself still needs the full key, so run it from your own terminal only.
-6. Run step 6 once with a real card and a real dealership of your own, then refund it from the Dashboard.
+5. In live mode, check the failed-payment setting from step 3: **If all retries for a payment fail** is **Cancel the subscription**.
+6. Optional and safer: instead of the full live secret key, give the function a restricted key that may only write customers, Checkout Sessions and portal sessions (Developers, API keys, Create restricted key; check the permission names on that screen). The setup script itself still needs the full key, so run it from your own terminal only.
+7. Run step 6 once with a real card and a real dealership of your own, then refund it from the Dashboard.
 
 ## What never happens
 

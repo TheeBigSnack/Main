@@ -205,7 +205,7 @@ test('stripe setup: --apply creates everything once, prints the ids and the sign
   assert.deepEqual(second.secrets, first.secrets);
   const read = await run(s);
   assert.equal(read.ok, true);
-  assert.ok(read.lines.every((l) => l.ok));
+  assert.deepEqual(read.lines.filter((l) => !l.ok).map((l) => l.check), ['failed payments'], 'everything is ok but the one setting only the Dashboard has');
 });
 
 test('stripe setup: a price that differs from pricing.json fails and is left alone; --apply --reprice moves the lookup key to a new price', async () => {
@@ -295,4 +295,22 @@ test('stripe setup: a new --site-url is applied to the portal and the next read 
   assert.equal((await run(s, { apply: true, siteUrl: 'https://lotcurrent.example' })).ok, true);
   assert.equal(s.db.portals[0].business_profile.terms_of_service_url, 'https://lotcurrent.example/legal/terms/');
   assert.equal((await run(s, { siteUrl: 'https://lotcurrent.example' })).ok, true);
+});
+
+test('stripe setup: every run that reaches Stripe notes the failed-payment setting it cannot set, and the docs give the step', async () => {
+  const s = fakeStripe();
+  for (const r of [await run(s), await run(s, { apply: true })]) {
+    const l = line(r, 'failed payments');
+    assert.ok(l, 'a failed payments line');
+    assert.equal(l.note, true, 'a note: it never fails the run');
+    assert.match(l.detail, /"If all retries for a payment fail" to "Cancel the subscription"/);
+    assert.match(l.detail, /docs\/stripe-setup\.md step 3/);
+  }
+  const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
+  const step3 = doc.slice(doc.indexOf('## 3. '), doc.indexOf('## 4. '));
+  assert.match(step3, /set \*\*If all retries for a payment fail\*\* to \*\*Cancel the subscription\*\*/);
+  assert.match(doc.slice(doc.indexOf('## Later: switching to live mode')), /\*\*If all retries for a payment fail\*\* is \*\*Cancel the subscription\*\*/, 'checked again in live mode');
+  const readme = readFileSync(new URL('../supabase/README.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(readme, /Stripe is still collecting/, 'an unpaid subscription is no longer retried');
+  assert.match(readme, /`past_due` and `unpaid` are left out: the subscription is still open/);
 });

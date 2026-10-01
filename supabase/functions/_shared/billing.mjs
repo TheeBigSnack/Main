@@ -58,10 +58,13 @@ const idOf = (x) => (typeof x === 'string' ? x : isRecord(x) && typeof x.id === 
 // ---------- the state machine ----------
 
 // Stripe keeps a subscription open in these statuses (a trial or a paid
-// period running, an invoice in dunning, a first payment not finished, a
-// pause): the card is changed in the Billing Portal and Stripe retries the
-// open invoice. Everything else (canceled, incomplete_expired, no
-// subscription at all) is over, and a new Checkout is how to pay again.
+// period running, an invoice being retried (past_due) or no longer retried
+// but still payable (unpaid), a first payment not finished, a pause): the
+// card is changed in the Billing Portal, where the open invoice can be paid.
+// With the failed-payment setting docs/stripe-setup.md step 3 asks for, a
+// subscription whose retries all fail is canceled rather than left unpaid.
+// Everything else (canceled, incomplete_expired, no subscription at all) is
+// over, and a new Checkout is how to pay again.
 export const OPEN_STATUSES = Object.freeze(['trialing', 'active', 'past_due', 'unpaid', 'incomplete', 'paused']);
 export const OPEN_SUBSCRIPTION_CODE = 'open-subscription';
 export const OPEN_SUBSCRIPTION_MESSAGE = 'update the card in Manage billing; the subscription is still open';
