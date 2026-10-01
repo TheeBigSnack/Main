@@ -297,3 +297,18 @@ test('a full storage when set-up saves its progress is shown on the step, and th
   assert.match(html, /Clear the numbers on the Numbers tab/, 'the You step shows it');
 });
 
+
+test('a storage error shown on the Permission step goes once Allow automatic rescans is granted', async () => {
+  browser();
+  await start();
+  await nextUntil('permission');
+  wiz.error = STORAGE_FULL; // an earlier save on this step could not be kept
+  ctx.render();
+  assert.match(html, /Clear the numbers on the Numbers tab/);
+  globalThis.chrome.permissions.request = async () => true; // the person clicks Allow in Chrome's prompt
+  await handleWizardClick('wizGrant', ctx);
+  assert.equal(wiz.granted, true);
+  assert.equal(wiz.error, '', 'the grant and the save after it both went through');
+  assert.doesNotMatch(html, /Clear the numbers on the Numbers tab/);
+  assert.match(html, /Permission granted\. Automatic rescans are on\./);
+});

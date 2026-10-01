@@ -30,7 +30,7 @@ import { ACCOUNT, accountsConfigured } from './accountConfig.js';
 import { signInWithMagicLink, verifyOtp, ensureFreshSession, loadSession, storeSession, clearSession, signOut, authHeaders, errorText, DEFAULT_OTP_TYPE } from './account.js';
 import { syncPayload, mergeRegistry, mergeFlags, nextSyncState, scanSummary, SYNC_VERSION } from './sync.js';
 import { withPilotDefaults } from './pilot.js';
-import { siteKeys, originOfSiteKey } from './storageKeys.js';
+import { siteKeys, originOfSiteKey, SITES_KEY } from './storageKeys.js';
 import { updateKey, storageErrorText, withLock } from './storage.js';
 import { DECISION } from './classify.js';
 
@@ -158,7 +158,9 @@ async function storedKeys(storage) {
  * the websites named in deps.origins), not only the website open, so the
  * next sign-in, whoever it is, starts each website with a first sync, which
  * takes nothing down, and no website keeps showing the last account's
- * dealership, role, plan or count of today's posts.
+ * dealership, role, plan or count of today's posts. Each website's registry
+ * entry forgets the last account's sync record too (SYNC_RECORD), so
+ * Settings never shows its time or its error to the next account.
  */
 export async function signOutAll(deps = {}) {
   const { config, fetchImpl, storage } = withDeps(deps);
@@ -183,7 +185,34 @@ export async function signOutAll(deps = {}) {
       /* the session is gone; a stale sync state only makes the next sync a full one */
     }
   }
+  if (storage) {
+    try {
+      await updateKey(SITES_KEY, withoutSyncRecord, storage);
+    } catch {
+      /* the session is gone; Settings may show the last sync's time until the next one */
+    }
+  }
   return { ok: true };
+}
+
+// What the service worker records about a website's last sync on its
+// registry entry (background.js startSync).
+const SYNC_RECORD = ['lastSync', 'lastSyncAttempt', 'lastSyncError', 'lastSyncRetry'];
+
+// The registry without any sync record; undefined (nothing written) when it holds none.
+function withoutSyncRecord(sites) {
+  if (!sites || typeof sites !== 'object') return undefined;
+  let changed = false;
+  const next = {};
+  for (const [origin, entry] of Object.entries(sites)) {
+    if (entry && typeof entry === 'object' && SYNC_RECORD.some((f) => f in entry)) {
+      next[origin] = Object.fromEntries(Object.entries(entry).filter(([f]) => !SYNC_RECORD.includes(f)));
+      changed = true;
+    } else {
+      next[origin] = entry;
+    }
+  }
+  return changed ? next : undefined;
 }
 
 // ---------- the rewrite service ----------

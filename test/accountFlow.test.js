@@ -271,6 +271,31 @@ test('signOutAll forgets every website\'s sync state on this computer, not only 
   assert.equal(ACCOUNT_KEY in blind.data, false);
 });
 
+// The registry entry of each website also records the last sync (when it
+// was tried, when it answered, its error, a retry due): the last account's,
+// which the next account's Settings would otherwise show as its own, such as
+// "the last attempt failed: your account is not a member of …".
+test('signOutAll forgets the last account\'s sync times and error on every website\'s registry entry, and keeps the rest of it', async () => {
+  const OTHER = 'https://www.example-sister-store.test';
+  const { fetchImpl } = fakeFetch({ logout: { status: 204, body: null } });
+  const storage = fakeStorage({
+    [ACCOUNT_KEY]: freshSession(),
+    [GLOBAL_KEYS.sites]: {
+      [ORIGIN]: { name: 'Example Motors', auto: true, lastScan: T(0), lastSync: T(1), lastSyncAttempt: T(2), lastSyncError: `your account is not a member of the dealership for ${ORIGIN}`, lastSyncRetry: T(3) },
+      [OTHER]: { name: 'Example Sister Store', auto: false, lastScan: T(0), lastSyncAttempt: T(2), lastSyncError: 'too many syncs; try again in a minute' },
+    },
+  });
+  assert.deepEqual(await signOutAll(deps({ fetchImpl, storage, origins: [] })), { ok: true });
+  assert.deepEqual(storage.data[GLOBAL_KEYS.sites], {
+    [ORIGIN]: { name: 'Example Motors', auto: true, lastScan: T(0) },
+    [OTHER]: { name: 'Example Sister Store', auto: false, lastScan: T(0) },
+  }, 'the rescan settings and scan times stay');
+
+  const untouched = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [GLOBAL_KEYS.sites]: { [ORIGIN]: { name: 'Example Motors' } } });
+  await signOutAll(deps({ fetchImpl, storage: untouched }));
+  assert.deepEqual(untouched.writes, [], 'a registry with no sync record is not rewritten');
+});
+
 // ---------- the rewrite service's key ----------
 
 test('rewriteKeyFor: the session\'s token only for the account\'s own rewrite function, nothing there when signed out; the typed key for any other address', () => {

@@ -506,6 +506,7 @@ async function wizardClick(id, ctx) {
     case 'wizGrant': {
       readInputs(); // keep the notification tick as the person left it across the re-render
       const origins = originsFor(wiz.site, wiz.service);
+      wiz.error = ''; // an earlier error on this step no longer applies; a failure below sets its own
       try {
         wiz.granted = await chrome.permissions.request({ origins }); // straight from the click
       } catch (e) {
