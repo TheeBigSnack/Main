@@ -124,6 +124,7 @@ Notes:
 - A post that is under way blocks a to-do item: finish or stop it first, then click the To do button again.
 - **My listings** shows each car as "Matches the website", "Website price changed" (with **Updated**) or "Not on the website at the last scan", with **Taken down** and, when a link was saved, **Open listing**.
 - Signed in to your dealership's account, your colleagues' listings come under **Posted by colleagues**, below yours and not in the tab's count, with who posted each car and **Open listing** only. Ready to post shows "Posted by [name]" on such a car, and a sold car or price change on one is listed in To do as "posted by [name]", with no buttons: keeping it up to date is that colleague's to do.
+- A car a colleague had already listed when your post of it reached your dealership's account is not added to the dealership's list: the list and the manager view keep your colleague's. Your listing is still yours on Facebook. To do then says how many of your posts were not shared, and the car in **My listings** says "Not shared with your dealership" and who has it listed, so you can decide with your colleague which listing stays. A post whose time is ahead of the server's clock is not shared either; the car says to check the computer's date and time.
 - The posting rules ask for sold cars to come down the same day.
 
 ## The Numbers tab

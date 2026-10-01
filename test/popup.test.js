@@ -352,3 +352,41 @@ test('after Forget my synced profile, a Rescan, Allow automatic rescans or a sig
   assert.equal(p.sync[PROFILE_KEY].salesperson.name, 'Sam');
   assert.equal(p.sync[PROFILE_KEY].origin, POPUP_ORIGIN);
 });
+
+// A post the sync function would not put on the dealership's list (a
+// colleague already had the car up, or the post's time was ahead of the
+// server's clock) is named where the salesperson looks: a banner on To do,
+// the car in My listings, and a count in Settings' sync line.
+test('a post the last sync could not share is named on To do, on the car in My listings and in Settings', async () => {
+  const ram = vehicle('usedNormal');
+  const jeep = vehicle('certified');
+  const shared = vehicle('usedZeroMiles');
+  const at = (min) => new Date(Date.UTC(2026, 9, 1, 9, min)).toISOString();
+  const posted = {
+    [ram.vin]: { name: ram.name, price: ram.price, postedAt: at(30) },
+    [jeep.vin]: { name: jeep.name, price: jeep.price, postedAt: at(50) },
+    [shared.vin]: { name: shared.name, price: shared.price, postedAt: at(5) },
+  };
+  const syncState = { version: 1, since: at(40), known: [], dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: at(40), plan: null, postsToday: null,
+    notShared: [{ vin: ram.vin, postedAt: at(30), reason: 'colleague', by: 'Pat' }, { vin: jeep.vin, postedAt: at(50), reason: 'clock' }] };
+  const session = { accessToken: 'a.e30.c', refreshToken: 'r', expiresAt: Date.now() + 3600e3, user: { id: 'u1', email: 'sam@example.test' } };
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted, [k.sync]: syncState, account: session } });
+  await p.scan();
+  assert.equal(p.status(), '', 'the scan went through');
+  assert.match(p.panel(), /id="notSharedBanner">2 of your posts are not on your dealership's list: the last sync could not share them\. <b>My listings<\/b> says why\./);
+
+  await p.tab('mine');
+  const items = p.panel().split('<li class="row');
+  const itemOf = (car) => items.find((t) => t.includes(car.name)) || '';
+  assert.match(itemOf(ram), /Not shared with your dealership: Pat already has this car listed, so your dealership's list and the manager view show theirs, not yours\./);
+  assert.match(itemOf(jeep), /Not shared with your dealership: this post's time is ahead of the server's clock\. Check this computer's date and time, then sync again\./);
+  assert.doesNotMatch(itemOf(shared), /Not shared/, 'a shared post says nothing');
+
+  await p.tab('settings');
+  assert.match(p.panel(), /id="syncStatus">Last sync [^<]* · 2 of your posts are not shared with your dealership \(My listings says why\)\. /);
+
+  // nothing refused: no banner
+  const q = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted, [k.sync]: { ...syncState, notShared: [] }, account: session } });
+  await q.scan();
+  assert.doesNotMatch(q.panel(), /notSharedBanner/);
+});

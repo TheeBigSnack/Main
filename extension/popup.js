@@ -443,7 +443,7 @@ function viewTodo(l) {
   if (!state.snapshot && !d) {
     return setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
   }
-  let html = setupBanner() + scheduleBanner();
+  let html = setupBanner() + scheduleBanner() + notSharedBanner();
   html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
   if (d?.firstScan) {
@@ -664,6 +664,25 @@ function viewReview(l) {
   return html;
 }
 
+// One of the person's posts the last sync could not put on the dealership's
+// list (src/sync.js notSharedFrom), or null: the person is told on the car.
+function notShared(p) {
+  const list = state.syncState && Array.isArray(state.syncState.notShared) ? state.syncState.notShared : [];
+  return list.find((n) => n && n.vin === String(p.vin || '').toUpperCase() && Date.parse(n.postedAt) === Date.parse(p.postedAt)) || null;
+}
+const notSharedText = (n) => (n.reason === 'clock'
+  ? "Not shared with your dealership: this post's time is ahead of the server's clock. Check this computer's date and time, then sync again."
+  : `Not shared with your dealership: ${n.by ? esc(n.by) : 'a colleague'} already has this car listed, so your dealership's list and the manager view show theirs, not yours.`);
+
+// On To do, where the person looks first: how many of their posts the
+// dealership's list does not hold. My listings says which and why.
+function notSharedBanner() {
+  const mine = Object.entries(state.posted || {}).filter(([, p]) => p && p.mine !== false).map(([vin, p]) => ({ vin, ...p }));
+  const n = mine.filter((p) => notShared(p)).length;
+  if (!n) return '';
+  return `<div class="banner warn" id="notSharedBanner">${n === 1 ? 'One of your posts is' : `${n} of your posts are`} not on your dealership's list: the last sync could not share ${n === 1 ? 'it' : 'them'}. <b>My listings</b> says why.</div>`;
+}
+
 function viewMine(l) {
   const lead = `<p class="lead">Cars you've marked as posted. Each scan compares these with the website.</p>`;
   if (!l.mine.length) return lead + empty('Nothing marked as posted yet. Use <b>Mark posted</b> on the Ready to post tab.') + viewColleagues(l);
@@ -682,8 +701,10 @@ function viewMine(l) {
         }
         const entry = { name: p.name, url: now?.url };
         const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
+        const refused = notShared(p);
         return row(entry, {
           sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${link}`,
+          line: refused ? `<span class="notShared" style="color: var(--bad)">${notSharedText(refused)}</span>` : '',
           right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
@@ -792,8 +813,10 @@ function accountFieldset() {
   const planLine = plan ? ` · <span id="planStatus"${ss.plan.state === 'lapsed' ? ' style="color: var(--bad)"' : ''}>${esc(plan)}</span>` : '';
   const last = ss.lastSyncAt ? `Last sync ${esc(when(ss.lastSyncAt))}` : 'Not synced yet';
   const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}` : '';
+  const refused = Array.isArray(ss.notShared) ? ss.notShared.length : 0;
+  const notSharedNote = refused ? ` · ${refused} of your posts ${refused === 1 ? 'is' : 'are'} not shared with your dealership (My listings says why)` : '';
   const syncHint = state.origin
-    ? `<p class="hint" id="syncStatus">${last}${failed}. Lot Current also syncs after every rescan and after each post you record.</p>`
+    ? `<p class="hint" id="syncStatus">${last}${failed}${notSharedNote}. Lot Current also syncs after every rescan and after each post you record.</p>`
     : `<p class="hint" id="syncStatus">Open your dealership's website to sync its listings.</p>`;
   return `<fieldset><legend>Account</legend>
     <p id="accountStatus">Signed in as <b>${esc(email)}</b>${dealership}${planLine}</p>

@@ -371,6 +371,9 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   assert.equal(r.listed, 2);
   assert.equal(r.serverTime, r.state.since);
   assert.equal(describeSync(r), 'Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent.');
+  // a post the function would not share is named, never passed over
+  assert.equal(describeSync({ ...r, counts: { ...r.counts, conflicts: 1 } }), 'Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent. 1 of your posts was not shared with your dealership: a colleague already has that car listed (My listings shows which).');
+  assert.equal(describeSync({ ...r, counts: { ...r.counts, conflicts: 2, rejected: 1 } }), "Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent. 2 of your posts were not shared with your dealership: a colleague already has those cars listed (My listings shows which). 1 of your posts was not shared with your dealership: its posting time is ahead of the server's clock, so check this computer's date and time.");
   // merged into storage
   const merged = storage.data[K.posted];
   assert.deepEqual(Object.keys(merged).sort(), [VIN_A, VIN_C].sort(), 'the colleague\'s Honda arrived');
@@ -385,7 +388,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const flag = storage.data[K.pilot].flags[0];
   assert.equal(flag.doneAt, T(40), 'the flag closed on the colleague\'s machine is closed here');
   assert.equal(flag.how, 'detected');
-  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, known: [postKey(VIN_A, T(0))], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today } }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap; the Ram, sent, is known, the colleague\'s Honda is not');
+  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, known: [postKey(VIN_A, T(0))], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today }, notShared: [] }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap; the Ram, sent, is known, the colleague\'s Honda is not; every post of the person\'s is shared');
   assert.equal(storage.data[ACCOUNT_KEY].accessToken, freshSession().accessToken, 'the session is untouched');
 
   // the second sync carries `since`, sends only pilot changes after it, and writes nothing that did not change

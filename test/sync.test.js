@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, PILOT_LOOKBACK_MS, flagsAwaitingSync, clearNumbersKeepingUnsynced } from '../extension/src/sync.js';
+import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, PILOT_LOOKBACK_MS, flagsAwaitingSync, clearNumbersKeepingUnsynced, notSharedFrom, FUTURE_SKEW_MS } from '../extension/src/sync.js';
 import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
@@ -323,7 +323,7 @@ test('clearNumbersKeepingUnsynced keeps the closed to-do items the next sync sti
 test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {
   const today = { from: T(0), to: new Date(Date.UTC(2026, 10, 17, 9, 0)).toISOString() };
   const s = nextSyncState(null, { serverTime: T(1), dealership: { id: D, name: 'Example Motors' }, role: 'salesperson' });
-  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), known: [], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: null, postsToday: null }, 'an answer without a plan or a count (an older function) leaves both null');
+  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), known: [], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: null, postsToday: null, notShared: [] }, 'an answer without a plan or a count (an older function) leaves both null');
   assert.equal(nextSyncState(s, { ok: false }).since, T(1), 'a failed answer keeps the last state');
   const plan = { state: 'pilot', pilotEndsAt: T(30), currentPeriodEnd: null, seats: 5 };
   const s2 = nextSyncState(s, { serverTime: T(2), plan, postsToday: 3 }, { today });
@@ -360,6 +360,42 @@ test('the state kept for the next sync: since, the dealership, the role, the pla
   assert.equal(planFrom({ state: 'gold' }).state, 'none');
   assert.equal(planFrom('pilot'), null);
   assert.equal(planFrom(null), null);
+});
+
+// The sync function skips an upload of a VIN a colleague has up
+// (counts.conflicts) and sets aside a post stamped more than FUTURE_SKEW_MS
+// ahead of its clock (counts.rejected). The person is told which of their
+// posts the dealership's list does not hold, read off the answer, which
+// carries every listing that is up.
+test('a post the function refused, because a colleague has the car up or because its time is ahead of the server\'s clock, is named in the state until a sync shares it', () => {
+  const VIN_D = 'TESTVIN00000000D4';
+  const VIN_E = 'TESTVIN00000000E5';
+  const fn = readFileSync(new URL('../supabase/functions/sync/index.ts', import.meta.url), 'utf8');
+  assert.match(fn, /^const FUTURE_SKEW_MS = 5 \* 60 \* 1000;/m, 'the function\'s skew and FUTURE_SKEW_MS here are the same');
+  assert.equal(FUTURE_SKEW_MS, 5 * 60 * 1000);
+  // Pat (U2) posted the Ram at 09:10; this salesperson's machine, last synced at 09:00, still offered it, and they posted it at 09:30
+  const local = {
+    [VIN_A]: { name: 'Ram', price: 28995, postedAt: T(30) }, // refused: Pat has it up
+    [VIN_B]: { name: 'Jeep', price: 34995, postedAt: T(5) }, // shared
+    [VIN_C]: { name: 'Honda', price: 21495, postedAt: T(39) }, // made while the request was out, no colleague: goes up next time
+    [VIN_D]: { name: 'Ford', price: 15995, postedAt: T(50) }, // stamped ten minutes past the server's 09:40
+  };
+  const answer = { serverTime: T(40), counts: { conflicts: 1, rejected: 1 }, listings: [row(VIN_A, { user_id: U2, posted_at: T(10), salesperson: 'Pat' }), row(VIN_B, { user_id: U1, posted_at: T(5) }), row(VIN_E, { user_id: U2, posted_at: T(1) })] };
+  const held = mergeRegistry(local, answer, { userId: U1 });
+  assert.deepEqual(held[VIN_A], local[VIN_A], 'the person\'s own Ram stays theirs here (it goes up again)');
+  const expected = [{ vin: VIN_A, postedAt: T(30), reason: 'colleague', by: 'Pat' }, { vin: VIN_D, postedAt: T(50), reason: 'clock' }];
+  assert.deepEqual(notSharedFrom(held, answer, { userId: U1 }), expected);
+  const state = nextSyncState({ since: T(0) }, answer, { sent: local, userId: U1, held });
+  assert.deepEqual(state.notShared, expected, 'kept for My listings and Settings');
+  assert.deepEqual(nextSyncState(state, { ok: false, code: 'lapsed', plan: { state: 'lapsed' } }).notShared, expected, 'a 402 synced nothing: the list stands');
+  // Pat takes the Ram down and the clock is put right: the next sync shares both, and the list empties
+  const later = { serverTime: T(59), listings: [row(VIN_A, { user_id: U2, posted_at: T(10), status: 'taken_down', taken_down_at: T(55) }), row(VIN_A, { user_id: U1, posted_at: T(30) }), row(VIN_B, { user_id: U1, posted_at: T(5) }), row(VIN_D, { user_id: U1, posted_at: T(50) })] };
+  assert.deepEqual(nextSyncState(state, later, { userId: U1, held: mergeRegistry(held, later, { userId: U1 }) }).notShared, []);
+  // a colleague's entry is never the person's to share, and without a user or a serverTime nothing is said
+  assert.deepEqual(notSharedFrom({ [VIN_E]: { postedAt: T(1), userId: U2, mine: false } }, answer, { userId: U1 }), []);
+  assert.deepEqual(notSharedFrom(held, answer, {}), []);
+  assert.deepEqual(notSharedFrom(held, { listings: answer.listings }, { userId: U1 }), []);
+  assert.deepEqual(notSharedFrom(null, answer, { userId: U1 }), []);
 });
 
 // ---------- two machines converge ----------

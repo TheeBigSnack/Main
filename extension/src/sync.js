@@ -478,6 +478,52 @@ export function mergeFlags(pilot, remote, { posted = null, userId = '' } = {}) {
   return touched ? { ...p, flags } : p;
 }
 
+// How far ahead of the server's clock a post may be stamped: the sync
+// function's FUTURE_SKEW_MS (supabase/functions/sync/index.ts), which sets a
+// post stamped later than that aside (counts.rejected).
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * The caller's own posts the dealership's list does not hold after a sync,
+ * and why, so the person is told rather than left to find out: the sync
+ * function skips an upload of a VIN another member has up (counts.conflicts)
+ * and sets aside one stamped more than FUTURE_SKEW_MS ahead of its clock
+ * (counts.rejected). The answer carries every listing that is up, so both
+ * are read off it: an own entry of `held` (the registry after the merge)
+ * whose post has no row of the caller's in the answer is 'clock' when it is
+ * stamped past serverTime plus the skew, and 'colleague' (with their name)
+ * when a colleague's row of the VIN is listed. An entry made while the
+ * request was out and with no colleague's row goes up next time: not listed.
+ * Returns [{ vin, postedAt, reason: 'colleague' | 'clock', by? }].
+ */
+export function notSharedFrom(held, response, { userId = '' } = {}) {
+  const r = isObject(response) ? response : {};
+  const server = ms(r.serverTime);
+  if (!userId || server === null) return [];
+  const rows = rowsOf(r, 'listings').filter(isObject);
+  const theirs = new Map(); // vin -> a colleague's listed row of it
+  const mine = new Set(); // the caller's posts the answer holds, listed or taken down
+  for (const row of rows) {
+    if (isTheirs(row, userId)) {
+      if (row.status === 'listed' && !theirs.has(vinOf(row.vin))) theirs.set(vinOf(row.vin), row);
+    } else if (row.user_id && String(row.user_id) === String(userId)) mine.add(postKey(row.vin, row.posted_at));
+  }
+  const out = [];
+  for (const [key, e] of Object.entries(isObject(held) ? held : {})) {
+    if (!isObject(e) || !isOwn(e, userId)) continue;
+    const vin = vinOf(e.vin || key);
+    const at = isoOrNull(e.postedAt);
+    const k = postKey(vin, at);
+    if (!k || mine.has(k)) continue;
+    if (ms(at) > server + FUTURE_SKEW_MS) out.push({ vin, postedAt: at, reason: 'clock' });
+    else if (theirs.has(vin)) {
+      const by = text(theirs.get(vin).salesperson, 60);
+      out.push({ vin, postedAt: at, reason: 'colleague', ...(by ? { by } : {}) });
+    }
+  }
+  return out;
+}
+
 // The plan words the sync function answers (subscription_state() on the server).
 export const PLAN_STATES = Object.freeze(['none', 'pilot', 'active', 'lapsed']);
 
@@ -509,6 +555,9 @@ export function planFrom(plan) {
 // known and never taken down from here. Without `held` (direct callers), the
 // caller's own listed rows in the answer stand in. Only an answer that
 // synced (it carries a serverTime) replaces it; a 402 keeps the last one.
+// `notShared` is notSharedFrom over `held` (else `sent`): the person's posts
+// the dealership's list does not hold, for My listings and Settings; it too
+// is replaced only by an answer that synced.
 export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null } = {}) {
   const prev = isObject(previous) ? previous : {};
   const r = isObject(response) ? response : {};
@@ -528,5 +577,6 @@ export function nextSyncState(previous, response, { today = null, sent = null, u
     lastSyncAt: isoOrNull(r.serverTime) || prev.lastSyncAt || null,
     plan: planFrom(r.plan) || planFrom(prev.plan),
     postsToday: day && Number.isInteger(r.postsToday) && r.postsToday >= 0 ? { count: r.postsToday, ...day } : null,
+    notShared: synced ? notSharedFrom(isObject(held) ? held : sent, r, { userId }) : Array.isArray(prev.notShared) ? prev.notShared : [],
   };
 }
