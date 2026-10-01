@@ -93,7 +93,9 @@ const unreachable = (e) => `couldn't reach the account server (${(e && e.message
 /**
  * Asks the auth server to email a sign-in code to this address. No
  * redirect is asked for, so the email's code is the way in (the template
- * carries {{ .Token }}, supabase/README.md step 3).
+ * carries {{ .Token }}, supabase/README.md step 3), and the request carries
+ * a PKCE challenge nobody can answer, so the email's link brings no token
+ * to the manager view it lands on (account.js unanswerableChallenge).
  * @returns {{ ok: true, email, message } | { ok: false, error, notConfigured? }}
  */
 export async function signInStart(email, deps = {}) {

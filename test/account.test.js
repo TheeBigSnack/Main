@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  signInWithMagicLink, verifyOtp, sessionFromHash, exchangeTokenFromUrl, refreshSession, ensureFreshSession, isExpired,
+  signInWithMagicLink, unanswerableChallenge, verifyOtp, sessionFromHash, exchangeTokenFromUrl, refreshSession, ensureFreshSession, isExpired,
   storeSession, loadSession, clearSession, authHeaders, redeemInvite, createInvite, signOut, decodeJwt, sessionFromTokenResponse, errorText,
   ACCOUNT_KEY, REFRESH_SKEW_MS,
 } from '../extension/src/account.js';
@@ -42,7 +42,7 @@ function fakeStorage() {
   };
 }
 
-test('signInWithMagicLink posts the email to /auth/v1/otp with the anon key; a bad address never leaves the browser', async () => {
+test('signInWithMagicLink posts the email to /auth/v1/otp with the anon key (a redirect asked for: no challenge, that page takes the tokens); a bad address never leaves the browser', async () => {
   const { fetchImpl, calls } = fakeFetch([{ status: 200, body: {} }]);
   const r = await signInWithMagicLink('  Alex@Example.test ', { url: URL_, anonKey: ANON, redirectTo: 'chrome-extension://abc/signin.html', fetchImpl });
   assert.deepEqual(r, { ok: true, email: 'alex@example.test' });
@@ -57,6 +57,23 @@ test('signInWithMagicLink posts the email to /auth/v1/otp with the anon key; a b
   assert.match((await signInWithMagicLink('not an email', { url: URL_, anonKey: ANON, fetchImpl: none.fetchImpl })).error, /valid email/);
   assert.match((await signInWithMagicLink('a@b.co', { url: '', anonKey: '', fetchImpl: none.fetchImpl })).error, /not set up/);
   assert.equal(none.calls.length, 0);
+});
+
+test('signInWithMagicLink with no redirect sends a PKCE challenge nobody can answer, so the emailed link brings no token to the page it lands on', async () => {
+  const { fetchImpl, calls } = fakeFetch([{ status: 200, body: {} }, { status: 200, body: {} }]);
+  assert.deepEqual(await signInWithMagicLink('alex@example.test', { url: URL_, anonKey: ANON, fetchImpl }), { ok: true, email: 'alex@example.test' });
+  await signInWithMagicLink('alex@example.test', { url: URL_, anonKey: ANON, fetchImpl });
+  assert.equal(calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/otp', 'no redirect_to: the link lands on the Site URL, the manager view');
+  const [a, b] = calls.map((c) => c.body);
+  assert.deepEqual(Object.keys(a).sort(), ['code_challenge', 'code_challenge_method', 'create_user', 'email']);
+  assert.equal(a.email, 'alex@example.test');
+  assert.equal(a.create_user, true);
+  assert.equal(a.code_challenge_method, 's256', 'S256: the challenge is a hash, and no verifier hashing to it exists');
+  assert.match(a.code_challenge, /^[A-Za-z0-9_-]{43}$/, 'base64url, inside the 43 to 128 characters the auth server takes');
+  assert.notEqual(a.code_challenge, b.code_challenge, 'a fresh one for every email');
+  // 32 bytes, base64url without padding; the verifier is never made, so nothing is kept
+  assert.equal(unanswerableChallenge(() => new Uint8Array(32).fill(255)), '_'.repeat(42) + '8');
+  assert.equal(unanswerableChallenge(() => new Uint8Array(32)), 'A'.repeat(43));
 });
 
 test('signInWithMagicLink passes the server\'s own words back on a rate limit', async () => {

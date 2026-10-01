@@ -20,10 +20,18 @@
 // is a manager (the invites table itself has no read policy). Each code has
 // Copy and Revoke; a code works once and for 7 days.
 //
-// Sign-in is a magic link in the PKCE flow: the link carries a one-time code
-// that supabase-js exchanges on this page (the code verifier waits in this
-// browser's storage), so the tokens never travel in a URL, and the link only
-// works in the browser that asked for it.
+// Sign-in is a magic link in the PKCE flow: the link this page asks for
+// carries a one-time code that supabase-js exchanges on this page (the code
+// verifier waits in this browser's storage), so its tokens never travel in a
+// URL, and the link only works in the browser that asked for it. The
+// extension's emails land here too (the Site URL is this page); it sends a
+// PKCE challenge whose verifier nobody keeps, so its link brings back only a
+// code nothing can exchange. An address that still arrives with
+// #access_token=... (a link asked for without a challenge) or the auth
+// server's #error=... is taken out of the address before supabase-js starts,
+// the session those tokens opened is ended, and the sign-in form says why
+// (data.js authFragment); a ?code= this browser could not exchange leaves
+// the address the same way.
 //
 // Self-serve sign-up: a signed-in person in no dealership sees the Start your
 // dealership form when config.js's selfServeSignup is on (otherwise the old
@@ -38,7 +46,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -812,7 +820,32 @@ async function loadLive() {
 
 // ---------- start ----------
 
+// A sign-in answer this page did not ask for (data.js authFragment): the
+// fragment leaves the address at once, before supabase-js reads it, so the
+// tokens leave the address bar and a session this browser holds is kept.
+// The session those tokens opened is ended with its own token (scope local:
+// no other session of the person's), and nothing waits on that answer.
+// Returns the sentence for the sign-in form, or ''.
+function dropAuthFragment() {
+  const found = authFragment(location.hash);
+  if (!found) return '';
+  try {
+    const url = new URL(location.href);
+    url.hash = '';
+    history.replaceState(null, '', url.toString());
+  } catch { /* some file:// pages refuse */ }
+  if (found.accessToken && configured()) {
+    fetch(`${trimSlash(CONFIG.supabaseUrl)}/auth/v1/logout?scope=local`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { apikey: CONFIG.supabaseAnonKey, Authorization: `Bearer ${found.accessToken}` },
+    }).catch(() => { /* the address is clean either way */ });
+  }
+  return found.note;
+}
+
 async function start() {
+  const linkNote = dropAuthFragment();
   const params = new URLSearchParams(location.search);
   // back from Stripe: one note in the Billing card, and the flag leaves the address so a reload does not repeat it
   if (params.has('billing')) {
@@ -827,7 +860,10 @@ async function start() {
     const { data, error } = await supabase.auth.getSession();
     if (error) throw new Error(`Couldn't check the sign-in: ${error.message}`);
     state.session = data.session || null;
-    if (!state.session) return viewSignIn();
+    // supabase-js takes a code it exchanged out of the address; one still there was not (another browser's, the extension's, or used)
+    const deadCode = new URL(location.href).searchParams.has('code');
+    if (deadCode) setParam('code', null);
+    if (!state.session) return viewSignIn(linkNote || (deadCode ? UNUSED_CODE_NOTE : ''));
     await loadLive();
   } catch (e) {
     viewError(e && e.message ? e.message : String(e));

@@ -122,14 +122,16 @@ test('with an empty config every flow answers notConfigured and nothing leaves t
 
 // ---------- signing in ----------
 
-test('signInStart asks for a code by email (no redirect: the code is the way in) and tells the person where it went', async () => {
+test('signInStart asks for a code by email (no redirect and a challenge nobody can answer: the code is the way in) and tells the person where it went', async () => {
   const { fetchImpl, calls } = fakeFetch({ otp: { status: 200, body: {} } });
   const r = await signInStart('  Alex@Example.test ', deps({ fetchImpl }));
   assert.deepEqual(r, { ok: true, email: 'alex@example.test', message: 'A six-digit sign-in code is on its way to alex@example.test. Enter it below.' });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/otp', 'no redirect_to: the email carries the code');
   assert.equal(calls[0].headers.apikey, CONFIG.anonKey);
-  assert.deepEqual(calls[0].body, { email: 'alex@example.test', create_user: true });
+  const { code_challenge: challenge, ...rest } = calls[0].body;
+  assert.deepEqual(rest, { email: 'alex@example.test', create_user: true, code_challenge_method: 's256' });
+  assert.match(challenge, /^[A-Za-z0-9_-]{43}$/, 'a PKCE challenge nobody can answer: the email\'s link brings no token to the manager view');
 
   const none = fakeFetch({});
   const bad = await signInStart('not an email', deps({ fetchImpl: none.fetchImpl }));

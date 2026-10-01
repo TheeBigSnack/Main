@@ -91,10 +91,27 @@ export function sessionFromTokenResponse(body, now = Date.now()) {
 
 // ---------- signing in ----------
 
+// A PKCE challenge nobody can answer: 32 random bytes in base64url (43
+// characters), sent as an S256 challenge whose verifier is never made, so no
+// one holds a value that hashes to it. With it, the link in the sign-in
+// email brings back only a one-time ?code= that no page can exchange,
+// instead of #access_token=...&refresh_token=... in the address of the page
+// it lands on (the project's Site URL, which is the manager view). The
+// six-digit code the extension signs in with works the same either way.
+export function unanswerableChallenge(randomBytes = (n) => globalThis.crypto.getRandomValues(new Uint8Array(n))) {
+  let s = '';
+  for (const b of randomBytes(32)) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 /**
- * Asks the auth server to email a sign-in link (and code) to this address.
+ * Asks the auth server to email a sign-in code (and link) to this address.
  * POST /auth/v1/otp. redirectTo, when given, is where the link lands; it
- * must be on the project's redirect allow-list.
+ * must be on the project's redirect allow-list, and that page takes the
+ * #access_token the link brings (exchangeTokenFromUrl). Without one the link
+ * lands on the project's Site URL (the manager view), which cannot sign the
+ * extension in, so the request carries unanswerableChallenge() and the link
+ * brings no token there: the code is the way in.
  */
 export async function signInWithMagicLink(email, { url = '', anonKey = '', redirectTo = '', fetchImpl = globalThis.fetch } = {}) {
   const e = String(email || '').trim().toLowerCase();
@@ -102,10 +119,12 @@ export async function signInWithMagicLink(email, { url = '', anonKey = '', redir
   const missing = missingConfig({ url, anonKey });
   if (missing) return { ok: false, error: missing };
   const query = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : '';
+  const body = { email: e, create_user: true };
+  if (!redirectTo) Object.assign(body, { code_challenge: unanswerableChallenge(), code_challenge_method: 's256' });
   const r = await call(fetchImpl, `${trimSlash(url)}/auth/v1/otp${query}`, {
     method: 'POST',
     headers: jsonHeaders(anonKey),
-    body: JSON.stringify({ email: e, create_user: true }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) return { ok: false, status: r.status, error: errorText(r.body, r.status) };
   return { ok: true, email: e };

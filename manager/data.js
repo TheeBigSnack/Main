@@ -279,6 +279,40 @@ function scanLine(s, nowAt, zone) {
   };
 }
 
+// ---------- a sign-in answer this page did not ask for ----------
+
+// The page signs in with the PKCE flow: its own link comes back with a
+// one-time ?code= that supabase-js exchanges with the verifier this browser
+// kept. Two other answers can land here, because the project's Site URL is
+// this page: #access_token=...&refresh_token=... from an implicit-flow link
+// (an email asked for elsewhere without a PKCE challenge: an extension from
+// before it sent one, or a call made by hand), and #error=... when the auth
+// server refused a link. supabase-js would refuse either and, doing so,
+// remove a session this browser already has, while the fragment stays in
+// the address bar. authFragment() reads the fragment so the page can take
+// it out of the address before supabase-js starts, end the session those
+// tokens opened, and say one sentence. The sentences never quote the
+// address: anyone can write words into a link.
+export const STRAY_LINK_NOTE = 'That link was not asked for on this page, so it does not sign you in here. Asked from the Lot Current extension? Ask it for a new code: opening the link used this one up. To sign in here, send yourself a link below.';
+export const FAILED_LINK_NOTE = 'That sign-in link did not work: it may have expired, been used already, or been replaced by a newer email. Send yourself a new one below.';
+export const UNUSED_CODE_NOTE = 'That sign-in link did not sign you in here. A link asked for on this page works once, in the browser that asked for it. One asked for in the Lot Current extension never signs in here, and opening it used up its code: ask the extension for a new one. To sign in here, send yourself a link below.';
+
+/**
+ * @param {string} hash  location.hash, with or without the leading #
+ * @returns {null | { accessToken: string, note: string }}  null when the
+ *   fragment carries neither a token nor an auth error
+ */
+export function authFragment(hash) {
+  const raw = String(hash ?? '').replace(/^#/, '');
+  if (!raw) return null;
+  const p = new URLSearchParams(raw);
+  const accessToken = p.get('access_token') || '';
+  const tokens = Boolean(accessToken || p.get('refresh_token') || p.get('provider_token'));
+  const failed = Boolean(p.get('error') || p.get('error_code') || p.get('error_description'));
+  if (!tokens && !failed) return null;
+  return { accessToken, note: tokens ? STRAY_LINK_NOTE : FAILED_LINK_NOTE };
+}
+
 // ---------- billing ----------
 
 export const DAY_MS = 24 * 3600 * 1000;
