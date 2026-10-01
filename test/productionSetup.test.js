@@ -72,6 +72,21 @@ test('the manager view deploys from the default branch only, configured, tested,
   assert.match(manager, /pages deploy "\$RUNNER_TEMP\/manager"/, 'only the staged folder is uploaded');
 });
 
+// set-project --check alone checks the URL's shape and that the two files
+// agree; only the production ref says which project. The workflow and the
+// doc promise a refusal of any other project, so the ref is compared.
+test('the manager view deploy refuses a page set to any project but the one in SUPABASE_PROJECT_REF', () => {
+  assert.match(manager, /PROJECT_REF: \$\{\{ vars\.SUPABASE_PROJECT_REF \}\}/);
+  const step = manager.split(/\n      - /).find((x) => x.startsWith('name: The page names the production project'));
+  assert.ok(step);
+  assert.match(step, /if ! printf '%s' "\$PROJECT_REF" \| grep -Eq '\^\[a-z0-9\]\{20\}\$'; then echo "::error::[^"]*"; exit 1; fi\n\s+node scripts\/set-project\.mjs --check --project-ref "\$PROJECT_REF"/, 'a missing ref stops the deploy; a present one is compared');
+  assert.match(manager, /variable SUPABASE_PROJECT_REF/);
+  const doc = read('docs/production-setup.md');
+  assert.match(doc, /`manager-view`, deployment branches: the default branch only; its environment secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and the \*\*Environment variable\*\* `SUPABASE_PROJECT_REF`/);
+  assert.match(doc, /names any project but the one in `SUPABASE_PROJECT_REF`/);
+  assert.doesNotMatch(doc + manager, /refuses to (deploy|upload) a page (that is not configured for|that isn't set to) the production project/);
+});
+
 test('every manager view run ends with the hosting check; "check only" skips everything that deploys', () => {
   const steps = manager.split(/\n      - /);
   const last = steps.at(-1);

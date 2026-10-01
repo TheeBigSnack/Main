@@ -84,3 +84,33 @@ test('--check: the committed files are not ready until the project exists, and s
   assert.deepEqual(loose.length, 1);
   assert.match(loose[0], /not pinned/);
 });
+
+// The Manager view workflow passes the production project's ref from its
+// environment, so a well-formed page set to any other project (a staging or
+// test one) is refused before anything is uploaded; the shape of the URL and
+// the two files agreeing say nothing about which project it is.
+test('--check --project-ref: the files must name exactly the production project', async () => {
+  const OTHER = 'abcdefghijklmnopqrst';
+  const other = { account: { url: URL_, anonKey: KEY }, manager: { ...CONFIG, supabaseUrl: URL_, supabaseAnonKey: KEY } };
+  assert.deepEqual(readiness(other), [], 'without a ref only the shape and the agreement are checked');
+  assert.deepEqual(readiness({ ...other, projectRef: OTHER }), []);
+  const wrong = readiness({ ...other, projectRef: 'zyxwvutsrqponmlkjihg' });
+  assert.deepEqual(wrong, [`manager/config.js names ${URL_}, not the production project https://zyxwvutsrqponmlkjihg.supabase.co: run npm run set-project with the production project and commit`]);
+  for (const bad of ['', '   ', 'ABCDEFGHIJKLMNOPQRST', 'short', `${OTHER}x`, null]) {
+    const r = readiness({ ...other, projectRef: bad });
+    assert.equal(r.length, 1, String(bad));
+    assert.match(r[0], /the production project ref is missing or is not 20 lower-case letters and digits/);
+  }
+  // the script itself, as the workflow runs it, against the committed files
+  const { spawnSync } = await import('node:child_process');
+  const run = (...args) => spawnSync(process.execPath, ['scripts/set-project.mjs', '--check', ...args], { cwd: new URL('..', import.meta.url), encoding: 'utf8' });
+  const committedRef = /^https:\/\/([a-z0-9]{20})\.supabase\.co$/.exec(CONFIG.supabaseUrl)?.[1];
+  if (committedRef) {
+    assert.equal(run('--project-ref', committedRef).status, 0);
+    const refused = run('--project-ref', committedRef === 'zyxwvutsrqponmlkjihg' ? OTHER : 'zyxwvutsrqponmlkjihg');
+    assert.equal(refused.status, 1);
+    assert.match(refused.stdout, /FAIL  manager\/config\.js names https:\/\/[a-z0-9]{20}\.supabase\.co, not the production project/);
+  }
+  assert.equal(run('--project-ref').status, 2, 'a flag with no ref is a usage error, never a pass');
+  assert.equal(run('--bogus', 'x').status, 2);
+});

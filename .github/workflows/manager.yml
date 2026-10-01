@@ -6,15 +6,17 @@
 #
 # Until the owner has added the two Cloudflare secrets the job says so and
 # stops green, so pushes before the account exists stay quiet. With them it
-# refuses to deploy a page that is not configured for the production project
-# (npm run set-project -- --check), runs the page's tests, and uploads the
-# folder without the local demo server.
+# refuses to deploy a page that names any project but the one in
+# SUPABASE_PROJECT_REF, or that is not ready (npm run set-project -- --check
+# --project-ref), runs the page's tests, and uploads the folder without the
+# local demo server.
 #
 # Settings it reads, on the "manager-view" environment (Settings,
 # Environments, manager-view, deployment branches: the default branch only),
 # so a workflow on another branch cannot read them:
 #   secrets  CLOUDFLARE_API_TOKEN   an API token with Cloudflare Pages: Edit only
 #            CLOUDFLARE_ACCOUNT_ID  the Cloudflare account's id (not secret, kept with the token)
+#   variable SUPABASE_PROJECT_REF  the production project's ref, as on the "production" environment
 #   variable CLOUDFLARE_PAGES_PROJECT  the Pages project's name (default lotcurrent-app)
 #   variable MANAGER_URL      the page's own address once its DNS is set (https://app.<domain>/)
 #   variable SENDER_DOMAIN    the sign-in email's sending domain once it is set (mail.<domain>)
@@ -65,6 +67,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
       PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'lotcurrent-app' }}
       MANAGER_URL: ${{ vars.MANAGER_URL }}
       SENDER_DOMAIN: ${{ vars.SENDER_DOMAIN }}
@@ -87,7 +90,9 @@ jobs:
           node-version-file: .nvmrc
       - name: The page names the production project with a pinned client
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
-        run: node scripts/set-project.mjs --check
+        run: |
+          if ! printf '%s' "$PROJECT_REF" | grep -Eq '^[a-z0-9]{20}$'; then echo "::error::the variable SUPABASE_PROJECT_REF is missing on the manager-view environment or is not a 20-character project ref (docs/production-setup.md, step 6)"; exit 1; fi
+          node scripts/set-project.mjs --check --project-ref "$PROJECT_REF"
       - name: The page's tests
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
         run: node --test test/manager.test.js test/setProject.test.js test/productionSetup.test.js test/checkHosting.test.js
