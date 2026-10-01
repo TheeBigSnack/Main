@@ -78,25 +78,162 @@ test('the test hook can only move addresses and timings, never the fields the fi
   assert.equal((panel.match(/applyOverrides\(FORM_MAP, devOverrides\)/g) || []).length, 2);
 });
 
-test('the fill code never submits a form or clicks anything but a dropdown option', () => {
+// The text of a function declared in `src`, from `function name(` to its
+// closing brace (braces inside quoted strings and line comments are
+// skipped). '' when missing.
+function bodyOf(src, name) {
+  const start = src.search(new RegExp(`(async\\s+)?function\\s+${name}\\s*\\(`));
+  if (start < 0) return '';
+  const open = src.indexOf('{', src.indexOf(')', start));
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === "'" || c === '"' || c === '`') {
+      for (i++; i < src.length && src[i] !== c; i++) if (src[i] === '\\') i++;
+    } else if (c === '/' && src[i + 1] === '/') {
+      i = src.indexOf('\n', i);
+      if (i < 0) return '';
+    } else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return src.slice(start, i + 1);
+  }
+  return '';
+}
+
+// What these source checks prove: the usual ways to click, submit or inject
+// in ordinary code are caught. Code written to hide a click from them (a
+// method name built from pieces, say) is for code review; the e2e mock form
+// also counts real clicks on its own Publish button.
+test('the fill code never submits a form, and clicks only inside the dropdown and checkbox helpers', () => {
   const src = read('../extension/facebook/fillForm.js');
   // the read-only probe and the listing reader must not act on the page at all
   const probe = src.slice(src.indexOf('function probeFormInPage'), src.indexOf('function fillPriceInPage'));
-  assert.ok(probe.length > 100 && !/\.click\(\)|dispatchEvent|\.focus\(\)|\.value\s*=/.test(probe), 'probeFormInPage must be read-only');
+  assert.ok(probe.length > 100 && !/\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(probe), 'probeFormInPage must be read-only');
   const reader = src.slice(src.indexOf('function readListingInPage'), src.indexOf('function attachPhotosInPage'));
-  assert.ok(reader.length > 100 && !/\.click\(\)|dispatchEvent|\.focus\(\)|\.value\s*=/.test(reader), 'readListingInPage must be read-only');
+  assert.ok(reader.length > 100 && !/\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(reader), 'readListingInPage must be read-only');
   // the price filler touches one box and never clicks
   const pricer = src.slice(src.indexOf('function fillPriceInPage'), src.indexOf('function readListingInPage'));
-  assert.ok(pricer.length > 100 && !/\.click\(\)/.test(pricer), 'fillPriceInPage must not click');
-  assert.ok(!/\.submit\s*\(|requestSubmit|\bpublish\b|mark as sold|\bdelete\b/i.test(src), 'fillForm.js must not contain submit/publish/delete paths');
-  assert.ok(!/type\s*=\s*["']submit["']/i.test(src));
-  // the only element type ever clicked is a dropdown control or one of its
-  // options: every .click( in the file, whatever the receiver expression
-  const clicks = [...src.matchAll(/(\S+)\.click\(/g)];
-  assert.ok(clicks.length >= 2, 'the dropdown clicks are still there');
-  for (const m of clicks) assert.ok(['control', 'option', 'trigger'].includes(m[1]), `unexpected click on "${m[1]}"`);
-  // and no click can be synthesised as an event either
+  assert.ok(pricer.length > 100 && !/\.click\b/.test(pricer), 'fillPriceInPage must not click');
+  // no submit by any spelling (form.submit(), requestSubmit, ['submit'], a submit button), and no Publish, Mark as sold or Delete
+  assert.ok(!/submit|\bpublish\b|mark as sold|\bdelete\b/i.test(src), 'fillForm.js must not contain submit/publish/delete paths');
+  // every click sits in one of three helpers, one click each: opening a
+  // dropdown, choosing one of its options, ticking a checkbox the map names.
+  // Anywhere else, .click in any form (a call, .click.call or .apply,
+  // HTMLElement.prototype.click) fails, whatever the receiver is called.
+  let rest = src;
+  for (const helper of ['openDropdown', 'chooseOption', 'setCheckbox']) {
+    const body = bodyOf(src, helper);
+    assert.ok(body.length > 50, `${helper} is still there`);
+    assert.equal((body.match(/\.click\b/g) || []).length, 1, `${helper} has exactly one click`);
+    assert.equal((body.match(/\.click\(\)/g) || []).length, 1, `${helper}'s click is a plain call`);
+    rest = rest.replace(body, '');
+  }
+  assert.ok(!/\.click\b|\bclick\s*\(/.test(rest), 'fillForm.js clicks only inside openDropdown, chooseOption and setCheckbox');
+  // and no click can be synthesised as an event, and no Enter pressed (Enter commits a form)
   assert.ok(!/['"`]click['"`]/.test(src), 'fillForm.js must not dispatch a click event');
+  assert.ok(!/['"`]Enter['"`]/.test(src), 'fillForm.js must not press Enter');
+});
+
+test('bodyOf finds a helper whole, braces in strings and comments and all', () => {
+  const src = "function a(x) {\n  if (x) { return '}'; } // isn't {\n  return \"{\";\n}\nfunction b() { return 1; }\n";
+  assert.equal(bodyOf(src, 'a'), "function a(x) {\n  if (x) { return '}'; } // isn't {\n  return \"{\";\n}");
+  assert.equal(bodyOf(src, 'b'), 'function b() { return 1; }');
+  assert.equal(bodyOf(src, 'c'), '');
+});
+
+// Every .js file under extension/, wherever it sits: a new module is checked
+// the day it is added, without a list here to update.
+function extensionFiles(dir = new URL('../extension/', import.meta.url), prefix = '') {
+  const out = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) out.push(...extensionFiles(new URL(e.name + '/', dir), prefix + e.name + '/'));
+    else if (/\.m?js$/.test(e.name)) out.push(prefix + e.name);
+  }
+  return out;
+}
+
+// The only files that inject into a page, and what each may inject: a
+// function imported from the module the guards above check, by the name it
+// is exported under. The adapters' own probe and search are checked in the
+// dealer-site test below for every adapter in ADAPTERS.
+const INJECTORS = {
+  'sidepanel.js': { './facebook/fillForm.js': ['fillFormInPage', 'attachPhotosInPage', 'probeFormInPage'] },
+  'upkeep.js': { './facebook/fillForm.js': ['fillPriceInPage', 'readListingInPage'] },
+  'src/scanRunner.js': { './scan.js': ['probeSiteInPage'] },
+};
+const ADAPTER_FUNCS = ['adapter.probeInPage', 'adapter.searchInPage'];
+
+// The argument text of every call to `name(` in src, parentheses balanced.
+function callArgs(src, name) {
+  const out = [];
+  for (const m of src.matchAll(new RegExp(`\\b${name}\\(`, 'g'))) {
+    let depth = 0;
+    for (let i = m.index + m[0].length - 1; i < src.length; i++) {
+      if (src[i] === '(') depth++;
+      else if (src[i] === ')' && --depth === 0) {
+        out.push(src.slice(m.index + m[0].length, i));
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+function injectionProblems(file, src) {
+  const problems = [];
+  // chrome.scripting only to call executeScript, spelled out (no alias, no registerContentScripts)
+  const scripting = (src.match(/\bscripting\b/g) || []).length;
+  const calls = callArgs(src, 'chrome\\.scripting\\.executeScript');
+  if (scripting !== calls.length || (src.match(/executeScript/g) || []).length !== calls.length) problems.push(`${file}: chrome.scripting is used other than as chrome.scripting.executeScript(...)`);
+  if (/chrome\.debugger|tabs\.sendMessage/.test(src)) problems.push(`${file}: another way into a page`);
+  // outside the adapters, the adapters' in-page functions are only ever reached through an adapter object, never defined
+  if (!file.startsWith('adapters/') && /\b(probeInPage|searchInPage)\b/.test(src.replace(/\badapter\.(probeInPage|searchInPage)\b/g, ''))) problems.push(`${file}: defines or names probeInPage/searchInPage outside an adapter`);
+  if (!calls.length) return problems;
+  const allowed = INJECTORS[file];
+  if (!allowed) return [...problems, `${file}: injects into a page, and only ${Object.keys(INJECTORS).join(', ')} may`];
+  const names = Object.values(allowed).flat();
+  for (const args of calls) {
+    const func = /\bfunc:\s*([\w$.]+)/.exec(args);
+    if (/\bfiles\s*:/.test(args)) problems.push(`${file}: injects files`);
+    if (!func || !(names.includes(func[1]) || (file === 'src/scanRunner.js' && ADAPTER_FUNCS.includes(func[1])))) problems.push(`${file}: injects ${func ? func[1] : 'something with no func'}`);
+  }
+  // each name is the imported function itself: it appears once in its import
+  // and otherwise only as func: (no local function, variable or parameter of that name)
+  for (const [from, list] of Object.entries(allowed)) {
+    for (const name of list) {
+      const imported = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*['"]${from.replace(/[.]/g, '\\.')}['"]`).test(src);
+      const uses = (src.match(new RegExp(`\\b${name}\\b`, 'g')) || []).length;
+      const asFunc = (src.match(new RegExp(`\\bfunc:\\s*${name}\\b`, 'g')) || []).length;
+      if (asFunc && (!imported || uses !== asFunc + 1)) problems.push(`${file}: ${name} is not only the one imported from ${from}`);
+    }
+  }
+  return problems;
+}
+
+test('every file of the extension reaches a page only through the known injected functions, imported from their checked modules', () => {
+  const files = extensionFiles();
+  assert.ok(files.length > 20 && files.includes('src/pilot.js') && files.includes('facebook/fillForm.js'), 'every folder is walked');
+  const problems = [];
+  let injecting = 0;
+  for (const file of files) {
+    const src = read('../extension/' + file);
+    if (/executeScript/.test(src)) injecting += 1;
+    problems.push(...injectionProblems(file, src));
+  }
+  assert.deepEqual(problems, []);
+  assert.equal(injecting, Object.keys(INJECTORS).length, 'the three injecting files are found');
+
+  // the check itself: each way round it that ordinary code could take fails
+  const panel = read('../extension/sidepanel.js');
+  const planted = {
+    'a new module that injects': ['src/pilot.js', "async function x(id) { await chrome.scripting.executeScript({ target: { tabId: id }, func: probeFormInPage }); }"],
+    'a local function under a known name': ['sidepanel.js', panel + '\nconst probeFormInPage = () => null;\n'],
+    'a parameter under a known name': ['sidepanel.js', panel.replace('async function runProbe() {', 'async function runProbe(probeFormInPage) {')],
+    'an alias of executeScript': ['sidepanel.js', panel + '\nconst inject = chrome.scripting.executeScript;\n'],
+    'a content script registered at run time': ['upkeep.js', read('../extension/upkeep.js') + "\nchrome.scripting.registerContentScripts([]);\n"],
+    'an injected file': ['upkeep.js', read('../extension/upkeep.js').replace('func: fillPriceInPage', "files: ['x.js'], func: fillPriceInPage")],
+    'a function from elsewhere': ['upkeep.js', read('../extension/upkeep.js').replace('func: fillPriceInPage', 'func: somethingElse')],
+  };
+  for (const [what, [file, src]] of Object.entries(planted)) assert.ok(injectionProblems(file, src).length, `${what} is caught`);
 });
 
 // The comment stripper above removes /* ... */ blocks; a "/*" inside a string
