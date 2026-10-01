@@ -175,6 +175,17 @@ test('My listings: sold, sale-pending and held back by the pre-owned check come 
   assert.equal(pendingText({ status: 'publish', statusLabel: '' }), null);
 });
 
+test('My listings: a posted car whose website price is gone says so, as To do does, not "Matches the website"', () => {
+  const entry = snapshot([['usedNormal']]).vehicles[VIN.ram];
+  const noPrice = { ...entry, price: null, priceLabel: 'call for price' };
+  const status = listingStatus(noPrice, 27163, null);
+  assert.deepEqual(status, { tone: 'warn', text: 'Website no longer shows a price' });
+  const posted = markPosted({}, { vin: VIN.ram, name: entry.name, price: 27163 });
+  const todo = diffScans({ vehicles: { [VIN.ram]: entry } }, { vehicles: { [VIN.ram]: noPrice } }, { posted, confirm: confirmed() }).needsALook.map((n) => n.text);
+  assert.ok(todo.some((t) => t.startsWith(status.text)), `To do says ${JSON.stringify(todo)}`);
+  assert.deepEqual(listingStatus(noPrice, null, null), { tone: 'good', text: 'Matches the website' }, 'a listing posted without a price still matches');
+});
+
 test('new arrival shows up with its decision', () => {
   const curr = snapshot([...LOT, ['usedZeroMiles']]);
   const d = diffScans(snapshot(LOT), curr, { confirm: confirmed() });

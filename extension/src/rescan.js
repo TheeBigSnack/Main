@@ -125,6 +125,8 @@ export function listingStatus(now, listedPrice, sitePrice) {
   if (held) return { tone: 'bad', text: held };
   if (now.decision === DECISION.SKIP) return { tone: 'bad', text: 'Not pre-owned on the website' };
   if (now.decision === DECISION.REVIEW) return { tone: 'warn', text: 'Needs a look (see To do)' };
+  // as To do says it (diffScans): the listing has a price the website no longer shows
+  if (listedPrice && !sitePrice) return { tone: 'warn', text: 'Website no longer shows a price' };
   if (sitePrice && sitePrice !== listedPrice) return { tone: 'warn', text: 'Website price changed', priceChanged: true };
   return { tone: 'good', text: 'Matches the website' };
 }

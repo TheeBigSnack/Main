@@ -78,6 +78,7 @@ test('help.md names every state My listings can show a posted car in, as the cod
     listingStatus({ statusLabel: 'Sold' }, 1, 1),
     listingStatus({ decision: 'skip' }, 1, 1),
     listingStatus({ decision: 'review' }, 1, 1),
+    listingStatus({ decision: 'not-ready' }, 1, null),
     listingStatus({ decision: 'ready' }, 1, 2),
     listingStatus({ decision: 'ready' }, 1, 1),
   ];
