@@ -1,8 +1,8 @@
 // The first-run wizard's pure parts (wizard.js draws them): which steps it
 // has, and what the Account step shows. The Account step is there only when
 // the extension has an account server to talk to (src/accountConfig.js
-// accountsConfigured()); with the shipped empty config the wizard has exactly
-// the steps it had before accounts. The step's words are Settings' own
+// accountsConfigured()); with an empty config the wizard has exactly the
+// steps it had before accounts. The step's words are Settings' own
 // (popup.js accountFieldset), so a salesperson who skips it and signs in
 // later under Settings, Account meets the same labels.
 

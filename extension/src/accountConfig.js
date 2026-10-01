@@ -1,9 +1,18 @@
-// Where the extension's accounts live (Milestone 4). The owner fills this in
-// once the Supabase project exists (supabase/README.md, "What to create,
-// once"); until then every value is empty, accountsConfigured() is false,
-// and the extension behaves exactly as it did without accounts: the Account
-// section in Settings shows one line, nothing signs in, nothing syncs, and
-// no request leaves the browser.
+// Where the extension's accounts live (Milestone 4). `npm run set-project`
+// fills this in once the Supabase project exists (docs/production-setup.md,
+// step 1). With url and anonKey filled, accountsConfigured() is true: the
+// first-run wizard has its optional Account step and Settings offers
+// sign-in. Those work only once the project's database, functions and
+// sign-in email are set up (docs/production-setup.md, steps 3 to 5, with
+// npm run check-deploy showing no FAIL), and docs/release.md says not to hand
+// a build to anyone before then. Nothing is sent to the project until a
+// salesperson asks for a sign-in code, and nothing syncs until one is signed
+// in.
+//
+// With every value empty, accountsConfigured() is false and the extension
+// behaves exactly as it did without accounts: the Account section in
+// Settings shows one line, nothing signs in, nothing syncs, and no request
+// leaves the browser.
 //
 //   url          the project URL from Project settings, API, like
 //                https://<ref>.supabase.co

@@ -144,6 +144,17 @@ export function submitSteps(listing) {
 // The same name scripts/pack.mjs writes.
 export const zipPath = (version) => `dist/lot-current-extension-${version}.zip`;
 
+// The account project a build talks to: the url in extension/src/accountConfig.js,
+// or '' while that config is empty.
+export function accountUrlIn(text) {
+  const m = /^\s*url: '([^']*)',/m.exec(String(text || ''));
+  return m ? m[1] : '';
+}
+
+// What a build that names an account project must wait for, in one place so
+// docs/release.md can quote it.
+export const ACCOUNT_GATE = 'docs/production-setup.md steps 3 to 5 done and npm run check-deploy showing no FAIL';
+
 // Lines whose text differs between two versions of a file (the edit keeps the line count).
 export function changedLines(before, after) {
   const a = before.split('\n');
@@ -152,13 +163,19 @@ export function changedLines(before, after) {
 }
 
 // What a person does after the script: printed, never run.
-export function nextSteps({ version, listing }) {
+export function nextSteps({ version, listing, accountUrl = '' }) {
   const zip = zipPath(version);
   const boxes = submitSteps(listing || '');
   const lines = [
     `Lot Current ${version} is packed: ${zip}`,
     'Nothing was committed, tagged, pushed or uploaded. Next, by hand (docs/release.md):',
     '',
+    // a build that names the account project offers sign-in, which works only once that project is set up
+    ...(accountUrl ? [
+      `This build names the account project ${accountUrl} (extension/src/accountConfig.js), so the wizard and Settings offer sign-in.`,
+      `Hand it to no tester and upload it nowhere before ${ACCOUNT_GATE}: until then that sign-in cannot work.`,
+      '',
+    ] : []),
     '1. The end-to-end flows and the sandbox drive, with Playwright\'s Chromium (README, "For development"):',
     '     npm run test:e2e',
     '     npm run test:demo',
@@ -203,6 +220,15 @@ const USAGE = [
 function listingText(io) {
   try {
     return io.read('store/listing.md');
+  } catch {
+    return '';
+  }
+}
+
+// Likewise the account config, read only to say what the build talks to.
+function accountUrlOf(io) {
+  try {
+    return accountUrlIn(io.read('extension/src/accountConfig.js'));
   } catch {
     return '';
   }
@@ -265,7 +291,7 @@ export function release(argv, io) {
       for (const d of changedLines(texts[f], next[f])) io.log(`  ${f}:${d.line}  ${d.from}  ->  ${d.to}`);
     }
     io.log(`Then it would run ${COMMANDS.test.join(' ')} and ${COMMANDS.pack.join(' ')}, and print:\n`);
-    io.log(nextSteps({ version, listing: listingText(io) }).join('\n'));
+    io.log(nextSteps({ version, listing: listingText(io), accountUrl: accountUrlOf(io) }).join('\n'));
     return 0;
   }
 
@@ -280,7 +306,7 @@ export function release(argv, io) {
   if (io.run(COMMANDS.pack).code !== 0) return restore('npm run pack failed');
   if (!io.exists(zipPath(version))) return restore(`npm run pack did not write ${zipPath(version)}`);
   io.log('');
-  io.log(nextSteps({ version, listing: listingText(io) }).join('\n'));
+  io.log(nextSteps({ version, listing: listingText(io), accountUrl: accountUrlOf(io) }).join('\n'));
   return 0;
 }
 

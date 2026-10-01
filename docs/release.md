@@ -12,6 +12,8 @@ Every version ships the same way. A person writes the release notes, `npm run re
    - the README's first line does not carry the new major and minor number.
 
    Then it writes the version into `extension/manifest.json`, `package.json` and both places in `package-lock.json`, runs `npm test` and `npm run pack`, and prints the next steps. If the tests or the pack fail, it puts the three files back as they were.
+
+   **A build that names the account project.** When `extension/src/accountConfig.js` names a Supabase project (`npm run set-project` filled it in), the build shows the optional Account step in the first-run wizard and sign-in under Settings, and the printed steps say so. That sign-in works only once the project is set up, so hand such a build to no tester and upload it nowhere before `docs/production-setup.md` steps 3 to 5 are done and `npm run check-deploy` shows no FAIL. The config cannot simply be emptied for the meantime: the Supabase deploy workflow refuses a project the committed config does not name.
 3. **The end-to-end flows and the sandbox drive**: `npm run test:e2e`, then `npm run test:demo`, with Playwright's Chromium (README, "For development"). Both must pass before the commit. CI runs them again after the push.
 4. **Commit and tag**, as the script prints them:
 

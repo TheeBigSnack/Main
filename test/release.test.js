@@ -9,7 +9,9 @@ import { readFileSync } from 'node:fs';
 import {
   COMMANDS, VERSION_FILES, parseVersion, compareVersions, bump, setVersionText, changelogHasVersion, newestChangelogVersion,
   readmeTitle, readmeTitleFits, dirtyPaths, submitSteps, zipPath, changedLines, nextSteps, parseArgs, release, runCommand,
+  accountUrlIn, ACCOUNT_GATE,
 } from '../scripts/release.mjs';
+import { ACCOUNT, accountsConfigured } from '../extension/src/accountConfig.js';
 
 const read = (rel) => readFileSync(new URL('../' + rel, import.meta.url), 'utf8');
 const REAL = Object.fromEntries([...VERSION_FILES, 'CHANGELOG.md', 'README.md', 'store/listing.md'].map((f) => [f, read(f)]));
@@ -295,4 +297,32 @@ test('the script never commits, tags, pushes or reaches the network: three comma
   const runs = [...code.matchAll(/\brun\(([^)]*)\)/g)].map((m) => m[1]);
   assert.ok(runs.length >= 3);
   for (const arg of runs) assert.match(arg, /^(COMMANDS\.(status|test|pack)|cmd)$/, `run(${arg})`);
+});
+
+// A build whose extension/src/accountConfig.js names a project offers sign-in
+// in the wizard and Settings, which works only once that project's database,
+// functions and sign-in email are set up. The release says so before the
+// upload and the testers' copy, and says nothing while the config is empty.
+test('the next steps say when a build names the account project, and what it waits for', () => {
+  assert.equal(accountUrlIn(read('extension/src/accountConfig.js')), ACCOUNT.url, 'the url the extension uses');
+  assert.equal(accountUrlIn("export const ACCOUNT = Object.freeze({\n  url: '',\n  anonKey: '',\n});"), '');
+  const url = 'https://abcdefghijklmnopqrst.supabase.co';
+  const named = nextSteps({ version: '0.6.0', listing: '', accountUrl: url }).join('\n');
+  assert.ok(named.includes(`names the account project ${url} (extension/src/accountConfig.js)`));
+  assert.ok(named.includes(ACCOUNT_GATE));
+  assert.ok(named.indexOf(ACCOUNT_GATE) < named.indexOf('3. Upload') && named.indexOf(ACCOUNT_GATE) < named.indexOf('4. Testers'), 'before the upload and the testers');
+  assert.doesNotMatch(nextSteps({ version: '0.6.0', listing: '' }).join('\n'), /account project/);
+  // the run reads the real config: today it names the production project
+  const next = bump(CURRENT, 'patch');
+  const w = world({ changelogEntry: next });
+  w.files['extension/src/accountConfig.js'] = read('extension/src/accountConfig.js');
+  assert.equal(release(['patch', '--dry-run'], w.io), 0, w.err());
+  assert.equal(w.out().includes(ACCOUNT_GATE), accountsConfigured());
+  // the release checklist and the config's own header say the same
+  assert.ok(read('docs/release.md').includes(`before \`docs/production-setup.md\` steps 3 to 5 are done and \`npm run check-deploy\` shows no FAIL`));
+  const header = read('extension/src/accountConfig.js').split('export const')[0];
+  assert.match(header, /With url and anonKey filled, accountsConfigured\(\) is true: the\n\/\/ first-run wizard has its optional Account step/);
+  assert.match(header, /steps 3 to 5/);
+  assert.doesNotMatch(header, /until then every value is empty/, 'the header no longer says the shipped values are empty');
+  assert.doesNotMatch(read('extension/src/wizardSteps.js'), /the shipped empty config/);
 });
