@@ -1,0 +1,137 @@
+<!doctype html>
+<!-- Written by scripts/site-pages.mjs from site-src/pages/for-managers.html and site/config.js. Change those and run
+     npm run site-pages; an edit made here is lost at the next run, and npm test fails until then. -->
+<html lang="en" data-root="../">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#14532d">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>For managers | Lot Sync</title>
+  <meta name="description" content="The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="stylesheet" href="../site.css">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Lot Sync">
+  <meta property="og:title" content="For managers">
+  <meta property="og:description" content="The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="For managers">
+  <meta name="twitter:description" content="The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home"},{"@type":"ListItem","position":2,"name":"For managers"}]}]}</script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="../">Lot Sync <small>A Chrome extension for dealership salespeople</small></a>
+      <nav aria-label="Site">
+        <ul>
+          <li><a href="../">Home</a></li>
+          <li><a href="../how-it-works/">How it works</a></li>
+          <li><a href="../pricing/">Pricing</a></li>
+          <li><a href="../faq/">FAQ</a></li>
+          <li><a href="../for-managers/" aria-current="page">For managers</a></li>
+          <li><a href="../support/">Support</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <div class="wrap">
+      <ol>
+        <li><a href="../">Home</a></li>
+        <li aria-current="page">For managers</li>
+      </ol>
+    </div>
+  </nav>
+
+  <main id="main">
+    <section class="intro" aria-labelledby="page-h">
+      <div class="wrap narrow">
+        <h1 id="page-h">What managers see</h1>
+        <p class="lead">The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.</p>
+        <p>When your dealership uses Lot Sync accounts, the manager view is a web page that shows your whole store once your salespeople sign in to their extensions. Nothing on it comes from anyone's Facebook account.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="signin-h">
+      <div class="wrap narrow">
+        <h2 id="signin-h">Signing in</h2>
+        <p>Type your work email and click <b>Send me a sign-in link</b>. Open the link in the same browser on the same computer. There is no password.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="numbers-h">
+      <div class="wrap narrow">
+        <h2 id="numbers-h">The numbers</h2>
+        <ul class="plain">
+          <li><b>Salespeople</b>: for each person, posted this week (the last 7 days), all time, the median seconds per post (from the click on Post to "It's posted", their own review and Publish click included), listings up and taken down.</li>
+          <li><b>Sold cars still listed</b>: each car a rescan flagged as sold whose listing is still up, with how long it has been open, longest first. The salesperson sees the same item on their To do tab.</li>
+          <li><b>Price changes not yet updated</b>: each listing whose price no longer matches the website, with the listing price next to the website price and how long it has been open.</li>
+          <li><b>Download CSV</b>: the same numbers, with their definitions, for a spreadsheet.</li>
+        </ul>
+        <p>They are the numbers the salespeople's own Numbers tab keeps: how long each post took, which form fields could not be filled, and how long sold cars and price changes stayed on a listing. Never buyers, messages, the description text or anything from a Facebook account beyond the person's own listings. The page says when the last scan ran; rescans run every 3 hours while a salesperson's Chrome is open.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="start-h">
+      <div class="wrap narrow">
+        <h2 id="start-h">Getting started</h2>
+        <p>Four steps above the other cards, each marked Done or To do with one sentence: <b>Start the free pilot or subscribe</b>; <b>Invite your salespeople</b>; <b>First car posted and synced</b>; <b>Two salespeople posting</b> (two different salespeople posted in the past 7 days; a manager's own posts don't count). Once all four are done, the card shrinks to one line.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="invites-h">
+      <div class="wrap narrow">
+        <h2 id="invites-h">Invite codes</h2>
+        <p><b>Invite a salesperson</b> or <b>Invite a manager</b> makes a code that works once and for 7 days; <b>Copy</b> puts it on the clipboard. The card lists every open code with the day it expires, and <b>Revoke</b> cancels one that went to the wrong person. A salesperson enters the code in the extension under Settings, Account.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="team-h">
+      <div class="wrap narrow">
+        <h2 id="team-h">Team</h2>
+        <p>Everyone in the dealership's account. <b>Make manager</b> and <b>Make salesperson</b> change a role; <b>Remove</b> takes two clicks and stops that person's extension from syncing (the cars they posted stay in the numbers). A dealership always keeps at least one manager, so make someone else a manager before you step down or leave.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="billing-h">
+      <div class="wrap narrow">
+        <h2 id="billing-h">Billing</h2>
+        <p>Where the dealership's plan stands: no plan yet, the free pilot with the days left, subscribed with the seats paid for, or lapsed. <b>Start the free pilot</b>, <b>Subscribe</b> and <b>Manage billing</b> open Stripe's own pages for the card and the invoices, and Checkout shows the price before you pay. Each person with the salesperson role takes a seat; managers don't. Lot Sync never adds seats or changes what you pay on its own. When a plan has lapsed, salespeople can still post by hand, but nothing syncs and the description writer is off until it is renewed. The planned prices are on the <a href="../pricing/">pricing page</a>.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="cap-h">
+      <div class="wrap narrow">
+        <h2 id="cap-h">The daily cap</h2>
+        <p>Each salesperson may record a set number of posts a day, 10 unless your dealership changes it in the extension's Settings (Safety, Posts per day, per salesperson). At the cap the Post buttons go away until tomorrow. It is a safety setting, not a guarantee of anything from Facebook; Meta does not publish its limits.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="never-h">
+      <div class="wrap narrow">
+        <h2 id="never-h">What managers never see</h2>
+        <p>Nothing from a salesperson's Facebook account: no messages, buyers, passwords or cookies, because Lot Sync never reads them. The listings are the salesperson's own, posted from their own account; the manager view shows the car, the price, the time, who posted it and the listing link they saved. Lot Sync never publishes, edits or takes down a listing for anyone, and support never asks for access to an account (<a href="../support/">what support never does</a>). Every step a salesperson takes is on the <a href="../how-it-works/">how it works</a> page.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <ul>
+        <li><a href="../legal/terms/">Terms of service</a></li>
+        <li><a href="../legal/privacy/">Privacy policy</a></li>
+        <li><a href="../legal/posting-rules/">Posting rules</a></li>
+      </ul>
+      <p>Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.</p>
+    </div>
+  </footer>
+</body>
+</html>

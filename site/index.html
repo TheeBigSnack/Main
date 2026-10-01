@@ -1,42 +1,52 @@
 <!doctype html>
-<html lang="en">
+<!-- Written by scripts/site-pages.mjs from site-src/pages/home.html and site/config.js. Change those and run
+     npm run site-pages; an edit made here is lost at the next run, and npm test fails until then. -->
+<html lang="en" data-root="./">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <!-- Scripts, styles, images and data only from this site; calls only to this site and the lead function on
-       Supabase (config.js demoEndpoint); the form's own action is the mailto fallback. Change connect-src with
-       demoEndpoint if the function is ever served from another host. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action mailto:">
-  <title>Lot Sync: your used cars on Marketplace, from your website</title>
-  <meta name="description" content="Lot Sync is a Chrome extension for dealership salespeople. It fills in the Facebook Marketplace vehicle listing from your dealership website, photos included. You check it and click Publish; Lot Sync never does.">
-  <link rel="stylesheet" href="site.css">
+  <meta name="theme-color" content="#14532d">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Your used cars on Marketplace, from your website | Lot Sync</title>
+  <meta name="description" content="Lot Sync fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="stylesheet" href="./site.css">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Lot Sync">
+  <meta property="og:title" content="Your used cars on Marketplace, from your website">
+  <meta property="og:description" content="Lot Sync fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Your used cars on Marketplace, from your website">
+  <meta name="twitter:description" content="Lot Sync fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"Lot Sync"},{"@type":"WebSite","name":"Lot Sync"},{"@type":"SoftwareApplication","name":"Lot Sync","applicationCategory":"BusinessApplication","operatingSystem":"Chrome","description":"Lot Sync fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish."}]}</script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
 
   <header class="top">
     <div class="wrap">
-      <a class="brand" href="#main">Lot Sync <small>A Chrome extension for dealership salespeople</small></a>
-      <nav aria-label="Page sections">
+      <a class="brand" href="./">Lot Sync <small>A Chrome extension for dealership salespeople</small></a>
+      <nav aria-label="Site">
         <ul>
-          <li><a href="#how">How it works</a></li>
-          <li><a href="#see">See it</a></li>
-          <li><a href="#wont">What it won't do</a></li>
-          <li><a href="#pricing">Pricing</a></li>
-          <li><a href="#faq">FAQ</a></li>
-          <li><a href="#demo">Request a demo</a></li>
+          <li><a href="./" aria-current="page">Home</a></li>
+          <li><a href="./how-it-works/">How it works</a></li>
+          <li><a href="./pricing/">Pricing</a></li>
+          <li><a href="./faq/">FAQ</a></li>
+          <li><a href="./for-managers/">For managers</a></li>
+          <li><a href="./support/">Support</a></li>
         </ul>
       </nav>
     </div>
   </header>
 
   <main id="main">
-
     <section class="hero" aria-labelledby="hero-h">
       <div class="wrap narrow">
         <h1 id="hero-h">Your used cars on Facebook Marketplace, from your website, in seconds.</h1>
-        <p class="lead">Lot Sync reads your dealership website's used inventory, fills in the Marketplace vehicle listing, photos included, and tells you the same day when a car sells or its price changes.</p>
+        <p class="lead">Lot Sync fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish. It also tells you the same day when a car sells or its price changes.</p>
         <!-- The Start a free pilot links stay hidden, here and under Pricing, until config.js names the manager view
              (signupUrl): site.js then shows them, with the pilot's length from pricing.json. -->
         <div class="actions">
@@ -57,7 +67,7 @@
           </li>
           <li>
             <h3>Fills in the listing</h3>
-            <p>Click Post on a car. The Marketplace form opens with the year, make, model, mileage, price, VIN, colors, body style, fuel, transmission, location, a description written from the website's facts, and the photos. Title status and condition come from your dealership's defaults. Several cars at once: tick them and post them one after another.</p>
+            <p>Click Post on a car. The Marketplace form opens with the year, make, model, mileage, price, VIN, colors, body style, fuel, transmission, location, a description written from the website's facts, and the photos.</p>
           </li>
           <li>
             <h3>You check it and click Publish</h3>
@@ -65,9 +75,10 @@
           </li>
           <li>
             <h3>Keeps listings honest</h3>
-            <p>Every 3 hours while Chrome is open, Lot Sync re-reads your website. Sold car? Price change? It shows on your To do list with a button that opens the right listing, price ready to update.</p>
+            <p>Every 3 hours while Chrome is open, Lot Sync re-reads your website. Sold car? Price change? It shows on your To do list with a button that opens the right listing.</p>
           </li>
         </ol>
+        <p><a href="./how-it-works/">Read how it works in full</a>, including what it needs and how the pre-owned check decides.</p>
       </div>
     </section>
 
@@ -78,31 +89,31 @@
         <ul class="shots">
           <li>
             <figure>
-              <img src="screenshots/01-ready-to-post.png" alt="The Lot Sync popup over the sample dealership website, on its Ready to post tab: four pre-owned cars with a price and a Post button each, and counts on the To do, Not ready, Other stores and Needs a look tabs." width="1280" height="800" loading="lazy">
+              <img src="./screenshots/01-ready-to-post.png" alt="The Lot Sync popup over the sample dealership website, on its Ready to post tab: four pre-owned cars with a price and a Post button each, and counts on the To do, Not ready, Other stores and Needs a look tabs." width="1280" height="800" loading="lazy">
               <figcaption><b>Scan your website.</b> Only pre-owned cars at your store are ready to post. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
           <li>
             <figure>
-              <img src="screenshots/02-side-panel.png" alt="The side panel next to the sample dealership website: the 2020 Ford F-150 XLT re-checked at the website's price, the description written from the website's facts, and the line that all checks passed, every number matching the website and the dealership named." width="1280" height="800" loading="lazy">
+              <img src="./screenshots/02-side-panel.png" alt="The side panel next to the sample dealership website: the 2020 Ford F-150 XLT re-checked at the website's price, the description written from the website's facts, and the line that all checks passed, every number matching the website and the dealership named." width="1280" height="800" loading="lazy">
               <figcaption><b>Read the description, then open the Marketplace form.</b> Every number in it is checked against the website first. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
           <li>
             <figure>
-              <img src="screenshots/03-form-filled.png" alt="The sample Marketplace form filled in, three photos attached and Vehicle type, Year and Make filled, with the side panel saying the form is filled in, listing the 17 fields it filled and asking the person to click Publish themselves." width="1280" height="800" loading="lazy">
+              <img src="./screenshots/03-form-filled.png" alt="The sample Marketplace form filled in, three photos attached and Vehicle type, Year and Make filled, with the side panel saying the form is filled in, listing the 17 fields it filled and asking the person to click Publish themselves." width="1280" height="800" loading="lazy">
               <figcaption><b>Every field filled in.</b> You check it and click Publish. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
           <li>
             <figure>
-              <img src="screenshots/04-to-do.png" alt="The popup's To do tab after the day-2 rescan: a sold 2020 Ford F-150 XLT to take down, a 2019 Honda Civic EX price change from $19,995 to $18,995 with a button that opens the listing to update it, a new arrival and a car that just became ready." width="1280" height="800" loading="lazy">
+              <img src="./screenshots/04-to-do.png" alt="The popup's To do tab after the day-2 rescan: a sold 2020 Ford F-150 XLT to take down, a 2019 Honda Civic EX price change from $19,995 to $18,995 with a button that opens the listing to update it, a new arrival and a car that just became ready." width="1280" height="800" loading="lazy">
               <figcaption><b>Rescans flag sold cars and price changes on your listings.</b> A button opens the right listing with the new price ready. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
           <li>
             <figure>
-              <img src="screenshots/05-pilot.png" alt="The popup's Numbers tab: how many cars were posted through Lot Sync and the median time per post, the form fields with nothing to fix by hand, and the Download CSV button." width="1280" height="800" loading="lazy">
+              <img src="./screenshots/05-pilot.png" alt="The popup's Numbers tab: how many cars were posted through Lot Sync and the median time per post, the form fields with nothing to fix by hand, and the Download CSV button." width="1280" height="800" loading="lazy">
               <figcaption><b>The numbers your manager sees, kept in your browser.</b> Time per post, fields that could not be filled, how long sold cars stayed listed. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
@@ -151,6 +162,7 @@
             <p>Your dealership sets how many posts a day each salesperson may make. It is a safety setting, not a guarantee of anything from Facebook.</p>
           </li>
         </ul>
+        <p>Managers get the same numbers for the whole store: <a href="./for-managers/">what managers see</a>.</p>
       </div>
     </section>
 
@@ -172,23 +184,6 @@
       </div>
     </section>
 
-    <section id="needs" aria-labelledby="needs-h">
-      <div class="wrap two">
-        <div>
-          <h2 id="needs-h">What it needs</h2>
-          <ul class="plain">
-            <li>Google Chrome on the salesperson's computer.</li>
-            <li>A dealership website on Dealer Inspire. Other website platforms come later, one at a time.</li>
-            <li>The salesperson's own Facebook account. Marketplace stopped taking vehicle listings from dealer Pages in 2023, which is why salespeople post.</li>
-          </ul>
-        </div>
-        <div id="pilot">
-          <h2>The pilot</h2>
-          <p><span data-pricing="pilotDays">30</span> days, free, for 2 or 3 of your salespeople, with your used car manager's sign-off. We record how long each post takes, which fields the tool couldn't fill, and how long sold cars stayed listed, and we go over the numbers with you every week. No customer data is collected. At the end, the numbers are yours, whether you continue or not.</p>
-        </div>
-      </div>
-    </section>
-
     <section id="pricing" aria-labelledby="pricing-h">
       <div class="wrap narrow">
         <h2 id="pricing-h">Pricing</h2>
@@ -202,7 +197,7 @@
             <li>Founding dealers: the first <span data-pricing="foundingDealerCount">five</span> stores pay <span data-pricing="foundingDealerMonthly">$99</span> a month for their <span data-pricing="foundingDealerTerm">first year</span></li>
           </ul>
         </div>
-        <p class="muted">These are planned prices. Pricing is confirmed with you before any paid subscription starts.</p>
+        <p class="muted">These are planned prices. Pricing is confirmed with you before any paid subscription starts. <a href="./pricing/">See the pricing page</a> for the free pilot and how billing works.</p>
         <div class="actions">
           <a class="button" href="#demo">Request a demo</a>
           <a class="button alt" data-signup hidden>Start a free pilot</a>
@@ -213,37 +208,26 @@
     <section id="faq" class="faq" aria-labelledby="faq-h">
       <div class="wrap narrow">
         <h2 id="faq-h">Questions</h2>
-
-        <h3>Is this allowed on Facebook?</h3>
-        <p>Here is the honest answer. Meta's Terms prohibit accessing its products by automated means without permission. Lot Sync fills in the form and opens pages; a person checks every listing and clicks Publish, and nothing is posted or edited in the background or while you're away. That is the safest design available. It is not a guarantee, and no tool can honestly promise one. Facebook's rules apply to you when you post. If Facebook ever warns you about your listings, stop and tell your manager.</p>
-
-        <h3>Does it post for me?</h3>
-        <p>No. Lot Sync never clicks Publish, Update, Delete or Mark as sold. It fills in the Marketplace form and opens the right page; you check it and click Publish yourself, every time. There is no code for clicking those buttons, and a test that fails if any appears.</p>
-
-        <h3>What does it read?</h3>
-        <p>Your dealership's public website: the used inventory, the store's name and address, and one car's full record at post time. On the Marketplace create-listing page it reads back the fields it filled so it can tell you what the form shows. It does not read your Facebook messages, cookies or password, and it does not track your browsing anywhere else.</p>
-
-        <h3>Where is my data?</h3>
-        <p>In your own browser, in Chrome's storage. Your scans, settings and list of posts are kept on your computer, and your name, role and listing defaults follow your Chrome sign-in. Nothing from Facebook is kept beyond the listing links you save. When your dealership uses Lot Sync accounts, your posted list, post timings, to-do items and scan counts also sync to its records, where your manager sees them; the privacy policy says what is kept and for how long.</p>
-
-        <h3>What about my Facebook password?</h3>
-        <p>Lot Sync never asks for it, never reads your cookies or tokens, and never runs extra or shared accounts. You sign in to Facebook yourself, in your own browser, and Lot Sync never sees that.</p>
-
-        <h3>Which websites work?</h3>
-        <p>Dealership websites on Dealer Inspire today. Other website platforms are added one at a time, based on demand. Ask us about yours.</p>
-
-        <h3>How do updates arrive?</h3>
-        <p>Today Lot Sync installs as a file you unzip into a folder and load in Chrome; an update is a new file you unzip over the same folder, and your settings and listings stay put. A Chrome Web Store listing is planned, after which Chrome installs updates the way it does for any extension.</p>
+        <article class="qa">
+          <h3>Is this allowed on Facebook?</h3>
+          <p>Here is the honest answer. Meta's Terms prohibit accessing its products by automated means without permission. Lot Sync fills in the form and opens pages; a person checks every listing and clicks Publish, and nothing is posted or edited in the background or while you're away. That is the safest design available. It is not a guarantee, and no tool can honestly promise one. Facebook's rules apply to you when you post. If Facebook ever warns you about your listings, stop and tell your manager.</p>
+        </article>
+        <article class="qa">
+          <h3>Does it post for me?</h3>
+          <p>No. Lot Sync never clicks Publish, Update, Delete or Mark as sold. It fills in the Marketplace form and opens the right page; you check it and click Publish yourself, every time. There is no code for clicking those buttons, and a test that fails if any appears.</p>
+        </article>
+        <p><a href="./faq/">All questions and answers</a>: what it reads, where your data is, your Facebook password, which websites work, and how updates arrive.</p>
       </div>
     </section>
 
     <section id="demo" aria-labelledby="demo-h">
       <div class="wrap narrow">
         <h2 id="demo-h">Request a demo</h2>
-        <p class="lead">Ten minutes at your desk, on your own website. Tell us who you are and we will get in touch.</p>
+        
+        <p id="demo-closed" class="notice">The demo request form is not open yet.</p>
         <!-- Each field's maxlength is the lead function's limit for it (LEAD_LIMITS in supabase/functions/_shared/lead.mjs;
              test/lead.test.js keeps them equal), so the page never says it has a request the function then cut short. -->
-        <form id="demo-form" class="form-grid" action="mailto:demo@lotsync.example" method="post" enctype="text/plain">
+        <form id="demo-form" class="form-grid" hidden>
           <div class="field">
             <label for="f-name">Your name</label>
             <input id="f-name" name="name" type="text" required maxlength="80" autocomplete="name">
@@ -269,34 +253,33 @@
             <label for="f-message">Message (optional)</label>
             <textarea id="f-message" name="message" maxlength="2000"></textarea>
           </div>
-          <!-- Left empty by people: it is off screen and out of the tab order. A form-filling bot fills it, and the
+          <!-- Left empty by people: it is off screen and out of the tab order. A form-filling program fills it, and the
                lead function then stores nothing (supabase/functions/_shared/lead.mjs, HONEYPOT). -->
           <div class="hp" aria-hidden="true">
             <label for="f-company-url">Company URL</label>
             <input id="f-company-url" name="company_url" type="text" tabindex="-1" autocomplete="off">
           </div>
           <div class="full">
-            <button type="submit" class="button">Send the request</button>
+            <button type="submit" class="button" disabled>Send the request</button>
             <p id="demo-status" class="status" role="status" aria-live="polite"></p>
-            <p class="muted">Your request goes to us and nowhere else. Without JavaScript, the button opens your email app with the request filled in.</p>
+            
+            <p class="muted">Your request goes to us and nowhere else.</p><noscript><p class="muted">This form needs JavaScript.</p></noscript>
           </div>
         </form>
       </div>
     </section>
-
   </main>
 
   <footer>
     <div class="wrap">
       <ul>
-        <li><a href="legal/terms.html">Terms of service</a></li>
-        <li><a href="legal/privacy.html">Privacy policy</a></li>
-        <li><a href="legal/posting-rules.html">Posting rules</a></li>
+        <li><a href="./legal/terms/">Terms of service</a></li>
+        <li><a href="./legal/privacy/">Privacy policy</a></li>
+        <li><a href="./legal/posting-rules/">Posting rules</a></li>
       </ul>
       <p>Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.</p>
     </div>
   </footer>
-
-  <script type="module" src="site.js"></script>
+  <script type="module" src="./site.js"></script>
 </body>
 </html>

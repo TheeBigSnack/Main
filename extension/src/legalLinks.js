@@ -3,15 +3,18 @@
 //
 // The documents are attorney drafts (legal/terms-of-service.md,
 // legal/privacy-policy.md, legal/posting-rules.md). `npm run legal-pages`
-// writes them into the landing site as site/legal/terms.html, privacy.html
-// and posting-rules.html, each marked as a draft that is not in effect while
-// legal/legal-status.json says draft. Until site/ is deployed and those pages
-// are no longer drafts, these addresses stay placeholders: recording that a
-// person accepted a text marked "not in effect" would be a false record.
-// Then they become https://<the site's host>/legal/terms.html,
-// https://<the site's host>/legal/privacy.html and
-// https://<the site's host>/legal/posting-rules.html, and `version` must be
-// bumped in the same change.
+// writes them into the website as site/legal/terms/index.html,
+// site/legal/privacy/index.html and site/legal/posting-rules/index.html
+// (served at /legal/terms/, /legal/privacy/ and /legal/posting-rules/; the
+// old .html addresses redirect there), each marked as a draft that is not in
+// effect while legal/legal-status.json says draft. Until site/ is deployed
+// (docs/website.md) and those pages are no longer drafts, these addresses
+// stay placeholders: recording that a person accepted a text marked "not in
+// effect" would be a false record. Then they become
+// https://<the site's host>/legal/terms/,
+// https://<the site's host>/legal/privacy/ and
+// https://<the site's host>/legal/posting-rules/ (the host is the one in
+// site/config.js siteUrl), and `version` must be bumped in the same change.
 //
 // `version` is the edition the wizard's Terms step and the tick in Settings
 // record next to the acceptance time (settings.legal); after a change

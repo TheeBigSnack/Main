@@ -102,13 +102,17 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 717 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 758 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # six e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data
 npm run screenshots   # the landing page's product images, taken from the sandbox with sample data (site/screenshots/)
-npm run legal-pages   # the Terms, Privacy Policy and posting rules as site/legal/*.html from legal/*.md (--check: exit 1 when a page differs; legal/legal-status.json says draft)
-npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (landing page, legal pages, manager view, popup, side panel, the sandbox page)
+npm run site-pages    # the website's pages, robots.txt, llms.txt (and sitemap.xml, CNAME once config.js has siteUrl) from site-src/pages/ and site/config.js (--check: exit 1 when a file differs)
+npm run legal-pages   # the Terms, Privacy Policy and posting rules as site/legal/*/index.html from legal/*.md, plus the redirect stubs at the old addresses (--check: exit 1 when a page differs; legal/legal-status.json says draft)
+npm run favicons      # favicon.ico, favicon-32.png and apple-touch-icon.png from site/favicon.svg
+npm run social-images # the 1200x630 share image per page (site/social/) from site-src/social/template.html
+npm run test:site     # every page of site/ in headless Chromium: no console error or warning, no failed request, title and canonical as generated
+npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (every page of the website, manager view, popup, side panel, the sandbox page)
 npm run test:sql      # the Supabase SQL checks on a local Postgres (PGHOST etc.; CI runs them on Postgres 16)
 npm run check-deploy  # after the Supabase deploy: a checklist of what the live project lets a stranger do (supabase/README.md step 6)
 npm run release -- 0.6.0  # stamp a new version in the three files, test and pack; prints the commit, tag and upload steps (docs/release.md)
@@ -129,6 +133,8 @@ npm run test:e2e
 Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan: `PLAN.md`. The pilot: `PILOT.md`. Positioning, pricing hypothesis, sales sheet, demo script and emails: `marketing/`. Help for salespeople and managers: `docs/help.md`.
 
 Test drive without installing: `npm run demo`, then open http://127.0.0.1:8765/demo/. The real popup, side panel and service worker run against a sample dealership website and a sample Marketplace form inside one page (`demo/`; sample data only, nothing there is Facebook). `npm run test:demo` drives the whole flow in headless Chromium; CI runs it too.
+
+Website: `site/` is the Lot Sync website as served, one committed HTML file per page (home, how it works, pricing, FAQ, for managers, support, the legal documents, a custom 404 page), each written by `npm run site-pages` from a fragment under `site-src/pages/` and by `npm run legal-pages` from `legal/*.md`; plain HTML, CSS and one ES module, no build step, nothing loaded from another host. Everything that needs the site's own address comes from `siteUrl` in `site/config.js`, which stays empty until the owner has the domain (the generator reports "siteUrl is not set" until then). Hosting is GitHub Pages through `.github/workflows/pages.yml`. How to turn Pages on, point the domain and fill in the config: `docs/website.md`.
 
 | File | What it does |
 |---|---|
@@ -154,5 +160,5 @@ Test drive without installing: `npm run demo`, then open http://127.0.0.1:8765/d
 | `extension/background.js` | Downloads photos; rescans every known website every 3 hours and keeps the badge current |
 | `backend/` | The rewrite service (Anthropic API key lives here, never in the extension) |
 | `supabase/` | The accounts: schema with row-level security, the `rewrite`, `sync` and `billing` Edge Functions, SQL tests (`supabase/README.md`) |
-| `manager/`, `site/`, `demo/` | The manager view, the dealer landing page and the in-browser test drive; static pages, sample-data modes, their own tests |
+| `manager/`, `site/`, `demo/` | The manager view, the website (its pages written by `scripts/site-pages.mjs` and `scripts/legal-pages.mjs` from `site-src/` and `legal/`; `docs/website.md`) and the in-browser test drive; static pages, sample-data modes, their own tests |
 | `test/fixtures/records.json` | Real records from the Waynesburg site, one per edge case |

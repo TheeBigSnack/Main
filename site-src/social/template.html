@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Lot Sync share image</title>
+<!--
+  The share image behind every page's og:image (site/social/<slug>.png, 1200 x 630).
+  scripts/social-images.mjs opens this page once per page of the site map
+  (scripts/site-pages.mjs), puts that page's social heading in #heading, checks the
+  layout and screenshots it. It holds the mark (site/favicon.svg) on a white plate,
+  the name, the heading and the one line the product stands on, in the site's own
+  colours (site/site.css) and the system font; nothing is loaded from anywhere else,
+  and no other company's name or mark is on it. To see it, open this file in a
+  browser window 1200 px wide.
+-->
+<style>
+  :root {
+    --green: #14532d;
+    --white: #ffffff;
+    --soft: #e8f5ec;
+  }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    background: var(--green);
+    color: var(--white);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Liberation Sans", sans-serif;
+  }
+  main {
+    box-sizing: border-box;
+    height: 630px;
+    padding: 64px 72px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 24px; }
+  /* The mark is the same green as the page behind it; a white plate keeps its edge. */
+  .plate { display: flex; padding: 10px; background: var(--white); border-radius: 24px; }
+  .plate img { display: block; width: 72px; height: 72px; }
+  h1 { margin: 0; font-size: 56px; font-weight: 700; line-height: 1; letter-spacing: -0.01em; }
+  h2 { margin: 0; font-size: 56px; font-weight: 700; line-height: 1.15; color: var(--soft); }
+  p { margin: 0; font-size: 32px; font-weight: 600; line-height: 1.25; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <div class="plate"><img src="../../site/favicon.svg" width="72" height="72" alt=""></div>
+    <h1>Lot Sync</h1>
+  </div>
+  <h2 id="heading">Your used cars listed from your website, in seconds.</h2>
+  <p>You click Publish. Lot Sync never does.</p>
+</main>
+</body>
+</html>
