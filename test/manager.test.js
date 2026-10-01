@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, SCAN_STALE_NOTE } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -118,6 +118,10 @@ test('summarize on the sample: the last scan line', () => {
   const stale = summarize({ ...sample(), scans: [{ taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 }] });
   assert.equal(stale.lastScan.stale, true);
   assert.equal(stale.lastScan.line, 'Last scan 2026-11-16 06:00: 1 car on the website, 0 ready to post, 0 to take down, 0 price changes');
+  // a stale scan's note gives both reasons: no rescan ran, or the ones that ran looked like a website hiccup and were never sent
+  assert.match(SCAN_STALE_NOTE, /every 3 hours while a salesperson's Chrome is open/);
+  assert.match(SCAN_STALE_NOTE, /website hiccup .* not recorded here/);
+  assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_NOTE\}`\)/);
 });
 
 // ---------- hand-built rows ----------

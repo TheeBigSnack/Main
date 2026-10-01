@@ -38,7 +38,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, SCAN_STALE_NOTE } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -369,7 +369,7 @@ function viewData() {
   setStatus(state.mock ? 'Sample data: a made-up dealership so the page can be tried before an account exists. Nothing here is real.' : '');
 
   const scan = s.lastScan
-    ? `<p class="meta">${esc(s.lastScan.line)} ${s.lastScan.stale ? pill('warn', `${hrs(s.lastScan.hoursAgo)} ago; rescans run every 3 hours while a salesperson's Chrome is open`) : pill('', `${hrs(s.lastScan.hoursAgo)} ago`)}</p>`
+    ? `<p class="meta">${esc(s.lastScan.line)} ${s.lastScan.stale ? pill('warn', `${hrs(s.lastScan.hoursAgo)} ago; ${SCAN_STALE_NOTE}`) : pill('', `${hrs(s.lastScan.hoursAgo)} ago`)}</p>`
     : '<p class="meta">No scan recorded yet. The numbers start with the first scan from a salesperson\'s extension.</p>';
 
   const peopleRows = s.salespeople.length

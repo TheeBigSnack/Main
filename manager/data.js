@@ -58,6 +58,10 @@
 export const WEEK_MS = 7 * 24 * 3600 * 1000; // "this week" is the last 7 days
 export const OVERDUE_HOURS = 24; // an open item past this is shown in red
 export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is open; twice that and something is off
+// Why the last scan can be old, next to its time when it is stale: no
+// rescan ran, or the ones that ran looked like a website hiccup, which the
+// extension never sends (accountFlow.js scanFromStored).
+export const SCAN_STALE_NOTE = "rescans run every 3 hours while a salesperson's Chrome is open, and one that looks like a website hiccup (most of the lot gone at once) is not recorded here";
 
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
