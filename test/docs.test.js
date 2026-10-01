@@ -464,3 +464,18 @@ test('the help, README and site say a price update fills the last scan\'s price,
   assert.match(upkeepHtml(), /fills in <b>\$19,000<\/b> \(was \$20,000\), the price the website showed at the last scan;[^<]*<b>Update<\/b>\. If the website's price may have changed since, rescan first\./);
   up.active = false;
 });
+
+// The cap counts this person's posts on the website today, taking the
+// server's count from all their computers when signed in (cap.js capStatus,
+// serverPostsToday). The help said "posts recorded in this browser" only,
+// which a salesperson with two computers finds untrue.
+test('the help says the daily cap counts your posts from all your computers when signed in, not this browser\'s alone', () => {
+  const cap = read('../extension/src/cap.js');
+  assert.match(cap, /serverPostsToday\(opts\.serverCount, now\)/, 'capStatus takes the server\'s count');
+  const help = doc('help.md');
+  const section = help.slice(help.indexOf('## The daily cap'), help.indexOf('\n## ', help.indexOf('## The daily cap') + 5));
+  assert.doesNotMatch(section, /counts posts recorded in this browser for this website today\./);
+  assert.match(section, /counts your own posts on this website today: the ones recorded in this browser or, when you are signed in to a Lot Current account[^.]*all your computers/);
+  assert.match(section, /A colleague's posts never count toward yours\./);
+  assert.match(section, /safety setting, not a guarantee/);
+});
