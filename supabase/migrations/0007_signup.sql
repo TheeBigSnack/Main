@@ -215,7 +215,10 @@ as $$
 declare
   uid uuid := auth.uid();
   ws constant text := '[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+';
-  controls constant text := '[\u0001-\u001f\u007f-\u009f]';
+  -- what the errors call line breaks and control characters: the C0 and C1
+  -- controls, the line and paragraph separators, and the marks,
+  -- embeddings, overrides and isolates that reorder the text after them
+  controls constant text := '[\u0001-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]';
   closed constant text := 'sign-up is not open: you join Lot Current with an invite code, from Lot Current or from your dealership''s manager';
   taken constant text := 'that website already has a Lot Current dealership: ask its manager for an invite code (if nobody there uses Lot Current, write to Lot Current support)';
   settings public.signup_settings%rowtype;
