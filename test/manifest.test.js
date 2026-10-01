@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { honestyProblems } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const manifest = JSON.parse(read('../extension/manifest.json'));
@@ -49,11 +50,8 @@ test('the Web Store listing draft quotes the manifest description word for word 
   assert.match(listing, /legal\/chrome-web-store-privacy\.md/);
   // one justification per permission and host permission, from the manifest's own list
   for (const p of [...manifest.permissions, ...manifest.host_permissions, ...manifest.optional_host_permissions]) assert.ok(listing.includes('`' + p + '`'), `store/listing.md does not justify "${p}"`);
-  // "not a guarantee" is the honest line; nothing else may promise safety, compliance or a guarantee (as test/marketing.test.js checks the marketing copy)
-  const rest = listing.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-  assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, 'the listing makes a guarantee');
+  // "not a guarantee" is the honest line; nothing else may promise safety, compliance or a guarantee (the
+  // shared customer-facing lists of test/honesty.js, as for the marketing copy and the website)
+  assert.deepEqual(honestyProblems(listing), [], 'store/listing.md');
   assert.doesNotMatch(listing, /\bsafe\b|\bcompliant\b|\bguaranteed\b/i);
-  for (const re of [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /\b(five|5) stars?\b/i]) {
-    assert.doesNotMatch(listing, re, `store/listing.md matches ${re}`);
-  }
 });

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
+import { AFFILIATION } from './honesty.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -612,14 +613,13 @@ const MANAGER_FILES = readdirSync(join(root, 'manager')).filter((f) => /\.(html|
 
 test('the manager page carries no pilot-dealer value and no Meta-affiliation wording', () => {
   assert.ok(MANAGER_FILES.includes('index.html') && MANAGER_FILES.includes('manager.js') && MANAGER_FILES.includes('data.js') && MANAGER_FILES.includes('config.js'));
-  const never = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /endorsed by (meta|facebook)/i, /affiliated with (meta|facebook)(?! Platforms, Inc\.)/i];
   for (const name of MANAGER_FILES) {
     const src = read(join('manager', name));
     const hit = src.match(/Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\bRoger\b|ronlewis/i);
     assert.equal(hit, null, `manager/${name} contains "${hit && hit[0]}"`);
     // "not affiliated with Meta Platforms, Inc." is the one allowed mention
     const rest = src.replace(/not affiliated with Meta Platforms, Inc\./g, '');
-    for (const re of never) assert.doesNotMatch(rest, re, `manager/${name} matches ${re}`);
+    for (const re of AFFILIATION) assert.doesNotMatch(rest, re, `manager/${name} matches ${re}`);
     assert.doesNotMatch(src, /service_role/, `manager/${name} must never hold a service key`);
   }
   assert.match(read('manager/index.html'), /Lot Current is not affiliated with Meta Platforms, Inc\./);

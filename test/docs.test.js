@@ -18,6 +18,7 @@ import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
+import { honestyProblems } from './honesty.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -94,25 +95,13 @@ test('help.md says Lot Current never clicks Publish and is not affiliated with M
 test('no docs/ file carries a pilot-dealer value or Meta-affiliation wording', () => {
   // the pilot dealer is a fixture, not a default (test/anyDealer.test.js)
   const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
-  // what no document may say (test/marketing.test.js)
-  const NEVER = [
-    /approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i,
-    /compliant with (meta|facebook)/i, /(customers|dealers|salespeople) (say|love|report)/i, /\b(five|5) stars?\b/i,
-    /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /industry[- ]leading/i, /best[- ]in[- ]class/i, /\b#1\b/,
-  ];
   for (const name of DOCS) {
     const text = doc(name);
     const hit = text.match(PILOT);
     assert.equal(hit, null, `docs/${name} contains the pilot value "${hit && hit[0]}"`);
-    for (const re of NEVER) assert.doesNotMatch(text, re, `docs/${name} matches ${re}`);
-    // "not a guarantee" and its cousins are the honest line; any other guarantee is a promise we can't make
-    const rest = text.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-    assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, `docs/${name} makes a guarantee`);
-  }
-  // salespeople read the help doc: nothing that promises account safety
-  const help = doc('help.md');
-  for (const re of [/never (be|get) restricted/i, /your account is (safe|protected)/i, /\brisk[- ]free\b/i, /\bno risk\b/i, /\bbots?\b/i]) {
-    assert.doesNotMatch(help, re, `docs/help.md matches ${re}`);
+    // the shared lists (test/honesty.js): what no document may say, and no guarantee; salespeople read the
+    // help doc, so it is held to the customer-facing lists too (no promise of account safety, no made-up number)
+    assert.deepEqual(honestyProblems(text, { customerFacing: name === 'help.md' }), [], `docs/${name}`);
   }
 });
 
