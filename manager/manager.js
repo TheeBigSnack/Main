@@ -567,7 +567,9 @@ async function signOut() {
     return viewUnconfigured();
   }
   if (state.supabase) {
-    const { error } = await state.supabase.auth.signOut();
+    // this page's session only: supabase-js signs out everywhere by default,
+    // which would also sign the same person out of the extension
+    const { error } = await state.supabase.auth.signOut({ scope: 'local' });
     if (error) return setStatus(`Couldn't sign out: ${error.message}`, true);
   }
   state.session = null;

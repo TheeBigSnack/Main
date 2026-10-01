@@ -312,11 +312,14 @@ export async function createInvite(dealershipId, role = 'salesperson', { url = '
   return { ok: true, code: String(b.code || ''), role: String(b.role || role) };
 }
 
-// Tells the auth server the token is done with (best effort) and forgets it here.
+// Tells the auth server this session is done with (best effort) and forgets
+// it here. Only this session: Supabase's logout without a scope is global and
+// would also end the person's sessions on their other computers and in the
+// manager view, so the scope is always `local`.
 export async function signOut(session, { url = '', anonKey = '', fetchImpl = globalThis.fetch, storage } = {}) {
   if (session && session.accessToken && !missingConfig({ url, anonKey })) {
     try {
-      await fetchImpl(`${trimSlash(url)}/auth/v1/logout`, { method: 'POST', headers: jsonHeaders(anonKey, authHeaders(session)) });
+      await fetchImpl(`${trimSlash(url)}/auth/v1/logout?scope=local`, { method: 'POST', headers: jsonHeaders(anonKey, authHeaders(session)) });
     } catch {
       /* offline: the stored session goes anyway */
     }

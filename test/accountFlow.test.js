@@ -210,7 +210,7 @@ test('signOutAll tells the auth server, forgets the session and the named websit
   const session = freshSession();
   const storage = fakeStorage({ [ACCOUNT_KEY]: session, [K.sync]: { since: T(1), role: 'salesperson' }, [K.posted]: { [VIN_A]: { postedAt: T(0) } } });
   assert.deepEqual(await signOutAll(deps({ fetchImpl, storage, origins: [ORIGIN, ''] })), { ok: true });
-  assert.equal(calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/logout');
+  assert.equal(calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/logout?scope=local', 'this computer\'s session only: the person stays signed in elsewhere');
   assert.equal(calls[0].headers.Authorization, `Bearer ${session.accessToken}`);
   assert.equal(ACCOUNT_KEY in storage.data, false);
   assert.equal(K.sync in storage.data, false, 'the next sign-in starts with a first sync');

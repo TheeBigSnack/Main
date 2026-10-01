@@ -634,6 +634,10 @@ test('the page is relative, mobile-friendly, and offers what the brief names', (
   const js = read('manager/manager.js');
   assert.match(js, /Download CSV/);
   assert.match(js, /Sign out/);
+  // Sign out ends this page's session only: supabase-js's default is global,
+  // which would also sign the same person out of the extension on every computer
+  assert.match(js, /auth\.signOut\(\{ scope: 'local' \}\)/);
+  assert.doesNotMatch(js, /auth\.signOut\(\)/, 'no sign-out with the global default');
   assert.match(js, /Try with sample data/);
   assert.match(js, /signInWithOtp/);
   assert.match(js, /mock=1|get\('mock'\)/);
