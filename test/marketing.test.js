@@ -102,6 +102,19 @@ test('the emails are templates for any dealership: no pilot-dealer value, no "ou
   assert.match(offer, /\[dealership\]/, 'the pilot offer names the dealership as a bracket');
 });
 
+test('no marketing or Web Store document names the pilot dealer: every marketing file is sorted, and each is checked', () => {
+  // CLAUDE.md keeps the pilot dealer to test/fixtures/, marked worked examples and the pilot record
+  // (PILOT.md, CHANGELOG.md, legal/questions-for-attorney.md); the demo script, the sales sheet and the
+  // internal positioning are read before or at another dealership, so they name no pilot value either
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).sort();
+  assert.deepEqual(md('marketing'), [...ALL].sort(), 'a marketing document is not in CUSTOMER_FACING or ALL here: sort it, so the checks in this file read it');
+  for (const rel of [...ALL.map((f) => 'marketing/' + f), ...md('store').map((f) => 'store/' + f)]) {
+    const doc = read('../' + rel);
+    const line = doc.split('\n').findIndex((l) => PILOT.test(l));
+    assert.equal(line, -1, `${rel}:${line + 1} contains the pilot value "${line >= 0 && doc.split('\n')[line].match(PILOT)[0]}"`);
+  }
+});
+
 test('the store-install emails quote the pricing config and the code\'s numbers, and name the controls as the code labels them', () => {
   const store = read('../marketing/onboarding-store.md');
   for (const h of ['## To the manager', '## To each salesperson', '## Day 7, to the manager']) {

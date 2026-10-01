@@ -1,12 +1,12 @@
 # Lot Current: positioning (internal, draft)
 
-Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here is a hypothesis to test at Waynesburg. No invented testimonials, logos, reviews or statistics: every number below is either from our own live runs or is labelled as a guess.
+Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here is a hypothesis to test in the first pilot (the store is named in `PILOT.md`, not here). No invented testimonials, logos, reviews or statistics: every number below is either from our own live runs or is labelled as a guess.
 
 ## Who it is for
 
 - **Buyer:** the used car manager (or general manager) of a franchise dealership, one rooftop at a time. They approve the tool, set the rules, and want to know who posted what and that sold cars came down.
 - **User:** the salespeople who post their store's used cars on Facebook Marketplace from their own accounts, because Marketplace no longer takes vehicle listings from dealer Pages or partner feeds (since January 2023 and September 2021).
-- **First market:** dealerships on Dealer Inspire websites in western Pennsylvania, starting with Ron Lewis CDJR Waynesburg and its sister stores in Cranberry and Pleasant Hills.
+- **First market:** dealerships on Dealer Inspire websites in western Pennsylvania, starting with the first pilot's dealer group (named in `PILOT.md`).
 
 ## The problem in their words
 
@@ -41,7 +41,7 @@ Say:
 - "You click Publish. Lot Current never does." (True by construction: there is no code for it and a test that fails if any appears.)
 - "Only pre-owned cars, only at your store, only at the website price."
 - "Sold cars flagged the same day." (While Chrome is open, with rescans on; say that when asked.)
-- "On the live form at Waynesburg, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always".)
+- "On Facebook's live form, with a real dealership's cars, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always". Never name the store or its results without its written permission, pilot agreement section 3.)
 - "Not affiliated with Meta Platforms, Inc."
 
 Don't say (until the attorney answers the questions in `legal/questions-for-attorney.md`):

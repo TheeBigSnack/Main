@@ -9,7 +9,7 @@ For a used car manager, at their desk, on their own website. One laptop with Chr
 - Pick the car you will post: pre-owned, at this store, with photos and a price, and with a real write-up on the website if possible. Have a second one in mind.
 - Decide with the manager beforehand whether the demo post gets published. Default: **no**. You close the Facebook tab without publishing and nothing is recorded. If they want a real listing, one of their salespeople clicks Publish, not you.
 - Settings: name, role, store ticked, address filled from the website, defaults Clean / Very good, cap 10.
-- At Waynesburg the other rooftops are Cranberry and Pleasant Hills.
+- On a group website, know the group's other rooftops before you start: their cars show under **Other stores**, not Ready to post.
 
 ## 0:00 The problem, in one breath
 
