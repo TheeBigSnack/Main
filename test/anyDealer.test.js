@@ -16,17 +16,22 @@ function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) walk(full, out);
-    else if (/\.(js|html|json)$/.test(name)) out.push(full);
+    else if (/\.(m?js|ts|html|json)$/.test(name)) out.push(full);
   }
   return out;
 }
 
-test('the shipped code and the rewrite service carry no pilot-dealer value', () => {
-  const files = [...walk(join(root, 'extension')), ...walk(join(root, 'backend')).filter((f) => !/package(-lock)?\.json$/.test(f))];
+// The hosted rewrite service's prompt and guardrails (supabase/functions)
+// are code that ships too, in TypeScript and .mjs.
+test('the shipped code and the rewrite services carry no pilot-dealer value', () => {
+  const files = [...walk(join(root, 'extension')), ...walk(join(root, 'backend')).filter((f) => !/package(-lock)?\.json$/.test(f)), ...walk(join(root, 'supabase', 'functions'))];
   assert.ok(files.length > 30);
+  for (const shipped of ['supabase/functions/_shared/rewritePrompt.ts', 'supabase/functions/_shared/guardrails.ts', 'supabase/functions/rewrite/index.ts', 'supabase/functions/_shared/billing.mjs']) {
+    assert.ok(files.includes(join(root, shipped)), `${shipped} is checked`);
+  }
   for (const file of files) {
     const src = readFileSync(file, 'utf8');
-    const code = /\.js$/.test(file) ? stripComments(src) : src;
+    const code = /\.(m?js|ts)$/.test(file) ? stripComments(src) : src;
     const hit = code.match(PILOT);
     assert.equal(hit, null, `${file.slice(root.length)} contains "${hit && hit[0]}" outside a comment`);
   }
