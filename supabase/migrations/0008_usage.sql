@@ -1,4 +1,4 @@
--- Lot Sync: the owner's usage report (PLAN.md M6: the demo is "the partner
+-- Lot Current: the owner's usage report (PLAN.md M6: the demo is "the partner
 -- list with usage numbers", and acceptance 1 asks that each partner dealer
 -- has at least two active salespeople and one manager using the manager
 -- view).
@@ -65,7 +65,7 @@
 --                       call as such. What every sync does carry is the
 --                       counts of that machine's newest scan (a repeat is
 --                       stored once), under the time the scan ran on that
---                       machine's clock, and nothing in Lot Sync but /sync
+--                       machine's clock, and nothing in Lot Current but /sync
 --                       writes that table. So this is when the newest scan
 --                       to reach the database ran; it stops moving when
 --                       nobody's extension syncs, or when the plan lapses

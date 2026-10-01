@@ -1,9 +1,9 @@
 // Turns a normalised vehicle into the values the Facebook Marketplace vehicle
-// form gets, in LotSync's own canonical words. Facebook's spelling for each
+// form gets, in Lot Current's own canonical words. Facebook's spelling for each
 // option (and how each field is found on the page) lives in
 // extension/facebook/formMap.js, not here.
 
-// Marketplace's vehicle types Lot Sync knows. formMap.js has options only for
+// Marketplace's vehicle types Lot Current knows. formMap.js has options only for
 // the two it fills in (FORM_KINDS below).
 export const VEHICLE_KIND = Object.freeze({ CAR_TRUCK: 'car_truck', MOTORCYCLE: 'motorcycle', TRAILER: 'trailer', RV: 'rv', POWERSPORT: 'powersport', BOAT: 'boat' });
 
@@ -23,7 +23,7 @@ export function brandedTitleSignal(v = {}) {
   return m ? m[1] : '';
 }
 
-// What kind of vehicle this is, by Marketplace's vehicle types. Lot Sync
+// What kind of vehicle this is, by Marketplace's vehicle types. Lot Current
 // fills in only the car/truck and motorcycle forms (FORM_KINDS); a trailer,
 // an RV, a powersport vehicle or a boat is kept out of the posting flow
 // (classify.js sends it to Needs a look), never filled in as a car.
@@ -93,7 +93,7 @@ export function vehicleKind(v = {}) {
 }
 
 // Each reader below turns the website's own words for one form field into
-// { value, why }. `value` is Facebook's option in Lot Sync's spelling, or ''
+// { value, why }. `value` is Facebook's option in Lot Current's spelling, or ''
 // when the words map to nothing (the field is left blank and the panel shows
 // the website's words; never a guess). `why` is set when the value took a
 // reading a person should see: the panel lists it under the assumptions,
@@ -101,7 +101,7 @@ export function vehicleKind(v = {}) {
 const reading = (value, why = '') => ({ value, why });
 const said = (text) => `the website says "${String(text).trim()}"`;
 
-// Facebook's color list in Lot Sync's spelling (formMap.js maps Gray to Grey etc.).
+// Facebook's color list in Lot Current's spelling (formMap.js maps Gray to Grey etc.).
 export const COLORS = Object.freeze(['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Gray', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white']);
 
 // The list's own words (and grey): a color the website states.
@@ -376,7 +376,7 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
   // a photo guess or a default (assumed), or left for the person
   const assumed = [];
   const leftBlank = [];
-  if (!fields.vehicleType) leftBlank.push({ key: 'vehicleType', label: 'Vehicle type', why: `the website's ${kind.from} makes it ${kind.name}; Lot Sync fills in only the car/truck and motorcycle forms` });
+  if (!fields.vehicleType) leftBlank.push({ key: 'vehicleType', label: 'Vehicle type', why: `the website's ${kind.from} makes it ${kind.name}; Lot Current fills in only the car/truck and motorcycle forms` });
   const read = (key, label, r) => {
     if (r.value && r.why) assumed.push({ key, label, value: r.value, why: r.why });
   };

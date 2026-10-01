@@ -48,7 +48,7 @@ try {
   await ext.goto('chrome://extensions');
   const extensionId = await ext.evaluate(async () => {
     const list = await chrome.management.getAll();
-    return list.find((e) => e.name === 'Lot Sync').id;
+    return list.find((e) => e.name === 'Lot Current').id;
   });
   await ext.close();
 
@@ -150,10 +150,10 @@ try {
   await popup.selectOption('#readySort', 'price');
   await popup.waitForFunction(() => document.querySelector('.rows .name')?.textContent.startsWith('2021'));
   assert.deepEqual(await names(), [SILVERADO, HELLCAT], 'price, low to high: $36,603 before $53,485');
-  // the list redraws before the order is written (under the key's lock): wait for the write, or closing the popup can drop it
+  // the list already showed this order, so the redraw proves nothing: wait for the save before closing
   await popup.waitForFunction(async () => {
     const all = await chrome.storage.local.get(null);
-    return Object.entries(all).some(([k, v]) => k.startsWith('settings:') && v && v.readySort === 'price');
+    return Object.keys(all).some((k) => k.startsWith('settings:') && all[k]?.readySort === 'price');
   });
   await popup.close();
   popup = await openPopup();

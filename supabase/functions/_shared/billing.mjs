@@ -1,4 +1,4 @@
-// Lot Sync billing (Milestone 5): the pure parts of the billing function,
+// Lot Current billing (Milestone 5): the pure parts of the billing function,
 // as plain JavaScript so the Deno function (functions/billing/index.ts)
 // imports it and test/billing.test.js runs the same code in Node. Nothing in
 // here touches the network or a database: the state machine, the Checkout
@@ -30,7 +30,7 @@
 // baked into migrations/0004_billing.sql (seats default, start_pilot).
 export const PRICING = Object.freeze({ includedSalespeople: 5, pilotDays: 30 });
 
-// 'pilot' is Lot Sync's own (no Stripe object behind it); the rest are every
+// 'pilot' is Lot Current's own (no Stripe object behind it); the rest are every
 // status Stripe can put on a subscription, so a webhook never fails the
 // row's check constraint.
 export const STATUSES = Object.freeze(['pilot', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused']);
@@ -90,7 +90,7 @@ export function hasOpenSubscription(row) {
 // second subscription on the same customer, and the old one's dunning
 // events would then keep flipping the row back to lapsed).
 export function checkoutRefusal(row, now = Date.now()) {
-  if (subscriptionState(row, now) === 'active') return { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' };
+  if (subscriptionState(row, now) === 'active') return { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Current contact' };
   if (hasOpenSubscription(row)) return { status: 409, error: OPEN_SUBSCRIPTION_MESSAGE, code: OPEN_SUBSCRIPTION_CODE };
   return null;
 }
@@ -174,7 +174,7 @@ export function planOf(row, now = Date.now()) {
 // on; `plan` lets it say since when. The billing function is never gated:
 // a lapsed dealership must be able to renew.
 export const LAPSED_CODE = 'lapsed';
-export const LAPSED_MESSAGE = "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";
 export function lapsedAnswer(plan) {
   return { ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan };
 }
@@ -283,8 +283,11 @@ export function trialEndFor(pilotEndsAt, now = Date.now()) {
 // The Checkout Session as Stripe's form wants it. subscription_data.metadata
 // carries the dealership id so a webhook can find the row even when the
 // customer id is unknown; allow_promotion_codes lets the owner hand a
-// founding dealer a code instead of a second price.
-export function checkoutSessionParams({ customerId, dealershipId, lineItems, returnUrl, trialEnd = null }) {
+// founding dealer a code instead of a second price. automaticTax (the
+// STRIPE_AUTOMATIC_TAX secret, off until the attorney has said what to
+// collect) has Stripe add sales tax: Checkout then asks for the billing
+// address and saves it on the customer, which Stripe needs to work tax out.
+export function checkoutSessionParams({ customerId, dealershipId, lineItems, returnUrl, trialEnd = null, automaticTax = false }) {
   if (!customerId) throw new Error('a Stripe customer id is required');
   if (!dealershipId) throw new Error('a dealership id is required');
   if (!Array.isArray(lineItems) || !lineItems.length) throw new Error('line items are required');
@@ -298,6 +301,29 @@ export function checkoutSessionParams({ customerId, dealershipId, lineItems, ret
     subscription_data: { metadata: { dealership_id: dealershipId } },
   };
   if (typeof trialEnd === 'number' && trialEnd > 0) params.subscription_data.trial_end = trialEnd;
+  if (automaticTax === true) {
+    params.automatic_tax = { enabled: true };
+    params.billing_address_collection = 'required';
+    params.customer_update = { address: 'auto', name: 'auto' };
+  }
+  return params;
+}
+
+// The STRIPE_AUTOMATIC_TAX secret as a switch: only the word true (any case)
+// turns it on, so a typo leaves tax off rather than half on.
+export function automaticTaxOn(text) {
+  return String(text || '').trim().toLowerCase() === 'true';
+}
+
+// The Billing Portal session. configuration is the STRIPE_PORTAL_CONFIGURATION
+// secret (bpc_..., made by scripts/stripe-setup.mjs): without it Stripe uses
+// the account's default portal settings, which exist only once someone has
+// saved them in the Dashboard.
+export function portalSessionParams({ customerId, returnUrl, configuration = '' }) {
+  if (!customerId) throw new Error('a Stripe customer id is required');
+  const params = { customer: customerId, return_url: returnUrl };
+  const id = String(configuration || '').trim();
+  if (id) params.configuration = id;
   return params;
 }
 

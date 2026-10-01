@@ -62,7 +62,7 @@ export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is 
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
   'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
-  'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Sync sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
+  'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
   'Hours run from the flagging scan, and rescans happen every 3 hours while Chrome is open.',
 ]);
@@ -395,7 +395,7 @@ export function fmtLocalDate(iso, timeZone) {
  * The seat line is a manager's: "N salespeople; the plan includes M." from
  * the answer's count. While subscribed the main line carries the seats paid
  * for (the row's seats), and when there are more salespeople than that,
- * seatNote says so and that Lot Sync changes nothing on its own (seatTone
+ * seatNote says so and that Lot Current changes nothing on its own (seatTone
  * 'warn'). Otherwise, next to Subscribe, seatNote says how many seats
  * Subscribe asks for (subscribeSeats). No price: the answer carries none,
  * and Checkout shows it before the manager pays.
@@ -473,7 +473,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
 
 // What the card says when there are more salespeople than paid seats, in
 // one place so docs/help.md can quote it word for word.
-export const SEATS_NOT_ADDED = 'Lot Sync never adds seats or changes what you pay on its own: to add seats, ask your Lot Sync contact.';
+export const SEATS_NOT_ADDED = 'Lot Current never adds seats or changes what you pay on its own: to add seats, ask your Lot Current contact.';
 
 // The seats the row says are paid for (the included count plus the seat
 // price's quantity, copied from Stripe by the webhook), or null.
@@ -536,8 +536,8 @@ export function memberRole(memberships, userId) {
 // the extension's Settings uses (Account, Invite code, Join).
 export function inviteSentence(role) {
   return role === 'manager'
-    ? 'The new manager enters it in the Lot Sync extension under Settings, Account, Invite code, and clicks Join; the manager view then lets them in. It works once.'
-    : 'The salesperson enters it in the Lot Sync extension under Settings, Account, Invite code, and clicks Join. It works once.';
+    ? 'The new manager enters it in the Lot Current extension under Settings, Account, Invite code, and clicks Join; the manager view then lets them in. It works once.'
+    : 'The salesperson enters it in the Lot Current extension under Settings, Account, Invite code, and clicks Join. It works once.';
 }
 
 /**
@@ -586,7 +586,7 @@ export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZo
 
 // ---------- the Team card ----------
 
-export const TEAM_LINE = 'Everyone in this dealership\'s Lot Sync account. A manager can invite, bill and change the team; a salesperson posts.';
+export const TEAM_LINE = 'Everyone in this dealership\'s Lot Current account. A manager can invite, bill and change the team; a salesperson posts.';
 export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
 export const TEAM_UNCHANGED = 'Nothing changed: the team was changed elsewhere.';
 
@@ -634,7 +634,7 @@ export function teamCard(memberships, { role, userId = '', dealershipId = '', co
 
 // ---------- self-serve sign-up ----------
 
-// The origin Lot Sync keeps for a typed website address: the key the
+// The origin Lot Current keeps for a typed website address: the key the
 // extension syncs under (dealerships.website_origin), so it has to be what
 // the browser shows on the dealership's inventory pages. The rule has two
 // copies, create_dealership's SQL (supabase/migrations/0007_signup.sql) and
@@ -677,17 +677,17 @@ export const SIGNUP_WORDS = Object.freeze({
   website: 'Website address',
   yourName: 'Your name',
   submit: 'Start the dealership',
-  already: 'Does your store already use Lot Sync? Then don\'t start another one: ask its manager for an invite code and enter it in the Lot Sync extension under Settings, Account, Invite code.',
+  already: 'Does your store already use Lot Current? Then don\'t start another one: ask its manager for an invite code and enter it in the Lot Current extension under Settings, Account, Invite code.',
 });
 export const SIGNUP_EXAMPLE = 'www.yourdealership.com';
 
 // The line under the address box, redrawn as the person types: the origin
-// Lot Sync will keep and why it matters, or why the address cannot be used.
+// Lot Current will keep and why it matters, or why the address cannot be used.
 export function signupOriginNote(input) {
   const origin = websiteOrigin(input);
-  if (origin) return { usable: true, origin, keep: `Lot Sync will keep ${origin}.`, line: 'It must match the address bar on the dealership\'s inventory pages, www included.' };
+  if (origin) return { usable: true, origin, keep: `Lot Current will keep ${origin}.`, line: 'It must match the address bar on the dealership\'s inventory pages, www included.' };
   if (!String(input ?? '').trim()) return { usable: false, origin: '', keep: '', line: 'Copy it from the address bar on the dealership\'s inventory pages, www included.' };
-  return { usable: false, origin: '', keep: '', line: `That is not a website address Lot Sync can use: type it as the address bar shows it, for example ${SIGNUP_EXAMPLE}.` };
+  return { usable: false, origin: '', keep: '', line: `That is not a website address Lot Current can use: type it as the address bar shows it, for example ${SIGNUP_EXAMPLE}.` };
 }
 
 // What stops the form before it calls anything: the first box that is empty
@@ -829,7 +829,7 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   const who = (r) => (r.user_id && nameFor.get(r.user_id)) || text(r.salesperson, 60);
   const listingByVin = new Map(L.map((l) => [vinOf(l), l]));
   const out = [];
-  out.push(csvRow(['Lot Sync manager numbers', dealer, `exported ${local(s.now)}`]));
+  out.push(csvRow(['Lot Current manager numbers', dealer, `exported ${local(s.now)}`]));
   out.push(csvRow(['Website', origin]));
   out.push(csvRow(['Time zone', zone]));
   out.push('');
@@ -890,7 +890,7 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
 
 const slug = (s) => String(s ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unnamed';
 export function csvFileName(now = nowIso(), { dealer = '', timeZone } = {}) {
-  return `lot-sync-manager-${slug(dealer)}-${fmtLocal(now, timeZone).slice(0, 10)}.csv`;
+  return `lot-current-manager-${slug(dealer)}-${fmtLocal(now, timeZone).slice(0, 10)}.csv`;
 }
 
 // ---------- sample data ----------

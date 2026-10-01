@@ -1,4 +1,4 @@
-// Lot Sync rewrite service as a Supabase Edge Function (Milestone 4). It
+// Lot Current rewrite service as a Supabase Edge Function (Milestone 4). It
 // replaces backend/server.js once the owner deploys it: same request and
 // answer shapes, so extension/src/rewriter.js needs nothing new but the
 // address (…/functions/v1/rewrite) and, in place of the shared key, the

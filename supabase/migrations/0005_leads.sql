@@ -1,4 +1,4 @@
--- Lot Sync: demo requests from the landing page (PLAN.md M5, acceptance 2:
+-- Lot Current: demo requests from the landing page (PLAN.md M5, acceptance 2:
 -- "the demo form lands in Supabase or an inbox").
 --
 -- One row per request the `lead` Edge Function accepted. Nobody reads this

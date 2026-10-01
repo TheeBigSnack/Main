@@ -1,4 +1,4 @@
-# Lot Sync rewrite service
+# Lot Current rewrite service
 
 A small Node server that asks Claude for a Marketplace description from a JSON object of facts, checks the draft with the same guardrails the extension uses, and returns it. It exists so the Anthropic API key never ships inside the extension.
 
@@ -21,8 +21,8 @@ The extension works without it: descriptions then come from the built-in templat
    npm start
    ```
 
-   You should see `Lot Sync rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`.
-4. In the extension: click the Lot Sync icon, **Settings**, **Description writer**. Tick "Use the Lot Sync rewrite service", enter `http://localhost:8787` as the address and your `REWRITE_KEY` as the key. Save.
+   You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`.
+4. In the extension: click the Lot Current icon, **Settings**, **Description writer**. Tick "Use the Lot Current rewrite service", enter `http://localhost:8787` as the address and your `REWRITE_KEY` as the key. Save.
 
 From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, banned phrases, dealer name, length); a draft that fails is regenerated once, then the template is used.
 

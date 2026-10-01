@@ -1,9 +1,9 @@
 {
-  "name": "lot-sync-backend",
+  "name": "lot-current-backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Lot Sync rewrite service: asks Claude for a Marketplace description from facts, checks it, returns it. Keeps the API key off the extension.",
+  "description": "Lot Current rewrite service: asks Claude for a Marketplace description from facts, checks it, returns it. Keeps the API key off the extension.",
   "scripts": {
     "start": "node server.js"
   },

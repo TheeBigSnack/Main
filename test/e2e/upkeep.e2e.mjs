@@ -55,7 +55,7 @@ const WAGONEER = '1C4SJVDT7NS142834';
 try {
   const ext = await context.newPage();
   await ext.goto('chrome://extensions');
-  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Sync').id);
+  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Current').id);
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
 
@@ -103,7 +103,7 @@ try {
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '2');
   await popup.screenshot({ path: join(shots, 'upkeep-1-todo.png'), fullPage: true });
 
-  // ---- 2. Update the Wagoneer's price: open the listing, the person clicks Edit, Lot Sync fills the price, the person clicks Update ----
+  // ---- 2. Update the Wagoneer's price: open the listing, the person clicks Edit, Lot Current fills the price, the person clicks Update ----
   await popup.click('button[data-action="upkeep"][data-kind="price"]');
   await popup.waitForFunction(() => /side panel/i.test(document.querySelector('#status').textContent));
   await popup.close();
@@ -141,7 +141,7 @@ try {
   await tab(popup, 'mine').click();
   assert.match(await popup.textContent('.panel'), /Wagoneer[\s\S]*Listed \$36,883/);
 
-  // ---- 3. Take the Ram down: the open panel picks up the request, opens the listing, the person clicks Mark as sold, Lot Sync notices ----
+  // ---- 3. Take the Ram down: the open panel picks up the request, opens the listing, the person clicks Mark as sold, Lot Current notices ----
   await tab(popup, 'todo').click();
   const listing2Promise = context.waitForEvent('page', { timeout: 30000 });
   await popup.click('button[data-action="upkeep"][data-kind="takeDown"]');
@@ -168,7 +168,7 @@ try {
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '1');
   assert.equal(await popup.evaluate(() => chrome.action.getBadgeText({})), '');
 
-  // ---- 4. The Numbers tab (view id 'pilot'): both items were flagged by the day-2 scan and seen done on the listing by Lot Sync ----
+  // ---- 4. The Numbers tab (view id 'pilot'): both items were flagged by the day-2 scan and seen done on the listing by Lot Current ----
   await tab(popup, 'pilot').click();
   const pilotView = await popup.textContent('.panel');
   assert.match(pilotView, /Sold cars to take down\s*1\b/);

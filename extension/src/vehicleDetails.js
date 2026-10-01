@@ -19,7 +19,7 @@ export async function fetchVehicleDetails(tabId, vin, { url = null } = {}) {
     return { ok: false, message: "Couldn't reach the dealership website tab. Open the used inventory page and click Post again. (" + ((e && e.message) || e) + ')' };
   }
   const adapter = probe && detectAdapter(probe);
-  if (!adapter) return { ok: false, message: "This tab isn't a dealership inventory page Lot Sync can read. Open the used inventory page and click Post again." };
+  if (!adapter) return { ok: false, message: "This tab isn't a dealership inventory page Lot Current can read. Open the used inventory page and click Post again." };
   // What the probe could not see on this page (a car's own page has no
   // inventory list to find) comes from the service the last scan of this
   // website stored, when the same adapter read it; what the probe did see wins.

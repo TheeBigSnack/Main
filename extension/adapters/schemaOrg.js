@@ -13,7 +13,7 @@
 //     origin ({ url }) and answers { ok, status, finalUrl, redirected,
 //     contentType, text }. searchInPage makes it from the dealer tab the way
 //     the page's own fetch would (the page's cookies, no header of Lot
-//     Sync's); makeDirectSearch makes it from the service worker, without
+//     Current's); makeDirectSearch makes it from the service worker, without
 //     cookies, with the permission for the website that the wizard already
 //     asks for. Both refuse to ask for an address off the website. A
 //     redirect the website answers with is followed the way a browser follows
@@ -32,7 +32,7 @@ import { checkPreOwned, DECISION } from '../src/classify.js';
 
 export const PLATFORM = Object.freeze({ id: 'schemaOrg', name: 'Standard vehicle data (schema.org)' });
 
-// The most of one page Lot Sync keeps. A car's page is far shorter; a page
+// The most of one page Lot Current keeps. A car's page is far shorter; a page
 // cut at this length is read as far as it goes and the scan says it is not
 // complete. searchInPage runs inside the page and can't import this, so it
 // carries the same number (test/adapters.test.js checks the two agree).
@@ -46,7 +46,7 @@ export const MAX_LIST_PAGES = 40;
 // page is read again within a few scans.
 export const MAX_CAR_PAGES = 600;
 // Car pages that fail one after another before the scan stops: a website
-// that keeps failing is struggling or turning Lot Sync away, and the rest
+// that keeps failing is struggling or turning Lot Current away, and the rest
 // of the lot is not asked for.
 export const MAX_FAILED_IN_A_ROW = 3;
 export const MAX_SITEMAPS = 5;
@@ -158,7 +158,7 @@ export function probeInPage() {
 }
 
 // One GET of a page on this website, made the way the page's own fetch makes
-// it: no header of Lot Sync's, the page's cookies as a same-site fetch sends
+// it: no header of Lot Current's, the page's cookies as a same-site fetch sends
 // them. An address off the website is refused before anything is sent. A
 // redirect the website answers with is followed as the browser follows any
 // redirect (cookies go only to the website's own origin); scan() never uses
@@ -170,7 +170,7 @@ export async function searchInPage(service, request) {
     const target = new URL(request.url, location.origin);
     const allowed = service && service.origin ? String(service.origin) : location.origin;
     if (target.origin !== location.origin || target.origin !== allowed) {
-      return { ok: false, error: 'Lot Sync reads only ' + allowed + ', not ' + target.origin };
+      return { ok: false, error: 'Lot Current reads only ' + allowed + ', not ' + target.origin };
     }
     const init = {};
     let timer = null;
@@ -296,7 +296,7 @@ async function cappedText(res, limit) {
 // A search(request) from the service worker: one GET of a page on this
 // website, without the browser's cookies (a website that turns such a read
 // away fails the background rescan with its reason; the Scan button still
-// reads it from the tab). No header of Lot Sync's is added. An address off
+// reads it from the tab). No header of Lot Current's is added. An address off
 // the website throws before anything is sent. A redirect the website answers
 // with is followed as a browser follows it (still without cookies), and
 // scan() never uses an answer that landed off the website (judge).
@@ -305,7 +305,7 @@ export function makeDirectSearch(service, fetchImpl = globalThis.fetch) {
   return async (request) => {
     const href = request && request.url;
     const target = onSite(typeof href === 'string' ? href : '', origin, origin);
-    if (!target) throw new Error(`Lot Sync reads only ${origin || 'the dealership website'}, not ${String(href || 'an empty address').slice(0, 80)}`);
+    if (!target) throw new Error(`Lot Current reads only ${origin || 'the dealership website'}, not ${String(href || 'an empty address').slice(0, 80)}`);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
     try {
@@ -430,10 +430,10 @@ function soldOut(node) {
 const BOT_CHECK = /captcha|are you (?:a )?(?:human|robot)|verify(?:ing)? (?:that )?you are (?:a )?human|checking your browser|checking if the site connection is secure|access denied|request unsuccessful|enable (?:javascript and )?cookies to continue|just a moment/i;
 
 const STOPPED = {
-  403: 'The website refused a page to Lot Sync (HTTP 403), so the scan stopped.',
-  429: 'The website asked Lot Sync to slow down (HTTP 429), so the scan stopped. Nothing was retried; try again later.',
+  403: 'The website refused a page to Lot Current (HTTP 403), so the scan stopped.',
+  429: 'The website asked Lot Current to slow down (HTTP 429), so the scan stopped. Nothing was retried; try again later.',
   503: 'The website said it was too busy or unavailable (HTTP 503), so the scan stopped. Nothing was retried; try again later.',
-  check: 'The website showed a bot check instead of its page, so the scan stopped. Lot Sync never tries to get past one.',
+  check: 'The website showed a bot check instead of its page, so the scan stopped. Lot Current never tries to get past one.',
 };
 
 const isHtmlAnswer = (contentType, text) => /html/i.test(contentType) || (!contentType && /<(?:!doctype html|html|head|body)[\s>]/i.test(text));
@@ -456,7 +456,7 @@ function judge(answer, origin) {
     if (isHtmlAnswer(String(answer.contentType || ''), text) && isBotCheck(parseVehiclePage(text, String(answer.finalUrl || '')))) return { kind: 'blocked', status, message: STOPPED.check };
     return { kind: 'error', status, message: `HTTP ${status || 'error'}` };
   }
-  if (!onSite(String(answer.finalUrl || ''), null, origin)) return { kind: 'error', status, message: 'it sent Lot Sync to another website' };
+  if (!onSite(String(answer.finalUrl || ''), null, origin)) return { kind: 'error', status, message: 'it sent Lot Current to another website' };
   return { kind: 'page', status, finalUrl: answer.finalUrl, redirected: Boolean(answer.redirected), contentType: String(answer.contentType || ''), text: String(answer.text || '') };
 }
 
@@ -717,7 +717,7 @@ export async function scan(search, options = {}) {
   const site = siteReader(search, origin);
   const fail = (error, message) => ({ ok: false, error, message, requests: site.requests });
   const start = onSite(opts.listUrl, null, origin);
-  if (!start) return fail('no-list', "Lot Sync doesn't know this website's used inventory page yet. Open that page and click Scan website there.");
+  if (!start) return fail('no-list', "Lot Current doesn't know this website's used inventory page yet. Open that page and click Scan website there.");
 
   // 1. the list and its rel=next pages
   const visited = new Set();
@@ -789,7 +789,7 @@ export async function scan(search, options = {}) {
     }
   }
   if (!cars.size) {
-    return fail('no-cars', `Lot Sync found no links to car pages on the inventory page (${firstList}). A page that draws its list with scripts shows none to Lot Sync's plain read of it.`);
+    return fail('no-cars', `Lot Current found no links to car pages on the inventory page (${firstList}). A page that draws its list with scripts shows none to Lot Current's plain read of it.`);
   }
 
   // 3. which car pages to read
@@ -953,8 +953,8 @@ export async function getDetails(search, vin, options = {}) {
   const start = onSite(opts.listUrl, null, origin);
   if (!start) {
     return pageWithoutData
-      ? { ok: false, message: "The car's page on the website has no vehicle data Lot Sync can read." }
-      : { ok: false, message: "Lot Sync doesn't know where this car's page is. Scan the website again, then post." };
+      ? { ok: false, message: "The car's page on the website has no vehicle data Lot Current can read." }
+      : { ok: false, message: "Lot Current doesn't know where this car's page is. Scan the website again, then post." };
   }
   const visited = new Set();
   for (let at = start.href, n = 0; n < MAX_LIST_PAGES; n += 1) {

@@ -39,7 +39,7 @@
 //                                              sends the rescan message the alarm would)
 //   chrome.notifications.create                shown as a toast on the sandbox page
 //   chrome.action.setBadgeText / setBadgeBackgroundColor
-//                                              shown on the sandbox page's Lot Sync toolbar icon
+//                                              shown on the sandbox page's Lot Current toolbar icon
 //   chrome.sidePanel.open / setPanelBehavior   the panel is always docked in the sandbox; open() only flashes it (STUB)
 //   chrome.storage.managed                     always empty (STUB)
 // Nothing here can reach the Publish, Update, Delete or Mark as sold buttons
@@ -164,7 +164,7 @@
     }
 
     const hub = {
-      manifest: options.manifest || { name: 'Lot Sync', version: '' },
+      manifest: options.manifest || { name: 'Lot Current', version: '' },
       extensionId: options.extensionId || 'lot-sync-sandbox',
       extensionBase: options.extensionBase || '',
       tabs: options.tabs || null,

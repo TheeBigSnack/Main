@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lot Sync against a real local Supabase stack (docs/stack-test.md, the CI
+// Lot Current against a real local Supabase stack (docs/stack-test.md, the CI
 // job `stack`): the migrations as `supabase start` applied them, PostgREST,
 // GoTrue, the mail catcher and the four functions as `supabase functions
 // serve` runs them. The unit tests fake every one of those. This runs the
@@ -18,7 +18,7 @@
 // itself. LOTSYNC_STACK_SITE_ORIGIN must be the LEAD_ORIGINS the functions
 // were served with (SITE_ORIGIN below when unset).
 //
-// Nobody signs in with a password (Lot Sync has none): a person gets in with
+// Nobody signs in with a password (Lot Current has none): a person gets in with
 // the admin API's magic link (generate_link, with the service key) or with
 // the email the local mail catcher received, through the extension's own
 // signInFinish and exchangeTokenFromUrl. SQL goes to the stack's database
@@ -507,7 +507,7 @@ async function main() {
   const only = process.argv.slice(2);
   const files = readdirSync(STACK_DIR).filter((f) => f.endsWith('.stack.mjs')).sort().filter((f) => !only.length || only.some((o) => f.includes(o)));
   const s = makeContext(settings);
-  console.log(`Lot Sync stack test, run ${s.run}, against ${settings.url} (settings from ${source}; mail catcher ${settings.mailUrl}; landing page origin ${settings.siteOrigin})`);
+  console.log(`Lot Current stack test, run ${s.run}, against ${settings.url} (settings from ${source}; mail catcher ${settings.mailUrl}; landing page origin ${settings.siteOrigin})`);
   console.log(`Files: ${files.join(', ') || 'none'}\n`);
 
   let ready = false;

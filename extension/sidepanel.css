@@ -47,3 +47,18 @@ ol.rules li { margin: 6px 0; }
 /* the wizard's Account step: each button sits under its own box */
 .wizAccount .actions { margin: 0 0 6px; }
 .wizAccount .banner { margin: 8px 0; }
+/* the review step's photo pick: the website's photos, ticked ones outlined */
+ul.thumbs { list-style: none; margin: 6px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.thumb { border: 2px solid var(--line); border-radius: var(--radius); padding: 4px; font-size: 11px; display: flex; flex-direction: column; gap: 4px; }
+.thumb.on { border-color: var(--good); }
+.thumb .pic { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+.thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; background: var(--line); }
+.thumb:not(.on) img { opacity: .55; }
+.thumb .row { display: flex; align-items: center; gap: 4px; }
+.thumb .row input { margin: 0; }
+.thumb .copy { margin-left: 0; align-self: flex-start; }
+/* the highlights the salesperson picks from the website's features */
+fieldset.highlights { border: 1px solid var(--line); border-radius: var(--radius); margin: 10px 0 0; padding: 6px 10px 8px; }
+fieldset.highlights legend { font-weight: 600; padding: 0 4px; }
+.featureList { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+label.feature { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }

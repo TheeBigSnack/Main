@@ -20,8 +20,8 @@
 // in this file or anywhere else in the extension.
 
 export const ACCOUNT = Object.freeze({
-  url: '',
-  anonKey: '',
+  url: 'https://dblbfgfkmzlfdwzbcvpj.supabase.co',
+  anonKey: 'sb_publishable_dFXfRnfVqhUqZKxM2r_ylw_6uU4d2bt',
   functionsUrl: '',
 });
 

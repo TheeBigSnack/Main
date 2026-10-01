@@ -1,4 +1,4 @@
--- Lot Sync: billing checks (Milestone 5) against a running database with
+-- Lot Current: billing checks (Milestone 5) against a running database with
 -- the four migrations applied, in the shape of rls.sql: two dealerships
 -- and their people straight in auth.users, the JWT claims set the way
 -- PostgREST does, DO blocks that raise on anything wrong, everything rolled

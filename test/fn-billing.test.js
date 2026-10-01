@@ -329,7 +329,7 @@ test('billing: checkout refuses a store that pays with 409, and one Stripe still
   const handler = await load();
   world({ subscriptions: [{ dealership_id: D1, status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
   const active = await post(handler, 'checkout', TOKEN.u2);
-  assert.deepEqual([active.status, active.body], [409, { ok: false, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' }]);
+  assert.deepEqual([active.status, active.body], [409, { ok: false, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Current contact' }]);
   for (const s of ['past_due', 'unpaid', 'incomplete', 'paused']) {
     world({ subscriptions: [{ dealership_id: D1, status: s, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
     const open = await post(handler, 'checkout', TOKEN.u2);
@@ -385,6 +385,34 @@ test('billing: the portal is 404 until a customer exists, then a portal session 
   const [call] = stripeCalls();
   assert.deepEqual([call.path, call.form], ['/v1/billing_portal/sessions', { customer: 'cus_1', return_url: RETURN_URL }]);
   assert.match(call.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
+});
+
+test('billing: with STRIPE_PORTAL_CONFIGURATION the portal session names that configuration; with STRIPE_AUTOMATIC_TAX=true Checkout adds tax and asks for the address, and anything else leaves tax off', async () => {
+  world({ subscriptions: [{ dealership_id: D1, status: 'past_due', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
+  stripe({ customers: { cus_1: {} } });
+  const handler = await load({ STRIPE_PORTAL_CONFIGURATION: 'bpc_test_1', STRIPE_AUTOMATIC_TAX: 'TRUE' });
+  assert.equal((await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 })).status, 200);
+  assert.deepEqual(stripeCalls()[0].form, { customer: 'cus_1', return_url: RETURN_URL, configuration: 'bpc_test_1' });
+
+  world();
+  stripe();
+  net.calls = [];
+  const taxed = await load({ STRIPE_AUTOMATIC_TAX: 'true' });
+  assert.equal((await post(taxed, 'checkout', TOKEN.u2, { dealershipId: D1 })).status, 200);
+  const session = stripeCalls().find((c) => c.path === '/v1/checkout/sessions');
+  assert.equal(session.form['automatic_tax[enabled]'], 'true');
+  assert.equal(session.form.billing_address_collection, 'required');
+  assert.deepEqual([session.form['customer_update[address]'], session.form['customer_update[name]']], ['auto', 'auto']);
+
+  for (const off of ['', 'yes', '1', 'false']) {
+    world();
+    stripe();
+    net.calls = [];
+    const h = await load({ STRIPE_AUTOMATIC_TAX: off });
+    assert.equal((await post(h, 'checkout', TOKEN.u2, { dealershipId: D1 })).status, 200);
+    const form = stripeCalls().find((c) => c.path === '/v1/checkout/sessions').form;
+    assert.equal(Object.keys(form).some((k) => /automatic_tax|customer_update|billing_address/.test(k)), false, `STRIPE_AUTOMATIC_TAX=${off}`);
+  }
 });
 
 test('billing: checkout and the portal are braked at 10 a minute per manager; the status is not', async () => {
@@ -487,7 +515,7 @@ test('billing: which row an event lands on: the customer\'s, the subscription\'s
   assert.deepEqual(r.body, { ok: true, applied: true, attached: true });
   assert.deepEqual([fake.rows('subscriptions')[0].status, net.calls.length], ['past_due', 0]);
 
-  // no Lot Sync dealership: a customer without one, a dealership id that is no uuid, one that does not exist
+  // no Lot Current dealership: a customer without one, a dealership id that is no uuid, one that does not exist
   for (const [id, customers, metadata] of [['evt_none', { cus_8: { metadata: {} } }, {}], ['evt_bad', {}, { dealership_id: 'not-a-uuid' }], ['evt_gone', {}, { dealership_id: uuid(99) }]]) {
     world();
     stripe({ customers });

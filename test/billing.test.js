@@ -19,6 +19,7 @@ import {
   OPEN_STATUSES, OPEN_SUBSCRIPTION_CODE, OPEN_SUBSCRIPTION_MESSAGE, hasOpenSubscription, checkoutRefusal,
   planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
+  automaticTaxOn, portalSessionParams,
   formEncode, applyStripeEvent, normalizeStatus,
   parseStripeSignature, hmacSha256Hex, timingSafeEqualHex, verifyStripeSignature,
 } from '../supabase/functions/_shared/billing.mjs';
@@ -193,7 +194,7 @@ test('checkoutRefusal: no second Checkout while Stripe still holds a subscriptio
     const refusal = checkoutRefusal(r, NOW);
     assert.equal(refusal.status, 409, s);
     if (subscriptionState(r, NOW) === 'active') {
-      assert.deepEqual(refusal, { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' }, s + ': the active gate stays');
+      assert.deepEqual(refusal, { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Current contact' }, s + ': the active gate stays');
     } else {
       assert.deepEqual(refusal, { status: 409, error: OPEN_SUBSCRIPTION_MESSAGE, code: OPEN_SUBSCRIPTION_CODE }, s);
     }
@@ -251,7 +252,7 @@ test('planOf: the state word plus the dates and the seats the extension shows, i
 
 test('lapsedAnswer: what /sync and /rewrite answer with 402, with the plan for the extension', () => {
   assert.equal(LAPSED_CODE, 'lapsed');
-  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view");
+  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view");
   const plan = planOf(row({ status: 'canceled', stripe_customer_id: 'cus_1' }), NOW);
   assert.deepEqual(lapsedAnswer(plan), { ok: false, error: LAPSED_MESSAGE, code: 'lapsed', plan });
   assert.equal(lapsedAnswer(plan).plan, plan, 'the plan itself');
@@ -362,6 +363,18 @@ test('checkoutSessionParams: subscription mode, the customer, the dealership in 
   assert.throws(() => checkoutSessionParams({ customerId: '', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/' }), /customer/);
   assert.throws(() => checkoutSessionParams({ customerId: 'cus_1', dealershipId: '', lineItems, returnUrl: 'https://manager.example.com/' }), /dealership/);
   assert.throws(() => checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems: [], returnUrl: 'https://manager.example.com/' }), /line items/);
+});
+
+test('checkoutSessionParams with automatic tax; automaticTaxOn takes only the word true; portalSessionParams names a configuration only when one is set', () => {
+  const lineItems = [{ price: 'price_rooftop', quantity: 1 }];
+  const p = checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/', automaticTax: true });
+  assert.deepEqual([p.automatic_tax, p.billing_address_collection, p.customer_update], [{ enabled: true }, 'required', { address: 'auto', name: 'auto' }]);
+  assert.equal('automatic_tax' in checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/', automaticTax: 'true' }), false, 'only a real true');
+  assert.deepEqual(['true', ' TRUE ', 'True'].map(automaticTaxOn), [true, true, true]);
+  assert.deepEqual(['', 'false', 'yes', '1', null, undefined].map(automaticTaxOn), [false, false, false, false, false, false]);
+  assert.deepEqual(portalSessionParams({ customerId: 'cus_1', returnUrl: 'https://m.example/' }), { customer: 'cus_1', return_url: 'https://m.example/' });
+  assert.deepEqual(portalSessionParams({ customerId: 'cus_1', returnUrl: 'https://m.example/', configuration: ' bpc_1 ' }), { customer: 'cus_1', return_url: 'https://m.example/', configuration: 'bpc_1' });
+  assert.throws(() => portalSessionParams({ customerId: '', returnUrl: 'https://m.example/' }), /customer/);
 });
 
 // ---------- the form encoding ----------

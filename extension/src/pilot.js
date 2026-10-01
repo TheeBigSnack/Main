@@ -1,11 +1,11 @@
-// Pilot numbers (Milestone 3): what the pilot agreement lets Lot Sync record,
+// Pilot numbers (Milestone 3): what the pilot agreement lets Lot Current record,
 // kept per dealer website in this browser only:
 //   - time per post: from the click on Post to "It's posted", including the
 //     salesperson's review and their own Publish click;
 //   - which form fields could not be filled, per fill attempt (field keys
 //     only: never the values, never the description);
 //   - how long a sold car or a price change stayed on the salesperson's
-//     listing: from the scan that flagged it to the moment Lot Sync saw the
+//     listing: from the scan that flagged it to the moment Lot Current saw the
 //     change on the listing or the person ticked the item off.
 // No customer or buyer data, and nothing from Facebook beyond what the posted
 // registry already holds. Everything here is pure; updatePilot at the end is
@@ -133,7 +133,7 @@ export function noteFill(pilot, { vin, fill, at = nowIso(), mapVersion = '', ver
     at,
     vin: String(vin || '').toUpperCase(),
     mapVersion: clean(mapVersion, 40),
-    version: clean(version, 20), // the Lot Sync build that did the fill
+    version: clean(version, 20), // the Lot Current build that did the fill
     filled: keysOf(f.filled),
     partial: keysOf(f.partial),
     blocked: keysOf(f.blocked),
@@ -174,7 +174,7 @@ export function noteFlags(pilot, diff, { at } = {}) {
   return { ...p, flags: trim(flags, when, (f) => f.doneAt || f.flaggedAt, flagOpen) };
 }
 
-// The item was handled: Lot Sync saw the listing change (detected), the person
+// The item was handled: Lot Current saw the listing change (detected), the person
 // ticked it off (manual), or the car was unmarked as posted (cleared).
 // kind null closes both kinds for the car.
 export function resolveFlag(pilot, vin, kind = null, { at = nowIso(), how = 'manual' } = {}) {
@@ -323,7 +323,7 @@ export function fmtLocal(iso, timeZone) {
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
   'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
-  'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Sync sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
+  'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
   'Hours run from the flagging scan, and rescans happen every 3 hours while Chrome is open.',
 ]);
@@ -331,8 +331,8 @@ export const DEFINITIONS = Object.freeze([
 // A plain-text summary for the clipboard (the weekly check-in).
 export function pilotText(summary, { site = '' } = {}) {
   const s = summary;
-  const lines = [`Lot Sync pilot numbers${site ? ': ' + site : ''}`];
-  lines.push(`Posts through Lot Sync: ${s.posts.posted} posted (${s.posts.queued} in a queue), ${s.posts.drafts} saved as drafts, ${s.posts.notPosted + s.posts.skipped + s.posts.blocked + s.posts.abandoned} not posted`);
+  const lines = [`Lot Current pilot numbers${site ? ': ' + site : ''}`];
+  lines.push(`Posts through Lot Current: ${s.posts.posted} posted (${s.posts.queued} in a queue), ${s.posts.drafts} saved as drafts, ${s.posts.notPosted + s.posts.skipped + s.posts.blocked + s.posts.abandoned} not posted`);
   lines.push(`Time per post (click on Post to "It's posted", review included): median ${fmtSeconds(s.posts.medianSeconds)}, fastest ${fmtSeconds(s.posts.fastestSeconds)}, slowest ${fmtSeconds(s.posts.slowestSeconds)}, ${s.posts.under60Share === null ? '—' : s.posts.under60Share + '%'} within 60 s`);
   for (const sp of s.salespeople) lines.push(`  ${sp.name}: ${sp.posted} posted, median ${fmtSeconds(sp.medianSeconds)}`);
   lines.push(`Form fills: ${s.fills.attempts}, ${s.fills.clean} with nothing to fix by hand, ${s.fills.withDraft} where the form already held another car`);
@@ -382,12 +382,12 @@ export function pilotCsv(pilot, { now = nowIso(), labels = {}, site = '', origin
   const p = withPilotDefaults(pilot);
   const s = summarizePilot(p, { now, labels });
   const rows = [];
-  rows.push(csvRow(['Lot Sync pilot numbers', site, `exported ${local(now)}`]));
+  rows.push(csvRow(['Lot Current pilot numbers', site, `exported ${local(now)}`]));
   rows.push(csvRow(['Dealership', dealer]));
   rows.push(csvRow(['Website', origin]));
   rows.push(csvRow(['Salesperson (from Settings)', salesperson]));
   rows.push(csvRow(['Time zone', zone]));
-  rows.push(csvRow(['Lot Sync version', version]));
+  rows.push(csvRow(['Lot Current version', version]));
   rows.push('');
   rows.push(csvRow(['Summary', 'Value']));
   rows.push(csvRow(['Posts started', s.posts.started]));
@@ -434,11 +434,11 @@ export function pilotCsv(pilot, { now = nowIso(), labels = {}, site = '', origin
   return rows.join('\r\n') + '\r\n';
 }
 
-// lot-sync-pilot-<site>-<salesperson>-<local day>.csv, so one CSV per person
+// lot-current-pilot-<site>-<salesperson>-<local day>.csv, so one CSV per person
 // per website stays tellable apart on the owner's disk.
 const slug = (s) => String(s ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unnamed';
 export function pilotFileName(now = nowIso(), { site = '', salesperson = '', timeZone } = {}) {
-  return `lot-sync-pilot-${slug(site)}-${slug(salesperson)}-${fmtLocal(now, timeZone).slice(0, 10)}.csv`;
+  return `lot-current-pilot-${slug(site)}-${slug(salesperson)}-${fmtLocal(now, timeZone).slice(0, 10)}.csv`;
 }
 
 // ---------- storage ----------

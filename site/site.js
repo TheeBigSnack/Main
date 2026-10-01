@@ -1,4 +1,4 @@
-// Lot Sync website. Three jobs: fill the pricing numbers from pricing.json
+// Lot Current website. Three jobs: fill the pricing numbers from pricing.json
 // (the one pricing config, copied from marketing/), send the demo request
 // form, and show the Start a free pilot links once config.js names the
 // manager view. Every page works with this file switched off; the pricing
@@ -78,7 +78,7 @@ function fields(form) {
 function mailtoFor(data) {
   const lines = Object.entries(data).filter(([k]) => k !== 'company_url').map(([k, v]) => `${k}: ${v}`);
   const sep = SITE.demoMailto.includes('?') ? '&' : '?';
-  return `${SITE.demoMailto}${sep}subject=${encodeURIComponent('Lot Sync demo request')}&body=${encodeURIComponent(lines.join('\n'))}`;
+  return `${SITE.demoMailto}${sep}subject=${encodeURIComponent('Lot Current demo request')}&body=${encodeURIComponent(lines.join('\r\n'))}`;
 }
 
 // The demo request form is open once config.js names an endpoint or an

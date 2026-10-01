@@ -1,6 +1,6 @@
 # The 10-minute demo
 
-For a used car manager, at their desk, on their own website. One laptop with Chrome, the Lot Sync extension loaded, the store's used inventory page open, and a Facebook account signed in (yours, or the manager's salesperson's with their OK). Aim for nine minutes and leave one for questions.
+For a used car manager, at their desk, on their own website. One laptop with Chrome, the Lot Current extension loaded, the store's used inventory page open, and a Facebook account signed in (yours, or the manager's salesperson's with their OK). Aim for nine minutes and leave one for questions.
 
 ## Before you walk in
 
@@ -13,11 +13,11 @@ For a used car manager, at their desk, on their own website. One laptop with Chr
 
 ## 0:00 The problem, in one breath
 
-"Your salespeople post used cars on Marketplace from their own accounts because Facebook stopped taking dealer feeds. Each post is minutes of copying from your website, so it doesn't get done, and when a car sells the listing sits there. Lot Sync fills the listing from your website in about ten seconds, the salesperson checks it and clicks Publish, and it tells them the same day when a car sells or the price changes."
+"Your salespeople post used cars on Marketplace from their own accounts because Facebook stopped taking dealer feeds. Each post is minutes of copying from your website, so it doesn't get done, and when a car sells the listing sits there. Lot Current fills the listing from your website in about ten seconds, the salesperson checks it and clicks Publish, and it tells them the same day when a car sells or the price changes."
 
 ## 1:00 Scan the website
 
-Click the Lot Sync icon, then **Rescan website**.
+Click the Lot Current icon, then **Rescan website**.
 
 Show: the count of used cars read, **Ready to post**, **Other stores** (group websites only: cars at the group's other rooftops, kept off this list; the tab is hidden on a single-store site), **Needs a look** (anything the website doesn't add up on, like a used car showing 0 miles).
 
@@ -33,7 +33,7 @@ Click **Open the Marketplace form**. Watch it fill. Point at the panel's **Fille
 
 Then either close the Facebook tab and click **It didn't post** ("nothing was posted or recorded"), or have the salesperson click Publish and show **My listings** with the link.
 
-Say: "Lot Sync never clicks Publish. There's no code for it, and a test that fails if any appears."
+Say: "Lot Current never clicks Publish. There's no code for it, and a test that fails if any appears."
 
 ## 5:00 Several at once
 
@@ -49,7 +49,7 @@ Click the **Numbers** tab: "During the pilot this records how long each post tak
 
 Read the short list from the sales sheet: no Publish, no new cars, no invented prices, no hiding the dealership, no passwords, no tricks.
 
-Then, unprompted: "Meta's terms prohibit automated access without permission. A person clicking Publish is the safest design there is; it's not a guarantee, and I won't tell you it is. Lot Sync is not affiliated with Meta."
+Then, unprompted: "Meta's terms prohibit automated access without permission. A person clicking Publish is the safest design there is; it's not a guarantee, and I won't tell you it is. Lot Current is not affiliated with Meta."
 
 ## 9:00 The pilot
 
@@ -61,5 +61,5 @@ Leave the sales sheet. Ask who the two or three salespeople would be and when th
 
 - **A field didn't fill:** the panel lists it under **Couldn't fill** with a copy button. Say so plainly: "Facebook changed something; that's a one-line fix on our side," copy the report, and fill that field by hand.
 - **Facebook restored a draft over the form:** the panel says what changed and that it set it again. Delete the draft afterwards.
-- **The website scan fails:** you are not on the used inventory page, or the website is not one Lot Sync can read yet. Open the inventory page and scan again.
+- **The website scan fails:** you are not on the used inventory page, or the website is not one Lot Current can read yet. Open the inventory page and scan again.
 - **Chrome asks for a permission:** during set-up, from **Allow automatic rescans** or when you save Settings, it's the automatic rescan asking to read the website in the background; allow it, or skip it and scan by hand. When you open the form, fill it again or download photos, it's permission to download this car's photos from the server they sit on; allow it, or skip it and the form still fills without those photos. After **Check with NHTSA**, it's the free government VIN check; skip it and the VIN just isn't checked online.

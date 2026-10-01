@@ -1,26 +1,26 @@
-# Lot Sync: rules for every session
+# Lot Current: rules for every session
 
 Read this before touching anything. It is the product in one page plus the rules that are not negotiable. The build brief that produced it is summarised in PLAN.md.
 
 ## The product
 
-Lot Sync helps car dealership salespeople list their store's used cars on Facebook Marketplace and keep those listings accurate. It reads the dealership's own website inventory and only lets pre-owned cars through. It pre-fills Facebook's vehicle listing form so posting takes about 10 seconds. It rescans the website to tell each salesperson which of their listings sold or changed price.
+Lot Current helps car dealership salespeople list their store's used cars on Facebook Marketplace and keep those listings accurate. It reads the dealership's own website inventory and only lets pre-owned cars through. It pre-fills Facebook's vehicle listing form so posting takes about 10 seconds. It rescans the website to tell each salesperson which of their listings sold or changed price.
 
 - Customers: dealerships, billed per rooftop (store) per month. Users: salespeople, who post and maintain listings, and managers, who see who posted what.
 - Why salespeople post from personal profiles: Marketplace stopped showing vehicle listings from partner catalog feeds in September 2021 and stopped letting business Pages list vehicles in January 2023. Dealers are not allowed to list new vehicles on Marketplace.
 - First pilot: Ron Lewis Chrysler Dodge Jeep Ram Waynesburg, 2 to 3 salespeople, with the manager's approval. Dealer Inspire website: https://www.ronlewischryslerdodgejeepramwaynesburg.com/used-vehicles/
-- Competitors (Shiftly, CARVID, AutoLander, Relay Autos, ZenLite and others, roughly $39 to $1,299 a month as of Sept 2026) mostly auto-post. Lot Sync's angle is careful and accurate: a person posts in seconds, sold cars are flagged the same day, prices always match the website, and new cars never get listed by mistake.
+- Competitors (Shiftly, CARVID, AutoLander, Relay Autos, ZenLite and others, roughly $39 to $1,299 a month as of Sept 2026) mostly auto-post. Lot Current's angle is careful and accurate: a person posts in seconds, sold cars are flagged the same day, prices always match the website, and new cars never get listed by mistake.
 
 ## Non-negotiables (enforce in code, not only in docs)
 
-1. **A person publishes every post and every edit.** Lot Sync fills in forms and opens pages. It never clicks Publish, Update, Delete or Mark as sold, and it never posts or edits in the background or while the salesperson is away. `extension/facebook/formMap.js` has no selector for any of those buttons; `test/posting.test.js` fails if one appears or if the side panel gains any other way to act on the page.
+1. **A person publishes every post and every edit.** Lot Current fills in forms and opens pages. It never clicks Publish, Update, Delete or Mark as sold, and it never posts or edits in the background or while the salesperson is away. `extension/facebook/formMap.js` has no selector for any of those buttons; `test/posting.test.js` fails if one appears or if the side panel gains any other way to act on the page.
 2. **No detection evasion.** No randomized "human-like" delays, no fingerprint or user-agent spoofing, no proxies, no multiple or shared accounts. Never ask for, read or store Facebook passwords, cookies or tokens.
 3. **Pre-owned only.** The gate in `extension/src/classify.js` decides. New, demo, loaner and "needs a look" cars can't enter any posting flow. The side panel re-fetches and re-checks the car at post time (`extension/src/vehicleDetails.js`).
 4. **Honest prices.** The listed price equals the website price, using the dealer's chosen price basis. Price changes only mirror the website: no fake drops, no raise-then-drop, no delete-and-relist. A real price drop, once updated on the listing, notifies everyone who saved it; that is the honest version of a "ping".
 5. **The dealership stays identifiable.** Every description names the dealership and the salesperson's role. First-person tone is the goal, but posing as a private seller is not allowed.
 6. **Facts only.** Descriptions state only facts present in the source data, and numbers are checked against the source before the salesperson sees them (`extension/src/rewriteTemplate.js`, `runGuardrails`).
 7. **A per-salesperson daily post cap** the dealer can configure (default 10, `extension/src/cap.js`). Meta doesn't publish its limits, so it is presented as a safety setting, never as a guarantee.
-8. **No affiliation claims.** Never say or imply Lot Sync is affiliated with, approved by or partnered with Meta or Facebook. Use "Facebook" and "Marketplace" only as plain names, with no logos.
+8. **No affiliation claims.** Never say or imply Lot Current is affiliated with, approved by or partnered with Meta or Facebook. Use "Facebook" and "Marketplace" only as plain names, with no logos.
 
 Meta's Terms prohibit accessing its products "using automated means" without permission. Having a person click Publish is the safest design available, but it is not guaranteed safe. Keep that honest everywhere: product copy, README, marketing, legal.
 
@@ -34,7 +34,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 - Ask the owner before: adding paid services, widening extension permissions, doing anything that touches a real Facebook account, or spending money. Widenings so far: `sidePanel`, host permissions for `https://www.facebook.com/marketplace/*` and `https://vehicle-images.carscommerce.inc/*` (Milestone 1, called out in CHANGELOG); a car's photo servers requested from the salesperson's click at post time (`src/photoHosts.js`, approved 2026-09-29).
 - No secrets in git: the backend key lives in `backend/.env` (ignored). Commit after each working step. Keep README (for testers) and CHANGELOG up to date.
 - The rewrite service (`backend/`) is the only place an Anthropic API key exists. The extension only calls it when the dealer turns it on in Settings; the template writer is the default and the fallback.
-- Customer-facing copy lives in `marketing/` and must pass `test/marketing.test.js`: a person clicks Publish and Lot Sync never does, not affiliated with Meta, no promise of account safety, no Meta-approval or partnership wording, no invented numbers, prices only from `marketing/pricing.json` (a hypothesis until a dealer pays).
+- Customer-facing copy lives in `marketing/` and must pass `test/marketing.test.js`: a person clicks Publish and Lot Current never does, not affiliated with Meta, no promise of account safety, no Meta-approval or partnership wording, no invented numbers, prices only from `marketing/pricing.json` (a hypothesis until a dealer pays).
 - The pilot numbers (`extension/src/pilot.js`) record only what `legal/pilot-agreement.md` section 2 names: post timings, field keys that could not be filled, hours until sold cars and price changes were fixed. Never values, descriptions, buyers or anything from the Facebook account.
 
 ## Repo map

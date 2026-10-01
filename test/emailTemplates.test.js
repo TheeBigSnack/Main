@@ -1,4 +1,4 @@
-// The sign-in emails (supabase/templates/). Lot Sync signs people in with no
+// The sign-in emails (supabase/templates/). Lot Current signs people in with no
 // password: the extension with the code from the email, the manager view
 // with the link in the same email, both asked for with signInWithOtp. While
 // config.toml's enable_confirmations is false every sign-in sends the
@@ -89,11 +89,11 @@ const textOf = (html) => withoutComments(html)
   .replace(/\s+/g, ' ')
   .trim();
 
-test('config.toml names both sign-in templates with a Lot Sync subject and a path to a file in supabase/templates/', () => {
+test('config.toml names both sign-in templates with a Lot Current subject and a path to a file in supabase/templates/', () => {
   for (const t of templates) {
     assert.ok(config[`auth.email.template.${t.name}`], `config.toml has no [auth.email.template.${t.name}]`);
     assert.equal(typeof t.subject, 'string', `[auth.email.template.${t.name}] has no subject`);
-    assert.match(t.subject, /Lot Sync/, `the ${t.name} subject does not name Lot Sync`);
+    assert.match(t.subject, /Lot Current/, `the ${t.name} subject does not name Lot Current`);
     assert.match(t.path, /^\.\/supabase\/templates\/[\w-]+\.html$/, `[auth.email.template.${t.name}] content_path is not a file in ./supabase/templates/`);
     assert.ok(t.html, `${t.path}, named for ${t.name} in config.toml, does not exist`);
   }
@@ -113,12 +113,12 @@ test('each sign-in template carries the code and the link, each with the line th
     const text = textOf(t.html);
     assert.ok(t.html.includes('{{ .Token }}'), `${t.name} has no {{ .Token }}: the extension signs in with the code`);
     assert.ok(t.html.includes('<a href="{{ .ConfirmationURL }}">'), `${t.name} has no link to {{ .ConfirmationURL }}: the manager view signs in with it`);
-    assert.ok(text.includes(`Signing in to the Lot Sync extension? Type this code into "${ACCOUNT_WORDS.code}": {{ .Token }}`), `${t.name}: the code does not follow the line that says it is for the extension`);
+    assert.ok(text.includes(`Signing in to the Lot Current extension? Type this code into "${ACCOUNT_WORDS.code}": {{ .Token }}`), `${t.name}: the code does not follow the line that says it is for the extension`);
     assert.ok(text.includes('Asked for this email on the manager view? Open this link in that same browser. Asked from the extension? Use the code above instead: this link does not sign you in to the extension, and opening it uses the code up.'), `${t.name}: the link line must say it is for the manager view, in the browser that asked (PKCE), and that an email the extension asked for is used with its code: its link cannot sign in and would use the code up`);
     assert.ok(text.includes(IGNORE_LINE), `${t.name} lacks: ${IGNORE_LINE}`);
     const actions = [...t.html.matchAll(/\{\{-?\s*(.*?)\s*-?\}\}/g)].map((m) => m[1]);
     for (const a of actions) assert.ok(VARIABLES.includes(a), `${t.name} uses {{ ${a} }}, which is not one of ${VARIABLES.join(', ')}`);
-    assert.match(t.html, /<h1[^>]*>Sign in to Lot Sync<\/h1>/, `${t.name} does not open with "Sign in to Lot Sync"`);
+    assert.match(t.html, /<h1[^>]*>Sign in to Lot Current<\/h1>/, `${t.name} does not open with "Sign in to Lot Current"`);
     const title = (t.html.match(/<title>([^<]*)<\/title>/) || [])[1];
     assert.equal(title, t.subject, `${t.name}: the <title> is not the subject config.toml gives it`);
   }
@@ -161,7 +161,7 @@ test('the sign-in templates read in dark mode and as plain text', () => {
     const text = textOf(t.html);
     // with the tags gone, the address must still be there: the link's own href is not text
     assert.ok(text.includes('paste this address into that browser: {{ .ConfirmationURL }}'), `${t.name} shows the address only inside the link; a plain-text reader needs it as text too`);
-    assert.match(text, /^Sign in to Lot Sync /, `${t.name}'s text does not start with what it is`);
+    assert.match(text, /^Sign in to Lot Current /, `${t.name}'s text does not start with what it is`);
   }
 });
 

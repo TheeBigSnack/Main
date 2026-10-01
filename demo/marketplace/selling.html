@@ -8,7 +8,7 @@
 </head>
 <body>
   <!-- "Your listings": where a To do item lands when the listing's link was never saved (a car marked posted by hand). -->
-  <div class="sample">Sample Marketplace for the Lot Sync sandbox. This is not Facebook.</div>
+  <div class="sample">Sample Marketplace for the Lot Current sandbox. This is not Facebook.</div>
   <header class="mp"><div class="logo">Sample Marketplace</div><nav><a href="selling.html">Your listings</a><a href="create.html">Create listing</a></nav></header>
   <main>
     <h1>Your listings</h1>
@@ -23,7 +23,7 @@
       const list = document.getElementById('list');
       list.innerHTML = all.length
         ? all.map((l) => `<li><span><a href="item.html?id=${mp.esc(l.id)}">${mp.esc(l.title)}</a>${l.sold ? ' <span class="badge sold">Sold</span>' : ''}<span class="count">listing ${mp.esc(l.id)}</span></span><b>${mp.money(l.price)}</b></li>`).join('')
-        : '<li><span class="hint">No listings yet. Post a car from the Lot Sync side panel; you click Publish on the form.</span></li>';
+        : '<li><span class="hint">No listings yet. Post a car from the Lot Current side panel; you click Publish on the form.</span></li>';
     })();
   </script>
 </body>

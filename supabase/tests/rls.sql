@@ -1,4 +1,4 @@
--- Lot Sync: row-level security checks (PLAN.md, M4 acceptance 3).
+-- Lot Current: row-level security checks (PLAN.md, M4 acceptance 3).
 --
 -- Plain SQL, no pgTAP. Runs with psql as the database owner against a local
 -- database that has the migrations applied (supabase/README.md, "Run the

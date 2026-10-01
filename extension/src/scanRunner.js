@@ -96,7 +96,7 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
 }
 
 // The snapshot a scan leaves for the next one. Four things come over from
-// the last one. When Lot Sync first saw each car (firstSeenAt, rescan.js:
+// the last one. When Lot Current first saw each car (firstSeenAt, rescan.js:
 // the last entry's, this scan's time for a car that was not in the last
 // snapshot, null on a first scan), so the Ready and To do tabs can mark new
 // arrivals for days, not only until the next rescan replaces the diff; the
@@ -110,7 +110,7 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
 // the car nor changes it. And a car that is not in this scan keeps the page
 // it was last seen on (missingPages), so an adapter that checks a missing
 // car at its own page can check a posted car again next time, even after
-// the car has left the lot's list; with it, when Lot Sync first saw that
+// the car has left the lot's list; with it, when Lot Current first saw that
 // car (missingSeen), so a car that comes straight back is not called a
 // first sighting (rescan.js firstSeenAt).
 function snapshotOf({ site, res, vehicles, assessments, carry }) {

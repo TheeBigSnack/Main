@@ -1,4 +1,4 @@
--- Lot Sync: two rules that only a test with sessions acting at the same
+-- Lot Current: two rules that only a test with sessions acting at the same
 -- moment can prove, each with real sessions through dblink:
 --
 --   keep_a_manager (0002_rls.sql)       two managers acting at once cannot leave a dealership with none
@@ -29,7 +29,7 @@
 -- from one account sent together all pass that count before any of them
 -- has written its attempt. They then queue for the lock, and unless the
 -- count is made again under it, each one looks up its website: one burst
--- would tell a stranger whether many websites are Lot Sync customers, not
+-- would tell a stranger whether many websites are Lot Current customers, not
 -- 5 an hour. Here the owner's session holds the lock, standing in for a
 -- sign-up in progress, while seven sessions signed in as one account (p)
 -- ask for Dealership C's website, which is taken:

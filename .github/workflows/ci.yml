@@ -1,4 +1,4 @@
-# Lot Sync CI: the unit tests, then each end-to-end flow in its own job.
+# Lot Current CI: the unit tests, then each end-to-end flow in its own job.
 # The e2e flows load the real extension into Playwright's Chromium against
 # the two mock servers in test/e2e/ (never facebook.com); one flow per job
 # because the queue flow has 60-second waits that time out when two
@@ -111,12 +111,13 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm run pack
+      - run: npm run store-check
       - uses: actions/upload-artifact@v4
         with:
           name: extension-zip
           path: dist/*.zip
 
-  # Lot Sync against a real local Supabase stack (docs/stack-test.md): the
+  # Lot Current against a real local Supabase stack (docs/stack-test.md): the
   # migrations as `supabase start` applies them, PostgREST, GoTrue, the mail
   # catcher and the four functions served with a test env file, driven by
   # scripts/stack-test.mjs through the extension's own account and sync
@@ -145,7 +146,7 @@ jobs:
           supabase --version
           docker --version
           psql --version || echo "no psql on this runner: the stack test runs its SQL through docker exec"
-      # Only what Lot Sync uses: Postgres, GoTrue, PostgREST, the gateway, the
+      # Only what Lot Current uses: Postgres, GoTrue, PostgREST, the gateway, the
       # mail catcher and the Edge Runtime. start applies supabase/migrations
       # in order; a failed start is retried once with --debug, whose log says why.
       - name: Start the local stack
