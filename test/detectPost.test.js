@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyUrl, onCreatePage, isNewListingFromForm, watchForListing } from '../extension/facebook/detectPost.js';
+import { classifyUrl, onCreatePage, isNewListingFromForm, watchForListing, listingLink } from '../extension/facebook/detectPost.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 
 test('a listing address means it posted; the "your listings" page probably does; anything else is nothing', () => {
@@ -12,6 +12,35 @@ test('a listing address means it posted; the "your listings" page probably does;
   assert.equal(classifyUrl('https://www.facebook.com/marketplace/', FORM_MAP), null);
   assert.equal(classifyUrl('', FORM_MAP), null);
   assert.equal(classifyUrl(undefined, FORM_MAP), null);
+});
+
+// The link kept for a post: a listing's own address only, Facebook's other
+// spellings of it as its www address, and nothing for any other page.
+test('a listing link is kept only for a listing\'s own address, as its www address; Your listings and any other page give none', () => {
+  const ITEM = 'https://www.facebook.com/marketplace/item/1234567890/';
+  for (const [typed, kept] of [
+    [ITEM, ITEM],
+    [ITEM + '?ref=share&tracking=x', ITEM],
+    ['  ' + ITEM + '  ', ITEM],
+    ['https://m.facebook.com/marketplace/item/1234567890/', ITEM],
+    ['http://web.facebook.com/marketplace/item/1234567890/?ref=y', ITEM],
+    ['https://facebook.com/marketplace/item/1234567890/', ITEM],
+    ['facebook.com/marketplace/item/1234567890/', ITEM],
+    ['HTTPS://WWW.FACEBOOK.COM/marketplace/item/1234567890/', ITEM],
+    ['https://www.facebook.com/marketplace/item/42', 'https://www.facebook.com/marketplace/item/42'],
+  ]) assert.equal(listingLink(typed, FORM_MAP), kept, typed);
+  for (const typed of [
+    FORM_MAP.yourListingsUrl, 'https://www.facebook.com/marketplace/selling/', 'https://www.facebook.com/marketplace/you/selling?tab=active',
+    FORM_MAP.createUrl, 'https://www.facebook.com/marketplace/', 'https://www.facebook.com/marketplace/item/abc/',
+    'https://www.facebook.com.example.test/marketplace/item/1/', 'https://www.facebook.com@example.test/marketplace/item/1/', 'https://example.test/marketplace/item/1/',
+    'ftp://www.facebook.com/marketplace/item/1/', 'javascript:alert(1)', 'not an address', '', null, undefined,
+  ]) assert.equal(listingLink(typed, FORM_MAP), '', String(typed));
+  // a map with other addresses (the mock form's) keeps its own listing addresses as given
+  const mock = { ...FORM_MAP, createUrl: 'http://127.0.0.1:5555/marketplace/create/vehicle', listingUrlPattern: '^http://127\\.0\\.0\\.1:5555/marketplace/item/(\\d+)' };
+  assert.equal(listingLink('http://127.0.0.1:5555/marketplace/item/424242/', mock), 'http://127.0.0.1:5555/marketplace/item/424242/');
+  const byQuery = { ...FORM_MAP, createUrl: 'http://localhost:8080/demo/marketplace/create.html', listingUrlPattern: '^http://localhost:8080/demo/marketplace/item\\.html\\?id=(\\d+)' };
+  assert.equal(listingLink('http://localhost:8080/demo/marketplace/item.html?id=55', byQuery), 'http://localhost:8080/demo/marketplace/item.html?id=55', 'a query the pattern needs stays');
+  assert.equal(listingLink(ITEM, mock), '', 'a Facebook address is not the mock form\'s listing');
 });
 
 test('the form map only ever points at the create page and reads addresses; it has no verified claim', () => {

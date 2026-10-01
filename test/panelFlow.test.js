@@ -23,7 +23,7 @@ import { draftRecord } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
 import { FORM_MAP, applyOverrides } from '../extension/facebook/formMap.js';
-import { isNewListingFromForm, onCreatePage } from '../extension/facebook/detectPost.js';
+import { isNewListingFromForm, onCreatePage, listingLink } from '../extension/facebook/detectPost.js';
 import { vehicle } from './helpers.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
@@ -1030,9 +1030,9 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   const run = async ({ logFails = false } = {}) => {
     const writes = [];
     const store = { 'posted:o': {}, 'postLog:o': [] };
-    const state = { origin: 'o', vin: 'AAA', step: 'publish', vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } }, detected: null, queueMode: false, posted: {}, postLog: [] };
+    const state = { origin: 'o', vin: 'AAA', step: 'publish', vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } }, detected: null, queueMode: false, posted: {}, postLog: [], map: FORM_MAP };
     const confirmPosted = compile('confirmPosted', {
-      state, $: () => null, watcher: null, flowRun: 0, confirmedRun: -1,
+      state, $: () => null, watcher: null, flowRun: 0, confirmedRun: -1, listingLink,
       siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o }),
       markPosted: (p, v, basis, at) => ({ ...p, [v.vin]: { name: v.name, price: v.price, postedAt: at } }),
       logPost: (log, vin, at) => [...log, { vin, at }],
@@ -1057,6 +1057,56 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   const full = await run({ logFails: true });
   assert.deepEqual(full.writes, ['posted:o']);
   assert.equal(full.state.step, 'done', 'the post is recorded all the same');
+});
+
+// Only a listing's own address is kept as the listing link. Your listings,
+// where Facebook often lands after Publish, would be opened by every To do
+// item for the car (with no word that it is not the listing) and linked as the
+// car's listing in the manager's view. Such an address is recorded as no link,
+// the post is recorded all the same, and the panel says no link was saved.
+// Run with sidepanel.js's own confirmPosted and the real listingLink and markPosted.
+test('It\'s posted keeps a listing link only when it is a listing\'s own address; the post is recorded either way', async () => {
+  const run = async ({ typed = '', detected = null, queueMode = false } = {}) => {
+    const store = { 'posted:o': {}, 'postLog:o': [] };
+    const said = [];
+    const state = { origin: 'o', vin: 'AAA', step: 'publish', vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } }, detected, queueMode, posted: {}, postLog: [], map: FORM_MAP, snapshotVehicles: {} };
+    const confirmPosted = compile('confirmPosted', {
+      state, $: (id) => (id === 'listingUrl' ? { value: typed } : null), watcher: null, flowRun: 0, confirmedRun: -1, listingLink, markPosted,
+      siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o }),
+      logPost: (log, vin, at) => [...log, { vin, at }],
+      updateKey: async (key, change) => (store[key] = change(store[key])),
+      panelStorage: {}, storageErrorText: (e) => String(e), setStatus: (text) => said.push(text),
+      pilotNote: async () => {}, endPost: () => {}, accountsConfigured: () => false, nameOf: (vin) => (vin === 'AAA' ? 'Car A' : vin),
+      afterQueueStep: async () => said.push('next car'), render: () => {}, saveFlow: async () => {}, savedFlowIs: async () => true,
+    });
+    await confirmPosted();
+    return { entry: store['posted:o'].AAA, said, state };
+  };
+  const ITEM = 'https://www.facebook.com/marketplace/item/1234567890/';
+  // the Your listings page, typed in or left in the box: recorded, with no link, and said so
+  for (const typed of [FORM_MAP.yourListingsUrl, 'https://www.facebook.com/marketplace/selling/', 'https://www.facebook.com/', 'https://www.example-motors.test/used/car-1', 'not an address']) {
+    const r = await run({ typed, detected: { status: 'probably', url: null, id: null } });
+    assert.ok(r.entry && r.entry.postedAt, `${typed}: the post is recorded`);
+    assert.equal(r.entry.listingUrl, undefined, `${typed}: no link`);
+    assert.equal(r.state.step, 'done');
+    assert.match(r.said.join(' '), /No listing link was saved for Car A/, `${typed}: the panel says so`);
+  }
+  // another address typed over the listing the tab showed is not swapped for it: no link rather than a guess
+  const over = await run({ typed: FORM_MAP.yourListingsUrl, detected: { status: 'listing', url: ITEM, id: '1234567890' } });
+  assert.equal(over.entry.listingUrl, undefined);
+  // a queued car: recorded without a link, said so, and the queue moves on
+  const queued = await run({ typed: FORM_MAP.yourListingsUrl, queueMode: true });
+  assert.equal(queued.entry.listingUrl, undefined);
+  assert.deepEqual(queued.said.map((t) => t.slice(0, 31)), ['No listing link was saved for C', 'next car']);
+  // a listing's own address, in any of Facebook's spellings, is kept as its www address
+  for (const [typed, kept] of [[ITEM, ITEM], [ITEM + '?ref=share', ITEM], ['https://m.facebook.com/marketplace/item/1234567890', 'https://www.facebook.com/marketplace/item/1234567890'], ['facebook.com/marketplace/item/1234567890/', ITEM]]) {
+    const r = await run({ typed });
+    assert.equal(r.entry.listingUrl, kept, typed);
+    assert.deepEqual(r.said, [], `${typed}: nothing to say`);
+  }
+  // nothing typed: the listing the tab showed
+  assert.equal((await run({ detected: { status: 'listing', url: ITEM, id: '1234567890' } })).entry.listingUrl, ITEM);
+  assert.equal((await run({})).entry.listingUrl, undefined, 'nothing typed, nothing seen: no link, and nothing to say');
 });
 
 // A queued car is recorded once and moves the queue once. The listing
@@ -1089,11 +1139,11 @@ function queuePanel(store, { onNext = null, onUp = null, queueMode = true, detec
   };
   const state = {
     origin: O, vin: 'AAA', step: 'publish', queueMode, vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, price: 20000, settings: { basis: 'website', salesperson: { name: 'Pat' } },
-    detected, queue: null, posted: {}, postLog: [], drafts: {},
+    detected, queue: null, posted: {}, postLog: [], drafts: {}, map: FORM_MAP,
   };
   let fns;
   fns = compileMany(['confirmPosted', 'savedDraft', 'afterQueueStep', 'clearFlow', 'savedFlowIs'], {
-    state, flowRun: 0, confirmedRun: -1, advancing: false, watcher: null, FORM_MAP, draftRecord,
+    state, flowRun: 0, confirmedRun: -1, advancing: false, watcher: null, FORM_MAP, draftRecord, listingLink,
     $: () => null, updateKey, panelStorage: storage, markPosted, logPost, advance, currentVin,
     siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o, queue: 'postQueue:' + o, flow: 'postFlow:' + o, drafts: 'drafts:' + o }),
     pilotNote: async () => { await tick(); }, endPost: () => {}, accountsConfigured: () => false,

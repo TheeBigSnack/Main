@@ -21,6 +21,7 @@
 import { markPriceUpdated, markTakenDown } from './src/rescan.js';
 import { fillPriceInPage, readListingInPage } from './facebook/fillForm.js';
 import { LISTING_SIGNS } from './facebook/listingSigns.js';
+import { listingLink } from './facebook/detectPost.js';
 import { resolveFlag, updatePilot } from './src/pilot.js';
 import { siteKeys } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
@@ -57,9 +58,12 @@ function stopPolling() {
   poller = null;
 }
 
+// A saved link that is not a listing's own address (Your listings, saved by
+// an older version or another computer) counts as no link: the person is told
+// to open the listing, instead of being sent to a page with no word about it.
 export async function startUpkeep(req, ctx) {
   stopPolling();
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: req.listingUrl || '', name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
   ctx.render();
   const map = ctx.map();
   const url = up.listingUrl || map.yourListingsUrl;
@@ -73,9 +77,10 @@ export async function startUpkeep(req, ctx) {
     return;
   }
   up.status = 'waiting';
-  up.note = up.listingUrl ? '' : `No listing link was saved for this car, so this is Marketplace's Your listings page: open the listing for ${up.name} there.`;
+  up.note = up.listingUrl ? '' : `No link to this car's own listing was saved, so this is Marketplace's Your listings page: open the listing for ${up.name} there.`;
   ctx.render();
   await sleep(1500);
+  if (!up.active) return; // closed meanwhile
   poller = setInterval(() => poll(ctx).catch(() => {}), 1500);
 }
 

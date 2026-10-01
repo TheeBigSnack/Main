@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readListingInPage } from '../extension/facebook/fillForm.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
-import { onListing, listingIdFrom } from '../extension/upkeep.js';
+import { onListing, listingIdFrom, startUpkeep, endUpkeep, up } from '../extension/upkeep.js';
 
 // A page as the reader walks it: text nodes, each inside a plain block or a
 // dialog, and an optional Price box (in a dialog or on the page).
@@ -112,4 +112,35 @@ test('upkeep finds this car\'s own listing by its id, or with no link by its who
   const nothing = { id: '', name: LIMITED, prices: [] };
   assert.equal(decide(readPage({ url: at(111), texts: [LIMITED, '$31,995'] }, nothing)), false);
   assert.equal(onListing(null), false);
+});
+
+// A saved link that is not a listing's own address (the Your listings page,
+// kept by an older version or another computer) counts as no link: the tab
+// opens on Your listings with the note that tells the person to open the
+// listing there, and no id is taken from it. A listing's own link opens the
+// listing, with no note. Run with upkeep.js's own startUpkeep; Chrome's tabs
+// are a stand-in.
+test('upkeep treats a saved link that is not a listing\'s own address as no link, and says to open the listing', async () => {
+  const opened = [];
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 9 }; } } };
+  const ctx = { render: () => {}, map: () => FORM_MAP };
+  const begin = async (listingUrl) => {
+    const started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: 19000, listingUrl, name: 'Car A', listedPrice: 20000 }, ctx);
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    const seen = { url: opened[opened.length - 1], listingUrl: up.listingUrl, note: up.note };
+    endUpkeep();
+    await started;
+    return seen;
+  };
+  try {
+    const yours = await begin(FORM_MAP.yourListingsUrl);
+    assert.equal(yours.url, FORM_MAP.yourListingsUrl);
+    assert.equal(yours.listingUrl, '', 'no link');
+    assert.match(yours.note, /No link to this car's own listing was saved.*open the listing for Car A there/);
+    const item = await begin('https://m.facebook.com/marketplace/item/111/');
+    assert.deepEqual(item, { url: 'https://www.facebook.com/marketplace/item/111/', listingUrl: 'https://www.facebook.com/marketplace/item/111/', note: '' });
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
 });

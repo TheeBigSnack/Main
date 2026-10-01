@@ -28,7 +28,7 @@ import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/
 import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
-import { watchForListing, isNewListingFromForm, onCreatePage } from './facebook/detectPost.js';
+import { watchForListing, isNewListingFromForm, onCreatePage, listingLink } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
@@ -1076,7 +1076,14 @@ async function confirmPosted() {
   confirmedRun = run;
   const { vin, vehicle, origin } = state;
   const typed = (($('listingUrl') && $('listingUrl').value) || '').trim();
-  const listingUrl = /^https?:\/\//i.test(typed) ? typed : (state.detected && state.detected.url) || '';
+  // only a listing's own address is kept (listingLink): Your listings, where
+  // Facebook often lands after Publish, would open the wrong page from To do
+  // and in the manager's view. Another address typed in is not swapped for
+  // what the tab showed: the post is recorded with no link, and the panel says so.
+  const listingUrl = listingLink(typed || (state.detected && state.detected.url), state.map);
+  const linkNote = typed && !listingUrl
+    ? `No listing link was saved for ${nameOf(vin)}: the address in Listing link isn't a Marketplace listing's own address (Your listings, say). Its To do items open Your listings, where you pick the listing.`
+    : '';
   const now = new Date().toISOString();
   const extra = { postedWith: 'lotsync', salesperson: state.settings.salesperson.name || '' };
   if (listingUrl) extra.listingUrl = listingUrl;
@@ -1113,13 +1120,15 @@ async function confirmPosted() {
   if (run !== flowRun) return undefined; // dropped meanwhile: recorded, and the post now under way is not touched
   if (watcher) watcher.cancel();
   if (state.queueMode) {
+    if (linkNote) setStatus(linkNote, 'error');
     // the queue could not be saved: the car is recorded, and clicking again only moves the queue
     if ((await afterQueueStep('posted', vin)) === false) confirmedRun = -1;
     return undefined;
   }
   state.step = 'done';
   state.doneAt = (kept && kept.postedAt) || now;
-  if (kept) setStatus(`${nameOf(vin)} was already recorded as posted, so it was not recorded or counted again.`);
+  const said = [kept ? `${nameOf(vin)} was already recorded as posted, so it was not recorded or counted again.` : '', linkNote].filter(Boolean).join(' ');
+  if (said) setStatus(said, linkNote ? 'error' : '');
   render();
   // recorded elsewhere first (another window's panel), which may have started another post since: its saved post stays
   if (!kept || (await savedFlowIs(origin, vin))) await saveFlow();
@@ -1616,7 +1625,7 @@ function viewPublish() {
   const d = state.detected;
   let detect = '';
   if (d && (d.status === 'listing' || d.status === 'probably')) {
-    detect = `<div class="banner good" id="detected">Looks like it posted${d.url ? '' : ' (the listing page opened)'}. Confirm below to record it.</div>`;
+    detect = `<div class="banner good" id="detected">Looks like it posted${d.url ? '' : ' (the tab moved to Your listings)'}. Confirm below to record it.</div>`;
   } else if (d && d.status === 'closed') {
     detect = `<div class="banner warn" id="detected">The Facebook tab was closed. Did it post?</div>`;
   } else {
@@ -1642,7 +1651,7 @@ function viewPublish() {
     <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="attachAgain">${state.photos && (state.photos.attached || state.photos.again) ? 'Attach photos again' : 'Attach photos'}</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
   </section>
   <section>${detect}
-    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && d.url) || '')}" placeholder="paste the listing's address if you have it" /></label>
+    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && d.url) || '')}" placeholder="paste the listing's own address if you have it" /></label>
     <div class="actions">${outcome}</div>
   </section>`;
 }

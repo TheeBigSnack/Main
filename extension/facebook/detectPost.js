@@ -18,6 +18,38 @@ export function classifyUrl(url, { listingUrlPattern, afterPublishPatterns = [] 
   return null;
 }
 
+// The listing link to keep for a post, from an address the person pasted (or
+// the one the tab showed): only a listing's own address, the one the map's
+// listingUrlPattern reads an id from. Another spelling of the form's own
+// website (m., web. or no www, http, no scheme; createUrl's domain) becomes
+// the form's origin, without a query the pattern doesn't need. Anything else
+// (the Your listings page Facebook lands on after Publish, another page, text
+// that is not an address) gives '': no link is better than one that opens the
+// wrong page and hides upkeep's note that no link was saved.
+export function listingLink(text, { listingUrlPattern, afterPublishPatterns = [], createUrl = '' } = {}) {
+  const t = String(text || '').trim();
+  if (!t || !listingUrlPattern) return '';
+  let u;
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : 'https://' + t);
+  } catch (e) {
+    return '';
+  }
+  let tries = [u.href];
+  try {
+    const form = new URL(createUrl);
+    const domain = form.hostname.replace(/^www\./i, '').toLowerCase();
+    const host = u.hostname.toLowerCase();
+    if (/^https?:$/.test(u.protocol) && (host === domain || host.endsWith('.' + domain))) tries = [form.origin + u.pathname, form.origin + u.pathname + u.search];
+  } catch (e) {
+    /* no form address to compare with: the address as given */
+  }
+  return tries.find((link) => {
+    const r = classifyUrl(link, { listingUrlPattern, afterPublishPatterns });
+    return Boolean(r) && r.status === 'listing' && Boolean(r.id);
+  }) || '';
+}
+
 // Whether an address is the create-listing page: createUrl's page or a page
 // under it, with any query.
 export function onCreatePage(url, createUrl) {
