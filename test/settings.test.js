@@ -9,7 +9,7 @@ test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () =>
   assert.equal(s.version, SETTINGS_VERSION);
   assert.deepEqual(s.myStores, [WAYNESBURG]);
   assert.equal(s.basis, 'beforeFees');
-  assert.deepEqual(s.salesperson, { name: '', title: 'sales consultant' });
+  assert.deepEqual(s.salesperson, { name: '', title: 'sales consultant', closingLine: '' });
   assert.deepEqual(s.dealer, { name: 'Ron Lewis CDJR Waynesburg', city: 'Waynesburg', state: '', zip: '' });
   assert.equal(s.priceNote, '');
   assert.equal(s.dailyCap, 10);

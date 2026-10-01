@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 781 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 796 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # six e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data

@@ -13,7 +13,8 @@ import { markPosted, basisPrice } from './src/rescan.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { fetchVehicleDetails, recheck } from './src/vehicleDetails.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
-import { runGuardrails } from './src/rewriteTemplate.js';
+import { runGuardrails, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
+import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
@@ -53,6 +54,9 @@ const state = {
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
   vinCheck: null, // { local, online } from src/vin.js
   colorGuess: null, // { exterior, interior, confidence } from the photos, or { error }
+  photoPick: null, // the salesperson's pick of this car's photos, in order (src/photoPick.js); null: the website's first ones
+  highlights: null, // the salesperson's pick of this car's features for the description (rewriteTemplate.js settleHighlights); null: the usual pick
+  highlightsUsed: null, // the highlights the description on screen was written with
   queue: null, // the batch queue (src/queue.js), shared with the popup
   queueMode: false, // this car is being posted as part of the queue
   drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
@@ -127,7 +131,7 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'queueMode', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -147,7 +151,7 @@ async function clearFlow() {
   if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
     vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, queueMode: false, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
 
@@ -161,7 +165,7 @@ function setStatus(text, kind = '') {
 // second price and this car has none (the main price is used), the note
 // would be untrue for it, so it is left out and the car card says so.
 const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
-const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: noteFor(), price: state.price });
+const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
 
 // Pilot numbers (src/pilot.js): when each post started and ended, and what
 // each fill could not do. Bookkeeping only; a failure here never stops a post.
@@ -191,7 +195,19 @@ async function refreshGranted() {
   }
 }
 
-const photoList = () => (state.listing ? state.listing.photos : (state.vehicle && state.vehicle.photos) || []);
+// The form's photo limit: what the last fill read on the form, else the map's default.
+const photoLimitNow = () => (state.fill && state.fill.photoLimit && state.fill.photoLimit.value) || state.map.photoLimitDefault;
+// The limit a pick is cut to. With no pick made and no limit read from the
+// form yet, none: the listing keeps every photo and attachPhotos cuts it to
+// the limit the form shows (the map's default is not verified). A pick the
+// salesperson made is cut to the best limit known.
+const pickLimit = () => (state.photoPick === null && !(state.fill && state.fill.photoLimit) ? 0 : photoLimitNow());
+// The photos the salesperson picked for this car, in order (src/photoPick.js).
+const pickedPhotos = () => (state.vehicle ? settlePick(state.photoPick, state.vehicle.photos, pickLimit()) : []);
+// Every photo unticked while the website has some: the form would open with none.
+const noPhotosPicked = () => Boolean(state.vehicle) && !pickedPhotos().length && usablePhotos(state.vehicle.photos).length > 0;
+const NO_PHOTOS_TEXT = 'No photos are ticked. Marketplace needs at least one: tick the photos to post first.';
+const photoList = () => (state.listing ? state.listing.photos : pickedPhotos());
 const photoPatterns = (urls = photoList()) => neededPatterns(urls, { manifestHosts: MANIFEST_HOSTS, granted: grantedOrigins });
 const hostList = (patterns) => {
   const hosts = patterns.map(patternHost);
@@ -474,7 +490,8 @@ async function generate({ useClaude } = {}) {
   const s = state.settings;
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
   const settings = { ...s, rewrite };
-  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin }); // the origin tells the service which store this is
+  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
+  state.highlightsUsed = settleHighlights(state.highlights, state.vehicle.features);
   state.description = r.text;
   state.descriptionSource = r.source;
   // the function's 402 (the dealership's plan has lapsed) arrives as the service's error text: said plainly, not as a service hiccup
@@ -511,7 +528,7 @@ async function openForm({ probeOnly = false } = {}) {
   const box = $('description');
   if (box) state.description = box.value;
   state.guardrails = runGuardrails(state.description, ctx());
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: state.vehicle.photos });
+  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
@@ -764,7 +781,7 @@ function viewBlocked() {
   return `<div class="banner bad">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
-const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: state.vehicle.photos });
+const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
 
 function fieldsTable() {
   const l = currentListing();
@@ -796,7 +813,7 @@ function fieldsTable() {
       <button type="button" class="copy" id="guessColors" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>${cg && (cg.exterior || cg.interior) ? 'Guess again from the photos' : 'Guess from the photos'}</button>
       ${rw.enabled && rw.endpoint ? '' : ' (needs the rewrite service; otherwise pick it on the form)'}</p>`;
   }
-  return `<table class="fields">${rows}<tr><td>Photos</td><td>${l.photos.length} from the website</td></tr></table>${locationHint}${colorHint}`;
+  return `<table class="fields">${rows}<tr><td>Photos</td><td id="photoCount">${l.photos.length} picked from the website</td></tr></table>${locationHint}${colorHint}`;
 }
 
 function vinCheckHtml() {
@@ -852,6 +869,62 @@ function carCard() {
   </section>`;
 }
 
+// The salesperson's pick of photos: every photo the website shows for this
+// car, in the website's order, ticked when it goes on the form, numbered in
+// the order it will be attached. The first is the cover. The thumbnails are
+// the website's own photo addresses, shown as the website shows them (no
+// permission is needed to show a picture; downloading it for the form is
+// asked for from the click on Open the Marketplace form).
+const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'));
+
+function photoPickHtml() {
+  const all = usablePhotos(state.vehicle.photos);
+  const onFacebook = (state.vehicle.photos || []).filter((u) => typeof u === 'string' && isFacebookServer(u)).length;
+  const limit = photoLimitNow();
+  const pick = pickedPhotos();
+  const items = all.map((url, i) => {
+    const at = pick.indexOf(url);
+    const place = at === 0 ? ', cover' : at > 0 ? `, attached ${ordinal(at + 1)}` : '';
+    return `<li class="thumb${at === -1 ? '' : ' on'}">
+      <label class="pic"><img src="${esc(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+        <span class="row"><input type="checkbox" class="photoTick" id="photo-${i}" data-photo="${i}" ${at === -1 ? '' : 'checked'} /><span id="photoName-${i}">Photo ${i + 1}${place}</span></span></label>
+      <button type="button" class="copy" id="photoCover-${i}" data-photo-cover="${i}" aria-label="Make cover: photo ${i + 1}">Make cover</button>
+    </li>`;
+  }).join('');
+  const isDefault = state.photoPick === null;
+  return `<section id="photoPick" aria-labelledby="photoPickLabel">
+    <h3 id="photoPickLabel">Photos</h3>
+    <p class="hint" id="photoPickSummary">${esc(pickSummary(state.photoPick, state.vehicle.photos, pickLimit()))}</p>
+    ${all.length ? `<ul class="thumbs">${items}</ul>
+    <div class="actions"><button type="button" class="plain" id="photosDefault" ${isDefault ? 'aria-pressed="true"' : 'aria-pressed="false"'}>Use the website's order</button><button type="button" class="plain" id="photosNone">Untick all</button></div>
+    <p class="hint">Tick the photos to put on the listing. They are attached in the order shown by their numbers; the cover is the one Marketplace shows first.${all.length > limit ? ` The form takes up to ${limit}${state.fill && state.fill.photoLimit && state.fill.photoLimit.verified ? '' : ' (not yet checked on the form)'}.` : ''}</p>` : ''}
+    ${onFacebook ? `<p class="hint">${onFacebook === 1 ? 'One photo is' : `${onFacebook} photos are`} on Facebook's own servers and can't be attached.</p>` : ''}
+  </section>`;
+}
+
+// The salesperson's pick of highlights: the website's own features for this
+// car (rewriteTemplate.js featureChoices), up to MAX_HIGHLIGHTS, named in the
+// description in the order ticked. Nothing outside the website's list can be
+// picked, so the description stays facts only.
+function highlightsHtml() {
+  const choices = featureChoices(state.vehicle.features);
+  if (!choices.length) return '';
+  const picked = settleHighlights(state.highlights, state.vehicle.features);
+  // a flow saved before highlights were kept has none recorded: unknown, so no note
+  const changed = Array.isArray(state.highlightsUsed) && JSON.stringify(picked) !== JSON.stringify(state.highlightsUsed);
+  const boxes = choices.map((t, i) => {
+    const at = picked.indexOf(t);
+    return `<label class="feature"><input type="checkbox" class="featureTick" id="feature-${i}" data-feature="${i}" ${at === -1 ? '' : 'checked'} /> <span>${esc(t)}</span>${at === -1 ? '' : ` <span class="why" aria-hidden="true">${at + 1}</span>`}</label>`;
+  }).join('');
+  const edited = state.descriptionSource === 'edited';
+  return `<fieldset class="highlights" id="highlights">
+    <legend>Highlights <span class="why">${picked.length} of up to ${MAX_HIGHLIGHTS}, from the website's features</span></legend>
+    <div class="featureList">${boxes}</div>
+    <div class="actions"><button type="button" class="plain" id="useHighlights">Use these highlights</button>${changed ? ' <span class="why" id="highlightsChanged">Changed: the description above still has the earlier ones.</span>' : ''}</div>
+    <p class="hint">Writes the description again with the highlights ticked, in the order ticked${edited ? '. Your edits to the description are replaced' : ''}.</p>
+  </fieldset>`;
+}
+
 const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
 
 function viewReview() {
@@ -869,7 +942,9 @@ function viewReview() {
       <button type="button" class="plain" id="copyDescription">Copy</button>
     </div>
     <p class="hint">Edit anything you like; your edits are kept. Facts only: every number is checked against the website.</p>
+    ${highlightsHtml()}
   </section>
+  ${photoPickHtml()}
   <section><h3>What Lot Sync will fill in</h3>${fieldsTable()}</section>
   ${vinCheckHtml()}
   ${assumptionsHtml()}
@@ -877,7 +952,7 @@ function viewReview() {
     ${capHtml(cap)}
     <button type="button" class="primary wide" id="openForm" ${cap.reached ? 'disabled' : ''}>Open the Marketplace form</button>
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
-    ${photoServersHtml()}
+    <div id="photoServers">${photoServersHtml()}</div>
     <button type="button" class="plain wide" id="checkForm" ${cap.reached ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
     <p class="hint">For the first run: the panel reports which fields it can find on the page, without filling anything. You can fill it in from there.</p>
   </section>`;
@@ -1077,6 +1152,59 @@ async function openWizard(req) {
 
 // ---------- events ----------
 
+// Redraws one part of the review view in place, keeping keyboard focus on the
+// control that had it (by id), so ticking photos or highlights never throws
+// the person back to the top or loses the description they are typing.
+function redraw(id, html, focusId = null) {
+  const el = $(id);
+  if (!el) return render();
+  const focused = focusId || (document.activeElement && document.activeElement.id);
+  el.outerHTML = html;
+  if (focused && $(focused)) $(focused).focus();
+}
+
+// A changed pick of photos: the listing is built again from it at Open the
+// Marketplace form, and the count in the fields table follows.
+async function afterPhotoPick(focusId) {
+  state.listing = null;
+  redraw('photoPick', photoPickHtml(), focusId);
+  setStatus(pickSummary(state.photoPick, state.vehicle.photos, pickLimit())); // said aloud: the status line is the panel's live region
+  const count = $('photoCount');
+  if (count) count.textContent = `${pickedPhotos().length} picked from the website`;
+  // which photo servers Chrome will be asked about follows the pick
+  const servers = $('photoServers');
+  if (servers) servers.innerHTML = photoServersHtml();
+  await saveFlow();
+}
+
+async function onPickChange(target) {
+  if (state.step !== 'review' || !state.vehicle) return false;
+  if (target.classList.contains('photoTick')) {
+    const url = usablePhotos(state.vehicle.photos)[Number(target.dataset.photo)];
+    const r = togglePhoto(state.photoPick, url, state.vehicle.photos, photoLimitNow());
+    state.photoPick = r.pick;
+    await afterPhotoPick(target.id);
+    if (r.full) setStatus(`The form takes up to ${photoLimitNow()} photos: untick one first.`, 'error');
+    return true;
+  }
+  if (target.classList.contains('featureTick')) {
+    const t = featureChoices(state.vehicle.features)[Number(target.dataset.feature)];
+    const now = settleHighlights(state.highlights, state.vehicle.features);
+    let next = now.includes(t) ? now.filter((x) => x !== t) : [...now, t];
+    if (next.length > MAX_HIGHLIGHTS) {
+      next = now;
+      setStatus(`Up to ${MAX_HIGHLIGHTS} highlights: untick one first.`, 'error');
+    } else {
+      setStatus('');
+    }
+    state.highlights = next;
+    redraw('highlights', highlightsHtml(), target.id);
+    await saveFlow();
+    return true;
+  }
+  return false;
+}
+
 let inputTimer = null;
 function onInput(ev) {
   if (ev.target.id !== 'description') return;
@@ -1114,10 +1242,16 @@ async function onClick(ev) {
     return afterAllowPhotos(pattern, granted);
   }
   if (state.step === 'wizard' && (await handleWizardClick(btn.id, wizardCtx))) return undefined;
+  if (btn.dataset.photoCover !== undefined && state.step === 'review') {
+    const url = usablePhotos(state.vehicle.photos)[Number(btn.dataset.photoCover)];
+    state.photoPick = makeCover(state.photoPick, url, state.vehicle.photos, photoLimitNow());
+    return afterPhotoPick(btn.id);
+  }
   if (state.step === 'upkeep' && (await handleUpkeepClick(btn.id, upkeepCtx))) return undefined;
   switch (btn.id) {
     case 'openForm':
-      await askForPhotos();
+      await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
+      if (noPhotosPicked()) return setStatus(NO_PHOTOS_TEXT, 'error');
       return openForm();
     case 'checkForm': return openForm({ probeOnly: true });
     case 'checkVinOnline': return checkVinOnline();
@@ -1131,7 +1265,8 @@ async function onClick(ev) {
       return saveFlow();
     }
     case 'fillNow':
-      await askForPhotos();
+      await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
+      if (noPhotosPicked()) return setStatus(NO_PHOTOS_TEXT, 'error');
       return runFill();
     case 'probeAgain': return runProbe();
     case 'copyReport': return copy(JSON.stringify(state.probe, null, 2));
@@ -1146,6 +1281,21 @@ async function onClick(ev) {
       await generate({ useClaude: true });
       setStatus(state.note ? '' : 'Draft ready.');
       render();
+      return saveFlow();
+    }
+    case 'photosDefault':
+    case 'photosNone':
+      state.photoPick = btn.id === 'photosNone' ? [] : null;
+      return afterPhotoPick(btn.id);
+    case 'useHighlights': {
+      // the writer the description on screen came from: Claude's draft is asked for again, anything else is the template
+      const useClaude = state.descriptionSource === 'claude';
+      btn.disabled = true;
+      if (useClaude) setStatus('Asking the rewrite service…');
+      await generate({ useClaude });
+      setStatus(useClaude && !state.note ? 'Draft ready.' : '');
+      render();
+      if ($('useHighlights')) $('useHighlights').focus();
       return saveFlow();
     }
     case 'resetTemplate':
@@ -1270,7 +1420,10 @@ function adoptChanges(changes) {
 async function init() {
   $('panel').addEventListener('click', onClick);
   $('panel').addEventListener('input', onInput);
-  $('panel').addEventListener('change', (ev) => { if (state.step === 'wizard') handleWizardChange(ev.target); });
+  $('panel').addEventListener('change', (ev) => {
+    if (state.step === 'wizard') handleWizardChange(ev.target);
+    else onPickChange(ev.target);
+  });
   await refreshGranted();
   // a permission granted or removed elsewhere (the popup, chrome://extensions) counts from the next click
   chrome.permissions.onAdded.addListener(refreshGranted);
