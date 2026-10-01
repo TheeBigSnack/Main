@@ -25,7 +25,7 @@ const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\b
 const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('the pricing hypothesis is one config with the fields the docs quote', () => {
-  assert.equal(pricing.hypothesis, true, 'it stays a hypothesis until a dealer pays');
+  assert.equal(pricing.hypothesis, true, 'it stays a hypothesis until a dealer agrees to a price in writing (docs/launch-checklist.md, Pricing confirmed)');
   for (const k of ['perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'pilotDays', 'foundingDealerMonthly', 'foundingDealerMonths', 'foundingDealerCount']) {
     assert.ok(Number.isInteger(pricing[k]) && pricing[k] > 0, `${k} is a whole number`);
   }

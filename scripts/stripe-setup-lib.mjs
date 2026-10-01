@@ -28,7 +28,10 @@
 // reprice is also given, and then a new price takes over the lookup key
 // (existing subscriptions keep the price they were sold).
 //
-// A live key (sk_live_, rk_live_) is refused unless live is given. The key
+// A live key (sk_live_, rk_live_) is refused unless live is given, and live
+// mode is refused while pricing.json still says "hypothesis": true: real
+// prices wait for docs/launch-checklist.md, "Pricing confirmed" (a dealer
+// has agreed to a price in writing). The key
 // goes out only as the bearer on calls to api.stripe.com and is never
 // printed. The webhook's signing secret is printed once, when the endpoint
 // is created, because Stripe shows it only then.
@@ -235,6 +238,11 @@ export async function runSetup(opts) {
   }
   if (mode === 'live' && !live) {
     fail('the Stripe key', 'this is a live key: nothing was read or changed. Run in test mode first; add --live only when switching billing to live mode');
+    return done();
+  }
+  // Live prices charge real money: not from a file that still calls itself a guess
+  if (mode === 'live' && !(isRecord(pricing) && pricing.hypothesis === false)) {
+    fail('marketing/pricing.json', 'it still says "hypothesis": true, so nothing was read or changed in live mode. Live prices wait for docs/launch-checklist.md, "Pricing confirmed": a dealer has agreed to a price in writing, pricing.json has "hypothesis": false and those numbers, and test/marketing.test.js passes');
     return done();
   }
   ok('the Stripe key', `${mode} mode${apply ? ', creating what is missing' : ', reading only'}`);

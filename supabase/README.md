@@ -262,7 +262,7 @@ Reading them: Dashboard, Table editor, `demo_requests`, newest first; set `handl
 
 ## Billing (Milestone 5)
 
-Billing runs on Stripe: a subscription per rooftop per month, a free pilot period a manager starts without a card, and Stripe's own Billing Portal for the card, the invoices and cancelling. What is in the repo is code the owner deploys; nothing in it is switched on, and nothing charges anyone until the owner creates the Stripe objects below and sets the secrets. The prices are the ones in `marketing/pricing.json`, which stays a hypothesis until a dealer pays.
+Billing runs on Stripe: a subscription per rooftop per month, a free pilot period a manager starts without a card, and Stripe's own Billing Portal for the card, the invoices and cancelling. What is in the repo is code the owner deploys; nothing in it is switched on, and nothing charges anyone until the owner creates the Stripe objects below and sets the secrets. The prices are the ones in `marketing/pricing.json`, which stays a hypothesis until a dealer has agreed to a price in writing (`docs/launch-checklist.md`, "Pricing confirmed"); `npm run stripe-setup` refuses live mode until it says `"hypothesis": false`.
 
 | Path | What it is |
 |---|---|
@@ -382,7 +382,7 @@ The `psql` command under "Run the RLS test" runs `tests/billing.sql` too; its la
 
 `subscriptions`: the ids Stripe gave the dealership's customer and subscription, the status, the dates and the seat count. `billing_events`: each webhook event as Stripe sent it (ids, statuses, amounts, the billing email; Stripe never sends a card number). The privacy policy already names billing details and Stripe as the processor. Deleting a dealership row deletes its subscription row; `billing_events` keeps the accounting trail, which is what the retention line of the privacy policy allows.
 
-Pricing is a hypothesis until a dealer pays: the amounts in Stripe are copied from `marketing/pricing.json` by hand, and the first paying dealer is the moment to revisit that file, the sales sheet and the prices in Stripe together.
+Pricing is a hypothesis until a dealer has agreed to a price in writing: the amounts in Stripe are copied from `marketing/pricing.json` (`npm run stripe-setup`, or by hand), and that agreement is the moment to revisit that file, the sales sheet and the prices in Stripe together, and to set `"hypothesis": false`, which live mode waits for.
 
 ## Self-serve sign-up
 

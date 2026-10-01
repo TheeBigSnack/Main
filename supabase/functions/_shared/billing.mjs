@@ -26,7 +26,8 @@
 //   lapsed  everything else: the pilot ended unpaid, past_due, unpaid,
 //           canceled, incomplete, incomplete_expired, paused
 
-// From marketing/pricing.json, a hypothesis until a dealer pays.
+// From marketing/pricing.json, a hypothesis until a dealer agrees to a price
+// in writing (docs/launch-checklist.md, "Pricing confirmed").
 // test/billing.test.js keeps these equal to that file and to the numbers
 // baked into migrations/0004_billing.sql (seats default, start_pilot).
 export const PRICING = Object.freeze({ includedSalespeople: 5, pilotDays: 30 });

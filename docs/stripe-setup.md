@@ -48,7 +48,7 @@ Once the legal pages are final (not while they say draft), add `--site-url https
 
 It prints a `supabase secrets set ...` line with the ids. Keep it for step 5. Running it again creates nothing new; it reports what exists. Paste the output of a plain `npm run stripe-setup` (no `--apply`) into the thread and Claude will check it: that run never prints a secret.
 
-The prices are a hypothesis until a dealer pays. If `pricing.json` changes, `npm run stripe-setup` reports the difference and changes nothing; `npm run stripe-setup -- --apply --reprice` makes the new price (subscribers already paying keep theirs), and the printed line has the new id to set. Their seat counts stay right: the billing function counts seats by the `lotcurrent` tag every price the script makes carries, and the old price keeps it.
+The prices are a hypothesis until a dealer has agreed to one in writing (`docs/launch-checklist.md`, "Pricing confirmed"); then `pricing.json` says `"hypothesis": false`, and not before. Test mode runs on the hypothesis; live mode waits for it (the last section). If `pricing.json` changes, `npm run stripe-setup` reports the difference and changes nothing; `npm run stripe-setup -- --apply --reprice` makes the new price (subscribers already paying keep theirs), and the printed line has the new id to set. Their seat counts stay right: the billing function counts seats by the `lotcurrent` tag every price the script makes carries, and the old price keeps it.
 
 ## 4. Create the webhook [owner runs]
 
@@ -90,7 +90,7 @@ In the Supabase Dashboard, Table editor, `subscriptions` shows each change; Edge
 
 ## Later: switching to live mode [owner, money]
 
-Not before the company exists and the attorney has answered the sales-tax question (`docs/launch-checklist.md`).
+Not before the company exists and the attorney has answered the sales-tax question (`docs/launch-checklist.md`), and not before that checklist's "Pricing confirmed" item is done: a dealer has agreed to a price in writing, `marketing/pricing.json` holds that price and says `"hypothesis": false`, and `npm test` passes. Until then `npm run stripe-setup -- --live` refuses to read or create anything, because live prices charge real money and the website tells dealers the price is confirmed with them before any paid subscription starts.
 
 1. Activate the Stripe account: the company's legal name, EIN, address, the business bank account for payouts.
 2. Sales tax, as the attorney advises. If tax is to be collected: turn on Stripe Tax, set the default tax behavior to exclusive and add the registrations in the Dashboard (Stripe Tax charges a fee per transaction: decide with the price), then add the function secret `STRIPE_AUTOMATIC_TAX` = `true` (Dashboard, Edge Functions, Secrets). Checkout then asks for the billing address and adds the tax. Until the word `true` is set, no tax is added.
