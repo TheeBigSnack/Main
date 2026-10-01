@@ -16,7 +16,13 @@
 //     care, new parts or condition that the website's own words for this car
 //     (or the dealer's price note) don't make, and no number, in digits or
 //     in words, that isn't in the website's data
-// The template is the final fallback, so it is built to pass its own checks.
+// The template is the final fallback, so it is built to pass its own checks
+// whatever the website writes: it leaves out a write-up sentence the checks
+// would refuse, calms website words in capitals, and counts words as the
+// checks do (test/rewriteTemplate.test.js runs it over every fixture car).
+// Only the dealership's own Settings can still fail it (no dealership name,
+// a price note for another fee, a name typed in capitals), and the side
+// panel says which.
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
@@ -212,9 +218,11 @@ function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = n
 const statesNoOtherNumbers = (text, vehicle) => !priceAndMileageProblems(text, { vehicle }).length;
 // A write-up sentence the template may copy: that, and nothing the checks
 // would refuse in the template's own text, a banned phrase ("no accidents",
-// "private sale") or "one owner" without the Carfax one-owner flag.
+// "private sale"), "one owner" without the Carfax one-owner flag, capitals
+// that shout, or more than one emoji (two sentences at most are copied, so
+// the text stays within the emoji the checks allow).
 const narrativeSentenceOk = (sentence, vehicle) =>
-  statesNoOtherNumbers(sentence, vehicle) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner);
+  statesNoOtherNumbers(sentence, vehicle) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence) && emojiCount(sentence) <= 1;
 
 // The website's features a description can name as highlights: each once,
 // short enough to read in a list (40 characters or less), stating no price,
@@ -369,13 +377,14 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
+  // site: the website's own words for the car, as it writes them.
   const blocks = [
-    { id: 'lead', keep: 'always', text: milesText ? `${name} with ${milesText}.` : `${name}.` },
+    { id: 'lead', keep: 'always', site: true, text: milesText ? `${name} with ${milesText}.` : `${name}.` },
     { id: 'owner', keep: 'always', text: v.carfaxOneOwner ? 'One owner according to the Carfax report.' : '' },
-    { id: 'narrative', keep: 'optional', text: story },
-    { id: 'features', keep: 'always', text: features.length ? `Highlights: ${features.join(', ')}.` : '' },
-    { id: 'colors', keep: 'optional', text: colors.length ? `${capitalize(colors.join(', '))}.` : '' },
-    { id: 'mech', keep: 'optional', text: mech.length ? `${mech.join(', ')}.` : '' },
+    { id: 'narrative', keep: 'optional', site: true, text: story },
+    { id: 'features', keep: 'always', site: true, text: features.length ? `Highlights: ${features.join(', ')}.` : '' },
+    { id: 'colors', keep: 'optional', site: true, text: colors.length ? `${capitalize(colors.join(', '))}.` : '' },
+    { id: 'mech', keep: 'optional', site: true, text: mech.length ? `${mech.join(', ')}.` : '' },
     { id: 'where', keep: 'always', text: lot ? `Pre-owned and on the lot at ${lot}.` : '' },
     { id: 'carfax', keep: 'filler', text: v.carfaxUrl ? 'Carfax report available, just ask.' : '' },
     { id: 'stock', keep: 'filler', text: v.stock ? `Stock number ${v.stock}.` : '' },
@@ -400,8 +409,18 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   // the closing line and the VIN line are not counted, as in runGuardrails
   const words = () => wordCount(stripVin(stripClosing(render(), closing)));
 
+  // A website that writes in capitals ("2015 JEEP GRAND CHEROKEE LIMITED",
+  // "HEATED SEATS, NAVIGATION SYSTEM") would make the text shout, which the
+  // checks refuse: its words are then calmed (calmWords), in the
+  // description only; the form's fields keep the website's spelling. A
+  // write-up, colour or engine line that still shouts is left out.
+  if (shouting(render())) for (const b of blocks) if (b.site) b.text = calmWords(b.text);
   for (const id of ['narrative', 'mech', 'colors', 'cta']) {
     if (words() <= WORD_LIMITS.max) break;
+    on.delete(id);
+  }
+  for (const id of ['narrative', 'mech', 'colors']) {
+    if (!shouting(render())) break;
     on.delete(id);
   }
   for (const b of blocks.filter((b) => b.keep === 'filler')) {
@@ -418,7 +437,16 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
 function calmName(name) {
   const n = String(name || '').replace(/\s+/g, ' ').trim();
   if (!shouting(n)) return n;
-  return n.replace(/\b[A-Z]{3,}\b/g, (w) => (/[AEIOUY]/.test(w) ? w[0] + w.slice(1).toLowerCase() : w));
+  return calmWords(n, 3);
+}
+
+// Words in capitals set in title case: each word of `min` or more capital
+// letters with a vowel ("GRAND" is "Grand"). Shorter words ("AWD", "XLE"),
+// abbreviations with no vowel ("GMC") and words with a digit ("RAV4",
+// "F-150") stay as written. Only the description's text is calmed; the
+// form's fields keep the website's own spelling.
+function calmWords(text, min = 4) {
+  return String(text || '').replace(new RegExp(`\\b[A-Z]{${min},}\\b`, 'g'), (w) => (/[AEIOUY]/.test(w) ? w[0] + w.slice(1).toLowerCase() : w));
 }
 
 function shouting(text) {

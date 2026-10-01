@@ -630,3 +630,65 @@ test('a car the website lists at another store is described at that store, never
   assert.match(text, /Come take a look in person at Sample Chevrolet Shelbyville\./, 'the visit line names the car\'s store too');
   assert.deepEqual(runGuardrails(text, c).problems, []);
 });
+
+// ---------- the template passes its own checks ----------
+
+import { readFileSync as readFixture, readdirSync as listFixtures } from 'node:fs';
+import { fixtures } from './helpers.js';
+import { parseVehiclePage } from '../extension/adapters/schemaOrgParse.js';
+import { normalizeVehicle as schemaOrgVehicle } from '../extension/adapters/schemaOrgNormalize.js';
+
+// Every car in the fixtures: the real website records and the schema.org pages.
+function fixtureCars() {
+  const cars = Object.keys(fixtures).filter((n) => n !== '_about').map((n) => [n, vehicle(n)]);
+  const dir = new URL('./fixtures/structured/', import.meta.url);
+  for (const file of listFixtures(dir).filter((f) => f.endsWith('.html'))) {
+    const url = `https://www.sample-motors.test/inventory/${file.replace('.html', '/')}`;
+    const { vehicles, facts } = parseVehiclePage(readFixture(new URL(file, dir), 'utf8'), url);
+    vehicles.forEach((node, i) => {
+      const v = schemaOrgVehicle(node, { url, facts });
+      if (v) cars.push([`${file} #${i}`, v]);
+    });
+  }
+  return cars;
+}
+
+test('the template passes its own checks for every fixture car, however the website writes', async () => {
+  const upper = (s) => (typeof s === 'string' ? s.toUpperCase() : s);
+  const variants = {
+    'as the website has it': (v) => v,
+    'no features': (v) => ({ ...v, features: [] }),
+    'in capitals': (v) => ({ ...v, make: upper(v.make), model: upper(v.model), trim: upper(v.trim), engine: upper(v.engine), transmission: upper(v.transmission), exteriorColor: upper(v.exteriorColor), interiorColor: upper(v.interiorColor), features: [...(v.features || []), ...FEATURES].map(upper) }),
+    'a write-up the checks refuse': (v) => ({ ...v, carfaxOneOwner: false, descriptionRaw: 'One owner, clean title, no accidents.\nONE OWNER TRADE, SERVICED HERE SINCE NEW.' }),
+    'a write-up in capitals and emoji': (v) => ({ ...v, descriptionRaw: '🔥🔥 Hot one! LOCAL TRADE WITH NEW BRAKES AND TIRES. GREAT TRUCK! 😀😀 Room for everyone.' }),
+  };
+  const dealers = [{ name: 'Ace Auto', city: 'Troy' }, { name: 'Example Chrysler Dodge Jeep Ram of Springfield', city: 'Springfield' }];
+  const people = [{ title: 'sales consultant' }, { name: 'Alexandra', title: 'sales and leasing consultant' }];
+  let runs = 0;
+  for (const [name, car] of fixtureCars()) {
+    for (const [how, change] of Object.entries(variants)) {
+      const v = change(car);
+      for (const dealer of dealers) for (const salesperson of people) for (const priceNote of ['', 'Price includes the doc fee; tax and tags extra.']) {
+        const r = await generateDescription({ vehicle: v, dealer, salesperson, priceNote, price: v.price, settings: {} });
+        assert.deepEqual(r.guardrails.problems, [], `${name}, ${how}, ${dealer.name}, ${salesperson.name || 'no name'}, ${priceNote ? 'a price note' : 'no note'}:\n${r.text}`);
+        runs += 1;
+      }
+    }
+  }
+  assert.ok(runs >= 9 * 5 * 8, `${runs} descriptions`);
+});
+
+test('a name in capitals is written calmly in the description only; one that does not shout is left as the website writes it', async () => {
+  const v = { ...PLAIN(), year: 2015, make: 'JEEP', model: 'GRAND CHEROKEE', trim: 'LIMITED', features: ['HEATED SEATS', 'NAVIGATION SYSTEM', 'REMOTE START', 'USB PORT'] };
+  const r = await generateDescription({ ...plainCtx(v), settings: {} });
+  assert.match(r.text, /^2015 Jeep Grand Cherokee Limited with 20,986 miles\.$/m);
+  assert.match(r.text, /^Highlights: Navigation System, Heated Seats, Remote Start, USB Port\.$/m);
+  assert.deepEqual(r.guardrails.problems, []);
+  // the car itself, which fills the form, keeps the website's spelling
+  assert.equal(v.model, 'GRAND CHEROKEE');
+  // abbreviations, models with digits and a name that does not shout stay as written
+  for (const [make, model, trim] of [['GMC', 'SIERRA 1500', 'SLT AWD'], ['TOYOTA', 'RAV4', 'XLE AWD'], ['Ford', 'F-150', 'XLT SuperCrew'], ['Jeep', 'Grand Cherokee', 'SRT']]) {
+    const t = buildTemplateDescription({ ...plainCtx({ ...PLAIN(), make, model, trim }) });
+    assert.match(t, new RegExp(`^2019 ${make} ${model} ${trim} with`, 'm'), `${make} ${model} ${trim}`);
+  }
+});
