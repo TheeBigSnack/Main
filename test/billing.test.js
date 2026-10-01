@@ -721,6 +721,40 @@ test('billing/index.ts: the four routes, fetch not an SDK, the secret key only i
   assert.match(src, /if \(route === 'webhook'\) \{\s*if \(req\.method !== 'POST'\)[^]*?return webhook\(req\);/);
 });
 
+// docs/stripe-setup.md, live step 6: one real charge, then a refund and an
+// immediate cancel. A pilot makes Checkout a trial with nothing charged, so
+// the live check uses a dealership with no pilot; and the founding coupon's
+// few redemptions are the stores the pricing page promises them to.
+test('docs/stripe-setup.md: the live check charges a dealership with no pilot at once, refunds it, cancels it now, and keeps the founding code', () => {
+  const doc = read('../docs/stripe-setup.md');
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'), doc.indexOf('## What never happens'));
+  const step = live.slice(live.indexOf('\n6. '));
+  assert.ok(step.length > 1, 'live step 6 is there');
+  assert.doesNotMatch(live, /Run step 6 once with a real card/, 'a pilot would charge nothing to refund');
+  // no pilot: the card offers Subscribe, and Checkout gets no trial (the function passes a trial end only in the pilot state)
+  const fresh = { ...statusAnswer(row(), { role: 'manager', now: NOW }), role: 'manager' };
+  assert.equal(fresh.state, 'none');
+  assert.ok(fresh.canSubscribe);
+  const card = page.billingCard(fresh, { now: iso(NOW), timeZone: 'UTC' });
+  assert.ok(step.includes(`The Billing card says ${card.label}.`), card.label);
+  assert.ok(card.buttons.some((b) => b.label === 'Subscribe') && card.buttons.some((b) => b.label === 'Start the free pilot'));
+  assert.match(step, /Do not click Start the free pilot/);
+  assert.match(read('../supabase/functions/billing/index.ts'), /const trialEnd = state === 'pilot' && row \? trialEndFor\(row\.pilot_ends_at\) : null;/);
+  assert.equal(checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems: [{ price: 'price_1', quantity: 1 }], returnUrl: 'https://app.lotcurrent.com/', trialEnd: null }).subscription_data.trial_end, undefined);
+  // paid, then refunded and cancelled at once: the card the page draws for each row
+  const paid = { ...statusAnswer(row({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: iso(NOW + 30 * DAY) }), { role: 'manager', now: NOW }), role: 'manager' };
+  assert.ok(step.includes(`the card says ${page.billingCard(paid, { now: iso(NOW), timeZone: 'UTC' }).label} with the renewal date`));
+  for (const event of ['customer.subscription.created', 'invoice.paid']) assert.ok(HANDLED_EVENTS.includes(event) && step.includes(`\`${event}\``), event);
+  const ended = { ...statusAnswer(row({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }), { role: 'manager', now: NOW }), role: 'manager' };
+  const endedCard = page.billingCard(ended, { now: iso(NOW), timeZone: 'UTC' });
+  assert.ok(step.includes(`The card then says ${endedCard.label}, "${endedCard.detail}"`), `${endedCard.label}: ${endedCard.detail}`);
+  assert.match(step, /refund that payment in full, then open the subscription and cancel it \*\*immediately\*\*/);
+  // the test card and the founding code stay out of live mode
+  assert.doesNotMatch(step, /4242|0341/);
+  assert.match(step, /Do not use the founding code \(6\.5\) in a live Checkout/);
+  assert.equal(wantedObjects(pricing).coupon.max_redemptions, pricing.foundingDealerCount, 'the limit the step names');
+});
+
 // docs/stripe-setup.md step 6.4 walks the owner through a failed payment.
 // A running pilot outranks past_due (the state machine above), so the step
 // ends the pilot before the trial, and the card's words it promises are the
