@@ -85,7 +85,7 @@ test('more than half the lot vanishing at once is treated as a website hiccup', 
 
 test('price drop on a car you posted: update from your listing price', () => {
   const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
-  const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '26163' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { value: '26163' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   const d = diffScans(snapshot(LOT), curr, { posted, confirm: confirmed() });
   assert.equal(d.priceUpdates.length, 1);
   assert.deepEqual(
@@ -102,7 +102,7 @@ test('posted listing still at an old price is caught even if the website changed
 });
 
 test('price increase on a car nobody posted is reported too', () => {
-  const curr = snapshot([['usedNormal'], ['certified'], ['usedNoCarfax'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '34485' } } } } }]]);
+  const curr = snapshot([['usedNormal'], ['certified'], ['usedNoCarfax'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { value: '34485' } } } } }]]);
   const d = diffScans(snapshot(LOT), curr, { confirm: confirmed() });
   assert.equal(d.priceUpdates.length, 1);
   assert.equal(d.priceUpdates[0].change, 1000);
@@ -129,7 +129,7 @@ test('a change of the price setting is not a website price change: each listing 
   assert.equal(noteFlags(null, d).flags.length, 0, 'nothing for the pilot numbers either');
   assert.equal(listingStatus(ram, posted[VIN.ram].price, basisPrice(ram, postedBasis(posted[VIN.ram], 'beforeFees'))).text, 'Matches the website');
   // a real website change is still mirrored, on the listing's own basis
-  const drop = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '26163' }, high: { label: 'Was', value: '25673' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const drop = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { value: '26163' }, high: { label: 'Was', value: '25673' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   assert.deepEqual(diffScans(s, drop, { posted, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates.map((u) => [u.from, u.to]), [[27163, 26163]]);
   // the other way round: posted on the lower price, the setting back to the main price
   const lower = markPosted({}, ram, 'beforeFees', at);
@@ -176,7 +176,7 @@ test('under the "before fees" basis, "call for price" still needs a look, and a 
 
 test('settleDiff: a diff saved after a long scan drops the salesperson\'s items handled meanwhile, and keeps everything else', () => {
   const posted = { [VIN.ram]: { name: 'Ram', price: 27163 }, [VIN.hellcat]: { name: 'Hellcat', price: 53485 }, [VIN.tradesman]: { name: 'Tradesman', price: 33485 } };
-  const curr = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '32485' } } } } }]]);
+  const curr = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { value: '32485' } } } } }]]);
   const d = diffScans(snapshot(LOT), curr, { posted, confirm: { checked: [], notFound: [], error: null } });
   assert.deepEqual(d.takeDown.map((t) => t.vin), [VIN.ram]);
   assert.deepEqual(d.priceUpdates.map((u) => u.vin), [VIN.tradesman]);
