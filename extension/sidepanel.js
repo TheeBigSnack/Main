@@ -75,6 +75,10 @@ const state = {
   map: FORM_MAP,
 };
 let watcher = null;
+// Counts the posts the panel has dropped (clearFlow: a new post, Stop queue,
+// Back, a set-up). A website read that answers after its post was dropped is
+// thrown away (readCarNow), so it never lands in the post that took over.
+let flowRun = 0;
 
 // ---------- saved data ----------
 // The keys are named in src/storageKeys.js (siteKeys(origin) for this
@@ -171,6 +175,7 @@ async function saveFlow() {
 }
 
 async function clearFlow() {
+  flowRun += 1;
   if (watcher) watcher.cancel();
   watcher = null;
   if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
@@ -329,9 +334,14 @@ const READ_MAX_AGE_MS = 10 * 60 * 1000;
 // through the dealer tab when the post started from one that still shows this
 // website; otherwise straight from the extension, with the website
 // permission (readCarForPost). A failure stops the post with the reason
-// (block). Resolves { vehicle, price, noteApplies, readAt }, or null when stopped.
+// (block). Resolves { vehicle, price, noteApplies, readAt }, or null when
+// stopped. Also null, with nothing changed, when the post was dropped while
+// the website answered (flowRun: another car's Post, Stop queue, Skip,
+// Back): neither the car nor a failure lands in the post that took over.
 async function readCarNow() {
+  const run = flowRun;
   const fresh = await readCarForPost({ tabId: state.dealerTabId ?? null, origin: state.origin, info: state.siteInfo, vin: state.vin, url: state.snapshotVehicles[state.vin]?.url });
+  if (run !== flowRun) return null;
   if (!fresh.ok && fresh.needsPermission) {
     state.blockedOrigins = fresh.origins;
     await block(fresh.message, 'no-permission');
@@ -379,10 +389,14 @@ function formValues() {
 // Before Open the Marketplace form or Fill it in now: with a read older than
 // READ_MAX_AGE_MS, the car is read and checked on the website again. A car
 // that sold, turned new, went sale-pending or lost its price stops here
-// (block says why). One whose price or any form value changed goes back to
-// the review screen with the new values and the description's checks run
-// against them, and the status line says what changed: the person sees it
-// before anything is filled. Resolves true to go on.
+// (block says why). The description's checks run again against the new read
+// too. A car whose price or any form value changed, or whose description
+// now breaks a posting rule (a fact the website no longer gives, such as the
+// Carfax one-owner flag or a feature's number, with every form value the
+// same), goes back to the review screen with the new values and checks, and
+// the status line says what changed and what to fix: the person sees it
+// before anything is filled. A post dropped during the read (readCarNow)
+// goes no further. Resolves true to go on.
 async function carStillCurrent() {
   if (!readIsOld()) return true;
   const was = state.step;
@@ -398,8 +412,10 @@ async function carStillCurrent() {
   const after = formValues();
   const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
   const changed = Object.keys({ ...before.values, ...after }).filter((k) => k !== 'description' && before.values[k] !== after[k]);
+  state.guardrails = runGuardrails(state.description, ctx());
+  const stops = ruleProblems(state.guardrails);
   state.message = '';
-  if (!changed.length) {
+  if (!changed.length && !stops.length) {
     if (state.vinCheck && online) state.vinCheck.online = online; // the same car: the NHTSA comparison still stands
     state.step = was;
     await saveFlow();
@@ -407,10 +423,13 @@ async function carStillCurrent() {
   }
   const said = changed.map((k) => (k === 'price' ? `price ${money(before.price)} to ${money(state.price)}` : k === 'photos' ? 'photos' : (labels[k] || k).toLowerCase()));
   state.listing = null;
-  state.guardrails = runGuardrails(state.description, ctx());
   state.step = 'review';
   render();
-  setStatus(`The website changed this car since it was read (${said.join(', ')}). Check the review, then click Open the Marketplace form again.`, 'error');
+  const what = said.length ? ` (${said.join(', ')})` : '';
+  const next = stops.length
+    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then click Open the Marketplace form again.`
+    : ' Check the review, then click Open the Marketplace form again.';
+  setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
   await saveFlow();
   return false;
 }
