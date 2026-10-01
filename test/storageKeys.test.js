@@ -29,8 +29,9 @@ test('siteKeys names every per-website key as existing installs hold it; the glo
     flow: `postFlow:${ORIGIN}`,
     pilot: `pilot:${ORIGIN}`,
     sync: `sync:${ORIGIN}`,
+    takenDown: `takenDown:${ORIGIN}`,
   });
-  assert.deepEqual(Object.keys(SITE_KEY_NAMES), ['settings', 'snapshot', 'diff', 'posted', 'boilerplate', 'queue', 'drafts', 'wizard', 'wizardDone', 'flow', 'pilot', 'sync']);
+  assert.deepEqual(Object.keys(SITE_KEY_NAMES), ['settings', 'snapshot', 'diff', 'posted', 'boilerplate', 'queue', 'drafts', 'wizard', 'wizardDone', 'flow', 'pilot', 'sync', 'takenDown']);
   assert.ok(Object.isFrozen(SITE_KEY_NAMES) && Object.isFrozen(GLOBAL_KEYS) && Object.isFrozen(REQUEST_KEYS));
   assert.deepEqual(GLOBAL_KEYS, { sites: 'sites', devOverrides: 'devOverrides', postRequest: 'postRequest', setupRequest: 'setupRequest', upkeepRequest: 'upkeepRequest', lastPostOrigin: 'lastPostOrigin', account: 'account' });
   assert.equal(SITES_KEY, 'sites');
@@ -45,8 +46,8 @@ test('siteKeys names every per-website key as existing installs hold it; the glo
   assert.equal(siteKeys(undefined).posted, 'posted:', 'never throws; the caller checks the origin');
 });
 
-// Milestone 4's keys are documented when that work lands in HANDOFF.md.
-const PENDING_DOCS = new Set();
+// Keys documented in HANDOFF.md when its next update lands (docs/data-inventory.md has them already).
+const PENDING_DOCS = new Set(['takenDown']);
 
 test('the names are the documented ones (HANDOFF.md section 5.1)', () => {
   const handoff = readFileSync(new URL('../HANDOFF.md', import.meta.url), 'utf8');

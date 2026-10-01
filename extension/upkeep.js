@@ -17,6 +17,7 @@ import { fillPriceInPage, readListingInPage } from './facebook/fillForm.js';
 import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { resolveFlag, updatePilot } from './src/pilot.js';
 import { siteKeys } from './src/storageKeys.js';
+import { noteTakenDown } from './src/takenDown.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 
 export const up = {
@@ -152,6 +153,13 @@ async function finish(ctx, how) {
   const k = siteKeys(up.origin);
   const price = up.kind === 'price';
   try {
+    // a post taken down is kept for the daily cap first (src/takenDown.js);
+    // this item came from the scan (sold, gone or sale pending), so the
+    // website no longer listed the car as ready
+    if (!price) {
+      const entry = ((await chrome.storage.local.get(k.posted))[k.posted] || {})[up.vin];
+      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false }));
+    }
     await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
     await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook']));
   } catch (e) {

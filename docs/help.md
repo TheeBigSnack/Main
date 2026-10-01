@@ -219,7 +219,7 @@ To turn it on, your dealership needs the Lot Current rewrite service running and
 Each salesperson may record a set number of posts a day, 10 by default. Your dealership changes it in **Settings**, **Safety**, **Posts per day, per salesperson**.
 
 - The review screen shows "N of M posts today". At the cap, **Post** buttons and tick boxes go away on Ready to post, **Open the Marketplace form** is disabled, and a queue pauses. The message reads "Daily post cap reached (N of M today). It resets tomorrow; the dealer can change it in Settings."
-- It counts posts recorded in this browser for this website today.
+- It counts posts recorded in this browser for this website today, including a post you took down later the same day (**Taken down**, or unmarking **Posted ✓**): taking a listing down never gives the slot back. Signed in, it is never lower than your dealership's account's count of your posts today, which includes the ones from your other computers.
 - It is a safety setting, not a guarantee of anything from Facebook. Meta does not publish its limits.
 
 ## The manager view (for managers)
@@ -248,7 +248,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 ## Where the data lives and how to clear it
 
-**In this browser, per website:** the last scan, the to-do list, your posted list, your settings for that website (including the rewrite service key, which stays on this computer), the queue, drafts, set-up progress, a post under way, and the numbers on the Numbers tab (which prune themselves: each list keeps its newest 500 entries and nothing older than 90 days, open to-do items excepted). Each website's data is separate. When you sign in under Settings, Account, your posted list, your post timings, your to-do items and each scan's counts also sync to your dealership's account for the manager view; the record of which form fields could not be filled stays here. Your sign-in itself is kept in this browser only, until you click **Sign out**.
+**In this browser, per website:** the last scan, the to-do list, your posted list (and, for 30 days, the VIN and times of each listing you took off it, for the daily cap), your settings for that website (including the rewrite service key, which stays on this computer), the queue, drafts, set-up progress, a post under way, and the numbers on the Numbers tab (which prune themselves: each list keeps its newest 500 entries and nothing older than 90 days, open to-do items excepted). Each website's data is separate. When you sign in under Settings, Account, your posted list, your post timings, your to-do items and each scan's counts also sync to your dealership's account for the manager view; the record of which form fields could not be filled stays here. Your sign-in itself is kept in this browser only, until you click **Sign out**.
 
 **In Chrome's synced storage, under your own Google account:** your profile (name, role, closing line, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance). It follows you to other computers where you are signed in to Chrome.
 

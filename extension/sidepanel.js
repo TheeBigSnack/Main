@@ -64,6 +64,7 @@ const state = {
   drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
   snapshotVehicles: {}, // names for the queue bar
   syncState: null, // this website's sync state (src/sync.js nextSyncState): the server's count of today's posts feeds the cap
+  takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap still counts the day's
   sites: {}, // the site registry (src/scanRunner.js rememberSite): every website this computer has read, for the list's website choice
   siteInfo: null, // this website's registry entry: its adapter and service, so a car can be read without the dealer tab
   snapshotTakenAt: null, // when the saved snapshot behind the list was taken
@@ -122,7 +123,7 @@ const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet 
 async function loadSaved() {
   const origin = state.origin;
   const k = siteKeys(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, GLOBAL_KEYS.sites]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, k.takenDown, GLOBAL_KEYS.sites]);
   const sites = data[GLOBAL_KEYS.sites] || {};
   const siteInfo = sites[origin] || null;
   const siteName = data[k.snapshot]?.site?.name || siteInfo?.name || origin;
@@ -141,6 +142,7 @@ async function loadSaved() {
     drafts: data[k.drafts] || {},
     snapshotVehicles: data[k.snapshot]?.vehicles || {},
     syncState: data[k.sync] || null,
+    takenDown: data[k.takenDown] || null,
   });
   return true;
 }
@@ -347,9 +349,10 @@ async function startFlow(req) {
   if (state.queueMode && canAutoOpen()) await openForm();
 }
 
-// The day's cap for this salesperson: this machine's posts and, after a
-// sync, the server's count of theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
+// The day's cap for this salesperson: this machine's posts (the ones taken
+// down since included) and, after a sync, the server's count of theirs
+// across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday, takenDown: state.takenDown });
 
 // Anything assumed besides the dealership's own defaults (a reading of the
 // website's words, a colour guessed from the photos, a motorcycle read from
@@ -1736,6 +1739,7 @@ function adoptChanges(changes) {
     }
   }
   take(k.sync, 'syncState', null); // the server's count of today's posts feeds the cap line
+  take(k.takenDown, 'takenDown', null); // a post taken down still counts toward the cap
   if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
     state.settings = withDefaults(changes[k.settings].newValue, { name: state.siteName });
     touched = true;

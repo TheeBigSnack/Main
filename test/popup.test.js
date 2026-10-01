@@ -90,3 +90,26 @@ test('My listings counts only the person\'s own listings; a colleague\'s come in
   assert.match(again.panel(), /Posted by Pat/);
   assert.doesNotMatch(again.panel(), /Not marked as posted/);
 });
+
+// Non-negotiable 7: the day's cap counts the day's posts. Taken down and
+// unmarking Posted ✓ remove the car from the posted list, but the post was
+// made: the cap must not give the slot back.
+test('at the daily cap, Taken down or unmarking Posted ✓ on one of today\'s posts does not bring Post back', async () => {
+  const car = vehicle('usedNormal'); // the one car ready to post at MY_STORE
+  for (const action of ['takenDown', 'unpost']) {
+    const posted = { [car.vin]: { name: car.name, price: car.price, postedAt: new Date().toISOString() } };
+    const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE, dailyCap: 1 }, [k.posted]: posted } });
+    await p.scan();
+    assert.equal(p.status(), '', 'the scan went through');
+    await p.click(action, { vin: car.vin });
+    assert.deepEqual(p.local[k.posted], {}, `${action}: the car left the posted list`);
+    const kept = p.local[k.takenDown];
+    assert.equal(kept.length, 1, `${action}: the post is kept for the cap`);
+    assert.deepEqual([kept[0].vin, kept[0].postedAt, kept[0].stillListed], [car.vin, posted[car.vin].postedAt, true], 'the website still lists the car as ready');
+    await p.tab('ready');
+    assert.match(p.panel(), new RegExp(`data-action="openPost" data-vin="${car.vin}" disabled`), `${action}: Post stays off at 1 of 1`);
+    await p.click('openPost', { vin: car.vin });
+    assert.match(p.status(), /Daily post cap reached \(1 of 1 today\)/);
+    assert.equal(p.local.postRequest, undefined, 'nothing is handed to the side panel');
+  }
+});

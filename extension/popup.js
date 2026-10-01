@@ -4,6 +4,7 @@ import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
@@ -42,6 +43,7 @@ const state = {
   wizardActive: false, // set-up started in the side panel and not finished
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
   pilot: null, // pilot numbers (src/pilot.js): post timings, fill failures per field, to-do item durations
+  takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap still counts the day's
   syncState: null, // this website's sync state (src/sync.js nextSyncState): dealership, role, when it last synced, the plan, the server's count of today's posts (the cap reads it); accounts only
   account: { session: null, email: '', note: '', error: '' }, // the signed-in session (read only when accounts are configured) and what the Account section says
   rescanPermission: null, // true/false once known: may the service worker read this website?
@@ -90,6 +92,7 @@ async function loadSaved() {
   state.wizardActive = Boolean(data[k.wizard] && data[k.wizard].active && data[k.wizard].step !== 'done');
   state.site = (data[SITES_KEY] || {})[state.origin] || null;
   state.pilot = data[k.pilot] || null;
+  state.takenDown = data[k.takenDown] || null;
   state.syncState = data[k.sync] || null;
   await checkRescanPermission();
 }
@@ -499,9 +502,10 @@ function queueStatusHtml() {
   return `<div class="banner info queue" id="queueStatus"><b>${esc(describeQueue(q))}</b>${next ? ` · next: ${esc(name)}` : ''}<div class="toolbar">${buttons}</div></div>`;
 }
 
-// The day's cap for this salesperson: this machine's posts and, after a
-// sync, the server's count of theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
+// The day's cap for this salesperson: this machine's posts (the ones taken
+// down since included) and, after a sync, the server's count of theirs
+// across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday, takenDown: state.takenDown });
 const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
 
 // The Ready tab: the sort menu (remembered for this website in
@@ -962,6 +966,18 @@ function render() {
 let clearArmed = false;
 let pilotClearArmed = false;
 
+// Before a post leaves the posted list (Taken down, or Posted ✓ unmarked):
+// it is kept in takenDown:<origin> (src/takenDown.js), so the daily cap
+// still counts it on the day it was made. Written first: if the posted list
+// then fails to change, the post is still counted once. A colleague's entry
+// is theirs and has no such buttons. False when the write failed.
+async function keepTakenDown(vin) {
+  const entry = state.posted[vin];
+  if (!entry || entry.mine === false) return true;
+  const stillListed = stillListedNow(state.snapshot, state.diff, vin);
+  return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed }));
+}
+
 // Pilot numbers: an item the person ticked off by hand, or a car unmarked.
 const notePilot = (change) => updatePilot(state.origin, change).then((p) => { state.pilot = p; }).catch(() => null);
 
@@ -1104,12 +1120,14 @@ async function onPanelClick(ev) {
       break;
     }
     case 'unpost':
+      if (!(await keepTakenDown(vin))) break;
       await update('posted', (p) => markTakenDown(p || {}, vin));
       notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
       break;
     // Two keys, two writes: stop at the first that fails (the status says
     // why) so the item stays open and can be ticked again once there is room.
     case 'takenDown':
+      if (!(await keepTakenDown(vin))) break;
       if (!(await update('posted', (p) => markTakenDown(p || {}, vin)))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook'])))) break;
       notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
@@ -1448,6 +1466,7 @@ async function init() {
     take(k.diff, 'diff', null);
     take(k.snapshot, 'snapshot', null);
     take(k.pilot, 'pilot', null);
+    take(k.takenDown, 'takenDown', null); // a take-down from the side panel's To do upkeep: the cap counts it
     if (changes[k.sync]) {
       const next = changes[k.sync].newValue ?? null;
       // the server's count of today's posts feeds the cap, so the lists are redrawn when it moves; the rest is shown in Settings only

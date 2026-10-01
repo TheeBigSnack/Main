@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { capStatus, postsToday, serverPostsToday } from '../extension/src/cap.js';
 import { mergeRegistry, syncPayload } from '../extension/src/sync.js';
-import { markPosted } from '../extension/src/rescan.js';
+import { markPosted, markTakenDown } from '../extension/src/rescan.js';
+import { noteTakenDown } from '../extension/src/takenDown.js';
 
 const U1 = '00000000-0000-4000-8000-000000000001';
 const U2 = '00000000-0000-4000-8000-000000000002';
@@ -96,4 +97,34 @@ test('the server\'s count of today\'s posts raises the cap\'s count when it is h
   assert.deepEqual(capStatus(posted, 10, now, undefined), capStatus(posted, 10, now));
   assert.deepEqual(capStatus(posted, 10, now, null), capStatus(posted, 10, now));
   assert.equal(capStatus(posted, 10, now, { serverCount: { count: 1, ...day } }).used, 1, 'the colleague\'s entry would make 2 if it counted');
+});
+
+// A post taken down later the same day was still a post that day (the sync
+// function counts any status): Taken down and unmarking Posted ✓ keep the
+// post in takenDown:<origin> (src/takenDown.js) before removing it from the
+// posted list, and the cap counts both.
+test('a post taken down the same day still counts: Taken down never frees a slot, a re-post of the car is one more post', () => {
+  let posted = {};
+  for (let i = 0; i < 10; i += 1) posted = markPosted(posted, { vin: `TESTVIN0000000${String(i).padStart(2, '0')}X`, name: `Car ${i}`, price: 10000 + i }, 'website', today(i));
+  assert.deepEqual(capStatus(posted, 10, now), { used: 10, cap: 10, remaining: 0, reached: true });
+  // the salesperson clicks Taken down on one of today's posts
+  const vin = 'TESTVIN000000003X';
+  let takenDown = noteTakenDown(null, { vin, postedAt: posted[vin].postedAt, stillListed: true }, today(40), now);
+  posted = markTakenDown(posted, vin);
+  assert.equal(Object.keys(posted).length, 9);
+  assert.deepEqual(capStatus(posted, 10, now, { takenDown }), { used: 10, cap: 10, remaining: 0, reached: true }, 'still 10 posts today');
+  assert.equal(capStatus(posted, 10, now).used, 9, 'the posted list alone no longer has it');
+  // posted again the same day: two posts of one car
+  posted = markPosted(posted, { vin, name: 'Car 3', price: 10003 }, 'website', today(45));
+  assert.equal(postsToday(posted, now, takenDown), 11);
+  // the same post written twice (the record before a failed posted-list write) counts once
+  takenDown = noteTakenDown(takenDown, { vin: 'TESTVIN000000004X', postedAt: posted.TESTVIN000000004X.postedAt }, today(50), now);
+  assert.equal(postsToday(posted, now, takenDown), 11);
+  // yesterday's take-downs count toward no day but their own
+  const yesterday = new Date(2026, 8, 25, 12, 0).toISOString();
+  assert.equal(postsToday({}, now, noteTakenDown(null, { vin, postedAt: yesterday }, today(1), now)), 0);
+  // a record with no posting time counts toward no day
+  assert.equal(postsToday({}, now, noteTakenDown(null, { vin }, today(1), now)), 0);
+  // anything that is not a list is no record
+  assert.equal(postsToday(posted, now, { not: 'a list' }), 10);
 });
