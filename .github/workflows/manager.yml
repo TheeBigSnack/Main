@@ -7,8 +7,11 @@
 # Until the owner has added the two Cloudflare secrets the job says so and
 # stops green, so pushes before the account exists stay quiet. With them it
 # refuses to deploy a page that is not configured for the production project
-# (npm run set-project -- --check), runs the page's tests, and uploads the
-# folder without the local demo server.
+# (npm run set-project -- --check), runs the unit tests (npm test, the same
+# suite CI's unit job runs, test/billing.test.js's copies of the page's
+# billing rules among them), and uploads the folder without the local demo
+# server. A push deploys with no approval and does not wait for CI, so those
+# tests are what keep a page that breaks a rule off the live address.
 #
 # Settings it reads, on the "manager-view" environment (Settings,
 # Environments, manager-view, deployment branches: the default branch only),
@@ -88,9 +91,10 @@ jobs:
       - name: The page names the production project with a pinned client
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
         run: node scripts/set-project.mjs --check
-      - name: The page's tests
+      # Node only, no npm ci: about ten seconds
+      - name: The unit tests
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
-        run: node --test test/manager.test.js test/setProject.test.js test/productionSetup.test.js test/checkHosting.test.js
+        run: npm test
       - name: Stage the folder without the local demo server
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
         run: |

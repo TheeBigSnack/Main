@@ -213,7 +213,7 @@ test('the Supabase CLI in the deploy is the one the CI stack job tests with', ()
 test('the manager view deploys from the default branch only, configured, tested, without serve.mjs, with an exact wrangler', () => {
   assert.match(manager, /if: github\.ref_name == github\.event\.repository\.default_branch/);
   assert.match(manager, /^permissions:\n  contents: read$/m);
-  const order = ['node scripts/set-project.mjs --check', 'node --test test/manager.test.js', '--exclude serve.mjs', 'pages deploy'];
+  const order = ['node scripts/set-project.mjs --check', 'run: npm test\n', '--exclude serve.mjs', 'pages deploy'];
   const at = order.map((s) => manager.indexOf(s));
   assert.ok(at.every((i) => i > 0), JSON.stringify(at));
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'checked, then tested, then staged, then uploaded');
@@ -221,6 +221,17 @@ test('the manager view deploys from the default branch only, configured, tested,
   assert.ok(wranglers.length >= 2 && wranglers.every((v) => /^\d+\.\d+\.\d+$/.test(v)), 'an exact version every time');
   assert.match(manager, /go=false[\s\S]*::notice::|::notice::[\s\S]*go=false/, 'without the Cloudflare secrets it stops green with a notice');
   assert.match(manager, /pages deploy "\$RUNNER_TEMP\/manager"/, 'only the staged folder is uploaded');
+  // A push deploys with no approval and without waiting for CI: the whole unit suite gates the upload, so the
+  // page's copies of the billing rules (test/billing.test.js) are checked too, not only the page's own test files
+  const steps = manager.split(/\n      - /);
+  const unit = steps.find((st) => /^\s+run: npm test$/m.test(st));
+  assert.ok(unit, 'the manager view workflow runs npm test');
+  assert.doesNotMatch(unit, /continue-on-error/, 'a failure stops the deploy');
+  assert.doesNotMatch(manager, /run: node --test /, 'not a hand-picked list of test files');
+  assert.doesNotMatch(manager, /run: npm (ci|install)/, 'npm test needs no dependencies');
+  assert.match(manager, /^  push:\n    paths:\n/m, 'it deploys on a push, so the header and the docs say no one approves it');
+  assert.match(headerOf(manager), /A push deploys with no approval and does not wait for CI/);
+  assert.match(read('docs/production-setup.md'), /that deploy waits for no one: the environment has no required reviewer, and the workflow does not wait for CI, so its own `npm test` is what stops a page that breaks a rule\./);
 });
 
 test('every manager view run ends with the hosting check; "check only" skips everything that deploys', () => {
@@ -231,7 +242,7 @@ test('every manager view run ends with the hosting check; "check only" skips eve
   assert.match(last, /node scripts\/check-hosting\.mjs "\$\{pages\[@\]\}"/);
   assert.match(last, /--sender "\$SENDER_DOMAIN"/);
   assert.match(last, /exit "\$status"/, 'a failed check fails the run');
-  for (const s of steps.filter((x) => /set-project\.mjs --check|node --test|rsync|pages deploy/.test(x))) {
+  for (const s of steps.slice(1).filter((x) => /set-project\.mjs --check|run: npm test|rsync|pages deploy/.test(x))) {
     assert.match(s, /if: steps\.ready\.outputs\.go == 'true' && env\.CHECK_ONLY != 'true'\n/, s.split('\n')[0]);
   }
   assert.match(manager, /CHECK_ONLY: \$\{\{ inputs\.check_only == true \}\}/);
