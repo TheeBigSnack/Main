@@ -326,3 +326,20 @@ test('the deploy secrets reach only the steps that use them, never an action or 
   assert.deepEqual(holders.map((st) => st.split('\n')[0]), ['name: Deploy to Cloudflare Pages'], 'only the deploy holds the Cloudflare token');
   assert.match(mine.find((st) => st.startsWith('name: Is Cloudflare set up?')), /HAS_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN != '' \}\}/, 'the first step learns only whether it is set');
 });
+
+// The doc says an access token never goes into a chat, so the check that
+// needs one is the owner's to run: the token is set at a prompt in the
+// owner's own terminal and only the printed checklist reaches the thread.
+test('the signed-in deploy check is run by the owner with the token set at a prompt; only its output reaches Claude', () => {
+  const doc = read('docs/production-setup.md');
+  const step = doc.split('\n').find((l) => /^2\. \*\*\[Owner\]\*\* Signs in once in the manager view/.test(l));
+  assert.ok(step, 'step 7.2 moved: update this test');
+  assert.doesNotMatch(step, /Claude[^.]*runs `check-deploy`|Claude[^.]*with it \(`LOTSYNC_TEST_TOKEN`\)/, 'Claude would need the token');
+  assert.ok(step.includes("$env:LOTSYNC_TEST_TOKEN = Read-Host 'access token'"), 'PowerShell reads the token at a prompt');
+  assert.ok(step.includes('read -rs LOTSYNC_TEST_TOKEN && export LOTSYNC_TEST_TOKEN'), 'macOS and Linux read it at a prompt');
+  assert.match(step, /`npm run check-deploy`/);
+  assert.match(step, /Reads the printed checklist[^.]*: it carries no token or key/);
+  // and check-deploy reads the token from its own environment only
+  const src = read('scripts/check-deploy.mjs');
+  assert.match(src, /testToken: process\.env\.LOTSYNC_TEST_TOKEN \|\| ''/);
+});

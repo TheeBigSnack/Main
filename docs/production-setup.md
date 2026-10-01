@@ -116,7 +116,7 @@ Cloudflare's access logs see every manager's IP address and browser, so it is a 
 ## Step 7. The first dealership and the end-to-end check [Claude, then the owner]
 
 1. **[Claude]** Prepares the two SQL statements of `supabase/README.md` step 5 for the pilot dealership; **[Owner]** runs them in the Dashboard's SQL editor and keeps the manager invite code for the manager.
-2. **[Owner]** Signs in once in the manager view with a test address that belongs to no dealership; Claude says where to copy its access token from, and runs `check-deploy` with it (`LOTSYNC_TEST_TOKEN`). Done when no line reads `FAIL`.
+2. **[Owner]** Signs in once in the manager view with a test address that belongs to no dealership and copies that session's `access_token` from the browser's local storage (`supabase/README.md`, step 6). Then runs the check in a terminal in an up-to-date copy of the repository, so the token never leaves the owner's computer: on Windows PowerShell `$env:LOTSYNC_TEST_TOKEN = Read-Host 'access token'` (paste the token at the prompt, which keeps it out of the terminal's history file), `npm run check-deploy`, then `Remove-Item Env:LOTSYNC_TEST_TOKEN`; on macOS or Linux `read -rs LOTSYNC_TEST_TOKEN && export LOTSYNC_TEST_TOKEN`, `npm run check-deploy`, then `unset LOTSYNC_TEST_TOKEN`. **[Claude]** Reads the printed checklist, which the owner pastes into the thread: it carries no token or key. Done when no line reads `FAIL`.
 3. **[Owner]** On two computers, two test salespeople sign in and redeem invite codes; a car posted on one shows on the other after its next scan, and the manager view shows both. That is the launch checklist's "Supabase project live" and "The posted registry syncs".
 
 ---

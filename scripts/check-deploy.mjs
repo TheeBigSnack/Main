@@ -24,7 +24,9 @@
 //
 //   LOTSYNC_URL=https://<ref>.supabase.co LOTSYNC_ANON_KEY=... node scripts/check-deploy.mjs
 //   (both default to extension/src/accountConfig.js)
-//   optional: LOTSYNC_TEST_TOKEN=<a non-member's access token>
+//   optional: LOTSYNC_TEST_TOKEN=<a non-member's access token>, which the
+//               owner sets at a prompt in their own terminal and never pastes
+//               into a chat (docs/production-setup.md, step 7)
 //             LOTSYNC_SITE_ORIGIN=https://<where site/ is hosted>
 //             LOTSYNC_MANAGER_ORIGIN=https://<where the manager view is hosted>
 //
