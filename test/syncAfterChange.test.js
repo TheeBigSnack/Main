@@ -42,8 +42,17 @@ const session = () => sessionFromTokenResponse({
 
 const messages = [];
 const listeners = { addListener() {} };
+// chrome.alarms as Chrome keeps them: by name, a new one replacing the old.
+// The worker's alarm listeners are kept so a test can fire one.
+const alarms = new Map();
+const alarmListeners = [];
 globalThis.chrome = {
-  alarms: { onAlarm: listeners },
+  alarms: {
+    onAlarm: { addListener(fn) { alarmListeners.push(fn); } },
+    async create(name, info) { alarms.set(name, { name, ...info }); },
+    async clear(name) { return alarms.delete(name); },
+    async get(name) { return alarms.get(name) || null; },
+  },
   runtime: { onMessage: listeners, onInstalled: listeners, onStartup: listeners, sendMessage: async (msg) => { messages.push(msg); return {}; } },
   storage: { local: localArea({}) },
 };
@@ -97,6 +106,112 @@ test('a sync asked for while one is under way runs once more after it, sending w
     // nothing under way: a request is one sync
     await syncSite(ORIGIN);
     assert.equal(server.sent.length, 3);
+  } finally {
+    globalThis.fetch = fetchBefore;
+  }
+});
+
+// The account server's sync function turns a person's syncs away past a
+// dozen a minute (supabase/functions/sync/index.ts, PER_MINUTE) with a 429
+// and "try again in a minute". A salesperson marking a lot of cars on day
+// one passes that: the sync turned away is tried again a minute later, by a
+// one-shot alarm (a timer would not outlive the worker), so the last
+// changes are not left waiting for the next scan or post.
+function limitedServer() {
+  const answered = []; // when each sync got through, by the server's clock
+  const sent = [];
+  const server = { clock: Date.now(), sent, failNext: 0 };
+  server.fetchImpl = async (url, init = {}) => {
+    if (!String(url).endsWith('/sync')) return { ok: false, status: 404, json: async () => ({ ok: false, error: 'not found' }) };
+    if (server.failNext > 0) {
+      server.failNext -= 1;
+      return { ok: false, status: 500, json: async () => ({ ok: false, error: 'database unavailable' }) };
+    }
+    if (answered.filter((t) => server.clock - t < 60000).length >= 12) return { ok: false, status: 429, json: async () => ({ ok: false, error: 'too many syncs; try again in a minute' }) };
+    answered.push(server.clock);
+    sent.push(JSON.parse(init.body));
+    return { ok: true, status: 200, json: async () => ({ ok: true, serverTime: new Date(server.clock).toISOString(), dealership: { id: 'd1', name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'salesperson', listings: [], counts: {} }) };
+  };
+  return server;
+}
+
+const retryAlarm = () => [...alarms.values()].find((a) => a.name.includes(ORIGIN)) || null;
+const fireAlarm = (alarm) => Promise.all(alarmListeners.map((fn) => fn({ name: alarm.name, scheduledTime: Date.now() })));
+
+test('fourteen take-downs in a row, past the server\'s dozen syncs a minute, all reach the dealership: the sync turned away is tried again a minute later', async () => {
+  const vins = Array.from({ length: 14 }, (_, i) => `TESTVIN0000000${String(i).padStart(3, '0')}`);
+  const area = localArea({
+    [GLOBAL_KEYS.account]: session(),
+    [k.posted]: Object.fromEntries(vins.map((vin, i) => [vin, { name: `Car ${i}`, price: 10000, postedAt: new Date().toISOString() }])),
+    [SITES_KEY]: { [ORIGIN]: { name: 'Example Motors' } },
+  });
+  globalThis.chrome.storage.local = area;
+  alarms.clear();
+  const server = limitedServer();
+  const fetchBefore = globalThis.fetch;
+  globalThis.fetch = server.fetchImpl;
+  try {
+    const results = [];
+    for (const vin of vins) {
+      const left = { ...area.data[k.posted] };
+      delete left[vin]; // Taken down in the popup
+      area.data[k.posted] = left;
+      results.push(await syncSite(ORIGIN)); // the popup's request, answered before the next click
+      server.clock += 2000; // a click every two seconds
+    }
+    assert.equal(results.filter((r) => r.ok).length, 12, 'a dozen got through');
+    assert.equal(results[12].ok, false);
+    assert.equal(results[13].status, 429);
+    assert.equal(server.sent.length, 12);
+    assert.match(JSON.stringify(server.sent[11].posted), new RegExp(vins[13]), 'the last two take-downs have not reached the server yet');
+
+    const alarm = retryAlarm();
+    assert.ok(alarm, 'a sync is set for later');
+    assert.equal(alarm.delayInMinutes, 1, 'once the server\'s minute has passed');
+    assert.equal(alarm.periodInMinutes, undefined, 'once, not over and over');
+    assert.equal(alarms.size, 1, 'one alarm for the website, however many syncs were turned away');
+    const entry = area.data[SITES_KEY][ORIGIN];
+    assert.equal(entry.lastSyncError, 'too many syncs; try again in a minute');
+    assert.ok(Date.parse(entry.lastSyncRetry) > Date.now(), 'Settings can say when it tries again');
+    assert.equal(results[13].retryAt, entry.lastSyncRetry, 'Sync now can say so too');
+
+    // a minute later the alarm goes off (Chrome forgets a one-shot alarm once it has fired)
+    server.clock += 60000;
+    alarms.delete(alarm.name);
+    await fireAlarm(alarm);
+    assert.equal(server.sent.length, 13, 'one more sync');
+    assert.equal(JSON.stringify(server.sent[12].posted), '{}', 'every take-down has reached the dealership');
+    const after = area.data[SITES_KEY][ORIGIN];
+    assert.equal(after.lastSyncError, null, 'Settings no longer shows the refusal');
+    assert.equal(after.lastSyncRetry, null);
+    assert.ok(after.lastSync);
+    assert.equal(retryAlarm(), null, 'nothing left set');
+  } finally {
+    globalThis.fetch = fetchBefore;
+  }
+});
+
+test('a sync that gets through before the retry is due cancels it; a sync that fails for another reason sets none', async () => {
+  const area = localArea({ [GLOBAL_KEYS.account]: session(), [k.posted]: { [VIN_A]: { name: 'Car A', price: 10000, postedAt: new Date().toISOString() } }, [SITES_KEY]: { [ORIGIN]: { name: 'Example Motors' } } });
+  globalThis.chrome.storage.local = area;
+  alarms.clear();
+  const server = limitedServer();
+  const fetchBefore = globalThis.fetch;
+  globalThis.fetch = server.fetchImpl;
+  try {
+    for (let i = 0; i < 13; i++) await syncSite(ORIGIN);
+    assert.ok(retryAlarm(), 'the thirteenth was turned away: a retry is set');
+    server.clock += 61000;
+    assert.equal((await syncSite(ORIGIN)).ok, true, 'Sync now, a minute later');
+    assert.equal(retryAlarm(), null, 'the retry is cancelled: that sync sent everything');
+    assert.equal(area.data[SITES_KEY][ORIGIN].lastSyncRetry, null);
+
+    server.failNext = 1;
+    const failed = await syncSite(ORIGIN);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.retryAt, undefined);
+    assert.equal(retryAlarm(), null, 'only the server asking to wait sets a retry');
+    assert.equal(area.data[SITES_KEY][ORIGIN].lastSyncError, 'database unavailable');
   } finally {
     globalThis.fetch = fetchBefore;
   }

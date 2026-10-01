@@ -400,6 +400,25 @@ test('a post the last sync could not share is named on To do, on the car in My l
   assert.match(q.panel(), /id="notSharedBanner">2 of your posts are not on your dealership's list/);
 });
 
+// A sync the account server turned away for coming too often (more than a
+// dozen a minute) is tried again by the service worker a minute later
+// (background.js planRetry, which records lastSyncRetry): Settings says so
+// while it is still to come, and nothing about it once that time has passed.
+test('Settings says a sync the server asked to wait is tried again on its own, only while that is still to come', async () => {
+  const session = { accessToken: 'a.e30.c', refreshToken: 'r', expiresAt: Date.now() + 3600e3, user: { id: 'u1', email: 'sam@example.test' } };
+  const syncState = { version: 1, since: '2026-10-01T09:00:00.000Z', known: [], dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: '2026-10-01T09:00:00.000Z', plan: null, postsToday: null };
+  const entry = (retry) => ({ name: 'Example Motors', lastSync: '2026-10-01T09:00:00.000Z', lastSyncAttempt: '2026-10-01T09:05:00.000Z', lastSyncError: 'too many syncs; try again in a minute', lastSyncRetry: retry });
+  const soon = new Date(Date.now() + 50 * 1000).toISOString();
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.sync]: syncState, account: session, sites: { [POPUP_ORIGIN]: entry(soon) } } });
+  await p.tab('settings');
+  assert.match(p.panel(), /id="syncStatus">Last sync [^<]* · the last attempt failed: too many syncs; try again in a minute; Lot Current tries again on its own at [^<.]+\. /);
+
+  const past = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.sync]: syncState, account: session, sites: { [POPUP_ORIGIN]: entry(new Date(Date.now() - 60 * 1000).toISOString()) } } });
+  await past.tab('settings');
+  assert.match(past.panel(), /id="syncStatus">Last sync [^<]* · the last attempt failed: too many syncs; try again in a minute\. /);
+  assert.doesNotMatch(past.panel(), /tries again on its own/, 'a retry whose time has passed is not promised');
+});
+
 // Changing "Price to post" moves the person's listings to the new basis:
 // each must be edited by hand, but the website did not change, so they are
 // warned before saving, and To do and My listings say "Price to post changed

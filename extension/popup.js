@@ -830,7 +830,9 @@ function accountFieldset() {
   const plan = planText(ss.plan);
   const planLine = plan ? ` · <span id="planStatus"${ss.plan.state === 'lapsed' ? ' style="color: var(--bad)"' : ''}>${esc(plan)}</span>` : '';
   const last = ss.lastSyncAt ? `Last sync ${esc(when(ss.lastSyncAt))}` : 'Not synced yet';
-  const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}` : '';
+  // a sync the server asked to wait is tried again by the service worker (background.js planRetry); said only while that is still to come
+  const retry = site.lastSyncRetry && Date.parse(site.lastSyncRetry) > Date.now() ? `; Lot Current tries again on its own at ${esc(when(site.lastSyncRetry))}` : '';
+  const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}${retry}` : '';
   const refused = notSharedCount(); // the same count as To do's banner
   const notSharedNote = refused ? ` · ${refused} of your posts ${refused === 1 ? 'is' : 'are'} not shared with your dealership (My listings says why)` : '';
   const syncHint = state.origin

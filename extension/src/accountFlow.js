@@ -404,7 +404,9 @@ export function describeSync(r) {
   if (r.notConfigured) return r.error || NOT_CONFIGURED;
   if (r.code === LAPSED_CODE || r.lapsed) return `Not synced: ${r.error || LAPSED_MESSAGE}.`;
   if (r.signedOut) return `Not synced: sign in first (${r.error || NOT_SIGNED_IN}).`;
-  return `Sync failed: ${r.error || 'unknown error'}`;
+  // the server asked to wait, and the service worker set a retry (background.js planRetry)
+  const retry = r.retryAt ? '. Lot Current tries again on its own in a minute.' : '';
+  return `Sync failed: ${r.error || 'unknown error'}${retry}`;
 }
 
 // One line about the dealership's plan for the Account section, from the

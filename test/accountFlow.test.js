@@ -478,6 +478,12 @@ test('syncOnce: a token the function rejects signs the person out; not a member 
   assert.deepEqual(elsewhere.data, before2, 'a refused sync leaves the storage as it found it (its first-sync placeholder removed)');
   assert.equal(describeSync(r2), `Sync failed: ${r2.error}`);
 
+  // the server's brake (a dozen syncs a minute): a 429 with the server's own words, which the worker retries
+  const busy = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl: fakeFetch({ sync: { status: 429, body: { ok: false, error: 'too many syncs; try again in a minute' } } }).fetchImpl, storage: fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted }) }) });
+  assert.equal(busy.status, 429, 'the worker sets its retry from the status');
+  assert.equal(describeSync(busy), 'Sync failed: too many syncs; try again in a minute');
+  assert.equal(describeSync({ ...busy, retryAt: '2026-10-01T10:01:00.000Z' }), 'Sync failed: too many syncs; try again in a minute. Lot Current tries again on its own in a minute.');
+
   const offline = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
   const before3 = structuredClone(offline.data);
   const r3 = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl: async () => { throw new TypeError('Failed to fetch'); }, storage: offline }) });

@@ -509,6 +509,33 @@ test('every text that lists when the extension syncs counts the scans, take-down
   }
 });
 
+// A sync the account server turns away for coming too often (its brake is a
+// dozen a minute) is tried again a minute later by a one-shot alarm
+// (background.js planRetry), so a run of Mark posted clicks still reaches
+// the dealership. That is a call the extension makes a minute after the
+// click, with the alarms permission: the texts that list when it syncs and
+// what the alarms permission does say so.
+test('every text that lists when the extension syncs, or what the alarms permission does, says a sync the server asked to wait is tried again a minute later', () => {
+  const worker = read('../extension/background.js');
+  assert.match(worker, /if \(r\.status !== 429\) return null;[^]*?chrome\.alarms\.create\(name, \{ delayInMinutes: SYNC_RETRY_MINUTES \}\)/, 'the worker no longer retries a sync the server asked to wait: these texts must stop saying it does');
+  const lineWith = (rel, marker) => {
+    const line = read(rel).split('\n').find((l) => l.includes(marker));
+    assert.ok(line, `${rel} has no line with "${marker}"`);
+    return line;
+  };
+  for (const [rel, marker] of [
+    ['../docs/data-inventory.md', '| Sync ('],
+    ['../docs/help.md', '**What leaves the browser'],
+    ['../legal/chrome-web-store-privacy.md', '| While signed in:'],
+    ['../legal/chrome-web-store-privacy.md', '| `alarms` |'],
+    ['../store/listing.md', '| `alarms` |'],
+  ]) {
+    const line = lineWith(rel, marker);
+    assert.match(line, /asked (it )?to wait|asks to wait|turns away/, `${rel}: "${marker}" does not say when the server turns a sync away`);
+    assert.match(line, /again a minute (later|after)/, `${rel}: "${marker}" does not say the sync is tried again a minute later`);
+  }
+});
+
 // Only Save settings (the popup's onSettingsSubmit) and finishing set-up
 // (wizard.js) write the synced profile; a scan, the rescan permission or a
 // sign-in never puts back a profile the person forgot. Every text that says

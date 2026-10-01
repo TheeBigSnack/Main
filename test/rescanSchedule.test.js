@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE, fakeDealerPage, fakeChrome } from './helpers.js';
@@ -13,6 +13,17 @@ test('the badge counts only the salesperson\'s own to-dos', () => {
   assert.equal(badgeText(0), '');
   assert.equal(badgeText(2), '2');
   assert.equal(badgeText(150), '99');
+});
+
+test('a sync retry alarm is named after its website and read back only from its own name', () => {
+  const origin = 'https://www.example-motors.test';
+  assert.equal(originOfSyncRetryAlarm(syncRetryAlarm(origin)), origin);
+  assert.notEqual(syncRetryAlarm(origin), syncRetryAlarm('https://www.example-sister-store.test'), 'one per website');
+  assert.notEqual(syncRetryAlarm(origin), RESCAN_ALARM);
+  assert.equal(originOfSyncRetryAlarm(RESCAN_ALARM), null, 'the rescan alarm is not a retry');
+  assert.equal(originOfSyncRetryAlarm(syncRetryAlarm('')), null, 'no website, no retry');
+  assert.equal(originOfSyncRetryAlarm(undefined), null);
+  assert.equal(SYNC_RETRY_MINUTES, 1, 'the account server\'s brake counts the last minute');
 });
 
 test('a notification only when the count went up', () => {

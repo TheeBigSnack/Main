@@ -15,9 +15,10 @@
 //      the popup shows; the Scan button still reads it from the tab.
 //   4. Sync the posted list and the pilot numbers with the dealership's
 //      account server (src/accountFlow.js) after a rescan and when the popup
-//      or the side panel asks (syncNow): only once the owner has filled in
-//      src/accountConfig.js and the person is signed in. With an empty
-//      config nothing here calls out.
+//      or the side panel asks (syncNow), and again a minute after the
+//      server turned a sync away for coming too often (a one-shot alarm):
+//      only once the owner has filled in src/accountConfig.js and the
+//      person is signed in. With an empty config nothing here calls out.
 // It never touches Facebook and never posts anything.
 
 import { adapterById } from './adapters/index.js';
@@ -25,7 +26,7 @@ import { scanWithSearch } from './src/scanRunner.js';
 import { siteKeys, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { withDefaults } from './src/settings.js';
-import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
+import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
@@ -152,10 +153,13 @@ const updateSites = (change) => updateKey(SITES_KEY, (sites) => change(sites || 
 // done) or set-up asked for it; one sync per website at a time. A request
 // made while one runs may carry a change that sync read too early (a
 // take-down clicked a second after a post), so one more sync follows it,
-// shared by every request made meanwhile, and they all get its result. The
-// outcome is recorded on the website's registry entry (lastSyncAttempt,
-// lastSync, lastSyncError) so Settings can show it. Never throws: a failed
-// sync is a result, not an exception.
+// shared by every request made meanwhile, and they all get its result. A
+// sync the account server turns away for coming too often (a 429: its
+// per-person brake is a dozen a minute, which a salesperson marking a lot of
+// cars passes) is tried again a minute later (planRetry). The outcome is
+// recorded on the website's registry entry (lastSyncAttempt, lastSync,
+// lastSyncError, lastSyncRetry) so Settings can show it. Never throws: a
+// failed sync is a result, not an exception.
 const syncing = new Map(); // origin -> { run, again, scan }: the sync under way, the one to follow it, and the scan it sends
 
 export function syncSite(origin, { scan = null } = {}) {
@@ -182,17 +186,43 @@ function startSync(key, scan) {
     } catch (e) {
       r = { ok: false, error: String((e && e.message) || e) };
     }
+    const retryAt = await planRetry(key, r);
     const at = new Date().toISOString();
     try {
       await updateSites((sites) => (sites[key]
-        ? { ...sites, [key]: { ...sites[key], lastSyncAttempt: at, ...(r.ok ? { lastSync: at, lastSyncError: null } : { lastSyncError: r.error || 'unknown error' }) } }
+        ? { ...sites, [key]: { ...sites[key], lastSyncAttempt: at, ...(r.ok ? { lastSync: at, lastSyncError: null, lastSyncRetry: null } : { lastSyncError: r.error || 'unknown error', ...(retryAt ? { lastSyncRetry: retryAt } : {}) }) } }
         : undefined)); // a website not registered for rescans has nowhere to record it; the result still says
     } catch (e) { /* the registry could not be written; the result still says what happened */ }
-    return r;
+    return retryAt ? { ...r, retryAt } : r;
   })();
   syncing.set(key, entry);
   entry.run.finally(() => { if (syncing.get(key) === entry) syncing.delete(key); });
   return entry.run;
+}
+
+// After a 429 from the account server, one more sync a minute later, when
+// its minute has passed: it sends the whole registry as it is then, so every
+// change the refused syncs carried goes up. An alarm, not a timer, because
+// Chrome stops an idle worker well before a minute. One per website: a later
+// refusal moves it, and a sync that gets through first cancels it, having
+// sent everything. Any other failure (offline, signed out, a lapsed plan)
+// sets none; the next scan, post or Sync now tries again as before. Returns
+// when the retry is due, or null.
+async function planRetry(key, r) {
+  if (!chrome.alarms || typeof chrome.alarms.create !== 'function') return null;
+  const name = syncRetryAlarm(key);
+  try {
+    if (r.ok) {
+      await chrome.alarms.clear(name);
+      return null;
+    }
+    if (r.status !== 429) return null;
+    const due = new Date(Date.now() + SYNC_RETRY_MINUTES * 60 * 1000).toISOString();
+    await chrome.alarms.create(name, { delayInMinutes: SYNC_RETRY_MINUTES });
+    return due;
+  } catch (e) {
+    return null; // no alarm: the next scan, post or Sync now still syncs
+  }
 }
 
 export async function updateBadge() {
@@ -300,9 +330,17 @@ async function ensureAlarm() {
   if (!existing) await chrome.alarms.create(RESCAN_ALARM, { periodInMinutes: RESCAN_PERIOD_MINUTES, delayInMinutes: RESCAN_PERIOD_MINUTES });
 }
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === RESCAN_ALARM) rescanDueSites('alarm');
-});
+// The 3-hourly rescan, and a sync retried after the account server asked
+// to wait (planRetry). The promise is for the tests; Chrome ignores it.
+function onAlarm(alarm) {
+  if (!alarm) return undefined;
+  if (alarm.name === RESCAN_ALARM) return rescanDueSites('alarm');
+  const origin = originOfSyncRetryAlarm(alarm.name);
+  if (origin) return syncSite(origin);
+  return undefined;
+}
+
+chrome.alarms.onAlarm.addListener(onAlarm);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
