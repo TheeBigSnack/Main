@@ -285,12 +285,14 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
   const flagStats = (flags) => {
     const done = flags.filter((f) => f.done_at && f.how !== 'cleared');
     const hours = done.map((f) => hoursBetween(f.flagged_at, f.done_at)).filter((h) => typeof h === 'number');
+    const openRows = flags.filter(isOpen);
+    const open = new Set(openRows.map(vinOf)).size; // one per car, as the lists above
     return {
-      flagged: flags.length,
+      flagged: flags.length - openRows.length + open, // open rows of one car count once here too, so flagged = done + open + cleared
       done: done.length,
       detected: done.filter((f) => f.how === 'detected').length,
       cleared: flags.filter((f) => f.how === 'cleared').length,
-      open: new Set(flags.filter(isOpen).map(vinOf)).size, // one per car, as the lists above
+      open,
       medianHours: median(hours),
       longestHours: hours.length ? Math.max(...hours) : null,
     };

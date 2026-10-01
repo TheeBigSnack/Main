@@ -198,6 +198,11 @@ test('a car with two open items of one kind (two machines of one salesperson tha
   assert.deepEqual(s.soldStillListed.map((o) => [o.vin, o.hoursOpen, o.overdue]), [['V1', 26, true]]);
   assert.equal(s.priceUpdates.open, 1);
   assert.equal(s.takeDowns.open, 1);
+  // and flagged = done + still open + cleared, as the CSV says
+  assert.deepEqual([s.priceUpdates.flagged, s.takeDowns.flagged], [1, 1]);
+  const closed = summarize({ listings, todoItems: [...todoItems, { vin: 'V1', kind: 'price', flagged_at: ago(50), done_at: ago(40), how: 'manual' }, { vin: 'V1', kind: 'price', flagged_at: ago(60), done_at: ago(55), how: 'cleared' }], now: NOW });
+  const p = closed.priceUpdates;
+  assert.deepEqual([p.flagged, p.done, p.open, p.cleared], [3, 1, 1, 1]);
 });
 
 test('a car still listed by someone no longer on the team is listed for the manager, since no rescan looks after it; the empty to-do cards claim only what the items show', () => {
