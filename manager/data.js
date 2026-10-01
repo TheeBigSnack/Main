@@ -402,6 +402,26 @@ export function authFragment(hash) {
   return { accessToken, note: tokens ? STRAY_LINK_NOTE : FAILED_LINK_NOTE };
 }
 
+// A link the auth server refused (expired, used, replaced by a newer email)
+// on this page's own PKCE flow comes back with the error in the query as
+// well as in the fragment: ?error=...&error_code=...&error_description=...
+// supabase-js reads the query too, takes an error_description there for a
+// failed sign-in and removes a session this browser already has; and the
+// words would stay in the address bar. authQueryError() names the error
+// parameters the query carries, so the page takes them out before
+// supabase-js starts, and says FAILED_LINK_NOTE.
+export const AUTH_ERROR_PARAMS = Object.freeze(['error', 'error_code', 'error_description']);
+/**
+ * @param {string} search  location.search, with or without the leading ?
+ * @returns {null | { params: string[], note: string }}  null when the query
+ *   carries no auth error
+ */
+export function authQueryError(search) {
+  const p = new URLSearchParams(String(search ?? '').replace(/^\?/, ''));
+  const params = AUTH_ERROR_PARAMS.filter((k) => p.has(k));
+  return params.length ? { params, note: FAILED_LINK_NOTE } : null;
+}
+
 // ---------- billing ----------
 
 export const DAY_MS = 24 * 3600 * 1000;

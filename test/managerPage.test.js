@@ -188,6 +188,48 @@ test('a link that lands with the auth server\'s #error: the fragment leaves the 
   assert.doesNotMatch(status(page), /invalid or has expired/, 'the address\'s own words are never shown: anyone can write them into a link');
 });
 
+// GoTrue sends a refused link of the PKCE flow (expired, used, replaced by
+// a newer email) back with the error in the query as well as the fragment.
+// supabase-js reads the query too, and takes an error_description there for
+// a failed sign-in: it would remove a session this browser already holds.
+const REFUSED = 'error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired';
+
+test('a refused link of this page\'s own (the error in the query and the fragment): both leave the address before supabase-js starts, and the page says the link did not work', async () => {
+  const seen = {};
+  const page = await openPage(`${PAGE}?${REFUSED}#${REFUSED}`, { client: fakeClient({ seen }) });
+  assert.doesNotMatch(seen.created.href, /error|#/, 'supabase-js never sees the error, so it cannot wipe a session this browser holds');
+  assert.equal(page.href, PAGE, 'the address bar keeps none of the error\'s words');
+  assert.ok(page.history.every((h) => !/error/.test(h)));
+  assert.equal(page.fetches.filter((f) => f.url.includes('/auth/v1/logout')).length, 0);
+  assert.match(main(page), /<h2>Sign in<\/h2>/);
+  assert.match(status(page), /did not work: it may have expired, been used already, or been replaced by a newer email/);
+  assert.doesNotMatch(status(page), /invalid or has expired/, 'the address\'s own words are never shown');
+});
+
+test('the error in the query alone gets the same sentence, and the rest of the address stays', async () => {
+  const seen = {};
+  const page = await openPage(`${PAGE}?mode=x&${REFUSED}`, { client: fakeClient({ seen }) });
+  assert.doesNotMatch(seen.created.href, /error/);
+  assert.equal(page.href, `${PAGE}?mode=x`, 'only the error parameters leave');
+  assert.match(status(page), /did not work/);
+});
+
+test('a refused link opened in a browser that is already signed in: the person stays signed in', async () => {
+  const seen = {};
+  const client = fakeClient({
+    seen,
+    session: { access_token: 'my-own-token', user: { id: 'u-manager', email: 'manager@example.test' } },
+    tables: {
+      dealerships: [{ id: 'd1', name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+      memberships: [{ user_id: 'u-manager', dealership_id: 'd1', role: 'manager', name: 'Jamie' }],
+    },
+  });
+  const page = await openPage(`${PAGE}?${REFUSED}#${REFUSED}`, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
+  assert.doesNotMatch(seen.created.href, /error/);
+  assert.equal(page.elements.get('dealer').textContent, 'Example Motors');
+  assert.equal(page.href, PAGE);
+});
+
 test('an address with neither tokens nor an error is left as it is', async () => {
   const seen = {};
   const page = await openPage(PAGE + '#section', { client: fakeClient({ seen }) });

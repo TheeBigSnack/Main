@@ -28,7 +28,8 @@
 // PKCE challenge whose verifier nobody keeps, so its link brings back only a
 // code nothing can exchange. An address that still arrives with
 // #access_token=... (a link asked for without a challenge) or the auth
-// server's #error=... is taken out of the address before supabase-js starts,
+// server's #error=... (and, for a refused link of this page's own, the same
+// error in the query) is taken out of the address before supabase-js starts,
 // the session those tokens opened is ended, and the sign-in form says why
 // (data.js authFragment); a ?code= this browser could not exchange leaves
 // the address the same way.
@@ -46,7 +47,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, authQueryError, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -839,20 +840,24 @@ async function loadLive() {
 
 // ---------- start ----------
 
-// A sign-in answer this page did not ask for (data.js authFragment): the
-// fragment leaves the address at once, before supabase-js reads it, so the
-// tokens leave the address bar and a session this browser holds is kept.
-// The session those tokens opened is ended with its own token (scope local:
-// no other session of the person's), and nothing waits on that answer.
-// Returns the sentence for the sign-in form, or ''.
+// A sign-in answer this page did not ask for (data.js authFragment), or a
+// refused link's error in the query (data.js authQueryError): the fragment
+// and the error parameters leave the address at once, before supabase-js
+// reads it, so the tokens and the error leave the address bar and a session
+// this browser holds is kept. The session stray tokens opened is ended with
+// its own token (scope local: no other session of the person's), and nothing
+// waits on that answer. Returns the sentence for the sign-in form, or ''.
 function dropAuthFragment() {
   const found = authFragment(location.hash);
-  if (!found) return '';
+  const failed = authQueryError(location.search);
+  if (!found && !failed) return '';
   try {
     const url = new URL(location.href);
-    url.hash = '';
+    if (found) url.hash = '';
+    if (failed) for (const name of failed.params) url.searchParams.delete(name);
     history.replaceState(null, '', url.toString());
   } catch { /* some file:// pages refuse */ }
+  if (!found) return failed.note;
   if (found.accessToken && configured()) {
     fetch(`${trimSlash(CONFIG.supabaseUrl)}/auth/v1/logout?scope=local`, {
       method: 'POST',
