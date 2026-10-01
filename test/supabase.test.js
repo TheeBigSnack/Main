@@ -270,7 +270,7 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   }
   assert.match(rls, /grant select on public\.dealerships to authenticated;\s[\s\S]*?grant update \(name\) on public\.dealerships to authenticated;/);
   assert.doesNotMatch(rls, /grant select, update on public\.dealerships/);
-  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was looked up', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice', 'making a manager a salesperson kept the unused code they made', 'a salesperson changed a stored salesperson name through the API', 'a_sales made themselves a manager', 'a_sales renamed a member', 'a_sales removed another member', 'a_sales renamed their dealership']) {
+  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was looked up', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice', 'making a manager a salesperson kept the unused code they made', 'a salesperson changed a stored salesperson name through the API', 'a_sales made themselves a manager', 'a_sales renamed a member', 'a_sales removed another member', 'a_sales renamed their dealership', 'redeeming a salesperson code made a manager a salesperson', 'a manager who already belongs used up the code meant for a new hire']) {
     assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
   }
 });

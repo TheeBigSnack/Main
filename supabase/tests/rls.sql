@@ -153,7 +153,8 @@ insert into public.invites (code, dealership_id, role, created_by, expires_at) v
   ('EXPIREDB0003', :'dealer_b', 'salesperson', null,       now() - interval '1 minute'), -- past its 7 days
   ('ORPHANA00004', :'dealer_a', 'salesperson', :'b_sales', now() + interval '7 days'),   -- its maker is no manager of A (B's salesperson)
   ('DEMOTEA00006', :'dealer_a', 'salesperson', :'a_sales', now() + interval '7 days'),   -- live only while a_sales is a manager of A
-  ('OPENC0000005', :'dealer_c', 'salesperson', null,       now() + interval '7 days');   -- C's, out of a_mgr's reach
+  ('OPENC0000005', :'dealer_c', 'salesperson', null,       now() + interval '7 days'),   -- C's, out of a_mgr's reach
+  ('HIREB0000007', :'dealer_b', 'salesperson', :'a_mgr',   now() + interval '7 days');   -- a_mgr's code for a new hire at B
 
 -- ---------------------------------------------------------------------------
 -- a_sales: a salesperson of A
@@ -596,6 +597,7 @@ declare
   b uuid := '00000000-0000-4000-8000-0000000000d2';
   got jsonb;
   code text;
+  own_code text;
   i integer;
 begin
   select count(*) into n from public.listings;
@@ -644,6 +646,25 @@ begin
   select count(*) into n from public.memberships where user_id = auth.uid() and dealership_id = b and role = 'manager';
   if n <> 1 then raise exception 'redeeming the second invite did not update the membership'; end if;
   raise notice 'ok: an invite code is matched ignoring case and surrounding spaces';
+
+  -- a code never lowers a role: the newcomer, now a manager of B like a_mgr, enters the code a_mgr made for
+  -- a new hire. Nothing changes: still a manager, the codes the newcomer made still open, the new hire's code
+  -- still unused, and no miss counted (the throttle below still counts four)
+  own_code := public.create_invite(b, 'salesperson') ->> 'code';
+  got := public.redeem_invite('HIREB0000007', 'Riley');
+  if got ->> 'code' is distinct from 'P0012' or got ->> 'message' is distinct from 'you are already a manager of this dealership; the code was not used' then
+    raise exception 'a manager redeeming a salesperson code was answered with %', got;
+  end if;
+  if (select role from public.memberships where user_id = auth.uid() and dealership_id = b) is distinct from 'manager' then
+    raise exception 'redeeming a salesperson code made a manager a salesperson';
+  end if;
+  if not exists (select 1 from public.list_invites(b) l where l.code = own_code) then
+    raise exception 'redeeming a salesperson code deleted the codes the manager made';
+  end if;
+  if not exists (select 1 from public.list_invites(b) l where l.code = 'HIREB0000007') then
+    raise exception 'a manager who already belongs used up the code meant for a new hire';
+  end if;
+  raise notice 'ok: a code never lowers a role, and a member it would not raise leaves it unused';
 
   -- the throttle: four misses so far (NOPE, expired, orphaned, used); six more make ten, and then the
   -- function refuses before looking anything up, even a good code
