@@ -299,6 +299,12 @@ try {
   await panelEs.goto(extUrl('sidepanel.html'));
   await panelEs.waitForSelector('#openForm', { timeout: 20000 });
   assert.match(await panelEs.textContent('#vehicle'), /2022 Jeep Wagoneer Series III/);
+  // the Wagoneer is at another store: its description names that store, never this dealership's town,
+  // and the location (the dealership's address) is listed for the person to check on the form
+  const draftEs = await panelEs.inputValue('#description');
+  assert.match(draftEs, /^Pre-owned and on the lot at [^\n]*Cranberry\.$/m);
+  assert.doesNotMatch(draftEs, /in Waynesburg/);
+  assert.match(await panelEs.textContent('#assumed'), /Location[\s\S]*the website lists this car at [^\n]*Cranberry, so check the location on the form/);
   const [fbEs] = await Promise.all([context.waitForEvent('page'), panelEs.click('#checkForm')]);
   watch(fbEs);
   await panelEs.waitForSelector('#probeResults', { timeout: 30000 });

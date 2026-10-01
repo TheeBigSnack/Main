@@ -288,3 +288,29 @@ test('listingChanges: the form fields a fresh read of the car changes, the descr
   assert.ok(branded.some((c) => c.key === 'titleStatus' || c.key === 'cleanTitle'), JSON.stringify(branded));
   assert.deepEqual(listing.listingChanges(null, build(v, 27163)).map((c) => c.key).includes('price'), true, 'no earlier listing: everything is new');
 });
+
+test('the listing\'s location is listed as assumed when the website puts the car at a store that may not be at the dealership\'s address', async () => {
+  const { carStore } = await import('../extension/src/listingData.js');
+  const dealer = { name: 'Sample Auto Group', city: 'Springfield', state: 'OH', zip: '45505' };
+  const car = (location) => ({ ...vehicle('usedNormal'), location });
+  const opts = (stores) => ({ dealer, price: 20000, stores });
+  const location = (d) => d.assumed.find((a) => a.key === 'location');
+  // no store ticked, the car at a store whose name does not name the town: check the location
+  const away = buildListingData(car('Sample Chevrolet Shelbyville'), opts([]));
+  assert.equal(away.fields.location, '45505', 'still filled from the dealership\'s address');
+  assert.equal(location(away).value, '45505');
+  assert.match(location(away).why, /^your dealership's address; the website lists this car at Sample Chevrolet Shelbyville, so check the location on the form$/);
+  // two stores ticked: the same
+  assert.ok(location(buildListingData(car('Sample Chevrolet Shelbyville'), opts(['Sample Ford Springfield', 'Sample Chevrolet Shelbyville']))));
+  // the one store ticked, a store named for the dealership's town, or no store named: nothing to check
+  assert.equal(location(buildListingData(car('Sample Chevrolet Shelbyville'), opts(['Sample Chevrolet Shelbyville']))), undefined);
+  assert.equal(location(buildListingData(car('Sample Ford Springfield'), opts([]))), undefined);
+  assert.equal(location(buildListingData(car(null), opts([]))), undefined);
+  // carStore itself: the town is matched as whole words, any case or accent
+  assert.deepEqual(carStore({ location: 'Sample Ford of SPRINGFIELD' }, { dealer }), { store: 'Sample Ford of SPRINGFIELD', away: false });
+  assert.deepEqual(carStore({ location: 'Sample Ford Springfieldtown' }, { dealer }), { store: 'Sample Ford Springfieldtown', away: true });
+  assert.deepEqual(carStore({ location: 'Sample Ford Mount Pleasant' }, { dealer: { city: 'Mount Pleasant' } }), { store: 'Sample Ford Mount Pleasant', away: false });
+  assert.deepEqual(carStore({ location: 'Sample Ford' }, { dealer: {} }), { store: 'Sample Ford', away: true }, 'no town known: it may be anywhere');
+  assert.deepEqual(carStore({ location: '  Sample Ford ' }, { stores: ['Sample Ford'] }), { store: '', away: false });
+  assert.deepEqual(carStore({}, { stores: [] }), { store: '', away: false });
+});

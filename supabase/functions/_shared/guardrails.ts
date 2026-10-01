@@ -50,6 +50,7 @@ export interface GuardrailVehicle {
   readableType?: unknown;
   urlConditionWord?: unknown;
   siteTitle?: unknown;
+  location?: unknown; // the store the website lists the car at
 }
 
 export interface GuardrailDealer {
@@ -131,7 +132,7 @@ export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price
     v.year, v.make, v.model, v.trim, v.name, v.mileage, v.stock, v.engine, v.transmission, v.drivetrain,
     v.exteriorColor, v.interiorColor, v.bodyType, v.fuelType, v.price, v.priceBeforeFees, v.descriptionRaw,
     ...(Array.isArray(v.features) ? v.features : []),
-    priceNote, price, dealer.name, dealer.city, dealer.zip,
+    priceNote, price, dealer.name, dealer.city, dealer.zip, v.location,
   ];
   return numbersIn(bits.filter((b) => b !== null && b !== undefined).join(' '));
 }
@@ -399,9 +400,9 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   for (const n of numbersIn(prose)) {
     if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
   }
-  // the car's own words: without the dealership's name, its city and the role, which are not claims about it
+  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
   const role = String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
-  const aboutCar = without(prose, [dealer.name, dealer.city, role]);
+  const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]);
   const sourceWords = claimSource({ vehicle, priceNote });
   const spelled = new Set<string>();
   for (const q of spelledQuantities(aboutCar)) {

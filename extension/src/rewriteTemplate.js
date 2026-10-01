@@ -19,6 +19,7 @@
 // The template is the final fallback, so it is built to pass its own checks.
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
+import { carStore } from './listingData.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -99,7 +100,7 @@ export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price
     v.year, v.make, v.model, v.trim, v.name, v.mileage, v.stock, v.engine, v.transmission, v.drivetrain,
     v.exteriorColor, v.interiorColor, v.bodyType, v.fuelType, v.price, v.priceBeforeFees, v.descriptionRaw,
     ...(Array.isArray(v.features) ? v.features : []),
-    priceNote, price, dealer.name, dealer.city, dealer.zip,
+    priceNote, price, dealer.name, dealer.city, dealer.zip, v.location,
   ];
   return numbersIn(bits.filter((b) => b !== null && b !== undefined).join(' '));
 }
@@ -345,10 +346,15 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   narrative:   car-specific sentences from description.js (cleanDescription)
  *   highlights:  the salesperson's pick of the website's features (settleHighlights); null for the usual pick
  *   closingLine: the salesperson's own line from Settings (salesperson.closingLine), used when it passes checkClosingLine
+ *   stores:      the salesperson's ticked stores (settings.myStores); a car the website lists at any other store, or
+ *                with none or several ticked, is said to be at its own store, never at the dealership in its town
  */
-export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [], highlights = null }) {
+export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [], highlights = null, stores = [] }) {
   const dealerName = String(dealer.name || '').trim();
   const city = String(dealer.city || '').trim();
+  const store = calmName(carStore(v, { stores, dealer }).store);
+  // where the car is: its own store as the website names it, or the dealership in its town
+  const lot = store || (dealerName ? `${dealerName}${city ? ' in ' + city : ''}` : '');
   const person = String(salesperson.name || '').trim();
   const title = String(salesperson.title || DEFAULT_SALESPERSON_TITLE).trim();
   const name = [v.year, v.make, v.model, v.trim].filter(Boolean).join(' ');
@@ -369,7 +375,7 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'features', keep: 'always', text: features.length ? `Highlights: ${features.join(', ')}.` : '' },
     { id: 'colors', keep: 'optional', text: colors.length ? `${capitalize(colors.join(', '))}.` : '' },
     { id: 'mech', keep: 'optional', text: mech.length ? `${mech.join(', ')}.` : '' },
-    { id: 'where', keep: 'always', text: dealerName ? `Pre-owned and on the lot at ${dealerName}${city ? ' in ' + city : ''}.` : '' },
+    { id: 'where', keep: 'always', text: lot ? `Pre-owned and on the lot at ${lot}.` : '' },
     { id: 'carfax', keep: 'filler', text: v.carfaxUrl ? 'Carfax report available, just ask.' : '' },
     { id: 'stock', keep: 'filler', text: v.stock ? `Stock number ${v.stock}.` : '' },
     { id: 'vin', keep: 'always', text: v.vin ? `VIN ${String(v.vin).toUpperCase().replace(/[^A-Z0-9]/g, '')}.` : '' },
@@ -380,7 +386,7 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     // which then comes back only when the text runs short (the closing line is not counted)
     { id: 'cta', keep: closing ? 'filler' : 'optional', text: 'Message me to set up a test drive or ask a question.' },
     { id: 'more', keep: 'filler', text: 'Happy to send more photos or answer any questions.' },
-    { id: 'visit', keep: 'filler', text: dealerName ? `Come take a look in person at ${dealerName}.` : '' },
+    { id: 'visit', keep: 'filler', text: store || dealerName ? `Come take a look in person at ${store || dealerName}.` : '' },
     { id: 'reply', keep: 'filler', text: "Message me here on Marketplace and I'll get right back to you." },
     // the last filler names nothing, so a sparse car at a dealership with a short name still reaches the minimum
     { id: 'see', keep: 'filler', text: 'Let me know a good time to come see it.' },
@@ -402,6 +408,16 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     on.add(b.id);
   }
   return render();
+}
+
+// A store name as the website writes it, without shouting: when the name
+// is in capitals ("SMITH CHEVROLET SHELBYVILLE"), each word of three or more
+// capitals with a vowel is set in title case; an abbreviation with no vowel
+// ("GMC", "CDJR") stays as written.
+function calmName(name) {
+  const n = String(name || '').replace(/\s+/g, ' ').trim();
+  if (!shouting(n)) return n;
+  return n.replace(/\b[A-Z]{3,}\b/g, (w) => (/[AEIOUY]/.test(w) ? w[0] + w.slice(1).toLowerCase() : w));
 }
 
 function shouting(text) {
@@ -480,7 +496,7 @@ export function listedCertified(v = {}) {
   return /\b(?:certified|cpo)\b/i.test([v.inventoryType, v.readableType, v.urlConditionWord, titleWords].filter((s) => typeof s === 'string').join(' '));
 }
 
-// The text with the given names (the dealership, its city, the role) set aside.
+// The text with the given names (the dealership, its city, the car's store, the role) set aside.
 function without(text, names) {
   let out = String(text || '');
   for (const n of names) {
@@ -579,9 +595,9 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   for (const n of numbersIn(prose)) {
     if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
   }
-  // the car's own words: without the dealership's name, its city and the role, which are not claims about it
+  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
   const role = String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
-  const aboutCar = without(prose, [dealer.name, dealer.city, role]);
+  const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]);
   const sourceWords = claimSource({ vehicle, priceNote });
   const spelled = new Set();
   for (const q of spelledQuantities(aboutCar)) {

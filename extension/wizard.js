@@ -171,7 +171,7 @@ export function wizardHtml() {
       const matched = stores.length ? matchStore(wiz.site, stores) : null;
       const hint = !stores.length ? '' : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
-        <p class="hint">Only cars at your store count as ready to post.${hint ? ' ' + hint : ''}</p>
+        <p class="hint">Only cars at the stores you tick count as ready to post; with none ticked, every store's cars count.${hint ? ' ' + hint : ''}</p>
         ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${s.myStores.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st, stores))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}
         ${nav()}`;
     }

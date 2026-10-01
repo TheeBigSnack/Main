@@ -8,12 +8,13 @@ const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Wa
 const ME = { name: 'Roger', title: 'sales consultant' };
 const NOTE = 'Price includes the $490 doc fee; tax and tags extra.';
 const DISCLAIMER = 'Ron Lewis Real Price includes all costs to be paid by a consumer except for licensing costs, registration fees and taxes. Documentation fee of $490 is not included.';
-const on = { rewrite: { enabled: true, endpoint: 'http://localhost:8787/', key: 'secret' } };
+// the service on, and the store the salesperson ticked: the one the website lists the Ram at
+const on = { myStores: [vehicle('usedNormal').location], rewrite: { enabled: true, endpoint: 'http://localhost:8787/', key: 'secret' } };
 
 const args = (extra = {}) => ({
   vehicle: vehicle('usedNormal', { features: ['Backup Camera', 'Bluetooth', 'Keyless Entry', 'Tow Package'], description: `Local trade with new tires.<br>${DISCLAIMER}` }),
   dealer: DEALER, salesperson: ME, priceNote: NOTE, price: 27163, boilerplate: [DISCLAIMER],
-  settings: { rewrite: { enabled: false } },
+  settings: { myStores: on.myStores, rewrite: { enabled: false } },
   ...extra,
 });
 const reply = (status, body) => async () => ({ ok: status < 400, status, json: async () => body });
@@ -192,4 +193,25 @@ test('a Claude draft that adds parts to the one the write-up names falls back to
   assert.match(r.note, /Says "new brakes"/);
   assert.match(r.note, /Says "new battery"/);
   assert.equal(r.text, template);
+});
+
+test('for a car the website lists at a store in another town, the template names its store and the service is not asked', async () => {
+  const group = { name: 'Sample Auto Group', city: 'Springfield', zip: '00000' };
+  let calls = 0;
+  const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: true, text: 'unused' }) }; };
+  const away = args({ vehicle: { ...args().vehicle, location: 'Sample Chevrolet Shelbyville' }, dealer: group, priceNote: '' });
+  for (const myStores of [[], ['Sample Ford Springfield', 'Sample Chevrolet Shelbyville']]) {
+    const r = await generateDescription({ ...away, settings: { ...on, myStores }, fetchImpl: counting });
+    assert.equal(r.source, 'template');
+    assert.match(r.text, /on the lot at Sample Chevrolet Shelbyville\./);
+    assert.doesNotMatch(r.text, /Springfield/);
+    assert.match(r.note, /lists this car at Sample Chevrolet Shelbyville, which may not be at your dealership's address/);
+    assert.ok(r.guardrails.ok, JSON.stringify(r.guardrails.problems));
+  }
+  assert.equal(calls, 0, 'nothing was sent');
+  // a store in the dealership's own town, or the one store ticked: the service is asked as before
+  const home = args({ vehicle: { ...args().vehicle, location: 'Sample Ford Springfield' }, dealer: group, priceNote: '' });
+  await generateDescription({ ...home, settings: { ...on, myStores: [] }, fetchImpl: counting });
+  await generateDescription({ ...away, settings: { ...on, myStores: ['Sample Chevrolet Shelbyville'] }, fetchImpl: counting });
+  assert.equal(calls, 2);
 });

@@ -8,6 +8,7 @@
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { cleanDescription } from './description.js';
 import { buildTemplateDescription, runGuardrails, ensureVinLine, ensureClosingLine, usableClosingLine, settleHighlights } from './rewriteTemplate.js';
+import { carStore } from './listingData.js';
 
 export const REWRITE_TIMEOUT_MS = 25000;
 
@@ -90,10 +91,16 @@ export async function generateDescription({ vehicle, dealer = {}, salesperson = 
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
   const closingLine = usableClosingLine(salesperson.closingLine);
   const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine };
-  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative, highlights });
+  const stores = Array.isArray(settings.myStores) ? settings.myStores : [];
+  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative, highlights, stores });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };
   const rw = settings.rewrite || {};
   if (!rw.enabled || !rw.endpoint) return fallback;
+  // The service knows the dealership's name and town, not the car's store, so
+  // for a car the website lists at a store in another town it could only say
+  // the car is somewhere it isn't: the template, which names the car's store, is used.
+  const where = carStore(vehicle, { stores, dealer });
+  if (where.away) return { ...fallback, note: `The website lists this car at ${where.store}, which may not be at your dealership's address, so the template wrote the description: it names the car's own store. If it is your store, tick it in Settings.` };
   const facts = { ...rewriteFacts({ vehicle, dealer, salesperson, priceNote, narrative, highlights }), ...(origin ? { origin: String(origin) } : {}) };
   try {
     const r = await rewriteWithBackend({ endpoint: rw.endpoint, key: rw.key, facts, fetchImpl });

@@ -599,7 +599,7 @@ async function readAgainIfStale() {
     return false;
   }
   fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
-  const formOf = (v, p) => buildListingData(v, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, price: p });
+  const formOf = (v, p) => buildListingData(v, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, price: p, stores: state.settings.myStores });
   const changes = listingChanges(formOf(state.vehicle, state.price), formOf(fresh.vehicle, price));
   state.vehicle = fresh.vehicle;
   state.price = price;
@@ -684,7 +684,7 @@ async function openForm({ probeOnly = false } = {}) {
     state.opening = false; // released before the step below moves on, with no wait in between
   }
   state.guardrails = runGuardrails(state.description, ctx());
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
+  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
@@ -1069,7 +1069,7 @@ function viewBlocked() {
   return `<div class="banner bad" id="blocked">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
-const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
+const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
 
 function fieldsTable() {
   const l = currentListing();

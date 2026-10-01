@@ -405,15 +405,36 @@ export function locationExpect(dealer = {}) {
   return { alternatives, strict: Boolean(abbr || /^\d{5}/.test(zip)) };
 }
 
+// Where the website says a car is, against the salesperson's own store.
+// `store` is the car's store, for a description to name in place of the
+// dealership and its town: the website names a store for the car, and it is
+// not the one store the salesperson ticked (they ticked none, so every
+// store's cars count, or several, or the car is at another). '' when the
+// car is at the one store ticked, or the website names no store. `away` is
+// true when that store's name does not name the dealership's town either, so
+// the dealership's address, which the listing's location is typed from, may
+// not be where the car is.
+const placeWords = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+/g) || [];
+export function carStore(v = {}, { stores = [], dealer = {} } = {}) {
+  const at = typeof v.location === 'string' ? v.location.trim() : '';
+  const mine = (Array.isArray(stores) ? stores : []).map((st) => String(st || '').trim()).filter(Boolean);
+  const store = at && !(mine.length === 1 && mine[0] === at) ? at : '';
+  const name = placeWords(store);
+  const town = placeWords(dealer && dealer.city);
+  const inTown = town.length > 0 && name.some((_, i) => town.every((w, j) => name[i + j] === w));
+  return { store, away: Boolean(store) && !inTown };
+}
+
 /**
  * @param {object} vehicle   normalised vehicle
- * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition} }
+ * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition}, stores }
  *   price is the number to post (the caller applies the dealer's price basis);
  *   defaults are the dealership's answers for the fields the website can't give;
  *   guesses ({ exterior, interior, confidence }) are colors read from the photos,
- *   used only where the website gives no usable color
+ *   used only where the website gives no usable color;
+ *   stores are the salesperson's ticked stores (settings.myStores), for carStore
  */
-export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null } = {}) {
+export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null, stores = [] } = {}) {
   const v = vehicle || {};
   const d = defaults || {};
   const g = guesses || {};
@@ -470,6 +491,9 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
   const guessWhy = (raw) => `guessed from the photos (${g.confidence || 'unknown'} confidence); the website ${raw ? `says "${raw}"` : 'gives no color'}; check it on the form`;
   if (extGuess) assumed.push({ key: 'exteriorColor', label: 'Exterior color', value: extGuess, why: guessWhy(v.exteriorColor) });
   if (intGuess) assumed.push({ key: 'interiorColor', label: 'Interior color', value: intGuess, why: guessWhy(v.interiorColor) });
+  // the location is the dealership's address; a car the website lists at a store in another town may be elsewhere
+  const where = carStore(v, { stores, dealer });
+  if (fields.location && where.away) assumed.push({ key: 'location', label: 'Location', value: fields.location, why: `your dealership's address; the website lists this car at ${where.store}, so check the location on the form` });
   if (fields.condition) assumed.push({ key: 'condition', label: 'Vehicle condition', value: fields.condition, why: "your dealership's default; change it on the form if this car is different" });
   else leftBlank.push({ key: 'condition', label: 'Vehicle condition', why: 'no default set in Settings; pick it on the form' });
   if (fields.titleStatus) assumed.push({ key: 'titleStatus', label: 'Title status', value: fields.titleStatus, why: "your dealership's default; change it on the form if this car's title is branded" });

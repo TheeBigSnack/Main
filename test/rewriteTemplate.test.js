@@ -416,7 +416,7 @@ test('private-seller wording is refused in the closing line, in the template and
     const withLine = buildTemplateDescription({ ...c, salesperson: { ...SAM, closingLine: line } });
     assert.equal(withLine, text, `the template leaves it out: ${line}`);
     assert.ok(runGuardrails(`${text}\n${line}`, c).problems.some((p) => p.code === 'banned-phrase'), `description: ${line}`);
-    const draft = await generateDescription({ ...c, settings: { rewrite: { enabled: true, endpoint: 'http://localhost:8787' } }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, text: `${text}\n${line}` }) }) });
+    const draft = await generateDescription({ ...c, settings: { myStores: [c.vehicle.location], rewrite: { enabled: true, endpoint: 'http://localhost:8787' } }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, text: `${text}\n${line}` }) }) });
     assert.equal(draft.source, 'template', `a draft saying it is refused: ${line}`);
     assert.match(draft.note, /failed a check/);
   }
@@ -583,4 +583,39 @@ test('a number in words passes only as the website says it, unit and all', () =>
   // a "one" in passing, a word that only holds a number word, and inch sizes are not quantities
   assert.deepEqual(codesAfter('This one is ready for someone new, with a phone mount.', plainCtx()), []);
   assert.deepEqual(spelledQuantities('Only thirty thousand miles, twenty-five mpg, two owners, five grand, one owner.').map((q) => [q.said, q.value]), [['thirty thousand miles', 30000], ['twenty-five mpg', 25], ['two owners', 2], ['five grand', 5000]]);
+});
+
+// ---------- where the car is ----------
+
+const GROUP = { name: 'Sample Auto Group', city: 'Springfield', zip: '00000' };
+const HOME = 'Sample Ford Springfield';
+const AWAY = 'Sample Chevrolet Shelbyville';
+
+test('a car the website lists at another store is described at that store, never at the dealership in its town', () => {
+  const base = vehicle('usedNormal', { features: FEATURES });
+  const at = (location, stores) => {
+    const c = { vehicle: { ...base, location }, dealer: GROUP, salesperson: SAM, priceNote: '', price: base.price, stores };
+    return { c, text: buildTemplateDescription(c) };
+  };
+  // no store ticked (every store's cars count), or two: the car's own store, with no town added
+  for (const stores of [[], [HOME, AWAY]]) {
+    const { c, text } = at(AWAY, stores);
+    assert.match(text, /^Pre-owned and on the lot at Sample Chevrolet Shelbyville\.$/m, JSON.stringify(stores));
+    assert.doesNotMatch(text, /Springfield/, 'never the dealership\'s town');
+    assert.match(text, /I'm Sam, sales consultant at Sample Auto Group\./, 'the dealership is still named, with the role');
+    assert.deepEqual(runGuardrails(text, c).problems, []);
+  }
+  // at the one store ticked, or with no store named by the website: the dealership in its town, as before
+  assert.match(at(HOME, [HOME]).text, /^Pre-owned and on the lot at Sample Auto Group in Springfield\.$/m);
+  assert.match(at(null, []).text, /^Pre-owned and on the lot at Sample Auto Group in Springfield\.$/m);
+  // a store name in capitals, with a number and a word the claim checks read: written calmly, and neither a claim nor an unknown number
+  const odd = at('SAMPLE CERTIFIED MOTORS ROUTE 19 GMC', []);
+  assert.match(odd.text, /^Pre-owned and on the lot at Sample Certified Motors Route 19 GMC\.$/m);
+  assert.deepEqual(runGuardrails(odd.text, odd.c).problems, []);
+  // a sparse car at another store still reaches the word minimum
+  const sparse = { vin: base.vin, year: base.year, make: base.make, model: base.model, price: base.price, location: AWAY, features: [] };
+  const c = { vehicle: sparse, dealer: GROUP, salesperson: { name: 'Pat', closingLine: 'Ask for me by name.' }, priceNote: '', price: base.price, closingLine: 'Ask for me by name.', stores: [] };
+  const text = buildTemplateDescription(c);
+  assert.match(text, /Come take a look in person at Sample Chevrolet Shelbyville\./, 'the visit line names the car\'s store too');
+  assert.deepEqual(runGuardrails(text, c).problems, []);
 });

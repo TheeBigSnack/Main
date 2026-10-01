@@ -208,7 +208,8 @@ test('the queue holds a car at review when anything besides the dealership defau
   const body = src.slice(start, src.indexOf('\n}\n', start) + 2);
   const make = new Function('state', 'currentListing', 'dailyCap', 'photoPatterns', 'refusedPhotoServers', `${body}\nreturn canAutoOpen;`);
   const opens = (listing) => make({ guardrails: { ok: true }, vinCheck: { local: { ok: true } } }, () => listing, () => ({ reached: false }), () => [], new Set())();
-  const options = { dealer: { zip: '45505' }, description: 'Written from the facts.', price: 20000, photos: ['https://img.example/1.jpg'] };
+  // the salesperson ticked their store, the one the website lists the pilot's Ram at
+  const options = { dealer: { zip: '45505' }, description: 'Written from the facts.', price: 20000, photos: ['https://img.example/1.jpg'], stores: [vehicle('usedNormal').location] };
   // the pilot's Ram: only the dealership defaults are assumed, so it opens
   assert.equal(opens(buildListingData(vehicle('usedNormal'), options)), true);
   // each of these used to be blank (and so held at review); now filled, it must still stop there
