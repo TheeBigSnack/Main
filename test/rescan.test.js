@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff } from '../extension/src/rescan.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, standardCarPage, standardListPage, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
@@ -141,6 +141,29 @@ test('under the "before fees" basis, "call for price" still needs a look, and a 
   const d3 = diffScans(day2, day3, { posted, confirm: confirmed(), basis: 'beforeFees' });
   assert.equal(d3.priceUpdates.length, 0);
   assert.match(d3.needsALook.map((n) => n.text).join(' '), /no longer shows a price/);
+});
+
+test('settleDiff: a diff saved after a long scan drops the salesperson\'s items handled meanwhile, and keeps everything else', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 27163 }, [VIN.hellcat]: { name: 'Hellcat', price: 53485 }, [VIN.tradesman]: { name: 'Tradesman', price: 33485 } };
+  const curr = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '32485' } } } } }]]);
+  const d = diffScans(snapshot(LOT), curr, { posted, confirm: { checked: [], notFound: [], error: null } });
+  assert.deepEqual(d.takeDown.map((t) => t.vin), [VIN.ram]);
+  assert.deepEqual(d.priceUpdates.map((u) => u.vin), [VIN.tradesman]);
+  assert.deepEqual(d.needsALook.map((n) => n.vin), [VIN.hellcat], 'the posted car missing from this scan');
+  // meanwhile: the Ram taken down, the Tradesman's price updated, the Hellcat taken down
+  const now = { [VIN.tradesman]: { ...posted[VIN.tradesman], price: 32485 } };
+  const settled = settleDiff(d, now);
+  assert.deepEqual([settled.takeDown, settled.priceUpdates, settled.needsALook], [[], [], []]);
+  assert.equal(settled.counts, d.counts, 'the rest of the diff as it was');
+  // nothing handled: nothing changes; a price updated to another number keeps the item
+  assert.deepEqual(settleDiff(d, posted), d);
+  assert.deepEqual(settleDiff(d, { ...posted, [VIN.tradesman]: { ...posted[VIN.tradesman], price: 30000 } }).priceUpdates.map((u) => u.vin), [VIN.tradesman]);
+  // a colleague's car (mine: false) is never the salesperson's item; items about the lot are kept
+  const lot = { ...d, newArrivals: [{ vin: 'X' }], priceUpdates: [...d.priceUpdates, { vin: VIN.wagoneer, yours: false, from: 1, to: 2 }] };
+  assert.deepEqual(settleDiff(lot, { ...posted, [VIN.ram]: { ...posted[VIN.ram], mine: false } }).takeDown, []);
+  assert.deepEqual(settleDiff(lot, {}).priceUpdates.map((u) => u.vin), [VIN.wagoneer]);
+  assert.deepEqual(settleDiff(lot, {}).newArrivals, [{ vin: 'X' }]);
+  assert.equal(settleDiff(null, posted), null);
 });
 
 test('car you posted goes sale-pending: take down', () => {

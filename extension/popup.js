@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
@@ -11,7 +11,7 @@ import { FORM_MAP } from './facebook/formMap.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
@@ -228,11 +228,19 @@ async function scan() {
     state.settings = r.settings;
     state.settingsFromProfile = false;
     state.boilerplate = r.boilerplate;
-    state.diff = r.diff;
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
     state.siteName = r.site.name;
-    if (!(await save('snapshot', 'diff', 'settings', 'boilerplate'))) return; // the status says why (the quota); the read stays on screen
-    state.pilot = await recordFlags(state.origin, r.diff, r.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
+    // saved under the diff's lock, against the posted list as it is now: the
+    // side panel may have finished a to-do item while this scan ran (src/rescan.js settleDiff)
+    const diffKey = siteKeys(state.origin).diff;
+    const saved = await withLock(diffKey, async () => {
+      const postedKey = siteKeys(state.origin).posted;
+      state.posted = (await chrome.storage.local.get(postedKey))[postedKey] || {};
+      state.diff = settleDiff(r.diff, state.posted);
+      return save('snapshot', 'diff', 'settings', 'boilerplate');
+    });
+    if (!saved) return; // the status says why (the quota); the read stays on screen
+    state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
     // the scan registered the website for background rescans; show its state
     state.site = ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {})[state.origin] || null;
     await checkRescanPermission();

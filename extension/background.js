@@ -23,7 +23,8 @@
 import { adapterById } from './adapters/index.js';
 import { scanWithSearch } from './src/scanRunner.js';
 import { siteKeys, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText } from './src/storage.js';
+import { settleDiff } from './src/rescan.js';
 import { withDefaults } from './src/settings.js';
 import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
@@ -223,7 +224,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`, reason);
   if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION, reason);
   const k = siteKeys(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff, k.boilerplate]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate]);
   if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS, reason);
   const site = { ...(info.site || {}), origin, name: info.name, adapter: info.adapter };
   const settings = withDefaults(data[k.settings], site);
@@ -235,18 +236,29 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
     out = { ok: false, message: String((e && e.message) || e) };
   }
   if (!out.ok) return noteFailure(origin, info, out.message, reason);
-  const save = { [k.diff]: out.diff, [k.boilerplate]: out.boilerplate };
-  if (!out.diff.unreliable) save[k.snapshot] = out.snapshot;
+  // Saved under the diff's lock, against the posted list as it is now: the
+  // salesperson may have ticked an item off while this scan ran, and the
+  // popup and the side panel change the diff under the same lock
+  // (src/rescan.js settleDiff, src/storage.js).
+  let diff;
+  let before;
   try {
-    await chrome.storage.local.set(save);
+    ({ diff, before } = await withLock(k.diff, async () => {
+      const now = await chrome.storage.local.get([k.posted, k.diff]);
+      const settled = settleDiff(out.diff, now[k.posted] || {});
+      const save = { [k.diff]: settled, [k.boilerplate]: out.boilerplate };
+      if (!settled.unreliable) save[k.snapshot] = out.snapshot;
+      await chrome.storage.local.set(save);
+      return { diff: settled, before: now[k.diff] };
+    }));
   } catch (e) {
     return noteFailure(origin, info, storageErrorText(e), reason); // the quota, most likely: the popup's To do shows it as the last error
   }
-  await recordFlags(origin, out.diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
-  const count = todoCountFor(out.diff);
+  await recordFlags(origin, diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
+  const count = todoCountFor(diff);
   // Compared with the person's outstanding list (the saved diff, which the
   // popup and upkeep trim as items are handled), not with the last rescan's count.
-  const note = notificationFor(todoCountFor(data[k.diff]), count);
+  const note = notificationFor(todoCountFor(before), count);
   try {
     await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count } }));
   } catch (e) {
@@ -254,13 +266,13 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   }
   await updateBadge();
   // the dealership's shared registry, once accounts exist: recorded on the site entry, never a reason for the rescan to fail
-  if (accountsConfigured()) await syncSite(origin, { scan: scanFromStored({ snapshot: out.snapshot, diff: out.diff }) });
+  if (accountsConfigured()) await syncSite(origin, { scan: scanFromStored({ snapshot: out.snapshot, diff }) });
   if (note && settings.notify !== false && reason === 'alarm') {
     try {
       await chrome.notifications.create(`lot-sync-${origin}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: note.title, message: `${note.message} (${info.name || origin})`, priority: 0 });
     } catch (e) { /* notifications may be blocked; the badge still shows */ }
   }
-  return { ok: true, count, warnings: out.diff.warnings, cars: Object.keys(out.snapshot.vehicles).length };
+  return { ok: true, count, warnings: diff.warnings, cars: Object.keys(out.snapshot.vehicles).length };
 }
 
 async function rescanDueSites(reason) {

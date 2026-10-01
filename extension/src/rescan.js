@@ -258,6 +258,27 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   return out;
 }
 
+/**
+ * A scan's diff checked against the posted list as it is stored now, just
+ * before the diff is saved. A rescan can run for minutes, and meanwhile the
+ * salesperson may tick an item off (Taken down, Updated) or the side panel
+ * may finish one: a diff worked out from the posted list read when the scan
+ * began would put that item back on To do. So the salesperson's own items
+ * (yours) are dropped when their car is no longer posted as theirs, and a
+ * price item when the listing already carries the new price. Items about
+ * colleagues' cars and the rest of the lot are kept as they are.
+ */
+export function settleDiff(diff, posted) {
+  if (!diff || typeof diff !== 'object') return diff;
+  const now = posted && typeof posted === 'object' ? posted : {};
+  const stillYours = (vin) => Object.prototype.hasOwnProperty.call(now, vin) && now[vin]?.mine !== false;
+  const keep = (item) => !item || !item.yours || stillYours(item.vin);
+  const out = { ...diff };
+  for (const list of ['takeDown', 'needsALook']) if (Array.isArray(diff[list])) out[list] = diff[list].filter(keep);
+  if (Array.isArray(diff.priceUpdates)) out.priceUpdates = diff.priceUpdates.filter((u) => keep(u) && !(u && u.yours && now[u.vin].price === u.to));
+  return out;
+}
+
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
 // `extra` can carry the listing link and who posted (listingUrl, salesperson).
 export function markPosted(posted, entry, basis = 'website', now = new Date().toISOString(), extra = {}) {
