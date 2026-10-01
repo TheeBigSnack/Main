@@ -122,6 +122,7 @@ Notes:
 - The panel only fills or ticks off when the tab is showing that car's listing. If you moved to another page it says "This tab isn't showing the listing for [car]".
 - A post that is under way blocks a to-do item: finish or stop it first, then click the To do button again.
 - **My listings** shows each car as "Matches the website", "Website price changed" (with **Updated**) or "Not on the website at the last scan", with **Taken down** and, when a link was saved, **Open listing**.
+- Signed in to your dealership's account, your colleagues' listings come under **Posted by colleagues**, below yours and not in the tab's count, with who posted each car and **Open listing** only. Ready to post shows "Posted by [name]" on such a car, and a sold car or price change on one is listed in To do as "posted by [name]", with no buttons: keeping it up to date is that colleague's to do.
 - The posting rules ask for sold cars to come down the same day.
 
 ## The Numbers tab

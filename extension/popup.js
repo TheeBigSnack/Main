@@ -32,7 +32,7 @@ const state = {
   siteName: '',
   snapshot: null, // last saved scan
   diff: null, // to-do list from the last scan
-  posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }
+  posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }; with an account, colleagues' too, marked `mine: false` by sync
   settings: null, // see src/settings.js
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [],
@@ -251,6 +251,7 @@ async function scan() {
 function lists() {
   const all = Object.values(state.snapshot?.vehicles || {}).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const has = (e, code) => (e.blockers || []).includes(code);
+  const posted = Object.entries(state.posted).map(([vin, p]) => ({ vin, ...p, now: state.snapshot?.vehicles?.[vin] || null }));
   return {
     all,
     ready: all.filter((e) => e.decision === DECISION.READY),
@@ -258,9 +259,19 @@ function lists() {
     otherStores: all.filter((e) => e.decision === DECISION.NOT_READY && has(e, 'other-store')),
     review: all.filter((e) => e.decision === DECISION.REVIEW),
     skipped: all.filter((e) => e.decision === DECISION.SKIP),
-    mine: Object.entries(state.posted).map(([vin, p]) => ({ vin, ...p, now: state.snapshot?.vehicles?.[vin] || null })),
+    mine: posted.filter((p) => p.mine !== false),
+    colleagues: posted.filter((p) => p.mine === false), // merged in by sync: shown, never the person's to update or take down
   };
 }
+
+// A colleague's listing, merged into the posted list by sync (`mine: false`,
+// src/sync.js): it keeps the car off the Post buttons so nobody lists it
+// twice, but updating or taking it down is theirs, so no button here acts on it.
+const colleagueEntry = (vin) => {
+  const p = state.posted[vin];
+  return p && p.mine === false ? p : null;
+};
+const byWhom = (p) => (p.salesperson ? esc(p.salesperson) : 'a colleague');
 
 const todoCount = () => todoCountFor(state.diff);
 
@@ -357,6 +368,8 @@ function empty(text) {
 // "Post" opens the guided flow in the side panel (only for ready cars). "Mark
 // posted" is for a listing the salesperson made by hand.
 function postButton(vin, { canPost = true } = {}) {
+  const theirs = colleagueEntry(vin);
+  if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark">Posted ✓</button>`;
   if (state.drafts[vin]) {
     return `<span class="actions"><span class="pill warn" title="Saved as a draft on Facebook; publish it there, then mark it posted">Draft on Facebook</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
@@ -403,6 +416,9 @@ function scheduleBanner() {
   return '';
 }
 
+// Why a to-do item has no buttons: a colleague's listing, or a car nobody marked as posted.
+const notYours = (vin) => (colleagueEntry(vin) ? ` · posted by ${byWhom(colleagueEntry(vin))}` : ' · not marked as posted');
+
 function viewTodo(l) {
   const d = state.diff;
   if (!state.snapshot && !d) {
@@ -420,7 +436,7 @@ function viewTodo(l) {
     parts.push(
       section('Take down', 'bad', takeDown.map((t) =>
         row(t, {
-          sub: esc(t.text) + (t.yours ? '' : ' · not marked as posted'),
+          sub: esc(t.text) + (t.yours ? '' : notYours(t.vin)),
           right: t.lastPrice ? money(t.lastPrice) : '',
           action: t.yours
             ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="takeDown" data-vin="${esc(t.vin)}" title="Opens your listing so you can mark it sold or delete it">Open listing</button><button type="button" class="small" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button></span>`
@@ -435,7 +451,7 @@ function viewTodo(l) {
     parts.push(
       section('Update price', 'warn', updates.map((p) =>
         row(p, {
-          sub: (p.yours ? 'Your listing' : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
+          sub: (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
           right: `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
           action: p.yours
             ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`
@@ -466,7 +482,7 @@ function viewTodo(l) {
   const nowReady = d?.nowReady || [];
   if (nowReady.length) parts.push(section('Just became ready', 'good', nowReady.map((n) => row(n, { sub: esc(n.what), action: postButton(n.vin) }))));
   const look = d?.needsALook || [];
-  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : '') }))));
+  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : '') }))));
   if (!parts.length && d && !d.firstScan) html += empty('Nothing changed since the last scan.');
   return html + parts.join('');
 }
@@ -630,7 +646,7 @@ function viewReview(l) {
 
 function viewMine(l) {
   const lead = `<p class="lead">Cars you've marked as posted. Each scan compares these with the website.</p>`;
-  if (!l.mine.length) return lead + empty('Nothing marked as posted yet. Use <b>Mark posted</b> on the Ready to post tab.');
+  if (!l.mine.length) return lead + empty('Nothing marked as posted yet. Use <b>Mark posted</b> on the Ready to post tab.') + viewColleagues(l);
   return (
     lead +
     rows(
@@ -652,8 +668,22 @@ function viewMine(l) {
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
       })
-    )
+    ) +
+    viewColleagues(l)
   );
+}
+
+// Colleagues' listings, as the last sync brought them: who posted the car,
+// when, at what price and the link, so nobody lists it again. No buttons:
+// marking one taken down or updated here would change nothing on Facebook
+// or for the colleague, only this computer's copy.
+function viewColleagues(l) {
+  if (!l.colleagues.length) return '';
+  const items = l.colleagues.map((p) => {
+    const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
+    return row({ name: p.name || p.vin, url: p.now?.url }, { sub: `Posted by ${byWhom(p)} ${esc(when(p.postedAt))}${link}`, right: `Listed ${money(p.price)}`, muted: true });
+  });
+  return `<h3 id="colleagueListings">Posted by colleagues <span class="pill">${items.length}</span></h3><p class="hint">Their listings, as of the last sync. Keeping them up to date is theirs to do.</p>${rows(items)}`;
 }
 
 // ---------- pilot numbers ----------
@@ -892,7 +922,7 @@ function problemReport() {
     `Last error: ${site.lastError || 'none'}`,
     `Automatic rescans: ${site.auto ? 'on' : 'off'}; background permission: ${permission}`,
     `Account: ${accountsConfigured() ? (state.account.session ? 'signed in' : 'signed out') : 'not set up'}; plan: ${state.syncState && state.syncState.plan ? state.syncState.plan.state : 'unknown'}; last sync: ${site.lastSync || 'never'}; last sync error: ${site.lastSyncError || 'none'}`,
-    `Counts: to do ${todoCount()}, ready to post ${l.ready.length}, not ready ${l.notReady.length}, other stores ${l.otherStores.length}, needs a look ${l.review.length + l.skipped.length}, my listings ${l.mine.length}, queue: ${state.queue ? describeQueue(state.queue) : 'none'}`,
+    `Counts: to do ${todoCount()}, ready to post ${l.ready.length}, not ready ${l.notReady.length}, other stores ${l.otherStores.length}, needs a look ${l.review.length + l.skipped.length}, my listings ${l.mine.length}, colleagues' listings ${l.colleagues.length}, queue: ${state.queue ? describeQueue(state.queue) : 'none'}`,
     lastFill
       ? `Last fill: ${lastFill.at || 'unknown time'}, form map ${lastFill.mapVersion || 'unknown'}, build ${lastFill.version || 'unknown'}; needed a click: ${keysOf(lastFill.partial)}; couldn't fill: ${keysOf(lastFill.blocked)}; changed by the form afterwards: ${keysOf(lastFill.changed)}`
       : 'Last fill: none recorded',

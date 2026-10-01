@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPopup, POPUP_ORIGIN } from './popupHarness.js';
+import { fixtures, raw, vehicle, sampleVin, MY_STORE } from './helpers.js';
 import { PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
 
@@ -44,4 +45,48 @@ test('Clear everything for this website, then Rescan as the status line says, pu
   const s = p.local[k.settings];
   assert.equal(s.salesperson.closingLine, PROFILE.salesperson.closingLine, 'and this website starts again from the profile');
   assert.equal(s.rewrite.key, '', 'the key typed on this computer was cleared with the website, as before');
+});
+
+test('My listings counts only the person\'s own listings; a colleague\'s come in their own section with no buttons, and To do and Ready say whose they are', async () => {
+  const own = vehicle('usedZeroMiles');
+  const theirs = vehicle('usedNormal'); // ready to post at the store MY_STORE names
+  const gone = sampleVin(7, 2020); // a colleague's car the website no longer lists
+  const at = new Date().toISOString();
+  const colleague = { mine: false, userId: 'colleague-id', salesperson: 'Pat' }; // as src/sync.js mergeRegistry writes it
+  const posted = {
+    [own.vin]: { name: own.name, price: own.price, postedAt: at },
+    [theirs.vin]: { name: theirs.name, price: theirs.price, postedAt: at, listingUrl: 'https://listing.example.test/1', ...colleague },
+    [gone]: { name: '2020 Example Truck', price: 20000, postedAt: at, ...colleague },
+  };
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted } });
+  await p.scan();
+  assert.equal(p.status(), '', 'the scan went through');
+  assert.match(p.tabs(), /My listings<span class="count">1<\/span>/, 'the tab counts the person\'s own listing only');
+
+  const todo = p.panel();
+  assert.match(todo, /Gone from the website \(sold or removed\) · posted by Pat/, 'To do says whose listing the sold car is');
+  assert.doesNotMatch(todo, /not marked as posted/);
+  assert.doesNotMatch(todo, new RegExp(`data-vin="${gone}"`), 'and offers no button on it');
+
+  await p.tab('mine');
+  const [ownPart, theirPart = ''] = p.panel().split('id="colleagueListings"');
+  assert.match(ownPart, new RegExp(`data-action="takenDown" data-vin="${own.vin}"`));
+  assert.ok(!ownPart.includes(theirs.name) && !ownPart.includes(gone), 'a colleague\'s listing is not among the person\'s own');
+  assert.match(theirPart, /Posted by colleagues <span class="pill">2<\/span>/);
+  assert.match(theirPart, /Posted by Pat/);
+  assert.match(theirPart, /href="https:\/\/listing\.example\.test\/1"/, 'with the link to the listing');
+  assert.doesNotMatch(theirPart, /data-action=/, 'no Taken down or Updated on a colleague\'s listing');
+
+  await p.tab('ready');
+  assert.match(p.panel(), /Posted by Pat/, 'the Ready tab says who posted the car');
+  assert.doesNotMatch(p.panel(), new RegExp(`data-action="unpost" data-vin="${theirs.vin}"`), 'and offers no unmarking of it');
+
+  // The website lowers the price of the colleague's car: To do says it is theirs.
+  const lower = Number(raw('usedNormal').extra_fields.lightning.pricing.low.value) - 1000;
+  const records = Object.entries(fixtures).filter(([name]) => name !== '_about').map(([name]) => (name === 'usedNormal' ? raw(name, { extra_fields: { lightning: { pricing: { low: { value: lower } } } } }) : raw(name)));
+  const again = await loadPopup({ local: p.local, records });
+  await again.scan();
+  assert.ok((again.local[k.diff].priceUpdates || []).some((u) => u.vin === theirs.vin && !u.yours), 'the price change is found');
+  assert.match(again.panel(), /Posted by Pat/);
+  assert.doesNotMatch(again.panel(), /Not marked as posted/);
 });
