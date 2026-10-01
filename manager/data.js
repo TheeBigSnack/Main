@@ -655,11 +655,13 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
       // cancelled in the portal: Stripe keeps the status until the end, and nothing renews or charges after it
       label = 'Cancelled';
       tone = 'warn';
-      const until = ends !== null ? `ends ${date(ends)}` : 'ends with the paid period';
+      // the end can be past while Stripe's last event is still on its way (the row then still says active): it ended, and nothing runs until then
+      const over = ends !== null && ms(ends) <= t;
+      const until = ends === null ? 'ends with the paid period' : `${over ? 'ended' : 'ends'} ${date(ends)}`;
       line = sub.status === 'trialing'
         ? `Cancelled${who}, ${until} before the first charge.`
-        : `Cancelled${who}, ${until} and does not renew.`;
-      if (manager && s.canManageBilling) detail = 'Everything works as it does now until then; Manage billing can renew it.';
+        : `Cancelled${who}, ${until}${over ? '' : ' and does not renew'}.`;
+      if (manager && s.canManageBilling && !over) detail = 'Everything works as it does now until then; Manage billing can renew it.';
     }
   } else if (state === 'lapsed') {
     label = 'Lapsed';

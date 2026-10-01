@@ -350,6 +350,11 @@ test('billingCard: a subscription cancelled in the portal never says renews or f
   assert.deepEqual(sp.buttons, []);
   // renewed in the portal: the flags are back to false and null, and so is the line
   assert.equal(card(paying({ cancel_at_period_end: false, cancel_at: null })).line, 'Subscribed: 5 seats, renews 2026-12-06.');
+  // the end has passed and Stripe's last event has not arrived yet (the row still says active): ended, never "ends" on a past day
+  const past = card(paying({ cancel_at_period_end: true, current_period_end: inDays(-2) }));
+  assert.equal(past.line, 'Cancelled: 5 seats, ended 2026-11-14.');
+  assert.equal(past.detail, '', 'no "until then" for a day that has passed');
+  assert.equal(card(paying({ status: 'trialing', cancel_at: inDays(-2) })).line, 'Cancelled: 5 seats, ended 2026-11-14 before the first charge.');
 });
 
 test('billingCard: lapsed says so in the agreed words, why, and offers Subscribe (and Manage billing once a customer exists)', () => {

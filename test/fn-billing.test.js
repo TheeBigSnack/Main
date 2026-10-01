@@ -461,20 +461,23 @@ test('billing: a cancellation in the portal reaches the row and the card says wh
     assert.deepEqual([r.status, r.body.ok, r.body.applied], [200, true, true], id);
   };
   const cardNow = async () => billingCard((await status(handler, TOKEN.u2)).body, { now: iso(Date.now()) });
-  await send('evt_a', 'customer.subscription.created', t0 - 120, { cancel_at_period_end: false, cancel_at: null });
+  // the trial ends 20 days from now, as it would when the portal is opened (the card words a passed end as "ended")
+  const end = t0 + 20 * 86400;
+  const items = { data: [{ price: { id: 'price_rooftop_test' }, quantity: 1, current_period_end: end }, { price: { id: 'price_seat_test' }, quantity: 2, current_period_end: end }] };
+  await send('evt_a', 'customer.subscription.created', t0 - 120, { items, cancel_at_period_end: false, cancel_at: null });
   assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
 
   // the portal cancels at the end of the period: Stripe keeps the trial running and says it will not renew
-  await send('evt_b', 'customer.subscription.updated', t0 - 60, { cancel_at_period_end: true, cancel_at: 1790000000, canceled_at: t0 - 60 });
+  await send('evt_b', 'customer.subscription.updated', t0 - 60, { items, cancel_at_period_end: true, cancel_at: end, canceled_at: t0 - 60 });
   const [row] = fake.rows('subscriptions');
-  assert.deepEqual([row.status, row.cancel_at_period_end, row.cancel_at], ['trialing', true, pgTime(iso(1790000000 * 1000))]);
+  assert.deepEqual([row.status, row.cancel_at_period_end, row.cancel_at], ['trialing', true, pgTime(iso(end * 1000))]);
   const cancelled = await cardNow();
   assert.equal(cancelled.label, 'Cancelled');
   assert.match(cancelled.line, /^Cancelled: 7 seats, ends \d{4}-\d{2}-\d{2} before the first charge\.$/);
   assert.doesNotMatch(cancelled.line, /renews|first charge \d/);
 
   // renewed in the portal before the end
-  await send('evt_c', 'customer.subscription.updated', t0, { cancel_at_period_end: false, cancel_at: null });
+  await send('evt_c', 'customer.subscription.updated', t0, { items, cancel_at_period_end: false, cancel_at: null });
   const [renewedRow] = fake.rows('subscriptions');
   assert.deepEqual([renewedRow.cancel_at_period_end, renewedRow.cancel_at], [false, null]);
   assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
