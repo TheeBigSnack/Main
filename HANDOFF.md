@@ -1,18 +1,18 @@
-# Lot Sync: complete handoff (written 2026-09-27, evening; updated 2026-09-28 from a cloud session, see section 12)
+# Lot Sync (becoming Lot Current): complete handoff (written 2026-09-27; rewritten 2026-10-01 at the end of the cloud session that ran 2026-09-28 to 2026-10-01; section 15 is that session)
 
-**For the next Claude instance.** The owner's first message will be something like "read E:\LotSync\HANDOFF.md and follow it" (or "unzip this and continue"). This file is meant to make you fully current without any other conversation history. Read it top to bottom once, then read `CLAUDE.md` (the rules), skim `PLAN.md`, `CHANGELOG.md` and `README.md`, and you know everything the previous instance knew.
+**For the next Claude instance.** This file is meant to make you fully current without any other conversation history. Read it in this order: section 0 (where things stand), section 15 (the latest session: decisions, infrastructure, what is half-done and how this environment works), section 1 (the owner), section 2 (the product rules), then skim the rest as reference. Then read `CLAUDE.md` (the rules, authoritative), `CHANGELOG.md` "Unreleased", `README.md` and `docs/website.md`. Sections 12 to 14 are the earlier cloud sessions, kept because their decisions still hold.
 
-If you arrived with a zip instead of the folder: unzip it so that the files land in `E:\LotSync` (or wherever the owner says), then in that folder run `npm install` and, for the end-to-end tests, `npx playwright install chromium` with the environment variables in section 3.4. Everything else, including the full git history, is in the zip (`node_modules` and test screenshots are not).
+The owner's first message will be something like "read HANDOFF.md and continue" or a specific task. If it is a task, still read sections 0 and 15 first: several things changed on 2026-10-01 (the business name, the domain, the hosting) that every piece of copy and config now has to follow.
 
 ---
 
 ## 0. Where things stand in five lines
 
-1. **Product:** Lot Sync, a Chrome extension (Manifest V3, plain JavaScript ES modules, no build step) for car dealership salespeople. It reads the dealership website's used inventory, lets only pre-owned cars through, pre-fills a Facebook Marketplace vehicle listing that the salesperson publishes by hand, and rescans the website to flag sold cars and price changes on the listings they made.
-2. **State:** version 0.5.0 (section 14 has the day's rounds). Milestone 1 (one-click post) is done and verified on the real site; Milestone 2 (batch queue, listing upkeep, first-run wizard, automatic rescans, adapter layout) is built, tested against mock sites, and hardened by a 25-agent adversarial review (29 confirmed defects, all fixed). The queue is verified live; the wizard's permission step, a background rescan on the real site, and upkeep on real listing pages are not yet tried live. Milestone 3 (the pilot) was started on 2026-09-28: the pilot numbers are recorded and exported from the popup's **Numbers** tab (called Pilot until 0.5.0; the view id and the storage key still say `pilot`), `PILOT.md` is the runbook, `marketing/` holds the positioning, pricing hypothesis, sales sheet, demo script and emails (section 12).
-3. **Tests:** 686 unit tests (`npm test`, node:test, no dependencies), six Playwright end-to-end flows against mock sites (popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data), the SQL tests and a CI job against a real local Supabase stack; all green in CI on the last pushed commit (sections 12 to 14 have the later rounds). Never run anything against the real facebook.com.
-4. **Where the code is:** GitHub, `TheeBigSnack/Main`, branch `claude/fervent-fermi-exkhz9` (pushed 2026-09-28; the repo is public). The owner's `E:\LotSync` copy stops at commit `2a52640` and must be brought up to that branch (section 12). Section 3 has the Windows machine's drives, git, Node, Playwright and permissions quirks.
-5. **Next:** the owner's direction (2026-09-29/30) is product development first, no dealer outreach. Milestone 4 (accounts, sync, manager view, billing, sign-up) is built and tested locally but not deployed: no Supabase project or Stripe account exists yet (section 14 item 14). The biggest open risk is that everything since the 2026-09-27 live runs has met only sample sites: the owner's live checks (section 9) and scans of real dealer websites come before more features.
+1. **Product and name:** a Chrome extension (Manifest V3, plain JavaScript ES modules, no build step) for car-dealership salespeople. It reads the dealership website's used inventory, lets only pre-owned cars through, pre-fills a Facebook Marketplace vehicle listing that the salesperson publishes by hand, and rescans the website to flag sold cars and price changes on the listings they made. **The business and the product are now called Lot Current** (owner's decision 2026-10-01, after "Lot Sync" turned out to be an existing dealership-software company; section 15.5). **The code, copy and docs still say Lot Sync everywhere**: the rename is the next round (section 15.10, task N) and has not started.
+2. **State:** version 0.5.0 plus the unreleased rounds in CHANGELOG "Unreleased": the standard-vehicle-data reader for any dealer website and per-server photo permission (round J), the site survey tool, honest field words and vehicle kinds (round K1), the Ready to post list with sort orders, New pills, days on the lot and search (round K2), and the multi-page website with SEO plumbing and GitHub Pages hosting (round W; section 15.7 says whether it landed). Milestones 1 and 2 were verified live on 2026-09-27; everything since has met only sample sites and mocks. Milestone 4 (accounts, sync, manager view, billing, sign-up) is built and tested locally but not deployed: no Supabase project or Stripe account exists.
+3. **Tests:** 740 unit tests at commit `0a8e90a` (`npm test`, node:test, no dependencies; more after round W), six Playwright end-to-end flows against mock sites (popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data), the sandbox drive, the accessibility walk, the SQL tests and a CI job against a real local Supabase stack. CI (`.github/workflows/ci.yml`) was green on every push of this session up to `5f295d8`; check run 20+ for `0a8e90a` and later. Never run anything against the real facebook.com.
+4. **Where the code is:** GitHub, `TheeBigSnack/Main`, branch `claude/fervent-fermi-exkhz9`, which is also the repository's only and default branch (the repo is public). The owner's `E:\LotSync` copy on the Windows machine stops at `2a52640` (2026-09-27) and must be brought up to the branch (section 3.2). **Infrastructure now exists:** `lotcurrent.com` is registered at GoDaddy, its DNS points at GitHub Pages, the domain is verified on the owner's GitHub account, the repository's Pages source is GitHub Actions with the custom domain saved and HTTPS enforced; a GoDaddy mailbox for `blawrence@lotcurrent.com` was bought but its MX records were not in DNS yet (section 15.6).
+5. **Next, in order:** (a) if round W is not merged, finish it (section 15.7) so `lotcurrent.com` stops showing GitHub's 404; (b) the rename round N (section 15.10); (c) the survey of the five local dealer groups' websites, which this cloud environment could not run because its network policy blocks dealer hosts (section 15.2; the owner can run it on Windows); (d) roadmap items 6 and 7 (photo picking, the salesperson's closing line) and round L; (e) the owner's live checks of everything since 2026-09-27. The owner's direction stands: product development first, no dealer outreach yet.
 
 ---
 
@@ -78,12 +78,15 @@ The one thing that runs on its own, only with the person's permission: re-readin
 
 ### 3.4 Running the tests
 ```
-npm test                                  # 269 unit tests, seconds
+npm test                                  # 740 unit tests (2026-10-01), seconds
 set PLAYWRIGHT_BROWSERS_PATH=D:\ms-playwright
 set TEMP=D:\lotsync-tmp
 set TMP=D:\lotsync-tmp
-npm run test:e2e                          # all five flows one at a time, about 4 minutes (test:e2e:parallel: two at a time)
-npm run test:e2e:popup | :post | :queue | :wizard | :upkeep
+npm run test:e2e                          # all six flows one at a time, about 2 minutes on a fast machine (test:e2e:parallel: two at a time)
+npm run test:e2e:popup | :post | :queue | :wizard | :upkeep | :standard
+npm run test:demo                         # demo/drive.mjs, the sandbox walk-through
+npm run test:a11y                         # scripts/a11y.mjs, the keyboard walk of every page
+npm run survey -- <used-inventory url>    # scripts/survey.mjs, a real dealer website (docs/survey.md)
 ```
 In PowerShell: `$env:PLAYWRIGHT_BROWSERS_PATH = 'D:\ms-playwright'; $env:TEMP = 'D:\lotsync-tmp'; $env:TMP = 'D:\lotsync-tmp'`.
 
@@ -244,18 +247,16 @@ Seven reviewers (wizard, background rescans, adapter regressions, upkeep, Chrome
 
 ---
 
-## 9. What's next
-Immediately (with the owner):
-1. Reload the unpacked extension from `E:\LotSync\extension` in Chrome (chrome://extensions, Developer mode, Load unpacked, or Reload).
-2. On the Waynesburg used-inventory page: click the icon, "Set up Lot Sync", walk the wizard including "Allow automatic rescans"; confirm the badge and, after 3 hours or a `rescanNow`, a rescan.
-3. One real upkeep item each way (a price change and a sold car) on a listing they made; fix `listingSigns.js`/`formMap.js` from what the page shows.
-4. Delete the stale Honda Accord draft on Facebook.
+## 9. What's next (rewritten 2026-10-01; section 15 has the detail)
 
-Milestone 3 (pilot, PLAN.md): manager's approval, 2–3 salespeople, track time per post, prefill failures per field, and how long sold cars stay listed; weekly fixes; positioning/pricing/demo materials. Prerequisites the owner must supply: manager sign-off, attorney review, optionally an Anthropic API key and a host for `backend/`.
+1. **Round W (the website)**: if section 15.7 says it is still in the `website` worktree, finish it: integrate, set `SITE.siteUrl = 'https://lotcurrent.com'` and the contact inbox, run every check, merge, push; GitHub Pages deploys it (`.github/workflows/pages.yml`).
+2. **Round N (the rename to Lot Current)**: section 15.10. Everything people see; nothing internal.
+3. **The survey of real dealer websites** (section 15.2): the owner runs `npm run survey` on Windows against the seven addresses, or opens this environment's network policy; then fix the reader or write DealerOn / Dealer.com adapters from the reports.
+4. **Roadmap items 6 and 7** (`scratchpad/roadmap.txt` is gone with the container; the titles: photo picking in the side panel; the salesperson's own closing line and their pick of highlights), then **round L** (post from the side panel without the dealer tab; listing links and VIN confirm; Fix all To do; colleague-aware lists).
+5. **With the owner, live**: reload the unpacked extension on the Windows machine from the branch; walk the wizard on the pilot site including "Allow automatic rescans"; one real upkeep item each way; delete the stale Honda Accord draft on Facebook; the first real scan of a standard-data website; Chrome's own photo-server prompt once by hand.
+6. **Owner-only items** (section 15.11): the attorney's USPTO check on "Lot Current"; the mailbox's MX records; the `www` record; the Supabase project and Stripe objects when ready; the attorney's answers on the legal texts; the pricing hypothesis; making the repo private.
 
-Milestone 4+ (accounts via Supabase, manager view, billing, landing page, Web Store, design partners) is planned in PLAN.md and not started.
-
-Engineering ideas the owner has not asked for (mention, don't build unasked): a Dealer.com adapter (needs a real site to verify), an "update re-reads the website first" option for upkeep, a manager summary export, a Web Store packaging script.
+Engineering ideas the owner has not asked for (mention, don't build unasked): a DealerOn and a Dealer.com adapter (the survey decides), an "update re-reads the website first" option for upkeep, a manager summary export.
 
 ---
 
