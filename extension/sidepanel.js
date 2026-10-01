@@ -115,21 +115,34 @@ async function ownRemove(keys) {
 // src/storage.js under the key's lock: the popup changes all three too.
 const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet };
 
+// Reads the website's saved data into the panel. The website choice can move
+// on while the reads run (two quick changes of the Website menu): a load for a
+// website the panel no longer shows is dropped, so one website's cars, posts
+// and queue never show under another. Resolves false when it was dropped.
 async function loadSaved() {
-  const k = siteKeys(state.origin);
+  const origin = state.origin;
+  const k = siteKeys(origin);
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, GLOBAL_KEYS.sites]);
-  state.sites = data[GLOBAL_KEYS.sites] || {};
-  state.siteInfo = state.sites[state.origin] || null;
-  state.siteName = data[k.snapshot]?.site?.name || state.siteInfo?.name || state.origin;
-  state.snapshotTakenAt = data[k.snapshot]?.takenAt || null;
-  const site = data[k.snapshot]?.site || { name: state.siteName };
-  state.settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), { ...site, origin: state.origin }) || withDefaults({}, site);
-  state.posted = data[k.posted] || {};
-  state.boilerplate = data[k.boilerplate] || [];
-  state.queue = data[k.queue] || null;
-  state.drafts = data[k.drafts] || {};
-  state.snapshotVehicles = data[k.snapshot]?.vehicles || {};
-  state.syncState = data[k.sync] || null;
+  const sites = data[GLOBAL_KEYS.sites] || {};
+  const siteInfo = sites[origin] || null;
+  const siteName = data[k.snapshot]?.site?.name || siteInfo?.name || origin;
+  const site = data[k.snapshot]?.site || { name: siteName };
+  const settings = data[k.settings] ? withDefaults(data[k.settings], site) : settingsFromProfile(await loadProfile(), { ...site, origin }) || withDefaults({}, site);
+  if (state.origin !== origin) return false;
+  Object.assign(state, {
+    sites,
+    siteInfo,
+    siteName,
+    snapshotTakenAt: data[k.snapshot]?.takenAt || null,
+    settings,
+    posted: data[k.posted] || {},
+    boilerplate: data[k.boilerplate] || [],
+    queue: data[k.queue] || null,
+    drafts: data[k.drafts] || {},
+    snapshotVehicles: data[k.snapshot]?.vehicles || {},
+    syncState: data[k.sync] || null,
+  });
+  return true;
 }
 
 const saveQueue = async () => {
@@ -161,7 +174,7 @@ async function clearFlow() {
   if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
   if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
-    vin: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
+    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
@@ -195,7 +208,8 @@ let grantedOrigins = [];
 // Servers the salesperson said no to while this panel is open. They are not
 // asked about again for the next car, only from their own Allow photos button.
 const refusedPhotoServers = new Set();
-let photoPromptOpen = false;
+// A Chrome permission prompt (photos or the website) is open: other clicks wait for its answer.
+let promptOpen = false;
 
 async function refreshGranted() {
   try {
@@ -236,7 +250,7 @@ async function askForPhotos(urls = photoList(), { again = false } = {}) {
   const patterns = neededPatterns(urls, { manifestHosts: MANIFEST_HOSTS, granted: grantedOrigins }).filter((p) => again || !refusedPhotoServers.has(p));
   if (!patterns.length) return true;
   setStatus(askSentence(patterns));
-  photoPromptOpen = true;
+  promptOpen = true;
   let granted = false;
   try {
     granted = await chrome.permissions.request({ origins: patterns });
@@ -244,7 +258,7 @@ async function askForPhotos(urls = photoList(), { again = false } = {}) {
     setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
     return false;
   } finally {
-    photoPromptOpen = false;
+    promptOpen = false;
   }
   await refreshGranted();
   for (const p of patterns) {
@@ -281,6 +295,19 @@ async function startFlow(req) {
   state.windowId = req.windowId || null;
   state.queueMode = Boolean(req.queue);
   await loadSaved();
+  if (state.posted[state.vin]) {
+    // posted meanwhile (from the panel's own list while a queue was paused,
+    // from the popup, or on another computer): never a second form for it
+    const name = nameOf(state.vin);
+    if (state.queueMode) {
+      await afterQueueStep('skipped');
+      if (state.step === 'idle' || state.step === 'queueDone') setStatus(`${name} is already marked as posted, so the queue skipped it.`);
+      return undefined;
+    }
+    await clearFlow();
+    setStatus(`${name} is already marked as posted on this website, so it isn't posted again. Its listing is under My listings in the popup.`);
+    return render();
+  }
   await refreshGranted(); // current before canAutoOpen below looks at the photo servers
   state.step = 'checking';
   setStatus('');
@@ -356,7 +383,8 @@ async function startNextInQueue() {
     render();
     return;
   }
-  await startFlow({ origin: state.origin, vin, dealerTabId: q.dealerTabId || state.dealerTabId, windowId: q.windowId || state.windowId, queue: true });
+  // the tab the queue was started from (the popup's), never one an earlier post or to-do item left behind
+  await startFlow({ origin: state.origin, vin, dealerTabId: q.dealerTabId ?? null, windowId: q.windowId || state.windowId, queue: true });
 }
 
 // Records how this car ended and moves on: the next car, a pause, or the end.
@@ -809,12 +837,15 @@ const siteMissing = () => missingOrigins(siteNeeds(), grantedOrigins);
 async function askForSite(origins = siteMissing()) {
   if (!origins.length) return true;
   setStatus(`Chrome will ask to let Lot Sync read ${hostOf(state.origin)} from the side panel (the same permission automatic rescans use).`);
+  promptOpen = true;
   let granted = false;
   try {
     granted = await chrome.permissions.request({ origins });
   } catch (e) {
     setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
     return false;
+  } finally {
+    promptOpen = false;
   }
   await refreshGranted();
   if (!granted) {
@@ -823,6 +854,20 @@ async function askForSite(origins = siteMissing()) {
   }
   setStatus('');
   return true;
+}
+
+// One list action at a time (Post, Post the next N, Allow reading). The step
+// stays idle while Chrome's prompt and the first reads run, so a second click
+// (Post and then Post the next N, or a double click) would otherwise start a
+// second flow over the same state. Called straight from the click, so the
+// action's own first call, Chrome's prompt, still runs inside it.
+let listBusy = false;
+function oneAtATime(action) {
+  if (listBusy) return undefined;
+  listBusy = true;
+  return action().finally(() => {
+    listBusy = false;
+  });
 }
 
 const readyNow = (now = Date.now()) => readyRows({ vehicles: state.snapshotVehicles }, { posted: state.posted, drafts: state.drafts, settings: state.settings || {}, filter: state.listFilter, now });
@@ -1384,13 +1429,14 @@ async function rescanFromList() {
 // Another website from the list's choice. Only from the list itself, so a
 // post, a set-up or an upkeep under way is never pulled onto another website.
 async function chooseSite(origin) {
-  if (state.step !== 'idle' || !origin || origin === state.origin) return;
+  if (listBusy) return render(); // a post from the list is starting on this website: the menu goes back to it
+  if (state.step !== 'idle' || state.vin || !origin || origin === state.origin) return render(); // a post or a set-up is under way here
   state.origin = origin;
   state.listFilter = '';
   try {
     await chrome.storage.local.set({ [GLOBAL_KEYS.lastPostOrigin]: origin });
   } catch (e) { /* only which website the panel opens on next time */ }
-  await loadSaved();
+  if (!(await loadSaved())) return; // chosen again meanwhile: the later choice draws the list
   setStatus('');
   render();
   if ($('panelSite')) $('panelSite').focus();
@@ -1507,7 +1553,7 @@ async function onClick(ev) {
   const btn = ev.target.closest('button');
   if (!btn) return;
   if (btn.dataset.copy !== undefined) return copy(btn.dataset.copy);
-  if (photoPromptOpen) return undefined; // Chrome's prompt is open: its answer comes first
+  if (promptOpen) return undefined; // Chrome's prompt is open: its answer comes first
   // Every Chrome prompt for photo servers is asked from here, first thing in
   // the click (askForPhotos says why).
   if (btn.dataset.allowPhotos !== undefined) {
@@ -1522,11 +1568,11 @@ async function onClick(ev) {
     return afterPhotoPick(btn.id);
   }
   if (state.step === 'upkeep' && (await handleUpkeepClick(btn.id, upkeepCtx))) return undefined;
-  if (btn.dataset.postVin !== undefined && state.step === 'idle') return postFromList(btn.dataset.postVin);
+  if (btn.dataset.postVin !== undefined && state.step === 'idle') return oneAtATime(() => postFromList(btn.dataset.postVin));
   switch (btn.id) {
-    case 'panelQueue': return state.step === 'idle' ? queueFromList() : undefined;
+    case 'panelQueue': return state.step === 'idle' ? oneAtATime(() => queueFromList()) : undefined;
     case 'panelRescan': return state.step === 'idle' ? rescanFromList() : undefined;
-    case 'allowSite': return state.step === 'blocked' ? allowSiteAndRetry() : undefined;
+    case 'allowSite': return state.step === 'blocked' ? oneAtATime(() => allowSiteAndRetry()) : undefined;
     case 'openForm':
       await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
       if (noPhotosPicked()) return setStatus(NO_PHOTOS_TEXT, 'error');

@@ -255,15 +255,28 @@ test('the side panel asks Chrome for the website only from a click, first, and o
   // allowSiteAndRetry asks for the patterns the blocked read named, or the website's own
   assert.match(fnText(src, 'allowSiteAndRetry'), /state\.blockedOrigins[^\n]*: siteNeeds\(\)/);
 
-  // each action is reached from the click handler with nothing awaited on the way
+  // each action is reached from the click handler with nothing awaited on the
+  // way in the idle and blocked steps: the only awaits before the list's Post
+  // buttons are the photo prompt's own branch and the wizard's and upkeep's
+  // handlers, each behind its own step
   const click = fnText(src, 'onClick');
   const switchAt = click.indexOf('switch (btn.id)');
   const postAt = click.indexOf('btn.dataset.postVin');
   assert.ok(postAt > 0 && postAt < switchAt, 'the list\'s Post buttons are handled before the switch');
-  assert.match(click, /if \(btn\.dataset\.postVin !== undefined && state\.step === 'idle'\) return postFromList\(btn\.dataset\.postVin\);/);
-  for (const [id, name] of [['panelQueue', 'queueFromList'], ['panelRescan', 'rescanFromList'], ['allowSite', 'allowSiteAndRetry']]) {
-    assert.match(click, new RegExp(`case '${id}': return state\\.step === '(?:idle|blocked)' \\? ${name}\\(\\) : undefined;`), `${id} goes straight to ${name}`);
+  const awaitsBefore = [...click.slice(0, postAt).matchAll(/[^\n]*\bawait\b[^\n]*/g)].map((m) => m[0].trim());
+  assert.deepEqual(awaitsBefore, [
+    'const granted = await askForPhotos(photoList().filter((u) => patternCovers(pattern, u)), { again: true });',
+    "if (state.step === 'wizard' && (await handleWizardClick(btn.id, wizardCtx))) return undefined;",
+    "if (state.step === 'upkeep' && (await handleUpkeepClick(btn.id, upkeepCtx))) return undefined;",
+  ], 'nothing else is awaited before the list\'s actions');
+  assert.match(click, /if \(btn\.dataset\.allowPhotos !== undefined\) \{\n\s*const pattern = btn\.dataset\.allowPhotos;\n\s*const granted = await askForPhotos\([^\n]*\n\s*return afterAllowPhotos\(pattern, granted\);\n\s*\}/, 'the photo prompt\'s await is inside its own branch, which returns');
+  assert.match(click, /if \(btn\.dataset\.postVin !== undefined && state\.step === 'idle'\) return oneAtATime\(\(\) => postFromList\(btn\.dataset\.postVin\)\);/);
+  for (const [id, name, step] of [['panelQueue', 'queueFromList', 'idle'], ['allowSite', 'allowSiteAndRetry', 'blocked']]) {
+    assert.match(click, new RegExp(`case '${id}': return state\\.step === '${step}' \\? oneAtATime\\(\\(\\) => ${name}\\(\\)\\) : undefined;`), `${id} goes straight to ${name}`);
   }
+  assert.match(click, /case 'panelRescan': return state\.step === 'idle' \? rescanFromList\(\) : undefined;/, 'panelRescan goes straight to rescanFromList (it has its own Rescanning… state)');
+  // oneAtATime calls the action before anything else, so Chrome's prompt is still inside the click
+  assert.match(fnText(src, 'oneAtATime'), /^function oneAtATime\(action\) \{\n\s*if \(listBusy\) return undefined;\n\s*listBusy = true;\n\s*return action\(\)\.finally\(/);
   for (const name of callers) {
     const uses = (src.match(new RegExp(`\\b${name}\\(`, 'g')) || []).length;
     assert.equal(uses, 2, `${name} is called only from the click handler`);

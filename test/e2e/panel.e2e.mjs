@@ -204,7 +204,7 @@ try {
   assert.equal(sites[origin].lastError, null);
   await panel.screenshot({ path: join(shots, 'panel-4-rescanned.png'), fullPage: true });
 
-  // ---- 7. "Post the next 2": a queue walked in the panel, with no dealer tab ----
+  // ---- 7. "Post the next 2": a queue walked in the panel, with no dealer tab; a car posted meanwhile is skipped ----
   await panel.click('#panelQueue');
   await panel.waitForSelector('#queueBar');
   assert.match(await panel.textContent('#queueBar'), /Car 1 of 2/);
@@ -213,9 +213,26 @@ try {
   assert.equal(stored.dealerTabId, null);
   await panel.waitForSelector('#openForm, #confirmPosted, #blocked', { timeout: 30000 });
   assert.equal(await panel.$('#blocked'), null, 'the first queued car was read from the website, not stopped');
-  await panel.click('#queueStop');
+  if (!(await panel.$('#confirmPosted'))) await panel.click('#openForm'); // a car with something assumed waits at review for this click
+  await panel.waitForSelector('#confirmPosted', { timeout: 30000 });
+  // meanwhile a colleague posts the second car (their entry arrives through
+  // the sync): the queue must skip it, never open a second form for it
+  const [first, second] = stored.vins;
+  await panel.evaluate(async ({ o, vin }) => {
+    const k = `posted:${o}`;
+    const data = await chrome.storage.local.get(k);
+    await chrome.storage.local.set({ [k]: { ...data[k], [vin]: { name: 'posted by a colleague', price: 1, postedAt: new Date().toISOString(), mine: false } } });
+  }, { o: origin, vin: second });
+  const formsBefore = context.pages().filter((p) => p.url().startsWith(marketOrigin)).length;
+  await panel.click('#skipCar'); // the salesperson skips the first car
+  await panel.waitForSelector('#queueDone', { timeout: 20000 });
+  assert.match(await panel.textContent('#queueBar'), /Queue finished: 2 cars · 2 skipped/);
+  assert.match(await panel.textContent('#status'), /is already marked as posted, so the queue skipped it\./);
+  assert.equal(context.pages().filter((p) => p.url().startsWith(marketOrigin)).length, formsBefore, 'no form was opened for the car already posted');
+  await panel.click('#queueClear');
   await panel.waitForSelector('#panelReady');
   assert.equal(await panel.evaluate(async (o) => (await chrome.storage.local.get(`postQueue:${o}`))[`postQueue:${o}`] ?? null, origin), null);
+  assert.deepEqual(await panel.$$eval('#panelList .row [data-post-vin]', (els) => els.map((e) => e.dataset.postVin)), [first], 'the colleague\'s car is off the list');
   assert.equal(await publishCount(), '1', 'nothing was published but the salesperson\'s own click');
   for (const p of context.pages()) if (p.url().startsWith(marketOrigin)) await p.close();
 
@@ -228,8 +245,8 @@ try {
   await panel.waitForSelector('#capReached');
   assert.equal(await panel.locator('button[data-post-vin]').count(), 0);
   assert.equal(await panel.$('#panelQueue'), null);
-  assert.equal(await panel.locator('#panelList .row').count(), 2);
-  assert.match(await panel.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/);
+  assert.equal(await panel.locator('#panelList .row').count(), 1);
+  assert.match(await panel.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/, 'a colleague\'s post does not count against this salesperson\'s cap');
   await panel.screenshot({ path: join(shots, 'panel-5-cap.png'), fullPage: true });
 
   // ---- 9. The pilot numbers: two attempts from the panel, one blocked as gone, one posted ----

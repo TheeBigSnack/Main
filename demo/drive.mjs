@@ -7,7 +7,9 @@
 // the rescan's To do items, the price update and the take-down through the
 // side panel, the background rescan, and Reset. Then a second pass over the
 // other sample website, which publishes standard vehicle data on each car's
-// page: switching to it, the scan, a post, day 2 and the background rescan.
+// page: switching to it, the scan, a post, the side panel's own list (Chrome's
+// question for the website, said no to and then yes), day 2 and the
+// background rescan.
 //
 // Run:  node demo/drive.mjs
 // Needs the repo's Playwright (npm ci) and a Chromium: LOTSYNC_CHROME=<path>
@@ -371,6 +373,33 @@ try {
   assert.match(await text(panel.locator('#done')), /Recorded: 2019 Honda Civic EX at \$19,995/);
   assert.equal(await publishClicks(), 1);
   await shot(page, 'drive-16-standard-posted.png');
+
+  // ---- 13b. The side panel's own list, and Chrome's question for the website from a click there ----
+  // The sandbox serves the sample website from its own address, which counts
+  // as allowed; that is taken back here, so the panel has to ask, as it would
+  // for a website the person never allowed automatic rescans for.
+  await panel.locator('#postAnother').click();
+  await panel.locator('#panelReady').waitFor();
+  assert.match(await text(panel.locator('#panelMeta')), /Last scan .* · 5 ready to post · 9 more posts allowed today/);
+  assert.equal(await panel.locator(`button[data-post-vin="${STD_CIVIC}"]`).count(), 0, 'the posted Civic is off the list');
+  const sitePattern = await page.evaluate(() => {
+    const hub = window.__lotSyncHub;
+    const pattern = location.origin + '/' + '*';
+    hub.permissionsRemove({ origins: [pattern] });
+    hub.permissionAnswer = false; // the person says no to Chrome's prompt
+    hub.permissionRequests.length = 0;
+    return pattern;
+  });
+  await panel.locator('button[data-post-vin="1FMSAMPL5JU000205"]').click(); // Post on the Escape
+  await panel.locator('#status').filter({ hasText: /Not allowed, so Lot Sync can't read .* from the side panel/ }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.__lotSyncHub.permissionRequests), [[sitePattern]], 'asked for the website only, from the click');
+  assert.equal(await panel.locator('#panelReady').count(), 1, 'nothing was started');
+  await page.evaluate(() => { window.__lotSyncHub.permissionAnswer = true; }); // this time the person allows it
+  await panel.locator('#panelRescan').click();
+  await panel.locator('#status').filter({ hasText: /^Rescanned \S+: \d+ used cars?\./ }).waitFor({ timeout: 30000 });
+  assert.deepEqual(await page.evaluate(() => window.__lotSyncHub.permissionRequests), [[sitePattern], [sitePattern]]);
+  assert.match(await text(panel.locator('#panelMeta')), /5 ready to post/);
+  await shot(page, 'drive-16b-panel-list.png');
 
   // ---- 14. The Accord was listed by hand: Mark posted ----
   await openPopup();
