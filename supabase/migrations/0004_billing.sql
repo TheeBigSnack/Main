@@ -26,11 +26,6 @@
 --   current_period_end  the paid-through date from Stripe.
 --   seats   salespeople the subscription covers: the included count plus
 --           what the seat price's quantity adds. Informational for now.
---   cancel_at_period_end, cancel_at  a subscription cancelled to end later
---           (the portal cancels at the end of the paid period): Stripe keeps
---           it trialing or active until then, so the state stays active, and
---           these say it will not renew and when it ends. Copied from every
---           subscription event, so renewing in the portal clears them.
 -- ---------------------------------------------------------------------------
 create table public.subscriptions (
   dealership_id uuid primary key references public.dealerships (id) on delete cascade,
@@ -40,14 +35,10 @@ create table public.subscriptions (
   pilot_ends_at timestamptz,
   current_period_end timestamptz,
   seats integer not null default 5 check (seats >= 1),
-  cancel_at_period_end boolean not null default false,
-  cancel_at timestamptz,
   updated_at timestamptz not null default now()
 );
 comment on table public.subscriptions is 'One row per dealership: the free pilot period or the Stripe subscription''s status, as the billing function copies it in.';
 comment on column public.subscriptions.status is 'pilot (Lot Current''s own free period) or a Stripe subscription status; null until either exists.';
-comment on column public.subscriptions.cancel_at_period_end is 'Stripe''s cancel_at_period_end: the subscription was cancelled and ends at the end of its paid period instead of renewing.';
-comment on column public.subscriptions.cancel_at is 'Stripe''s cancel_at: when a cancelled subscription ends; null while it renews.';
 comment on column public.subscriptions.seats is 'Salespeople the subscription covers: the included count (5, marketing/pricing.json) plus the seat price''s quantity.';
 
 -- ---------------------------------------------------------------------------

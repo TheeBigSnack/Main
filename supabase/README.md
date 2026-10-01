@@ -19,6 +19,7 @@ What is here:
 | `migrations/0005_leads.sql` | `demo_requests`, the landing page's demo requests; no API role reads it. |
 | `migrations/0007_signup.sql` | Self-serve sign-up: `signup_settings` (the switch, off until you open it, and two limits), `signup_attempts`, `website_origin_of` and `create_dealership`; no API role reads either table (below, "Self-serve sign-up"). |
 | `migrations/0008_usage.sql` | The owner's usage report, `usage_report(since)`: one row per dealership with its plan and activity; no API role may call it (below, "Usage report"). |
+| `migrations/0009_cancel_at.sql` | `subscriptions.cancel_at`: the date a cancellation scheduled in the Billing Portal ends the subscription, so the manager view says so instead of a renewal. The first change made after the project applied the first eight; apply it (`db push`, or the workflow's database step) before deploying the `billing` function that writes it. |
 | `functions/lead/` | `/lead`: the landing page's demo form, anonymous, behind its origin, a honeypot and rate limits. |
 | `functions/rewrite/` | The rewrite service (replaces `backend/`): `/rewrite` and `/color` behind sign-in, a rate limit and a monthly cost cap. |
 | `functions/sync/` | `/sync`: the posted registry and the pilot numbers up, the dealership's current state down. |
@@ -50,7 +51,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    supabase db push
    ```
 
-   `db push` applies the eight migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. Until the first project has applied them, a change to the schema is made in the file that defines it (the files are the schema, not a history yet; `listings.created_at` and the invite-code index were added that way); from then on every change is a new numbered file.
+   `db push` applies the nine migrations in order. Nothing in them is reachable through the API until the second one has turned row-level security on, and `db push` applies them all together. The production project has applied `0001_schema.sql` to `0008_usage.sql`, so those files never change again, not even a comment: Supabase records a migration by its number and never reads it twice, so a change made inside one would reach a fresh build and never production. Every change is a new numbered file that applies on top (`0009_cancel_at.sql` was the first), and `test/supabase.test.js` fails if an applied file changes.
 
 3. **Sign-in settings** (Dashboard, Authentication):
    - Providers, Email: keep it on; passwords are never used, so "Confirm email" can be off (the magic link is the confirmation). A new hosted project starts with it on; either way works, because both sign-in templates carry the code and the link (below, "Sign-in emails").
@@ -201,6 +202,7 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
   -f supabase/migrations/0006_privacy.sql \
   -f supabase/migrations/0007_signup.sql \
   -f supabase/migrations/0008_usage.sql \
+  -f supabase/migrations/0009_cancel_at.sql \
   -f supabase/tests/rls.sql \
   -f supabase/tests/billing.sql \
   -f supabase/tests/privacy.sql \
@@ -277,7 +279,7 @@ Billing runs on Stripe: a subscription per rooftop per month, a free pilot perio
 | `migrations/0004_billing.sql` | `subscriptions` (one row per dealership: the pilot or the Stripe status), `billing_events` (every webhook event once), `subscription_state()` and `start_pilot()`, RLS. |
 | `functions/billing/` | `/checkout`, `/portal`, `/status` behind sign-in, `/webhook` behind Stripe's signature. Talks to Stripe's REST API with `fetch`; no SDK. |
 | `functions/_shared/billing.mjs` | The pure parts, plain JavaScript so Node tests them: the state machine, the line items, the form encoding, what each event does to the row, the signature check. |
-| `tests/billing.sql` | Proves the pilot rules and the wall between dealerships against a running database (same recipe as `rls.sql`, with `0004_billing.sql` added to the list). |
+| `tests/billing.sql` | Proves the pilot rules, the wall between dealerships and who may read and write a scheduled cancellation against a running database (same recipe as `rls.sql`, with `0004_billing.sql` and `0009_cancel_at.sql` added to the list). |
 | `test/billing.test.js` | The unit tests, in `npm test`. |
 
 ### What to create in Stripe, once
@@ -347,7 +349,7 @@ All three signed-in routes take `Authorization: Bearer <the user's access token>
 | `active` | Stripe says `trialing` (a subscription whose first charge waits for the pilot to end) or `active`. | Everything works; the page shows the paid-through date, seats, and "Manage billing". |
 | `lapsed` | Everything else: the pilot ended unpaid, `past_due`, `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, `paused`. | The page says so and offers "Subscribe" (and "Manage billing" when a customer exists). `/sync` and `/rewrite` answer 402 with `code: "lapsed"` and the plan and do nothing else: syncing and the description writer stop until a manager renews. The billing routes are never gated, so renewing always works. |
 
-The row: `status` (`pilot`, or a Stripe status, or null), `pilot_ends_at`, `current_period_end`, `seats` (the included count plus the seat price's quantity, copied from Stripe by the webhook; the Billing card shows it against the salespeople, and nothing in Lot Current changes it in Stripe), `cancel_at_period_end` and `cancel_at` (Stripe's own fields, copied by the webhook from every subscription event: a subscription cancelled in the portal stays `trialing` or `active` until it ends, and these say it will not renew and when it ends), `stripe_customer_id`, `stripe_subscription_id`, `updated_at`.
+The row: `status` (`pilot`, or a Stripe status, or null), `pilot_ends_at`, `current_period_end`, `seats` (the included count plus the seat price's quantity, copied from Stripe by the webhook; the Billing card shows it against the salespeople, and nothing in Lot Current changes it in Stripe), `cancel_at` (when Stripe will end a subscription whose cancellation the dealership scheduled in the Billing Portal, which cancels at the end of the paid period and keeps the status `trialing` or `active` until then: Stripe's `cancel_at`, or the period end when it sends only `cancel_at_period_end`; null otherwise, written on every subscription event so undoing the cancellation clears it; `0009_cancel_at.sql`), `stripe_customer_id`, `stripe_subscription_id`, `updated_at`.
 
 ### How the free pilot starts
 
@@ -366,7 +368,7 @@ The manager view (`manager/`) has a Billing card fed by `GET /billing/status?dea
 |---|---|---|
 | `none` | "No plan yet. Start the free pilot: `pilotDays` days, `includedSalespeople` salespeople included, no card." (a salesperson reads "A manager can start") | **Start the free pilot**, **Subscribe** |
 | `pilot` | "Free pilot: N days left (ends `pilot_ends_at`)." and, for a manager, that subscribing now is first charged when the pilot ends | **Subscribe** |
-| `active` | "Subscribed: `seats` seats, renews `current_period_end`." ("first charge" while Stripe reports `trialing`). Once it is cancelled in the portal (Stripe keeps it `trialing` or `active` until the end and sets `cancel_at_period_end` or `cancel_at`, which the webhook copies), the pill says Cancelled and the line "Cancelled: `seats` seats, ends `current_period_end` and does not renew." ("before the first charge" while `trialing`), with "Manage billing can renew it." | **Manage billing** |
+| `active` | "Subscribed: `seats` seats, renews `current_period_end`." ("first charge" while Stripe reports `trialing`). Once it is cancelled in the portal (Stripe keeps it `trialing` or `active` until the end, and the webhook records the date it ends in `cancel_at`), the pill says Cancelled and the line "Cancelled: `seats` seats, ends `cancel_at` and does not renew." ("before the first charge" while `trialing`), with "Manage billing can renew it." | **Manage billing** |
 | `lapsed` | "The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed." plus why (the payment failed, it was cancelled or paused, or the free pilot ended on a date). While Stripe still holds the subscription open (`past_due`, `unpaid`, `incomplete`, `paused`) it adds what renews it, for a manager: after a failed payment "Update the card with Manage billing; syncing starts again once Stripe takes the payment.", after a pause or an unfinished first payment Manage billing or the Lot Current contact; Getting started's first step says the same instead of "subscribe" | **Subscribe** once the subscription is over (cancelled, expired, or the free pilot ended), and **Manage billing** when a Stripe customer exists |
 
 A manager also reads the seats under the line: "N salespeople; the plan includes M." (`salespeople` and `includedSalespeople` from the status; a salesperson gets no seat line). Next to **Subscribe** it says how many seats Subscribe asks for, and that Checkout shows the price before you pay: the status carries no price, so the card shows none. While subscribed, when there are more salespeople than `seats`, a warning says "N salespeople and S seats paid for. Lot Current never adds seats or changes what you pay on its own: to add seats, ask your Lot Current contact."

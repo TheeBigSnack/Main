@@ -496,10 +496,12 @@ test('billing: a cancellation in the portal reaches the row and the card says wh
   await send('evt_a', 'customer.subscription.created', t0 - 120, { items, cancel_at_period_end: false, cancel_at: null });
   assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
 
-  // the portal cancels at the end of the period: Stripe keeps the trial running and says it will not renew
-  await send('evt_b', 'customer.subscription.updated', t0 - 60, { items, cancel_at_period_end: true, cancel_at: end, canceled_at: t0 - 60 });
+  // the portal cancels at the end of the period: Stripe keeps the trial running and says only cancel_at_period_end;
+  // the row records the period's end (from the items, as newer API versions carry it) as the date it ends
+  await send('evt_b', 'customer.subscription.updated', t0 - 60, { items, cancel_at_period_end: true, cancel_at: null, canceled_at: t0 - 60 });
   const [row] = fake.rows('subscriptions');
-  assert.deepEqual([row.status, row.cancel_at_period_end, row.cancel_at], ['trialing', true, pgTime(iso(end * 1000))]);
+  assert.deepEqual([row.status, row.cancel_at], ['trialing', pgTime(iso(end * 1000))]);
+  assert.ok(!('cancel_at_period_end' in row), 'the row has one cancellation column, cancel_at (0009_cancel_at.sql)');
   const cancelled = await cardNow();
   assert.equal(cancelled.label, 'Cancelled');
   assert.match(cancelled.line, /^Cancelled: 7 seats, ends \d{4}-\d{2}-\d{2} before the first charge\.$/);
@@ -508,7 +510,7 @@ test('billing: a cancellation in the portal reaches the row and the card says wh
   // renewed in the portal before the end
   await send('evt_c', 'customer.subscription.updated', t0, { items, cancel_at_period_end: false, cancel_at: null });
   const [renewedRow] = fake.rows('subscriptions');
-  assert.deepEqual([renewedRow.cancel_at_period_end, renewedRow.cancel_at], [false, null]);
+  assert.equal(renewedRow.cancel_at, null);
   assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
 });
 

@@ -106,7 +106,6 @@ Not before the company exists and the attorney has answered the sales-tax questi
           status = case when pilot_ends_at is not null then 'pilot' end,
           current_period_end = null,
           cancel_at = null,
-          cancel_at_period_end = false,
           seats = default,
           updated_at = now()
     where stripe_customer_id is not null

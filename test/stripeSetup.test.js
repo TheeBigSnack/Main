@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import {
   keyMode, webhookUrlFor, wantedObjects, runSetup, secretsCommands, priceMismatch, portalMismatch, webhookMismatch,
   LOOKUP_KEYS, FOUNDING_COUPON_ID, TAG,
@@ -308,10 +308,16 @@ test('stripe setup doc: the live switch resets every Stripe column test mode wro
   const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
   const sql = /```sql\n([^]*?)```/.exec(live)?.[1] || '';
   assert.match(sql, /update public\.subscriptions/, 'the live switch has the reset statement');
-  const migration = readFileSync(new URL('../supabase/migrations/0004_billing.sql', import.meta.url), 'utf8');
-  const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migration)[1];
+  // the columns as every migration leaves them: 0004's table and what later files add
+  const dir = new URL('../supabase/migrations/', import.meta.url);
+  const migrations = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort().map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+  const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migrations)[1];
   const columns = [...table.matchAll(/^\s+([a-z_]+) /gm)].map((m) => m[1]);
+  for (const m of migrations.matchAll(/^alter table public\.subscriptions add column (?:if not exists )?([a-z_]+)/gm)) columns.push(m[1]);
   assert.ok(columns.includes('stripe_customer_id') && columns.includes('cancel_at'), columns.join(','));
+  const sets = [...sql.matchAll(/^\s+(?:set\s+)?([a-z_]+) = /gm)].map((m) => m[1]);
+  assert.ok(sets.length >= 5, sets.join(','));
+  for (const c of sets) assert.ok(columns.includes(c), `the reset sets ${c}, which no migration creates: the statement would fail`);
   for (const c of columns.filter((c) => !['dealership_id', 'pilot_ends_at', 'updated_at'].includes(c))) assert.match(sql, new RegExp(`\\b${c} = `), `the reset sets ${c}`);
   assert.match(sql, /status = case when pilot_ends_at is not null then 'pilot' end/, 'a free pilot stays a pilot');
   assert.doesNotMatch(sql, /pilot_ends_at = /, 'the free pilots keep their end dates');

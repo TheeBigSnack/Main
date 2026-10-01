@@ -11,7 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import {
   PRICING, STATUSES, STATES, HANDLED_EVENTS, MAX_SEATS, MIN_TRIAL_SECONDS,
@@ -425,32 +425,45 @@ const sub = (over = {}) => ({
 const event = (type, object, created = T) => ({ id: 'evt_' + type.replace(/\W/g, '_'), object: 'event', type, created, data: { object } });
 const opts = { included: 5, priceRooftop: 'price_rooftop', priceSeat: 'price_seat' };
 
-test('applyStripeEvent: a cancellation in the portal is copied while Stripe keeps the status, and a renewal clears it', () => {
+// The row keeps one column for a cancellation, cancel_at (0009_cancel_at.sql;
+// 0001 to 0008 are applied in production and never change): when Stripe will
+// end the subscription. Every patch the webhook writes names only columns the
+// migrations create, or the upsert fails and Stripe's event is answered 500.
+test('applyStripeEvent: a cancellation in the portal records the date it ends while Stripe keeps the status, and a renewal clears it', () => {
   const paying = row({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: iso(NOW + 30 * DAY), updated_at: iso(NOW - DAY) });
-  // the portal cancels at the end of the period: status stays active, cancel_at_period_end says it will not renew
-  const atEnd = applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: true, cancel_at: T + 30 * 86400, canceled_at: T })), opts);
-  assert.equal(atEnd.status, 'active', 'Stripe keeps it active until the end');
-  assert.equal(atEnd.cancel_at_period_end, true);
-  assert.equal(atEnd.cancel_at, iso(NOW + 30 * DAY));
-  assert.equal(subscriptionState({ ...paying, ...atEnd }, NOW), 'active', 'still served until the end');
-  // newer API versions may schedule the end through cancel_at alone
-  const byDate = applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: false, cancel_at: T + 30 * 86400 })), opts);
-  assert.deepEqual([byDate.cancel_at_period_end, byDate.cancel_at], [false, iso(NOW + 30 * DAY)]);
-  // a trial cancelled before its first charge
-  const trial = applyStripeEvent(paying, event('customer.subscription.updated', sub({ status: 'trialing', cancel_at_period_end: true })), opts);
-  assert.deepEqual([trial.status, trial.cancel_at_period_end, trial.cancel_at], ['trialing', true, null]);
-  // renewed in the portal: both go back, so the card says renews again
+  // as the portal sends it (cancel_at_period_end, and cancel_at in API versions that set it), and cancel_at alone: the date it ends
+  for (const [shape, extra] of [['both', { cancel_at_period_end: true, cancel_at: T + 30 * 86400, canceled_at: T }], ['period end only', { cancel_at_period_end: true }], ['cancel_at only', { cancel_at_period_end: false, cancel_at: T + 30 * 86400 }]]) {
+    for (const status of ['trialing', 'active']) {
+      const p = applyStripeEvent(paying, event('customer.subscription.updated', sub({ status, ...extra })), opts);
+      assert.equal(p.status, status, `${shape}: Stripe keeps it ${status} until the end`);
+      assert.equal(p.cancel_at, iso(NOW + 30 * DAY), `${shape}, ${status}`);
+      assert.equal(subscriptionState({ ...paying, ...p }, NOW), 'active', 'still served until the end');
+    }
+  }
+  // a cancel_at date of its own wins over the period end
+  assert.equal(applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: false, cancel_at: T + 9 * 86400 })), opts).cancel_at, iso(NOW + 9 * DAY));
+  // renewed in the portal: written as null, not left out, so the stored date goes and the card says renews again
+  const atEnd = applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: true })), opts);
   const renewed = applyStripeEvent({ ...paying, ...atEnd }, event('customer.subscription.updated', sub({ cancel_at_period_end: false, cancel_at: null }), T + 60), opts);
-  assert.deepEqual([renewed.cancel_at_period_end, renewed.cancel_at], [false, null]);
-  // invoices never touch them
+  assert.ok(Object.hasOwn(renewed, 'cancel_at') && renewed.cancel_at === null);
+  // invoices never touch it
   const paid = applyStripeEvent({ ...paying, ...atEnd }, event('invoice.paid', { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [] } }, T + 60), opts);
-  assert.ok(paid && !('cancel_at_period_end' in paid) && !('cancel_at' in paid));
+  assert.ok(paid && !('cancel_at' in paid));
+  // no patch names a column the migrations do not create
+  const dir = new URL('../supabase/migrations/', import.meta.url);
+  const migrations = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort().map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+  const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migrations)[1];
+  const columns = [...table.matchAll(/^\s+([a-z_]+) /gm)].map((m) => m[1]);
+  for (const m of migrations.matchAll(/^alter table public\.subscriptions add column (?:if not exists )?([a-z_]+)/gm)) columns.push(m[1]);
+  for (const p of [...[true, false].map((c) => applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: c, cancel_at: c ? T + 30 * 86400 : null })), opts)), atEnd, renewed, paid]) {
+    for (const key of Object.keys(p)) assert.ok(columns.includes(key), `the webhook writes ${key}, a column no migration creates`);
+  }
 });
 
 test('applyStripeEvent: subscription created and updated copy the status, ids, period end and seats', () => {
   assert.deepEqual(HANDLED_EVENTS, ['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed']);
   const created = applyStripeEvent(null, event('customer.subscription.created', sub()), opts);
-  assert.deepEqual(created, { updated_at: iso(NOW), stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', status: 'active', current_period_end: iso(NOW + 30 * DAY), seats: 5, cancel_at_period_end: false, cancel_at: null });
+  assert.deepEqual(created, { updated_at: iso(NOW), stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', status: 'active', current_period_end: iso(NOW + 30 * DAY), cancel_at: null, seats: 5 });
   // a pilot row becomes a trialing subscription when the checkout finished with a trial
   const pilot = row({ status: 'pilot', pilot_ends_at: iso(NOW + 10 * DAY), stripe_customer_id: 'cus_1' });
   const trial = applyStripeEvent(pilot, event('customer.subscription.created', sub({ status: 'trialing' })), opts);

@@ -14,6 +14,7 @@
 --     -f supabase/migrations/0006_privacy.sql \
 --     -f supabase/migrations/0007_signup.sql \
 --     -f supabase/migrations/0008_usage.sql \
+--     -f supabase/migrations/0009_cancel_at.sql \
 --     -f supabase/tests/rls.sql \
 --     -f supabase/tests/billing.sql \
 --     -f supabase/tests/privacy.sql \

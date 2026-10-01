@@ -339,8 +339,8 @@ test('billingCard: subscribed shows the seats and the renewal date; a trial says
 
 test('billingCard: a subscription cancelled in the portal never says renews or first charge; it says when it ends', () => {
   const paying = (over) => status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', seats: 5, current_period_end: inDays(20), ...over }) });
-  // Stripe keeps it active until the period ends; cancel_at_period_end says it will not renew
-  const c = card(paying({ cancel_at_period_end: true, cancel_at: inDays(20) }));
+  // Stripe keeps it active until the period ends; the webhook records the date it ends in cancel_at (0009_cancel_at.sql)
+  const c = card(paying({ cancel_at: inDays(20) }));
   assert.equal(c.state, 'active', 'still served until then');
   assert.equal(c.label, 'Cancelled');
   assert.equal(c.tone, 'warn');
@@ -348,12 +348,11 @@ test('billingCard: a subscription cancelled in the portal never says renews or f
   assert.doesNotMatch(c.line, /renews|first charge/);
   assert.equal(c.detail, 'Everything works as it does now until then; Manage billing can renew it.');
   assert.deepEqual(c.buttons.map((b) => b.action), ['portal']);
-  // cancel_at_period_end alone (the end is the period's), and cancel_at alone (newer API versions)
-  assert.equal(card(paying({ cancel_at_period_end: true })).line, 'Cancelled: 5 seats, ends 2026-12-06 and does not renew.');
-  assert.equal(card(paying({ cancel_at: inDays(20) })).line, 'Cancelled: 5 seats, ends 2026-12-06 and does not renew.');
-  assert.equal(card(paying({ cancel_at_period_end: true, current_period_end: null })).line, 'Cancelled: 5 seats, ends with the paid period and does not renew.');
+  // the row has no other cancellation column: a Stripe field the database never stores changes nothing
+  assert.equal(card(paying({ cancel_at_period_end: true })).line, 'Subscribed: 5 seats, renews 2026-12-06.', 'only cancel_at, the column the database has, says it is cancelled');
+  assert.equal(card(paying({ cancel_at: inDays(20), current_period_end: null })).line, 'Cancelled: 5 seats, ends 2026-12-06 and does not renew.');
   // a trial cancelled before the pilot ends is never charged
-  const trial = card(paying({ status: 'trialing', pilot_ends_at: inDays(12), current_period_end: inDays(12), cancel_at_period_end: true }));
+  const trial = card(paying({ status: 'trialing', pilot_ends_at: inDays(12), current_period_end: inDays(12), cancel_at: inDays(12) }));
   assert.equal(trial.line, 'Cancelled: 5 seats, ends 2026-11-28 before the first charge.');
   assert.doesNotMatch(trial.line, /first charge 2026/);
   // cancelled from a date after this period: the renewal before it still happens, and the card says both
@@ -361,14 +360,14 @@ test('billingCard: a subscription cancelled in the portal never says renews or f
   assert.equal(later.label, 'Cancelled');
   assert.equal(later.line, 'Subscribed: 5 seats, renews 2026-12-06; cancelled from 2027-01-05.');
   // a salesperson reads the same line, with nothing to press and no portal hint
-  const sp = card(status({ state: 'active', role: 'salesperson', subscription: subRow({ status: 'active', seats: 5, current_period_end: inDays(20), cancel_at_period_end: true }) }));
+  const sp = card(status({ state: 'active', role: 'salesperson', subscription: subRow({ status: 'active', seats: 5, current_period_end: inDays(20), cancel_at: inDays(20) }) }));
   assert.equal(sp.line, 'Cancelled: 5 seats, ends 2026-12-06 and does not renew.');
   assert.equal(sp.detail, '');
   assert.deepEqual(sp.buttons, []);
-  // renewed in the portal: the flags are back to false and null, and so is the line
-  assert.equal(card(paying({ cancel_at_period_end: false, cancel_at: null })).line, 'Subscribed: 5 seats, renews 2026-12-06.');
+  // renewed in the portal: the webhook writes cancel_at null, and the line is the renewal again
+  for (const undone of [null, undefined, '']) assert.equal(card(paying({ cancel_at: undone })).line, 'Subscribed: 5 seats, renews 2026-12-06.', String(undone));
   // the end has passed and Stripe's last event has not arrived yet (the row still says active): ended, never "ends" on a past day
-  const past = card(paying({ cancel_at_period_end: true, current_period_end: inDays(-2) }));
+  const past = card(paying({ current_period_end: inDays(-2), cancel_at: inDays(-2) }));
   assert.equal(past.line, 'Cancelled: 5 seats, ended 2026-11-14.');
   assert.equal(past.detail, '', 'no "until then" for a day that has passed');
   assert.equal(card(paying({ status: 'trialing', cancel_at: inDays(-2) })).line, 'Cancelled: 5 seats, ended 2026-11-14 before the first charge.');

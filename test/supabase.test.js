@@ -13,7 +13,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const schema = read('../supabase/migrations/0001_schema.sql');
@@ -28,6 +29,36 @@ const billing = read('../supabase/functions/billing/index.ts');
 const readme = read('../supabase/README.md');
 
 // ---------- the schema ----------
+
+// The production project has applied 0001 to 0008. Supabase records a
+// migration by its number and never reads an applied file again, so a change
+// made inside one reaches a fresh build but never production, where the code
+// that relies on it then fails. Those files stay exactly as deployed, comments
+// included, and every change is a new numbered file (0009_cancel_at.sql was
+// the first). Line endings are folded so a Windows checkout reads the same.
+const APPLIED_MIGRATIONS = Object.freeze({
+  '0001_schema.sql': 'a781dc0771958bacbe86448c3fe5ea1cd258583fe11a677a76955ff5bc3877d8',
+  '0002_rls.sql': '25c73dc346820f882563b2ccc91ca58f3cff46d97bffbdbc678bc72de67e47c7',
+  '0003_views.sql': 'e651faa63f595e94059b4b624c407570fc7c7c418fed11d7e139c8b5aa2d0ab2',
+  '0004_billing.sql': '6e7f0637e6d74dd4bfab20f7d8cca26279d1d9e1683427820512f219ec58dc36',
+  '0005_leads.sql': '3eed948aa5eebf1fa2746ff4c034d64132f017c1c42d45cbbc41fe5a5e93922f',
+  '0006_privacy.sql': '11e44419ea8da5127325f6a49813bf823f2f313779d76dbbf466afd6a39c37e4',
+  '0007_signup.sql': 'af23fca0fa04d4f292cfa9b86750d5515f48fb406b1e72203b7069ce4a58953e',
+  '0008_usage.sql': 'd71bfb982b354490f58603559ce5e7f3a13bb08d6dc8fce64fece757ae46e022',
+});
+
+test('the migrations production applied (0001 to 0008) are the deployed files unchanged; every later change is a new numbered file', () => {
+  const files = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
+  for (const [file, sha] of Object.entries(APPLIED_MIGRATIONS)) {
+    assert.ok(files.includes(file), `${file} is applied in production and must stay`);
+    const text = read(`../supabase/migrations/${file}`).replace(/\r\n/g, '\n');
+    assert.equal(createHash('sha256').update(text).digest('hex'), sha, `${file} is applied in production and must not change, not even a comment: put the change in a new numbered migration`);
+  }
+  const last = Object.keys(APPLIED_MIGRATIONS).sort().pop();
+  for (const f of files.filter((x) => !Object.hasOwn(APPLIED_MIGRATIONS, x))) assert.ok(f.slice(0, 4) > last.slice(0, 4), `${f} sorts after ${last}, so it applies on top of what production has`);
+  assert.match(readme, /The production project has applied `0001_schema\.sql` to `0008_usage\.sql`/, 'the README says the applied files are fixed');
+  assert.doesNotMatch(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/, 'the README no longer says to change a migration in place');
+});
 
 test('0001_schema.sql: every table gets RLS in 0002_rls.sql; listings carry the server\'s created_at next to the client\'s posted_at', () => {
   const tables = [...schema.matchAll(/^create table public\.(\w+) \(/gm)].map((m) => m[1]);
@@ -214,13 +245,12 @@ test('supabase/README.md names today, postsToday, plan, the 402 rule and the Bil
   assert.doesNotMatch(readme, /not wired in this step/, 'the card is wired now');
 });
 
-test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule, in-place migrations', () => {
+test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule', () => {
   assert.match(readme, /a code works once and for 7 days/);
   assert.match(readme, /marks as taken down the caller's listed rows whose key is in `known` and missing from `posted` \(no time decides it/);
   assert.match(readme, /a request without `known` takes nothing down/);
   assert.match(readme, /the answer looks back 10 minutes before `since`/);
   assert.match(readme, /matches none of their dealerships gets 403/);
-  assert.match(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/);
   assert.match(readme, /The pilot lists are the one place a client clock still meets `since`/);
 });
 
