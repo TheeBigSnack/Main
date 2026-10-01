@@ -536,3 +536,20 @@ test('the privacy texts stay templates for any dealership', () => {
     assert.equal(hit, null, `${f} contains the pilot value "${hit && hit[0]}"`);
   }
 });
+
+test('the texts that say where synced post attempts and to-do items go say that every member reads them, as the policies allow', () => {
+  const rls = read('supabase/migrations/0002_rls.sql');
+  for (const table of ['post_attempts', 'todo_items']) {
+    assert.match(rls, new RegExp(`on public\\.${table} for select to authenticated\\s+using \\(public\\.is_member\\(dealership_id\\)\\);`), `${table}: every member reads every row of the dealership; if that changed, change the texts below with it`);
+  }
+  const item = questions.split('\n').find((l) => l.startsWith('- **8.4**'));
+  assert.match(item, /where every member of the dealership, salespeople as well as managers, can read them/, 'the attorney is told who reads them');
+  assert.doesNotMatch(item, /where its managers see them/);
+  const usageRow = (text) => text.split('\n').find((l) => l.startsWith('| Usage numbers'));
+  for (const [name, text] of [['the privacy policy', policy], ['the Chrome Web Store answers', storeTexts]]) {
+    assert.match(usageRow(text), /where every member of that dealership, salespeople as well as managers, can see them/, name);
+  }
+  const faq = read('site-src/pages/faq.html');
+  assert.doesNotMatch(faq, /where your manager sees them/);
+  assert.match(faq, /where your manager and the other people in your dealership who are signed in can see them/);
+});

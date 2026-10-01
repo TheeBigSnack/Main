@@ -220,9 +220,11 @@ create policy "managers delete listings of their dealership"
   using (public.is_manager(dealership_id));
 
 -- ---------------------------------------------------------------------------
--- post_attempts (time per post): the same shape as listings. A salesperson
--- records only their own attempts; a manager sees and can correct all of the
--- dealership's; only managers delete.
+-- post_attempts (time per post): the same shape as listings. Every member
+-- reads all of the dealership's (the manager view's per-salesperson table
+-- shows anyone signed in to the dealership each colleague's posts and
+-- seconds per post; the privacy texts say so). A salesperson records only
+-- their own attempts; a manager can correct any; only managers delete.
 -- ---------------------------------------------------------------------------
 create policy "members read their dealership's post attempts"
   on public.post_attempts for select to authenticated
