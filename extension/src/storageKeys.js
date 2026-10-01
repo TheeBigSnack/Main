@@ -41,6 +41,17 @@ export function siteKeys(origin) {
 
 export const pilotKey = (origin) => siteKeys(origin).pilot;
 
+// The website a stored key belongs to when it is this field's per-website key
+// (originOfSiteKey('sync', 'sync:https://www.example-dealer.com') is that
+// origin), else ''. For finding every website's copy of one key among the
+// keys Chrome holds, without spelling the prefix anywhere else.
+export function originOfSiteKey(field, key) {
+  const name = Object.hasOwn(SITE_KEY_NAMES, field) ? SITE_KEY_NAMES[field] : '';
+  if (!name || typeof key !== 'string') return '';
+  const prefix = name + ':';
+  return key.startsWith(prefix) ? key.slice(prefix.length) : '';
+}
+
 // Keys that are not per website.
 export const GLOBAL_KEYS = Object.freeze({
   sites: 'sites', // the background-rescan registry, one object for all origins (src/scanRunner.js)

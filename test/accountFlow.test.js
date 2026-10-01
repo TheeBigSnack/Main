@@ -65,6 +65,7 @@ function fakeStorage(initial = {}) {
     data,
     writes,
     async get(keys) {
+      if (keys === null || keys === undefined) return { ...data }; // everything, as chrome.storage answers get(null)
       const list = Array.isArray(keys) ? keys : [keys];
       return Object.fromEntries(list.map((k) => [k, data[k]]));
     },
@@ -220,6 +221,54 @@ test('signOutAll tells the auth server, forgets the session and the named websit
   assert.deepEqual(await signOutAll(deps({ fetchImpl: async () => { throw new TypeError('Failed to fetch'); }, storage: offline })), { ok: true });
   assert.equal(ACCOUNT_KEY in offline.data, false);
   assert.deepEqual(await signOutAll(deps({ fetchImpl, storage: fakeStorage() })), { ok: true }, 'nothing stored is fine too');
+});
+
+// Signing out from one website (or from a Facebook tab, which names none)
+// must not leave another website showing the last account's dealership,
+// role and plan, or counting its posts today in the daily cap.
+test('signOutAll forgets every website\'s sync state on this computer, not only the website open, and nothing else', async () => {
+  const OTHER = 'https://www.example-sister-store.test';
+  const O = siteKeys(OTHER);
+  const stored = () => ({
+    [ACCOUNT_KEY]: freshSession(),
+    [K.sync]: { since: T(1), dealershipName: 'Example Motors', role: 'manager', postsToday: 3 },
+    [O.sync]: { since: T(2), dealershipName: 'Example Motors', role: 'manager', postsToday: 3, plan: { state: 'lapsed' } },
+    [K.posted]: { [VIN_A]: { postedAt: T(0) } },
+    [O.posted]: { [VIN_B]: { postedAt: T(0) } },
+    [O.settings]: { dailyCap: 10 },
+    [GLOBAL_KEYS.sites]: { [ORIGIN]: { name: 'Example Motors' } },
+  });
+  const { fetchImpl } = fakeFetch({ logout: { status: 204, body: null } });
+  const left = (storage) => Object.keys(storage.data).sort();
+  const kept = [K.posted, O.posted, O.settings, GLOBAL_KEYS.sites].sort();
+
+  // the popup open on one website: the other website's state goes too
+  const one = fakeStorage(stored());
+  assert.deepEqual(await signOutAll(deps({ fetchImpl, storage: one, origins: [ORIGIN] })), { ok: true });
+  assert.deepEqual(left(one), kept, 'both websites\' sync state and the session go; the posted lists, settings and registry stay');
+
+  // the popup open on Facebook names no website: every website's state goes all the same
+  const none = fakeStorage(stored());
+  await signOutAll(deps({ fetchImpl, storage: none, origins: [] }));
+  assert.deepEqual(left(none), kept);
+
+  // where Chrome has getKeys(), it is used instead of reading everything
+  const listed = fakeStorage(stored());
+  let readAll = false;
+  const get = listed.get;
+  listed.get = async (keys) => { if (keys === null) readAll = true; return get(keys); };
+  listed.getKeys = async () => Object.keys(listed.data);
+  await signOutAll(deps({ fetchImpl, storage: listed }));
+  assert.deepEqual(left(listed), kept);
+  assert.equal(readAll, false, 'the key list is enough');
+
+  // the keys cannot be listed: the website named still goes
+  const blind = fakeStorage(stored());
+  const blindGet = blind.get;
+  blind.get = async (keys) => { if (keys === null) throw new Error('not available'); return blindGet(keys); };
+  assert.deepEqual(await signOutAll(deps({ fetchImpl, storage: blind, origins: [ORIGIN] })), { ok: true });
+  assert.equal(K.sync in blind.data, false);
+  assert.equal(ACCOUNT_KEY in blind.data, false);
 });
 
 // ---------- the rewrite service's key ----------

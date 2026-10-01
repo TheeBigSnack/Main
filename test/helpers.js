@@ -89,6 +89,7 @@ export function fakeChrome(page, store = {}) {
     storage: {
       local: {
         get: async (keys) => {
+          if (keys === null || keys === undefined) return { ...store }; // everything, as chrome.storage answers get(null)
           const out = {};
           for (const k of Array.isArray(keys) ? keys : [keys]) if (k in store) out[k] = store[k];
           return out;

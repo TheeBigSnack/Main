@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { siteKeys, SITE_KEY_NAMES, GLOBAL_KEYS, SITES_KEY, REQUEST_KEYS, pilotKey } from '../extension/src/storageKeys.js';
+import { siteKeys, SITE_KEY_NAMES, GLOBAL_KEYS, SITES_KEY, REQUEST_KEYS, pilotKey, originOfSiteKey } from '../extension/src/storageKeys.js';
 import { SITES_KEY as RUNNER_SITES_KEY } from '../extension/src/scanRunner.js';
 import { pilotKey as pilotKeyFromPilot } from '../extension/src/pilot.js';
 import { withLock, updateKey, STORAGE_FULL, storageErrorText } from '../extension/src/storage.js';
@@ -44,6 +44,19 @@ test('siteKeys names every per-website key as existing installs hold it; the glo
   assert.equal(new Set(names).size, names.length);
   assert.ok(!names.some((n) => Object.values(GLOBAL_KEYS).includes(n)));
   assert.equal(siteKeys(undefined).posted, 'posted:', 'never throws; the caller checks the origin');
+});
+
+// Sign out finds every website's sync state among the keys Chrome holds.
+test('originOfSiteKey names the website a stored key belongs to, only for that field\'s key', () => {
+  assert.equal(originOfSiteKey('sync', siteKeys(ORIGIN).sync), ORIGIN);
+  assert.equal(originOfSiteKey('queue', siteKeys(ORIGIN).queue), ORIGIN, 'by the stored name (postQueue), not the field\'s');
+  assert.equal(originOfSiteKey('wizard', siteKeys(ORIGIN).wizardDone), '', 'wizardDone:<origin> is not wizard:<origin>');
+  assert.equal(originOfSiteKey('sync', siteKeys(ORIGIN).settings), '');
+  assert.equal(originOfSiteKey('sync', GLOBAL_KEYS.account), '');
+  assert.equal(originOfSiteKey('sync', 'sync:'), '', 'a key with no origin names none');
+  assert.equal(originOfSiteKey('nope', 'nope:x'), '');
+  assert.equal(originOfSiteKey('toString', 'toString:x'), '', 'only the module\'s own fields');
+  assert.equal(originOfSiteKey('sync', null), '');
 });
 
 // Keys documented in HANDOFF.md when its next update lands (docs/data-inventory.md has them already).

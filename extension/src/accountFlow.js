@@ -7,7 +7,7 @@
 //   signInStart(email, deps)          -> the auth server emails a code
 //   signInFinish(email, code, deps)   -> the code becomes a stored session
 //   currentSession(deps)              -> the stored session, refreshed when due
-//   signOutAll(deps)                  -> the token is revoked and forgotten
+//   signOutAll(deps)                  -> the token is revoked and forgotten, with every website's sync state
 //   syncOnce({ origin, scan, deps })  -> POST .../sync, merge the answer
 //   rewriteEndpointFor(config)        -> the rewrite function's address
 //   rewriteKeyFor({ rewrite, session, config }) -> what goes in Authorization
@@ -30,7 +30,7 @@ import { ACCOUNT, accountsConfigured } from './accountConfig.js';
 import { signInWithMagicLink, verifyOtp, ensureFreshSession, loadSession, storeSession, clearSession, signOut, authHeaders, errorText, DEFAULT_OTP_TYPE } from './account.js';
 import { syncPayload, mergeRegistry, mergeFlags, nextSyncState, scanSummary, SYNC_VERSION } from './sync.js';
 import { withPilotDefaults } from './pilot.js';
-import { siteKeys } from './storageKeys.js';
+import { siteKeys, originOfSiteKey } from './storageKeys.js';
 import { updateKey, storageErrorText, withLock } from './storage.js';
 import { DECISION } from './classify.js';
 
@@ -145,16 +145,37 @@ export async function currentSession(deps = {}) {
   }
 }
 
+// Every key the storage area holds: getKeys() where Chrome has it, else
+// everything read once (a sign-out is rare enough for that).
+async function storedKeys(storage) {
+  if (typeof storage.getKeys === 'function') return storage.getKeys();
+  return Object.keys((await storage.get(null)) || {});
+}
+
 /**
  * Revokes the token (best effort) and forgets the session. The sync state of
- * the websites named in deps.origins goes too, so the next sign-in starts
- * with a first sync, which takes nothing down.
+ * every website on this computer goes too (each sync:<origin> stored, plus
+ * the websites named in deps.origins), not only the website open, so the
+ * next sign-in, whoever it is, starts each website with a first sync, which
+ * takes nothing down, and no website keeps showing the last account's
+ * dealership, role, plan or count of today's posts.
  */
 export async function signOutAll(deps = {}) {
   const { config, fetchImpl, storage } = withDeps(deps);
   const session = await loadSession(storage);
   await signOut(session, { url: config.url, anonKey: config.anonKey, fetchImpl, storage });
-  const keys = (Array.isArray(deps.origins) ? deps.origins : []).filter(Boolean).map((o) => siteKeys(o).sync);
+  const origins = new Set((Array.isArray(deps.origins) ? deps.origins : []).filter(Boolean));
+  if (storage) {
+    try {
+      for (const key of await storedKeys(storage)) {
+        const origin = originOfSiteKey('sync', key);
+        if (origin) origins.add(origin);
+      }
+    } catch {
+      /* the keys could not be listed: the websites named still go */
+    }
+  }
+  const keys = [...origins].map((o) => siteKeys(o).sync);
   if (keys.length && storage) {
     try {
       await storage.remove(keys);

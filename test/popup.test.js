@@ -509,3 +509,31 @@ test('Settings warns about a change of Price to post only where the website show
   assert.match(q.panel(), /value="beforeFees"/);
   assert.match(q.panel(), /id="basisWarning">You have one posted listing/, 'where there is one, the warning is beside it');
 });
+
+// Sign out from any tab (here Marketplace, which names no dealership
+// website) forgets the sync state of every website on this computer, so the
+// next account to sign in never sees the last one's dealership, role or plan
+// on another website, and the cap never counts its posts today there.
+test('Sign out from a Facebook tab forgets every website\'s sync state and keeps the posted lists', async () => {
+  const other = siteKeys('https://www.example-sister-store.test');
+  const session = { accessToken: 'a.e30.c', refreshToken: 'r', expiresAt: Date.now() + 3600e3, user: { id: 'u1', email: 'sam@example.test' } };
+  const state = { version: 1, since: '2026-10-01T09:00:00.000Z', known: [], dealershipName: 'Example Motors', role: 'manager', lastSyncAt: '2026-10-01T09:00:00.000Z', plan: { state: 'lapsed' }, postsToday: 4 };
+  const posted = { [sampleVin(1)]: { name: 'A car', price: 10000, postedAt: '2026-10-01T08:00:00.000Z' } };
+  const p = await loadPopup({ tabUrl: 'https://www.facebook.com/marketplace/you/selling', local: { account: session, [k.sync]: state, [other.sync]: state, [k.posted]: posted, [other.posted]: posted } });
+  const calls = [];
+  const fetchBefore = globalThis.fetch;
+  globalThis.fetch = async (url) => { calls.push(String(url)); return { ok: true, status: 204, json: async () => ({}) }; };
+  try {
+    await p.click('accountSignOut');
+  } finally {
+    globalThis.fetch = fetchBefore;
+  }
+  assert.match(p.status(), /^Signed out\./);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/auth\/v1\/logout\?scope=local$/, 'this browser\'s session only');
+  assert.equal(p.local.account, undefined);
+  assert.equal(p.local[k.sync], undefined);
+  assert.equal(p.local[other.sync], undefined, 'the website not open goes too');
+  assert.deepEqual(p.local[k.posted], posted, 'the posted lists stay on this computer');
+  assert.deepEqual(p.local[other.posted], posted);
+});
