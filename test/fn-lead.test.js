@@ -45,7 +45,7 @@ test('lead: another page gets 403 before the brake or the body are looked at; no
   const handler = await loadFunction('lead', ENV);
   for (let i = 0; i < PER_ADDRESS_PER_HOUR + 2; i += 1) {
     const r = await lead(handler, { origin: STRANGER, body: { not: 'a form' } });
-    assert.deepEqual([r.status, r.body], [403, { ok: false, error: 'demo requests come from the Lot Sync website only' }], `request ${i + 1}`);
+    assert.deepEqual([r.status, r.body], [403, { ok: false, error: 'demo requests come from the Lot Current website only' }], `request ${i + 1}`);
     assert.equal(r.headers.get('access-control-allow-origin'), null);
   }
   assert.equal((await lead(handler, { origin: '' })).status, 403, 'no Origin header');

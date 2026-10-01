@@ -21,7 +21,7 @@
   'use strict';
 
   const DOC_FEE = 250;
-  const DISCLAIMER = `Example Motors Price includes the $${DOC_FEE} documentation fee. Tax, title and registration are extra. Sample listing for the Lot Sync sandbox; not a real vehicle.`;
+  const DISCLAIMER = `Example Motors Price includes the $${DOC_FEE} documentation fee. Tax, title and registration are extra. Sample listing for the Lot Current sandbox; not a real vehicle.`;
 
   // Each car's in-stock date is `daysOnLot` days before the day the sandbox
   // runs, by the person's own calendar (the website's date_in_stock, a

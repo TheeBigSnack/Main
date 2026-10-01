@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- Lot Sync's mark, the same as the extension's icon (extension/icons/): a green rounded
+  <!-- Lot Current's mark, the same as the extension's icon (extension/icons/): a green rounded
        square with a white check, no text. scripts/favicons.mjs draws favicon.ico,
        favicon-32.png and apple-touch-icon.png from this file; site-src/social/template.html
        puts it on the share images. -->

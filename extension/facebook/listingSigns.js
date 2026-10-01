@@ -1,6 +1,6 @@
 // How a Marketplace listing page reads, in its static text (never button or
 // link text), once the salesperson has acted on it. Used only to notice that
-// the person has finished a To do item; Lot Sync never performs these actions.
+// the person has finished a To do item; Lot Current never performs these actions.
 //
 // STATUS: NOT YET VERIFIED against live listing pages; proven against
 // test/e2e/mock-marketplace.mjs. If a sign is wrong, the "I updated it" /

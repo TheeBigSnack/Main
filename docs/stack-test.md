@@ -1,4 +1,4 @@
-# The stack test: Lot Sync against a real local Supabase
+# The stack test: Lot Current against a real local Supabase
 
 The unit tests run the four functions' handlers, the extension's account and sync modules and the manager page's data code against fakes: a fake database, a fake auth server, a fake PostgREST. The SQL tests run the migrations on a plain Postgres with no PostgREST in front. Neither can show what the real pieces answer when they meet. The stack test can: `scripts/stack-test.mjs` runs against a local Supabase stack started by the Supabase CLI, with the real Postgres, PostgREST, GoTrue (the auth server), mail catcher, gateway and Edge Runtime, and prints what each of them answered.
 
@@ -19,7 +19,7 @@ Each file in `test/stack/` is one part of `supabase/README.md`, checked against 
 
 Before the files run, the script checks the stack is ready: the gateway and GoTrue answer, every file in `supabase/migrations` is in the CLI's migration history, and each function answers a request that reaches its own code: sync and rewrite refuse a call with no token, billing refuses an unsigned webhook for its signature and lead takes an empty form from the landing page's origin, which shows the env file is loaded. It also looks at who answers a CORS preflight. The CLI's local gateway (Kong, with its `cors` plugin) answers every preflight itself and puts `allow-origin *` on every answer, so the functions' own CORS answers cannot be seen through it; the script says so in a note, and the lines that would judge those answers are listed and not counted.
 
-Nobody signs in with a password, because Lot Sync has none. A person gets in with the admin API's magic link (`generate_link`, with the service key), either typing its six-digit code into the extension's `signInFinish` or handing its token hash to the extension's `exchangeTokenFromUrl`, or, for the manager in `01`, with the email the local mail catcher received: its six-digit code when the email carries one (the local stack uses the sign-in template `config.toml` names, if any), else the token in its link, and the log says which.
+Nobody signs in with a password, because Lot Current has none. A person gets in with the admin API's magic link (`generate_link`, with the service key), either typing its six-digit code into the extension's `signInFinish` or handing its token hash to the extension's `exchangeTokenFromUrl`, or, for the manager in `01`, with the email the local mail catcher received: its six-digit code when the email carries one (the local stack uses the sign-in template `config.toml` names, if any), else the token in its link, and the log says which.
 
 A raised refusal (`P0005` from `redeem_invite`, `P0006`, `P0008`) reaches the client with whatever HTTP status PostgREST gives it; PostgREST's rule sends PL/pgSQL codes other than `P0001` as 500, and the README names no status for them. The test checks the `code` and the sentence and prints the status it got, so a change there shows in the log.
 
@@ -27,7 +27,7 @@ A raised refusal (`P0005` from `redeem_invite`, `P0006`, `P0008`) reaches the cl
 
 You need Docker and the Supabase CLI (`npx supabase`, or the CLI installed; CI pins the version in the `stack` job).
 
-1. Start the stack with only what Lot Sync uses. `start` applies `supabase/migrations` in order:
+1. Start the stack with only what Lot Current uses. `start` applies `supabase/migrations` in order:
 
    ```
    supabase start -x studio,storage-api,imgproxy,realtime,logflare,vector,supavisor,postgres-meta

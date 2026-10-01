@@ -23,7 +23,7 @@ export function badgeText(count) {
 export function notificationFor(previousCount, count) {
   const prev = Number(previousCount) || 0;
   if (!(count > 0) || count <= prev) return null;
-  return { title: 'Lot Sync', message: `${count} of your listings need${count === 1 ? 's' : ''} attention` };
+  return { title: 'Lot Current', message: `${count} of your listings need${count === 1 ? 's' : ''} attention` };
 }
 
 // Due when a period has passed since the last attempt, less five minutes of

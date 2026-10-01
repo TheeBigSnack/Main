@@ -223,7 +223,7 @@ test('the registry: by id, by probe, by stored service, and the unsupported-page
   assert.equal(adapterById('schemaOrg'), schemaOrg);
   assert.equal(detectAdapter({ site: {}, service: { kind: 'schemaOrg', origin: 'https://x.test', listUrl: null }, adapterId: null }), schemaOrg);
   assert.deepEqual(platformNames(), ['Dealer Inspire', 'Standard vehicle data (schema.org)']);
-  assert.equal(unsupportedSiteMessage(), "Lot Sync can't read the cars on this page. What it reads today: Dealer Inspire; Standard vehicle data (schema.org). Open your dealership's used inventory page and try again.");
+  assert.equal(unsupportedSiteMessage(), "Lot Current can't read the cars on this page. What it reads today: Dealer Inspire; Standard vehicle data (schema.org). Open your dealership's used inventory page and try again.");
   for (const a of ADAPTERS) assert.ok(unsupportedSiteMessage().includes(a.PLATFORM.name));
 });
 
@@ -487,7 +487,7 @@ test('schemaOrg direct search: a GET without cookies or headers of its own, only
   assert.deepEqual(await search({ url: LIST }), { ok: true, status: 200, finalUrl: LIST, redirected: false, contentType: 'text/html', text: '<html>hi</html>' });
   assert.equal(seen[0].init.credentials, 'omit');
   assert.equal(seen[0].init.method, undefined);
-  assert.equal(seen[0].init.headers, undefined, 'no user agent or any other header of Lot Sync\'s');
+  assert.equal(seen[0].init.headers, undefined, 'no user agent or any other header of Lot Current\'s');
   for (const url of ['https://other.example/', 'http://www.sample-motors.test/', 'https://www.sample-motors.test.evil.example/']) await assert.rejects(search({ url }), /reads only https:\/\/www\.sample-motors\.test/);
   assert.equal(seen.length, 1, 'nothing off the website was fetched');
   assert.deepEqual(schemaOrg.origins(SERVICE), [O + '/*'], 'the website itself, which the wizard already asks for');

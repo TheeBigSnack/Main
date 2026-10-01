@@ -329,7 +329,7 @@ test('billing: checkout refuses a store that pays with 409, and one Stripe still
   const handler = await load();
   world({ subscriptions: [{ dealership_id: D1, status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
   const active = await post(handler, 'checkout', TOKEN.u2);
-  assert.deepEqual([active.status, active.body], [409, { ok: false, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' }]);
+  assert.deepEqual([active.status, active.body], [409, { ok: false, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Current contact' }]);
   for (const s of ['past_due', 'unpaid', 'incomplete', 'paused']) {
     world({ subscriptions: [{ dealership_id: D1, status: s, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
     const open = await post(handler, 'checkout', TOKEN.u2);
@@ -487,7 +487,7 @@ test('billing: which row an event lands on: the customer\'s, the subscription\'s
   assert.deepEqual(r.body, { ok: true, applied: true, attached: true });
   assert.deepEqual([fake.rows('subscriptions')[0].status, net.calls.length], ['past_due', 0]);
 
-  // no Lot Sync dealership: a customer without one, a dealership id that is no uuid, one that does not exist
+  // no Lot Current dealership: a customer without one, a dealership id that is no uuid, one that does not exist
   for (const [id, customers, metadata] of [['evt_none', { cus_8: { metadata: {} } }, {}], ['evt_bad', {}, { dealership_id: 'not-a-uuid' }], ['evt_gone', {}, { dealership_id: uuid(99) }]]) {
     world();
     stripe({ customers });

@@ -17,7 +17,7 @@ import { vinCheckDigit } from '../extension/src/vin.js';
 export const DEFAULTS = Object.freeze({
   out: 'survey-out',
   maxCarPages: 5,
-  // car pages the Lot Sync scan may read in the survey's copy of the extension
+  // car pages the Lot Current scan may read in the survey's copy of the extension
   // (as shipped: MAX_CAR_PAGES = 600), so one survey stays a handful of requests
   scanCarPages: 10,
   scanListPages: 5,
@@ -36,8 +36,8 @@ export const USAGE = `Usage: npm run survey -- <used-inventory URL> [<URL> ...] 
 Options:
   --out <dir>             where the reports go (default ${DEFAULTS.out}/)
   --max-car-pages <n>     car pages the survey opens per site, 0 to ${MAX_CAR_PAGES_LIMIT} (default ${DEFAULTS.maxCarPages})
-  --scan-car-pages <n>    car pages Lot Sync's own scan may read per site, 1 to 50 (default ${DEFAULTS.scanCarPages})
-  --scan-timeout <sec>    how long to wait for Lot Sync's scan (default ${DEFAULTS.scanTimeoutSec})
+  --scan-car-pages <n>    car pages Lot Current's own scan may read per site, 1 to 50 (default ${DEFAULTS.scanCarPages})
+  --scan-timeout <sec>    how long to wait for Lot Current's scan (default ${DEFAULTS.scanTimeoutSec})
   --headed                show the browser window
   --help                  this text`;
 
@@ -573,10 +573,10 @@ export function surveyHostPermissions(urls) {
   return [...out];
 }
 
-// ---------- what Lot Sync read ----------
+// ---------- what Lot Current read ----------
 
 /**
- * Lot Sync's reading of the site from the extension's own storage after the
+ * Lot Current's reading of the site from the extension's own storage after the
  * popup's scan: the snapshot's cars, the to-do warnings, the registry entry.
  * The service is summarised (its keys and list address, never an API key).
  */
@@ -613,9 +613,9 @@ const mostOf = (missing, total) => missing * 2 > total;
 const tooMany = (missing, total) => missing > Math.floor(total * 0.1);
 
 /**
- * The gaps between what the website offers and what Lot Sync read, and the
+ * The gaps between what the website offers and what Lot Current read, and the
  * one-line verdict: "reads it", "partly", "doesn't read it", or "not
- * surveyed" when the survey stopped before Lot Sync's scan could run.
+ * surveyed" when the survey stopped before Lot Current's scan could run.
  */
 export function verdictFor(report) {
   const gaps = [];
@@ -624,12 +624,12 @@ export function verdictFor(report) {
   const list = r.list || {};
   const ls = r.lotSync || {};
   if (r.stopped) return { verdict: 'not surveyed', why: r.stopped.reason, gaps, notes };
-  if (!ls.attempted) return { verdict: 'not surveyed', why: ls.skippedReason || "Lot Sync's scan did not run", gaps, notes };
+  if (!ls.attempted) return { verdict: 'not surveyed', why: ls.skippedReason || "Lot Current's scan did not run", gaps, notes };
   const scriptsOnly = Boolean(list.server && list.rendered && list.rendered.carLinks > 0 && list.server.carLinks === 0);
   if (!ls.ok) {
     const failed = [ls.message || 'the scan failed'];
-    if (scriptsOnly) failed.push("the list's car links appear only after scripts run, and Lot Sync reads the list without scripts");
-    return { verdict: "doesn't read it", why: ls.message || "Lot Sync's scan failed", gaps: failed, notes };
+    if (scriptsOnly) failed.push("the list's car links appear only after scripts run, and Lot Current reads the list without scripts");
+    return { verdict: "doesn't read it", why: ls.message || "Lot Current's scan failed", gaps: failed, notes };
   }
   const n = ls.carCount || 0;
   if (!n) return { verdict: "doesn't read it", why: 'the scan ran but found no used cars', gaps: ['no cars read'], notes };
@@ -638,15 +638,15 @@ export function verdictFor(report) {
   if (linksOnList && n < linksOnList && tooMany(linksOnList - n, linksOnList)) gaps.push(`read ${n} cars, but the list's first page alone links to ${linksOnList} car pages`);
   for (const [key, what] of [['withPrice', 'price'], ['withMileage', 'mileage'], ['withPhotos', 'photos']]) {
     const missing = n - (ls[key] || 0);
-    if (missing > 0 && mostOf(missing, n)) gaps.push(`${missing} of ${n} cars have no ${what} in what Lot Sync read`);
-    else if (missing > 0) notes.push(`${missing} of ${n} cars have no ${what} in what Lot Sync read (the website may show none for them; compare a car page)`);
+    if (missing > 0 && mostOf(missing, n)) gaps.push(`${missing} of ${n} cars have no ${what} in what Lot Current read`);
+    else if (missing > 0) notes.push(`${missing} of ${n} cars have no ${what} in what Lot Current read (the website may show none for them; compare a car page)`);
   }
   for (const w of ls.warnings || []) {
-    if (/more car pages than one scan reads/i.test(w)) notes.push("the survey's own cap on car pages left some for a later scan (not a gap in Lot Sync)");
+    if (/more car pages than one scan reads/i.test(w)) notes.push("the survey's own cap on car pages left some for a later scan (not a gap in Lot Current)");
     else gaps.push('warning: ' + w);
   }
   if (ls.adapter === 'schemaOrg' && scriptsOnly) {
-    gaps.push("the list's car links appear only after scripts run, and Lot Sync reads the list without scripts");
+    gaps.push("the list's car links appear only after scripts run, and Lot Current reads the list without scripts");
   }
   if (ls.adapter === 'schemaOrg' && r.carPagesSummary && r.carPagesSummary.read > 0 && r.carPagesSummary.withVehicleJsonLd === 0 && r.carPagesSummary.withVehicleMicrodata === 0) {
     gaps.push('the car pages carry no schema.org vehicle markup');
@@ -674,7 +674,7 @@ export function renderReportMd(r) {
   const list = r.list || {};
   const v = r.verdict || {};
   L.push(`# Site survey: ${r.host}`, '');
-  L.push(`Surveyed ${r.surveyedAt} from ${r.input}. Tool: \`npm run survey\` (Lot Sync ${r.lotSyncVersion}).`, '');
+  L.push(`Surveyed ${r.surveyedAt} from ${r.input}. Tool: \`npm run survey\` (Lot Current ${r.lotSyncVersion}).`, '');
   L.push(`**Verdict: ${v.verdict}.** ${v.why || ''}`, '');
   if (r.stopped) L.push(`**Stopped:** ${r.stopped.reason} (at ${r.stopped.at}). Nothing was retried.`, '');
 
@@ -689,7 +689,7 @@ export function renderReportMd(r) {
 
   L.push('## What the markup offers', '');
   if (list.finalUrl) L.push(`List page: ${list.finalUrl}${list.redirected ? ' (redirected from the address given)' : ''}, "${esc(list.title || '')}"`, '');
-  L.push(...anatomyLines('List, server HTML (no scripts, what Lot Sync reads)', list.server));
+  L.push(...anatomyLines('List, server HTML (no scripts, what Lot Current reads)', list.server));
   L.push(...anatomyLines('List, rendered (after scripts)', list.rendered));
   if (list.server && list.rendered) {
     L.push(`- car links only after scripts run: ${yes(list.rendered.carLinks > 0 && list.server.carLinks === 0)}; VINs only after scripts run: ${yes(list.rendered.vins > 0 && list.server.vins === 0)}`);
@@ -721,7 +721,7 @@ export function renderReportMd(r) {
   if (r.excerpt) L.push('', `A JSON-LD block of ${r.excerpt.from} (the first with a vehicle, else the first) (at most ${EXCERPT_LIMIT} characters):`, '', '```json', r.excerpt.text, '```');
   L.push('');
 
-  L.push('## What Lot Sync read', '');
+  L.push('## What Lot Current read', '');
   const ls = r.lotSync || {};
   if (!ls.attempted) L.push(`Not run: ${ls.skippedReason || 'the survey stopped first'}.`);
   else if (!ls.ok) L.push(`The scan did not read the site: "${esc(ls.message)}"`);
@@ -734,7 +734,7 @@ export function renderReportMd(r) {
     if (ls.metaText) L.push(`- the popup said: "${esc(ls.metaText)}"`);
     for (const w of ls.warnings || []) L.push(`- warning shown: "${esc(w)}"`);
     if (ls.firstCars && ls.firstCars.length) {
-      L.push('', 'First cars as Lot Sync stored them:', '', '| VIN | Name | Price | Mileage | Photos | Type | Decision |', '|---|---|---|---|---|---|---|');
+      L.push('', 'First cars as Lot Current stored them:', '', '| VIN | Name | Price | Mileage | Photos | Type | Decision |', '|---|---|---|---|---|---|---|');
       for (const c of ls.firstCars) L.push(`| ${esc(c.vin)} | ${esc(c.name)} | ${c.price ?? ''} | ${c.mileage ?? ''} | ${c.photoCount ?? ''} | ${esc(c.type)} | ${esc(c.decision)}${c.reason ? ': ' + esc(c.reason) : ''} |`);
     }
   }
@@ -751,7 +751,7 @@ export function renderReportMd(r) {
   L.push(`- cap: ${r.limits ? r.limits.capText : ''}`);
   L.push(`- pages the survey itself asked for: ${q.survey ?? 0} (robots.txt ${q.robots ?? 0}, list ${q.list ?? 0}, list server HTML ${q.listServerHtml ?? 0}, car pages ${q.carPages ?? 0}), at least ${r.limits ? r.limits.pauseMs / 1000 : 2} s apart`);
   L.push(`- everything the browser loaded while on the site's pages (scripts, styles, the page's own data calls): ${q.browserTotal ?? 0}; images, video and fonts were not downloaded (${q.blockedMedia ?? 0} skipped)`);
-  L.push(`- during Lot Sync's scan: ${q.lotSyncScan ?? 0} requests seen from the tab`);
+  L.push(`- during Lot Current's scan: ${q.lotSyncScan ?? 0} requests seen from the tab`);
   const rb = r.robots || {};
   L.push(`- robots.txt: HTTP ${rb.status ?? 'not read'}; ${rb.rules ?? 0} rules for every robot; crawl-delay ${rb.crawlDelaySec ?? 'none'}${rb.note ? '; ' + rb.note : ''}`);
   if (r.bot && r.bot.signs && r.bot.signs.length) L.push(`- bot-check / CDN signs: ${r.bot.signs.join('; ')}`);
@@ -763,7 +763,7 @@ export function renderReportMd(r) {
 export function renderSummaryMd(reports, { runAt = '' } = {}) {
   const L = ['# Site survey summary', ''];
   if (runAt) L.push(`Run ${runAt}. One row per site; each site's report.md has the evidence.`, '');
-  L.push('| Site | Platform | Server HTML: car links / VINs | Rendered: car links / VINs | Car pages with vehicle JSON-LD / microdata | Lot Sync adapter | Cars read (price / mileage / photos) | Verdict |', '|---|---|---|---|---|---|---|---|');
+  L.push('| Site | Platform | Server HTML: car links / VINs | Rendered: car links / VINs | Car pages with vehicle JSON-LD / microdata | Lot Current adapter | Cars read (price / mileage / photos) | Verdict |', '|---|---|---|---|---|---|---|---|');
   for (const r of reports) {
     const list = r.list || {};
     const s = list.server;

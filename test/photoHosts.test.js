@@ -297,7 +297,7 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
   await load('downloadPhotos')();
   assert.deepEqual(sent, photos.filter((u) => !facebook.includes(u)), 'downloadPhotos sends only the dealer\'s photos');
   assert.match(panel.status, /^2 of 4 photos downloaded/);
-  assert.match(panel.status, /2 are on Facebook's own servers, which Lot Sync doesn't download from\./);
+  assert.match(panel.status, /2 are on Facebook's own servers, which Lot Current doesn't download from\./);
 });
 
 test('nothing but a click in an extension page asks for a host: never the service worker, never an adapter', () => {

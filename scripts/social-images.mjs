@@ -1,7 +1,7 @@
 // Draws the share image behind each page's og:image (site/social/<slug>.png,
 // 1200 x 630) from site-src/social/template.html in headless Chromium: the
 // mark, the name, the page's social heading (the site map's social.heading,
-// scripts/site-pages.mjs) and the line "You click Publish. Lot Sync never
+// scripts/site-pages.mjs) and the line "You click Publish. Lot Current never
 // does.", in the site's own colours, and nothing else: no other claim, no
 // number, no screenshot, no other company's name or mark.
 //
@@ -35,7 +35,7 @@ export const IMAGES_JSON = 'site/social/images.json';
 export const SIZE = Object.freeze({ width: 1200, height: 630 });
 export const SIZE_LIMIT = 300 * 1024;
 export const MARGIN = 40;
-export const LINE = 'You click Publish. Lot Sync never does.';
+export const LINE = 'You click Publish. Lot Current never does.';
 
 // Width and height from the PNG's IHDR chunk, so a wrong size cannot ship quietly.
 export function pngSize(buf) {
@@ -62,7 +62,7 @@ export function restingHeading(html) {
 }
 
 // The og:image:alt sentence for a heading: what the image shows, in words.
-export const altFor = (heading) => `Lot Sync's green check mark with the words "${heading}" and "${LINE}"`;
+export const altFor = (heading) => `The Lot Current check mark and name, with the words "${heading}" and "${LINE}"`;
 
 // A page's social heading as the image may show it: a plain sentence with no
 // number and no other company's name, short enough for two lines.
@@ -125,7 +125,7 @@ export async function main({ pages, socialAlt, log = (s) => console.log(s) } = {
   const html = readFileSync(join(root, TEMPLATE), 'utf8');
   const resting = restingHeading(html);
   const text = templateText(html);
-  if (text !== `Lot Sync ${resting} ${LINE}`) throw new Error(`${TEMPLATE} says "${text}"; it must say the name, the heading and the line, "Lot Sync ${resting} ${LINE}", and nothing else`);
+  if (text !== `Lot Current ${resting} ${LINE}`) throw new Error(`${TEMPLATE} says "${text}"; it must say the name, the heading and the line, "Lot Current ${resting} ${LINE}", and nothing else`);
   checkHeading({ slug: TEMPLATE, social: { heading: resting } });
   const targets = socialPages(map.pages);
   if (!targets.length) throw new Error('no page of the site map has a social heading');
@@ -159,7 +159,7 @@ export async function main({ pages, socialAlt, log = (s) => console.log(s) } = {
       await tab.evaluate((heading) => { document.getElementById('heading').textContent = heading; }, page.social.heading);
       const layout = await tab.evaluate(measure);
       const { box } = layout;
-      if (layout.text !== `Lot Sync ${page.social.heading} ${LINE}`) throw new Error(`${name}: the page shows "${layout.text}"`);
+      if (layout.text !== `Lot Current ${page.social.heading} ${LINE}`) throw new Error(`${name}: the page shows "${layout.text}"`);
       if (box.left < MARGIN || box.top < MARGIN || box.right > width - MARGIN || box.bottom > height - MARGIN) throw new Error(`${name}: the text runs within ${MARGIN}px of the edge or past it`);
       if (layout.scroll.width > width || layout.scroll.height > height) throw new Error(`${name}: the page overflows ${width} x ${height}`);
       if (layout.name !== 1) throw new Error(`${name}: the name wraps onto ${layout.name} lines`);

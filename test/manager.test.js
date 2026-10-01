@@ -210,7 +210,7 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   const csv = managerCsv(d, { now: NOW, dealer: d.dealership.name, origin: d.dealership.website_origin, timeZone: 'UTC' });
   assert.ok(csv.endsWith('\r\n'));
   const lines = csv.split('\r\n');
-  assert.equal(lines[0], 'Lot Sync manager numbers,Example Motors,exported 2026-11-16 15:00');
+  assert.equal(lines[0], 'Lot Current manager numbers,Example Motors,exported 2026-11-16 15:00');
   assert.equal(lines[1], 'Website,https://www.example-motors-springfield.test');
   assert.equal(lines[2], 'Time zone,UTC');
   assert.equal(lines[3], '');
@@ -247,7 +247,7 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   // a cell with a comma or a quote is quoted
   const quoted = managerCsv({ listings: [{ vin: 'V', name: 'Car, with "quotes"', posted_at: NOW, salesperson: 'A' }] }, { now: NOW, timeZone: 'UTC' });
   assert.match(quoted, /"Car, with ""quotes"""/);
-  assert.equal(csvFileName(NOW, { dealer: 'Example Motors', timeZone: 'UTC' }), 'lot-sync-manager-example-motors-2026-11-16.csv');
+  assert.equal(csvFileName(NOW, { dealer: 'Example Motors', timeZone: 'UTC' }), 'lot-current-manager-example-motors-2026-11-16.csv');
 });
 
 // ---------- the Billing card ----------
@@ -414,13 +414,13 @@ test('billingCard: no seat line without a manager\'s count, for a salesperson, o
   assert.equal(card({ state: 'gold', role: 'manager', salespeople: 3, includedSalespeople: INC }).seatLine, '');
 });
 
-test('billingCard: subscribed with fewer seats paid for than salespeople says so, and that Lot Sync adds none on its own; at or under the seats paid for it says nothing more', () => {
+test('billingCard: subscribed with fewer seats paid for than salespeople says so, and that Lot Current adds none on its own; at or under the seats paid for it says nothing more', () => {
   const active = (n, seats) => card(status({ state: 'active', canManageBilling: true, salespeople: n, subscription: subRow({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', seats, current_period_end: inDays(30) }) }));
   const short = active(INC + 3, INC + 1);
   assert.equal(short.line, `Subscribed: ${INC + 1} seats, renews 2026-12-16.`, 'the seats paid for, from subscriptions.seats');
   assert.equal(short.seatLine, `${INC + 3} salespeople; the plan includes ${INC}.`);
   assert.equal(short.seatNote, `${INC + 3} salespeople and ${INC + 1} seats paid for. ${SEATS_NOT_ADDED}`);
-  assert.equal(SEATS_NOT_ADDED, 'Lot Sync never adds seats or changes what you pay on its own: to add seats, ask your Lot Sync contact.');
+  assert.equal(SEATS_NOT_ADDED, 'Lot Current never adds seats or changes what you pay on its own: to add seats, ask your Lot Current contact.');
   assert.deepEqual([short.seatTone, short.seatsPaid, short.salespeople, short.subscribeSeats], ['warn', INC + 1, INC + 3, null]);
   assert.deepEqual(short.buttons.map((b) => b.action), ['portal'], 'nothing on the card buys a seat');
   assert.equal(active(2, 1).seatNote, `2 salespeople and 1 seat paid for. ${SEATS_NOT_ADDED}`);
@@ -622,7 +622,7 @@ test('the manager page carries no pilot-dealer value and no Meta-affiliation wor
     for (const re of never) assert.doesNotMatch(rest, re, `manager/${name} matches ${re}`);
     assert.doesNotMatch(src, /service_role/, `manager/${name} must never hold a service key`);
   }
-  assert.match(read('manager/index.html'), /Lot Sync is not affiliated with Meta Platforms, Inc\./);
+  assert.match(read('manager/index.html'), /Lot Current is not affiliated with Meta Platforms, Inc\./);
 });
 
 test('the page is relative, mobile-friendly, and offers what the brief names', () => {
@@ -853,7 +853,7 @@ test('websiteOrigin: every case of test/fixtures/website-origins.json, the table
 
 test('signupOriginNote: the origin kept and the address-bar sentence, or the not-usable sentence, as the person types', () => {
   const ok = signupOriginNote('WWW.SmithFord.com/used-inventory/');
-  assert.deepEqual(ok, { usable: true, origin: 'https://www.smithford.com', keep: 'Lot Sync will keep https://www.smithford.com.', line: 'It must match the address bar on the dealership\'s inventory pages, www included.' });
+  assert.deepEqual(ok, { usable: true, origin: 'https://www.smithford.com', keep: 'Lot Current will keep https://www.smithford.com.', line: 'It must match the address bar on the dealership\'s inventory pages, www included.' });
   const empty = signupOriginNote('   ');
   assert.equal(empty.usable, false);
   assert.equal(empty.keep, '');
@@ -861,7 +861,7 @@ test('signupOriginNote: the origin kept and the address-bar sentence, or the not
   const bad = signupOriginNote('192.168.1.10');
   assert.equal(bad.usable, false);
   assert.equal(bad.origin, '');
-  assert.match(bad.line, /^That is not a website address Lot Sync can use/);
+  assert.match(bad.line, /^That is not a website address Lot Current can use/);
   assert.match(bad.line, /www\.yourdealership\.com/, 'an example with no dealer in it');
 });
 
@@ -1023,7 +1023,7 @@ test('the page: the Start your dealership form behind the flag, the rpc with the
   const js = read('manager/manager.js');
   assert.match(js, /client\.rpc\('create_dealership', \{ name, website, your_name: yourName \}\)/, 'the database function, through the client, with the contract\'s three parameters');
   assert.match(js, /if \(CONFIG\.selfServeSignup\) return viewSignup\(\);/, 'the flag only decides whether the form shows');
-  assert.match(js, /Your account is not a member of any dealership yet\. Ask whoever set Lot Sync up for your store to add you\./, 'with the flag off the page says what it said');
+  assert.match(js, /Your account is not a member of any dealership yet\. Ask whoever set Lot Current up for your store to add you\./, 'with the flag off the page says what it said');
   const view = js.slice(js.indexOf('function viewSignup()'), js.indexOf('function originNoteHtml('));
   assert.ok(view.length > 500, 'viewSignup moved: update this test');
   for (const [id, words] of [['suName', 'W.name'], ['suWebsite', 'W.website'], ['suYou', 'W.yourName']]) {
@@ -1032,8 +1032,8 @@ test('the page: the Start your dealership form behind the flag, the rpc with the
   }
   assert.match(view, /aria-describedby="suOrigin"/, 'the address box is described by the origin line');
   assert.match(view, /<p class="banner warn error" id="signupError" role="alert"><\/p>/, 'the live region is on the page, empty, from the start');
-  assert.match(view, /\$\{esc\(W\.already\)\}/, 'the line for a store that already uses Lot Sync');
-  assert.match(SIGNUP_WORDS.already, /ask its manager for an invite code and enter it in the Lot Sync extension/);
+  assert.match(view, /\$\{esc\(W\.already\)\}/, 'the line for a store that already uses Lot Current');
+  assert.match(SIGNUP_WORDS.already, /ask its manager for an invite code and enter it in the Lot Current extension/);
   // a refusal keeps what was typed: onSignup never redraws the form
   const submit = js.slice(js.indexOf('async function onSignup('), js.indexOf('\nfunction downloadCsv('));
   assert.ok(submit.length > 500, 'onSignup moved: update this test');
@@ -1081,7 +1081,7 @@ test('the page: Getting started first, for managers only, redrawn with the cards
 
 test('help.md names the Start your dealership form and the Getting started card as the page labels them', () => {
   const help = read('docs/help.md');
-  const section = help.slice(help.indexOf('## The manager view'), help.indexOf('## What Lot Sync never does'));
+  const section = help.slice(help.indexOf('## The manager view'), help.indexOf('## What Lot Current never does'));
   assert.ok(section.length > 200, 'docs/help.md has a manager view section');
   for (const words of [SIGNUP_WORDS.heading, SIGNUP_WORDS.submit, SIGNUP_WORDS.name, SIGNUP_WORDS.website, SIGNUP_WORDS.yourName, 'Getting started', ...Object.values(GETTING_STARTED).map((s) => s.title)]) {
     assert.ok(section.includes(words), `the manager view section does not name "${words}"`);
@@ -1091,5 +1091,5 @@ test('help.md names the Start your dealership form and the Getting started card 
   assert.ok(section.includes('the plan includes'), 'the manager view section does not quote the seat line');
   assert.ok(section.includes(SEATS_NOT_ADDED), 'the manager view section does not quote SEATS_NOT_ADDED word for word');
   assert.match(section, /managers don't/i, 'it says who takes a seat');
-  assert.match(section, /invite code/i, 'a store that already uses Lot Sync asks its manager for a code');
+  assert.match(section, /invite code/i, 'a store that already uses Lot Current asks its manager for a code');
 });

@@ -15,7 +15,7 @@ const listing = read('../store/listing.md');
 const tile = read('../store/images/tile.html');
 const css = read('../site/site.css');
 
-const LINE = 'You click Publish. Lot Sync never does.';
+const LINE = 'You click Publish. Lot Current never does.';
 const FILES = [
   { name: 'promo-small-440x280.png', width: 440, height: 280 },
   { name: 'promo-marquee-1400x560.png', width: 1400, height: 560 },
@@ -55,8 +55,8 @@ test('the tile says the name and the listing\'s line word for word, and nothing 
   assert.equal(quoted[1], LINE, 'the listing\'s line changed: change tile.html, this test and the images together');
   const text = visible(tile);
   assert.ok(text.includes(LINE), 'tile.html does not carry the listing\'s line word for word');
-  assert.ok(text.includes('Lot Sync'), 'tile.html does not carry the name');
-  assert.equal(text, `Lot Sync ${LINE}`, 'tile.html says something besides the name and the line');
+  assert.ok(text.includes('Lot Current'), 'tile.html does not carry the name');
+  assert.equal(text, `Lot Current ${LINE}`, 'tile.html says something besides the name and the line');
   assert.doesNotMatch(text, /\d/, 'no numbers on the tile');
 });
 

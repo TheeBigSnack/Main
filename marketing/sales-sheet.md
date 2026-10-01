@@ -1,17 +1,17 @@
-# Lot Sync
+# Lot Current
 
 **Your used cars on Facebook Marketplace, from your website, in seconds. You click Publish.**
 
-Lot Sync is a Chrome extension for dealership salespeople. It reads your dealership website's used inventory, pre-fills the Marketplace vehicle listing, photos included, and tells you the same day when a car sells or its price changes so the listing gets fixed.
+Lot Current is a Chrome extension for dealership salespeople. It reads your dealership website's used inventory, pre-fills the Marketplace vehicle listing, photos included, and tells you the same day when a car sells or its price changes so the listing gets fixed.
 
 ## What it does
 
-1. **Reads your website.** Click Scan on your used inventory page. Lot Sync lists the pre-owned cars at your store that have photos and a price. New, demo and loaner cars never get through.
+1. **Reads your website.** Click Scan on your used inventory page. Lot Current lists the pre-owned cars at your store that have photos and a price. New, demo and loaner cars never get through.
 2. **Fills in the listing.** Click Post on a car. The Marketplace form opens with the year, make, model, mileage, price, VIN, colors, body style, fuel, transmission, location, a description written from the website's facts, and the photos. Title status and condition come from your dealership's defaults. Several cars at once: tick them and post them one after another.
-3. **You check it and click Publish.** Lot Sync shows you what it filled, as the form shows it, and anything it couldn't. Then you publish, every time; Lot Sync never does.
-4. **Keeps listings honest.** Every 3 hours while Chrome is open, Lot Sync re-reads your website. Sold car? Price change? It shows on your To do list with a button that opens the right listing, price ready to update. Your manager sees who posted what.
+3. **You check it and click Publish.** Lot Current shows you what it filled, as the form shows it, and anything it couldn't. Then you publish, every time; Lot Current never does.
+4. **Keeps listings honest.** Every 3 hours while Chrome is open, Lot Current re-reads your website. Sold car? Price change? It shows on your To do list with a button that opens the right listing, price ready to update. Your manager sees who posted what.
 
-## What Lot Sync won't do
+## What Lot Current won't do
 
 - Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it, and a test that fails if any appears.
 - Post a new, demo or loaner vehicle, or any car the pre-owned check can't confirm.
@@ -27,7 +27,7 @@ Lot Sync is a Chrome extension for dealership salespeople. It reads your dealers
 
 ## Straight talk
 
-Meta's Terms prohibit accessing its products by automated means without permission. Having a person check and click Publish is the safest design available; it is not a guarantee, and no tool can honestly promise one. Lot Sync is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used only as the names of the places you post.
+Meta's Terms prohibit accessing its products by automated means without permission. Having a person check and click Publish is the safest design available; it is not a guarantee, and no tool can honestly promise one. Lot Current is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used only as the names of the places you post.
 
 ## The pilot
 
@@ -39,4 +39,4 @@ Planned at **$149 per rooftop per month**, five salespeople included, $20 a mont
 
 ---
 
-Lot Sync · [contact name] · [phone] · [email] · [city, state]
+Lot Current · [contact name] · [phone] · [email] · [city, state]

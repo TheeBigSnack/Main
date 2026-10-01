@@ -1,4 +1,4 @@
--- Lot Sync: the owner's privacy tools (legal/privacy-policy.md, "Your
+-- Lot Current: the owner's privacy tools (legal/privacy-policy.md, "Your
 -- choices and rights" and "Retention").
 --
 -- The policy says a customer can ask for its dealership's records to be
@@ -163,10 +163,10 @@ begin
   return doc || jsonb_build_object(
     'counts', (select jsonb_object_agg(k.key, jsonb_array_length(k.value)) from jsonb_each(doc) k where jsonb_typeof(k.value) = 'array'),
     'notes', jsonb_build_array(
-      'Every row Lot Sync''s database holds for this dealership, one list per table, as stored.',
+      'Every row Lot Current''s database holds for this dealership, one list per table, as stored.',
       'memberships carries each current member''s account email. People who are no longer members have no email here; the rows they made keep their user_id and the salesperson name they posted under, unless they asked to be forgotten.',
       'The code of an unused invite is left out (null): it may still let someone join. Managers see open codes in the manager view.',
-      'signup_attempts says when the dealership was started through self-serve sign-up (empty when Lot Sync set it up), with the time and outcome only: which account started it is that account''s record.',
+      'signup_attempts says when the dealership was started through self-serve sign-up (empty when Lot Current set it up), with the time and outcome only: which account started it is that account''s record.',
       'Not in the database, so not here: what each salesperson''s browser keeps (Settings, the Numbers tab, which form fields could not be filled). Nothing from Facebook beyond the listing links saved in listings.'
     )
   );
@@ -291,7 +291,7 @@ comment on function public.delete_dealership(uuid, text) is 'Owner only. Deletes
 -- times, outcome, under a user_id that no longer maps to anyone. A link on a
 -- listing still marked up stays: the car is still advertised on the
 -- person's profile, the dealership needs the link to see it come down, and
--- only the person can take it down (Lot Sync never does).
+-- only the person can take it down (Lot Current never does).
 -- Keeps: used invite codes (who joined when, under the same bare user id),
 -- rewrite_usage, and billing_events, which may carry their email when they
 -- opened Checkout: the accounting record. The answer counts those.

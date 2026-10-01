@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lot Sync deploy smoke test: run it once the Supabase project is deployed
+// Lot Current deploy smoke test: run it once the Supabase project is deployed
 // (supabase/README.md, "Check the deploy"). It looks at the live project from
 // the outside, the way a browser or a stranger would, and prints a checklist:
 //

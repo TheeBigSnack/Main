@@ -1,4 +1,4 @@
-// Lot Sync rewrite service. One endpoint, POST /rewrite, that asks Claude for
+// Lot Current rewrite service. One endpoint, POST /rewrite, that asks Claude for
 // a Marketplace description from a JSON object of facts, checks the draft with
 // the same guardrails the extension uses, and returns it. The Anthropic API
 // key lives here, in backend/.env, never in the extension.
@@ -225,5 +225,5 @@ if (host !== '127.0.0.1' && host !== 'localhost' && !config.key) {
   process.exit(1);
 }
 server.listen(config.port, host, () => {
-  console.log(`Lot Sync rewrite service on http://${host}:${config.port} (model ${config.model}, cap $${config.monthlyCapUsd}/month${config.key ? ', key required' : ', NO KEY: local use only'})`);
+  console.log(`Lot Current rewrite service on http://${host}:${config.port} (model ${config.model}, cap $${config.monthlyCapUsd}/month${config.key ? ', key required' : ', NO KEY: local use only'})`);
 });

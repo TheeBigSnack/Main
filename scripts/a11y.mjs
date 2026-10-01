@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lot Sync accessibility check (`npm run test:a11y`): opens every page of the
+// Lot Current accessibility check (`npm run test:a11y`): opens every page of the
 // website (the site map of scripts/site-pages.mjs: home, how it works,
 // pricing, FAQ, for managers, support, the legal pages and the 404 page, each
 // at a desktop and a phone width, in light and dark; the home and pricing

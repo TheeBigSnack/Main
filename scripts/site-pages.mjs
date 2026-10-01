@@ -61,11 +61,11 @@ export const CONFIG_FILE = 'site/config.js';
 export const PRICING_FILE = 'site/pricing.json';
 export const STATUS_FILE = 'legal/legal-status.json';
 
-export const SITE_NAME = 'Lot Sync';
-export const TITLE_SUFFIX = ' | Lot Sync';
+export const SITE_NAME = 'Lot Current';
+export const TITLE_SUFFIX = ' | Lot Current';
 export const BRAND_TAGLINE = 'A Chrome extension for dealership salespeople';
-export const LINE = 'You click Publish. Lot Sync never does.';
-export const FOOTER_LINE = 'Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.';
+export const LINE = 'You click Publish. Lot Current never does.';
+export const FOOTER_LINE = 'Lot Current is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.';
 export const THEME_COLOR = '#14532d';
 export const SOCIAL = Object.freeze({ width: 1200, height: 630 });
 
@@ -82,8 +82,8 @@ const page = (p) => Object.freeze({ ...p, social: p.social ? Object.freeze(p.soc
 export const PAGES = Object.freeze([
   page({
     slug: 'home', path: '/', file: 'site/index.html', kind: 'page', source: 'site-src/pages/home.html',
-    title: 'Your used cars on Marketplace, from your website',
-    description: 'Lot Sync fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.',
+    title: 'Used cars on Marketplace, from your website',
+    description: 'Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.',
     h1: 'Your used cars on Facebook Marketplace, from your website, in seconds.',
     nav: 'Home', crumb: null, social: { heading: 'Your used cars listed from your website, in seconds.' },
     script: true, sitemap: true, jsonld: ['Organization', 'WebSite', 'SoftwareApplication'],
@@ -91,15 +91,15 @@ export const PAGES = Object.freeze([
   page({
     slug: 'how-it-works', path: '/how-it-works/', file: 'site/how-it-works/index.html', kind: 'page', source: 'site-src/pages/how-it-works.html',
     title: 'How it works',
-    description: "Lot Sync reads your website's used inventory, fills in the Marketplace form for each pre-owned car, and rescans to show what sold or changed price.",
-    h1: 'How Lot Sync works',
+    description: "Lot Current reads your website's used inventory, fills in the Marketplace form for each pre-owned car, and rescans to show what sold or changed price.",
+    h1: 'How Lot Current works',
     nav: 'How it works', crumb: 'How it works', social: { heading: 'How it works: scan, fill, check, publish.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
   }),
   page({
     slug: 'pricing', path: '/pricing/', file: 'site/pricing/index.html', kind: 'page', source: 'site-src/pages/pricing.html',
     title: 'Pricing',
-    description: 'Lot Sync is priced per rooftop per month, with a free pilot first; the planned prices are confirmed with you before any paid subscription starts.',
+    description: 'Lot Current is priced per rooftop per month, with a free pilot first; the planned prices are confirmed with you before any paid subscription starts.',
     h1: 'Pricing',
     nav: 'Pricing', crumb: 'Pricing', social: { heading: 'Pricing: per rooftop, per month, after a free pilot.' },
     script: true, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -107,7 +107,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'faq', path: '/faq/', file: 'site/faq/index.html', kind: 'page', source: 'site-src/pages/faq.html',
     title: 'Frequently asked questions',
-    description: 'Straight answers about Lot Sync: whether it is allowed on Facebook, what it reads, where your data is, and why you click Publish, never the tool.',
+    description: 'Straight answers about Lot Current: whether it is allowed on Facebook, what it reads, where your data is, and why you click Publish, never the tool.',
     h1: 'Frequently asked questions',
     nav: 'FAQ', crumb: 'FAQ', social: { heading: 'Questions, answered straight.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList', 'FAQPage'],
@@ -115,7 +115,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'for-managers', path: '/for-managers/', file: 'site/for-managers/index.html', kind: 'page', source: 'site-src/pages/for-managers.html',
     title: 'For managers',
-    description: 'The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.',
+    description: 'The manager view will show who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.',
     h1: 'What managers see',
     nav: 'For managers', crumb: 'For managers', social: { heading: 'What managers see.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -123,7 +123,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'support', path: '/support/', file: 'site/support/index.html', kind: 'page', source: 'site-src/pages/support.html',
     title: 'Support',
-    description: 'How to get help with Lot Sync, what to send with a report, what support never asks for, and how to ask for your data to be exported or deleted.',
+    description: 'How to get help with Lot Current, what to send with a report, what support never asks for, and how to ask for your data to be exported or deleted.',
     h1: 'Support',
     nav: 'Support', crumb: 'Support', social: { heading: 'Support, and what we never ask for.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -131,7 +131,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'legal', path: '/legal/', file: 'site/legal/index.html', kind: 'page', source: 'site-src/pages/legal.html',
     title: 'Legal documents',
-    description: 'The Lot Sync Terms of Service, the Privacy Policy and the posting rules for salespeople, each on its own page.',
+    description: 'The Lot Current Terms of Service, the Privacy Policy and the posting rules for salespeople, each on its own page.',
     h1: 'Legal documents',
     nav: null, crumb: 'Legal', social: { heading: 'Legal documents.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -139,7 +139,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'legal-terms', path: '/legal/terms/', file: 'site/legal/terms/index.html', kind: 'legal', source: 'legal/terms-of-service.md',
     title: 'Terms of service',
-    description: 'The Terms of Service for the Lot Sync browser extension and its related services, for the dealership that subscribes and the people it authorises.',
+    description: 'The Terms of Service for the Lot Current browser extension and its related services, for the dealership that subscribes and the people it authorises.',
     h1: null,
     nav: null, crumb: 'Terms of service', social: { heading: 'Terms of service.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -147,7 +147,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'legal-privacy', path: '/legal/privacy/', file: 'site/legal/privacy/index.html', kind: 'legal', source: 'legal/privacy-policy.md',
     title: 'Privacy policy',
-    description: 'The Lot Sync Privacy Policy: what we collect, why, who processes it, how long we keep it and how to reach us.',
+    description: 'The Lot Current Privacy Policy: what we collect, why, who processes it, how long we keep it and how to reach us.',
     h1: null,
     nav: null, crumb: 'Privacy policy', social: { heading: 'Privacy policy.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -155,7 +155,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'legal-posting-rules', path: '/legal/posting-rules/', file: 'site/legal/posting-rules/index.html', kind: 'legal', source: 'legal/posting-rules.md',
     title: 'Posting rules',
-    description: 'The posting rules every salesperson reads before using Lot Sync: you publish every post, pre-owned cars only, the website price, facts only.',
+    description: 'The posting rules every salesperson reads before using Lot Current: you publish every post, pre-owned cars only, the website price, facts only.',
     h1: null,
     nav: null, crumb: 'Posting rules', social: { heading: 'Posting rules for salespeople.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -163,7 +163,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'not-found', path: '/404.html', file: 'site/404.html', kind: 'notFound', source: 'site-src/pages/not-found.html',
     title: 'Page not found',
-    description: 'That address is not on the Lot Sync website; the links on this page lead to the pages that exist.',
+    description: 'That address is not on the Lot Current website; the links on this page lead to the pages that exist.',
     h1: 'Page not found',
     nav: null, crumb: null, social: null,
     script: false, sitemap: false, jsonld: [],
@@ -389,7 +389,7 @@ export function rootFor(page) {
   return depth ? '../'.repeat(depth) : './';
 }
 
-export const socialAlt = (page) => (page.social ? `Lot Sync's green check mark with the words "${page.social.heading}" and "${LINE}"` : '');
+export const socialAlt = (page) => (page.social ? `The Lot Current check mark and name, with the words "${page.social.heading}" and "${LINE}"` : '');
 
 /** The pages above this one in the address, home first (the breadcrumb trail without the page itself). */
 export function ancestorsOf(page) {
@@ -525,7 +525,9 @@ export function renderPage(page, bodyHtml, ctx) {
     `  <title>${attr(title)}${TITLE_SUFFIX}</title>`,
     `  <meta name="description" content="${attr(page.description)}">`,
   ];
-  if (notFound) head.push('  <meta name="robots" content="noindex">');
+  // A legal text still marked draft (legal/legal-status.json) carries blanks
+  // in brackets and notes for the attorney: readable, never indexed.
+  if (notFound || (page.kind === 'legal' && legalDraft)) head.push('  <meta name="robots" content="noindex">');
   if (site.siteUrl && !notFound) head.push(`  <link rel="canonical" href="${attr(site.siteUrl + page.path)}">`);
   head.push(
     `  <link rel="icon" href="${root}favicon.svg" type="image/svg+xml">`,
@@ -653,9 +655,13 @@ export function robotsTxt(site) {
   return lines.join('\n') + '\n';
 }
 
-export function sitemapXml(site) {
+// The pages search engines and llms.txt are pointed at: the map's sitemap
+// pages, less the legal texts while they are drafts (they say noindex then).
+export const listedPages = (legalDraft = defaultLegalDraft()) => PAGES.filter((p) => p.sitemap && !(p.kind === 'legal' && legalDraft));
+
+export function sitemapXml(site, legalDraft = defaultLegalDraft()) {
   if (!site.siteUrl) throw new Error('sitemap.xml needs siteUrl');
-  const urls = PAGES.filter((p) => p.sitemap).map((p) => `  <url><loc>${attr(site.siteUrl + p.path)}</loc></url>`);
+  const urls = listedPages(legalDraft).map((p) => `  <url><loc>${attr(site.siteUrl + p.path)}</loc></url>`);
   return ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">', ...urls, '</urlset>', ''].join('\n');
 }
 
@@ -664,15 +670,15 @@ export const cnameTxt = (site) => {
   return new URL(site.siteUrl).hostname + '\n';
 };
 
-export const LLMS_SUMMARY = "Lot Sync is a Chrome extension for dealership salespeople: it fills in the Facebook Marketplace vehicle listing from the dealership's own website, photos included, and a person checks it and clicks Publish. Lot Sync never publishes anything itself.";
-export const LLMS_NOTE = 'Lot Sync is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used only as the names of the places salespeople post. The prices on the pricing page are planned prices, confirmed with each dealership before any paid subscription starts.';
+export const LLMS_SUMMARY = "Lot Current is a Chrome extension for dealership salespeople: it fills in the Facebook Marketplace vehicle listing from the dealership's own website, photos included, and a person checks it and clicks Publish. Lot Current never publishes anything itself.";
+export const LLMS_NOTE = 'Lot Current is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used only as the names of the places salespeople post. The prices on the pricing page are planned prices, confirmed with each dealership before any paid subscription starts.';
 
 // The llmstxt.org shape: an H1, a blockquote summary, a paragraph, then H2
 // sections of "- [name](url): description" lines. url is the absolute
 // address once siteUrl is set, the path until then.
-export function llmsTxt(site) {
+export function llmsTxt(site, legalDraft = defaultLegalDraft()) {
   const line = (p) => `- [${p.nav || p.title}](${site.siteUrl ? site.siteUrl + p.path : p.path}): ${p.description}`;
-  const listed = PAGES.filter((p) => p.sitemap);
+  const listed = listedPages(legalDraft);
   return [
     `# ${SITE_NAME}`,
     '',
@@ -781,10 +787,10 @@ export function buildSite(ctx) {
     files.push({ file: p.file, content: renderFragmentPage(p, fragment, ctx) });
   }
   files.push({ file: 'site/robots.txt', content: robotsTxt(ctx.site) });
-  files.push({ file: 'site/llms.txt', content: llmsTxt(ctx.site) });
+  files.push({ file: 'site/llms.txt', content: llmsTxt(ctx.site, ctx.legalDraft) });
   const remove = [];
   if (ctx.site.siteUrl) {
-    files.push({ file: 'site/sitemap.xml', content: sitemapXml(ctx.site) });
+    files.push({ file: 'site/sitemap.xml', content: sitemapXml(ctx.site, ctx.legalDraft) });
     files.push({ file: 'site/CNAME', content: cnameTxt(ctx.site) });
   } else {
     remove.push('site/sitemap.xml', 'site/CNAME');

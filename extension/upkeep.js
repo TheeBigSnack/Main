@@ -2,7 +2,7 @@
 // price to update) opens the salesperson's own listing, the new price is put
 // into the edit form's Price box as soon as it appears, and the item is
 // marked done when the page shows the change (or when the person says so).
-// The person clicks Edit, Update, Mark as sold or Delete; Lot Sync never does.
+// The person clicks Edit, Update, Mark as sold or Delete; Lot Current never does.
 //
 // Two guards, because the tab is an ordinary tab the person can move around
 // in (and for a car with no saved link it opens on Marketplace's list of all
@@ -89,7 +89,7 @@ async function poll(ctx) {
       const [inj] = await chrome.scripting.executeScript({ target: { tabId: up.tabId }, func: readListingInPage, args: [map, LISTING_SIGNS, expectFor(map)] });
       seen = inj && inj.result;
     } catch (e) {
-      // the tab closed, or is on a page Lot Sync may not read (outside /marketplace/)
+      // the tab closed, or is on a page Lot Current may not read (outside /marketplace/)
       try { await chrome.tabs.get(up.tabId); } catch (gone) { up.status = 'gone'; stopPolling(); ctx.render(); }
       return;
     }
@@ -103,7 +103,7 @@ async function poll(ctx) {
     }
     if (up.offTarget !== !onTarget) {
       up.offTarget = !onTarget;
-      up.note = onTarget ? '' : `This tab isn't showing the listing for ${up.name}. Open that listing and Lot Sync continues.`;
+      up.note = onTarget ? '' : `This tab isn't showing the listing for ${up.name}. Open that listing and Lot Current continues.`;
       ctx.render();
     }
     if (!onTarget) return;
@@ -160,7 +160,7 @@ async function finish(ctx, how) {
     return;
   }
   up.error = '';
-  // pilot numbers: how long the item stayed open, and whether Lot Sync saw the change itself
+  // pilot numbers: how long the item stayed open, and whether Lot Current saw the change itself
   await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, up.kind === 'price' ? 'price' : 'takeDown', { how })).catch(() => null);
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   up.status = 'done';
@@ -184,10 +184,10 @@ export function upkeepHtml() {
   else if (up.status === 'done') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;
   else if (up.kind === 'price') {
     body = up.status === 'filled'
-      ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Sync will notice when the listing shows the new price.</div>`
-      : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Sync fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}; then you click <b>Update</b>.</div>`;
+      ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price.</div>`
+      : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Current fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}; then you click <b>Update</b>.</div>`;
   } else {
-    body = `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Mark as sold</b> (or <b>Delete</b>) on this listing. Lot Sync will notice and mark it done.</div>`;
+    body = `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Mark as sold</b> (or <b>Delete</b>) on this listing. Lot Current will notice and mark it done.</div>`;
   }
   const buttons = up.status === 'done'
     ? `<button type="button" class="primary" id="upkeepClose">Close</button>`
@@ -195,7 +195,7 @@ export function upkeepHtml() {
   return `<section class="car"><div class="name">${title}</div><div class="facts">${esc(up.vin)}${up.listingUrl ? ` · <a href="${esc(up.listingUrl)}" target="_blank" rel="noopener">listing</a>` : ''}</div></section>
     ${error}${body}${note}
     <div class="actions">${buttons}</div>
-    <p class="hint">Lot Sync fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>`;
+    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>`;
 }
 
 export async function handleUpkeepClick(id, ctx) {

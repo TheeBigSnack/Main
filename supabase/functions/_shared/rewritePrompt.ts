@@ -21,6 +21,7 @@ Rules, all of them strict:
 - Use only facts from the JSON. Do not invent, assume or embellish: nothing about condition, service history, accidents, tires, brakes, title, financing, warranty, "best price" or how fast it will sell. Do not use any number that is not in the JSON.
 - Say "one owner" only if carfaxOneOwner is true.
 - Mention the mileage and 4 to 6 of the most useful features. Navigation, Apple CarPlay/Android Auto, heated seats, leather, sunroof, backup camera, remote start, blind spot monitoring, towing, AWD/4WD, Bluetooth and keyless entry rank highest.
+- If highlightsPicked is true, the salesperson chose the features: name exactly the ones in "features", in the order given, and no others (none if the list is empty).
 - If "narrative" has text, you may use its facts and tone, but write it in your own words.
 - Include the priceNote exactly as given, if it is not empty.
 - End with a sign-off that names the salesperson (if given), their title and the dealership name exactly as given, for example: "I'm <salesperson name>, <title> at <dealership name>." Never pose as a private seller.

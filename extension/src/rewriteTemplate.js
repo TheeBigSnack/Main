@@ -96,7 +96,11 @@ export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price
   return numbersIn(bits.filter((b) => b !== null && b !== undefined).join(' '));
 }
 
-export function pickFeatures(features, { min = 4, max = 6 } = {}) {
+// The website's features a description can name as highlights: each once,
+// short enough to read in a list (40 characters or less), ranked by
+// FEATURE_PRIORITY and then the website's own order. The side panel offers
+// these for the salesperson's pick; the template takes the first few.
+export function featureChoices(features) {
   if (!Array.isArray(features)) return [];
   const seen = new Set();
   const clean = [];
@@ -111,9 +115,89 @@ export function pickFeatures(features, { min = 4, max = 6 } = {}) {
     const i = FEATURE_PRIORITY.findIndex((re) => re.test(t));
     return i === -1 ? FEATURE_PRIORITY.length : i;
   };
-  const ranked = clean.map((t, i) => ({ t, r: rank(t), i })).sort((a, b) => a.r - b.r || a.i - b.i);
+  return clean.map((t, i) => ({ t, r: rank(t), i })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.t);
+}
+
+export const MAX_HIGHLIGHTS = 6;
+
+export function pickFeatures(features, { min = 4, max = MAX_HIGHLIGHTS } = {}) {
+  const ranked = featureChoices(features);
   const want = ranked.length < min ? ranked.length : Math.min(max, ranked.length);
-  return ranked.slice(0, want).map((x) => x.t);
+  return ranked.slice(0, want);
+}
+
+// The salesperson's own pick of highlights, settled against the website: only
+// features the website lists for this car (matched without regard to case or
+// spacing, written as the website writes them), each once, in the order
+// picked, at most MAX_HIGHLIGHTS. null (no pick made) is the usual choice.
+export function settleHighlights(pick, features) {
+  if (!Array.isArray(pick)) return pickFeatures(features);
+  const key = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const byKey = new Map(featureChoices(features).map((t) => [key(t), t]));
+  const out = [];
+  for (const p of pick) {
+    const t = byKey.get(key(p));
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out.slice(0, MAX_HIGHLIGHTS);
+}
+
+// ---------- the salesperson's closing line ----------
+// One sentence or two of the salesperson's own, typed in Settings and added
+// after the sign-off of every description ("Ask for me by name; I'm in
+// Monday to Saturday."). It is about them, not the car: facts about the car
+// come from the website, so the line carries no numbers except a phone
+// number, no prices and none of the banned phrases. Like the VIN line it is
+// left out of the word count, so a long line never pushes out the car's facts.
+
+export const CLOSING_LINE_MAX_WORDS = 30;
+const PHONE = /(?:\+?1[\s.-]?)?\(?\b\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g;
+
+export function cleanClosingLine(line) {
+  return String(line ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// { ok, problems: [{ code, text }] } for a closing line as typed. An empty
+// line is fine: the description then ends as before.
+export function checkClosingLine(line) {
+  const t = cleanClosingLine(line);
+  const problems = [];
+  if (!t) return { ok: true, problems };
+  const words = wordCount(t);
+  if (words > CLOSING_LINE_MAX_WORDS) problems.push({ code: 'closing-too-long', text: `The closing line has ${words} words; keep it to ${CLOSING_LINE_MAX_WORDS}` });
+  if (/\$\s?\d|\d\s?%|\bdollars?\b|\bpercent\b/i.test(t)) problems.push({ code: 'closing-price', text: 'The closing line mentions money; prices come from the website only' });
+  else if (/\d/.test(t.replace(PHONE, ' '))) problems.push({ code: 'closing-number', text: 'The closing line has a number in it; a phone number is fine, but facts about the car come from the website' });
+  for (const [phrase, re] of BANNED_RE) {
+    if (re.test(t)) problems.push({ code: 'closing-banned', text: `The closing line says "${phrase}"` });
+  }
+  if (/\b(one|1|single)[- ]owner\b/i.test(t)) problems.push({ code: 'closing-one-owner', text: "The closing line says one owner; that comes from the car's Carfax report, not from you" });
+  if (shouting(t)) problems.push({ code: 'closing-caps', text: 'The closing line has ALL CAPS shouting' });
+  if (emojiCount(t) > 1) problems.push({ code: 'closing-emoji', text: 'The closing line has more than one emoji' });
+  return { ok: problems.length === 0, problems };
+}
+
+// The closing line to write into descriptions: the cleaned line when it
+// passes its checks, otherwise none.
+export const usableClosingLine = (line) => (checkClosingLine(line).ok ? cleanClosingLine(line) : '');
+
+// Adds the closing line on a line of its own when the text doesn't already
+// carry it (a draft from the rewrite service never does: the line is not
+// sent there).
+export function ensureClosingLine(text, line) {
+  const c = cleanClosingLine(line);
+  const t = String(text || '').trimEnd();
+  if (!c || closingPattern(c).test(t)) return t;
+  return `${t}\n${c}`;
+}
+
+// The text without the closing line, for the word count and the number check.
+// Matched with any run of spaces or line breaks between its words, so a
+// line the salesperson wrapped in the box is still recognised.
+const closingPattern = (c) => new RegExp(c.split(' ').map(escapeRe).join('\\s+'));
+function stripClosing(text, line) {
+  const c = cleanClosingLine(line);
+  if (!c) return text;
+  return String(text || '').replace(closingPattern(c), ' ');
 }
 
 function firstSentences(text, maxSentences, maxWords) {
@@ -135,15 +219,18 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   salesperson: { name, title }
  *   priceNote:   the dealer's wording about fees, typed in Settings (a suggested sentence is offered from the website's price gap)
  *   narrative:   car-specific sentences from description.js (cleanDescription)
+ *   highlights:  the salesperson's pick of the website's features (settleHighlights); null for the usual pick
+ *   closingLine: the salesperson's own line from Settings (salesperson.closingLine), used when it passes checkClosingLine
  */
-export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [] }) {
+export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [], highlights = null }) {
   const dealerName = String(dealer.name || '').trim();
   const city = String(dealer.city || '').trim();
   const person = String(salesperson.name || '').trim();
   const title = String(salesperson.title || DEFAULT_SALESPERSON_TITLE).trim();
   const name = [v.year, v.make, v.model, v.trim].filter(Boolean).join(' ');
   const milesText = typeof v.mileage === 'number' ? `${v.mileage.toLocaleString('en-US')} miles` : '';
-  const features = pickFeatures(v.features);
+  const features = settleHighlights(highlights, v.features);
+  const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
   const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45) : '';
@@ -163,7 +250,9 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'vin', keep: 'always', text: v.vin ? `VIN ${String(v.vin).toUpperCase().replace(/[^A-Z0-9]/g, '')}.` : '' },
     { id: 'priceNote', keep: 'always', text: String(priceNote || '').trim() },
     { id: 'signoff', keep: 'always', text: person ? `I'm ${person}, ${title} at ${dealerName}.` : `${capitalize(title)} at ${dealerName}.` },
-    { id: 'cta', keep: 'optional', text: 'Message me to set up a test drive or ask a question.' },
+    { id: 'closing', keep: 'always', text: closing },
+    // the salesperson's own closing line takes the place of the stock invitation
+    { id: 'cta', keep: 'optional', text: closing ? '' : 'Message me to set up a test drive or ask a question.' },
     { id: 'more', keep: 'filler', text: 'Happy to send more photos or answer any questions.' },
     { id: 'visit', keep: 'filler', text: dealerName ? `Come take a look in person at ${dealerName}.` : '' },
     { id: 'reply', keep: 'filler', text: "Message me here on Marketplace and I'll get right back to you." },
@@ -171,13 +260,15 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
 
   const on = new Set(blocks.filter((b) => b.keep !== 'filler').map((b) => b.id));
   const render = () => blocks.filter((b) => on.has(b.id)).map((b) => b.text).join('\n');
+  // the closing line is not counted, as in runGuardrails
+  const words = () => wordCount(stripClosing(render(), closing));
 
   for (const id of ['narrative', 'mech', 'colors', 'cta']) {
-    if (wordCount(render()) <= WORD_LIMITS.max) break;
+    if (words() <= WORD_LIMITS.max) break;
     on.delete(id);
   }
   for (const b of blocks.filter((b) => b.keep === 'filler')) {
-    if (wordCount(render()) >= WORD_LIMITS.min) break;
+    if (words() >= WORD_LIMITS.min) break;
     on.add(b.id);
   }
   return render();
@@ -207,9 +298,12 @@ const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).r
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
  */
-export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '', price = null } = {}) {
+export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '', price = null, closingLine = '' } = {}) {
   const t = String(text || '');
-  const prose = stripVin(t);
+  // the closing line is the salesperson's, checked on its own (checkClosingLine) wherever the text carries it
+  const closing = cleanClosingLine(closingLine);
+  const hasClosing = Boolean(closing) && closingPattern(closing).test(t);
+  const prose = stripVin(hasClosing ? stripClosing(t, closing) : t);
   const problems = [];
   const words = wordCount(prose);
   if (words < WORD_LIMITS.min) problems.push({ code: 'too-short', text: `${words} words; needs at least ${WORD_LIMITS.min}` });
@@ -250,5 +344,6 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '',
   }
   if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
   if (emojiCount(t) > 3) problems.push({ code: 'emoji', text: 'Too many emoji' });
+  if (hasClosing) for (const p of checkClosingLine(closing).problems) if (!problems.some((q) => q.text === p.text)) problems.push(p);
   return { ok: problems.length === 0, problems, words };
 }

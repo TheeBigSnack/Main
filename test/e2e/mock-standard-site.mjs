@@ -49,7 +49,7 @@ export function startMockStandardSite(port = 0) {
     const origin = 'http://' + req.headers.host;
     const url = new URL(req.url, origin);
     const send = (status, type, body, headers = {}) => {
-      // the user agent is recorded so the flow can check Lot Sync never changes it
+      // the user agent is recorded so the flow can check Lot Current never changes it
       if (!CONTROLS.has(url.pathname)) requests.push({ method: req.method, path: url.pathname + url.search, status, ua: req.headers['user-agent'] || '' });
       res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers });
       res.end(req.method === 'HEAD' ? undefined : body);
