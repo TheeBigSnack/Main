@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
-import { capStatus, logPost, unlogPost, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, capCount, logPost, unlogPost, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
@@ -490,10 +490,12 @@ function queueStatusHtml() {
 }
 
 // The day's cap for this salesperson: this machine's posts (those taken down
-// since included: the day's log) and, after a sync, the server's count of
-// theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { log: state.postLog, serverCount: state.syncState && state.syncState.postsToday });
-const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
+// since included: the day's log), after a sync the server's count of theirs
+// across their machines, and the forms saved as drafts today that are not
+// marked posted yet (src/cap.js). Mark posted never looks at it: a listing
+// already live on Facebook is always recorded, so rescans watch it.
+const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { log: state.postLog, serverCount: state.syncState && state.syncState.postsToday, drafts: state.drafts });
+const capText = (cap) => `Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`;
 
 // The Ready tab: the sort menu (remembered for this website in
 // settings.readySort) and the search box above the list; the list itself,

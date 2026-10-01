@@ -19,7 +19,7 @@ import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
-import { capStatus, logPost } from './src/cap.js';
+import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
@@ -510,9 +510,10 @@ async function startFlow(req) {
 }
 
 // The day's cap for this salesperson: this machine's posts (those taken down
-// since included: the day's log) and, after a sync, the server's count of
-// theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { log: state.postLog, serverCount: state.syncState && state.syncState.postsToday });
+// since included: the day's log), after a sync the server's count of theirs
+// across their machines, and the forms saved as drafts today that are not
+// marked posted yet (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { log: state.postLog, serverCount: state.syncState && state.syncState.postsToday, drafts: state.drafts });
 
 // Anything assumed besides the dealership's own defaults (a reading of the
 // website's words, a colour guessed from the photos, a motorcycle read from
@@ -542,7 +543,7 @@ async function startNextInQueue() {
     state.queue = pauseQueue(q);
     await saveQueue();
     await clearFlow();
-    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap}). The queue is paused until tomorrow; the dealer can change the cap in Settings.`, 'error');
+    setStatus(`Daily post cap reached (${capCount(cap)}). The queue is paused until tomorrow; the dealer can change the cap in Settings.`, 'error');
     render();
     return;
   }
@@ -757,15 +758,16 @@ async function openForm({ probeOnly = false } = {}) {
   const run = flowRun;
   const dropped = () => run !== flowRun; // the post was dropped meanwhile: no tab for it, nothing filled
   const k = siteKeys(state.origin);
-  const fresh = await chrome.storage.local.get([k.posted, k.postLog, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
+  const fresh = await chrome.storage.local.get([k.posted, k.postLog, k.sync, k.drafts]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
   if (dropped()) return;
   state.posted = fresh[k.posted] || state.posted;
   state.postLog = fresh[k.postLog] || state.postLog;
   state.syncState = fresh[k.sync] || state.syncState;
+  state.drafts = fresh[k.drafts] || state.drafts;
   if (state.posted[state.vin]) return stopPosted();
   const cap = dailyCap();
   if (cap.reached) {
-    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+    setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
     return;
   }
   if (descriptionStopped()) return;
@@ -1236,7 +1238,7 @@ function viewIdle() {
   return `<section id="panelReady" aria-labelledby="panelReadyLabel">
     <h3 id="panelReadyLabel">Ready to post</h3>
     <div class="meta" id="panelMeta">${meta}</div>
-    ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
+    ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${esc(capCount(cap))}). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
     <div class="toolbar listControls">
       ${siteChoiceHtml()}
       <label class="control"><span>Sort</span><select id="panelSort">${SORT_ORDERS.map((o) => `<option value="${o.id}" ${o.id === order ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>
@@ -1413,7 +1415,7 @@ const readAgainHtml = () => (readIsOld()
   ? `<p class="hint" id="readAgain">Read from the website ${state.readAt ? esc(when(state.readAt)) : 'a while ago'}. Lot Current reads and checks it again before the form opens or fills.</p>`
   : '');
 
-const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
+const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.drafts ? ` (${cap.drafts} saved as ${cap.drafts === 1 ? 'a draft' : 'drafts'})` : ''}${cap.reached ? ' · cap reached' : ''}</div>`;
 
 function viewReview() {
   const cap = dailyCap();
@@ -1734,7 +1736,7 @@ async function postFromList(vin) {
   if (!entry || state.posted[vin]) return render(); // posted or gone meanwhile: the list is redrawn
   const cap = dailyCap();
   if (cap.reached) {
-    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+    setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
     return render();
   }
   return startFlow({ origin: state.origin, vin, dealerTabId: null, windowId: panelWindowId, at: Date.now() });

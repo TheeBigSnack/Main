@@ -59,15 +59,40 @@ export function loggedToday(log, now = new Date()) {
   return entries(log).filter((e) => sameDay(e.at, now)).length;
 }
 
+// The forms Lot Current filled today that the person saved as a Facebook
+// draft instead of publishing (drafts:<origin>, src/drafts.js: { vin: {
+// savedAt, ... } }). Each was a listing filled in today, so each counts
+// toward the day's cap like a post, until the car is marked posted: from
+// then on it counts as that post (the posted list or the day's log has it),
+// never twice.
+export function draftsToday(drafts, { posted = {}, log = [], now = new Date() } = {}) {
+  const logged = new Set(entries(log).filter((e) => sameDay(e.at, now)).map((e) => e.vin));
+  return Object.entries(drafts && typeof drafts === 'object' ? drafts : {}).filter(([vin, d]) => (
+    d && typeof d === 'object' && typeof d.savedAt === 'string' && sameDay(d.savedAt, now) && !(posted && posted[vin]) && !logged.has(vin)
+  )).length;
+}
+
 // The day's standing: the largest of three counts of this person's posts
 // today, since each is a count of real posts. The posted list knows the
 // cars still listed; `options.log` (the log above) also knows the ones
 // taken down since; `options.serverCount` (the count above) knows the ones
-// synced from anywhere, minus what has not gone up yet. The fourth argument
+// synced from anywhere, minus what has not gone up yet. To that come the
+// forms saved as drafts today (`options.drafts`, draftsToday above), which
+// the result also names as `drafts` when there are any. The fourth argument
 // is optional: the old three-argument call is the posted list alone.
 export function capStatus(posted, cap = DEFAULT_DAILY_CAP, now = new Date(), options = undefined) {
   const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : DEFAULT_DAILY_CAP;
   const opts = options && typeof options === 'object' ? options : {};
-  const used = Math.max(postsToday(posted, now), loggedToday(opts.log, now), serverPostsToday(opts.serverCount, now));
-  return { used, cap: limit, remaining: Math.max(0, limit - used), reached: used >= limit };
+  const drafts = draftsToday(opts.drafts, { posted, log: opts.log, now });
+  const used = Math.max(postsToday(posted, now), loggedToday(opts.log, now), serverPostsToday(opts.serverCount, now)) + drafts;
+  const out = { used, cap: limit, remaining: Math.max(0, limit - used), reached: used >= limit };
+  if (drafts) out.drafts = drafts;
+  return out;
+}
+
+// "N of M today", and how many of the N are drafts: the cap's count as the
+// popup and the side panel say it.
+export function capCount(cap) {
+  const d = cap && cap.drafts;
+  return `${cap.used} of ${cap.cap} today${d ? `, ${d === 1 ? 'one' : d} of them saved as ${d === 1 ? 'a draft' : 'drafts'}` : ''}`;
 }

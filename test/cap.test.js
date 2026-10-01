@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { capStatus, postsToday, serverPostsToday } from '../extension/src/cap.js';
+import { capStatus, postsToday, serverPostsToday, draftsToday, capCount } from '../extension/src/cap.js';
+import { createQueue } from '../extension/src/queue.js';
+import { nextToPost } from '../extension/src/panelList.js';
+import { draftRecord } from '../extension/src/drafts.js';
 import { mergeRegistry, syncPayload } from '../extension/src/sync.js';
 import { markPosted } from '../extension/src/rescan.js';
 
@@ -153,10 +156,59 @@ test('only recording a post writes the day\'s log; take-downs never touch it, an
   assert.match(panel, /updateKey\(siteKeys\(origin\)\.postLog, \(log\) => logPost\(log, vehicle\.vin, now\)/, 'the side panel logs the post it records');
   assert.match(popup, /update\('postLog', \(log\) => logPost\(log, vin, at\)\)/, 'Mark posted logs it');
   assert.match(popup, /update\('postLog', \(log\) => \(Array\.isArray\(log\) \? unlogPost\(log, vin, at\)/, 'unmarking takes its own entry off');
-  for (const s of [panel, popup]) assert.match(s, /capStatus\(state\.posted, state\.settings\??\.dailyCap, new Date\(\), \{ log: state\.postLog, serverCount:/);
+  for (const s of [panel, popup]) assert.match(s, /capStatus\(state\.posted, state\.settings\??\.dailyCap, new Date\(\), \{ log: state\.postLog, serverCount:[^}]*, drafts: state\.drafts \}\)/, 'the cap counts the day\'s drafts in the popup and the side panel');
   // the take-down paths: upkeep's finish, and the popup's Taken down
   assert.doesNotMatch(src('upkeep.js'), /postLog/);
   const takenDown = popup.slice(popup.indexOf("case 'takenDown':"), popup.indexOf("case 'priceUpdated':"));
   assert.ok(takenDown.length > 50 && !/postLog/.test(takenDown));
   assert.equal((popup.match(/update\('postLog'/g) || []).length, 2);
 });
+
+// Saved as draft, next car ends a car's form without publishing it, so a
+// queue could fill any number of listings a day with the cap never moving.
+// Each form saved as a draft today counts toward the day's cap until its car
+// is marked posted; from then on it counts as that post, never twice.
+test('forms saved as drafts today count toward the daily cap, once, until they are marked posted', () => {
+  const drafts = {};
+  const vins = Array.from({ length: 30 }, (_, i) => `TESTVIN0000000${String(i).padStart(2, '0')}`);
+  for (const [i, vin] of vins.entries()) drafts[vin] = draftRecord({ name: `Car ${i}`, price: 20000 + i, basis: 'website', savedAt: today(i) });
+  let cap = capStatus({}, 10, now, { log: [], drafts });
+  assert.deepEqual(cap, { used: 30, cap: 10, remaining: 0, reached: true, drafts: 30 }, 'thirty drafts filled today: the cap is reached');
+  assert.equal(capCount(cap), '30 of 10 today, 30 of them saved as drafts');
+
+  // a queue: after ten drafts, nothing more is queued or filled today
+  const ten = Object.fromEntries(Object.entries(drafts).slice(0, 10));
+  cap = capStatus({}, 10, now, { log: [], drafts: ten });
+  assert.equal(cap.reached, true);
+  const rows = ['NEXTVIN000000001', 'NEXTVIN000000002'].map((vin) => ({ vin, draft: false }));
+  assert.deepEqual(nextToPost(rows, cap.remaining), []);
+  assert.equal(createQueue(rows.map((r) => r.vin), { remaining: cap.remaining }).ok, false);
+
+  // one draft marked posted (Mark posted writes the posted list and the log): counted as the post, not twice
+  const vin = vins[0];
+  const one = { [vin]: drafts[vin] };
+  const posted = markPosted({}, { vin, name: 'Car 0', price: 20000 }, 'website', today(40));
+  const log = logPost([], vin, today(40), now);
+  assert.deepEqual(capStatus(posted, 10, now, { log, drafts: one }), { used: 1, cap: 10, remaining: 9, reached: false });
+  // taken down the same day: the log still has the post, and the draft is not counted again
+  assert.equal(capStatus({}, 10, now, { log, drafts: one }).used, 1);
+  // unmarked by mistake: the draft is back on the count
+  assert.equal(capStatus({}, 10, now, { log: [], drafts: one }).used, 1);
+  assert.equal(capCount(capStatus({}, 10, now, { log: [], drafts: one })), '1 of 10 today, one of them saved as a draft');
+
+  // yesterday's drafts, and anything that is not a draft record, do not count today
+  assert.equal(draftsToday({ [vin]: { ...drafts[vin], savedAt: new Date(2026, 8, 25, 18, 0).toISOString() } }, { now }), 0);
+  for (const bad of [null, undefined, 'drafts', { X: null }, { X: { name: 'no date' } }]) assert.equal(draftsToday(bad, { now }), 0);
+  // drafts add to the posts: two posts and one draft
+  const two = { ...markPosted({}, { vin: VIN_A, name: 'A', price: 1 }, 'website', today(1)), ...markPosted({}, { vin: VIN_B, name: 'B', price: 1 }, 'website', today(2)) };
+  assert.deepEqual(capStatus(two, 10, now, { drafts: one }), { used: 3, cap: 10, remaining: 7, reached: false, drafts: 1 });
+  assert.equal(capCount({ used: 2, cap: 10 }), '2 of 10 today');
+});
+
+test('Mark posted always records a live listing, at the cap or not: only filling a form is capped', () => {
+  const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  const markPostedCase = popup.slice(popup.indexOf("case 'post': {"), popup.indexOf("case 'openPost':"));
+  assert.ok(markPostedCase.length > 100, 'the popup\'s Mark posted is found');
+  assert.doesNotMatch(markPostedCase, /dailyCap|capStatus|reached/, 'Mark posted never looks at the cap');
+});
+

@@ -206,17 +206,17 @@ try {
   assert.doesNotMatch(await popup.textContent('.panel'), /Queue finished/);
   await popup.screenshot({ path: join(shots, 'queue-4-popup.png') });
 
-  // ---- 6. At the daily cap nothing more can be selected or posted ----
+  // ---- 6. At the daily cap nothing more can be selected or posted; the form saved as a draft counts ----
   await popup.evaluate(async (o) => {
     const k = `settings:${o}`;
     const s = (await chrome.storage.local.get(k))[k];
-    s.dailyCap = 1; // one post was made today
+    s.dailyCap = 2; // one post and one form saved as a draft today
     await chrome.storage.local.set({ [k]: s });
   }, origin);
   await popup.close();
   popup = await openPopup();
   await tab(popup, 'ready').click();
-  assert.match(await popup.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/);
+  assert.match(await popup.textContent('#capReached'), /Daily post cap reached \(2 of 2 today, one of them saved as a draft\)/);
   assert.equal(await popup.locator('.pick').count(), 0, 'no boxes to tick');
   assert.equal(await popup.locator('#queueBtn').count(), 0);
   assert.equal(await popup.locator('button[data-action="openPost"]:not([disabled])').count(), 0, 'Post buttons are disabled');
