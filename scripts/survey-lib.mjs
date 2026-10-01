@@ -416,9 +416,9 @@ export function jsonEndpoint({ url, method = 'GET', status = 0, contentType = ''
   let topKeys;
   if (Array.isArray(data)) {
     const first = data.find((x) => x && typeof x === 'object' && !Array.isArray(x));
-    topKeys = [`[array of ${data.length}]`, ...(first ? Object.keys(first).slice(0, 30).map((k) => '[].' + k) : [])];
+    topKeys = [`[array of ${data.length}]`, ...(first ? Object.keys(first).slice(0, 30).map((k) => '[].' + scrub(k)) : [])];
   } else if (data && typeof data === 'object') {
-    topKeys = Object.keys(data).slice(0, 30);
+    topKeys = Object.keys(data).slice(0, 30).map((k) => scrub(k));
   } else {
     topKeys = [];
   }
@@ -440,7 +440,7 @@ export function pagingParams(href) {
   const out = {};
   try {
     for (const [k, v] of new URL(href).searchParams) {
-      if (PAGING_NAME.test(k.replace(/[^a-z0-9]/gi, '')) && /^\d{1,5}$/.test(v)) out[k] = Number(v);
+      if (PAGING_NAME.test(k.replace(/[^a-z0-9]/gi, '')) && /^\d{1,4}$/.test(v)) out[k] = Number(v);
     }
   } catch (e) {
     // not an address
@@ -462,11 +462,26 @@ export function requestKeys(postData) {
   } catch (e) {
     // not JSON: a form body
   }
-  if (/^[^=&\s]+=/.test(text)) return { kind: 'form', keys: [...new Set(new URLSearchParams(text).keys())].slice(0, 60) };
+  if (/^[^=&\s]+=/.test(text)) return { kind: 'form', keys: [...new Set([...new URLSearchParams(text).keys()].map((k) => scrub(k)))].slice(0, 60) };
   return { kind: 'other', keys: [] };
 }
 
 const plainObject = (x) => Boolean(x) && typeof x === 'object' && !Array.isArray(x);
+
+/**
+ * A name or label as the report may keep it: a VIN-like run becomes <VIN>,
+ * a dollar amount <$>, a run of three or more digits <n>, and it is cut to
+ * `max` characters, so a value that rides in a key ("photosByVin.<VIN>"),
+ * a label ("Was <$> now") or a condition ("Used - stock <n>") never reaches
+ * the report.
+ */
+export function scrub(text, max = 40) {
+  const out = String(text ?? '')
+    .replace(/[A-HJ-NPR-Z0-9]{17}/gi, (m) => (/\d/.test(m) && /[a-z]/i.test(m) ? '<VIN>' : m))
+    .replace(/\$\s*\d[\d,]*(?:\.\d+)?/g, '<$>')
+    .replace(/\d{3,}(?:,\d{3})*/g, '<n>');
+  return out.length > max ? out.slice(0, max - 1) + '…' : out;
+}
 
 /**
  * Where an object's values sit, as dot paths with the type of each leaf
@@ -484,7 +499,7 @@ export function keyPaths(x, depth = 3, limit = 120) {
       return;
     }
     if (plainObject(v) && (d < depth || !at)) {
-      for (const [k, w] of Object.entries(v)) visit(w, at ? `${at}.${k}` : k, d + 1);
+      for (const [k, w] of Object.entries(v)) visit(w, at ? `${at}.${scrub(k)}` : scrub(k), d + 1);
       return;
     }
     out.push(`${at}: ${v === null ? 'null' : plainObject(v) ? 'object' : typeof v}`);
@@ -521,13 +536,18 @@ export function recordsShape(json, href) {
     const dealer = (flat[i] && flat[i].location) || '';
     for (const e of labeledPrices(card)) {
       const kind = priceKind(e, dealer);
-      const id = `${e.key}|${e.label}|${kind}|${e.final}`;
-      if (!labels.has(id)) labels.set(id, { key: e.key, label: e.label, kind, final: e.final, cars: 0 });
+      const key = scrub(e.key);
+      const label = scrub(e.label);
+      const id = `${key}|${label}|${kind}|${e.final}`;
+      if (!labels.has(id)) labels.set(id, { key, label, kind, final: e.final, cars: 0 });
       labels.get(id).cars += 1;
     }
   });
   const conditions = {};
-  for (const v of flat) conditions[v.inventoryType || '(none)'] = (conditions[v.inventoryType || '(none)'] || 0) + 1;
+  for (const v of flat) {
+    const word = v.inventoryType ? scrub(v.inventoryType, 30) : '(none)';
+    conditions[word] = (conditions[word] || 0) + 1;
+  }
   return {
     listPath: path || '(top level)',
     count: cards.length,

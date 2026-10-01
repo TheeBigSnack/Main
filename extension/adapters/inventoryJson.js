@@ -399,7 +399,7 @@ function conditionOf(card) {
   const raw = textOf(pick(card, N.condition));
   if (/^\s*u\s*$/i.test(raw)) return 'Used'; // a one-letter code, as some list data sends it
   if (/^\s*n\s*$/i.test(raw)) return 'New';
-  return /\b(?:new|used|pre-?\s?owned|certified|cpo|demo|loaner|courtesy)\b/i.test(raw) ? raw : '';
+  return /\b(?:new|used|pre-?\s?owned|certified|cpo|demo(?:nstrator)?|loaner|courtesy)\b/i.test(raw) ? raw : '';
 }
 
 function carfaxOf(card, vin) {
@@ -446,7 +446,7 @@ export function mileageOf(card) {
   } else {
     // a mileage written out is short: a number and at most a unit
     const written = textOf(raw);
-    const m = written.length <= 40 ? written.match(/^(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*([a-z.]*)$/i) : null;
+    const m = written.length <= 40 ? written.match(/^((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*([a-z.]*)$/i) : null;
     if (m) {
       value = toNumber(m[1].replace(/,/g, ''));
       unit = m[2];
@@ -640,6 +640,14 @@ export function crawlDelaySeconds(text) {
   return delay;
 }
 
+// A robots.txt answer that is the file itself: plain text, not a web page
+// answering 200 for every address.
+function isRobotsText(answer) {
+  if (typeof answer.text !== 'string') return false;
+  if (/html/i.test(answer.contentType || '')) return false;
+  return !/^\s*<(?:!doctype|html|head|body)\b/i.test(answer.text);
+}
+
 const REFUSED = { 401: 'asked for a sign-in (401)', 403: 'turned the read away (403)', 429: 'asked for fewer requests (429)', 503: 'said it is unavailable right now (503)' };
 
 function originOf(href) {
@@ -772,10 +780,11 @@ export async function scanInventory(search, options, platform) {
       pageLimit = 0;
     } else if (rules && where === origin && (rules.status === 404 || rules.status === 410)) {
       gap = 0; // no robots.txt, no rules
-    } else if (rules && where === origin && rules.ok) {
-      const asked = crawlDelaySeconds(typeof rules.text === 'string' ? rules.text : '');
+    } else if (rules && where === origin && rules.ok && isRobotsText(rules)) {
+      const asked = crawlDelaySeconds(rules.text);
       gap = asked === null ? 0 : Math.round(asked * 1000);
     } else {
+      // unreadable, off the website, or a web page answering for robots.txt
       gap = Number(platform.pageGapMs) || 0;
     }
   }

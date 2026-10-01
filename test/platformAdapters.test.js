@@ -559,7 +559,7 @@ test('at post time from a car\'s own page, the list address comes from the last 
 
 test('a certified loaner or demo keeps its word: the gate never sees it as Certified Used', () => {
   const [c] = platformCars(1, { from: 500 });
-  for (const word of ['Loaner', 'Service Loaner', 'Demo', 'Courtesy Vehicle']) {
+  for (const word of ['Loaner', 'Service Loaner', 'Demo', 'Demonstrator', 'Courtesy Vehicle']) {
     const record = { ...dealerComRecord({ ...c, certified: true }), inventoryType: word, link: '/certified/' + c.make + '/x.htm' };
     const v = normalizeInventoryRecord(record, { origin: DEALERCOM_ORIGIN });
     assert.equal(v.inventoryType, word, `${word}: the condition word is kept`);
@@ -583,6 +583,7 @@ test('mileage is kept only in miles: kilometres and other units are no mileage, 
   assert.deepEqual(read('31,207'), { value: 31207, reason: '' });
   assert.deepEqual(read('31,207 miles'), { value: 31207, reason: '' });
   assert.deepEqual(read('31,207 mi.'), { value: 31207, reason: '' });
+  assert.deepEqual(read('31,207.6 miles'), { value: 31207.6, reason: '' }, 'decimals kept, as in a number');
   assert.deepEqual(read('64,120 km'), { value: null, reason: 'the mileage is in kilometres' });
   assert.deepEqual(read('64120 KM'), { value: null, reason: 'the mileage is in kilometres' });
   assert.deepEqual(read(64120, { odometerUnit: 'km' }), { value: null, reason: 'the mileage is in kilometres' }, 'a unit field beside a bare number');
@@ -670,11 +671,30 @@ test('the gap between car-page reads is the Crawl-delay of the website\'s own ro
   assert.deepEqual(asked.res.confirm.notFound, [a.vin, b.vin, c.vin]);
   assert.ok(asked.gaps.every((g) => g >= 55), `every gap kept (${asked.gaps})`);
 
-  const none = await run(null, 0);
-  assert.deepEqual(none.res.confirm.notFound, [a.vin, b.vin, c.vin], 'no robots.txt (404): no rules, no gap');
+  const none = await run(null, 200);
+  assert.deepEqual(none.res.confirm.notFound, [a.vin, b.vin, c.vin]);
+  assert.ok(none.gaps.every((g) => g < 150), `no robots.txt (404): no rules, no gap, not the platform's (${none.gaps})`);
 
   const unreadable = await run({ ok: false, status: 500, contentType: 'text/plain', text: '' }, 60);
   assert.ok(unreadable.gaps.every((g) => g >= 55), `an unreadable robots.txt keeps the platform's own gap (${unreadable.gaps})`);
+  const softPage = await run({ ok: true, status: 200, contentType: 'text/html', text: '<!doctype html><html><body>Page not found</body></html>' }, 60);
+  assert.ok(softPage.gaps.every((g) => g >= 55), `a web page answering for robots.txt is no rules: the platform's gap (${softPage.gaps})`);
+  const untyped = await run({ ok: true, status: 200, contentType: '', text: '<html><body>Not found</body></html>' }, 60);
+  assert.ok(untyped.gaps.every((g) => g >= 55), `the same without a content type (${untyped.gaps})`);
+  const moved = await (async () => {
+    const site = dealerComSite({ cars: platformCars(2), gone: [a, b, c] });
+    const base = platformSearch(site);
+    const times = [];
+    const search = async (r) => {
+      times.push({ url: r.url, at: Date.now() });
+      if (r.url.endsWith('/robots.txt')) return { ok: true, status: 200, contentType: 'text/plain', text: 'User-agent: *\nCrawl-delay: 0\n', finalUrl: 'https://elsewhere.test/robots.txt', redirected: true };
+      return base(r);
+    };
+    await scanInventory(search, { ...dealerCom.scanOptions(comService), confirmVins: [a.vin, b.vin, c.vin], confirmUrls }, { pageAddress: dealerComPage, pagePhotos: () => [], pageGapMs: 60 });
+    const pages = times.filter((t) => Object.values(confirmUrls).includes(t.url));
+    return pages.slice(1).map((t, i) => t.at - pages[i].at);
+  })();
+  assert.ok(moved.every((g) => g >= 55), `a robots.txt from another website is not this one's rules (${moved})`);
 
   const slow = await run(text('User-agent: *\nCrawl-delay: 30\n'));
   assert.ok(30000 > MAX_PAGE_GAP_MS);

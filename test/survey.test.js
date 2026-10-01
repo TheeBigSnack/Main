@@ -12,7 +12,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import {
   DEFAULTS, parseArgs, hostDir, parseRobots, robotsAllows, robotsVerdict, metaGenerator, assetHosts, findVins,
   jsonLdSummary, jsonLdExcerpt, microdataTypes, carLinks, pickCarPages, paginationShape, pageAnatomy, photoHosts,
-  urlPattern, jsonEndpoint, botSigns, fingerprint, capScanLimits, surveyHostPermissions, lotSyncReading, verdictFor,
+  urlPattern, jsonEndpoint, scrub, botSigns, fingerprint, capScanLimits, surveyHostPermissions, lotSyncReading, verdictFor,
   renderReportMd, renderSummaryMd, EXCERPT_LIMIT,
 } from '../scripts/survey-lib.mjs';
 import { vinCheckDigit } from '../extension/src/vin.js';
@@ -233,6 +233,25 @@ test('jsonEndpoint lays out the car records as the platform readers see them, ke
   assert.deepEqual([on.records.filled.price, on.records.filled.mileage, on.records.filled.url], [1, 1, 1]);
   assert.ok(on.records.keys.includes('VehicleCard.VehicleVin: string') || on.records.keys.includes('VehicleVin: string'));
   assert.equal(jsonEndpoint({ url: SITE + '/vin-lookup', body: JSON.stringify({ note: 'ask about ' + VIN }), contentType: 'application/json' }).records, undefined, 'a VIN outside a list is no car list');
+});
+
+test('the record layout never carries a value that rides in a key, a label, a condition or a search number', () => {
+  const body = JSON.stringify({
+    total: 1,
+    photosByVin: { [VIN]: ['a.jpg'] },
+    vehicles: [{ vin: VIN, inventoryType: 'Used - stock 12345 at 4500 Main St', odometer: 31207, pricing: [{ label: 'Was $25,995 now', value: '$24,995' }], [`notes_${VIN2}`]: 'x' }],
+  });
+  const ep = jsonEndpoint({ url: SITE + '/api/inventory?from=15301&page=2&start=4800', method: 'POST', status: 200, contentType: 'application/json', body, postData: JSON.stringify({ filters: { [VIN2]: true }, zip: '15301' }) });
+  const text = JSON.stringify(ep);
+  for (const value of [VIN, VIN2, '25,995', '24,995', '12345', '4500', '15301', '31207']) assert.ok(!text.includes(value), `no ${value} in the summary`);
+  assert.deepEqual(ep.paging, { page: 2, start: 4800 }, 'a five-digit number is not a page');
+  assert.ok(ep.topKeys.includes('photosByVin'));
+  assert.ok(ep.records.keys.some((k) => k.startsWith('notes_<VIN>')));
+  assert.ok(ep.requestKeys.keys.includes('filters.<VIN>: boolean'));
+  assert.ok(ep.records.priceLabels.some((p) => p.label === 'Was <$> now'));
+  assert.deepEqual(Object.keys(ep.records.conditions), ['Used - stock <n> at <n> Main …'], 'numbers out, and cut short');
+  assert.equal(scrub('VehicleInternetPrice'), 'VehicleInternetPrice', 'an ordinary name is kept');
+  assert.equal(scrub('x'.repeat(60)).length, 40);
 });
 
 test('botSigns: a 403, 429 or 503 or a challenge page is a refusal; a CDN header on an ordinary page is only noted', () => {
