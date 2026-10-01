@@ -528,6 +528,15 @@ export function spelledQuantities(text) {
 // The words, said the same way, somewhere in the text (a hyphen or a space between words).
 const saysWords = (text, words) => new RegExp(`\\b${escapeRe(oneLine(words)).replace(/[\s-]+/g, '[\\s-]+')}\\b`, 'i').test(String(text || ''));
 
+// The problems a person may still post with: the length and the tone. Every
+// other problem (a number, price, mileage or claim the website doesn't make,
+// a banned phrase, one owner without the Carfax flag, a missing dealership,
+// role, VIN or price note, a price note for another fee) keeps the side
+// panel from filling the form until the description is fixed, and a new
+// kind of problem does too until it is added here.
+export const STYLE_PROBLEMS = Object.freeze(['too-short', 'too-long', 'all-caps', 'emoji', 'closing-too-long', 'closing-caps', 'closing-emoji']);
+export const blockingProblems = (g) => (g && Array.isArray(g.problems) ? g.problems.filter((p) => !STYLE_PROBLEMS.includes(p.code)) : []);
+
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.

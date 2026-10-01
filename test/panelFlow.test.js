@@ -194,6 +194,11 @@ test('the panel checks every description against the salesperson\'s own role', (
   assert.match(src, /^const ctx = \(\) => \(\{[^\n]*\bsalesperson: state\.settings\.salesperson\b/m);
 });
 
+// The rest of the checks, passing, for the tests about the dealership's name
+// alone (fillBlocker runs them after the name; the tests further down run the real ones).
+const PASSING_CHECKS_NAMES = ['runGuardrails', 'blockingProblems', 'ctx'];
+const PASSING_CHECKS = [() => ({ ok: true, problems: [], words: 80 }), (g) => g.problems, () => ({})];
+
 // dealerNamed and NO_DEALER_TEXT as sidepanel.js writes them, with fillBlocker when it is defined.
 function dealerChecks() {
   const consts = ['dealerNamed', 'NO_DEALER_TEXT'].map((n) => {
@@ -211,13 +216,14 @@ test('no way of filling the form types a description that does not name the deal
     const said = [];
     const typed = [];
     const state = { settings: { dealer }, listing: { fields: { description } }, step, map: { fields: [], photoLimitDefault: 20 } };
-    const runFill = new Function('state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', `${dealerChecks()}\n${fnText('runFill')}\nreturn runFill;`)(
+    const runFill = new Function('state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', ...PASSING_CHECKS_NAMES, `${dealerChecks()}\n${fnText('runFill')}\nreturn runFill;`)(
       state,
       (text, tone) => said.push([text, tone]),
       () => {},
       { scripting: { executeScript: async (inj) => { typed.push(inj.args[1].fields.description); return [{ result: {} }]; } } },
       async () => { throw new Error('filled'); }, // the first step after the form is filled
       function fillFormInPage() {},
+      ...PASSING_CHECKS,
     );
     try {
       await runFill();
@@ -249,21 +255,23 @@ test('Open the Marketplace form does not open a tab for a description that does 
   const open = async (description, probeOnly = false) => {
     const said = [];
     const state = { origin: 'https://www.example-dealer.test', settings: { dealer: { name: 'Example Motors' } }, description, posted: {}, syncState: null };
-    const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'ctx', 'runGuardrails', `${dealerChecks()}\n${fnText('openForm')}\nreturn openForm;`)(
+    const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'checksHtml', 'buildListingData', 'pickedPhotos', ...PASSING_CHECKS_NAMES, `${dealerChecks()}\n${fnText('openForm')}\nreturn openForm;`)(
       state,
       (text, tone) => said.push([text, tone]),
       () => ({ posted: 'p', sync: 's' }),
       { storage: { local: { get: async () => ({}) } } },
       () => ({ reached: false }),
       () => null,
-      () => ({}),
-      never('runGuardrails'), // the next step: the form is on its way
+      () => '',
+      never('buildListingData'), // the next step: the listing is built for the form
+      never('pickedPhotos'),
+      ...PASSING_CHECKS,
     );
     try {
       await openForm({ probeOnly });
       return { said, opened: false };
     } catch (e) {
-      assert.match(e.message, /runGuardrails must not run/);
+      assert.match(e.message, /(buildListingData|pickedPhotos) must not run/);
       return { said, opened: true };
     }
   };
@@ -272,4 +280,102 @@ test('Open the Marketplace form does not open a tab for a description that does 
   assert.match(stale.said[0][0], /^The description doesn't name Example Motors/);
   assert.equal((await open('A fine truck. Sales consultant at Example Motors.')).opened, true);
   assert.equal((await open('A fine truck. Sales consultant.', true)).opened, true, 'checking the form fills nothing, so it still opens');
+});
+
+// ---------- a description that fails a fact or identity check is never typed into the form ----------
+import * as template from '../extension/src/rewriteTemplate.js';
+
+const CAR = { vin: '1TESTVEH0NA000123', year: 2021, make: 'Example', model: 'Sedan', trim: 'LX', name: '2021 Example Sedan LX', mileage: 34567, price: 20986, features: ['Heated Seats', 'Backup Camera', 'Bluetooth'], descriptionRaw: '' };
+const SETTINGS = { dealer: { name: 'Example Motors', city: 'Springfield' }, salesperson: { name: 'Sam', title: 'sales consultant' }, priceNote: '' };
+const CLEAN = template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: '' });
+// sidepanel.js's own ctx and fillBlocker, over the real checks
+function realBlocker(state) {
+  const ctxLine = src.match(/^const ctx = .*;$/m)[0];
+  const noteLine = src.match(/^const noteFor = .*;$/m)[0];
+  return new Function('state', 'runGuardrails', 'blockingProblems', 'usableClosingLine', `${dealerChecks()}\n${noteLine}\n${ctxLine}\nreturn fillBlocker;`)(state, template.runGuardrails, template.blockingProblems, template.usableClosingLine);
+}
+
+test('the form is not filled with a description that fails a fact or identity check; length and tone only warn', () => {
+  const state = { settings: SETTINGS, vehicle: CAR, price: 20986, noteApplies: true };
+  const fillBlocker = realBlocker(state);
+  assert.deepEqual(template.runGuardrails(CLEAN, { vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, price: 20986 }).problems, []);
+  assert.equal(fillBlocker(CLEAN), '', 'the template is filled');
+  const stops = {
+    'an unknown number': CLEAN.replace('34,567 miles', '12,000 miles'),
+    'a banned phrase': `${CLEAN}\nNo accidents.`,
+    'a claim the website does not make': `${CLEAN}\nComes with a warranty.`,
+    'one owner without the Carfax flag': `${CLEAN}\nOne owner.`,
+    'no VIN': CLEAN.replace(/\nVIN .*$/m, ''),
+    'no role': CLEAN.replace(', sales consultant at', ' at'),
+    'a price that is not the listing\'s': `${CLEAN}\nYours for $18,995.`,
+  };
+  for (const [what, text] of Object.entries(stops)) {
+    const why = fillBlocker(text);
+    assert.match(why, /^The description fails (a check|\d+ checks) that must pass before the form is filled: /, what);
+    assert.match(why, /Fix the description \(or use Reset to template\) first\.$/, what);
+  }
+  assert.match(fillBlocker(`${CLEAN}\nComes with a warranty.`), /Says "warranty", but the website says nothing about a warranty or guarantee for this car/);
+  // the dealer's price note, when it applies to this car, is one of them
+  const noted = { ...state, settings: { ...SETTINGS, priceNote: 'Tax and tags extra.' } };
+  assert.match(realBlocker(noted)(CLEAN), /Doesn't include your dealership's price note/);
+  assert.equal(realBlocker({ ...noted, noteApplies: false })(CLEAN), '', 'a note that does not apply to this car is not looked for');
+  // length and tone are the salesperson's call
+  for (const text of [`${CLEAN}\nCOME SEE THIS TRUCK TODAY`, `${CLEAN}\n🔥🔥🔥🔥`, CLEAN.split('\n').slice(0, 3).join('\n') + `\nI'm Sam, sales consultant at Example Motors.\nVIN ${CAR.vin}.`]) {
+    const g = template.runGuardrails(text, { vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, price: 20986 });
+    assert.equal(g.ok, false, text);
+    assert.equal(fillBlocker(text), '', text);
+  }
+});
+
+test('the checks line says which problems stop the form and which only warn', () => {
+  const checksHtml = new Function('esc', 'blockingProblems', 'noteFor', `${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.blockingProblems, () => '');
+  const stop = { code: 'unknown-number', text: '"12000" isn\'t in the website\'s data for this car' };
+  const warn = { code: 'too-short', text: '50 words; needs at least 60' };
+  const both = checksHtml({ ok: false, problems: [stop, warn], words: 50 });
+  assert.match(both, /class="checks bad"/);
+  assert.match(both, /Fix before the form can be filled:<ul><li>"12000" isn't in the website's data for this car<\/li><\/ul>/);
+  assert.match(both, /Worth fixing \(the form can still be filled\):<ul><li>50 words; needs at least 60<\/li><\/ul>/);
+  const warnOnly = checksHtml({ ok: false, problems: [warn], words: 50 });
+  assert.match(warnOnly, /class="checks warn"/);
+  assert.doesNotMatch(warnOnly, /Fix before/);
+  assert.match(checksHtml({ ok: true, problems: [], words: 80 }), /^<div class="checks ok" id="checks">All checks passed: 80 words/);
+});
+
+test('Open the Marketplace form, Fill it in now and Fill again all refuse a description with a claim the website does not make', async () => {
+  const bad = `${CLEAN}\nComes with a warranty.`;
+  const ctxLine = src.match(/^const ctx = .*;$/m)[0];
+  const noteLine = src.match(/^const noteFor = .*;$/m)[0];
+  const checks = [template.runGuardrails, template.blockingProblems, template.usableClosingLine];
+  // openForm: no tab is opened, and the checks line is brought up to date
+  const opened = async (description) => {
+    const said = [];
+    const state = { origin: 'https://www.example-dealer.test', settings: SETTINGS, vehicle: CAR, price: 20986, noteApplies: true, description, posted: {}, syncState: null };
+    const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'checksHtml', 'buildListingData', 'pickedPhotos', 'runGuardrails', 'blockingProblems', 'usableClosingLine', `${dealerChecks()}\n${noteLine}\n${ctxLine}\n${fnText('openForm')}\nreturn openForm;`)(
+      state, (text, tone) => said.push([text, tone]), () => ({ posted: 'p', sync: 's' }), { storage: { local: { get: async () => ({}) } } }, () => ({ reached: false }), () => null, () => '',
+      never('buildListingData'), never('pickedPhotos'), ...checks,
+    );
+    try {
+      await openForm();
+      return { said, opened: false, state };
+    } catch (e) {
+      assert.match(e.message, /(buildListingData|pickedPhotos) must not run/);
+      return { said, opened: true, state };
+    }
+  };
+  const refused = await opened(bad);
+  assert.equal(refused.opened, false);
+  assert.match(refused.said[0][0], /^The description fails a check that must pass before the form is filled: Says "warranty"/);
+  assert.equal(refused.state.guardrails.ok, false, 'the checks line shows the problem');
+  assert.equal((await opened(CLEAN)).opened, true);
+  // runFill: what Fill it in now (after a fields check) and Fill again call
+  const typed = [];
+  const state = { settings: SETTINGS, vehicle: CAR, price: 20986, noteApplies: true, listing: { fields: { description: bad } }, step: 'filling', map: { fields: [], photoLimitDefault: 20 } };
+  const said = [];
+  const runFill = new Function('state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', 'runGuardrails', 'blockingProblems', 'usableClosingLine', `${dealerChecks()}\n${noteLine}\n${ctxLine}\n${fnText('runFill')}\nreturn runFill;`)(
+    state, (text, tone) => said.push([text, tone]), () => {}, { scripting: { executeScript: async (inj) => { typed.push(inj.args[1].fields.description); return [{ result: {} }]; } } }, never('saveFlow'), function fillFormInPage() {}, ...checks,
+  );
+  await runFill();
+  assert.deepEqual(typed, []);
+  assert.equal(state.step, 'review', 'back to the description');
+  assert.match(said[0][0], /Says "warranty"/);
 });

@@ -15,7 +15,7 @@ import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins } from './src/panelList.js';
 import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
-import { runGuardrails, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
+import { runGuardrails, blockingProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus } from './src/cap.js';
@@ -571,13 +571,21 @@ const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership
 // Why a description can't be typed into the form, or '' when it can. Every
 // way of filling the form (Open the Marketplace form, Fill it in now after
 // a fields check, Fill again) goes through this, so none of them types a
-// description that does not name the dealership: not with no name set, and
-// not a description written before the name was added.
+// description that does not name the dealership (not with no name set, and
+// not a description written before the name was added), or one that fails
+// any other check of facts or identity (rewriteTemplate.js
+// blockingProblems): a number, price, mileage or claim the website doesn't
+// make, a banned phrase, a missing role, VIN or price note. Length and tone
+// only warn.
 function fillBlocker(description) {
   if (!dealerNamed()) return NO_DEALER_TEXT;
   const name = String(state.settings.dealer.name).trim();
-  if (String(description || '').toLowerCase().includes(name.toLowerCase())) return '';
-  return `The description doesn't name ${name}, and every description names the dealership. Add it to the description (or use Reset to template) before the form is filled.`;
+  if (!String(description || '').toLowerCase().includes(name.toLowerCase())) {
+    return `The description doesn't name ${name}, and every description names the dealership. Add it to the description (or use Reset to template) before the form is filled.`;
+  }
+  const stops = blockingProblems(runGuardrails(description, ctx()));
+  if (!stops.length) return '';
+  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. Fix the description (or use Reset to template) first.`;
 }
 
 async function openForm({ probeOnly = false } = {}) {
@@ -594,7 +602,13 @@ async function openForm({ probeOnly = false } = {}) {
   const box = $('description');
   if (box) state.description = box.value;
   const blocked = probeOnly ? '' : fillBlocker(state.description);
-  if (blocked) return setStatus(blocked, 'error');
+  if (blocked) {
+    // the checks line shows the same problems, current with what is typed
+    state.guardrails = runGuardrails(state.description, ctx());
+    const checks = $('checks');
+    if (checks) checks.outerHTML = checksHtml(state.guardrails);
+    return setStatus(blocked, 'error');
+  }
   state.guardrails = runGuardrails(state.description, ctx());
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
   state.step = 'filling';
@@ -830,10 +844,15 @@ async function downloadPhotos() {
 
 // ---------- rendering ----------
 
+// The problems that keep the form from being filled (fillBlocker), then the
+// ones that only warn (length and tone).
 function checksHtml(g) {
   if (!g) return '';
-  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words, every number matches the website, no banned phrases, dealership and your role named.</div>`;
-  return `<div class="checks bad" id="checks">Fix before posting:<ul>${g.problems.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul></div>`;
+  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number, price and claim matches the website; no banned phrases; dealership and your role named${noteFor() ? '; price note included' : ''}.</div>`;
+  const stops = blockingProblems(g);
+  const warns = g.problems.filter((p) => !stops.includes(p));
+  const list = (ps) => `<ul>${ps.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
+  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
 }
 
 function sourcePill() {

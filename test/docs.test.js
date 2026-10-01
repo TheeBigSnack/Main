@@ -49,6 +49,8 @@ const LABELS = [
   'Rescan the website',
   'Post the next',
   'Allow reading',
+  'Fix before the form can be filled',
+  'Worth fixing (the form can still be filled)',
 ];
 
 test('the four launch-kit files exist and are not stubs', () => {
