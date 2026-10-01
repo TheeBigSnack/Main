@@ -150,6 +150,8 @@ try {
   await popup.selectOption('#readySort', 'price');
   await popup.waitForFunction(() => document.querySelector('.rows .name')?.textContent.startsWith('2021'));
   assert.deepEqual(await names(), [SILVERADO, HELLCAT], 'price, low to high: $36,603 before $53,485');
+  // the list reads the same in both orders, so wait for the save itself before closing the popup
+  await popup.waitForFunction(async () => Object.values(await chrome.storage.local.get(null)).some((v) => v && typeof v === 'object' && v.readySort === 'price'));
   await popup.close();
   popup = await openPopup();
   await tab(popup, 'ready').click();
