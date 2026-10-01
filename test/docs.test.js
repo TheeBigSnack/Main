@@ -433,3 +433,24 @@ test('README\'s unit-test count is the number of tests npm test runs', () => {
   assert.ok(m, 'README.md no longer gives the unit-test count on its npm test line');
   assert.equal(Number(m[1]), count, `README.md says ${m[1]} unit tests, and test/*.test.js holds ${count}`);
 });
+
+// The 3-hourly rescan is the one thing that runs with nobody at the computer,
+// and for a signed-in salesperson it is a read and an upload: runRescan in
+// background.js ends with syncSite, which sends the posted list, the post
+// attempts, the to-do items and the scan's counts to the dealership's
+// account. Every text that tells a person what Lot Current does on its own
+// names both, and none says it only reads the website.
+test('every text that says what Lot Current does on its own names the upload a signed-in rescan sends', () => {
+  const bg = read('../extension/background.js');
+  const rescan = bg.slice(bg.indexOf('async function runRescan'), bg.indexOf('async function rescanDueSites'));
+  assert.ok(rescan.length > 100 && /\bsyncSite\(/.test(rescan), 'the background rescan no longer syncs: change these texts with it');
+  const TEXTS = ['../README.md', '../store/listing.md', '../docs/help.md', '../extension/popup.js', '../legal/chrome-web-store-privacy.md'];
+  for (const rel of TEXTS) {
+    const text = read(rel);
+    assert.doesNotMatch(text, /one thing it does on its own|only reads the website/i, `${rel} says the rescan only reads the website`);
+    // the lines that describe the unattended rescan: "every 3 hours" with what it never does then, or the Settings hint once the permission is granted
+    const lines = text.split('\n').filter((l) => (/every 3 hours while Chrome is open/.test(l) && /never (touches Facebook|opens or reads Marketplace)/i.test(l)) || /in the background: granted/.test(l));
+    assert.ok(lines.length >= 1, `${rel} no longer describes the background rescan`);
+    for (const l of lines) assert.match(l, /[Ww]hile (you are|they are|the user is) signed in to a Lot Current account, (it also )?sends that rescan(\\)?'s results/, `${rel}: "${l.trim().slice(0, 90)}..." leaves out what a signed-in rescan sends`);
+  }
+});

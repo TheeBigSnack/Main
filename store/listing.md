@@ -18,7 +18,7 @@ Pre-fills Marketplace listings from your dealership's pre-owned inventory for yo
 
 Lot Current is for car dealership salespeople who list their store's used cars on Facebook Marketplace from their own accounts. It reads your dealership website's used inventory, checks that every car is really pre-owned, pre-fills a Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
-You click Publish. Lot Current never does. It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. The one thing it does on its own, and only if you allow it, is re-read your dealership's website every 3 hours while Chrome is open to keep your to-do count current; it never opens or reads Marketplace then.
+You click Publish. Lot Current never does. It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. On its own, and only if you allow it, it re-reads your dealership's website every 3 hours while Chrome is open to keep your to-do count current and, while you are signed in to a Lot Current account, sends that rescan's results (your posted list, post records, to-do items and the scan's counts) to your dealership's account; it never opens or reads Marketplace then.
 
 What it does
 
@@ -93,7 +93,7 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 | `scripting` | Runs the read-only scan in that tab, and fills the Marketplace create-listing form the person opened when they click Post. |
 | `storage` | Scans, settings, the posted list and the usage numbers, per website, and the Lot Current sign-in session, in the person's browser; the profile (name, role, closing line, dealership details, listing defaults, the rewrite-service address, the Terms acceptance) in Chrome's sync storage under their own Google account, removable in Settings. |
 | `sidePanel` | The guided post flow and the set-up wizard run in the side panel so they stay open while the person moves between the dealership tab and the Marketplace tab. |
-| `alarms` | Re-reads a dealership website the person allowed every 3 hours while Chrome is open, to keep the to-do count on the icon current; it never touches Facebook. |
+| `alarms` | Re-reads a dealership website the person allowed every 3 hours while Chrome is open, to keep the to-do count on the icon current, and, while they are signed in to a Lot Current account, sends that rescan's results to their dealership's account; it never touches Facebook. |
 | `notifications` | One desktop notification when a background rescan adds to the person's to-do list; off in Settings if they prefer. |
 | `https://www.facebook.com/marketplace/*` | Fills the vehicle listing form on the create-listing page the person opened, fills the new price on the edit page they opened, and notices when the tab shows the published listing's address. No other Facebook page is read. |
 | `https://vehicle-images.carscommerce.inc/*` | Downloads the car's own photos from the dealership's image host so they can be attached to the form. |

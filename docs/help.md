@@ -56,7 +56,7 @@ Click the Lot Current icon, then **Settings**. The first line reads "Lot Current
 - **Not ready**: pre-owned cars at your store that are missing something a listing needs. They move to Ready to post on their own once the website has it.
 - **Other stores**: your group's cars at other rooftops, kept off your list. Change your store in Settings.
 - **Needs a look**: the website's details for the car do not add up (a used car showing 0 miles, signs that disagree), or the website lists it as damaged or refurbished, or it is a trailer, RV, powersport vehicle or boat (Lot Current fills in only Marketplace's car/truck and motorcycle forms; the reason quotes the website's words). Fix them on the website, or ask whoever manages inventory, then scan again. Below it, "Skipped as new (never posted)" lists cars the website calls new, demo or loaner. They can never be posted with Lot Current.
-- With automatic rescans on, Lot Current re-reads the website every 3 hours while Chrome is open and puts your to-do count on its icon. It only reads the website then; it never touches Facebook on its own.
+- With automatic rescans on, Lot Current re-reads the website every 3 hours while Chrome is open and puts your to-do count on its icon. While you are signed in to a Lot Current account, it also sends that rescan's results (your posted list, post records, to-do items and the scan's counts) to your dealership's account. It never touches Facebook on its own.
 
 ## Post one car
 
