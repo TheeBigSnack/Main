@@ -1,14 +1,18 @@
-// The first-run wizard, shown in the side panel for a website that has no
-// settings yet: read the website, choose the store, name and role, sign in
-// and join the dealership (only when accounts are configured, and never
-// required), the store's address, the price to post, permission for
-// automatic rescans, the posting rules, the Terms of Service and Privacy
-// Policy, and a first scan with the final settings. Progress is kept in
-// storage so the panel can be closed and reopened; the sign-in session is
-// not part of it (src/account.js keeps it).
+// The set-up wizard, shown in the side panel and offered by the popup until
+// it is finished or skipped for a website: read the website, choose the
+// store, name and role, sign in and join the dealership (only when accounts
+// are configured, and never required), the store's address, the price to
+// post, permission for automatic rescans, the posting rules, the Terms of
+// Service and Privacy Policy, and a first scan with the final settings. It
+// starts from what is already there: this website's own settings (a plain
+// Scan or Settings may have come first), else the person's synced profile
+// (a second computer, or after Clear everything), else the defaults the
+// first read works out. Progress is kept in storage so the panel can be
+// closed and reopened; the sign-in session is not part of it (src/account.js
+// keeps it).
 
 import { performScan, rememberSite } from './src/scanRunner.js';
-import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
+import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation, storeNames, matchStore } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -34,6 +38,7 @@ export const wiz = {
   step: 'welcome',
   scan: null, // { cars, stores, siteName }
   settings: null, // built up as the person goes
+  fromProfile: false, // the settings came from the synced profile and the first read has not settled the store yet
   service: null, site: null,
   granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '',
   account: freshAccount(),
@@ -60,13 +65,13 @@ const priceHint = (suggested) => `Honest prices: the listed price always equals 
 
 async function persist() {
   if (!wiz.origin) return;
-  const { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead, termsAccepted } = wiz;
+  const { active, origin, dealerTabId, windowId, step, scan, settings, fromProfile, service, site, granted, rulesRead, termsAccepted } = wiz;
   const account = { email: wiz.account.email, note: wiz.account.note, joined: wiz.account.joined };
-  await chrome.storage.local.set({ [key(origin)]: { active, origin, dealerTabId, windowId, step, scan, settings, service, site, granted, rulesRead, termsAccepted, account } });
+  await chrome.storage.local.set({ [key(origin)]: { active, origin, dealerTabId, windowId, step, scan, settings, fromProfile, service, site, granted, rulesRead, termsAccepted, account } });
 }
 
 export async function startWizard(req) {
-  Object.assign(wiz, { active: true, origin: req.origin, dealerTabId: req.dealerTabId, windowId: req.windowId || null, step: 'welcome', scan: null, settings: null, service: null, site: null, granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '', account: freshAccount() });
+  Object.assign(wiz, { active: true, origin: req.origin, dealerTabId: req.dealerTabId, windowId: req.windowId || null, step: 'welcome', scan: null, settings: null, fromProfile: false, service: null, site: null, granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '', account: freshAccount() });
   const saved = (await chrome.storage.local.get(key(req.origin)))[key(req.origin)];
   if (saved && saved.active && saved.step !== 'done') Object.assign(wiz, saved, { dealerTabId: req.dealerTabId || saved.dealerTabId, step: knownStep(saved.step), busy: false, error: '', account: accountFrom(saved.account) });
   await loadAccount();
@@ -76,7 +81,7 @@ export async function startWizard(req) {
 export async function resumeWizard(origin) {
   const saved = (await chrome.storage.local.get(key(origin)))[key(origin)];
   if (!saved || !saved.active || saved.step === 'done') return false;
-  Object.assign(wiz, saved, { step: knownStep(saved.step), busy: false, error: '', account: accountFrom(saved.account) });
+  Object.assign(wiz, { fromProfile: false }, saved, { step: knownStep(saved.step), busy: false, error: '', account: accountFrom(saved.account) });
   await loadAccount();
   return true;
 }
@@ -104,17 +109,45 @@ async function findDealerTab() {
 
 export const TAB_GONE = "Couldn't reach the dealership tab. Open the used inventory page, click the Lot Current icon and click Continue set-up.";
 
-// Reads the website with the settings so far (defaults on the first pass) and saves the result.
+// What set-up starts from, read just before the first read of the website:
+// this website's own settings when it has them, kept as they are (the
+// dealer's cap, price basis and rescans, the rewrite key), else the person's
+// synced profile, whose store names the first read checks against this
+// website (performScan's settingsFromProfile), else nothing, and the first
+// read works out the defaults. Starting from defaults instead would write
+// them over what the website and the profile already hold.
+async function seedSettings(stored) {
+  if (stored) {
+    wiz.settings = withDefaults(stored, wiz.site || {});
+    wiz.fromProfile = false;
+    return;
+  }
+  wiz.settings = settingsFromProfile(await loadProfile(), { origin: wiz.origin });
+  wiz.fromProfile = Boolean(wiz.settings);
+}
+
+// Automatic rescans already on for this website, with Chrome's permission
+// still there, stay on: the Permission step says so, and Skip for now never
+// switches them off. Only asks whether the permission is held, never for it.
+async function keepGrantedRescans() {
+  if (wiz.granted || !(wiz.settings && wiz.settings.autoRescan)) return;
+  try {
+    wiz.granted = await chrome.permissions.contains({ origins: originsFor(wiz.site, wiz.service) });
+  } catch (e) { /* unknown: the Permission step offers Allow as on a first set-up */ }
+}
+
+// Reads the website with the settings so far and saves the result.
 async function runScan(ctx) {
   wiz.busy = true;
   wiz.error = '';
   ctx.render();
   const k = siteKeys(wiz.origin);
-  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate]);
+  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate, k.settings]);
+  if (!wiz.settings) await seedSettings(data[k.settings]);
   let r;
   try {
     const tabId = await findDealerTab();
-    r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, snapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, boilerplate: data[k.boilerplate] || [] });
+    r = await performScan({ tabId, origin: wiz.origin, settings: wiz.settings, settingsFromProfile: wiz.fromProfile, snapshot: data[k.snapshot] || null, posted: data[k.posted] || {}, boilerplate: data[k.boilerplate] || [] });
   } catch (e) {
     r = { ok: false, message: TAB_GONE + ' (' + ((e && e.message) || e) + ')' };
   }
@@ -125,8 +158,10 @@ async function runScan(ctx) {
     return false;
   }
   wiz.settings = r.settings;
+  wiz.fromProfile = false;
   wiz.service = r.service;
   wiz.site = r.site;
+  await keepGrantedRescans();
   // Like the popup and the background rescan: a scan that lost most of the
   // lot at once is a website hiccup, so the last good snapshot is kept.
   const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
@@ -167,9 +202,15 @@ export function wizardHtml() {
       const stores = (wiz.scan && wiz.scan.stores) || [];
       // The same match the read used for the default tick (performScan,
       // normalize.js matchStore): one store at most, and when nothing stands
-      // out none is ticked and the hint says so, so a person picks.
+      // out none is ticked and the hint says so, so a person picks. Settings
+      // the website or the profile already had keep their own choice, and
+      // the hint says that instead.
       const matched = stores.length ? matchStore(wiz.site, stores) : null;
-      const hint = !stores.length ? '' : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
+      const ticked = s.myStores.filter((st) => stores.includes(st));
+      const byMatch = matched ? ticked.length === 1 && ticked[0] === matched : !ticked.length;
+      const hint = !stores.length ? ''
+        : !byMatch ? (ticked.length ? 'The website lists these stores; your earlier choice is ticked.' : 'The website lists these stores. None is ticked: tick yours.')
+        : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
         <p class="hint">Only cars at your store count as ready to post.${hint ? ' ' + hint : ''}</p>
         ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${s.myStores.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st, stores))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}
@@ -272,9 +313,10 @@ export function wizardHtml() {
 }
 
 function readInputs() {
-  // Before the first read there are no settings yet: the read computes the
-  // defaults (store from the site name, address from the page), so don't
-  // invent an empty settings object here.
+  // Before the first read the settings may not be there yet: the read starts
+  // from the website's or the profile's, or works out the defaults (store
+  // from the site name, address from the page), so don't invent an empty
+  // settings object here.
   if (!wiz.settings && !['store', 'you', 'account', 'address', 'price', 'permission', 'rules', 'terms'].includes(wiz.step)) return;
   const s = wiz.settings || withDefaults({}, wiz.site || {});
   const val = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : undefined; };
@@ -284,7 +326,7 @@ function readInputs() {
   }
   const next = { ...s };
   if (wiz.step === 'store') next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
-  if (wiz.step === 'you') next.salesperson = { ...s.salesperson, name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE }; // the closing line is Settings', kept as it is
+  if (wiz.step === 'you') next.salesperson = { ...s.salesperson, name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE }; // the closing line is Settings' (or the profile's), kept as it is
   if (wiz.step === 'address') next.dealer = { name: val('wizDealer') || s.dealer.name, city: val('wizCity') ?? s.dealer.city, state: (val('wizState') ?? s.dealer.state).toUpperCase(), zip: val('wizZip') ?? s.dealer.zip };
   if (wiz.step === 'price') {
     const picked = document.querySelector('input[name="wizBasis"]:checked');
