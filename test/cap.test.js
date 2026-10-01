@@ -150,7 +150,7 @@ test('only recording a post writes the day\'s log; take-downs never touch it, an
   const src = (rel) => readFileSync(new URL('../extension/' + rel, import.meta.url), 'utf8');
   const panel = src('sidepanel.js');
   const popup = src('popup.js');
-  assert.match(panel, /updateKey\(siteKeys\(state\.origin\)\.postLog, \(log\) => logPost\(log, state\.vehicle\.vin, now\)/, 'the side panel logs the post it records');
+  assert.match(panel, /updateKey\(siteKeys\(origin\)\.postLog, \(log\) => logPost\(log, vehicle\.vin, now\)/, 'the side panel logs the post it records');
   assert.match(popup, /update\('postLog', \(log\) => logPost\(log, vin, at\)\)/, 'Mark posted logs it');
   assert.match(popup, /update\('postLog', \(log\) => \(Array\.isArray\(log\) \? unlogPost\(log, vin, at\)/, 'unmarking takes its own entry off');
   for (const s of [panel, popup]) assert.match(s, /capStatus\(state\.posted, state\.settings\??\.dailyCap, new Date\(\), \{ log: state\.postLog, serverCount:/);

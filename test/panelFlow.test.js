@@ -11,7 +11,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { currentVin } from '../extension/src/queue.js';
+import { currentVin, advance } from '../extension/src/queue.js';
+import { markPosted } from '../extension/src/rescan.js';
+import { logPost } from '../extension/src/cap.js';
+import { updateKey } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData } from '../extension/src/listingData.js';
 import { recheck } from '../extension/src/vehicleDetails.js';
@@ -839,9 +842,9 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   const run = async ({ logFails = false } = {}) => {
     const writes = [];
     const store = { 'posted:o': {}, 'postLog:o': [] };
-    const state = { origin: 'o', vin: 'AAA', vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } }, detected: null, queueMode: false, posted: {}, postLog: [] };
+    const state = { origin: 'o', vin: 'AAA', step: 'publish', vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } }, detected: null, queueMode: false, posted: {}, postLog: [] };
     const confirmPosted = compile('confirmPosted', {
-      state, $: () => null, watcher: null,
+      state, $: () => null, watcher: null, flowRun: 0, confirmedRun: -1,
       siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o }),
       markPosted: (p, v, basis, at) => ({ ...p, [v.vin]: { name: v.name, price: v.price, postedAt: at } }),
       logPost: (log, vin, at) => [...log, { vin, at }],
@@ -866,6 +869,101 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   const full = await run({ logFails: true });
   assert.deepEqual(full.writes, ['posted:o']);
   assert.equal(full.state.step, 'done', 'the post is recorded all the same');
+});
+
+// A queued car is recorded once and moves the queue once. The listing
+// watcher and a click on It's posted, next car (or a second click) can both
+// arrive, and a side panel in another window holds the same car: the second
+// confirm never records the next car, which was never posted, nor skips it,
+// nor starts it a second time. Run with sidepanel.js's own confirmPosted,
+// afterQueueStep and clearFlow on one shared store, the real queue, the real
+// posted list and the real lock.
+function queuePanel(store, { onNext = null } = {}) {
+  const O = 'https://www.example-motors.test';
+  const calls = [];
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+  const storage = { get: async (k) => { await tick(); return { [k]: store[k] }; }, set: async (o) => { await tick(); Object.assign(store, o); } };
+  const state = {
+    origin: O, vin: 'AAA', step: 'publish', queueMode: true, vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } },
+    detected: { status: 'listing', url: 'https://www.facebook.com/marketplace/item/1/' }, queue: null, posted: {}, postLog: [],
+  };
+  let fns;
+  fns = compileMany(['confirmPosted', 'afterQueueStep', 'clearFlow'], {
+    state, flowRun: 0, confirmedRun: -1, advancing: false, watcher: null, FORM_MAP,
+    $: () => null, updateKey, panelStorage: storage, markPosted, logPost, advance, currentVin,
+    siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o, queue: 'postQueue:' + o, flow: 'postFlow:' + o }),
+    pilotNote: async () => { await tick(); }, endPost: () => {}, accountsConfigured: () => false,
+    chrome: { storage: { local: { remove: async () => { await tick(); } } }, runtime: { sendMessage: async () => {} } },
+    storageErrorText: (e) => String(e), setStatus: (text) => calls.push('status: ' + text), render: () => calls.push('render:' + state.step), saveFlow: async () => {},
+    nameOf: (vin) => vin,
+    startNextInQueue: async () => {
+      // the real startFlow: storage reads, clearFlow, then the next car comes up and is checked on the website
+      calls.push('start ' + currentVin(state.queue));
+      if (onNext) await onNext(fns, state);
+      await tick();
+      await fns.clearFlow();
+      Object.assign(state, { vin: currentVin(state.queue), vehicle: null, step: 'checking', queueMode: true });
+    },
+  });
+  return { state, calls, fns };
+}
+
+test('a queued car is recorded once and moves the queue once, whether the watcher and a click both confirm it or a second window\'s panel does', async () => {
+  const fresh = () => ({ 'postQueue:https://www.example-motors.test': { vins: ['AAA', 'BBB', 'CCC'], index: 0, status: 'running', results: {} } });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  const queueOf = (store) => store['postQueue:https://www.example-motors.test'];
+  // the click lands while the next car is being brought up (the publish view is still on screen), or once it is being checked
+  for (const when of ['before the next car', 'while the next car is checked']) {
+    const store = fresh();
+    let late = null;
+    const p = queuePanel(store, {
+      onNext: async (fns, state) => {
+        if (when === 'before the next car') late = fns.confirmPosted();
+        else setTimeout(() => { late = fns.confirmPosted(); }, 20);
+        return state;
+      },
+    });
+    await p.fns.confirmPosted(); // the watcher saw the listing address
+    await settle();
+    await late;
+    assert.deepEqual([queueOf(store).index, queueOf(store).results], [1, { AAA: 'posted' }], `${when}: one step, A posted (${p.calls.join(' | ')})`);
+    assert.deepEqual(Object.keys(store['posted:https://www.example-motors.test']), ['AAA'], `${when}: B is not recorded`);
+    assert.equal(store['postLog:https://www.example-motors.test'].length, 1, `${when}: one post in the day's log`);
+    assert.deepEqual(p.calls.filter((c) => c.startsWith('start')), ['start BBB'], `${when}: B is started once`);
+    assert.deepEqual([p.state.vin, p.state.step], ['BBB', 'checking']);
+  }
+
+  // two panels (two windows) on the same car, both confirming it
+  const store = fresh();
+  const one = queuePanel(store);
+  const two = queuePanel(store);
+  await Promise.all([one.fns.confirmPosted(), two.fns.confirmPosted()]);
+  await settle();
+  assert.deepEqual([queueOf(store).index, queueOf(store).results], [1, { AAA: 'posted' }], `two panels: one step (${one.calls.join(' | ')} || ${two.calls.join(' | ')})`);
+  const started = [...one.calls, ...two.calls].filter((c) => c.startsWith('start'));
+  assert.deepEqual(started, ['start BBB'], 'B is started in one panel only');
+  const behind = one.calls.includes('start BBB') ? two : one;
+  assert.deepEqual([behind.state.vin, behind.state.step], [null, 'idle'], 'the other panel lets the car go');
+  assert.ok(behind.calls.some((c) => /already moved on from AAA/.test(c)), 'and says so');
+
+  // a confirm outside the publish step does nothing
+  const idle = queuePanel(fresh());
+  idle.state.step = 'review';
+  await idle.fns.confirmPosted();
+  assert.equal(idle.state.posted && Object.keys(idle.state.posted).length, 0);
+});
+
+// A side panel opened in a second window brings back the same post at
+// Publish; only the panel of the window the post belongs to watches its tab.
+test('a post brought back at Publish is watched only by the side panel of its own window', async () => {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  for (const [windowId, panelWindowId, watched] of [[5, 5, true], [5, 9, false], [null, 9, true], [5, null, true]]) {
+    const o = formOpener({ description, step: 'idle', extra: { panelWindowId } });
+    await o.fns.resumeFlow(o.state.origin, { vin: v.vin, step: 'publish', vehicle: v, price: v.price, description, fbTabId: 77, windowId });
+    assert.equal(o.calls.includes('startWatcher'), watched, `post from window ${windowId}, panel in window ${panelWindowId}`);
+    assert.equal(o.state.step, 'publish');
+  }
 });
 
 // Saved as draft, next car: the draft keeps the price the form was filled

@@ -553,20 +553,37 @@ async function startNextInQueue() {
 // Records how this car ended and moves on: the next car, a pause, or the end.
 // The queue is advanced from what is stored, under its lock: the popup may
 // have stopped it (or paused it) while this car was on the form, and a stale
-// copy must not bring it back.
+// copy must not bring it back. It moves only while it is still on the car
+// this panel finished (vin): when it has moved on already (a second confirm
+// of the same car, or the side panel in another window), nothing is recorded
+// against the next car and the next car is not started a second time.
 let advancing = false;
-async function afterQueueStep(outcome) {
+async function afterQueueStep(outcome, vin = state.vin) {
   if (advancing) return; // the watcher and a click on the same car advance once
   advancing = true;
   let startNext = false;
   try {
     if (watcher) watcher.cancel();
-    if (state.vin) await pilotNote((p) => endPost(p, state.vin, outcome)); // a no-op for a car already recorded as posted or drafted
+    if (vin) await pilotNote((p) => endPost(p, vin, outcome)); // a no-op for a car already recorded as posted or drafted
     let stored;
+    let moved = false;
     try {
-      stored = await updateKey(siteKeys(state.origin).queue, (q) => (q ? advance(q, outcome) : undefined), panelStorage);
+      stored = await updateKey(siteKeys(state.origin).queue, (q) => {
+        if (!q) return undefined;
+        moved = Boolean(vin) && currentVin(q) === vin;
+        return advance(q, outcome, vin);
+      }, panelStorage);
     } catch (e) {
       setStatus(storageErrorText(e), 'error'); // the queue stays where it is; the button can be clicked again
+      return;
+    }
+    if (stored && !moved) {
+      state.queue = stored;
+      if (state.vin !== vin) return; // this panel is on another car already: it stays on it
+      await clearFlow();
+      state.step = stored.status === 'done' ? 'queueDone' : 'idle';
+      setStatus(`The queue had already moved on from ${nameOf(vin)}, so nothing more was recorded for it here.`);
+      render();
       return;
     }
     if (!stored) {
@@ -645,7 +662,10 @@ async function resumeFlow(origin, flow) {
   await loadSaved();
   if (state.step === 'checking' || state.step === 'filling') state.step = state.vehicle ? 'review' : 'idle';
   render();
-  if (state.step === 'publish' && state.fbTabId) startWatcher();
+  // The listing watcher only in the window the post belongs to: a side panel
+  // opened in a second window shows the same post with its buttons, but two
+  // watchers on one tab would record the post twice and move a queue twice.
+  if (state.step === 'publish' && state.fbTabId && (!state.windowId || panelWindowId === null || state.windowId === panelWindowId)) startWatcher();
 }
 
 // Which colors the website gives no usable word for (blank, or a word that is
@@ -927,7 +947,17 @@ function startWatcher() {
   });
 }
 
+// Records the post of the car on the form, once: the watcher and a click on
+// It's posted (or two quick clicks) can both arrive, and only the first
+// records it and moves a queue on (confirmedRun holds the post's flowRun).
+// Only from the publish step, for the car captured here; a post dropped
+// while it was recorded stays recorded, and the post that took over is left alone.
+let confirmedRun = -1;
 async function confirmPosted() {
+  const run = flowRun;
+  if (state.step !== 'publish' || !state.vehicle || confirmedRun === run) return undefined;
+  confirmedRun = run;
+  const { vin, vehicle, origin } = state;
   const typed = (($('listingUrl') && $('listingUrl').value) || '').trim();
   const listingUrl = /^https?:\/\//i.test(typed) ? typed : (state.detected && state.detected.url) || '';
   const now = new Date().toISOString();
@@ -935,22 +965,24 @@ async function confirmPosted() {
   if (listingUrl) extra.listingUrl = listingUrl;
   try {
     // recorded into the list as it is stored now: the popup may have marked or unmarked cars while this one was on the form
-    state.posted = await updateKey(siteKeys(state.origin).posted, (fresh) => markPosted(fresh || {}, state.vehicle, state.settings.basis, now, extra), panelStorage);
+    state.posted = await updateKey(siteKeys(origin).posted, (fresh) => markPosted(fresh || {}, vehicle, state.settings.basis, now, extra), panelStorage);
   } catch (e) {
+    confirmedRun = -1; // not recorded: It's posted can be clicked again
     setStatus(storageErrorText(e), 'error'); // the post is on Facebook; the panel stays here so it can be recorded once there is room
-    return;
+    return undefined;
   }
   try {
     // the day's log for the cap, which a take-down later leaves alone
-    state.postLog = await updateKey(siteKeys(state.origin).postLog, (log) => logPost(log, state.vehicle.vin, now), panelStorage); // the same key as the posted entry
+    state.postLog = await updateKey(siteKeys(origin).postLog, (log) => logPost(log, vehicle.vin, now), panelStorage); // the same key as the posted entry
   } catch (e) {
     /* the posted list has the post, and counts it while it stays listed */
   }
-  await pilotNote((p) => endPost(p, state.vin, 'posted', { at: now }));
+  await pilotNote((p) => endPost(p, vin, 'posted', { at: now }));
   // the dealership's shared registry (accounts only): the worker syncs; nothing here waits for it
-  if (accountsConfigured()) chrome.runtime.sendMessage({ type: 'syncNow', origin: state.origin }).catch(() => {});
+  if (accountsConfigured()) chrome.runtime.sendMessage({ type: 'syncNow', origin }).catch(() => {});
+  if (run !== flowRun) return undefined; // dropped meanwhile: recorded, and the post now under way is not touched
   if (watcher) watcher.cancel();
-  if (state.queueMode) return afterQueueStep('posted');
+  if (state.queueMode) return afterQueueStep('posted', vin);
   state.step = 'done';
   state.doneAt = now;
   render();
