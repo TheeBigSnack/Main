@@ -563,7 +563,13 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
 
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
+// Every description names the dealership (rule 5): with no dealership name
+// set, no description can, so the form is not opened until one is.
+const dealerNamed = () => Boolean(String((state.settings && state.settings.dealer && state.settings.dealer.name) || '').trim());
+const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
+
 async function openForm({ probeOnly = false } = {}) {
+  if (!probeOnly && !dealerNamed()) return setStatus(NO_DEALER_TEXT, 'error');
   const k = siteKeys(state.origin);
   const fresh = await chrome.storage.local.get([k.posted, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
   state.posted = fresh[k.posted] || state.posted;
@@ -1115,7 +1121,8 @@ function viewReview() {
   ${assumptionsHtml()}
   <section>
     ${capHtml(cap)}
-    <button type="button" class="primary wide" id="openForm" ${cap.reached ? 'disabled' : ''}>Open the Marketplace form</button>
+    ${dealerNamed() ? '' : `<div class="banner bad" id="noDealer">${esc(NO_DEALER_TEXT)}</div>`}
+    <button type="button" class="primary wide" id="openForm" ${cap.reached || !dealerNamed() ? 'disabled' : ''}>Open the Marketplace form</button>
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
     <div id="photoServers">${photoServersHtml()}</div>
     <button type="button" class="plain wide" id="checkForm" ${cap.reached ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
@@ -1765,7 +1772,7 @@ function adoptChanges(changes) {
   if (capLine && state.settings) {
     const cap = dailyCap();
     capLine.outerHTML = capHtml(cap);
-    for (const id of ['openForm', 'checkForm']) { const b = $(id); if (b) b.disabled = cap.reached; }
+    for (const id of ['openForm', 'checkForm']) { const b = $(id); if (b) b.disabled = cap.reached || (id === 'openForm' && !dealerNamed()); }
   }
 }
 

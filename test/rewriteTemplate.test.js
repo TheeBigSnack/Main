@@ -262,3 +262,21 @@ test('the template passes its own word count whatever the features and write-up 
     }
   }
 });
+
+// ---------- the dealership is always named ----------
+
+test('with no dealership name set, the description never passes and never signs off "at ."', async () => {
+  const v = { ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: 'A clean truck that has been well kept by its last owner. It drives smoothly and quietly on the highway.' };
+  for (const dealer of [{ name: '', city: '' }, { name: '   ' }, {}]) {
+    for (const salesperson of [SAM, { title: 'sales consultant' }]) {
+      const r = await generateDescription({ vehicle: v, dealer, salesperson, price: v.price });
+      assert.doesNotMatch(r.text, / at \./, 'no empty sign-off');
+      assert.equal(r.guardrails.ok, false, JSON.stringify(dealer));
+      assert.ok(r.guardrails.problems.some((p) => p.code === 'no-dealer' && p.text === 'No dealership name is set; add it in Settings (Dealership name)'));
+    }
+  }
+  // with the name set, the same car passes
+  const named = await generateDescription({ vehicle: v, dealer: EXAMPLE, salesperson: { title: 'sales consultant' }, price: v.price });
+  assert.deepEqual(named.guardrails.problems, []);
+  assert.match(named.text, /Sales consultant at Example Motors\./);
+});

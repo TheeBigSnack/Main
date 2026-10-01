@@ -156,3 +156,35 @@ test('a load for a website the panel has moved away from is dropped, so its cars
   assert.equal(state.siteName, C);
   assert.equal(state.siteInfo.name, C);
 });
+
+test('the Marketplace form is not opened while no dealership name is set: no description could name the dealership', async () => {
+  const consts = ['dealerNamed', 'NO_DEALER_TEXT'].map((n) => {
+    const m = src.match(new RegExp(`^const ${n} = .*;$`, 'm'));
+    assert.ok(m, `${n} is defined`);
+    return m[0];
+  }).join('\n');
+  const run = async (dealer, options) => {
+    const said = [];
+    const openForm = new Function('state', 'setStatus', 'siteKeys', `${consts}\n${fnText('openForm')}\nreturn openForm;`)(
+      { settings: { dealer } },
+      (text, tone) => said.push([text, tone]),
+      never('siteKeys'), // the first step past the check
+    );
+    try {
+      await openForm(options);
+      return { said, opened: false };
+    } catch (e) {
+      assert.match(e.message, /siteKeys must not run/);
+      return { said, opened: true };
+    }
+  };
+  for (const dealer of [{ name: '' }, { name: '   ' }, {}]) {
+    const r = await run(dealer);
+    assert.equal(r.opened, false, JSON.stringify(dealer));
+    assert.deepEqual(r.said, [["Add your dealership's name in Settings first (Dealership name): every description names the dealership.", 'error']]);
+  }
+  assert.equal((await run({ name: 'Example Motors' })).opened, true, 'with a name the form opens');
+  assert.equal((await run({ name: '' }, { probeOnly: true })).opened, true, 'checking the form fills nothing, so it still opens');
+  // the review step shows why and keeps the button off
+  assert.match(fnText('viewReview'), /id="openForm" \$\{cap\.reached \|\| !dealerNamed\(\) \? 'disabled' : ''\}/);
+});

@@ -312,7 +312,8 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'stock', keep: 'filler', text: v.stock ? `Stock number ${v.stock}.` : '' },
     { id: 'vin', keep: 'always', text: v.vin ? `VIN ${String(v.vin).toUpperCase().replace(/[^A-Z0-9]/g, '')}.` : '' },
     { id: 'priceNote', keep: 'always', text: String(priceNote || '').trim() },
-    { id: 'signoff', keep: 'always', text: person ? `I'm ${person}, ${title} at ${dealerName}.` : `${capitalize(title)} at ${dealerName}.` },
+    // with no dealership name set the checks stop the description; the sign-off still never reads "at ."
+    { id: 'signoff', keep: 'always', text: `${person ? `I'm ${person}, ${title}` : capitalize(title)}${dealerName ? ` at ${dealerName}` : ''}.` },
     { id: 'closing', keep: 'always', text: closing },
     // the salesperson's own closing line takes the place of the stock invitation
     { id: 'cta', keep: 'optional', text: closing ? '' : 'Message me to set up a test drive or ask a question.' },
@@ -402,8 +403,10 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '',
   if (/\b(one|1|single)[- ]owner\b/i.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
+  // the dealership is always named: with no name set there is nothing to name it by
   const dealerName = String(dealer.name || '').trim();
-  if (dealerName && !t.toLowerCase().includes(dealerName.toLowerCase())) {
+  if (!dealerName) problems.push({ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' });
+  else if (!t.toLowerCase().includes(dealerName.toLowerCase())) {
     problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
   }
   if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });

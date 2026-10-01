@@ -261,6 +261,16 @@ test('rewrite: a draft repeating a stale price, price drop or mileage from the w
   assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says 29,000 miles, but the website shows 34,567 miles'));
 });
 
+test('rewrite: with no dealership name in the facts, no draft passes: the description must name the dealership', async () => {
+  world();
+  anthropic(says(GOOD.replace(' at Example Motors', '')));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1, { ...rewriteFacts({ vehicle: VEHICLE, dealer: { name: '', city: '' }, salesperson: SALESPERSON, narrative: [] }), origin: ORIGIN });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems, [{ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' }]);
+});
+
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {
   world();
   anthropic(says(null, { stop: 'refusal' }));

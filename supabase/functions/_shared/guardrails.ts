@@ -10,7 +10,7 @@
 //   - a price note quoting a dollar amount must match the car's two-price gap
 //   - a dollar amount must be the price posted or one in the price note, a
 //     mileage must be the website's, and no price change is claimed
-//   - the VIN and the dealership's name must be present
+//   - the VIN and the dealership's name must be present (and a name must be set)
 //   - banned phrases (claims the data can't support, posing as a private
 //     seller, protected characteristics), "one owner" only with the flag,
 //     no ALL CAPS shouting, no walls of emoji
@@ -236,8 +236,10 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, priceN
   if (/\b(one|1|single)[- ]owner\b/i.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
+  // the dealership is always named: with no name set there is nothing to name it by
   const dealerName = String(dealer.name || '').trim();
-  if (dealerName && !t.toLowerCase().includes(dealerName.toLowerCase())) {
+  if (!dealerName) problems.push({ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' });
+  else if (!t.toLowerCase().includes(dealerName.toLowerCase())) {
     problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
   }
   if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
