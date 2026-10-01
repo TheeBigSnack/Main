@@ -83,7 +83,7 @@ test('clearing a finished post forgets the tab and the window it came from', asy
 function startFlowWith({ posted, queue }) {
   const calls = [];
   const state = { origin: 'https://www.example-dealer.test', posted, snapshotVehicles: { AAA: { name: '2020 Make Model' } } };
-  const startFlow = compile('startFlow', {
+  const { startFlow } = compileMany(['startFlow', 'stopPosted'], {
     state,
     chrome: { storage: { local: { remove: async () => {} } } },
     GLOBAL_KEYS: { postRequest: 'postRequest' },
@@ -122,6 +122,35 @@ test('a car already marked as posted never gets a second form: the queue skips i
 
   // not posted: it goes on to read the website (the first stub that throws)
   await assert.rejects(startFlowWith({ posted: {}, queue: false }).run(), /refreshGranted must not run/);
+});
+
+// A car marked as posted after its review began (the popup's Mark posted, or
+// a colleague's post brought down by the sync while the car waits at review):
+// Open the Marketplace form and the dry run's Fill it in now read the posted
+// list as it is stored then, and stop (stopPosted) before any tab opens or
+// anything is typed.
+test('a car marked as posted while it waits at review gets no form: Open the Marketplace form and Fill it in now check the stored list first', async () => {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const colleague = { 'posted:https://www.example-motors.test': { [v.vin]: { name: v.name, price: v.price, postedAt: new Date().toISOString(), mine: false } } };
+  for (const queueMode of [false, true]) {
+    for (const step of ['review', 'probe']) {
+      const stops = [];
+      const o = formOpener({ description, step, stored: colleague, extra: { stopPosted: async () => stops.push(`${o.state.vin} queue=${o.state.queueMode}`) } });
+      o.state.queueMode = queueMode;
+      if (step === 'review') await o.fns.openForm();
+      else await o.fns.fillFromProbe();
+      const what = `${queueMode ? 'queued' : 'single'} car at ${step}`;
+      assert.deepEqual(o.forms, [], `${what}: no Marketplace tab (${o.calls.join(' | ')})`);
+      assert.ok(!o.calls.some((c) => c.startsWith('runFill') || c === 'runProbe'), `${what}: nothing filled`);
+      assert.deepEqual(stops, [`${v.vin} queue=${queueMode}`], `${what}: stopped as posted`);
+      assert.ok(o.state.posted[v.vin], `${what}: the panel holds the stored list`);
+    }
+  }
+  // not posted: the form opens as before
+  const free = formOpener({ description, extra: { stopPosted: never('stopPosted') } });
+  await free.fns.openForm();
+  assert.deepEqual(free.forms, [`${v.vin} while vin=${v.vin}`]);
 });
 
 test('one list action at a time, and the action itself still runs inside the click', async () => {
@@ -187,7 +216,7 @@ const FLOW_FIELDS = new Function(`return ${/const FLOW_FIELDS = (\[[^\]]*\]);/.e
 // are stubs that record they ran. autoOpen: what canAutoOpen says (a queued
 // car that passes every check opens its form by itself); gen: the stand-in
 // for writing the description, given the state.
-function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, car = vehicle('usedNormal'), also = [], autoOpen = false, gen = null, tabLoad = null }) {
+function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, car = vehicle('usedNormal'), also = [], autoOpen = false, gen = null, tabLoad = null, stored = {}, extra = {} }) {
   const v = car;
   const calls = [];
   const forms = []; // each Marketplace tab opened: the car it was opened for, and the post the panel was on
@@ -227,7 +256,7 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
     pickedPhotos: () => [],
     render: () => calls.push('render:' + state.step), saveFlow: async () => {}, pilotNote: async () => {}, notePostStep: () => {},
     GLOBAL_KEYS: { devOverrides: 'devOverrides', postRequest: 'postRequest' }, FORM_MAP, applyOverrides: (m) => m,
-    chrome: { storage: { local: { get: async () => ({}), remove: async () => {} } }, tabs: { create: async () => { calls.push('tabs.create'); forms.push(`${state.vehicle ? state.vehicle.vin : '(no car)'} while vin=${state.vin}`); return { id: 77 }; } } },
+    chrome: { storage: { local: { get: async () => ({ ...stored }), remove: async () => {} } }, tabs: { create: async () => { calls.push('tabs.create'); forms.push(`${state.vehicle ? state.vehicle.vin : '(no car)'} while vin=${state.vin}`); return { id: 77 }; } } },
     waitForTabLoad: async (id) => (tabLoad ? tabLoad(id) : undefined), sleep: async () => {},
     runFill: async () => calls.push(`runFill: ${state.listing ? state.listing.fields.description : '(no listing)'}`),
     runProbe: async () => calls.push('runProbe'),
@@ -235,6 +264,7 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
       calls.push(`readCarForPost ${req.vin} tab ${req.tabId}`);
       return (read || never('readCarForPost'))(req);
     },
+    ...extra,
   });
   return { state, calls, fns, v, forms, box };
 }

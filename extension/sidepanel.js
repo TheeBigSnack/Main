@@ -442,6 +442,23 @@ async function carStillCurrent() {
   return false;
 }
 
+// A car marked as posted meanwhile (from the panel's own list while a queue
+// was paused, from the popup, or on another computer through the sync) never
+// gets a second form. It is checked when the post starts and again, from
+// what is stored then, before the form opens or the dry run's form is filled:
+// a queued car is skipped, a single post stops.
+async function stopPosted() {
+  const name = nameOf(state.vin);
+  if (state.queueMode) {
+    await afterQueueStep('skipped');
+    if (state.step === 'idle' || state.step === 'queueDone') setStatus(`${name} is already marked as posted, so the queue skipped it.`);
+    return undefined;
+  }
+  await clearFlow();
+  setStatus(`${name} is already marked as posted on this website, so it isn't posted again. Its listing is under My listings in the popup.`);
+  return render();
+}
+
 async function startFlow(req) {
   await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
   endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
@@ -457,19 +474,7 @@ async function startFlow(req) {
   state.queueMode = Boolean(req.queue);
   await loadSaved();
   if (dropped()) return undefined;
-  if (state.posted[state.vin]) {
-    // posted meanwhile (from the panel's own list while a queue was paused,
-    // from the popup, or on another computer): never a second form for it
-    const name = nameOf(state.vin);
-    if (state.queueMode) {
-      await afterQueueStep('skipped');
-      if (state.step === 'idle' || state.step === 'queueDone') setStatus(`${name} is already marked as posted, so the queue skipped it.`);
-      return undefined;
-    }
-    await clearFlow();
-    setStatus(`${name} is already marked as posted on this website, so it isn't posted again. Its listing is under My listings in the popup.`);
-    return render();
-  }
+  if (state.posted[state.vin]) return stopPosted();
   await refreshGranted(); // current before canAutoOpen below looks at the photo servers
   if (dropped()) return undefined;
   state.step = 'checking';
@@ -732,6 +737,7 @@ async function openForm({ probeOnly = false } = {}) {
   state.posted = fresh[k.posted] || state.posted;
   state.postLog = fresh[k.postLog] || state.postLog;
   state.syncState = fresh[k.sync] || state.syncState;
+  if (state.posted[state.vin]) return stopPosted();
   const cap = dailyCap();
   if (cap.reached) {
     setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
@@ -803,8 +809,15 @@ async function runFill() {
 }
 
 // Fill it in now, on the form the dry run opened: the same checks as Open
-// the Marketplace form before anything is typed, the car's read included.
+// the Marketplace form before anything is typed, the car's read included,
+// and whether it was marked as posted meanwhile (stopPosted).
 async function fillFromProbe() {
+  const run = flowRun;
+  const k = siteKeys(state.origin);
+  const fresh = await chrome.storage.local.get(k.posted);
+  if (run !== flowRun) return undefined;
+  state.posted = fresh[k.posted] || state.posted;
+  if (state.posted[state.vin]) return stopPosted();
   if (descriptionStopped()) return undefined;
   if (!(await carStillCurrent())) return undefined;
   return runFill();
