@@ -1087,6 +1087,11 @@ async function confirmPosted() {
   const now = new Date().toISOString();
   const extra = { postedWith: 'lotsync', salesperson: state.settings.salesperson.name || '' };
   if (listingUrl) extra.listingUrl = listingUrl;
+  // The price the form was filled with (read and checked on the website under
+  // the price basis of that moment), not one worked out again from today's
+  // Settings: a basis changed while the form waited would record a price the
+  // listing does not show, and no rescan would ever flag the gap.
+  const filled = typeof state.price === 'number' && Number.isFinite(state.price) && state.price > 0 ? state.price : null;
   let kept = null; // this person's entry for the car, already stored
   try {
     // recorded into the list as it is stored now: the popup may have marked or unmarked cars while this one was on the form
@@ -1095,7 +1100,7 @@ async function confirmPosted() {
       list = fresh || {};
       const had = list[vehicle.vin];
       kept = had && had.mine !== false ? had : null;
-      if (!kept) return markPosted(list, vehicle, state.settings.basis, now, extra);
+      if (!kept) return markPosted(list, filled === null ? vehicle : { ...vehicle, price: filled, priceBeforeFees: null }, filled === null ? state.settings.basis : 'website', now, extra);
       if (!listingUrl || kept.listingUrl) return undefined; // nothing to add: nothing is written
       kept = { ...kept, listingUrl };
       return { ...list, [vehicle.vin]: kept };

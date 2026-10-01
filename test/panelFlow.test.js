@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { currentVin, advance } from '../extension/src/queue.js';
-import { markPosted } from '../extension/src/rescan.js';
+import { markPosted, diffScans } from '../extension/src/rescan.js';
 import { logPost } from '../extension/src/cap.js';
 import { updateKey } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
@@ -1057,6 +1057,48 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   const full = await run({ logFails: true });
   assert.deepEqual(full.writes, ['posted:o']);
   assert.equal(full.state.step, 'done', 'the post is recorded all the same');
+});
+
+// The posted entry keeps the price the form was filled with. The dealer can
+// switch the price basis in Settings while a form waits for Publish (or
+// before a saved post comes back): working the price out again from the new
+// basis would record a price the listing does not show, and every rescan
+// would then find nothing to update. With the filled price recorded, the
+// next rescan flags the gap. Run with sidepanel.js's own confirmPosted, the
+// real markPosted and the real diffScans.
+test('It\'s posted records the price the form was filled with, even when the price basis changed since, so the next rescan flags the gap', async () => {
+  const car = { vin: 'AAA', name: 'Car A', price: 25000, priceBeforeFees: 24500 };
+  const run = async ({ filledUnder, confirmUnder, price = basisPrice(car, filledUnder) }) => {
+    const store = { 'posted:o': {}, 'postLog:o': [] };
+    const state = { origin: 'o', vin: 'AAA', step: 'publish', vehicle: car, price, settings: { basis: filledUnder, salesperson: { name: 'Pat' } }, detected: null, queueMode: false, posted: {}, postLog: [], map: FORM_MAP };
+    const confirmPosted = compile('confirmPosted', {
+      state, $: () => null, watcher: null, flowRun: 0, confirmedRun: -1, listingLink, markPosted,
+      siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o }),
+      logPost: (log, vin, at) => [...log, { vin, at }],
+      updateKey: async (key, change) => (store[key] = change(store[key])),
+      panelStorage: {}, storageErrorText: (e) => String(e), setStatus: never('setStatus'),
+      pilotNote: async () => {}, endPost: () => {}, accountsConfigured: () => false,
+      afterQueueStep: never('afterQueueStep'), render: () => {}, saveFlow: async () => {},
+    });
+    state.settings = { ...state.settings, basis: confirmUnder }; // Settings saved while the form waited (adoptChanges), or the post came back under new Settings
+    await confirmPosted();
+    const posted = store['posted:o'];
+    const snap = { vehicles: { AAA: { ...car } } };
+    return { recorded: posted.AAA.price, todo: diffScans(snap, snap, { posted, basis: confirmUnder }).priceUpdates };
+  };
+  // filled at the main price, then the dealer switched to the lower second price
+  const down = await run({ filledUnder: 'website', confirmUnder: 'beforeFees' });
+  assert.equal(down.recorded, 25000, 'the price the listing shows');
+  assert.deepEqual(down.todo.map((t) => [t.from, t.to]), [[25000, 24500]], 'the next rescan asks for the update');
+  // the other way round
+  const up = await run({ filledUnder: 'beforeFees', confirmUnder: 'website' });
+  assert.equal(up.recorded, 24500);
+  assert.deepEqual(up.todo.map((t) => [t.from, t.to]), [[24500, 25000]]);
+  // no switch: the same price as before, and nothing to do
+  const same = await run({ filledUnder: 'beforeFees', confirmUnder: 'beforeFees' });
+  assert.deepEqual([same.recorded, same.todo.length], [24500, 0]);
+  // a post with no filled price kept (saved before prices were): the website's on today's basis, as before
+  assert.equal((await run({ filledUnder: 'website', confirmUnder: 'beforeFees', price: null })).recorded, 24500);
 });
 
 // Only a listing's own address is kept as the listing link. Your listings,
