@@ -2,11 +2,13 @@
 // cars the salesperson has marked as posted, and turns the differences into
 // a to-do list:
 //   - take down: cars gone from the website (confirmed by a direct VIN lookup)
-//                and posted cars that went sale-pending
+//                and posted cars the website marks sale-pending or sold
+//                (on every scan while they are still marked posted)
 //   - update price: website price went up or down since it was posted / last seen
 //   - new arrivals: cars on the website that weren't there last time
 //   - now ready: cars that just got photos, a price, arrived on the lot, etc.
-//   - needs a look: anything ambiguous (price removed, unconfirmed disappearance)
+//   - needs a look: anything ambiguous (price removed, unconfirmed disappearance),
+//                and posted cars the pre-owned check now holds back (every scan)
 //
 // A car is only called gone when the website's own search can't find its VIN.
 // If more than half the lot disappears at once, nothing is marked gone: that
@@ -96,6 +98,32 @@ function isPending(e) {
   return /pend/i.test(e?.status || '') || /pending|sold/i.test(e?.statusLabel || '');
 }
 
+// What the website says about a car it still lists but no longer sells as
+// listed: "Marked sold on the website" when its status word says sold (a
+// schema.org SoldOut offer reads "Sold"), "Sale pending on the website" for
+// any other pending status; null for a car that is for sale.
+export function pendingText(e) {
+  if (!isPending(e)) return null;
+  return /\bsold\b/i.test(e?.statusLabel || '') && !/pend/i.test(e?.statusLabel || '') ? 'Marked sold on the website' : 'Sale pending on the website';
+}
+
+// A posted car's line on My listings, from the last scan's entry for it
+// (null when the scan did not have the car), the price on the listing and
+// the website price on the dealer's basis. The first that applies: not on
+// the website, sold or sale-pending, held back by the pre-owned check (the
+// website now calls it new, demo or loaner, or its details need a look),
+// a different price, else matching. The same states To do raises on every
+// scan while the listing is still marked posted (diffScans).
+export function listingStatus(now, listedPrice, sitePrice) {
+  if (!now) return { tone: 'bad', text: 'Not on the website at the last scan' };
+  const held = pendingText(now);
+  if (held) return { tone: 'bad', text: held };
+  if (now.decision === DECISION.SKIP) return { tone: 'bad', text: 'Not pre-owned on the website' };
+  if (now.decision === DECISION.REVIEW) return { tone: 'warn', text: 'Needs a look (see To do)' };
+  if (sitePrice && sitePrice !== listedPrice) return { tone: 'warn', text: 'Website price changed', priceChanged: true };
+  return { tone: 'good', text: 'Matches the website' };
+}
+
 function whatGotReady(before, now) {
   const changes = [];
   if (!before.photoCount && now.photoCount) changes.push('photos added');
@@ -167,8 +195,18 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     const mine = yours(vin);
     const nowPrice = basisPrice(now, basis);
 
-    if (mine && isPending(now) && !isPending(before)) {
-      out.takeDown.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'sale-pending', text: 'Sale pending on the website', lastPrice: posted[vin].price });
+    // A posted car the website marks sold or sale-pending, or no longer
+    // calls pre-owned, is raised on every scan while it is still marked
+    // posted, not only on the scan where it changed: each save replaces the
+    // whole diff, so a one-scan item would leave To do, the badge and the
+    // pilot's open flag while the listing is still up. Taken down (or the
+    // website changing back) is what ends it.
+    const held = mine ? pendingText(now) : null;
+    if (held) {
+      out.takeDown.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'sale-pending', text: held, lastPrice: posted[vin].price });
+    }
+    if (mine && (now.decision === DECISION.SKIP || now.decision === DECISION.REVIEW)) {
+      out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, text: now.reason });
     }
 
     // Price: posted cars compare with the price on the Marketplace listing,
@@ -192,9 +230,6 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
 
     if (now.decision === DECISION.READY && before.decision !== DECISION.READY && !mine) {
       out.nowReady.push({ vin, name: now.name, stock: now.stock, url: now.url, what: whatGotReady(before, now) });
-    }
-    if (mine && (now.decision === DECISION.SKIP || now.decision === DECISION.REVIEW) && before.decision !== now.decision) {
-      out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, text: now.reason });
     }
   }
 

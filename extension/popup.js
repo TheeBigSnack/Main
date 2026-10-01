@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
@@ -637,13 +637,10 @@ function viewMine(l) {
       l.mine.map((p) => {
         const now = p.now;
         const site = now ? price(now) : null;
-        let pill = '<span class="pill good">Matches the website</span>';
-        let extra = '';
-        if (!now) pill = '<span class="pill bad">Not on the website at the last scan</span>';
-        else if (site && site !== p.price) {
-          pill = '<span class="pill warn">Website price changed</span>';
-          extra = `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>`;
-        }
+        // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus)
+        const status = listingStatus(now, p.price, site);
+        const pill = `<span class="pill ${status.tone}">${esc(status.text)}</span>`;
+        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
         const entry = { name: p.name, url: now?.url };
         const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
         return row(entry, {

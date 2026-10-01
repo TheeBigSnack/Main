@@ -103,7 +103,7 @@ First run on a new machine: on the review screen, **Open the form and check fiel
 
 Only cars marked as posted are watched: cars posted through the panel or marked with **Mark posted**. A to-do item for a car you did not mark shows greyed out with "not marked as posted" and no button.
 
-**A sold car.** The **To do** tab lists it under **Take down**, with the reason (sold, or gone sale-pending).
+**A sold car.** The **To do** tab lists it under **Take down**, with the reason (gone from the website, marked sold, or sale pending). The item stays on every rescan until you click **Taken down** or the website shows the car for sale again.
 
 1. Click **Open listing**. The side panel opens your listing in a new tab.
 2. On Facebook, click **Mark as sold** (or **Delete**) yourself. The panel notices ("The listing shows it as sold or removed") and ticks the item off.
@@ -121,7 +121,8 @@ Notes:
 - If no listing link was saved for the car, the panel opens Marketplace's Your listings page instead and asks you to open the listing there.
 - The panel only fills or ticks off when the tab is showing that car's listing. If you moved to another page it says "This tab isn't showing the listing for [car]".
 - A post that is under way blocks a to-do item: finish or stop it first, then click the To do button again.
-- **My listings** shows each car as "Matches the website", "Website price changed" (with **Updated**) or "Not on the website at the last scan", with **Taken down** and, when a link was saved, **Open listing**.
+- **My listings** shows each car as "Matches the website", "Website price changed" (with **Updated**), "Not on the website at the last scan", "Marked sold on the website", "Sale pending on the website", "Not pre-owned on the website" or "Needs a look (see To do)", with **Taken down** and, when a link was saved, **Open listing**.
+- A car you posted that the website now calls new, demo or loaner, or whose details need a look, stays under **Needs a look** on every rescan until the website is fixed or you take the listing down and click **Taken down**.
 - The posting rules ask for sold cars to come down the same day.
 
 ## The Numbers tab

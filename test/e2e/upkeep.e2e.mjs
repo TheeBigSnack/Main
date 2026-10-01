@@ -4,7 +4,9 @@
 // listing, the test clicks Edit as the person would, the panel fills the
 // new price, the test clicks Update, and the panel notices the new price and
 // marks the item done; "Open listing" opens the sold car's listing, the test
-// clicks Mark as sold, and the panel notices and marks it taken down.
+// clicks Mark as sold, and the panel notices and marks it taken down. Last,
+// the website marks the repriced car sale-pending and keeps it listed: it is
+// on Take down on that scan and on the next, and My listings says so.
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:upkeep
 
@@ -176,6 +178,24 @@ try {
   await popup.screenshot({ path: join(shots, 'upkeep-4-pilot.png'), fullPage: true });
   const pilot = await popup.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
   assert.deepEqual(pilot.flags.map((f) => [f.kind, f.how, typeof f.hours]).sort(), [['price', 'detected', 'number'], ['takeDown', 'detected', 'number']]);
+
+  // ---- 5. The website marks the Wagoneer sale-pending and keeps it listed: Take down on that scan and on the next, My listings says so, the flag stays open ----
+  await dealer.request.get(`${origin}/scenario?name=day2pending`);
+  const storedDiff = () => popup.evaluate(async (o) => (await chrome.storage.local.get(`diff:${o}`))[`diff:${o}`], origin);
+  for (const scan of ['the scan that sees it', 'the next scan']) {
+    const before = (await storedDiff())?.takenAt;
+    await tab(popup, 'todo').click();
+    await popup.click('#scan');
+    for (let i = 0; i < 300 && (await storedDiff())?.takenAt === before; i += 1) await popup.waitForTimeout(100);
+    await popup.waitForFunction(() => !document.querySelector('#scan').disabled);
+    assert.match(await popup.textContent('.panel'), /Take down\s*1[\s\S]*2022 Jeep Wagoneer Series III[\s\S]*Sale pending on the website/, scan);
+    assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '1', scan);
+  }
+  await tab(popup, 'mine').click();
+  assert.match(await popup.textContent('.panel'), /Wagoneer[\s\S]*Sale pending on the website/);
+  assert.doesNotMatch(await popup.textContent('.panel'), /Matches the website/);
+  const pending = await popup.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
+  assert.deepEqual(pending.flags.filter((f) => !f.doneAt).map((f) => [f.kind, f.why]), [['takeDown', 'sale-pending']], 'still open after the second scan, not cleared');
   await popup.close();
   await panel.close();
 

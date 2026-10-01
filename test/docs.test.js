@@ -16,6 +16,7 @@ import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
+import { listingStatus } from '../extension/src/rescan.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
 
@@ -67,6 +68,21 @@ test('help.md names the popup and side panel controls as the code labels them', 
     assert.ok(ui.includes(label), `"${label}" is no longer a label in popup.js or sidepanel.js: update the help doc and this list together`);
     assert.ok(help.includes(label), `docs/help.md does not name "${label}"`);
   }
+});
+
+test('help.md names every state My listings can show a posted car in, as the code words it', () => {
+  const help = doc('help.md');
+  const states = [
+    listingStatus(null, 1, null),
+    listingStatus({ status: 'pend-sale' }, 1, 1),
+    listingStatus({ statusLabel: 'Sold' }, 1, 1),
+    listingStatus({ decision: 'skip' }, 1, 1),
+    listingStatus({ decision: 'review' }, 1, 1),
+    listingStatus({ decision: 'ready' }, 1, 2),
+    listingStatus({ decision: 'ready' }, 1, 1),
+  ];
+  assert.equal(new Set(states.map((s) => s.text)).size, states.length);
+  for (const s of states) assert.ok(help.includes(`"${s.text}"`), `docs/help.md does not name the My listings state "${s.text}"`);
 });
 
 test('help.md is organised by what people are trying to do', () => {

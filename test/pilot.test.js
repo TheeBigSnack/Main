@@ -131,6 +131,25 @@ test('an open flag is cleared only by a complete, confirmed scan that no longer 
   assert.equal(noteFlags(p, null).flags.length, 4);
 });
 
+test('a posted car the website keeps showing as sale-pending keeps its take-down flag open scan after scan, never "cleared"', () => {
+  const posted = { [RAM]: { name: '2019 Ram 1500 Classic Express', price: 27163 } };
+  const pending = (at) => snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, at);
+  let prev = snapshot(LOT);
+  let p = null;
+  for (const at of [T(0), T(180), T(360)]) {
+    const now = pending(at);
+    const diff = diffScans(prev, now, { posted, confirm: confirmed() });
+    diff.takenAt = at;
+    p = noteFlags(p, diff);
+    prev = now; // the scan's snapshot is saved, as background.js and the popup save it
+  }
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.why, f.flaggedAt, f.doneAt]), [[RAM, 'takeDown', 'sale-pending', T(0), undefined]]);
+  assert.equal(summarizePilot(p, { now: T(360), labels }).takeDowns.cleared, 0);
+  // Taken down closes it with the hours from the first scan that flagged it
+  p = resolveFlag(p, RAM, null, { at: T(420) });
+  assert.deepEqual(p.flags.map((f) => [f.how, f.hours]), [['manual', 7]]);
+});
+
 test('resolving a flag: seen on the listing, ticked off by hand, or the car unmarked; kind null closes both kinds', () => {
   const diff = { warnings: [], takeDown: [{ vin: RAM, yours: true, name: 'Ram', why: 'gone' }], priceUpdates: [{ vin: RAM, yours: true, name: 'Ram', from: 2, to: 1 }, { vin: WAGONEER, yours: true, name: 'Wagoneer', from: 38383, to: 36883 }], takenAt: T(0) };
   let p = noteFlags(null, diff);

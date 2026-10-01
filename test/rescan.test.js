@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText } from '../extension/src/rescan.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
@@ -131,6 +131,48 @@ test('car you posted goes sale-pending: take down', () => {
   const d = diffScans(snapshot(LOT), curr, { posted, confirm: confirmed() });
   assert.equal(d.takeDown.length, 1);
   assert.equal(d.takeDown[0].why, 'sale-pending');
+});
+
+test('a posted car stays on Take down on every scan while the website marks it sale-pending or sold, until Taken down', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
+  const pending = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const first = diffScans(snapshot(LOT), pending, { posted, confirm: confirmed() });
+  const again = diffScans(pending, pending, { posted, confirm: confirmed() }); // the next rescan: the saved snapshot already says pending
+  for (const d of [first, again]) assert.deepEqual(d.takeDown.map((t) => [t.vin, t.why, t.text, t.yours]), [[VIN.ram, 'sale-pending', 'Sale pending on the website', true]]);
+  // a website that marks the car sold (a schema.org SoldOut offer reads "Sold") says sold, scan after scan
+  const sold = snapshot([['usedNormal', { extra_fields: { lightning: { statusLabel: 'Sold' } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  for (const prev of [snapshot(LOT), sold]) assert.deepEqual(diffScans(prev, sold, { posted, confirm: confirmed() }).takeDown.map((t) => t.text), ['Marked sold on the website']);
+  // Taken down ends it; the car back for sale ends it
+  assert.deepEqual(diffScans(pending, pending, { posted: markTakenDown(posted, VIN.ram), confirm: confirmed() }).takeDown, []);
+  assert.deepEqual(diffScans(pending, snapshot(LOT), { posted, confirm: confirmed() }).takeDown, []);
+});
+
+test('a posted car the pre-owned check now holds back stays under Needs a look on every scan, not only the first', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
+  const retyped = snapshot([['usedNormal', { type: 'New', vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.equal(retyped.vehicles[VIN.ram].decision, 'skip', 'every sign now says new');
+  const disagree = snapshot([['usedNormal', { vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.equal(disagree.vehicles[VIN.ram].decision, 'review', 'the signs disagree');
+  for (const now of [retyped, disagree]) {
+    for (const prev of [snapshot(LOT), now]) {
+      const d = diffScans(prev, now, { posted, confirm: confirmed() });
+      assert.deepEqual(d.needsALook.map((n) => [n.vin, n.yours, n.text]), [[VIN.ram, true, now.vehicles[VIN.ram].reason]]);
+    }
+    assert.deepEqual(diffScans(now, now, { posted: {}, confirm: confirmed() }).needsALook, [], 'not posted: the Review tab holds it, To do does not');
+  }
+});
+
+test('My listings: sold, sale-pending and held back by the pre-owned check come before a price change', () => {
+  const entry = (patch) => snapshot([['usedNormal', patch]]).vehicles[VIN.ram];
+  assert.deepEqual(listingStatus(null, 27163, null), { tone: 'bad', text: 'Not on the website at the last scan' });
+  assert.deepEqual(listingStatus(entry({ status: 'pend-sale' }), 27163, 26163), { tone: 'bad', text: 'Sale pending on the website' });
+  assert.deepEqual(listingStatus(entry({ extra_fields: { lightning: { statusLabel: 'Sold' } } }), 27163, 27163), { tone: 'bad', text: 'Marked sold on the website' });
+  assert.deepEqual(listingStatus(entry({ vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/' }), 27163, 27163), { tone: 'warn', text: 'Needs a look (see To do)' });
+  assert.deepEqual(listingStatus({ decision: 'skip' }, 27163, 27163), { tone: 'bad', text: 'Not pre-owned on the website' });
+  assert.deepEqual(listingStatus(entry(), 28000, 27163), { tone: 'warn', text: 'Website price changed', priceChanged: true });
+  assert.deepEqual(listingStatus(entry(), 27163, 27163), { tone: 'good', text: 'Matches the website' });
+  assert.equal(pendingText({ statusLabel: 'Reserved (sale pending)' }), 'Sale pending on the website');
+  assert.equal(pendingText({ status: 'publish', statusLabel: '' }), null);
 });
 
 test('new arrival shows up with its decision', () => {
