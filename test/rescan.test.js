@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from '../extension/src/rescan.js';
-import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError } from './helpers.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt } from '../extension/src/rescan.js';
+import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
+import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
 import { scanWithSearch } from '../extension/src/scanRunner.js';
 import { withDefaults } from '../extension/src/settings.js';
@@ -285,4 +286,172 @@ test('a website read from its pages: a posted car sold on a bad server day is ta
     const good = await rescanOf(thinListSite(rest), prev, posted);
     assert.deepEqual(good.diff.takeDown.map((t) => [t.vin, t.why]), [[cars[0].vin, 'gone']], `rescan ${day} after the bad day`);
   }
+});
+
+// ---------- the dates the snapshot keeps for the Ready and To do tabs ----------
+// (src/readyList.js reads them: the website's own in-stock date, and when
+// Lot Sync first saw the car, carried from one saved snapshot to the next)
+
+test('the snapshot keeps the website\'s in-stock date as the record gave it, and no date is no date', () => {
+  const s = snapshot([['usedNormal'], ['certified'], ['usedNoPrice', { date_in_stock: null }]]);
+  assert.equal(s.vehicles[VIN.ram].dateInStock, fixtures.usedNormal.date_in_stock);
+  assert.equal(s.vehicles[VIN.wagoneer].dateInStock, fixtures.certified.date_in_stock);
+  assert.equal(s.vehicles[fixtures.usedNoPrice.vin].dateInStock, null);
+  assert.equal(snapshotEntry({ vin: 'X', dateInStock: '   ' }, { decision: 'ready', blockers: [] }).dateInStock, null, 'blank is no date');
+  assert.equal(snapshotEntry({ vin: 'X', dateInStock: 20260920 }, { decision: 'ready', blockers: [] }).dateInStock, null, 'only the website\'s own text is kept, never a number made into a date');
+});
+
+test('when Lot Sync first saw a car: null on a first scan, this scan\'s time for a newcomer, carried over for the rest', () => {
+  const T1 = '2026-09-26T21:00:00.000Z';
+  const T2 = '2026-09-27T09:00:00.000Z';
+  const T3 = '2026-09-28T09:00:00.000Z';
+  // first scan: nothing is new by first sighting
+  const first = snapshot(LOT, MY_STORE, T1);
+  assert.deepEqual(Object.values(first.vehicles).map((e) => e.firstSeenAt), [null, null, null, null]);
+  assert.equal(firstSeenAt(null, VIN.ram, T1), null);
+  // a rescan: the newcomer gets this scan's time, the others keep null
+  const withNewcomer = (takenAt, previous) => makeSnapshotFrom([...LOT, ['usedZeroMiles']], takenAt, previous);
+  const second = withNewcomer(T2, first);
+  assert.equal(second.vehicles[fixtures.usedZeroMiles.vin].firstSeenAt, T2);
+  for (const vin of Object.values(VIN)) assert.equal(second.vehicles[vin].firstSeenAt, null, `${vin} was already there`);
+  // the scan after: the newcomer's first sighting stays what it was
+  const third = withNewcomer(T3, second);
+  assert.equal(third.vehicles[fixtures.usedZeroMiles.vin].firstSeenAt, T2);
+  // a car that leaves and comes back is seen afresh
+  const without = makeSnapshotFrom(LOT, T3, second);
+  const back = withNewcomer('2026-09-29T09:00:00.000Z', without);
+  assert.equal(back.vehicles[fixtures.usedZeroMiles.vin].firstSeenAt, '2026-09-29T09:00:00.000Z');
+  // an entry saved before the field existed carries null: Lot Sync did not see that car arrive either
+  const old = { ...first, vehicles: Object.fromEntries(Object.entries(first.vehicles).map(([vin, e]) => { const { firstSeenAt: _, ...rest } = e; return [vin, rest]; })) };
+  assert.ok(!('firstSeenAt' in old.vehicles[VIN.ram]));
+  const after = withNewcomer(T2, old);
+  assert.equal(after.vehicles[VIN.ram].firstSeenAt, null);
+  assert.equal(after.vehicles[fixtures.usedZeroMiles.vin].firstSeenAt, T2);
+  // garbage in the previous snapshot is a first scan
+  assert.equal(firstSeenAt({ vehicles: 'x' }, VIN.ram, T2), null);
+  assert.equal(firstSeenAt({ vehicles: { [VIN.ram]: { firstSeenAt: 42 } } }, VIN.ram, T2), null, 'a non-string date is no date');
+  assert.equal(firstSeenAt({ vehicles: {} }, VIN.ram, ''), null, 'a newcomer with no scan time gets none, never an invented one');
+  // the diff is as it was: the newcomer is a new arrival once, by the VIN diff
+  assert.deepEqual(diffScans(first, second).newArrivals.map((n) => n.vin), [fixtures.usedZeroMiles.vin]);
+  assert.deepEqual(diffScans(second, third).newArrivals, []);
+});
+
+function makeSnapshotFrom(items, takenAt, previous) {
+  const vehicles = items.map(([name, patch]) => vehicle(name, patch));
+  const assessments = vehicles.map((v) => assessVehicle(v, MY_STORE));
+  return makeSnapshot({ site: { origin: 'https://example-dealer.test', name: 'Test' }, takenAt, complete: true, vehicles, assessments, previous });
+}
+
+test('the scan runner carries the first sighting through its own snapshot, on the first scan, a rescan, and after a scan it did not save', async () => {
+  const cars = standardCars(12);
+  const first = await rescanOf(thinListSite(cars), null);
+  assert.deepEqual([...new Set(Object.values(first.snapshot.vehicles).map((e) => e.firstSeenAt))], [null], 'a first scan: nothing new by first sighting');
+  assert.deepEqual([...new Set(Object.values(first.snapshot.vehicles).map((e) => e.dateInStock))], [null], 'this website gives no in-stock date');
+  // a rescan with a newcomer
+  const more = standardCars(13);
+  const second = await rescanOf(thinListSite(more), first.snapshot);
+  const newcomer = more[12].vin;
+  assert.equal(second.snapshot.vehicles[newcomer].firstSeenAt, second.res.fetchedAt);
+  assert.ok(second.snapshot.vehicles[newcomer].firstSeenAt > first.res.fetchedAt);
+  for (const c of cars) assert.equal(second.snapshot.vehicles[c.vin].firstSeenAt, null, 'the rest were already there');
+  // a scan whose snapshot is not saved (11 of 13 gone at once is unreliable): the next scan still carries from the last saved one
+  const broken = await rescanOf(thinListSite(more.slice(11)), second.snapshot);
+  assert.equal(broken.diff.unreliable, true);
+  const third = await rescanOf(thinListSite(more), second.snapshot);
+  assert.equal(third.snapshot.vehicles[newcomer].firstSeenAt, second.res.fetchedAt, 'the first sighting is the saved snapshot\'s, not the broken scan\'s');
+  for (const c of cars) assert.equal(third.snapshot.vehicles[c.vin].firstSeenAt, null);
+  // a car whose page failed keeps its whole last entry, dates included
+  const bad = await rescanOf(thinListSite(more, { [more[12].path]: httpError(500) }), second.snapshot);
+  assert.deepEqual(bad.res.unread, [newcomer]);
+  assert.equal(bad.snapshot.vehicles[newcomer].firstSeenAt, second.res.fetchedAt);
+});
+
+test('the same first-sighting rule through the inventory-service adapter the background rescan uses', async () => {
+  const { default: dealerInspire } = await import('../extension/adapters/dealerInspire.js');
+  const { fakeDealerPage, runInPage } = await import('./helpers.js');
+  const site = { origin: 'https://example-dealer.test', host: 'example-dealer.test', name: 'Example Motors', title: 'Used', adapter: 'dealerInspire' };
+  const service = { search: 'https://example-dealer.test/api/v1/listings/1', apiKey: 'test-key', visibleStatusValues: ['publish', 'modified', 'pend-sale'] };
+  const scanOf = (records, prevSnapshot) => {
+    const page = fakeDealerPage({ records });
+    const search = (body) => runInPage(page, dealerInspire.searchInPage, service, body).then((r) => r.data);
+    return scanWithSearch({ adapter: dealerInspire, search, site, settings: withDefaults({ myStores: [WAYNESBURG] }, site), prevSnapshot, options: dealerInspire.scanOptions(service) });
+  };
+  const day1 = [fixtures.usedNormal, fixtures.certified, fixtures.usedNoCarfax];
+  const first = await scanOf(day1, null);
+  assert.equal(first.ok, true);
+  assert.deepEqual(Object.values(first.snapshot.vehicles).map((e) => [e.dateInStock, e.firstSeenAt]), day1.map((r) => [r.date_in_stock, null]), 'the website\'s dates, and nothing new by first sighting');
+  const second = await scanOf([...day1, fixtures.usedNoPhotos], first.snapshot);
+  assert.equal(second.snapshot.vehicles[fixtures.usedNoPhotos.vin].firstSeenAt, second.res.fetchedAt);
+  assert.equal(second.snapshot.vehicles[fixtures.usedNoPhotos.vin].dateInStock, fixtures.usedNoPhotos.date_in_stock);
+  assert.equal(second.snapshot.vehicles[fixtures.usedNormal.vin].firstSeenAt, null);
+});
+
+test("a new arrival in the diff carries the car's dates, so To do can show them when this scan's snapshot is not saved", async () => {
+  const { dateLine } = await import('../extension/src/readyList.js');
+  // the scan times and "now" are on the machine's own clock, as the popup's are, so the words below hold in every time zone
+  const T1 = new Date(2026, 8, 30, 9, 0).toISOString();
+  const T2 = new Date(2026, 9, 1, 9, 0).toISOString();
+  const big = [];
+  for (let i = 0; i < 12; i += 1) big.push(['usedNormal', { vin: `1C6RR7FT0KS64${String(1000 + i)}`, date_in_stock: '2026-09-01T00:00:00.000Z' }]);
+  const prev = makeSnapshotFrom(big, T1, null);
+  const dated = ['usedNoCarfax', { date_in_stock: '2026-09-30T00:00:00.000Z' }];
+  const undated = ['usedNoPhotos', { date_in_stock: null }];
+  // a scan that drops 10 of 12 cars is unreliable: the popup and the service worker save its diff but not its snapshot
+  const curr = makeSnapshotFrom([...big.slice(0, 2), dated, undated], T2, prev);
+  const d = diffScans(prev, curr);
+  assert.equal(d.unreliable, true);
+  assert.deepEqual(d.newArrivals.map((n) => [n.vin, n.dateInStock, n.firstSeenAt]), [[VIN.hellcat, '2026-09-30T00:00:00.000Z', T2], [VIN.tradesman, null, T2]], 'the website\'s date as it gave it, and this sighting');
+  const now = new Date(2026, 9, 1, 12, 0).getTime();
+  assert.equal(dateLine(d.newArrivals[0], { now, locale: 'en-US' }), 'on the website since Sep 30 · 1 day on the lot');
+  assert.equal(dateLine(d.newArrivals[1], { now, locale: 'en-US' }), 'Lot Sync first saw it Oct 1');
+  // a reliable rescan says the same of its newcomer
+  const ok = diffScans(prev, makeSnapshotFrom([...big, dated], T2, prev));
+  assert.equal(ok.unreliable, false);
+  assert.deepEqual(ok.newArrivals.map((n) => [n.vin, n.dateInStock, n.firstSeenAt]), [[VIN.hellcat, '2026-09-30T00:00:00.000Z', T2]]);
+  // a first scan has no arrivals, and nothing else in the diff changed shape
+  assert.deepEqual(diffScans(null, curr).newArrivals, []);
+  assert.deepEqual(Object.keys(ok.newArrivals[0]).sort(), ['dateInStock', 'decision', 'firstSeenAt', 'name', 'price', 'reason', 'stock', 'url', 'vin']);
+});
+
+test('a car the last snapshot still names among its missing pages is not a first sighting when it comes back: it keeps the sighting kept for it, else none', async () => {
+  const T1 = '2026-09-27T09:00:00.000Z';
+  const T2 = '2026-09-28T09:00:00.000Z';
+  const page = 'https://example-dealer.test/car/x';
+  // the rule itself (rescan.js firstSeenAt)
+  assert.equal(firstSeenAt({ vehicles: {}, missingPages: { X: page } }, 'X', T2), null, 'known before, when it arrived unknown: no date, never this scan\'s');
+  assert.equal(firstSeenAt({ vehicles: {}, missingPages: { X: page }, missingSeen: { X: T1 } }, 'X', T2), T1, 'known before, with the sighting the snapshot kept');
+  assert.equal(firstSeenAt({ vehicles: {}, missingPages: { X: page }, missingSeen: { X: 42 } }, 'X', T2), null, 'a non-string sighting is none');
+  assert.equal(firstSeenAt({ vehicles: {}, missingPages: { Y: page }, missingSeen: { X: T1 } }, 'X', T2), T2, 'a car not among the missing pages is a newcomer');
+  assert.equal(firstSeenAt({ vehicles: {}, missingPages: 'x' }, 'X', T2), T2, 'garbage missing pages are none');
+  // through the scan runner: a car already there at the first scan leaves the list on a bad server day (its page cannot be checked, so it is kept among the missing pages) and is back the scan after
+  const cars = standardCars(12);
+  const first = await rescanOf(thinListSite(cars), null);
+  const rest = cars.slice(1);
+  const bad = await rescanOf(thinListSite(rest, { [cars[0].path]: httpError(429) }), first.snapshot);
+  assert.deepEqual(Object.keys(bad.snapshot.missingPages), [cars[0].vin]);
+  assert.equal(bad.snapshot.missingSeen, undefined, 'nothing to keep: Lot Sync did not see this car arrive');
+  const back = await rescanOf(thinListSite(cars), bad.snapshot);
+  assert.deepEqual(back.diff.newArrivals.map((n) => n.vin), [cars[0].vin], 'the VIN diff still lists its return once');
+  assert.equal(back.snapshot.vehicles[cars[0].vin].firstSeenAt, null, 'not a first sighting: Lot Sync had seen it in both scans before');
+  // a newcomer that leaves and comes back keeps the sighting it had
+  const more = standardCars(13);
+  const newcomer = more[12];
+  const second = await rescanOf(thinListSite(more), first.snapshot);
+  const seenAt = second.snapshot.vehicles[newcomer.vin].firstSeenAt;
+  assert.equal(seenAt, second.res.fetchedAt);
+  const gone = await rescanOf(thinListSite(cars, { [newcomer.path]: httpError(500) }), second.snapshot);
+  assert.deepEqual(gone.snapshot.missingPages, { [newcomer.vin]: STANDARD_ORIGIN + newcomer.path });
+  assert.deepEqual(gone.snapshot.missingSeen, { [newcomer.vin]: seenAt }, 'its sighting goes with its page');
+  const returned = await rescanOf(thinListSite(more), gone.snapshot);
+  assert.equal(returned.snapshot.vehicles[newcomer.vin].firstSeenAt, seenAt, 'the sighting it had, not this scan\'s');
+  assert.equal(returned.snapshot.missingSeen, undefined);
+  // a posted car gone for several scans keeps its page and its sighting the whole time
+  const posted = markPosted({}, { vin: newcomer.vin, name: 'posted car', price: newcomer.price });
+  let prev = second.snapshot;
+  for (let day = 1; day <= 3; day += 1) {
+    const out = await rescanOf(thinListSite(cars, { [newcomer.path]: httpError(500) }), prev, posted);
+    assert.deepEqual(out.snapshot.missingSeen, { [newcomer.vin]: seenAt }, `scan ${day} without it`);
+    prev = out.snapshot;
+  }
+  assert.equal((await rescanOf(thinListSite(more), prev, posted)).snapshot.vehicles[newcomer.vin].firstSeenAt, seenAt);
 });

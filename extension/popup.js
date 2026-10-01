@@ -14,6 +14,7 @@ import { updateKey, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
+import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from './src/readyList.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -45,6 +46,8 @@ const state = {
   rescanPermission: null, // true/false once known: may the service worker read this website?
   scanning: false,
   view: 'todo',
+  readyFilter: '', // the Ready tab's search box, for as long as the popup is open
+  picked: new Set(), // the Ready tab's ticked cars (VINs), for as long as the popup is open: a tick survives the search box hiding its row and a redraw; the queue takes them all
 };
 
 // ---------- saved data (kept per website, in this browser only) ----------
@@ -298,15 +301,45 @@ function facts(e) {
   return bits.join(' · ');
 }
 
-function row(e, { sub = '', right = '', action = '', muted = false, pick = false } = {}) {
+// `tag` is HTML shown after the name (the New pill), `line` a third, small
+// line under the facts (the car's date and where it came from).
+function row(e, { sub = '', right = '', action = '', muted = false, pick = false, tag = '', line = '' } = {}) {
   const name = /^https?:\/\//i.test(e.url || '')
     ? `<a class="name" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.name)}</a>`
     : `<span class="name">${esc(e.name)}</span>`;
-  const box = pick ? `<input type="checkbox" class="pick" data-vin="${esc(e.vin)}" aria-label="Queue ${esc(e.name)}" />` : '';
-  return `<li class="row${muted ? ' muted' : ''}">${box}<div class="main">${name}<div class="sub">${sub}</div></div>${
+  const box = pick ? `<input type="checkbox" class="pick" data-vin="${esc(e.vin)}" aria-label="Queue ${esc(e.name)}"${state.picked.has(e.vin) ? ' checked' : ''} />` : '';
+  return `<li class="row${muted ? ' muted' : ''}">${box}<div class="main">${name}${tag}<div class="sub">${sub}</div>${line ? `<div class="when">${line}</div>` : ''}</div>${
     right ? `<div class="price">${right}</div>` : ''
   }${action}</li>`;
 }
+
+// ---------- new arrivals and the car's date (src/readyList.js) ----------
+
+const readySort = () => sortOrder(state.settings?.readySort);
+const newDays = () => newDaysOf(state.settings?.newDays);
+const newOptions = (now = Date.now()) => ({ days: newDays(), now, posted: state.posted });
+const newPill = (e, now = Date.now()) => (isNew(e, newOptions(now)) ? ` <span class="pill good new" title="Within the last ${newDays()} days, by the website's in-stock date or else the scan that first saw it">New</span>` : '');
+const whenLine = (e, now = Date.now()) => esc(dateLine(e, { now }));
+
+// The To do tab's New arrivals: every car the window says is new (the
+// website's in-stock date, else the scan that first saw it; posted cars
+// drop off), plus what the last scan found that was not on the website the
+// time before (the rescan diff, as ever: a fact even when the website's own
+// date is older than the window). Newest first.
+function newArrivalItems(now = Date.now()) {
+  const snap = state.snapshot?.vehicles || {};
+  const byVin = new Map();
+  for (const n of state.diff?.newArrivals || []) {
+    if (state.posted[n.vin]) continue;
+    byVin.set(n.vin, { ...(snap[n.vin] || {}), ...n });
+  }
+  for (const e of Object.values(snap)) {
+    if (byVin.has(e.vin) || !isNew(e, newOptions(now))) continue;
+    byVin.set(e.vin, { ...e, price: price(e) });
+  }
+  return sortEntries([...byVin.values()], 'newest', { basis: state.settings?.basis });
+}
+const readyArrivals = (items) => items.filter((n) => n.decision === DECISION.READY && !state.posted[n.vin]);
 
 function rows(items) {
   return `<ul class="rows">${items.join('')}</ul>`;
@@ -410,16 +443,18 @@ function viewTodo(l) {
       ))
     );
   }
-  const arrivals = d?.newArrivals || [];
+  const now = Date.now();
+  const arrivals = newArrivalItems(now);
   if (arrivals.length) {
-    const readyArrivals = arrivals.filter((n) => n.decision === DECISION.READY && !state.posted[n.vin]);
-    const queueAll = readyArrivals.length > 1
-      ? `<div class="toolbar"><button type="button" class="small go" data-action="queueArrivals">Queue all ${readyArrivals.length} ready arrivals</button><span class="hint">Pre-fills them one at a time in the side panel; you click Publish on each.</span></div>`
+    const ready = readyArrivals(arrivals);
+    const queueAll = ready.length > 1
+      ? `<div class="toolbar"><button type="button" class="small go" data-action="queueArrivals">Queue all ${ready.length} ready arrivals</button><span class="hint">Pre-fills them one at a time in the side panel; you click Publish on each.</span></div>`
       : '';
     parts.push(
       section('New arrivals', 'good', arrivals.map((n) =>
         row(n, {
           sub: decisionPill(n.decision) + (n.decision === DECISION.READY ? '' : ' ' + esc(n.reason)),
+          line: whenLine(n, now),
           right: money(n.price),
           action: n.decision === DECISION.READY ? postButton(n.vin) : '',
         })
@@ -451,42 +486,123 @@ function queueStatusHtml() {
 const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
 const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
 
+// The Ready tab: the sort menu (remembered for this website in
+// settings.readySort) and the search box above the list; the list itself,
+// with its Select the next N toolbar, is drawn by readyBodyHtml so typing in
+// the box redraws only the list and the box keeps the focus.
 function viewReady(l) {
   const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. Click <b>Post</b> on one car, or tick several and <b>Post</b> them as a queue: the side panel pre-fills each form and you click Publish on each. Listed one by hand? Click <b>Mark posted</b>.</p>`;
-  if (!l.ready.length) return lead + queueStatusHtml() + empty('No cars are ready right now.');
+  if (!l.ready.length) {
+    state.picked.clear();
+    return lead + queueStatusHtml() + empty('No cars are ready right now.');
+  }
   const cap = dailyCap();
-  const pickable = l.ready.filter((e) => !state.posted[e.vin]);
   const capBanner = cap.reached ? `<div class="banner warn" id="capReached">${esc(capText(cap))}</div>` : '';
-  const toolbar = pickable.length > 1 && !cap.reached
-    ? `<div class="toolbar"><label><input type="checkbox" id="pickAll" /> <span>Select the next ${Math.min(cap.remaining, pickable.length)}</span></label><button type="button" class="small go" data-action="queue" id="queueBtn" disabled>Post selected</button><span class="hint" id="pickHint">${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.</span></div>`
-    : '';
-  return lead + queueStatusHtml() + capBanner + toolbar + rows(l.ready.map((e) => row(e, { sub: facts(e), right: money(price(e)), action: postButton(e.vin), pick: !state.posted[e.vin] && !cap.reached })));
+  const order = readySort();
+  const controls = `<div class="toolbar listControls">
+    <label class="control"><span>Sort</span><select id="readySort">${SORT_ORDERS.map((o) => `<option value="${o.id}" ${o.id === order ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>
+    <label class="control grow"><span class="sr">Search</span><input type="search" id="readySearch" value="${esc(state.readyFilter)}" placeholder="Search: stock number, last 6 of the VIN, year, make or model" autocomplete="off" spellcheck="false" /></label>
+  </div>`;
+  return lead + queueStatusHtml() + capBanner + controls + `<div id="readyBody">${readyBodyHtml(l, cap)}</div>`;
 }
 
-// Ticking: never more than the day's remaining posts. "Select all" takes the
-// first N cars from the top, where N is what's left today.
+// The ready cars in the chosen order, after the search box, each with its
+// New pill and date line. The ticks live in state.picked (every pickable
+// car, shown or hidden by the search box), so "Post N cars" counts them all
+// and the queue takes them all, in this order. "Select the next N" counts
+// the pickable cars shown, less the ticked ones the search box hides, so N
+// is what the tick takes from the top and the day's cap holds either way.
+function readyBodyHtml(l, cap) {
+  const order = readySort();
+  const basis = { basis: state.settings?.basis };
+  prunePicks(sortEntries(l.ready.filter((e) => !state.posted[e.vin]), order, basis), cap);
+  const shown = sortEntries(l.ready.filter((e) => filterText(e, state.readyFilter)), order, basis);
+  const pickable = shown.filter((e) => !state.posted[e.vin]);
+  const hidden = state.picked.size - pickable.filter((e) => state.picked.has(e.vin)).length;
+  const n = Math.max(0, Math.min(cap.remaining - hidden, pickable.length));
+  const posts = `${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.`;
+  const selectNext = pickable.length > 1 && n > 0;
+  const toolbar = !cap.reached && (pickable.length > 1 || state.picked.size)
+    ? `<div class="toolbar">${selectNext ? `<label><input type="checkbox" id="pickAll" data-n="${n}" /> <span>Select the next ${n}</span></label>` : ''}<button type="button" class="small go" data-action="queue" id="queueBtn"${state.picked.size ? '' : ' disabled'}>${queueLabel()}</button><span class="hint" id="pickHint">${selectNext ? `Ticks the next ${n} in this order. ` : ''}${hidden ? `${hidden} ticked car${hidden === 1 ? '' : 's'} hidden by the search. ` : ''}${posts}</span></div>`
+    : '';
+  if (!shown.length) return toolbar + empty('No cars match');
+  const now = Date.now();
+  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin), pick: !state.posted[e.vin] && !cap.reached })));
+}
+
+// Ticks that no longer apply: a car that left the Ready list or was posted
+// (another tab, a rescan), and, once the day's cap has moved under them,
+// the ones past it (the first ones in the current order stay).
+function prunePicks(ordered, cap) {
+  state.picked = new Set(ordered.filter((e) => state.picked.has(e.vin)).slice(0, Math.max(0, cap.remaining)).map((e) => e.vin));
+}
+
+// The ticked cars, in the order shown, the ones the search box hides included.
+const pickedVins = () => sortEntries(lists().ready.filter((e) => state.picked.has(e.vin)), readySort(), { basis: state.settings?.basis }).map((e) => e.vin);
+
+const queueLabel = () => (state.picked.size ? `Post ${state.picked.size} car${state.picked.size === 1 ? '' : 's'}` : 'Post selected');
+
+// Redraws the list after a keystroke in the search box or a change of
+// order; the ticks come back from state.picked.
+function renderReadyBody() {
+  const body = $('readyBody');
+  if (!body) return;
+  body.innerHTML = readyBodyHtml(lists(), dailyCap());
+  syncPickAll();
+}
+
+// The sort order, kept with this website's settings (never in the synced
+// profile): written from what is stored now, under the key's lock, like
+// every other change to a shared key.
+async function changeReadySort(value) {
+  const order = sortOrder(value);
+  const site = state.snapshot?.site || { name: state.siteName };
+  state.settings = withDefaults({ ...(state.settings || {}), readySort: order }, site);
+  renderReadyBody();
+  if (!state.origin) return;
+  await update('settings', (s) => withDefaults({ ...(s || state.settings || {}), readySort: order }, site));
+}
+
+// Ticking: never more than the day's remaining posts, the ticks the search
+// box hides counted. "Select the next N" takes the first N cars in the order
+// shown (N as readyBodyHtml worked it out); unticking it clears the shown ones.
 function onPickChange(target) {
   const cap = dailyCap();
   const boxes = [...document.querySelectorAll('.pick')];
   if (target.id === 'pickAll') {
-    boxes.forEach((box, i) => { box.checked = target.checked && i < cap.remaining; });
-    if (target.checked && boxes.length > cap.remaining) setStatus(`Selected the first ${cap.remaining}: that's all that's allowed today.`);
-  } else if (target.checked && boxes.filter((b) => b.checked).length > cap.remaining) {
+    const n = Number(target.dataset.n) || 0;
+    boxes.forEach((box, i) => {
+      box.checked = target.checked && i < n;
+      if (box.checked) state.picked.add(box.dataset.vin);
+      else state.picked.delete(box.dataset.vin);
+    });
+    if (target.checked && boxes.length > n) setStatus(`Selected the next ${n} in this order: that's all that's allowed today.`);
+  } else if (target.checked && state.picked.size >= cap.remaining) {
     target.checked = false;
     setStatus(`Only ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.`, 'error');
+  } else if (target.checked) {
+    state.picked.add(target.dataset.vin);
+  } else {
+    state.picked.delete(target.dataset.vin);
   }
-  const picked = boxes.filter((b) => b.checked).length;
+  syncPickAll();
+}
+
+// The Select the next N box reads as ticked only when exactly those N are.
+function syncPickAll() {
   const all = $('pickAll');
-  if (all) all.checked = picked > 0 && picked === Math.min(cap.remaining, boxes.length);
+  if (all) {
+    const picked = [...document.querySelectorAll('.pick:checked')].length;
+    all.checked = picked > 0 && picked === (Number(all.dataset.n) || 0);
+  }
   updateQueueButton();
 }
 
 function updateQueueButton() {
   const btn = $('queueBtn');
   if (!btn) return;
-  const n = document.querySelectorAll('.pick:checked').length;
-  btn.disabled = n === 0;
-  btn.textContent = n ? `Post ${n} car${n === 1 ? '' : 's'}` : 'Post selected';
+  btn.disabled = state.picked.size === 0;
+  btn.textContent = queueLabel();
 }
 
 function viewNotReady(l) {
@@ -664,6 +780,10 @@ function viewSettings() {
       <p class="hint">Only cars at these stores count as ready to post. Leave all unticked to include every store.</p>
       ${stores}
     </fieldset>
+    <fieldset><legend>New arrivals</legend>
+      ${field('Mark cars as new for N days', 'newDays', s.newDays, `type="number" min="${MIN_NEW_DAYS}" max="${MAX_NEW_DAYS}"`)}
+      <p class="hint">Counted from the in-stock date the website gives for the car, or else from the scan that first saw it. A car you have posted is never marked new. ${MIN_NEW_DAYS} to ${MAX_NEW_DAYS} days; kept for this website only, so it does not follow your profile to another website. The order of the Ready to post list is remembered the same way.</p>
+    </fieldset>
     <fieldset><legend>Dealership, named on every listing</legend>
       ${field('Dealership name', 'dealerName', s.dealer.name)}
       ${field('City', 'dealerCity', s.dealer.city)}
@@ -787,7 +907,20 @@ function render() {
   renderTabs(l);
   const views = { todo: viewTodo, ready: viewReady, notReady: viewNotReady, otherStores: viewOtherStores, review: viewReview, mine: viewMine, pilot: viewPilot, settings: viewSettings };
   if (state.view === 'otherStores' && !l.otherStores.length) state.view = 'todo';
-  $('panel').innerHTML = (views[state.view] || viewTodo)(l);
+  // A redraw the person did not ask for (the service worker's 3-hourly
+  // rescan, a colleague's sync) must not take the caret out of the box they
+  // are typing in: the focused control comes back by its id, caret and all.
+  const panel = $('panel');
+  const active = document.activeElement;
+  const focus = active && active.id && panel.contains(active) ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
+  panel.innerHTML = (views[state.view] || viewTodo)(l);
+  const again = focus && $(focus.id);
+  if (again) {
+    again.focus();
+    if (typeof focus.start === 'number' && typeof again.setSelectionRange === 'function') {
+      try { again.setSelectionRange(focus.start, focus.end); } catch (e) { /* a control with no caret */ }
+    }
+  }
 }
 
 // ---------- actions ----------
@@ -839,8 +972,8 @@ async function onPanelClick(ev) {
       let queue = state.queue;
       if (btn.dataset.action !== 'continueQueue') {
         const vins = btn.dataset.action === 'queue'
-          ? [...document.querySelectorAll('.pick:checked')].map((i) => i.dataset.vin)
-          : (state.diff?.newArrivals || []).filter((n) => n.decision === DECISION.READY && !state.posted[n.vin]).map((n) => n.vin);
+          ? pickedVins() // the ticked cars in the order shown, the ones the search box hides included
+          : readyArrivals(newArrivalItems()).map((n) => n.vin); // the same cars the To do tab lists, in the same order
         const cap = dailyCap();
         const made = createQueue(vins, { remaining: cap.remaining, dealerTabId: state.tab.id, windowId: state.tab.windowId });
         if (!made.ok) {
@@ -871,6 +1004,7 @@ async function onPanelClick(ev) {
         setStatus(storageErrorText(e), 'error');
         return;
       }
+      if (btn.dataset.action === 'queue') state.picked.clear(); // the queue has them
       if (!opened) setStatus('Open the Lot Sync side panel (Chrome menu → Side panel) to work through the queue.');
       else setStatus(`Queue of ${queue.vins.length}: continue in the side panel.`);
       render();
@@ -1177,6 +1311,7 @@ async function onSettingsSubmit(ev) {
       dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },
       priceNote: str('priceNote'),
       dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),
+      newDays: Math.max(MIN_NEW_DAYS, Math.min(MAX_NEW_DAYS, Number(form.get('newDays')) || DEFAULT_NEW_DAYS)), // 1 to 30; blank or 0 is the default (readySort stays as the Ready tab's menu set it, through ...prev)
       rewrite: { enabled: form.get('rewriteEnabled') === 'on', endpoint: str('rewriteEndpoint'), key: form.has('rewriteKey') ? str('rewriteKey') : prev.rewrite.key }, // no key field while signed in: the typed one is kept, never the token
       defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },
       autoRescan: form.get('autoRescan') === 'on',
@@ -1227,6 +1362,20 @@ async function init() {
   $('panel').addEventListener('submit', onSettingsSubmit);
   $('panel').addEventListener('change', (ev) => {
     if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) onPickChange(ev.target);
+    else if (ev.target.id === 'readySort') changeReadySort(ev.target.value);
+  });
+  // the Ready tab's search box: filters as you type, Escape clears it
+  $('panel').addEventListener('input', (ev) => {
+    if (ev.target.id !== 'readySearch') return;
+    state.readyFilter = ev.target.value;
+    renderReadyBody();
+  });
+  $('panel').addEventListener('keydown', (ev) => {
+    if (ev.target.id !== 'readySearch' || ev.key !== 'Escape' || !ev.target.value) return;
+    ev.preventDefault();
+    ev.target.value = '';
+    state.readyFilter = '';
+    renderReadyBody();
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     // the side panel, the wizard and the service worker all write while the

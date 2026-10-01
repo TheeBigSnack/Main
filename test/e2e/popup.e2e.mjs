@@ -108,11 +108,54 @@ try {
   assert.match(todo, /Update price\s*1/);
   assert.match(todo, /\$38,383 → \$36,883/);
   assert.match(todo, /New arrivals\s*1/);
-  assert.match(todo, /2021 Chevrolet Silverado 1500 LTZ/);
+  assert.match(todo, /2021 Chevrolet Silverado 1500 LTZ[\s\S]*on the website since [^·]+· under a day on the lot/, "the arrival's date line: the mock site put it in stock today");
   assert.match(todo, /Just became ready\s*1/);
   assert.match(todo, /photos added, now at Waynesburg/);
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '1');
   await popup.screenshot({ path: join(shots, '5-rescan-todo.png'), fullPage: true });
+
+  // ---- Ready to post: the order, the New pill, the date line, the search box ----
+  // Two ready cars now: the Silverado that arrived today and the Hellcat
+  // (in stock 40 days ago on the mock site, with photos and at the store since today).
+  await tab(popup, 'ready').click();
+  const names = () => popup.locator('.rows .name').allTextContents();
+  const SILVERADO = '2021 Chevrolet Silverado 1500 LTZ';
+  const HELLCAT = '2016 Dodge Challenger SRT Hellcat';
+  assert.equal(await popup.locator('#readySort').inputValue(), 'newest', 'newest on the lot is the default order');
+  assert.deepEqual(await names(), [SILVERADO, HELLCAT], 'newest on the lot first');
+  assert.deepEqual(await popup.locator('.rows .row').evaluateAll((rows) => rows.map((r) => Boolean(r.querySelector('.pill.new')))), [true, false], 'only the car within the window is marked New');
+  assert.match(await popup.locator('.rows .row').nth(1).locator('.when').textContent(), /^on the website since .+ · 40 days on the lot$/);
+  assert.match(await popup.textContent('#pickHint'), /Ticks the next 2 in this order/);
+  await popup.selectOption('#readySort', 'name');
+  await popup.waitForFunction(() => document.querySelector('.rows .name')?.textContent.startsWith('2016'));
+  assert.deepEqual(await names(), [HELLCAT, SILVERADO], 'by name');
+  await popup.selectOption('#readySort', 'longest');
+  await popup.waitForFunction(() => document.querySelector('#readySort').value === 'longest' && document.querySelector('.rows .name')?.textContent.startsWith('2016'));
+  assert.deepEqual(await names(), [HELLCAT, SILVERADO], 'longest on the lot first');
+  await popup.selectOption('#readySort', 'newest');
+  await popup.waitForFunction(() => document.querySelector('.rows .name')?.textContent.startsWith('2021'));
+  // the search box: the stock number, the end of the VIN, words of the name; every word must match
+  await popup.fill('#readySearch', 'w2001');
+  assert.deepEqual(await names(), [SILVERADO], 'by stock number');
+  await popup.fill('#readySearch', '244585');
+  assert.deepEqual(await names(), [SILVERADO], 'by the last six of the VIN');
+  await popup.fill('#readySearch', 'dodge hell');
+  assert.deepEqual(await names(), [HELLCAT], 'by make and model words');
+  await popup.fill('#readySearch', 'dodge silverado');
+  assert.match(await popup.textContent('#readyBody'), /No cars match/);
+  await popup.press('#readySearch', 'Escape');
+  assert.equal(await popup.inputValue('#readySearch'), '', 'Escape clears the box');
+  assert.deepEqual(await names(), [SILVERADO, HELLCAT]);
+  // the order is remembered for this website: set it, close the popup, open it again
+  await popup.selectOption('#readySort', 'price');
+  await popup.waitForFunction(() => document.querySelector('.rows .name')?.textContent.startsWith('2021'));
+  assert.deepEqual(await names(), [SILVERADO, HELLCAT], 'price, low to high: $36,603 before $53,485');
+  await popup.close();
+  popup = await openPopup();
+  await tab(popup, 'ready').click();
+  assert.equal(await popup.locator('#readySort').inputValue(), 'price', 'the order was kept with this website\'s settings');
+  await popup.screenshot({ path: join(shots, '5b-ready-sorted.png') });
+  await tab(popup, 'todo').click();
 
   await popup.click('button[data-action="takenDown"]');
   // the click writes to storage before it redraws: wait for the redraw rather than read the old count
@@ -127,6 +170,97 @@ try {
   assert.equal(await popup.inputValue('input[name="dealerState"]'), 'PA');
   assert.equal(await popup.inputValue('input[name="dealerZip"]'), '15370');
   await popup.screenshot({ path: join(shots, '6-settings.png') });
+  await popup.close();
+
+  // ---- Day 3: the Tradesman gets photos and moves to Waynesburg, so three cars are ready ----
+  // The Silverado (in stock today, $36,603), the Hellcat (40 days, $53,485) and
+  // the Tradesman (50 days, $33,485): each of the four orders gives a list no
+  // other order gives, so a menu that mixed two of them up would show here.
+  await dealer.request.get(`http://127.0.0.1:${server.address().port}/scenario?name=day3`);
+  popup = await openPopup();
+  await popup.click('#scan');
+  await popup.waitForFunction(() => /3 ready to post/.test(document.querySelector('.meta')?.textContent || '')); // the day-2 to-do list is on screen until the rescan ends
+  assert.match(await popup.textContent('.panel'), /Just became ready\s*1[\s\S]*2025 Ram 1500 Tradesman[\s\S]*photos added, now at Waynesburg/);
+  await tab(popup, 'ready').click();
+  const TRADESMAN = '2025 Ram 1500 Tradesman';
+  const VIN = { silverado: '3GCUYGED0MG244585', hellcat: '2C3CDZC96GH308445', tradesman: '1C6RRFGG7SN698641' };
+  const checkedVins = () => popup.locator('.pick:checked').evaluateAll((boxes) => boxes.map((b) => b.dataset.vin));
+  const sortTo = async (order, first) => {
+    await popup.selectOption('#readySort', order);
+    await popup.waitForFunction(([o, f]) => document.querySelector('#readySort').value === o && document.querySelector('.rows .name')?.textContent === f, [order, first]);
+  };
+  assert.equal(await popup.locator('#readySort').inputValue(), 'price', 'the order kept from day 2');
+  assert.deepEqual(await names(), [TRADESMAN, SILVERADO, HELLCAT], 'price, low to high: $33,485, $36,603, $53,485');
+  await sortTo('newest', SILVERADO);
+  assert.deepEqual(await names(), [SILVERADO, HELLCAT, TRADESMAN], 'newest on the lot: today, 40 days, 50 days');
+  await sortTo('longest', TRADESMAN);
+  assert.deepEqual(await names(), [TRADESMAN, HELLCAT, SILVERADO], 'longest on the lot: 50 days, 40 days, today');
+  await sortTo('name', HELLCAT);
+  assert.deepEqual(await names(), [HELLCAT, SILVERADO, TRADESMAN], 'by name: 2016, 2021, 2025');
+  await sortTo('newest', SILVERADO);
+
+  // The caret stays in the search box when something else writes the scan
+  // (the service worker's 3-hourly rescan, say) and the popup redraws itself.
+  await popup.fill('#readySearch', 'che');
+  assert.deepEqual(await names(), [SILVERADO]);
+  await popup.evaluate(async () => {
+    document.getElementById('readySearch').dataset.before = '1'; // gone once the popup redraws
+    const all = await chrome.storage.local.get(null);
+    const key = Object.keys(all).find((k) => k.startsWith('snapshot:'));
+    await chrome.storage.local.set({ [key]: { ...all[key], takenAt: new Date().toISOString() } });
+  });
+  await popup.waitForFunction(() => document.getElementById('readySearch') && !document.getElementById('readySearch').dataset.before);
+  assert.equal(await popup.evaluate(() => document.activeElement && document.activeElement.id), 'readySearch', 'the search box keeps the focus across a redraw the person did not cause');
+  assert.equal(await popup.inputValue('#readySearch'), 'che', 'and what was typed');
+  await popup.keyboard.type('v');
+  assert.equal(await popup.inputValue('#readySearch'), 'chev', 'the next keystroke lands in the box');
+  assert.deepEqual(await names(), [SILVERADO]);
+  await popup.press('#readySearch', 'Escape');
+  assert.deepEqual(await names(), [SILVERADO, HELLCAT, TRADESMAN]);
+
+  // "Select the next N" ticks the first N in the CURRENT order: with 2 posts
+  // left today and three cars, "longest" ticks the Tradesman and the Hellcat,
+  // "newest" the Silverado and the Hellcat.
+  await popup.click('#settingsBtn');
+  await popup.fill('input[name="dailyCap"]', '2');
+  await popup.click('#panel button[type="submit"]');
+  await popup.waitForFunction(() => (document.querySelector('#saved')?.textContent || '').length > 0);
+  await tab(popup, 'ready').click();
+  assert.match(await popup.textContent('#pickHint'), /Ticks the next 2 in this order\. 2 more posts allowed today\./);
+  await sortTo('longest', TRADESMAN);
+  await popup.check('#pickAll');
+  assert.deepEqual(await checkedVins(), [VIN.tradesman, VIN.hellcat], 'Select the next 2 under "longest" ticks the first two in that order');
+  assert.equal(await popup.textContent('#queueBtn'), 'Post 2 cars');
+  assert.match(await popup.textContent('#status'), /Selected the next 2 in this order: that's all that's allowed today/);
+  await popup.uncheck('#pickAll');
+  assert.deepEqual(await checkedVins(), []);
+  await sortTo('newest', SILVERADO);
+  await popup.check('#pickAll');
+  assert.deepEqual(await checkedVins(), [VIN.silverado, VIN.hellcat], 'and under "newest" the first two in that order');
+  await popup.uncheck('#pickAll');
+  assert.equal(await popup.textContent('#queueBtn'), 'Post selected');
+
+  // A tick survives the search box hiding its row: tick the Silverado, find
+  // the Hellcat by searching, tick it, clear the box: both are ticked, and
+  // the queue takes both, in the order shown, the hidden one included.
+  await popup.check(`.pick[data-vin="${VIN.silverado}"]`);
+  assert.equal(await popup.textContent('#queueBtn'), 'Post 1 car');
+  await popup.fill('#readySearch', 'dodge');
+  assert.deepEqual(await names(), [HELLCAT]);
+  assert.equal(await popup.textContent('#queueBtn'), 'Post 1 car', 'the hidden tick still counts');
+  assert.match(await popup.textContent('#pickHint'), /1 ticked car hidden by the search/);
+  await popup.check(`.pick[data-vin="${VIN.hellcat}"]`);
+  assert.equal(await popup.textContent('#queueBtn'), 'Post 2 cars');
+  await popup.press('#readySearch', 'Escape');
+  assert.deepEqual(await checkedVins(), [VIN.silverado, VIN.hellcat], 'both ticks are there once the box is cleared');
+  assert.equal(await popup.textContent('#queueBtn'), 'Post 2 cars');
+  await popup.fill('#readySearch', 'dodge'); // the Silverado's row hidden again when the button is clicked
+  await popup.click('#queueBtn');
+  await popup.waitForFunction(() => /queue/i.test(document.querySelector('#status').textContent));
+  const queue = await popup.evaluate(async () => { const all = await chrome.storage.local.get(null); return all[Object.keys(all).find((k) => k.startsWith('postQueue:'))]; });
+  assert.deepEqual(queue.vins, [VIN.silverado, VIN.hellcat], 'the queue took the hidden tick too, in the order shown');
+  assert.match(await popup.textContent('#queueStatus'), /Car 1 of 2/);
+  await popup.screenshot({ path: join(shots, '7-day3-queue.png') });
   await popup.close();
 
   // ---- Not a dealer site ----

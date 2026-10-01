@@ -91,6 +91,16 @@ h3 .pill { font-weight: 600; }
 .row .name { font-weight: 600; text-decoration: none; }
 .row .name:hover { text-decoration: underline; }
 .row .sub { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.row .when { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; } /* the car's date and where it came from (src/readyList.js dateLine) */
+.row .name + .pill { margin-left: 6px; vertical-align: 1px; }
+
+/* The Ready tab's sort menu and search box (viewReady). */
+.listControls { margin: 0 0 8px; }
+.listControls .control { display: inline-flex; gap: 6px; align-items: center; }
+.listControls .control.grow { flex: 1; min-width: 200px; }
+.listControls select, .listControls input[type="search"] { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+.listControls input[type="search"] { flex: 1; min-width: 0; }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; } /* read out, not shown */
 .row .price { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .row .price .down { color: var(--good); }
 .row .price .up { color: var(--warn); }

@@ -39,7 +39,7 @@ export const VEHICLE_FIELDS = Object.freeze([
   'locationShort', // the store's own part of that name (normalize.js shortLocation): labels in the popup and the panel. The normaliser sees one record and guesses from brand words; scanRunner.js scanWithSearch settles it over the lot's store names
   'photoCount', // number: no photos = not ready (classify.js); the rescan's "photos added"
   'photos', // photo URLs: 3 per car from the bulk scan, all from getDetails; the panel attaches them
-  'dateInStock', // ISO date or null: kept from the site; no check reads it today (new arrivals come from the VIN diff)
+  'dateInStock', // ISO date or null, as the website gives it: kept in the snapshot (rescan.js snapshotEntry); src/readyList.js reads it for the New pill, the two date orders and the days-on-the-lot line (the rescan's new arrivals still come from the VIN diff)
 
   // --- text for the description writer (description.js, rewriteTemplate.js, rewriter.js) ---
   'descriptionRaw', // the site's own description text; scanRunner.js findBoilerplate strips lot-wide lines from it

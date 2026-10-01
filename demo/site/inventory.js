@@ -23,31 +23,46 @@
   const DOC_FEE = 250;
   const DISCLAIMER = `Example Motors Price includes the $${DOC_FEE} documentation fee. Tax, title and registration are extra. Sample listing for the Lot Sync sandbox; not a real vehicle.`;
 
+  // Each car's in-stock date is `daysOnLot` days before the day the sandbox
+  // runs, by the person's own calendar (the website's date_in_stock, a
+  // calendar date written at midnight UTC as the platform writes it; the
+  // popup counts it in the person's day, src/readyList.js ageDays, so the
+  // count reads exactly `daysOnLot` at any hour). So the Ready to post tab
+  // always has days on the lot to show, "New" pills on the cars within the
+  // window (7 days by default: the F-150 and the Grand Cherokee on day 1,
+  // the Sorento that arrives on day 2), and an order by newest that differs
+  // from the alphabetical one.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const inStockDate = (daysOnLot) => {
+    const d = new Date();
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - daysOnLot * DAY_MS).toISOString().slice(0, 10) + 'T00:00:00.000Z';
+  };
+
   // Each car in a short form; build() turns it into the service's record.
   const CARS = [
     {
-      key: 'f150', vin: '1FTSAMPL9LE000001', stock: 'EM1001', type: 'Used', year: 2020, make: 'Ford', model: 'F-150', trim: 'XLT', mileage: 34512, price: 32995,
+      key: 'f150', vin: '1FTSAMPL9LE000001', stock: 'EM1001', type: 'Used', year: 2020, make: 'Ford', model: 'F-150', trim: 'XLT', mileage: 34512, price: 32995, daysOnLot: 2,
       slug: 'used-2020-ford-f-150-xlt-4wd-supercrew', location: 'Example Motors Springfield', carfax: true, oneOwner: true, photos: 3,
       exterior: 'Velocity Blue', interior: 'Medium Earth Gray', body: 'Trucks', drivetrain: '4WD', engine: '2.7L EcoBoost V6', transmission: '10-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['4WD', 'Backup Camera', 'Apple CarPlay', 'Tow Package', 'Bluetooth', 'Keyless Entry', 'Cruise Control', 'Power Windows'],
       narrative: 'This 2020 F-150 XLT SuperCrew pairs the 2.7L EcoBoost V6 with 4WD and the 10-Speed Automatic. It came to us on trade and has been through our shop.',
     },
     {
-      key: 'rav4', vin: '4T3SAMPL1ME000002', stock: 'EM1002', type: 'Used', year: 2021, make: 'Toyota', model: 'RAV4', trim: 'XLE', mileage: 28904, price: 27495,
+      key: 'rav4', vin: '4T3SAMPL1ME000002', stock: 'EM1002', type: 'Used', year: 2021, make: 'Toyota', model: 'RAV4', trim: 'XLE', mileage: 28904, price: 27495, daysOnLot: 12,
       slug: 'used-2021-toyota-rav4-xle-awd', location: 'Example Motors Springfield', carfax: true, oneOwner: false, photos: 3,
       exterior: 'Magnetic Gray Metallic', interior: 'Black', body: 'SUVs', drivetrain: 'AWD', engine: '2.5L 4-Cylinder', transmission: '8-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['AWD', 'Backup Camera', 'Apple CarPlay', 'Android Auto', 'Blind Spot Monitor', 'Adaptive Cruise Control', 'Heated Front Seats'],
       narrative: '',
     },
     {
-      key: 'civic', vin: '2HGSAMPL6KE000003', stock: 'EM1003', type: 'Used', year: 2019, make: 'Honda', model: 'Civic', trim: 'EX', mileage: 41230, price: 19995,
+      key: 'civic', vin: '2HGSAMPL6KE000003', stock: 'EM1003', type: 'Used', year: 2019, make: 'Honda', model: 'Civic', trim: 'EX', mileage: 41230, price: 19995, daysOnLot: 25,
       slug: 'used-2019-honda-civic-ex-sedan', location: 'Example Motors Springfield', carfax: true, oneOwner: true, photos: 3,
       exterior: 'Lunar Silver Metallic', interior: 'Gray', body: 'Sedan', drivetrain: 'FWD', engine: '1.5L Turbo 4-Cylinder', transmission: 'CVT', fuel: 'Gasoline Fuel',
       features: ['Sunroof', 'Backup Camera', 'Apple CarPlay', 'Heated Front Seats', 'Bluetooth', 'Lane Keeping Assist', 'Remote Start'],
       narrative: 'A one-owner Civic EX with the 1.5L turbo and a sunroof, serviced here since new.',
     },
     {
-      key: 'grandCherokee', vin: '1C4SAMPL7NE000004', stock: 'EM1004', type: 'Certified Used', year: 2022, make: 'Jeep', model: 'Grand Cherokee', trim: 'Laredo', mileage: 22118, price: 33995,
+      key: 'grandCherokee', vin: '1C4SAMPL7NE000004', stock: 'EM1004', type: 'Certified Used', year: 2022, make: 'Jeep', model: 'Grand Cherokee', trim: 'Laredo', mileage: 22118, price: 33995, daysOnLot: 5,
       slug: 'certified-used-2022-jeep-grand-cherokee-laredo-4wd', location: 'Example Motors Springfield', carfax: true, oneOwner: true, photos: 3,
       exterior: 'Bright White Clearcoat', interior: 'Global Black', body: 'SUVs', drivetrain: '4WD', engine: '3.6L V6', transmission: '8-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['4WD', 'Backup Camera', 'Apple CarPlay', 'Heated Front Seats', 'Remote Start', 'Blind Spot Monitor', 'Keyless Entry'],
@@ -55,7 +70,7 @@
     },
     {
       // no photos on day 1 (Not ready); they arrive on day 2 (Just became ready)
-      key: 'equinox', vin: '3GNSAMPL1JE000005', stock: 'EM1005', type: 'Used', year: 2018, make: 'Chevrolet', model: 'Equinox', trim: 'LT', mileage: 61377, price: 15995,
+      key: 'equinox', vin: '3GNSAMPL1JE000005', stock: 'EM1005', type: 'Used', year: 2018, make: 'Chevrolet', model: 'Equinox', trim: 'LT', mileage: 61377, price: 15995, daysOnLot: 40,
       slug: 'used-2018-chevrolet-equinox-lt-fwd', location: 'Example Motors Springfield', carfax: true, oneOwner: false, photos: 0,
       exterior: 'Summit White', interior: 'Jet Black', body: 'SUVs', drivetrain: 'FWD', engine: '1.5L Turbo 4-Cylinder', transmission: '6-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['Backup Camera', 'Apple CarPlay', 'Bluetooth', 'Keyless Entry', 'Power Windows', 'Cruise Control'],
@@ -63,7 +78,7 @@
     },
     {
       // "Please call for price": pre-owned, but not ready
-      key: 'ram', vin: '1C6SAMPL6HE000006', stock: 'EM1006', type: 'Used', year: 2017, make: 'Ram', model: '1500', trim: 'Big Horn', mileage: 88402, price: null,
+      key: 'ram', vin: '1C6SAMPL6HE000006', stock: 'EM1006', type: 'Used', year: 2017, make: 'Ram', model: '1500', trim: 'Big Horn', mileage: 88402, price: null, daysOnLot: 70,
       slug: 'used-2017-ram-1500-big-horn-4wd-crew-cab', location: 'Example Motors Springfield', carfax: true, oneOwner: false, photos: 3,
       exterior: 'Bright Silver Metallic', interior: 'Black/Diesel Gray', body: 'Trucks', drivetrain: '4WD', engine: '5.7L V8 HEMI', transmission: '8-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['4WD', 'Tow Package', 'Backup Camera', 'Bluetooth', 'Power Windows', 'Cruise Control'],
@@ -71,7 +86,7 @@
     },
     {
       // at the group's other store: kept off the Springfield salesperson's list
-      key: 'tucson', vin: '5NMSAMPL6ME000007', stock: 'EM1007', type: 'Used', year: 2021, make: 'Hyundai', model: 'Tucson', trim: 'SEL', mileage: 30655, price: 21495,
+      key: 'tucson', vin: '5NMSAMPL6ME000007', stock: 'EM1007', type: 'Used', year: 2021, make: 'Hyundai', model: 'Tucson', trim: 'SEL', mileage: 30655, price: 21495, daysOnLot: 9,
       slug: 'used-2021-hyundai-tucson-sel-awd', location: 'Example Motors Shelbyville', carfax: true, oneOwner: true, photos: 3,
       exterior: 'Stellar Silver', interior: 'Gray', body: 'SUVs', drivetrain: 'AWD', engine: '2.5L 4-Cylinder', transmission: '8-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['AWD', 'Backup Camera', 'Apple CarPlay', 'Blind Spot Monitor', 'Heated Front Seats', 'Keyless Entry'],
@@ -79,7 +94,7 @@
     },
     {
       // 0 miles on a used car: the website's details don't add up (Needs a look)
-      key: 'cx5', vin: 'JM3SAMPL8RE000008', stock: 'EM1008', type: 'Used', year: 2024, make: 'Mazda', model: 'CX-5', trim: '2.5 S Preferred', mileage: 0, price: 27995,
+      key: 'cx5', vin: 'JM3SAMPL8RE000008', stock: 'EM1008', type: 'Used', year: 2024, make: 'Mazda', model: 'CX-5', trim: '2.5 S Preferred', mileage: 0, price: 27995, daysOnLot: 16,
       slug: 'used-2024-mazda-cx-5-2-5-s-preferred-awd', location: 'Example Motors Springfield', carfax: true, oneOwner: true, photos: 3,
       exterior: 'Soul Red Crystal Metallic', interior: 'Black', body: 'SUVs', drivetrain: 'AWD', engine: '2.5L 4-Cylinder', transmission: '6-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['AWD', 'Backup Camera', 'Apple CarPlay', 'Heated Front Seats', 'Blind Spot Monitor', 'Keyless Entry'],
@@ -87,7 +102,7 @@
     },
     {
       // new: never posted
-      key: 'explorer', vin: '1FMSAMPL5VE000009', stock: 'EM2001', type: 'New', year: 2027, make: 'Ford', model: 'Explorer', trim: 'XLT', mileage: 0, price: 44995, msrp: true,
+      key: 'explorer', vin: '1FMSAMPL5VE000009', stock: 'EM2001', type: 'New', year: 2027, make: 'Ford', model: 'Explorer', trim: 'XLT', mileage: 0, price: 44995, msrp: true, daysOnLot: 1,
       slug: 'new-2027-ford-explorer-xlt-4wd', location: 'Example Motors Springfield', carfax: false, oneOwner: false, photos: 3,
       exterior: 'Star White Metallic', interior: 'Ebony', body: 'SUVs', drivetrain: '4WD', engine: '2.3L EcoBoost 4-Cylinder', transmission: '10-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['4WD', 'Backup Camera', 'Apple CarPlay', 'Heated Front Seats', 'Third Row Seating'],
@@ -95,7 +110,7 @@
     },
     {
       // new and still in transit: never posted
-      key: 'camry', vin: '4T1SAMPL8VE000010', stock: '', type: 'New', year: 2027, make: 'Toyota', model: 'Camry', trim: 'LE', mileage: 0, price: 29495, msrp: true, inTransit: true,
+      key: 'camry', vin: '4T1SAMPL8VE000010', stock: '', type: 'New', year: 2027, make: 'Toyota', model: 'Camry', trim: 'LE', mileage: 0, price: 29495, msrp: true, inTransit: true, daysOnLot: 0,
       slug: 'new-2027-toyota-camry-le-fwd', location: 'Example Motors Springfield', carfax: false, oneOwner: false, photos: 3,
       exterior: 'Celestial Silver Metallic', interior: 'Black', body: 'Sedan', drivetrain: 'FWD', engine: '2.5L 4-Cylinder Hybrid', transmission: 'CVT', fuel: 'Gasoline/Electric Hybrid',
       features: ['Backup Camera', 'Apple CarPlay', 'Adaptive Cruise Control', 'Lane Keeping Assist'],
@@ -103,7 +118,7 @@
     },
     {
       // the day-2 arrival
-      key: 'sorento', vin: '5XYSAMPL2ME000011', stock: 'EM1011', type: 'Used', year: 2021, make: 'Kia', model: 'Sorento', trim: 'LX', mileage: 35780, price: 24995, day2Only: true,
+      key: 'sorento', vin: '5XYSAMPL2ME000011', stock: 'EM1011', type: 'Used', year: 2021, make: 'Kia', model: 'Sorento', trim: 'LX', mileage: 35780, price: 24995, day2Only: true, daysOnLot: 1,
       slug: 'used-2021-kia-sorento-lx-awd', location: 'Example Motors Springfield', carfax: true, oneOwner: true, photos: 3,
       exterior: 'Everlasting Silver', interior: 'Black', body: 'SUVs', drivetrain: 'AWD', engine: '2.5L 4-Cylinder', transmission: '8-Speed Automatic', fuel: 'Gasoline Fuel',
       features: ['AWD', 'Backup Camera', 'Apple CarPlay', 'Third Row Seating', 'Blind Spot Monitor', 'Keyless Entry'],
@@ -147,7 +162,7 @@
       vin: c.vin, stock: c.stock, type: c.type, year: c.year, make: c.make, model: c.model, trim: c.trim, mileage: c.mileage,
       vdp_url: `${base}index.html#/inventory/${c.slug}-${c.vin.toLowerCase()}/`,
       status: 'publish', in_transit: c.inTransit ? 'yes' : c.type === 'New' ? 'no' : 'unknown', is_demo: false, is_loaner: false,
-      date_in_stock: '2026-09-20T00:00:00.000Z',
+      date_in_stock: inStockDate(c.daysOnLot),
       history_report: { carfax_url: c.carfax ? `${base}index.html#/history/${c.vin}` : null, carfax_icon_url: null, carfax_oneowner: c.carfax ? c.oneOwner : null },
       pricing: p.pricing,
       media: { image_count: images.length, images },

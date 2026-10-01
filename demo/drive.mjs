@@ -46,6 +46,12 @@ const CIVIC = '2HGSAMPL6KE000003';
 const STD_CIVIC = '2HGSAMPL1KH000201';
 const STD_ACCORD = '1HGSAMPL3LA000202';
 
+// The sample lot's in-stock dates are N days before the day the sandbox runs,
+// by the person's own calendar (demo/site/inventory.js inStockDate), and the
+// popup counts a website's calendar date in that same day (src/readyList.js
+// ageDays), so the words are exact at any hour in any time zone.
+const onLot = (n) => (n === 0 ? 'under a day on the lot' : `${n} day${n === 1 ? '' : 's'} on the lot`);
+
 const popup = page.frameLocator('#popupFrame');
 const panel = page.frameLocator('#panelFrame');
 const tab = (id) => page.frameLocator(`iframe[data-tab-id="${id}"]`);
@@ -83,7 +89,16 @@ try {
   // the website's two new cars never enter the scan at all: the inventory request asks for used and certified used only
   assert.doesNotMatch(review, /Explorer|Camry/);
   await popupTab('ready').click();
-  assert.match(await text(popup.locator('.rows')), /2019 Honda Civic EX[\s\S]*2020 Ford F-150 XLT[\s\S]*2021 Toyota RAV4 XLE[\s\S]*2022 Jeep Grand Cherokee Laredo/);
+  // newest on the lot first (the sample lot's in-stock dates: F-150 2 days, Grand Cherokee 5, RAV4 12, Civic 25), the two within the 7-day window marked New
+  const readyRows = popup.locator('.rows .row');
+  assert.deepEqual(await readyRows.locator('.name').allTextContents(), ['2020 Ford F-150 XLT', '2022 Jeep Grand Cherokee Laredo', '2021 Toyota RAV4 XLE', '2019 Honda Civic EX']);
+  assert.deepEqual(await readyRows.locator('.when').allTextContents().then((l) => l.map((t) => t.replace(/since .* ·/, 'since … ·'))), [2, 5, 12, 25].map((n) => `on the website since … · ${onLot(n)}`));
+  assert.deepEqual(await readyRows.evaluateAll((rows) => rows.map((r) => Boolean(r.querySelector('.pill.new')))), [true, true, false, false]);
+  assert.equal(await popup.locator('#readySort').inputValue(), 'newest');
+  await popup.locator('#readySearch').fill('civ');
+  assert.deepEqual(await readyRows.locator('.name').allTextContents(), ['2019 Honda Civic EX'], 'the search box filters as you type');
+  await popup.locator('#readySearch').press('Escape');
+  assert.equal(await readyRows.count(), 4, 'Escape clears the search');
   await shot(page, 'drive-02-scanned-ready.png');
 
   // ---- 2. Post the F-150: the side panel re-checks it and writes the description ----
@@ -177,7 +192,11 @@ try {
   await shot(page, 'drive-07-pilot.png', { fullPage: true });
 
   // ---- 6. A queue of two: the panel opens each form by itself; the person publishes the first and skips the second ----
+  // The queue takes the ticked cars in the order shown: longest on the lot puts the Civic (25 days) before the RAV4 (12).
   await popupTab('ready').click();
+  await popup.locator('#readySort').selectOption('longest');
+  await popup.locator('.rows .row').first().filter({ hasText: 'Civic' }).waitFor();
+  assert.deepEqual(await popup.locator('.rows .name').allTextContents(), ['2019 Honda Civic EX', '2021 Toyota RAV4 XLE', '2022 Jeep Grand Cherokee Laredo', '2020 Ford F-150 XLT'], 'longest on the lot first');
   await popup.locator(`.pick[data-vin="${CIVIC}"]`).check();
   await popup.locator(`.pick[data-vin="${RAV4}"]`).check();
   assert.equal(await text(popup.locator('#queueBtn')), 'Post 2 cars');
@@ -218,7 +237,10 @@ try {
   const todo = await text(popup.locator('.panel'));
   assert.match(todo, /Take down\s*1[\s\S]*2020 Ford F-150 XLT[\s\S]*Gone from the website/);
   assert.match(todo, /Update price\s*1[\s\S]*2019 Honda Civic EX[\s\S]*\$19,995 → \$18,995/);
-  assert.match(todo, /New arrivals\s*1[\s\S]*2021 Kia Sorento LX/);
+  // new arrivals stay listed for the window: the Sorento that arrived today and the Grand Cherokee, 5 days on the lot and still not posted; the posted F-150 and the older cars are not
+  assert.match(todo, new RegExp(`New arrivals\\s*2[\\s\\S]*2021 Kia Sorento LX[\\s\\S]*on the website since [^·]+· ${onLot(1)}[\\s\\S]*2022 Jeep Grand Cherokee Laredo[\\s\\S]*${onLot(5)}`));
+  assert.doesNotMatch(todo.slice(todo.indexOf('New arrivals'), todo.indexOf('Just became ready')), /F-150|RAV4|Civic/);
+  assert.match(todo, /Queue all 2 ready arrivals/);
   assert.match(todo, /Just became ready\s*1[\s\S]*2018 Chevrolet Equinox LT[\s\S]*photos added/);
   assert.equal(await text(popupTab('todo').locator('.count')), '2');
   await page.waitForFunction(() => document.getElementById('badge').textContent === '2', null, { timeout: 5000 });
@@ -365,7 +387,9 @@ try {
   const stdTodo = await text(popup.locator('.panel'));
   assert.match(stdTodo, /Take down\s*1[\s\S]*2019 Honda Civic EX[\s\S]*Gone from the website/);
   assert.match(stdTodo, /Update price\s*1[\s\S]*2020 Honda Accord Sport[\s\S]*\$23,495 → \$22,495/);
-  assert.match(stdTodo, /New arrivals\s*1[\s\S]*2021 Hyundai Tucson SEL/);
+  // this website gives no in-stock dates, so the arrival carries the scan that first saw it, and never a count of days on the lot
+  assert.match(stdTodo, /New arrivals\s*1[\s\S]*2021 Hyundai Tucson SEL[\s\S]*Lot Sync first saw it /);
+  assert.doesNotMatch(stdTodo, /on the lot/);
   assert.match(stdTodo, /Just became ready\s*1[\s\S]*2016 Jeep Wrangler Sport/);
   assert.equal(await text(popupTab('todo').locator('.count')), '2');
   await page.waitForFunction(() => document.getElementById('badge').textContent === '2', null, { timeout: 5000 });

@@ -4,6 +4,7 @@
 import { shortLocation, storeNames, matchStore } from './normalize.js';
 import { DEFAULT_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
+import { sortOrder, newDaysOf } from './readyList.js';
 
 export const SETTINGS_VERSION = 2;
 export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
@@ -63,14 +64,18 @@ export function withDefaults(settings, site = {}) {
     rulesReadAt: typeof s.rulesReadAt === 'string' ? s.rulesReadAt : '',
     // the edition of the Terms of Service and Privacy Policy the person accepted (src/legalLinks.js LEGAL.version) and when; '' until they do
     legal: { version: typeof lg.version === 'string' ? lg.version : '', acceptedAt: typeof lg.acceptedAt === 'string' ? lg.acceptedAt : '' },
+    // the Ready to post list (src/readyList.js): its order and how many days a car counts as new; this website's, never the profile's
+    readySort: sortOrder(s.readySort),
+    newDays: newDaysOf(s.newDays),
   };
 }
 
 // The salesperson's own details, kept in chrome.storage.sync so they follow
 // the person's Chrome sign-in to any computer and survive clearing one
 // website's data or reloading the extension. The rewrite-service key stays
-// on this computer only. A real Lot Sync account (shared with the manager,
-// across a team) is Milestone 4.
+// on this computer only, and the Ready list's order and new-arrival window
+// (readySort, newDays) stay with the website they were set on. A real Lot
+// Sync account (shared with the manager, across a team) is Milestone 4.
 export const PROFILE_KEY = 'profile';
 
 export function profileFrom(settings, origin = '') {

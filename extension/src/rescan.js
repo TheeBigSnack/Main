@@ -47,16 +47,47 @@ export function snapshotEntry(v, assessment) {
     mileage: v.mileage,
     type: v.inventoryType,
     carfax: Boolean(v.carfaxUrl),
+    dateInStock: typeof v.dateInStock === 'string' && v.dateInStock.trim() ? v.dateInStock : null, // the website's own in-stock date, as it gives it (src/readyList.js reads it)
     decision: assessment.decision,
     reason: assessment.reason,
     blockers: (assessment.blockers || []).map((b) => b.code),
   };
 }
 
-export function makeSnapshot({ site, takenAt, complete, vehicles, assessments }) {
+// When Lot Sync first saw this car: carried over from the last saved
+// snapshot; this scan's time for a VIN that was not in it; null on a first
+// scan (no last snapshot), meaning the car was already there when Lot Sync
+// started, so nothing is ever "new" by first sighting on a first scan. An
+// entry saved before this field existed carries null too: Lot Sync did not
+// see that car arrive either. A car the last snapshot still names among its
+// missing pages (it left the list on the scan before, confirmed gone or
+// not, or is posted and gone: scanRunner.js snapshotOf) was known before,
+// so its return is not a first sighting: it carries the sighting the
+// snapshot kept for it (missingSeen), else null. A car gone for longer than
+// that memory is seen afresh when it comes back.
+export function firstSeenAt(previous, vin, takenAt) {
+  const last = previous && typeof previous === 'object' && previous.vehicles && typeof previous.vehicles === 'object' ? previous.vehicles : null;
+  if (!last) return null;
+  const dateOf = (v) => (typeof v === 'string' && v ? v : null);
+  const before = last[vin];
+  if (before) return dateOf(before.firstSeenAt);
+  const missing = previous.missingPages;
+  if (missing && typeof missing === 'object' && Object.prototype.hasOwnProperty.call(missing, vin)) {
+    const seen = previous.missingSeen;
+    return seen && typeof seen === 'object' ? dateOf(seen[vin]) : null;
+  }
+  return dateOf(takenAt);
+}
+
+/**
+ * @param {object} args
+ *   previous  the last saved snapshot (null on a first scan): each car's
+ *             firstSeenAt comes over from it (firstSeenAt above)
+ */
+export function makeSnapshot({ site, takenAt, complete, vehicles, assessments, previous = null }) {
   const entries = {};
   vehicles.forEach((v, i) => {
-    entries[v.vin] = snapshotEntry(v, assessments[i]);
+    entries[v.vin] = { ...snapshotEntry(v, assessments[i]), firstSeenAt: firstSeenAt(previous, v.vin, takenAt) };
   });
   return { version: 1, site, takenAt, complete: complete !== false, vehicles: entries };
 }
@@ -152,7 +183,10 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     }
 
     if (!before) {
-      if (prev) out.newArrivals.push({ vin, name: now.name, stock: now.stock, url: now.url, decision: now.decision, reason: now.reason, price: nowPrice });
+      // with the car's dates (the website's in-stock date and this sighting),
+      // so the To do tab shows them even when this scan's snapshot is not
+      // saved (unreliable above): the diff is saved either way
+      if (prev) out.newArrivals.push({ vin, name: now.name, stock: now.stock, url: now.url, decision: now.decision, reason: now.reason, price: nowPrice, dateInStock: now.dateInStock ?? null, firstSeenAt: now.firstSeenAt ?? null });
       continue;
     }
 

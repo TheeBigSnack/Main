@@ -181,3 +181,25 @@ test('a placeholder legal address is one nobody can read; the Terms step gates o
   // legalHosted is that predicate over the live addresses, whatever they are today
   assert.equal(legalHosted(), !isPlaceholderUrl(LEGAL.termsUrl) && !isPlaceholderUrl(LEGAL.privacyUrl));
 });
+
+test("the Ready list's order and the new-arrival window are this website's settings: defaults, limits, and never in the synced profile", () => {
+  const s = withDefaults({});
+  assert.equal(s.readySort, 'newest');
+  assert.equal(s.newDays, 7);
+  assert.equal(withDefaults({ readySort: 'price' }).readySort, 'price');
+  assert.equal(withDefaults({ readySort: 'longest' }).readySort, 'longest');
+  assert.equal(withDefaults({ readySort: 'name' }).readySort, 'name');
+  assert.equal(withDefaults({ readySort: 'sideways' }).readySort, 'newest', 'an unknown order is the default');
+  assert.equal(withDefaults({ newDays: 14 }).newDays, 14);
+  assert.equal(withDefaults({ newDays: '3' }).newDays, 3);
+  assert.equal(withDefaults({ newDays: 0 }).newDays, 7);
+  assert.equal(withDefaults({ newDays: 45 }).newDays, 30);
+  assert.equal(withDefaults({ newDays: 2.9 }).newDays, 2);
+  assert.equal(withDefaults({ newDays: 'soon' }).newDays, 7);
+  // the profile carries neither, so neither follows the person to another website, nor comes back from the profile on this one
+  const p = profileFrom(withDefaults({ readySort: 'price', newDays: 14 }), 'https://www.example-dealer.test');
+  assert.ok(!('readySort' in p) && !('newDays' in p));
+  const seeded = settingsFromProfile(p, { origin: 'https://www.example-dealer.test' });
+  assert.equal(seeded.readySort, 'newest');
+  assert.equal(seeded.newDays, 7);
+});

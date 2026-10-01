@@ -22,7 +22,11 @@ const withPrice = (r, value) => {
 };
 
 // Day 1: everything from the fixtures. Day 2: the Ram sold, the Wagoneer
-// dropped $1,500, the Hellcat got photos, and a Silverado arrived.
+// dropped $1,500, the Hellcat got photos, and a Silverado arrived. Day 3:
+// the Tradesman got photos and moved to Waynesburg, so three cars are ready
+// (the Silverado: today, $36,603; the Hellcat: 40 days, $53,485; the
+// Tradesman: 50 days, $33,485) and each of the Ready tab's four orders
+// gives a different list.
 export const SCENARIOS = {
   day1: () => Object.values(fx).map(clone),
   day2: () => {
@@ -40,6 +44,13 @@ export const SCENARIOS = {
     list.push(withPrice(arrival, 36603));
     return list;
   },
+  day3: () => {
+    const list = SCENARIOS.day2();
+    const tradesman = list.find((r) => r.vin === fx.usedNoPhotos.vin);
+    tradesman.media.image_count = 9;
+    tradesman.extra_fields.meta_location = 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg';
+    return list;
+  },
 };
 
 let current = 'day1';
@@ -55,9 +66,24 @@ const EXTRA = {
     narrative: 'This 2019 Ram 1500 Classic Express Quad Cab pairs the HEMI 5.7L V8 with 4WD and an 8-Speed Automatic.',
   },
 };
+// The fixtures' in-stock dates are the capture's; here each car's date is
+// set relative to the day the test runs, so the Ready tab's "New" window
+// (7 days) and its two date orders can be checked on any day: day 1's cars
+// 30 days or more ago, each a little older than the one before it in the
+// fixtures, and the day-2 arrival today. "Today" is the machine's own
+// calendar day, as a dealer's website in the dealer's time zone has it: the
+// popup counts a website's calendar date in the person's day (src/readyList.js
+// ageDays), so "40 days on the lot" holds at any hour in any time zone.
+const ARRIVAL_VIN = '3GCUYGED0MG244585';
+const DAY_MS = 24 * 60 * 60 * 1000;
+const AGE_DAYS = new Map(Object.values(fx).map((r, i) => [r.vin, 30 + i * 5]));
+const todayUtc = () => { const d = new Date(); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
+export const inStockDate = (daysAgo) => new Date(todayUtc() - daysAgo * DAY_MS).toISOString().slice(0, 10) + 'T00:00:00.000Z';
+
 // Photo URLs point back at this mock server (the real ones are on the dealer's image host).
 function enrich(r, origin) {
   const c = clone(r);
+  c.date_in_stock = inStockDate(c.vin === ARRIVAL_VIN ? 0 : AGE_DAYS.get(c.vin) ?? 60);
   const x = EXTRA[c.vin] || { features: ['Power Windows', 'Cruise Control'], narrative: '' };
   c.features = x.features;
   c.description =

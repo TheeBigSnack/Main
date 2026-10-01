@@ -75,7 +75,7 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   const stores = storeNames(vehicles);
   for (const v of vehicles) v.locationShort = shortLocation(v.location, stores);
   const assessments = vehicles.map((v) => assessVehicle(v, settings));
-  const carry = { last, unread: res.unread, confirmVins, confirmUrls };
+  const carry = { last, previous: prevSnapshot || null, unread: res.unread, confirmVins, confirmUrls };
   const snapshot = snapshotOf({ site: siteForSnapshot(site), res, vehicles, assessments, carry });
   const diff = diffScans(prevSnapshot, snapshot, { posted, confirm: res.confirm, basis: settings.basis });
   if (!res.complete) diff.warnings.unshift(incompleteWarning(res));
@@ -95,18 +95,26 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   return { ok: true, res, vehicles, assessments, snapshot, diff, boilerplate, photoOrigins, carry };
 }
 
-// The snapshot a scan leaves for the next one. Three things come over from
-// the last one. When a car's own page was last read (pageReadAt: this scan's
-// time for the cars in res.pagesRead, else the last entry's), so an adapter
-// that can read only so many pages per scan reads the oldest first and gets
-// round the whole lot. A car the website still lists but whose details the
-// adapter could not read this time (res.unread) keeps its last entry, so a
-// bad server day neither drops the car nor changes it. And a car that is not
-// in this scan keeps the page it was last seen on (missingPages), so an
-// adapter that checks a missing car at its own page can check a posted car
-// again next time, even after the car has left the lot's list.
+// The snapshot a scan leaves for the next one. Four things come over from
+// the last one. When Lot Sync first saw each car (firstSeenAt, rescan.js:
+// the last entry's, this scan's time for a car that was not in the last
+// snapshot, null on a first scan), so the Ready and To do tabs can mark new
+// arrivals for days, not only until the next rescan replaces the diff; the
+// last saved snapshot is the one carried from, so a scan whose snapshot is
+// not saved (diff.unreliable) changes no dates. When a car's own page was
+// last read (pageReadAt: this scan's time for the cars in res.pagesRead,
+// else the last entry's), so an adapter that can read only so many pages
+// per scan reads the oldest first and gets round the whole lot. A car the
+// website still lists but whose details the adapter could not read this
+// time (res.unread) keeps its last entry, so a bad server day neither drops
+// the car nor changes it. And a car that is not in this scan keeps the page
+// it was last seen on (missingPages), so an adapter that checks a missing
+// car at its own page can check a posted car again next time, even after
+// the car has left the lot's list; with it, when Lot Sync first saw that
+// car (missingSeen), so a car that comes straight back is not called a
+// first sighting (rescan.js firstSeenAt).
 function snapshotOf({ site, res, vehicles, assessments, carry }) {
-  const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments });
+  const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments, previous: carry.previous || null });
   const readNow = new Set(Array.isArray(res.pagesRead) ? res.pagesRead : []);
   for (const [vin, entry] of Object.entries(snapshot.vehicles)) {
     const before = carry.last[vin] && carry.last[vin].pageReadAt;
@@ -117,8 +125,16 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
     if (carry.last[vin] && !snapshot.vehicles[vin]) snapshot.vehicles[vin] = carry.last[vin];
   }
   const missingPages = {};
-  for (const vin of carry.confirmVins) if (!snapshot.vehicles[vin] && carry.confirmUrls[vin]) missingPages[vin] = carry.confirmUrls[vin];
+  const missingSeen = {};
+  const seenBefore = (carry.previous && carry.previous.missingSeen) || {};
+  for (const vin of carry.confirmVins) {
+    if (snapshot.vehicles[vin] || !carry.confirmUrls[vin]) continue;
+    missingPages[vin] = carry.confirmUrls[vin];
+    const seen = carry.last[vin] ? carry.last[vin].firstSeenAt : seenBefore[vin];
+    if (typeof seen === 'string' && seen) missingSeen[vin] = seen;
+  }
   if (Object.keys(missingPages).length) snapshot.missingPages = missingPages;
+  if (Object.keys(missingSeen).length) snapshot.missingSeen = missingSeen;
   return snapshot;
 }
 
