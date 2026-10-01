@@ -26,6 +26,7 @@ import { noteFlags } from '../extension/src/pilot.js';
 import { neededPatterns } from '../extension/src/photoHosts.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
 import { SITE } from '../site/config.js';
+import { stripComments as stripAllComments } from './helpers.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 // The website's own host once siteUrl is set: the pages name it in their
@@ -38,9 +39,9 @@ const storeTexts = read('legal/chrome-web-store-privacy.md');
 const questions = read('legal/questions-for-attorney.md');
 const sorted = (xs) => [...new Set(xs)].sort();
 
-// The same comment stripper as test/anyDealer.test.js: whole-line and
+// The same comment stripper as test/anyDealer.test.js (test/helpers.js): whole-line and
 // trailing // comments (never the // of an address) and block comments.
-const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`])\/\/[^\n]*$/gm, '$1');
+const stripComments = (src) => stripAllComments(src, { trailing: true });
 const stripHtmlComments = (src) => src.replace(/<!--[\s\S]*?-->/g, '');
 
 function walk(dir, out = []) {

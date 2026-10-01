@@ -7,9 +7,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './helpers.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`])\/\/[^\n]*$/gm, '$1');
 const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
 
 function walk(dir, out = []) {
@@ -26,7 +26,7 @@ test('the shipped code and the rewrite service carry no pilot-dealer value', () 
   assert.ok(files.length > 30);
   for (const file of files) {
     const src = readFileSync(file, 'utf8');
-    const code = /\.js$/.test(file) ? stripComments(src) : src;
+    const code = /\.js$/.test(file) ? stripComments(src, { trailing: true }) : src;
     const hit = code.match(PILOT);
     assert.equal(hit, null, `${file.slice(root.length)} contains "${hit && hit[0]}" outside a comment`);
   }
