@@ -104,8 +104,10 @@ export function brandedTitleSignal(v = {}) {
 // 2026-09-26.
 // The body type wins. A car body style ("Crew Cab Pickup - Trailer Tow",
 // "Pickup w/Camper Shell") makes it a car or truck, whatever equipment words
-// follow and whatever the make. Only when the body type says nothing is the
-// make read, from short lists of makes that build that kind. Some motorcycle
+// follow and whatever the make, except a van or cargo body from a maker of
+// RVs or trailers (a Winnebago "Van" is a camper van, a Wells Cargo "Cargo"
+// a cargo trailer). Otherwise the make is read only when the body type says
+// nothing, from short lists of makes that build that kind. Some motorcycle
 // makes build ATVs, side-by-sides or boats too (Yamaha, Kawasaki), so a
 // motorcycle read from the make alone is listed as an assumption, which holds
 // a queued car at review. Makes that build cars too (Honda, BMW, Suzuki) are
@@ -155,7 +157,11 @@ export function readVehicleKind(v = {}) {
   if (carBody && carBody.style !== 'Van') return car;
   for (const k of OTHER_KINDS) if (k.body.test(body)) return { kind: k.kind, name: k.name, from: `body style "${body}"`, fromMake: false };
   if (/\b(?:motorcycles?|motorbikes?|scooters?|sport ?bikes?|dirt ?bikes?)\b/i.test(body)) return { kind: VEHICLE_KIND.MOTORCYCLE, name: 'a motorcycle', from: `body style "${body}"`, fromMake: false };
-  if (carBody) return car;
+  if (carBody) {
+    // a van or cargo body from a maker of RVs, trailers, powersport vehicles or boats is one of those, not a van
+    for (const k of OTHER_KINDS) if (makeOnList(v.make, k.makes)) return { kind: k.kind, name: k.name, from: `make "${String(v.make).trim()}" with body style "${body}"`, fromMake: true };
+    return car;
+  }
   for (const k of OTHER_KINDS) if (makeOnList(v.make, k.makes)) return { kind: k.kind, name: k.name, from: `make "${String(v.make).trim()}"`, fromMake: true };
   if (makeOnList(v.make, MOTORCYCLE_MAKES)) return { kind: VEHICLE_KIND.MOTORCYCLE, name: 'a motorcycle', from: `make "${String(v.make).trim()}"`, fromMake: true };
   return car;

@@ -157,6 +157,12 @@ test('a trailer, RV, powersport vehicle or boat never reaches the car form', () 
   }
   // a make that builds only RVs, with no body style
   assert.match(assessVehicle(vehicle('usedNormal', { make: 'Winnebago', body_details: { type: '' } }), {}).reason, /make "Winnebago" makes it an RV or camper/);
+  // a van body from a maker of RVs is a camper van, and stays off the car form; a van from a car maker is a car
+  const camper = vehicle('usedNormal', { make: 'Winnebago', model: 'Travato', body_details: { type: 'Van' } });
+  assert.equal(assessVehicle(camper, {}).decision, DECISION.REVIEW);
+  assert.match(assessVehicle(camper, {}).reason, /make "Winnebago" with body style "Van" makes it an RV or camper/);
+  assert.equal(buildListingData(camper).fields.vehicleType, '');
+  assert.equal(buildListingData(vehicle('usedNormal', { body_details: { type: 'Van' } })).fields.vehicleType, 'car_truck');
   // a new one is still skipped as new
   assert.equal(assessVehicle(vehicle('newNormal', { body_details: { type: 'Trailer' } }), {}).decision, DECISION.SKIP);
   // cars and trucks are untouched
