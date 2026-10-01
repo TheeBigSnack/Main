@@ -29,10 +29,19 @@ test('every permission the manifest asks for is explained in the Web Store priva
   const doc = read('../legal/chrome-web-store-privacy.md');
   const wanted = [...manifest.permissions, ...manifest.host_permissions, ...manifest.optional_host_permissions];
   for (const p of wanted) assert.ok(doc.includes(p), `chrome-web-store-privacy.md does not mention "${p}"`);
-  // and nothing beyond what CLAUDE.md records as approved widenings
+  // and nothing beyond what was approved. activeTab, scripting and storage
+  // are the first build's (0.1.0); each widening since is recorded where it
+  // was decided and in the CHANGELOG entry that shipped it:
+  //   sidePanel, the Marketplace and image-host host permissions: Milestone 1 (CLAUDE.md's ledger, CHANGELOG 0.2.0)
+  //   alarms, notifications, optional https://*/* for the dealer's website: Milestone 2 (PLAN.md, CHANGELOG 0.3.0)
+  //   optional https://vpic.nhtsa.dot.gov/*: the VIN check (CHANGELOG 0.4.0)
+  //   https://*/* also for a car's photo servers, asked at post time: the owner, 2026-09-29 (CLAUDE.md's ledger, PLAN.md)
+  // Changing these lists is a widening: ask the owner first (CLAUDE.md).
   assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage', 'sidePanel', 'alarms', 'notifications']);
   assert.deepEqual(manifest.host_permissions, ['https://www.facebook.com/marketplace/*', 'https://vehicle-images.carscommerce.inc/*']);
   assert.deepEqual(manifest.optional_host_permissions, ['https://vpic.nhtsa.dot.gov/*', 'https://*/*']);
+  const changelog = read('../CHANGELOG.md');
+  for (const p of wanted.filter((x) => !['activeTab', 'scripting', 'storage'].includes(x))) assert.ok(changelog.includes('`' + p + '`'), `CHANGELOG.md does not record the widening "${p}"`);
 });
 
 test('the package script exists and the packed zip is ignored by git', () => {
