@@ -174,7 +174,8 @@ async function surveySite(url) {
       } else if (phase === 'scan') report.requests.lotSyncScan += 1;
     });
     // JSON the page's own scripts ask for: kept only when it holds VIN-like
-    // strings, and then only its address pattern and top-level keys
+    // strings, and then only its address pattern, top-level keys, the names
+    // its request sent and the layout of its car records, never a value
     context.on('response', (res) => {
       const req = res.request();
       if ((phase !== 'list' && phase !== 'car') || !['xhr', 'fetch'].includes(req.resourceType())) return;
@@ -183,7 +184,7 @@ async function surveySite(url) {
         const contentType = (await res.allHeaders().catch(() => ({})))['content-type'] || '';
         if (!/json|javascript|text\/plain/i.test(contentType)) return;
         const body = await res.text().catch(() => '');
-        const ep = body.length <= 20000000 ? jsonEndpoint({ url: res.url(), method: req.method(), status: res.status(), contentType, body }) : null;
+        const ep = body.length <= 20000000 ? jsonEndpoint({ url: res.url(), method: req.method(), status: res.status(), contentType, body, postData: req.postData() }) : null;
         if (ep && !report.jsonEndpoints.some((x) => x.pattern === ep.pattern && x.method === ep.method)) report.jsonEndpoints.push({ ...ep, page: on });
       })();
       pending.add(p);

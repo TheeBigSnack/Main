@@ -13,6 +13,7 @@
 import { extractJsonLd, vehicleNodes, pageFacts } from '../extension/adapters/schemaOrgParse.js';
 import { vinInAddress, looksLikeCarAddress } from '../extension/adapters/schemaOrg.js';
 import { vinCheckDigit } from '../extension/src/vin.js';
+import { findCardList, totalCount, labeledPrices, priceKind, normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
 
 export const DEFAULTS = Object.freeze({
   out: 'survey-out',
@@ -397,10 +398,12 @@ export function urlPattern(href) {
 
 /**
  * One JSON answer a page's own scripts asked for, kept only when it holds
- * VIN-like strings: the address pattern, the top-level keys and the count.
- * The body itself is never kept.
+ * VIN-like strings: the address pattern, the top-level keys and the count,
+ * the paging numbers in its address, the names its request body sent, and
+ * the layout of its car records (recordsShape). No value from the body is
+ * kept.
  */
-export function jsonEndpoint({ url, method = 'GET', status = 0, contentType = '', body = '' }) {
+export function jsonEndpoint({ url, method = 'GET', status = 0, contentType = '', body = '', postData = null }) {
   if (!/json/i.test(contentType) && !/^\s*[[{]/.test(String(body || ''))) return null;
   let data;
   try {
@@ -419,7 +422,121 @@ export function jsonEndpoint({ url, method = 'GET', status = 0, contentType = ''
   } else {
     topKeys = [];
   }
-  return { method, pattern: urlPattern(url), status, topKeys, vinCount: vins.length };
+  const out = { method, pattern: urlPattern(url), status, topKeys, vinCount: vins.length };
+  const paging = pagingParams(url);
+  if (Object.keys(paging).length) out.paging = paging;
+  const sent = requestKeys(postData);
+  if (sent) out.requestKeys = sent;
+  const records = recordsShape(data, url);
+  if (records) out.records = records;
+  return out;
+}
+
+// Query parameters that page a list, with their small number values
+// (pt=2, start=24, pageSize=24): how the list moves on, never a search.
+const PAGING_NAME = /^(?:page|pt|pn|p|start|offset|skip|take|limit|size|count|rows|perpage|pagesize|pagenumber|pagenum|pageindex|itemsperpage|resultsperpage|first|from)$/i;
+
+export function pagingParams(href) {
+  const out = {};
+  try {
+    for (const [k, v] of new URL(href).searchParams) {
+      if (PAGING_NAME.test(k.replace(/[^a-z0-9]/gi, '')) && /^\d{1,5}$/.test(v)) out[k] = Number(v);
+    }
+  } catch (e) {
+    // not an address
+  }
+  return out;
+}
+
+/**
+ * The names a request body sent (a POST's JSON keys as dot paths, or its
+ * form fields), never the values: whether the list needs a POST, and what it
+ * names in it. null when nothing was sent.
+ */
+export function requestKeys(postData) {
+  const text = typeof postData === 'string' ? postData.trim() : '';
+  if (!text) return null;
+  try {
+    const json = JSON.parse(text);
+    if (json && typeof json === 'object') return { kind: 'json', keys: keyPaths(json, 3, 60) };
+  } catch (e) {
+    // not JSON: a form body
+  }
+  if (/^[^=&\s]+=/.test(text)) return { kind: 'form', keys: [...new Set(new URLSearchParams(text).keys())].slice(0, 60) };
+  return { kind: 'other', keys: [] };
+}
+
+const plainObject = (x) => Boolean(x) && typeof x === 'object' && !Array.isArray(x);
+
+/**
+ * Where an object's values sit, as dot paths with the type of each leaf
+ * ("pricing.dprice[].label: string"), never the values. An array is read
+ * through its first object.
+ */
+export function keyPaths(x, depth = 3, limit = 120) {
+  const out = [];
+  const visit = (v, at, d) => {
+    if (out.length >= limit) return;
+    if (Array.isArray(v)) {
+      const first = v.find(plainObject);
+      if (first && d < depth) visit(first, at + '[]', d + 1);
+      else out.push(`${at}[]: ${v.length ? (first ? 'object' : typeof v[0]) : 'empty'}`);
+      return;
+    }
+    if (plainObject(v) && (d < depth || !at)) {
+      for (const [k, w] of Object.entries(v)) visit(w, at ? `${at}.${k}` : k, d + 1);
+      return;
+    }
+    out.push(`${at}: ${v === null ? 'null' : plainObject(v) ? 'object' : typeof v}`);
+  };
+  visit(x, '', 0);
+  return out.slice(0, limit);
+}
+
+// The flat-vehicle fields worth counting: which ones Lot Current filled from
+// the list data says which field names it read and which it missed.
+const FILLED = ['stock', 'year', 'make', 'model', 'trim', 'url', 'inventoryType', 'mileage', 'price', 'priceBeforeFees', 'location', 'photos', 'exteriorColor', 'interiorColor', 'bodyType', 'drivetrain', 'engine', 'transmission', 'fuelType', 'descriptionRaw', 'dateInStock', 'status'];
+
+/**
+ * How the car records of an inventory answer are laid out, as the
+ * DealerOn and Dealer.com readers (extension/adapters/inventoryJson.js) see
+ * them: where the list is, how many cars and the total the answer says, the
+ * first record's field names and types, every price label with the kind the
+ * reader gives it, and how many records filled each flat-vehicle field. No
+ * value is kept (no VIN, price, mileage or text). null when the answer holds
+ * no car list.
+ */
+export function recordsShape(json, href) {
+  const { cards, path } = findCardList(json);
+  if (!cards.length) return null;
+  let origin = '';
+  try { origin = new URL(href).origin; } catch (e) { origin = ''; }
+  const flat = cards.map((c) => normalizeInventoryRecord(c, { origin })).filter(Boolean);
+  const filled = {};
+  for (const f of FILLED) {
+    filled[f] = flat.filter((v) => (Array.isArray(v[f]) ? v[f].length > 0 : v[f] !== null && v[f] !== undefined && v[f] !== '')).length;
+  }
+  const labels = new Map();
+  cards.forEach((card, i) => {
+    const dealer = (flat[i] && flat[i].location) || '';
+    for (const e of labeledPrices(card)) {
+      const kind = priceKind(e, dealer);
+      const id = `${e.key}|${e.label}|${kind}|${e.final}`;
+      if (!labels.has(id)) labels.set(id, { key: e.key, label: e.label, kind, final: e.final, cars: 0 });
+      labels.get(id).cars += 1;
+    }
+  });
+  const conditions = {};
+  for (const v of flat) conditions[v.inventoryType || '(none)'] = (conditions[v.inventoryType || '(none)'] || 0) + 1;
+  return {
+    listPath: path || '(top level)',
+    count: cards.length,
+    total: totalCount(json),
+    keys: keyPaths(cards[0], 4, 150),
+    priceLabels: [...labels.values()].slice(0, 20),
+    conditions,
+    filled,
+  };
 }
 
 // ---------- refusals and bot checks ----------
@@ -586,7 +703,7 @@ export function lotSyncReading({ snapshot = null, diff = null, site = null, stat
   const service = site && site.service && typeof site.service === 'object' ? site.service : null;
   return {
     adapter: (site && site.adapter) || (snapshot && snapshot.site && snapshot.site.adapter) || null,
-    service: service ? { keys: Object.keys(service).sort(), listUrl: typeof service.listUrl === 'string' ? service.listUrl : undefined, searchHost: typeof service.search === 'string' ? hostOf(service.search) : undefined } : null,
+    service: service ? { keys: Object.keys(service).sort(), listUrl: typeof service.listUrl === 'string' ? service.listUrl : undefined, searchHost: typeof service.search === 'string' ? hostOf(service.search) : undefined, inventoryUrl: typeof service.inventoryUrl === 'string' ? urlPattern(service.inventoryUrl) : undefined } : null,
     carCount: cars.length,
     withVin: cars.filter((c) => c.vin).length,
     withPrice: cars.filter((c) => typeof c.price === 'number' && c.price > 0).length,
@@ -700,7 +817,19 @@ export function renderReportMd(r) {
   const eps = r.jsonEndpoints || [];
   if (eps.length) {
     L.push('- JSON the pages themselves asked for that holds VIN-like strings (address pattern, top-level keys; bodies not kept):');
-    for (const e of eps) L.push(`  - ${e.method} \`${esc(e.pattern)}\` (HTTP ${e.status}, ${e.vinCount} VINs, on the ${e.page}): ${e.topKeys.map((k) => '`' + esc(k) + '`').join(', ')}`);
+    for (const e of eps) {
+      L.push(`  - ${e.method} \`${esc(e.pattern)}\` (HTTP ${e.status}, ${e.vinCount} VINs, on the ${e.page}): ${e.topKeys.map((k) => '`' + esc(k) + '`').join(', ')}`);
+      if (e.paging) L.push(`    - paging in the address: ${Object.entries(e.paging).map(([k, n]) => `\`${esc(k)}=${n}\``).join(', ')}`);
+      if (e.requestKeys) L.push(`    - request body (${e.requestKeys.kind}), names only: ${e.requestKeys.keys.map((k) => '`' + esc(k) + '`').join(', ') || 'none'}`);
+      const rs = e.records;
+      if (rs) {
+        L.push(`    - car records at \`${esc(rs.listPath)}\`: ${rs.count} on this answer, total said ${rs.total ?? 'nowhere'}; conditions ${Object.entries(rs.conditions).map(([k, n]) => `${esc(k)} ${n}`).join(', ')}`);
+        L.push(`    - filled by the reader (of ${rs.count}): ${Object.entries(rs.filled).map(([k, n]) => `${k} ${n}`).join(', ')}`);
+        if (rs.priceLabels.length) L.push(`    - price labels: ${rs.priceLabels.map((p) => `"${esc(p.label)}" (\`${esc(p.key)}\`, ${p.kind}${p.final ? ', final' : ''}, ${p.cars} cars)`).join('; ')}`);
+        else L.push('    - price labels: none the reader recognised');
+        L.push(`    - first record's fields: ${rs.keys.map((k) => '`' + esc(k) + '`').join(', ')}`);
+      }
+    }
   } else {
     L.push('- JSON the pages themselves asked for that holds VIN-like strings: none seen');
   }
@@ -725,7 +854,8 @@ export function renderReportMd(r) {
   const ls = r.lotSync || {};
   if (!ls.attempted) L.push(`Not run: ${ls.skippedReason || 'the survey stopped first'}.`);
   else if (!ls.ok) L.push(`The scan did not read the site: "${esc(ls.message)}"`);
-  else {
+  if (ls.attempted && ls.service && ls.service.inventoryUrl) L.push(`- inventory address the probe took from the page's own requests: \`${esc(ls.service.inventoryUrl)}\``);
+  if (ls.attempted && ls.ok) {
     L.push(`- adapter: **${ls.adapterName || ls.adapter}** (\`${ls.adapter}\`)`);
     L.push(`- cars: ${ls.carCount}; with a VIN ${ls.withVin}, a price ${ls.withPrice}, mileage ${ls.withMileage}, photos ${ls.withPhotos}`);
     L.push(`- decisions: ${Object.entries(ls.decisions || {}).map(([k, c]) => `${k} ${c}`).join(', ') || 'none'}`);

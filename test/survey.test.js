@@ -176,14 +176,63 @@ test('pageAnatomy shows a list whose cars appear only after scripts run', () => 
 
 test('jsonEndpoint keeps the address pattern, the top-level keys and the VIN count, never the body or anyone\'s search', () => {
   const body = JSON.stringify({ total: 2, vehicles: [{ vin: VIN, price: 19995 }, { vin: VIN2 }], facets: {} });
-  const ep = jsonEndpoint({ url: SITE + '/api/inventory?zip=12345&page=1', method: 'POST', status: 200, contentType: 'application/json; charset=utf-8', body });
-  assert.deepEqual(ep, { method: 'POST', pattern: SITE + '/api/inventory?zip=…&page=…', status: 200, topKeys: ['total', 'vehicles', 'facets'], vinCount: 2 });
-  assert.ok(!JSON.stringify(ep).includes('19995') && !JSON.stringify(ep).includes('12345'));
+  const ep = jsonEndpoint({ url: SITE + '/api/inventory?zip=12345&page=1', method: 'POST', status: 200, contentType: 'application/json; charset=utf-8', body, postData: '{"zip":"12345","filters":{"type":"used"}}' });
+  const { records, ...summary } = ep;
+  assert.deepEqual(summary, { method: 'POST', pattern: SITE + '/api/inventory?zip=…&page=…', status: 200, topKeys: ['total', 'vehicles', 'facets'], vinCount: 2, paging: { page: 1 }, requestKeys: { kind: 'json', keys: ['zip: string', 'filters.type: string'] } });
+  assert.equal(records.listPath, 'vehicles');
+  assert.equal(records.count, 2);
+  for (const value of ['19995', '12345', VIN, VIN2, 'used"']) assert.ok(!JSON.stringify(ep).includes(value), `no ${value} in the summary`);
   const arr = jsonEndpoint({ url: SITE + '/inv.json', body: JSON.stringify([{ vin: VIN, stock: 'A1' }]), contentType: 'application/json' });
   assert.deepEqual(arr.topKeys, ['[array of 1]', '[].vin', '[].stock']);
   assert.equal(jsonEndpoint({ url: SITE + '/menu.json', body: '{"items":[]}', contentType: 'application/json' }), null, 'no VINs, not kept');
   assert.equal(jsonEndpoint({ url: SITE + '/x', body: 'not json ' + VIN, contentType: 'text/plain' }), null);
   assert.equal(urlPattern('https://a.test/p?x=1&x=2&y='), 'https://a.test/p?x=…&y=…');
+});
+
+// SYNTHETIC: the two inventory shapes the DealerOn and Dealer.com readers
+// expect (extension/adapters/inventoryJson.js), with made-up values.
+test('jsonEndpoint lays out the car records as the platform readers see them, keeping names, kinds and counts, never values', () => {
+  const dealerCom = {
+    pageInfo: { totalCount: 41 },
+    inventory: [
+      { vin: VIN, stockNumber: 'S100', year: 2019, make: 'Honda', model: 'Civic', trim: 'EX', odometer: '31,207 miles', inventoryType: 'used', link: '/used/Honda/2019-Honda-Civic-0123456789abcdef0123456789abcdef.htm', images: [{ uri: 'https://pictures.example-cdn.test/1.jpg' }], address: { accountName: 'Sample Motors' }, pricing: { retailPrice: '$18,995', dprice: [{ typeClass: 'retailPrice', label: 'Price', value: '$18,995' }, { typeClass: 'finalPrice', label: 'Sample Motors Price', value: '$19,485', isFinalPrice: true }] } },
+      { vin: VIN2, stockNumber: 'S101', year: 2018, make: 'Toyota', model: 'RAV4', odometer: '52,001', inventoryType: 'certified', link: '/certified/Toyota/2018-Toyota-RAV4-abcdef0123456789abcdef0123456789.htm', pricing: { dprice: [{ typeClass: 'finalPrice', label: 'Sample Motors Price', value: '$24,100', isFinalPrice: true }] } },
+    ],
+    featured: [{ vin: VIN }],
+  };
+  const ep = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0&pageSize=24&zip=15301', status: 200, contentType: 'application/json', body: JSON.stringify(dealerCom) });
+  assert.deepEqual(ep.paging, { start: 0, pageSize: 24 }, 'paging numbers kept, the search value not');
+  assert.equal(ep.requestKeys, undefined, 'a GET sends no body');
+  const rs = ep.records;
+  assert.equal(rs.listPath, 'inventory', 'the lot, not the featured list beside it');
+  assert.equal(rs.count, 2);
+  assert.equal(rs.total, 41);
+  assert.equal(rs.filled.mileage, 2);
+  assert.equal(rs.filled.price, 2);
+  assert.equal(rs.filled.priceBeforeFees, 1);
+  assert.equal(rs.filled.location, 1);
+  assert.equal(rs.filled.photos, 1);
+  assert.equal(rs.filled.drivetrain, 0, 'a field the records lack shows as 0');
+  assert.deepEqual(rs.conditions, { used: 1, certified: 1 }, 'the condition words as the reader keeps them');
+  assert.ok(rs.keys.includes('pricing.dprice[].label: string'));
+  assert.ok(rs.keys.includes('address.accountName: string'));
+  assert.ok(rs.keys.includes('images[].uri: string'));
+  const final = rs.priceLabels.find((p) => p.label === 'Sample Motors Price');
+  assert.deepEqual(final, { key: 'dprice.finalPrice', label: 'Sample Motors Price', kind: 'selling', final: true, cars: 2 });
+  assert.equal(rs.priceLabels.find((p) => p.label === 'Price').kind, 'base', 'a retail typeClass makes it the base price');
+  const text = JSON.stringify(ep);
+  for (const value of [VIN, VIN2, '18,995', '19,485', '31,207', 'S100', 'Civic', '15301', 'pictures.example-cdn']) assert.ok(!text.includes(value), `no ${value} in the summary`);
+
+  // DealerOn's shape: cards nested in a display list, "Vehicle" prefixes
+  const dealerOn = { DisplayCards: [{ VehicleCard: { VehicleVin: VIN, VehicleYear: 2019, VehicleMake: 'Honda', VehicleModel: 'Civic', Mileage: 31207, VehicleInternetPrice: 18995, VehicleDetailUrl: '/used-Town-2019-Honda-Civic-EX-' + VIN } }], Paging: { TotalCount: 1 } };
+  const on = jsonEndpoint({ url: SITE + '/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/123/456?pt=2', method: 'POST', status: 200, contentType: 'application/json', body: JSON.stringify(dealerOn), postData: 'pt=2&host=www.sample-motors.test' });
+  assert.deepEqual(on.paging, { pt: 2 });
+  assert.deepEqual(on.requestKeys, { kind: 'form', keys: ['pt', 'host'] });
+  assert.equal(on.records.listPath, 'DisplayCards');
+  assert.equal(on.records.total, 1);
+  assert.deepEqual([on.records.filled.price, on.records.filled.mileage, on.records.filled.url], [1, 1, 1]);
+  assert.ok(on.records.keys.includes('VehicleCard.VehicleVin: string') || on.records.keys.includes('VehicleVin: string'));
+  assert.equal(jsonEndpoint({ url: SITE + '/vin-lookup', body: JSON.stringify({ note: 'ask about ' + VIN }), contentType: 'application/json' }).records, undefined, 'a VIN outside a list is no car list');
 });
 
 test('botSigns: a 403, 429 or 503 or a challenge page is a refusal; a CDN header on an ordinary page is only noted', () => {
@@ -277,7 +326,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
     list: { finalUrl: LIST, title: 'Used', platform: fingerprint({ url: LIST, html: '' }), server: pageAnatomy(DEALERCOM_LIKE, LIST, 200), rendered: pageAnatomy(DEALERON_LIKE, LIST, 200), pagination: { shapes: ['?pt='] } },
     carPages: [{ url: SITE + '/v/1', status: 200, jsonLd: jsonLdSummary(CAR_PAGE), microdata: {}, serverVins: 1, photoHosts: { 'photos.example-cdn.test': 1 } }],
     carPagesSummary: { read: 1, withVehicleJsonLd: 1, withVehicleMicrodata: 0 },
-    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page' }],
+    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }], conditions: { '(none)': 2 }, filled: { price: 2, mileage: 0 } } }],
     excerpt: { from: SITE + '/v/1', text: jsonLdExcerpt(CAR_PAGE) },
     requests: { survey: 4, robots: 1, list: 1, listServerHtml: 1, carPages: 1, browserTotal: 9, blockedMedia: 3, lotSyncScan: 5 },
     bot: { signs: [] },
@@ -289,6 +338,10 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
   assert.match(md, /\*\*unknown\*\* \(no known marker matched; not guessed\)/);
   assert.match(md, /car links only after scripts run: yes/);
   assert.match(md, /`https:\/\/www\.sample-motors\.test\/api\/inventory\?page=…`/);
+  assert.match(md, /paging in the address: `page=1`/);
+  assert.match(md, /car records at `vehicles`: 2 on this answer, total said nowhere/);
+  assert.match(md, /filled by the reader \(of 2\): price 2, mileage 0/);
+  assert.match(md, /first record's fields: `vin: string`, `price: number`/);
   assert.match(md, /```json\n[\s\S]*vehicleIdentificationNumber/);
   assert.match(md, /\*\*Verdict: partly\.\*\*/);
   assert.match(md, /cap: at most 8 pages per site/);
