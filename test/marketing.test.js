@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
+import { copyProblems } from './copyGuards.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
@@ -61,17 +62,10 @@ test('customer-facing copy says who publishes and that Lot Current is not affili
 });
 
 test('no claim we have not measured, and nothing that sounds like Meta approval', () => {
-  // what no document may say, internal ones included
-  const never = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /(customers|dealers|salespeople) (say|love|report)/i, /\b(five|5) stars?\b/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /industry[- ]leading/i, /best[- ]in[- ]class/i, /\b#1\b/];
-  // what customer-facing copy may not say either (the positioning names these so we know what to avoid)
-  const notToCustomers = [/testimonial/i, /never (be|get) restricted/i, /your account is (safe|protected)/i, /\brisk[- ]free\b/i, /\bno risk\b/i, /\bbots?\b/i];
+  // test/copyGuards.js: what no document may say, internal ones included, and what customer-facing copy may not say
+  // either (no promise about anyone's account; the positioning names some of these so we know what to avoid)
   for (const rel of ALL) {
-    const doc = read('../marketing/' + rel);
-    // "not a guarantee" and its cousins are the honest line; anything else with "guarantee" is a promise we can't make
-    const rest = doc.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-    assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, `${rel} makes a guarantee`);
-    for (const re of never) assert.doesNotMatch(doc, re, `${rel} matches ${re}`);
-    if (CUSTOMER_FACING.includes(rel)) for (const re of notToCustomers) assert.doesNotMatch(doc, re, `${rel} matches ${re}`);
+    assert.deepEqual(copyProblems(read('../marketing/' + rel), { customerFacing: CUSTOMER_FACING.includes(rel) }), [], rel);
   }
 });
 

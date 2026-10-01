@@ -1,6 +1,6 @@
 // The website (site/) is customer-facing copy, so every page passes the same
-// honesty checks as marketing/ (test/marketing.test.js; the regex lists are
-// copied here, not imported, so each file stays self-contained), the home and
+// honesty checks as marketing/ (the shared lists in test/copyGuards.js, which
+// test/marketing.test.js and the store listing's test use too), the home and
 // pricing pages quote the one pricing config, no page names a dealer or loads
 // anything from anywhere else, and the only images are the sandbox's
 // screenshots (site/screenshots/, drawn by npm run screenshots). The home page's
@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { PAGES, cspFor } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
+import { copyProblems } from './copyGuards.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -49,14 +50,9 @@ test('the page says who publishes, that Lot Current never does, and that it is n
   assert.match(text, /Is this allowed on Facebook\?/, 'the FAQ asks the question straight');
 });
 
-// copied from test/marketing.test.js: what no document may say
-const NEVER = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /(customers|dealers|salespeople) (say|love|report)/i, /\b(five|5) stars?\b/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /industry[- ]leading/i, /best[- ]in[- ]class/i, /\b#1\b/];
-// and what customer-facing copy may not say either
-const NOT_TO_CUSTOMERS = [/testimonial/i, /never (be|get) restricted/i, /your account is (safe|protected)/i, /\brisk[- ]free\b/i, /\bno risk\b/i, /\bbots?\b/i];
+// test/copyGuards.js: what no customer-facing text may say, the same rules as the marketing kit and the store listing
 function assertHonest(said, where) {
-  const rest = said.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-  assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, `${where} makes a guarantee`);
-  for (const re of [...NEVER, ...NOT_TO_CUSTOMERS]) assert.doesNotMatch(said, re, `${where} matches ${re}`);
+  assert.deepEqual(copyProblems(said), [], where);
 }
 
 test('no claim we have not measured, and nothing that sounds like Meta approval', () => {

@@ -27,6 +27,7 @@ import {
 import { pngSize, parseIco } from '../scripts/favicons.mjs';
 import { MIME, ROOT_FILES, MISSING_PATHS, resolvePath, startPagesServer } from '../scripts/site-check.mjs';
 import { SITE } from '../site/config.js';
+import { copyProblems } from './copyGuards.js';
 const LEGAL_DRAFT = JSON.parse(readFileSync(new URL('../legal/legal-status.json', import.meta.url), 'utf8')).draft === true;
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -588,20 +589,14 @@ test('the prices on every page are pricing.json\'s, through data-pricing spans w
   }
 });
 
-// copied from test/marketing.test.js and test/site.test.js: what no customer-facing page may say
-const NEVER = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /(customers|dealers|salespeople) (say|love|report)/i, /\b(five|5) stars?\b/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /industry[- ]leading/i, /best[- ]in[- ]class/i, /\b#1\b/];
-const NOT_TO_CUSTOMERS = [/testimonial/i, /never (be|get) restricted/i, /your account is (safe|protected)/i, /\brisk[- ]free\b/i, /\bno risk\b/i, /\bbots?\b/i];
-// the legal texts name the forbidden things only to deny them; those denials are read first, then the scan
-const DENIALS = [/not affiliated with, endorsed by or partnered with Meta/g, /no one can promise your account will never be restricted/g];
+// test/copyGuards.js: what no customer-facing page may say (the legal texts name the forbidden things only to
+// deny them; copyProblems reads those denials first, then scans the rest)
 
 test('honest on every page: who clicks Publish, nothing guaranteed, the non-affiliation line, nothing that sounds like Meta approval', () => {
   for (const p of PAGES) {
-    let said = visibleText(p);
+    const said = visibleText(p);
     assert.ok(said.includes(FOOTER_LINE), `${p.file}: the non-affiliation line`);
-    for (const d of DENIALS) said = said.replace(d, '');
-    const rest = said.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-    assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, `${p.file} makes a guarantee`);
-    for (const re of [...NEVER, ...NOT_TO_CUSTOMERS]) assert.doesNotMatch(said, re, `${p.file} matches ${re}`);
+    assert.deepEqual(copyProblems(said), [], p.file);
   }
   for (const slug of ['home', 'faq']) {
     const text = visibleText(PAGES.find((p) => p.slug === slug));

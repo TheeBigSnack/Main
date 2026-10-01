@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { section } from '../scripts/store-check.mjs';
+import { copyProblems } from './copyGuards.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const manifest = JSON.parse(read('../extension/manifest.json'));
@@ -91,11 +92,10 @@ test('the Web Store listing draft quotes the manifest description word for word 
   assert.match(listing, /Lot Current is not affiliated with Meta Platforms, Inc\./);
   assert.match(listing, /You click Publish\. Lot Current never does\./);
   assert.match(listing, /legal\/chrome-web-store-privacy\.md/);
-  // "not a guarantee" is the honest line; nothing else may promise safety, compliance or a guarantee (as test/marketing.test.js checks the marketing copy)
-  const rest = listing.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-  assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, 'the listing makes a guarantee');
+  // "not a guarantee" is the honest line; nothing else may promise safety, compliance, a guarantee or anything about an account
+  // (test/copyGuards.js, the same rules as the website and the marketing kit), and the listing never says safe or compliant at all
+  assert.deepEqual(copyProblems(listing), [], 'store/listing.md');
   assert.doesNotMatch(listing, /\bsafe\b|\bcompliant\b|\bguaranteed\b/i);
-  for (const re of [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /\b(five|5) stars?\b/i]) {
-    assert.doesNotMatch(listing, re, `store/listing.md matches ${re}`);
-  }
+  // the Web Store answers are read by the same reviewer
+  assert.deepEqual(copyProblems(read('../legal/chrome-web-store-privacy.md')), [], 'legal/chrome-web-store-privacy.md');
 });
