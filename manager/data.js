@@ -61,14 +61,16 @@
 
 export const WEEK_MS = 7 * 24 * 3600 * 1000; // "this week" is the last 7 days
 export const OVERDUE_HOURS = 24; // an open item past this is shown in red
-export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is open; twice that and something is off
+export const SCAN_STALE_HOURS = 6; // with automatic rescans allowed they run every 3 hours while Chrome is open; twice that and something is off
+// What the stale pill says after the hours: why a scan can be that old.
+export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed';
 
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
   'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
   'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
-  'Hours run from the flagging scan, and rescans happen every 3 hours while Chrome is open.',
+  'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.',
 ]);
 
 // ---------- time ----------

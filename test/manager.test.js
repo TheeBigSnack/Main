@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -40,6 +40,22 @@ test('the definitions are the pilot\'s, sentence for sentence (both files read a
   assert.deepEqual([...DEFINITIONS], [...PILOT_DEFINITIONS]);
   assert.equal(DEFINITIONS.length, 5);
   assert.doesNotMatch(read('manager/data.js'), /from ['"]\.\.\/extension/, 'data.js does not import the extension (the page is hosted on its own)');
+});
+
+// Background rescans run only for a website whose permission the salesperson
+// granted, with automatic rescans on in Settings: a stale scan can mean
+// either, not only that nobody had Chrome open. The website and the
+// onboarding email say so; the manager view and its CSV say so too.
+test('every rescan line on the manager view names the condition: automatic rescans allowed', () => {
+  assert.equal(SCAN_STALE_WHY, 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed');
+  assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_WHY\}`\)/);
+  assert.equal(DEFINITIONS.at(-1), 'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.');
+  for (const file of ['manager/manager.js', 'manager/data.js', 'extension/src/pilot.js']) {
+    for (const line of read(file).split('\n').filter((l) => /every 3 hours/.test(l) && !/^\s*\/\//.test(l))) {
+      assert.match(line, /automatic rescans allowed/, `${file}: ${line.trim()}`);
+    }
+  }
+  assert.match(managerCsv(mockData(NOW), { now: NOW, timeZone: 'UTC' }), /with automatic rescans allowed, rescans happen every 3 hours/);
 });
 
 // ---------- the sample dealership ----------
