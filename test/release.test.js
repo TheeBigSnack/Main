@@ -5,7 +5,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   COMMANDS, VERSION_FILES, parseVersion, compareVersions, bump, setVersionText, changelogHasVersion, newestChangelogVersion, changelogProblems,
   readmeTitle, readmeTitleFits, dirtyPaths, submitSteps, zipPath, changedLines, nextSteps, parseArgs, release, runCommand,
@@ -252,6 +256,44 @@ test('a release refuses a CHANGELOG whose Unreleased section still holds entries
   assert.match(doc, /Rename that heading to the usual format, `## 0\.6\.0 \(/);
   assert.match(doc, /put a new, empty `## Unreleased` above it/);
   assert.match(doc, /`## Unreleased` is missing, below it or still holds entries/);
+});
+
+// world() fakes npm test, so the tests above cannot see a unit test that reads
+// CHANGELOG.md by place (the first "## " section as the Unreleased notes) and
+// fails once a release empties "## Unreleased": the release would roll back
+// every time. Here a copy of the repository gets what docs/release.md step 1
+// and the script do (the heading renamed, an empty "## Unreleased" above it,
+// the README title, the three version stamps), and every other unit test file
+// that reads CHANGELOG.md runs there for real.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const NOT_COPIED = new Set(['.git', 'node_modules', 'dist', 'survey-out', 'test-results']);
+test('the unit tests that read CHANGELOG.md pass on the layout a release leaves', () => {
+  const next = bump(CURRENT, 'minor');
+  const dir = mkdtempSync(join(tmpdir(), 'lot-current-release-'));
+  try {
+    cpSync(ROOT, dir, { recursive: true, filter: (src) => !NOT_COPIED.has(basename(src)) });
+    const at = (rel) => join(dir, rel);
+    const unreleased = /^## Unreleased[ \t]*$/m;
+    assert.match(REAL['CHANGELOG.md'], unreleased);
+    const log = REAL['CHANGELOG.md'].replace(unreleased, `## Unreleased\n\n## ${next} (2026-10-12, a release test)`);
+    const readme = REAL['README.md'].replace(readmeTitle(CURRENT), readmeTitle(next));
+    assert.deepEqual(changelogProblems(log, next), [], 'the layout the release asks for');
+    assert.ok(readmeTitleFits(readme, next));
+    writeFileSync(at('CHANGELOG.md'), log);
+    writeFileSync(at('README.md'), readme);
+    for (const f of VERSION_FILES) writeFileSync(at(f), setVersionText(REAL[f], next));
+    const files = readdirSync(at('test')).filter((f) => f.endsWith('.test.js') && f !== basename(fileURLToPath(import.meta.url)) && readFileSync(at(join('test', f)), 'utf8').includes('CHANGELOG'));
+    for (const f of ['docs.test.js', 'brandName.test.js']) assert.ok(files.includes(f), `${f} reads CHANGELOG.md`);
+    // a test runner started from inside a test file runs nothing unless it is told it is not a child
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...files.map((f) => join('test', f))], { cwd: dir, encoding: 'utf8', env });
+    const failed = (r.stdout || '').split('\n').filter((l) => /^\s*not ok /.test(l));
+    assert.equal(r.status, 0, `at ${next} with the CHANGELOG renamed, ${files.join(', ')} fail:\n${failed.join('\n') || r.stderr}`);
+    assert.match(r.stdout, /^# pass [1-9]/m, 'the tests ran');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a new minor without the README title is refused; with it, the release goes through', () => {

@@ -355,12 +355,21 @@ test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 list
 
 // Round J's photo permission: Chrome keeps a grant, and the side panel keeps a
 // refusal only in memory, so a "no" is asked again once the panel reopens.
+// The CHANGELOG entry sits under "## Unreleased" until a release renames that
+// heading to the version's and puts an empty "## Unreleased" above it
+// (scripts/release.mjs), so the entry is found by its title, not by place;
+// test/release.test.js runs this file on that layout.
 test('the texts say Chrome remembers a yes, and a no only while the side panel stays open', () => {
   const panel = read('../extension/sidepanel.js');
   assert.match(panel, /^const refusedPhotoServers = new Set\(\);$/m, 'the side panel no longer keeps photo refusals in a Set: check what the texts below say');
   assert.ok(!panel.split('\n').some((l) => l.includes('refusedPhotoServers') && /storage/.test(l)), 'the side panel stores photo refusals now: the texts can say Chrome or Lot Current remembers a no');
-  const unreleased = read('../CHANGELOG.md').split('\n## ')[1];
-  const texts = { 'README.md': read('../README.md'), 'CHANGELOG.md (Unreleased)': unreleased, 'docs/help.md': doc('help.md'), 'store/listing.md': read('../store/listing.md'), 'marketing/demo-script.md': read('../marketing/demo-script.md') };
+  const sections = read('../CHANGELOG.md').split(/\n(?=## )/).slice(1);
+  const unreleased = sections.find((s) => /^## Unreleased[ \t]*(\n|$)/.test(s));
+  assert.ok(unreleased !== undefined, 'CHANGELOG.md has no "## Unreleased" heading');
+  const photo = sections.find((s) => s.includes('\n- **Photos from any server'));
+  assert.ok(photo, 'CHANGELOG.md has no "Photos from any server" entry');
+  const photoHeading = photo.slice(3, photo.indexOf('\n'));
+  const texts = { 'README.md': read('../README.md'), 'CHANGELOG.md (Unreleased)': unreleased, [`CHANGELOG.md (${photoHeading})`]: photo, 'docs/help.md': doc('help.md'), 'store/listing.md': read('../store/listing.md'), 'marketing/demo-script.md': read('../marketing/demo-script.md') };
   for (const [name, text] of Object.entries(texts)) {
     assert.doesNotMatch(text, /remembers (the|your) answer|asks once/i, `${name} says a photo-server answer is remembered, and a no is forgotten when the side panel closes`);
   }
@@ -368,7 +377,8 @@ test('the texts say Chrome remembers a yes, and a no only while the side panel s
   assert.ok(line, "README's Limits no longer has the photo-server line");
   assert.match(line, /remembers a yes/);
   assert.match(line, /while the side panel stays open/);
-  assert.match(unreleased, /Chrome remembers a yes, and after a no Lot Current doesn't ask about that server again while the side panel stays open/);
+  const entry = photo.split('\n').find((l) => l.startsWith('- **Photos from any server'));
+  assert.match(entry, /Chrome remembers a yes, and after a no Lot Current doesn't ask about that server again while the side panel stays open/);
 });
 
 test('the pre-submission checklists quote only what PLAN.md says', () => {
