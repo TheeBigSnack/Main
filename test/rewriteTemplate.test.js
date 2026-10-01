@@ -374,6 +374,38 @@ test('a description that never gives the salesperson\'s role, or reads as a priv
   assert.ok(codes(`${text}\nFor sale by owner.`).includes('banned-phrase'));
 });
 
+test('private-seller wording is refused in the closing line, in the template and in a rewrite-service draft', async () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price };
+  const text = buildTemplateDescription(c);
+  const posing = [
+    'For sale by owner, text me directly.',
+    'Sold by owner.',
+    'FSBO, text me.',
+    'Private party sale, text me.',
+    'Not a dealer, just me.',
+    'Personal car, not a dealership car.',
+    'Selling it myself, text me.',
+    'This is my Jeep, I am the owner.',
+    "I'm the owner, ask me anything.",
+    'I\u2019m the owner, ask me anything.',
+  ];
+  for (const line of posing) {
+    assert.ok(checkClosingLine(line).problems.some((p) => p.code === 'closing-banned'), `closing line: ${line}`);
+    assert.equal(usableClosingLine(line), '', `never written into a description: ${line}`);
+    const withLine = buildTemplateDescription({ ...c, salesperson: { ...SAM, closingLine: line } });
+    assert.equal(withLine, text, `the template leaves it out: ${line}`);
+    assert.ok(runGuardrails(`${text}\n${line}`, c).problems.some((p) => p.code === 'banned-phrase'), `description: ${line}`);
+    const draft = await generateDescription({ ...c, settings: { rewrite: { enabled: true, endpoint: 'http://localhost:8787' } }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, text: `${text}\n${line}` }) }) });
+    assert.equal(draft.source, 'template', `a draft saying it is refused: ${line}`);
+    assert.match(draft.note, /failed a check/);
+  }
+  // the salesperson's own first-person words still pass
+  for (const line of ['Ask for me by name when you come in.', "I'll walk you around it myself.", 'Text me and I will set up a test drive.', 'Ask about our owner loyalty offers.']) {
+    assert.deepEqual(checkClosingLine(line).problems, [], line);
+  }
+});
+
 // ---------- the dealer's price note is always in the description ----------
 
 test('a description without the dealership\'s price note fails the checks; the template always carries it', () => {
