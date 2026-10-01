@@ -188,7 +188,14 @@ export function rewriteKeyFor({ rewrite = {}, session = null, config = ACCOUNT }
 
 // This scan's counts from what a scan leaves behind (the snapshot and the
 // diff), for the sync function's scan summary; null when nothing was scanned.
+// Also null when the scan was judged a website hiccup (diff.unreliable): its
+// snapshot is not saved, so its short car count is not the lot's, and the
+// saved snapshot is an older scan whose own take-down and price counts are
+// gone. Nothing goes up, so the manager's "Last scan" stays at the last scan
+// the extension trusted, with its own time (and shows as stale when the
+// hiccups go on).
 export function scanFromStored({ snapshot = null, diff = null } = {}) {
+  if (diff && diff.unreliable) return null;
   const takenAt = (diff && diff.takenAt) || (snapshot && snapshot.takenAt) || null;
   if (!takenAt) return null;
   const vehicles = snapshot && snapshot.vehicles && typeof snapshot.vehicles === 'object' ? Object.values(snapshot.vehicles) : [];
