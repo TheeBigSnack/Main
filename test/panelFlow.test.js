@@ -653,3 +653,44 @@ test('Stop queue and Clear queue never drop a Marketplace form that is open, nor
     assert.deepEqual([none.state.queue, none.state.step], [null, 'idle']);
   }
 });
+
+// The review screen's buttons follow the description's checks: drawn off
+// (viewReview) and switched off or on as the person types (onInput, through
+// setFormButtons) while a posting rule is broken, and off at the day's cap.
+test('Open the Marketplace form and Check fields are off while the description breaks a posting rule or the cap is reached, and on again once it is fixed', () => {
+  const v = vehicle('usedNormal');
+  const good = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const bad = good.replaceAll(DEALER.name, 'the lot');
+  const check = (text) => runGuardrails(text, { vehicle: v, dealer: DEALER, price: v.price });
+  let cap = { reached: false, used: 0, cap: 10 };
+  const buttons = { openForm: { disabled: false }, checkForm: { disabled: false } };
+  const state = { vehicle: v, price: v.price, description: good, guardrails: check(good), note: '', descriptionSource: 'template', settings: { dealer: DEALER, rewrite: { enabled: false } } };
+  const blank = () => '';
+  const fns = compileMany(['viewReview', 'setFormButtons', 'onInput'], {
+    state, ruleProblems, runGuardrails, dailyCap: () => cap, inputTimer: null,
+    ctx: () => ({ vehicle: state.vehicle, dealer: DEALER, priceNote: '', price: state.price, closingLine: '' }),
+    setTimeout: (fn) => fn(), clearTimeout: () => {}, saveFlow: () => {}, renderList: never('renderList'),
+    $: (id) => buttons[id] || null, esc: (s) => String(s ?? ''),
+    carCard: blank, readAgainHtml: blank, sourcePill: blank, checksHtml: blank, highlightsHtml: blank, photoPickHtml: blank,
+    fieldsTable: blank, vinCheckHtml: blank, assumptionsHtml: blank, capHtml: blank, photoServersHtml: blank,
+  });
+  const drawnOff = () => ['openForm', 'checkForm'].map((id) => new RegExp(`id="${id}" disabled`).test(fns.viewReview()));
+  assert.deepEqual(drawnOff(), [false, false], 'a description that passes: both on');
+  state.guardrails = check(bad);
+  assert.deepEqual(drawnOff(), [true, true], 'the dealership not named: both drawn off');
+  state.guardrails = check(good);
+  cap = { reached: true, used: 10, cap: 10 };
+  assert.deepEqual(drawnOff(), [true, true], 'at the cap: both drawn off');
+  cap = { reached: false, used: 0, cap: 10 };
+
+  // typing: the buttons follow the text in the box
+  fns.onInput({ target: { id: 'description', value: bad } });
+  assert.deepEqual([buttons.openForm.disabled, buttons.checkForm.disabled], [true, true], 'off as the rule breaks');
+  assert.equal(state.descriptionSource, 'edited');
+  fns.onInput({ target: { id: 'description', value: good + '\nAsk about the 2 keys.' } });
+  assert.deepEqual([buttons.openForm.disabled, buttons.checkForm.disabled], [true, true], 'an unsourced number keeps them off');
+  fns.onInput({ target: { id: 'description', value: good } });
+  assert.deepEqual([buttons.openForm.disabled, buttons.checkForm.disabled], [false, false], 'on again once fixed');
+  fns.onInput({ target: { id: 'description', value: `Pre-owned at ${DEALER.name}. VIN ${v.vin}.` } });
+  assert.deepEqual([buttons.openForm.disabled, buttons.checkForm.disabled], [false, false], 'a style warning (too short) leaves them on');
+});
