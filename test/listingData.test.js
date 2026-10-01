@@ -91,7 +91,8 @@ test('a branded title is caught in the usual ways a website writes it, and ordin
     'Prior flood damage': 'flood damage',
     'TMU - true mileage unknown title': 'TMU',
     'True mileage unknown.': 'True mileage unknown',
-    'Odometer reading is NOT ACTUAL MILEAGE.': 'NOT ACTUAL MILEAGE',
+    'Odometer reading is NOT ACTUAL MILEAGE.': 'Odometer reading is NOT ACTUAL',
+    'Sold with NOT ACTUAL MILEAGE.': 'NOT ACTUAL MILEAGE',
     'Mileage is not actual.': 'Mileage is not actual',
     'Odometer discrepancy on file': 'Odometer discrepancy',
     'Title is branded: odometer exempt': 'Title is branded',
@@ -111,6 +112,16 @@ test('a branded title is caught in the usual ways a website writes it, and ordin
     'Theft recovered': 'Theft recovered',
     'Junk title': 'Junk title',
     'Reconstructed vehicle': 'Reconstructed',
+    'Title: Branded': 'Title: Branded',
+    'Title Status: Branded': 'Title Status: Branded',
+    'Title - branded': 'Title - branded',
+    'Previously flooded': 'flooded',
+    'Flooded vehicle, sold as is': 'Flooded',
+    'Odometer not actual': 'Odometer not actual',
+    'Odometer reading is not actual.': 'Odometer reading is not actual',
+    'Exceeds mechanical limits': 'Exceeds mechanical limits',
+    'Mileage exceeds mechanical limits.': 'exceeds mechanical limits',
+    'Prior total loss; GAP coverage offered.': 'total loss',
   };
   for (const [words, signal] of Object.entries(branded)) {
     assert.equal(brandedTitleSignal({ descriptionRaw: words }), signal, words);
@@ -122,7 +133,7 @@ test('a branded title is caught in the usual ways a website writes it, and ordin
   assert.equal(brandedTitleSignal({ siteTitle: 'Used 2018 Ford F-150 XLT - Salvaged Title' }), 'Salvaged');
   assert.equal(brandedTitleSignal({ features: ['Flood-Damaged'] }), 'Flood-Damaged');
   // ordinary dealer wording is not a brand: the dealership's default stands
-  for (const words of ['Tax, title and license extra.', 'Fog lights, flood lights on the rack.', 'No liens.', 'Odometer exempt.', 'No frame damage reported.', 'Total price shown includes the doc fee.', 'Lemonade stand not included.', 'Our title clerk handles the paperwork.', 'Water-resistant seats, fire extinguisher mount.']) {
+  for (const words of ['Tax, title and license extra.', 'Fog lights, flood lights on the rack.', 'No liens.', 'Odometer exempt.', 'No frame damage reported.', 'Total price shown includes the doc fee.', 'Lemonade stand not included.', 'Our title clerk handles the paperwork.', 'Water-resistant seats, fire extinguisher mount.', 'Mopar-branded floor mats.', 'Title and registration extra.', 'Total Loss Protection available.', 'GAP and total loss coverage offered.']) {
     assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
     const d = buildListingData({ descriptionRaw: words });
     assert.equal(d.fields.titleStatus, 'Clean', words);

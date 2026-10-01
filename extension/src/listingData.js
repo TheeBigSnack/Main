@@ -17,10 +17,12 @@ export const DEFAULT_LISTING_DEFAULTS = Object.freeze({ titleStatus: 'Clean', co
 // Words in the website's own text that mean the title is not clean. When one
 // shows up, the title default is NOT applied, the clean-title box is
 // unticked, the panel says why, and a queued car waits at review. Each word
-// is read in its usual forms ("Salvaged", "Flood-damaged", "Totaled"). A bare
-// "title" or "damage" is never one ("tax, title and license extra", "no frame
-// damage"), "flood lights" is equipment, and "odometer exempt" is an age
-// exemption, not a brand.
+// is read in its usual forms ("Salvaged", "Flood-damaged", "Totaled",
+// "Previously flooded", "Title Status: Branded"). A bare "title", "damage"
+// or "branded" is never one ("tax, title and license extra", "no frame
+// damage", "Mopar-branded mats"), "flood lights" is equipment, "total loss
+// protection" or "coverage" is an insurance product, and "odometer exempt"
+// is an age exemption, not a brand.
 const BRANDED = new RegExp(
   '\\b(' +
     [
@@ -29,9 +31,11 @@ const BRANDED = new RegExp(
       'reconstructed',
       'branded[\\s-]+title',
       'title (?:is |was )?branded',
+      'title(?:\\s+status)?\\s*[:-]\\s*branded',
       '(?:flood|hail|water|fire)[\\s-]*damag\\w*',
       'flood (?:title|vehicle|car)',
-      'total(?:l?ed|[\\s-]*loss)',
+      'flooded',
+      'total(?:l?ed|[\\s-]*loss(?![\\s-]+(?:protection|coverage)))',
       'non[\\s-]*repairable',
       'junk title',
       'lien',
@@ -43,6 +47,8 @@ const BRANDED = new RegExp(
       'not (?:the )?actual mileage',
       'mileage (?:is )?not actual',
       'odometer (?:discrepanc\\w*|rollback|tamper\\w*)',
+      'odometer (?:reading )?(?:is )?not actual',
+      'exceeds? mechanical limits?',
       'r[\\s-]title',
     ].join('|') +
     ')\\b',
