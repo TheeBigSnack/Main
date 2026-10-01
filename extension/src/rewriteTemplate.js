@@ -6,7 +6,8 @@
 //   - first-person salesperson voice, 60-120 words, short lines
 //   - the 4-6 most useful features, plus mileage
 //   - "one owner" only when the Carfax one-owner flag is true
-//   - the dealer's own price note (e.g. doc fee wording) from settings
+//   - the dealer's own price note (e.g. doc fee wording) from settings, in
+//     every description it applies to (the checks fail a text without it)
 //   - a sign-off naming the salesperson's role and the dealership (the
 //     checks fail a text that names either one nowhere)
 //   - no ALL CAPS, no walls of emoji, no claims the data doesn't support,
@@ -408,6 +409,7 @@ function emojiCount(text) {
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const oneLine = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/\s+/g, '\\s+') + '\\b', 'i')]);
 const ONE_OWNER = /\b(one|1|single)[- ]owner\b/i;
 
@@ -447,6 +449,13 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
     for (const a of tied) {
       if (a.value !== gap && t.includes(a.text.replace(/\s/g, ''))) problems.push({ code: 'price-note-amount', text: `The price note says $${a.value.toLocaleString('en-US')}, but the website's two prices for this car differ by $${gap.toLocaleString('en-US')}; check the note in Settings` });
     }
+  }
+  // The note says what the posted price includes or leaves out (a doc fee,
+  // tax and tags), so it is in every description it applies to, whole: a
+  // draft or an edit that drops it would post the price without it.
+  const noteSaid = oneLine(priceNote);
+  if (noteSaid && !oneLine(t).toLowerCase().includes(noteSaid.toLowerCase())) {
+    problems.push({ code: 'no-price-note', text: `Doesn't include your dealership's price note: "${noteSaid}"` });
   }
   const vin = String(vehicle.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (vin && !t.toUpperCase().includes(vin)) problems.push({ code: 'no-vin', text: "Doesn't include the VIN" });

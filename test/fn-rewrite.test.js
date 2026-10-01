@@ -303,6 +303,21 @@ test('rewrite: a draft that leaves out the salesperson\'s role is refused, whate
   assert.deepEqual(other.body.guardrails.problems.map((p) => p.code), ['no-role']);
 });
 
+test('rewrite: a draft that leaves out the dealership\'s price note is refused; with the note it passes', async () => {
+  const note = 'Price is before the $490 doc fee; tax and tags extra.';
+  const facts = { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, priceNote: note, narrative: [] }), origin: ORIGIN };
+  world();
+  anthropic(says(GOOD));
+  const r = await rewrite(await load(), TOKEN.u1, facts);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems, [{ code: 'no-price-note', text: `Doesn't include your dealership's price note: "${note}"` }]);
+  world();
+  anthropic(says(GOOD.replace("I'm Sam,", `${note}\nI'm Sam,`)));
+  const withNote = await rewrite(await load(), TOKEN.u1, facts);
+  assert.deepEqual([withNote.body.ok, withNote.body.guardrails.problems], [true, []]);
+});
+
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {
   world();
   anthropic(says(null, { stop: 'refusal' }));

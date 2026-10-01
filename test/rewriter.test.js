@@ -157,3 +157,19 @@ test('a Claude draft that drops the salesperson\'s role falls back to the templa
   const fine = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: template.replace('Highlights:', 'What I like:') }) });
   assert.equal(fine.source, 'claude', fine.note);
 });
+
+test('a Claude draft that drops the dealership\'s price note falls back to the template, which carries it', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const note = 'Price is before the $490 doc fee; tax and tags extra.';
+  const base = args({ dealer: example, priceNote: note, price: 26673 });
+  const template = (await generateDescription(base)).text;
+  assert.ok(template.includes(note));
+  const noteless = template.replace(`${note}\n`, '').replace('Highlights:', 'What I like about it:') + '\nHappy to set up a time for you to see it.';
+  const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: noteless }) });
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Doesn't include your dealership's price note/);
+  assert.ok(r.text.includes(note));
+  // with the note, the same draft is used
+  const kept = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: template.replace('Highlights:', 'What I like about it:') }) });
+  assert.equal(kept.source, 'claude', kept.note);
+});

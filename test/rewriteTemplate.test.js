@@ -373,3 +373,27 @@ test('a description that never gives the salesperson\'s role, or reads as a priv
   assert.ok(codes(`${text}\nPrivate sale.`).includes('banned-phrase'));
   assert.ok(codes(`${text}\nFor sale by owner.`).includes('banned-phrase'));
 });
+
+// ---------- the dealer's price note is always in the description ----------
+
+test('a description without the dealership\'s price note fails the checks; the template always carries it', () => {
+  // the note explains what the posted price leaves out (here the lower second price, before the doc fee)
+  const v = vehicle('usedNormal', { features: FEATURES }); // 27163 main, 26673 before fees
+  const note = 'Price is before the $490 doc fee; tax and tags extra.';
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: note, price: 26673 };
+  const text = buildTemplateDescription(c);
+  assert.ok(text.includes(note));
+  assert.deepEqual(runGuardrails(text, c).problems, []);
+  const dropped = text.replace(`${note}\n`, '') + '\nHappy to answer any question about this truck and set up a time to see it.';
+  const g = runGuardrails(dropped, c);
+  assert.deepEqual(g.problems.map((p) => p.code), ['no-price-note']);
+  assert.equal(g.problems[0].text, "Doesn't include your dealership's price note: \"Price is before the $490 doc fee; tax and tags extra.\"");
+  // wrapped over two lines, or in another case, it is still the note
+  assert.deepEqual(runGuardrails(text.replace('$490 doc fee;', '$490 doc fee;\n'), c).problems, []);
+  assert.deepEqual(runGuardrails(text.replace(note, note.toLowerCase()), c).problems, []);
+  // only part of it is not the note
+  assert.deepEqual(runGuardrails(text.replace(' tax and tags extra.', ''), c).problems.map((p) => p.code), ['no-price-note']);
+  // no note set (or none for this car): nothing to look for
+  assert.deepEqual(runGuardrails(dropped, { ...c, priceNote: '' }).problems, []);
+  assert.deepEqual(runGuardrails(dropped, { ...c, priceNote: '   ' }).problems, []);
+});

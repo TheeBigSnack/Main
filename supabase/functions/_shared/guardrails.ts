@@ -7,7 +7,8 @@
 // Rules from the build brief, enforced here:
 //   - 60-120 words (the VIN line does not count)
 //   - every number in the text must be in the website's data for the car
-//   - a price note quoting a dollar amount must match the car's two-price gap
+//   - a price note quoting a dollar amount must match the car's two-price gap,
+//     and the price note, when one is set, must be in the text whole
 //   - a dollar amount must be the price posted or one in the price note, a
 //     mileage must be the website's, and no price change is claimed
 //   - the VIN and the dealership's name must be present (and a name must be set)
@@ -244,6 +245,7 @@ function emojiCount(text: unknown): number {
 }
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const oneLine = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim();
 const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/\s+/g, '\\s+') + '\\b', 'i')]);
 
 /**
@@ -279,6 +281,12 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
     for (const a of tied) {
       if (a.value !== gap && t.includes(a.text.replace(/\s/g, ''))) problems.push({ code: 'price-note-amount', text: `The price note says $${a.value.toLocaleString('en-US')}, but the website's two prices for this car differ by $${gap.toLocaleString('en-US')}; check the note in Settings` });
     }
+  }
+  // The note says what the posted price includes or leaves out (a doc fee,
+  // tax and tags), so it is in every description it applies to, whole.
+  const noteSaid = oneLine(priceNote);
+  if (noteSaid && !oneLine(t).toLowerCase().includes(noteSaid.toLowerCase())) {
+    problems.push({ code: 'no-price-note', text: `Doesn't include your dealership's price note: "${noteSaid}"` });
   }
   const vin = String(vehicle.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (vin && !t.toUpperCase().includes(vin)) problems.push({ code: 'no-vin', text: "Doesn't include the VIN" });
