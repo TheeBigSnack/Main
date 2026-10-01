@@ -14,6 +14,10 @@
 --   C           none    nobody and nothing: the row of zeros
 --   D           lapsed  d_mgr manager, a closed to-do item and an old scan
 --
+-- A also holds a scan stamped a month ahead (a machine whose clock ran
+-- ahead, stored before /sync refused such scans): last_synced_scan_at
+-- leaves out a scan more than 5 minutes ahead of the database's clock.
+--
 -- now() is the same all through one transaction, so "exactly 7 days ago"
 -- here is exactly what the report's default since is.
 --
@@ -23,7 +27,9 @@
 -- window includes since and excludes a microsecond before it, for posts
 -- and rewrite calls alike, and a null since counts everything; the plan
 -- matches subscription_state(); the rows come busiest first, then by name;
--- a dealership with no activity has its row, with zeros; public, anon,
+-- a dealership with no activity has its row, with zeros; a scan stamped
+-- more than 5 minutes ahead of the database's clock is never
+-- last_synced_scan_at; public, anon,
 -- authenticated and service_role cannot execute it, and it runs as its
 -- caller with an empty search_path.
 
@@ -130,6 +136,8 @@ insert into public.todo_items (dealership_id, vin, kind, name, flagged_at, done_
 insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count) values
   (:'dealer_a', 'https://www.usage-a.test', now() - interval '2 days',   40, 30, 0, 0),
   (:'dealer_a', 'https://www.usage-a.test', now() - interval '3 hours',  41, 31, 1, 2),
+  -- stored from a machine whose clock ran a month ahead: it must not pin A's last scan
+  (:'dealer_a', 'https://www.usage-a.test', now() + interval '30 days',  41, 31, 0, 0),
   (:'dealer_b', 'https://www.usage-b.test', now() - interval '20 minutes', 90, 70, 0, 1),
   (:'dealer_d', 'https://www.usage-d.test', now() - interval '40 days',  12, 9, 0, 0);
 
@@ -177,7 +185,7 @@ $$;
 -- manager, a_gone is no longer a member, x_both posted only in B); 5 posts
 -- (a_s1's two, a_s3's, a_mgr's, a_gone's); 3 cars up (A1 twice, A2, A4);
 -- one sold car still listed, two price changes, the oldest open 30 hours;
--- its newest scan 3 hours ago; 2 rewrite calls (the one at the window's
+-- its newest scan 3 hours ago (not the one a month ahead); 2 rewrite calls (the one at the window's
 -- start, the one an hour ago; not the one a microsecond early, not the
 -- color call). B: b_s1, b_s2 and x_both; 4 posts in the window.
 -- ---------------------------------------------------------------------------
@@ -283,6 +291,31 @@ begin
     raise exception 'a dealership with no activity has a time or a plan: %', to_jsonb(r);
   end if;
   raise notice 'ok: the plan is subscription_state()''s, the dates are the subscription''s, and a quiet dealership reads zeros';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- last_synced_scan_at and the clock: a scan more than 5 minutes ahead of the
+-- database's clock is left out, one within 5 minutes (ordinary drift) counts
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  c uuid := '00000000-0000-4000-8000-0000000000d3';
+  r record;
+begin
+  insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count)
+    values (c, 'https://www.usage-c.test', now() + interval '5 minutes' + interval '1 microsecond', 5, 4, 0, 0);
+  select * into r from public.usage_report() u where u.dealership_id = c;
+  if r.last_synced_scan_at is not null then
+    raise exception 'a scan stamped just over 5 minutes ahead is the last synced scan: %', r.last_synced_scan_at;
+  end if;
+  insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count)
+    values (c, 'https://www.usage-c.test', now() + interval '5 minutes', 5, 4, 0, 0);
+  select * into r from public.usage_report() u where u.dealership_id = c;
+  if r.last_synced_scan_at is distinct from now() + interval '5 minutes' then
+    raise exception 'a scan stamped 5 minutes ahead (ordinary drift) is not the last synced scan: %', r.last_synced_scan_at;
+  end if;
+  raise notice 'ok: last_synced_scan_at leaves out a scan more than 5 minutes ahead of the database''s clock';
 end;
 $$;
 

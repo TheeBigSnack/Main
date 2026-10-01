@@ -72,9 +72,13 @@
 --                       writes that table. So this is when the newest scan
 --                       to reach the database ran; it stops moving when
 --                       nobody's extension syncs, or when the plan lapses
---                       (/sync then writes nothing). listings.created_at,
---                       the server's clock, moves only with a new post, so
---                       it would say less.
+--                       (/sync then writes nothing). A scan stamped more
+--                       than 5 minutes ahead of the database's clock (a
+--                       machine whose clock ran ahead; /sync refuses one
+--                       now, with the same margin) is left out, so it
+--                       cannot pin the figure until its date comes.
+--                       listings.created_at, the server's clock, moves only
+--                       with a new post, so it would say less.
 --   rewrite_calls       rewrite_usage rows of kind rewrite since `since`: the
 --                       description writer's calls to the Anthropic API
 --                       (kind color, the photo color guess, is not counted)
@@ -132,7 +136,7 @@ as $$
       (select count(*) from public.todo_items t where t.dealership_id = d.id and t.done_at is null and t.kind = 'price')::integer as open_price_changes,
       (select round((extract(epoch from (now() - min(t.flagged_at))) / 3600)::numeric, 1)
          from public.todo_items t where t.dealership_id = d.id and t.done_at is null) as oldest_open_hours,
-      (select max(x.taken_at) from public.scan_summaries x where x.dealership_id = d.id) as last_synced_scan_at,
+      (select max(x.taken_at) from public.scan_summaries x where x.dealership_id = d.id and x.taken_at <= now() + interval '5 minutes') as last_synced_scan_at,
       (select count(*) from public.rewrite_usage u where u.dealership_id = d.id and u.kind = 'rewrite' and u.at >= w.since)::integer as rewrite_calls
     from public.dealerships d
     cross join w

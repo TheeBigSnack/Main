@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -118,6 +118,22 @@ test('summarize on the sample: the last scan line', () => {
   const stale = summarize({ ...sample(), scans: [{ taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 }] });
   assert.equal(stale.lastScan.stale, true);
   assert.equal(stale.lastScan.line, 'Last scan 2026-11-16 06:00: 1 car on the website, 0 ready to post, 0 to take down, 0 price changes');
+});
+
+test('summarize: a scan stamped more than 5 minutes ahead of now (a machine whose clock ran ahead) does not pin the last scan line or hide its stale warning', () => {
+  const later = (hours) => ago(-hours);
+  const real = { taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 };
+  const fromTheFuture = { taken_at: later(24 * 365), cars: 99, ready: 99, take_down_count: 0, price_update_count: 0 };
+  const s = summarize({ ...sample(), scans: [fromTheFuture, real] });
+  assert.equal(s.lastScan.takenAt, real.taken_at, 'the newest scan that ran by now');
+  assert.equal(s.lastScan.stale, true, 'nine hours without a real scan is still stale');
+  assert.equal(s.scans, 2, 'the row is still counted as read');
+  // a few minutes ahead is ordinary clock drift and still counts
+  const drift = { taken_at: later(4 / 60), cars: 2, ready: 1, take_down_count: 0, price_update_count: 0 };
+  assert.equal(summarize({ ...sample(), scans: [drift, real] }).lastScan.takenAt, drift.taken_at);
+  // only scans from the future: no last scan at all, rather than a wrong one
+  assert.equal(summarize({ ...sample(), scans: [fromTheFuture] }).lastScan, null);
+  assert.equal(FUTURE_SKEW_MS, 5 * 60 * 1000, 'the same margin /sync gives a scan');
 });
 
 // ---------- hand-built rows ----------

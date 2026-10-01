@@ -38,7 +38,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, FUTURE_SKEW_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -807,7 +807,7 @@ async function loadLive() {
     read('listings', (q) => own(q).order('posted_at', { ascending: false })),
     read('todo_items', (q) => own(q).order('flagged_at', { ascending: false })),
     read('post_attempts', (q) => own(q).order('started_at', { ascending: false })),
-    read('scan_summaries', (q) => own(q).order('taken_at', { ascending: false }).limit(50)),
+    read('scan_summaries', (q) => own(q).lte('taken_at', new Date(Date.now() + FUTURE_SKEW_MS).toISOString()).order('taken_at', { ascending: false }).limit(50)),
     loadBilling(dealership.id),
   ]);
   state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };

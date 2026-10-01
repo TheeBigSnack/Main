@@ -82,7 +82,10 @@ test('the window starts at since, included, has no end, and a null since counts 
   assert.match(body, /coalesce\(usage_report\.since, '-infinity'::timestamptz\) as since/);
   const windowed = [...body.matchAll(/(\w+\.\w+) >= w\.since/g)].map((m) => m[1]);
   assert.deepEqual(windowed, ['l.posted_at', 'l.posted_at', 'u.at'], 'active salespeople and posts by posted_at, rewrite calls by at');
-  assert.doesNotMatch(body.replace(/--.*$/gm, ''), /[<>]=? ?now\(\)|\bw\.since\b[^\n]*<|>\s*w\.since/, 'no upper end and no strict edge');
+  // the one comparison with now() is last_synced_scan_at's clock guard (checked below), not a window's end
+  const guard = "x.taken_at <= now() + interval '5 minutes'";
+  assert.equal(body.split(guard).length, 2, 'the scan clock guard appears once');
+  assert.doesNotMatch(body.replace(/--.*$/gm, '').replace(guard, ''), /[<>]=? ?now\(\)|\bw\.since\b[^\n]*<|>\s*w\.since/, 'no upper end and no strict edge');
   assert.match(body, /\n {2}order by r\.active_salespeople desc, r\.name, r\.dealership_id;\n/, 'the busiest first, then by name');
 });
 
@@ -100,7 +103,7 @@ test('active_salespeople counts current members with the salesperson role; the r
   assert.match(body, /count\(distinct l\.vin\) from public\.listings l where l\.dealership_id = d\.id and l\.status = 'listed'\)::integer as cars_listed_now/, 'cars, not listing rows');
   assert.match(body, /t\.done_at is null and t\.kind = 'takeDown'\)::integer as open_take_downs/);
   assert.match(body, /t\.done_at is null and t\.kind = 'price'\)::integer as open_price_changes/);
-  assert.match(body, /max\(x\.taken_at\) from public\.scan_summaries x/, 'the newest scan');
+  assert.match(body, /max\(x\.taken_at\) from public\.scan_summaries x where x\.dealership_id = d\.id and x\.taken_at <= now\(\) \+ interval '5 minutes'\) as last_synced_scan_at/, 'the newest scan, leaving out one stamped more than 5 minutes ahead (the margin /sync gives)');
   assert.match(body, /u\.kind = 'rewrite' and u\.at >= w\.since\)::integer as rewrite_calls/, 'description writer calls, not color guesses');
 });
 
@@ -111,6 +114,7 @@ test('tests/usage.sql checks both dealerships, the edges, the zeros and every AP
     'since a microsecond before the 7 days', 'since exactly a post', 'since a microsecond after a post', 'a null since',
     '% says % where subscription_state() says %', 'a dealership with no activity has no row', 'a dealership with no activity does not read zeros',
     'a signed-in manager ran the usage report', 'anon ran the usage report', 'the service role ran the usage report',
+    'a scan stamped just over 5 minutes ahead is the last synced scan: %', 'a scan stamped 5 minutes ahead (ordinary drift) is not the last synced scan: %',
   ]) {
     assert.ok(sqlTest.includes(words), `usage.sql does not check: ${words}`);
   }

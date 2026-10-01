@@ -381,6 +381,22 @@ test('sync: a listing stamped more than 5 minutes ahead of the server is not wri
   assert.deepEqual(fake.rows('listings').map((l) => l.vin), [VIN(2)]);
 });
 
+test('sync: a scan stamped more than 5 minutes ahead of the server is not stored and is counted, so it cannot pin the newest scan; 4 minutes ahead is stored', async () => {
+  world();
+  const handler = await load();
+  // a laptop whose clock runs a month ahead syncs its scan
+  const ahead = await sync(handler, TOKEN.u1, { scan: { takenAt: at(30 * 24 * 60), cars: 12, ready: 9, takeDownCount: 0, priceUpdateCount: 0 } });
+  assert.equal(ahead.status, 200);
+  assert.deepEqual([ahead.body.counts.rejected, ahead.body.counts.scans], [1, 0]);
+  assert.equal(fake.rows('scan_summaries').length, 0, 'nothing from the future is stored');
+  // ten minutes ahead is still too far; four minutes is within the same margin listings get
+  const ten = await sync(handler, TOKEN.u1, { scan: { takenAt: at(10), cars: 12, ready: 9 } });
+  assert.deepEqual([ten.body.counts.rejected, ten.body.counts.scans], [1, 0]);
+  const four = await sync(handler, TOKEN.u1, { scan: { takenAt: at(4), cars: 12, ready: 9 } });
+  assert.deepEqual([four.body.counts.rejected, four.body.counts.scans], [0, 1]);
+  assert.equal(fake.rows('scan_summaries').length, 1);
+});
+
 test('sync: postsToday counts the caller\'s own rows posted inside the day they sent, any status, after the upload; no usable day gives null', async () => {
   const today = { from: at(-6 * 60), to: at(6 * 60) };
   const hourAgo = at(-60);

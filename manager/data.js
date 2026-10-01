@@ -58,6 +58,12 @@
 export const WEEK_MS = 7 * 24 * 3600 * 1000; // "this week" is the last 7 days
 export const OVERDUE_HOURS = 24; // an open item past this is shown in red
 export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is open; twice that and something is off
+// A scan stamped further ahead of this computer's clock than this ran on a
+// machine whose clock was ahead: /sync refuses such a scan (the same margin,
+// FUTURE_SKEW_MS in supabase/functions/sync/index.ts), and the last scan line
+// leaves out one stored before it did, so it cannot stay "0 hours ago" and
+// hide the stale warning until its date comes.
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 // What the to-do cards say, claiming only what the items show: an item opens
 // only on the poster's own computer, when their extension's rescan finds the
@@ -298,9 +304,9 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     };
   };
 
-  // ----- the last scan -----
+  // ----- the last scan: the newest one that has run by now (FUTURE_SKEW_MS) -----
   let last = null;
-  for (const s of S) if (ms(s.taken_at) !== null && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
+  for (const s of S) if (ms(s.taken_at) !== null && ms(s.taken_at) <= t + FUTURE_SKEW_MS && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
   const lastScan = last ? scanLine(last, nowAt, zone) : null;
 
   return {
