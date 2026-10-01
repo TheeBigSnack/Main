@@ -53,7 +53,7 @@ The pilot itself ends when `PILOT.md`'s three criteria are met and the manager h
 
 ## Support
 
-- [ ] **The inbox exists.** Done when: `support@lotsync.example` is replaced by a real address in `docs/support.md`, the `[support email]` brackets in `store/listing.md` are filled with the same address, mail to it reaches a named person, and a test message was answered.
+- [ ] **The inbox exists.** Done when: `support@lotcurrent.example` is replaced by a real address in `docs/support.md`, the `[support email]` brackets in `store/listing.md` are filled with the same address, mail to it reaches a named person, and a test message was answered.
 - [ ] **The support address on the website.** The support page (`/support/`) shows no address until `supportEmail` in `site/config.js` is set; until then it tells people to ask the person who set Lot Current up for their store. Done when: `supportEmail` holds the same address as the item above, `npm run site-pages` has been run and committed, and the live support page shows it as a mail link.
 - [ ] **The help doc is current.** Done when: `docs/help.md` names every button as the current popup and side panel label it (`test/docs.test.js` checks a list of them), covers the store install, and a pilot salesperson has read it and found nothing missing.
 - [ ] **The log is running.** Done when: every request from the pilot is in the log in `docs/support.md`'s format, each with a first answer within one business day, and the weekly read of the log has produced at least one help-doc change or one fix.

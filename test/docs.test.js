@@ -114,7 +114,7 @@ test('no docs/ file carries a pilot-dealer value or Meta-affiliation wording', (
 
 test('support.md has the inbox, what to ask for, the one-business-day answer, the log, the severity words and what is never done', () => {
   const s = doc('support.md');
-  assert.match(s, /support@lotsync\.example/, 'the placeholder inbox');
+  assert.match(s, /support@lotcurrent\.example/, 'the placeholder inbox');
   assert.match(s, /within one business day/, 'the PLAN.md M6 commitment');
   for (const ask of ['Copy report', 'Settings', 'The website', 'What was on screen']) assert.ok(s.includes(ask), `support.md does not ask for "${ask}"`);
   assert.match(s, /^\| Date \| Dealer \| Who \| What happened \| The report \| Severity \| Fix commit \| Answered when \|$/m, 'the log template');
@@ -301,7 +301,7 @@ test('the CHANGELOG entry for the shipped version names what support and the hel
 
 test('the files support.md and the launch checklist say hold the support address do hold it', () => {
   for (const name of ['support.md', 'launch-checklist.md']) {
-    const lines = doc(name).split('\n').filter((l) => l.includes('support@lotsync.example'));
+    const lines = doc(name).split('\n').filter((l) => l.includes('support@lotcurrent.example'));
     assert.ok(lines.length, `docs/${name} no longer names the placeholder inbox`);
     for (const line of lines) {
       const paths = [...line.matchAll(/`([\w./-]+\.(?:md|js))`/g)].map((m) => m[1]).filter((p) => p !== 'docs/' + name);

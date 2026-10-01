@@ -33,7 +33,7 @@ You need Docker and the Supabase CLI (`npx supabase`, or the CLI installed; CI p
    supabase start -x studio,storage-api,imgproxy,realtime,logflare,vector,supavisor,postgres-meta
    ```
 
-2. Write the functions' env file somewhere outside the repository, for example `/tmp/lotsync-functions.env`. These are the variables `supabase/README.md` lists for the functions; the CLI sets `SUPABASE_URL` and the two keys itself. `ANTHROPIC_API_KEY` and `STRIPE_SECRET_KEY` stay out: the two services' addresses are fixed in the functions' code, so no stand-in can take their calls, and without a key those routes answer 500 without calling out. The signing secret is made up, so the webhook's signature check runs.
+2. Write the functions' env file somewhere outside the repository, for example `/tmp/lotcurrent-functions.env`. These are the variables `supabase/README.md` lists for the functions; the CLI sets `SUPABASE_URL` and the two keys itself. `ANTHROPIC_API_KEY` and `STRIPE_SECRET_KEY` stay out: the two services' addresses are fixed in the functions' code, so no stand-in can take their calls, and without a key those routes answer 500 without calling out. The signing secret is made up, so the webhook's signature check runs.
 
    ```
    MONTHLY_COST_CAP_USD=25
@@ -49,7 +49,7 @@ You need Docker and the Supabase CLI (`npx supabase`, or the CLI installed; CI p
 3. Serve the functions with it, in a second terminal, and leave it running:
 
    ```
-   supabase functions serve --env-file /tmp/lotsync-functions.env
+   supabase functions serve --env-file /tmp/lotcurrent-functions.env
    ```
 
 4. Run the test from the repository root:

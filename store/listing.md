@@ -2,7 +2,7 @@
 
 The text and the answers for the Developer Dashboard, kept here so they are reviewed like code. `test/manifest.test.js` checks that the summary below is the manifest's description word for word, that every permission in `extension/manifest.json` is justified here, and that nothing here promises what Lot Current cannot promise. The submission itself is Milestone 5 (PLAN.md): unlisted first.
 
-Placeholders in [brackets] and the `lotsync.example` addresses are filled in when the website and the support inbox exist. The addresses are the same as in `extension/src/legalLinks.js`, which the set-up wizard and Settings link to; change both together.
+Placeholders in [brackets] and the `lotcurrent.example` addresses are filled in when the website and the support inbox exist. The addresses are the same as in `extension/src/legalLinks.js`, which the set-up wizard and Settings link to; change both together.
 
 ## Item name
 
@@ -102,15 +102,15 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 
 ## Privacy practices
 
-The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, what the extension sends and to whom, the data-use ticks, the Limited Use certifications and "no remote code"; all of it follows `docs/data-inventory.md`. In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off, and, once Lot Current accounts are set up, the email address they sign in with); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); personal communications, health and financial, no. Authentication information [Pending attorney answer: questions-for-attorney.md 8.1], location [Pending attorney answer: questions-for-attorney.md 8.2], web history [Pending attorney answer: questions-for-attorney.md 8.3] and user activity [Pending attorney answer: questions-for-attorney.md 8.4] wait for the attorney's answers, and so does the submission. What leaves the browser: reads of the dealership's website, requests for the car's photos to the servers the website names for them when the person fills a form or downloads the photos, the VIN to NHTSA when the person asks, the car's facts to Anthropic through our rewrite service only with the description writer on, and, when the person signs in, their posted list, post timings, to-do items and scan counts to their dealership's records. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotsync.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
+The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, what the extension sends and to whom, the data-use ticks, the Limited Use certifications and "no remote code"; all of it follows `docs/data-inventory.md`. In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off, and, once Lot Current accounts are set up, the email address they sign in with); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); personal communications, health and financial, no. Authentication information [Pending attorney answer: questions-for-attorney.md 8.1], location [Pending attorney answer: questions-for-attorney.md 8.2], web history [Pending attorney answer: questions-for-attorney.md 8.3] and user activity [Pending attorney answer: questions-for-attorney.md 8.4] wait for the attorney's answers, and so does the submission. What leaves the browser: reads of the dealership's website, requests for the car's photos to the servers the website names for them when the person fills a form or downloads the photos, the VIN to NHTSA when the person asks, the car's facts to Anthropic through our rewrite service only with the description writer on, and, when the person signs in, their posted list, post timings, to-do items and scan counts to their dealership's records. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotcurrent.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
 
 ## Support and homepage
 
-- Homepage: `https://lotsync.example/` [the landing page, Milestone 5]
+- Homepage: `https://lotcurrent.example/` [the landing page, Milestone 5]
 - Support: [support email], [support page URL]
-- Privacy Policy: `https://lotsync.example/privacy`
-- Terms of Service: `https://lotsync.example/terms`
-- Posting rules: `https://lotsync.example/posting-rules`
+- Privacy Policy: `https://lotcurrent.example/privacy`
+- Terms of Service: `https://lotcurrent.example/terms`
+- Posting rules: `https://lotcurrent.example/posting-rules`
 
 The three document addresses must equal `LEGAL` in `extension/src/legalLinks.js`.
 

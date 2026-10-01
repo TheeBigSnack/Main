@@ -4,7 +4,7 @@ How support works for the pilot and the design-partner dealers. The commitment, 
 
 ## The inbox
 
-- Address: `support@lotsync.example` (a placeholder until the domain and the mailbox exist; change it here and fill in the `[support email]` brackets in `store/listing.md` together when it does. The extension itself shows no support address: Settings' **Report a problem** points people at the help doc, which points here).
+- Address: `support@lotcurrent.example` (a placeholder until the domain and the mailbox exist; change it here and fill in the `[support email]` brackets in `store/listing.md` together when it does. The extension itself shows no support address: Settings' **Report a problem** points people at the help doc, which points here).
 - One person owns the inbox each business day. The owner reads it at the start and the end of the day at least.
 - Salespeople may also send a report to their manager, who forwards it. The log records who it came from either way.
 - Anything that arrives through another channel (a text, a call, a note at a demo) is written into the inbox by whoever received it, so the log has one source.

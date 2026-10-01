@@ -9,7 +9,7 @@ import { runChecks, report, nothingRead, notDeployedYet, configFindings, TABLES,
 
 const URL_ = 'https://abcd.supabase.co';
 const KEY = 'anon-key';
-const SITE = 'https://lotsync.example';
+const SITE = 'https://lotcurrent.example';
 
 // A fake Supabase that behaves like a correct deploy, with switches to break it.
 function fakeProject(broken = {}) {
