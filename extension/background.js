@@ -60,6 +60,37 @@ function toBase64(buffer) {
 
 class PhotoTooLarge extends Error {}
 
+// What a downloaded file really is, from its first bytes: a JPEG, PNG, GIF or
+// WebP photo, or null. A server's content type can be missing or wrong (S3
+// serves an upload without one as binary/octet-stream), and a 200 answer
+// can be an error or bot-check page instead of the photo.
+export function sniffPhotoType(bytes) {
+  const b = bytes || new Uint8Array(0);
+  const starts = (...sig) => sig.every((x, i) => b[i] === x);
+  if (starts(0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
+  if (starts(0x47, 0x49, 0x46, 0x38)) return 'image/gif';
+  if (starts(0x52, 0x49, 0x46, 0x46) && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  return null;
+}
+
+// The type a downloaded file goes to the form with, or null when it is not a
+// photo. The bytes win when they show a photo format, whatever the header
+// says. Otherwise only a server that calls it an image (image/*, such as
+// AVIF or SVG) is believed, and not when the body is a page of markup in a
+// format other than SVG. Anything else (a text/html answer, a missing or
+// octet-stream type over bytes of no photo format) is no photo.
+export function photoTypeFor(declared, bytes) {
+  const sniffed = sniffPhotoType(bytes);
+  if (sniffed) return sniffed;
+  const type = String(declared || '').toLowerCase();
+  if (!/^image\/[\w.+-]+$/.test(type)) return null;
+  let i = 0;
+  while (i < bytes.length && i < 64 && (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0a || bytes[i] === 0x0d || bytes[i] === 0xef || bytes[i] === 0xbb || bytes[i] === 0xbf)) i += 1;
+  if (bytes[i] === 0x3c && type !== 'image/svg+xml') return null; // '<': an HTML page under an image type
+  return type;
+}
+
 // The body, read a chunk at a time and given up on as soon as it passes the
 // cap: a server that sends gigabytes never gets them into memory. Every read
 // races the timeout, so a body that stops arriving ends the download too.
@@ -108,14 +139,18 @@ export async function downloadPhoto(url, index, { fetchImpl = globalThis.fetch, 
   try {
     const res = await Promise.race([fetchImpl(url, { credentials: 'omit', signal: controller.signal }), deadline]);
     if (!res.ok) return { url, ok: false, error: `HTTP ${res.status} from ${hostOf(url)}` };
-    const type = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+    const declared = (res.headers.get('content-type') || '').split(';')[0].trim();
     // A server that says up front the photo is too large is not read at all.
     if (Number(res.headers.get('content-length')) > MAX_PHOTO_BYTES) {
       if (res.body && typeof res.body.cancel === 'function') res.body.cancel().catch(() => {});
       throw new PhotoTooLarge();
     }
     const bytes = await cappedBytes(res, deadline);
-    const ext = /png/i.test(type) ? 'png' : /webp/i.test(type) ? 'webp' : 'jpg';
+    // a 200 answer that is not a photo (an error or bot-check page) is a
+    // photo that couldn't be downloaded, never one attached under a .jpg name
+    const type = photoTypeFor(declared, bytes);
+    if (!type) return { url, ok: false, error: `not a photo (${declared || 'no type given'}) from ${hostOf(url)}` };
+    const ext = /png/i.test(type) ? 'png' : /webp/i.test(type) ? 'webp' : /gif/i.test(type) ? 'gif' : 'jpg';
     return {
       url,
       ok: true,

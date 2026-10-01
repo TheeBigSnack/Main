@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 // The worker registers its listeners when it loads; these stubs only take them.
 const listeners = { addListener() {} };
 globalThis.chrome = { alarms: { onAlarm: listeners }, runtime: { onMessage: listeners, onInstalled: listeners, onStartup: listeners } };
-const { downloadPhoto, MAX_PHOTO_BYTES, PHOTO_TIMEOUT_MS } = await import('../extension/background.js');
+const { downloadPhoto, sniffPhotoType, MAX_PHOTO_BYTES, PHOTO_TIMEOUT_MS } = await import('../extension/background.js');
 
 const MB = 1024 * 1024;
 // Every test here must end on its own well inside this; a hang is a failure, not a stuck run.
@@ -127,4 +127,35 @@ test('never from Facebook\'s own servers, even ones the manifest covers: nothing
   }
   assert.equal(calls, 0, 'no request went out');
   assert.equal((await downloadPhoto('https://notfbcdn.net/ok.jpg', 0, { fetchImpl })).ok, true, 'a name that only ends the same way is not Facebook');
+});
+
+test('a 200 answer that is not a photo is a photo that couldn\'t be downloaded, never one attached as .jpg', LIMIT, async () => {
+  const page = new TextEncoder().encode('<!doctype html><html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>');
+  const answer = (body, type) => async () => new Response(body, type === null ? {} : { headers: { 'content-type': type } });
+  const html = await downloadPhoto('https://img.cdn.example/1.jpg', 0, { fetchImpl: answer(page, 'text/html; charset=utf-8') });
+  assert.deepEqual(html, { url: 'https://img.cdn.example/1.jpg', ok: false, error: 'not a photo (text/html) from img.cdn.example' });
+  // the same page under an image type, or with no type at all
+  assert.deepEqual([(await downloadPhoto('https://img.cdn.example/2.jpg', 0, { fetchImpl: answer(page, 'image/jpeg') })).ok], [false]);
+  assert.equal((await downloadPhoto('https://img.cdn.example/3.jpg', 0, { fetchImpl: answer(page, null) })).error, 'not a photo (no type given) from img.cdn.example');
+  assert.equal((await downloadPhoto('https://img.cdn.example/4.jpg', 0, { fetchImpl: answer(new TextEncoder().encode('{"error":"not found"}'), 'application/json') })).ok, false);
+});
+
+test('a photo is known by its bytes: a JPEG served as octet-stream or with no type still attaches, under its real type', LIMIT, async () => {
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
+  const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x24, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50]);
+  const answer = (body, type) => async () => new Response(body, type === null ? {} : { headers: { 'content-type': type } });
+  const s3 = await downloadPhoto('https://bucket.s3.example/a', 0, { fetchImpl: answer(jpeg, 'binary/octet-stream') });
+  assert.deepEqual([s3.ok, s3.name, s3.type], [true, 'photo-01.jpg', 'image/jpeg']);
+  assert.match(s3.dataUrl, /^data:image\/jpeg;base64,/);
+  const bare = await downloadPhoto('https://bucket.s3.example/b', 1, { fetchImpl: answer(webp, null) });
+  assert.deepEqual([bare.ok, bare.name, bare.type], [true, 'photo-02.webp', 'image/webp']);
+  const mislabelled = await downloadPhoto('https://img.cdn.example/c.jpg', 2, { fetchImpl: answer(png, 'image/jpeg') });
+  assert.deepEqual([mislabelled.ok, mislabelled.name, mislabelled.type], [true, 'photo-03.png', 'image/png']);
+  // a format the bytes check doesn't know is believed when the server calls it an image (an SVG photo as the demo serves)
+  const svg = await downloadPhoto('https://img.cdn.example/d.svg', 3, { fetchImpl: answer(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>'), 'image/svg+xml') });
+  assert.deepEqual([svg.ok, svg.type], [true, 'image/svg+xml']);
+  assert.equal(sniffPhotoType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])), 'image/gif');
+  assert.equal(sniffPhotoType(new Uint8Array([1, 2, 3])), null);
+  assert.equal(sniffPhotoType(new Uint8Array(0)), null);
 });
