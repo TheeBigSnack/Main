@@ -599,8 +599,27 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     tone = 'good';
     const seats = seatsPaid(sub);
     const who = seats !== null ? `: ${plural(seats, 'seat')}` : '';
-    const when = sub.current_period_end ? `, ${sub.status === 'trialing' ? 'first charge' : 'renews'} ${date(sub.current_period_end)}` : '';
-    line = `Subscribed${who}${when}.`;
+    const verb = sub.status === 'trialing' ? 'first charge' : 'renews';
+    const ends = cancelledEnd(sub);
+    const periodEnd = ms(sub.current_period_end);
+    if (ends === undefined) {
+      const when = sub.current_period_end ? `, ${verb} ${date(sub.current_period_end)}` : '';
+      line = `Subscribed${who}${when}.`;
+    } else if (ends !== null && periodEnd !== null && ms(ends) > periodEnd) {
+      // cancelled from a date after this period: the period still renews (or the trial still ends in a charge) first
+      label = 'Cancelled';
+      tone = 'warn';
+      line = `Subscribed${who}, ${verb} ${date(sub.current_period_end)}; cancelled from ${date(ends)}.`;
+    } else {
+      // cancelled in the portal: Stripe keeps the status until the end, and nothing renews or charges after it
+      label = 'Cancelled';
+      tone = 'warn';
+      const until = ends !== null ? `ends ${date(ends)}` : 'ends with the paid period';
+      line = sub.status === 'trialing'
+        ? `Cancelled${who}, ${until} before the first charge.`
+        : `Cancelled${who}, ${until} and does not renew.`;
+      if (manager && s.canManageBilling) detail = 'Everything works as it does now until then; Manage billing can renew it.';
+    }
   } else if (state === 'lapsed') {
     label = 'Lapsed';
     tone = 'bad';
@@ -617,6 +636,15 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
 // What the card says when there are more salespeople than paid seats, in
 // one place so docs/help.md can quote it word for word.
 export const SEATS_NOT_ADDED = 'Lot Current never adds seats or changes what you pay on its own: to add seats, ask your Lot Current contact.';
+
+// When a cancelled subscription ends, from the row's copy of Stripe's
+// cancel_at (when it is set) or cancel_at_period_end (the period's end, or
+// null when the row has no period end); undefined when it renews.
+function cancelledEnd(sub) {
+  if (ms(sub.cancel_at) !== null) return sub.cancel_at;
+  if (sub.cancel_at_period_end === true) return ms(sub.current_period_end) !== null ? sub.current_period_end : null;
+  return undefined;
+}
 
 // The seats the row says are paid for (the included count plus the seat
 // price's quantity, copied from Stripe by the webhook), or null.

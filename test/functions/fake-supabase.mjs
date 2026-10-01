@@ -100,9 +100,9 @@ const SCHEMA = {
     check: (r) => (r.kind === null || ['rewrite', 'color'].includes(r.kind) ? '' : 'rewrite_usage_kind_check'),
   },
   subscriptions: {
-    columns: { dealership_id: 'uuid!', stripe_customer_id: 'text', stripe_subscription_id: 'text', status: 'text', pilot_ends_at: 'ts', current_period_end: 'ts', seats: 'int!', updated_at: 'ts!' },
+    columns: { dealership_id: 'uuid!', stripe_customer_id: 'text', stripe_subscription_id: 'text', status: 'text', pilot_ends_at: 'ts', current_period_end: 'ts', seats: 'int!', cancel_at_period_end: 'bool!', cancel_at: 'ts', updated_at: 'ts!' },
     keys: [['dealership_id'], ['stripe_customer_id'], ['stripe_subscription_id']],
-    defaults: { seats: 5, updated_at: NOW },
+    defaults: { seats: 5, cancel_at_period_end: false, updated_at: NOW },
     check: (r) => {
       const statuses = ['pilot', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused'];
       if (r.status !== null && !statuses.includes(r.status)) return 'subscriptions_status_check';

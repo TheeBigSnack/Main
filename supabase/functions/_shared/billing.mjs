@@ -12,7 +12,8 @@
 //
 // The row is public.subscriptions from migrations/0004_billing.sql:
 //   dealership_id, stripe_customer_id, stripe_subscription_id, status,
-//   pilot_ends_at, current_period_end, seats, updated_at
+//   pilot_ends_at, current_period_end, seats, cancel_at_period_end,
+//   cancel_at, updated_at
 //
 // The state a dealership is in, from the row (subscriptionState below and
 // subscription_state() in SQL, kept equal by supabase/tests/billing.sql):
@@ -453,6 +454,11 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
     if (end) patch.current_period_end = end;
     const seats = seatsOf(obj, Number.isInteger(included) ? included : PRICING.includedSalespeople, priceRooftop, priceSeat);
     if (seats !== null) patch.seats = seats;
+    // cancelled to end later (the portal cancels at the period's end; newer API versions may set cancel_at instead):
+    // Stripe keeps the status trialing or active until then, and only these say it will not renew. Every
+    // subscription event carries both, so a renewal in the portal sets them back.
+    patch.cancel_at_period_end = obj.cancel_at_period_end === true;
+    patch.cancel_at = unixToIso(obj.cancel_at);
     return patch;
   }
 

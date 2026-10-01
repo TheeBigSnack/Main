@@ -452,6 +452,34 @@ test('billing: an event signed over its raw body is applied to the dealership\'s
   assert.equal(fake.rows('billing_events').length, 1);
 });
 
+test('billing: a cancellation in the portal reaches the row and the card says when it ends, not that it renews; renewing puts it back', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const t0 = Math.floor(Date.now() / 1000);
+  const send = async (id, type, created, object) => {
+    const r = await deliver(handler, JSON.stringify(subscriptionEvent({ id, type, created }, object)));
+    assert.deepEqual([r.status, r.body.ok, r.body.applied], [200, true, true], id);
+  };
+  const cardNow = async () => billingCard((await status(handler, TOKEN.u2)).body, { now: iso(Date.now()) });
+  await send('evt_a', 'customer.subscription.created', t0 - 120, { cancel_at_period_end: false, cancel_at: null });
+  assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
+
+  // the portal cancels at the end of the period: Stripe keeps the trial running and says it will not renew
+  await send('evt_b', 'customer.subscription.updated', t0 - 60, { cancel_at_period_end: true, cancel_at: 1790000000, canceled_at: t0 - 60 });
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.status, row.cancel_at_period_end, row.cancel_at], ['trialing', true, pgTime(iso(1790000000 * 1000))]);
+  const cancelled = await cardNow();
+  assert.equal(cancelled.label, 'Cancelled');
+  assert.match(cancelled.line, /^Cancelled: 7 seats, ends \d{4}-\d{2}-\d{2} before the first charge\.$/);
+  assert.doesNotMatch(cancelled.line, /renews|first charge \d/);
+
+  // renewed in the portal before the end
+  await send('evt_c', 'customer.subscription.updated', t0, { cancel_at_period_end: false, cancel_at: null });
+  const [renewedRow] = fake.rows('subscriptions');
+  assert.deepEqual([renewedRow.cancel_at_period_end, renewedRow.cancel_at], [false, null]);
+  assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
+});
+
 test('billing: a missing, malformed, altered, stale or wrongly keyed signature is 400 and nothing is read; a rolled secret\'s second v1 is accepted', async () => {
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
   const handler = await load();

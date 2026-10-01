@@ -18,7 +18,8 @@
 -- the statement as the README writes it) puts a dealership on its pilot
 -- with that end date, start_pilot then changes nothing, the same statement
 -- extends it, and it leaves a dealership with a Stripe subscription alone;
--- the anon key gets nothing.
+-- a subscription cancelled to end later stays active until then; the anon
+-- key gets nothing.
 
 \set ON_ERROR_STOP on
 \set a_sales   '00000000-0000-4000-8000-0000000000a1'
@@ -220,6 +221,10 @@ begin
   select count(*) into n from public.subscriptions;
   if n <> 1 then raise exception 'b_mgr should see only B''s row, saw %', n; end if;
   if (select seats from public.subscriptions where dealership_id = b) <> 7 then raise exception 'B''s seats should read 7'; end if;
+  -- a row the webhook wrote before any cancellation: renews, and the member reads that
+  if (select cancel_at_period_end is distinct from false or cancel_at is not null from public.subscriptions where dealership_id = b) then
+    raise exception 'a new row should read cancel_at_period_end false and cancel_at null';
+  end if;
   -- a paying dealership cannot get a free pilot on top
   got := public.start_pilot(b);
   if (got ->> 'started')::boolean is not false or got ->> 'status' <> 'active' or got ->> 'state' <> 'active' then
@@ -259,6 +264,17 @@ begin
   -- and then it ends
   update public.subscriptions set pilot_ends_at = now() - interval '1 second' where dealership_id = a;
   if public.subscription_state(a) <> 'lapsed' then raise exception 'canceled after the pilot should be lapsed'; end if;
+
+  -- cancelled in the portal: Stripe keeps it trialing or active until the end, so it stays active (served) with the end recorded
+  update public.subscriptions set status = 'active', pilot_ends_at = null, cancel_at_period_end = true, cancel_at = now() + interval '20 days' where dealership_id = a;
+  if public.subscription_state(a) <> 'active' then raise exception 'a subscription cancelled to end later should stay active until then, reads %', public.subscription_state(a); end if;
+  begin
+    update public.subscriptions set cancel_at_period_end = null where dealership_id = a;
+    raise exception 'cancel_at_period_end accepted null';
+  exception when not_null_violation then
+    null;
+  end;
+  update public.subscriptions set cancel_at_period_end = false, cancel_at = null where dealership_id = a;
 
   -- every Stripe status the row accepts, without a pilot, is active or lapsed and never none
   foreach s in array array['trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused'] loop

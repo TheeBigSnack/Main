@@ -407,10 +407,32 @@ const sub = (over = {}) => ({
 const event = (type, object, created = T) => ({ id: 'evt_' + type.replace(/\W/g, '_'), object: 'event', type, created, data: { object } });
 const opts = { included: 5, priceRooftop: 'price_rooftop', priceSeat: 'price_seat' };
 
+test('applyStripeEvent: a cancellation in the portal is copied while Stripe keeps the status, and a renewal clears it', () => {
+  const paying = row({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: iso(NOW + 30 * DAY), updated_at: iso(NOW - DAY) });
+  // the portal cancels at the end of the period: status stays active, cancel_at_period_end says it will not renew
+  const atEnd = applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: true, cancel_at: T + 30 * 86400, canceled_at: T })), opts);
+  assert.equal(atEnd.status, 'active', 'Stripe keeps it active until the end');
+  assert.equal(atEnd.cancel_at_period_end, true);
+  assert.equal(atEnd.cancel_at, iso(NOW + 30 * DAY));
+  assert.equal(subscriptionState({ ...paying, ...atEnd }, NOW), 'active', 'still served until the end');
+  // newer API versions may schedule the end through cancel_at alone
+  const byDate = applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: false, cancel_at: T + 30 * 86400 })), opts);
+  assert.deepEqual([byDate.cancel_at_period_end, byDate.cancel_at], [false, iso(NOW + 30 * DAY)]);
+  // a trial cancelled before its first charge
+  const trial = applyStripeEvent(paying, event('customer.subscription.updated', sub({ status: 'trialing', cancel_at_period_end: true })), opts);
+  assert.deepEqual([trial.status, trial.cancel_at_period_end, trial.cancel_at], ['trialing', true, null]);
+  // renewed in the portal: both go back, so the card says renews again
+  const renewed = applyStripeEvent({ ...paying, ...atEnd }, event('customer.subscription.updated', sub({ cancel_at_period_end: false, cancel_at: null }), T + 60), opts);
+  assert.deepEqual([renewed.cancel_at_period_end, renewed.cancel_at], [false, null]);
+  // invoices never touch them
+  const paid = applyStripeEvent({ ...paying, ...atEnd }, event('invoice.paid', { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [] } }, T + 60), opts);
+  assert.ok(paid && !('cancel_at_period_end' in paid) && !('cancel_at' in paid));
+});
+
 test('applyStripeEvent: subscription created and updated copy the status, ids, period end and seats', () => {
   assert.deepEqual(HANDLED_EVENTS, ['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed']);
   const created = applyStripeEvent(null, event('customer.subscription.created', sub()), opts);
-  assert.deepEqual(created, { updated_at: iso(NOW), stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', status: 'active', current_period_end: iso(NOW + 30 * DAY), seats: 5 });
+  assert.deepEqual(created, { updated_at: iso(NOW), stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', status: 'active', current_period_end: iso(NOW + 30 * DAY), seats: 5, cancel_at_period_end: false, cancel_at: null });
   // a pilot row becomes a trialing subscription when the checkout finished with a trial
   const pilot = row({ status: 'pilot', pilot_ends_at: iso(NOW + 10 * DAY), stripe_customer_id: 'cus_1' });
   const trial = applyStripeEvent(pilot, event('customer.subscription.created', sub({ status: 'trialing' })), opts);
