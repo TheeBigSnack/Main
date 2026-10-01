@@ -19,7 +19,7 @@ The store's rules were read on 2026-10-01 from Google's developer documentation 
 ## 1. Package
 
 1. `npm test`, `npm run test:e2e`, `npm run test:demo` green; for a release, `npm run release -- <version>` (`docs/release.md`).
-2. `npm run pack`, then `npm run store-check -- --strict`. Strict mode also fails while anything it can see is still open (placeholders, the attorney's pending answers, draft legal pages, missing screenshots). It cannot see the attorney's answers on the Developer Agreement and the trader declaration, whether the support address receives mail, or whether all five screenshots are the right ones; those stay on the "Before submitting" list in `store/listing.md`.
+2. `npm run pack`, then `npm run store-check -- --strict`. Strict mode also fails while anything it can see is still open (placeholders, the attorney's pending answers, draft legal pages, missing screenshots, a support address on the listing that is neither the inbox `site/config.js` names nor a `support@` one). It cannot see the attorney's answers on the Developer Agreement and the trader declaration, whether the support address receives mail, or whether all five screenshots are the right ones; those stay on the "Before submitting" list in `store/listing.md`.
 3. Dashboard: **Add new item** (first time) or the item's **Package** page, upload `dist/lot-current-extension-<version>.zip`. The manifest is at the zip's top level (`npm run store-check` checks the zip against `extension/`).
 
 The summary on the store comes from the manifest's `description` and cannot be edited in the dashboard; change it in `extension/manifest.json` and `store/listing.md` together.

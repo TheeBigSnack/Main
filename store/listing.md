@@ -143,4 +143,5 @@ The three document addresses must equal `LEGAL` in `extension/src/legalLinks.js`
 - [ ] Visibility: Unlisted for the pilot and the design partners; Public only after the review passes and the owner says so.
 - [ ] The summary above still equals the manifest description (tested), and the detailed description says who publishes, that Lot Current is not affiliated with Meta Platforms, Inc., and nothing about what will happen to anyone's account.
 - [ ] Every [bracketed] placeholder filled in, and no Meta logo, wordmark or brand colour in the icon, the tile or the screenshots.
+- [ ] The support address under "Support and homepage" receives mail: send it a message from another account and see it arrive. `npm run store-check` accepts the inbox `site/config.js` names (`supportEmail`) or a `support@` address there, but it cannot see a mailbox.
 - [ ] `npm run store-check -- --strict` passes: nothing wrong with the package or the listing, and nothing left before a submission (`store/submission.md` walks the dashboard).

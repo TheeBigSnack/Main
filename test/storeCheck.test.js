@@ -9,10 +9,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   LIMITS, checkImages, checkListing, checkManifest, compareZip, findMissingReferences, findRemoteCode,
-  findStrayFiles, iconMargin, jpegSize, pngOpaqueBox, placeholders, pngSize, readZip, runChecks, section, validVersion,
+  configuredSupportEmail, findStrayFiles, iconMargin, jpegSize, pngOpaqueBox, placeholders, pngSize, readZip, runChecks, section, validVersion,
 } from '../scripts/store-check.mjs';
 import { zip } from '../scripts/pack.mjs';
 import { deflateSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import { SITE } from '../site/config.js';
 
 const root = new URL('..', import.meta.url).pathname;
 
@@ -258,6 +260,13 @@ test('the listing: name and summary from the manifest, length, code marks, place
   }).conditions.join('\n');
   for (const re of [/detailed description still says \[support email\]/, /test instructions still say \[a test account\]/, /Support and homepage still names \.example/, /legalLinks\.js/, /legal-status\.json/, /listing\.md has 1 "\[Pending/, /privacy\.md has 2 "\[Pending/, /marked DRAFT/, /names someone@example\.com, not a support inbox/]) assert.match(c, re);
   assert.doesNotMatch(c, /names support@example\.com/);
+  // the inbox site/config.js names is the owner's confirmed one: strict passes with it on the listing; any other address still stops it
+  const owner = { listing: LISTING({ support: '- Support: owner@lotcurrent.com and stray@lotcurrent.com' }), privacy: 'Answers.', manifest, legalLinks: "termsUrl: 'https://example.com/terms'", legalStatus: { draft: false } };
+  assert.deepEqual(checkListing({ ...owner, supportEmail: 'Owner@lotcurrent.com' }).conditions, ['Support and homepage names stray@lotcurrent.com, not a support inbox: put the inbox site/config.js names (supportEmail) or a support@ address there']);
+  assert.equal(checkListing(owner).conditions.length, 2, 'with no inbox configured, only support@ addresses pass');
+  assert.equal(configuredSupportEmail("export const SITE = {\n  siteUrl: '',\n  supportEmail: 'owner@lotcurrent.com',\n};"), 'owner@lotcurrent.com');
+  assert.equal(configuredSupportEmail("export const SITE = {\n  supportEmail: '',\n};"), '');
+  assert.equal(configuredSupportEmail(''), '');
 });
 
 test('section() reads one "## " section and nothing after it', () => {
@@ -274,4 +283,9 @@ test('the repository itself: nothing wrong with the package or the listing now',
   assert.deepEqual(failures, [], failures.join('\n'));
   // What is left is the owner's and the attorney's, and the check says so.
   assert.ok(conditions.every((c) => typeof c === 'string' && c.length));
+  // the listing's support address is the inbox the website names, which the owner confirmed, so it is not one of them
+  if (SITE.supportEmail) assert.ok(section(readFileSync(new URL('../store/listing.md', import.meta.url), 'utf8'), 'Support and homepage').includes(SITE.supportEmail), 'the listing names the support inbox site/config.js names');
+  assert.deepEqual(conditions.filter((c) => /^Support and homepage names /.test(c)), [], 'strict mode can pass with the confirmed inbox');
+  const before = readFileSync(new URL('../store/listing.md', import.meta.url), 'utf8').split('## Before submitting')[1] || '';
+  assert.match(before, /- \[ \] The support address [^\n]*receives mail/, 'what the check cannot see, the mailbox, is a box on the list');
 });
