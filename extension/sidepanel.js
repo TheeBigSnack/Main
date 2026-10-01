@@ -10,6 +10,7 @@
 // This file never clicks anything on the Facebook page.
 
 import { markPosted, basisPrice } from './src/rescan.js';
+import { draftRecord, draftPill } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins } from './src/panelList.js';
@@ -62,7 +63,7 @@ const state = {
   highlightsUsed: null, // the highlights the description on screen was written with
   queue: null, // the batch queue (src/queue.js), shared with the popup
   queueMode: false, // this car is being posted as part of the queue
-  drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
+  drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt, price, basis } } (src/drafts.js)
   snapshotVehicles: {}, // names for the queue bar
   syncState: null, // this website's sync state (src/sync.js nextSyncState): the server's count of today's posts feeds the cap
   sites: {}, // the site registry (src/scanRunner.js rememberSite): every website this computer has read, for the list's website choice
@@ -582,11 +583,13 @@ async function afterQueueStep(outcome) {
   if (startNext) return startNextInQueue();
 }
 
+// The draft keeps the price the form was filled with: the listing published
+// from it later shows that price, so Mark posted records it (src/drafts.js).
 async function savedDraft() {
-  const savedAt = new Date().toISOString();
+  const record = draftRecord({ name: state.vehicle.name, price: state.price, basis: state.settings.basis, savedAt: new Date().toISOString() });
   try {
     // added to the list as it is stored now: the popup may have changed it meanwhile
-    state.drafts = await updateKey(siteKeys(state.origin).drafts, (fresh) => ({ ...(fresh || {}), [state.vin]: { name: state.vehicle.name, savedAt } }), panelStorage);
+    state.drafts = await updateKey(siteKeys(state.origin).drafts, (fresh) => ({ ...(fresh || {}), [state.vin]: record }), panelStorage);
   } catch (e) {
     setStatus(storageErrorText(e), 'error');
     return;
@@ -1092,8 +1095,10 @@ function listRowHtml(r, { canPost = true } = {}) {
   const pill = r.isNew ? ' <span class="pill good new">New</span>' : '';
   const facts = [e.stock && 'Stock ' + esc(e.stock), typeof e.mileage === 'number' ? miles(e.mileage) : '', esc(e.locationShort || '')].filter(Boolean).join(' · ');
   let action = '';
-  if (r.draft) action = '<span class="pill warn" title="Saved as a draft on Facebook: publish it there, then mark it posted in the popup">Draft on Facebook</span>';
-  else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
+  if (r.draft) {
+    const draft = draftPill(state.drafts[r.vin], e, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
+    action = `<span class="pill ${draft.tone}" title="${esc(draft.title)}">${esc(draft.text)}</span>`;
+  } else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
   return `<li class="row"><div class="main">${name}${pill}<div class="sub">${facts}</div><div class="when">${esc(r.line)}</div></div><div class="price">${money(r.price)}</div>${action}</li>`;
 }
 

@@ -16,6 +16,7 @@ import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extens
 import { buildListingData } from '../extension/src/listingData.js';
 import { recheck } from '../extension/src/vehicleDetails.js';
 import { basisPrice } from '../extension/src/rescan.js';
+import { draftRecord } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
@@ -814,6 +815,34 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   const full = await run({ logFails: true });
   assert.deepEqual(full.writes, ['posted:o']);
   assert.equal(full.state.step, 'done', 'the post is recorded all the same');
+});
+
+// Saved as draft, next car: the draft keeps the price the form was filled
+// with, so the popup's Mark posted later records that price, not the
+// website's of that day (src/drafts.js).
+test('a car saved as a Facebook draft is kept with the price its form was filled with', async () => {
+  for (const basis of ['website', 'beforeFees']) {
+    const v = vehicle('usedNormal');
+    const filled = basisPrice(v, basis);
+    const store = { 'drafts:o': { OTHER: { name: 'Other car', savedAt: '2026-09-30T10:00:00Z' } } };
+    const calls = [];
+    const state = { origin: 'o', vin: v.vin, vehicle: v, price: filled, settings: { basis }, drafts: {} };
+    const savedDraft = compile('savedDraft', {
+      state, draftRecord, panelStorage: {},
+      siteKeys: (o) => ({ drafts: 'drafts:' + o }),
+      updateKey: async (key, change) => (store[key] = change(store[key])),
+      storageErrorText: (e) => String(e), setStatus: never('setStatus'),
+      pilotNote: async () => calls.push('pilotNote'), endPost: () => {},
+      afterQueueStep: async (outcome) => calls.push('afterQueueStep ' + outcome),
+    });
+    await savedDraft();
+    const record = store['drafts:o'][v.vin];
+    assert.deepEqual([record.name, record.price, record.basis], [v.name, filled, basis], basis);
+    assert.ok(!Number.isNaN(Date.parse(record.savedAt)));
+    assert.ok(store['drafts:o'].OTHER, 'the other drafts stay');
+    assert.equal(state.drafts, store['drafts:o']);
+    assert.deepEqual(calls, ['pilotNote', 'afterQueueStep draft']);
+  }
 });
 
 // The queue bar's Stop queue and Clear queue, as onClick runs them: the queue

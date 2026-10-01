@@ -7,7 +7,9 @@
 // the queue stops at review with it listed, and the test clicks Open the
 // Marketplace form as the person would. For the second car the test presses
 // "Saved as draft" (as if the person used Facebook's Save draft), and the
-// queue finishes with 1 posted, 1 draft.
+// queue finishes with 1 posted, 1 draft. Then the website drops the draft's
+// car $1,500: the draft's pill says so, and Mark posted records the price
+// the draft shows, with the drop listed under Update price.
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:queue
 
@@ -219,6 +221,36 @@ try {
   assert.equal(await popup.locator('#queueBtn').count(), 0);
   assert.equal(await popup.locator('button[data-action="openPost"]:not([disabled])').count(), 0, 'Post buttons are disabled');
   await popup.screenshot({ path: join(shots, 'queue-5-cap-reached.png') });
+  await popup.close();
+
+  // ---- 7. The website drops the Wagoneer $1,500 while its draft waits; the person publishes the draft and marks it posted ----
+  // The draft still says $38,383, so that is what the listing shows: it is recorded at that price and To do lists the drop at once.
+  await dealer.request.get(`${origin}/scenario?name=day2`);
+  popup = await openPopup();
+  await popup.click('#scan');
+  await popup.waitForSelector('h3');
+  assert.match(await popup.textContent('.panel'), /Update price\s*1[\s\S]*Jeep Wagoneer[\s\S]*Not marked as posted/);
+  await tab(popup, 'ready').click();
+  const draftPill = popup.locator('.pill', { hasText: 'Draft on Facebook' });
+  assert.equal(await draftPill.textContent(), 'Draft on Facebook at $38,383: the website now shows $36,883');
+  assert.match(await draftPill.getAttribute('class'), /\bbad\b/);
+  assert.match(await draftPill.getAttribute('title'), /^Change the price on the draft to \$36,883 before you publish it\./);
+  await popup.screenshot({ path: join(shots, 'queue-6-draft-price-changed.png') });
+  await popup.click(`button[data-action="post"][data-vin="${WAGONEER}"]`);
+  await popup.waitForFunction(() => /^Recorded at/.test(document.querySelector('#status').textContent));
+  assert.equal(await popup.textContent('#status'), 'Recorded at $38,383, the price the draft was filled with. The website now shows $36,883: update the price on the listing (To do, Update price).');
+  const recorded = await popup.evaluate(async ({ o, vin }) => (await chrome.storage.local.get(`posted:${o}`))[`posted:${o}`][vin].price, { o: origin, vin: WAGONEER });
+  assert.equal(recorded, 38383, 'the price the published draft shows');
+  await tab(popup, 'todo').click();
+  const todo = await popup.textContent('.panel');
+  assert.match(todo, /Update price\s*1[\s\S]*Jeep Wagoneer[\s\S]*Your listing[\s\S]*\$38,383 → \$36,883/);
+  assert.equal(await popup.locator(`button[data-action="upkeep"][data-kind="price"][data-vin="${WAGONEER}"]`).count(), 1, 'Open & update price is offered');
+  await popup.close();
+  // and the next rescan still lists it, until the listing is updated
+  popup = await openPopup();
+  await popup.click('#scan');
+  await popup.waitForSelector('h3');
+  assert.match(await popup.textContent('.panel'), /Update price\s*1[\s\S]*Jeep Wagoneer[\s\S]*Your listing[\s\S]*\$38,383 → \$36,883/);
   await popup.close();
   await panel.close();
 

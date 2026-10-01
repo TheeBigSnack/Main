@@ -1,5 +1,6 @@
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
+import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
@@ -38,7 +39,7 @@ const state = {
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [],
   queue: null, // the batch queue (src/queue.js), shared with the side panel
-  drafts: {}, // cars saved as drafts on Facebook during a queue: { vin: { name, savedAt } }
+  drafts: {}, // cars saved as drafts on Facebook during a queue: { vin: { name, savedAt, price, basis } } (src/drafts.js)
   wizardDone: false, // set-up finished (or skipped) for this website
   wizardActive: false, // set-up started in the side panel and not finished
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
@@ -357,11 +358,14 @@ function empty(text) {
 }
 
 // "Post" opens the guided flow in the side panel (only for ready cars). "Mark
-// posted" is for a listing the salesperson made by hand.
+// posted" is for a listing the salesperson made by hand, or published from a
+// draft: the draft's pill shows the price it was filled with, and says so
+// when the website's price moved or the car is not ready any more.
 function postButton(vin, { canPost = true } = {}) {
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark">Posted ✓</button>`;
   if (state.drafts[vin]) {
-    return `<span class="actions"><span class="pill warn" title="Saved as a draft on Facebook; publish it there, then mark it posted">Draft on Facebook</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
+    const pill = draftPill(state.drafts[vin], state.snapshot?.vehicles?.[vin], { basis: state.settings?.basis, ready: canPost });
+    return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
   const capReached = dailyCap().reached;
   const post = canPost
@@ -947,8 +951,19 @@ async function onPanelClick(ev) {
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry) return;
       const at = new Date().toISOString();
-      if (!(await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis, at)))) break;
+      const basis = state.settings?.basis;
+      // a listing published from a draft shows the draft's price: that is what is recorded (src/drafts.js)
+      const draft = state.drafts[vin] || null;
+      if (!(await update('posted', (p) => (draft ? markDraftPosted(p || {}, entry, draft, basis, at) : markPosted(p || {}, entry, basis, at))))) break;
       await update('postLog', (log) => logPost(log, vin, at)); // the day's log for the cap, which a take-down leaves alone
+      if (!draft) break;
+      const gap = draftPriceUpdate(draft, entry, basis);
+      if (gap) {
+        await update('diff', (d) => withPriceUpdate(d, gap)); // on To do now; every rescan lists it too until the listing is updated
+        setStatus(`Recorded at ${money(gap.from)}, the price the draft was filled with. The website now shows ${money(gap.to)}: update the price on the listing (To do, Update price).`, 'error');
+      } else if (draftPrice(draft) === null && basisPrice(entry, basis)) {
+        setStatus(`Recorded at ${money(basisPrice(entry, basis))}, the website's price. Lot Current did not keep this draft's price: check that the published listing shows ${money(basisPrice(entry, basis))}.`);
+      }
       break;
     }
     case 'openPost': {
