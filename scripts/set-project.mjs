@@ -54,13 +54,14 @@ export function isPinnedClient(address) {
 const quote = (v) => `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
 // Sets `<field>: '<value>',` in a config file's text. Exactly one such line
-// must exist, at the two-space indent both files use; anything else is an
+// must exist, at the two-space indent both files use (a Windows checkout's
+// CRLF endings kept as they are); anything else is an
 // error rather than a guess.
 export function setField(text, field, value) {
-  const re = new RegExp(`^(  ${field}: )'(?:[^'\\\\]|\\\\.)*',$`, 'gm');
+  const re = new RegExp(`^(  ${field}: )'(?:[^'\\\\]|\\\\.)*',(\\r?)$`, 'gm');
   const hits = text.match(re) || [];
   if (hits.length !== 1) throw new Error(`expected one "${field}: '...'," line, found ${hits.length}`);
-  return text.replace(re, `$1${quote(value)},`);
+  return text.replace(re, (_, lead, cr) => `${lead}${quote(value)},${cr}`);
 }
 
 export function applyProject(texts, url, key) {

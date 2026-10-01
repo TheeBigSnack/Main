@@ -10,7 +10,9 @@
 # (npm run set-project -- --check), runs the page's tests, and uploads the
 # folder without the local demo server.
 #
-# Settings it reads (Settings, Secrets and variables, Actions):
+# Settings it reads, on the "manager-view" environment (Settings,
+# Environments, manager-view, deployment branches: the default branch only),
+# so a workflow on another branch cannot read them:
 #   secrets  CLOUDFLARE_API_TOKEN   an API token with Cloudflare Pages: Edit only
 #            CLOUDFLARE_ACCOUNT_ID  the Cloudflare account's id (not secret, kept with the token)
 #   variable CLOUDFLARE_PAGES_PROJECT  the Pages project's name (default lotcurrent-app)
@@ -74,9 +76,13 @@ jobs:
           rsync -a --exclude serve.mjs manager/ "$RUNNER_TEMP/manager/"
           ls -la "$RUNNER_TEMP/manager"
       # An exact wrangler, so a new release cannot change the deploy under us.
-      # The project is created on the first run (an error that it exists is expected after that).
+      # The project is created on the first run; with a wrong token or account id the create fails and says why.
       - name: Deploy to Cloudflare Pages
         if: steps.ready.outputs.go == 'true'
         run: |
-          npx --yes wrangler@4.145.0 pages project create "$PAGES_PROJECT" --production-branch main || echo "the project $PAGES_PROJECT exists already"
+          if npx --yes wrangler@4.145.0 pages project list | grep -Fq " $PAGES_PROJECT "; then
+            echo "the project $PAGES_PROJECT exists"
+          else
+            npx --yes wrangler@4.145.0 pages project create "$PAGES_PROJECT" --production-branch main
+          fi
           npx --yes wrangler@4.145.0 pages deploy "$RUNNER_TEMP/manager" --project-name "$PAGES_PROJECT" --branch main --commit-hash "$GITHUB_SHA"

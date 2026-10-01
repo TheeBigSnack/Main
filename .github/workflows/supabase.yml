@@ -10,12 +10,15 @@
 #   check      only the outside check (npm run check-deploy)
 #
 # Every step ends with npm run check-deploy against the project the
-# committed config files name, and refuses to start when those files name a
+# committed config files name (only functions and check fail on it; before
+# the functions exist some of its lines fail by design), and refuses to start when those files name a
 # different project from SUPABASE_PROJECT_REF, so a deploy can only reach the
 # project the extension and the manager view talk to.
 #
-# Settings it reads (Settings, Secrets and variables, Actions; the
-# "production" environment can also require the owner's approval per run):
+# Settings it reads, all on the "production" environment (Settings,
+# Environments, production), which deploys from the default branch only and
+# waits for the owner's approval, so a workflow on another branch cannot
+# read them:
 #   secrets  SUPABASE_ACCESS_TOKEN  a personal access token (supabase.com, Account, Access tokens)
 #            SUPABASE_DB_PASSWORD   the database password chosen when the project was created
 #   variable SUPABASE_PROJECT_REF   the 20-character ref in the project URL (not secret)
@@ -80,7 +83,7 @@ jobs:
         run: supabase db push --dry-run
       - name: Apply the migrations
         if: inputs.step == 'database'
-        run: supabase db push
+        run: supabase db push --yes
       # Each name is checked against the four functions in supabase/functions,
       # so the box can only ever deploy one of them.
       - name: Deploy the functions
@@ -92,6 +95,11 @@ jobs:
               *) echo "::error::$f is not one of rewrite, sync, billing, lead"; exit 1 ;;
             esac
           done
-          for f in $FUNCTIONS; do supabase functions deploy "$f" --project-ref "$PROJECT_REF"; done
+          for f in $FUNCTIONS; do supabase functions deploy "$f" --project-ref "$PROJECT_REF" --use-api; done
+      # Before the functions are deployed (plan, database) some lines are
+      # expected to fail: tables missing before the first push, sync and
+      # rewrite missing before theirs. The output still shows, and the run
+      # stays green; on functions and check a FAIL turns the run red.
       - name: Check the project from the outside
+        continue-on-error: ${{ inputs.step == 'plan' || inputs.step == 'database' }}
         run: npm run check-deploy

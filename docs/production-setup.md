@@ -34,7 +34,7 @@ Why not the alternatives:
    - Database password: press **Generate a password**, save it in your password manager. You'll paste it once into GitHub (step 2). Don't send it to anyone.
    - Region: **East US (North Virginia)**, the closest to Pennsylvania dealers.
 4. When the project is ready, open **Project settings, API Keys**. Copy the **publishable** key (starts `sb_publishable_`). If the page only shows the legacy "anon" key, use that for now; it works until Supabase retires it, and switching later is one command.
-5. Open **Project settings, Data API** (older Dashboards: API) and copy the **Project URL** (`https://<20 letters>.supabase.co`).
+5. Open **Project settings, Data API** (older Dashboards: API) and copy the **Project URL** (`https://<20 letters and digits>.supabase.co`).
 
 **Send Claude:** the Project URL and the publishable key. Both are safe to share; the secret key on the same page is not, and is never needed.
 
@@ -43,12 +43,13 @@ Why not the alternatives:
 ## Step 2. Let GitHub deploy to it [Owner]
 
 1. In Supabase: your avatar, **Account preferences, Access Tokens**, **Generate new token**, name it `github-deploy`. Copy it.
-2. In GitHub: the repository, **Settings, Secrets and variables, Actions**:
-   - **Secrets**, New repository secret: `SUPABASE_ACCESS_TOKEN` = the token from 1; `SUPABASE_DB_PASSWORD` = the database password from step 1.
-   - **Variables**, New repository variable: `SUPABASE_PROJECT_REF` = the 20 letters between `https://` and `.supabase.co`.
-3. Optional and recommended: **Settings, Environments**, open **production** (it appears after the first run, or create it), tick **Required reviewers** and add yourself. Then every deploy to the real database waits for your click.
+2. In GitHub: the repository, **Settings, Environments, New environment**, name it `production`:
+   - **Deployment branches and tags**: choose **Selected branches and tags** and add the default branch only.
+   - **Required reviewers**: tick it and add yourself. Every deploy to the real database then waits for your click.
+   - **Environment secrets**, Add secret: `SUPABASE_ACCESS_TOKEN` = the token from 1; `SUPABASE_DB_PASSWORD` = the database password from step 1.
+   - **Environment variables**, Add variable: `SUPABASE_PROJECT_REF` = the 20 lower-case letters and digits between `https://` and `.supabase.co`.
 
-Secrets in a public repository are safe: GitHub never shows them, and only people with write access can run the deploy.
+Put them on the environment, not under the repository's own Secrets: a repository secret can be read by a workflow on any branch, an environment secret only by a run the environment lets through. GitHub never shows a secret once saved, and only people with write access can start the deploy.
 
 ## Step 3. The database and the functions [Claude, with the owner's go]
 
@@ -56,6 +57,8 @@ The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, 
 
 1. **plan**: shows the eight migrations it would apply. Changes nothing.
 2. **database**: applies them.
+
+   After plan and database the outside check prints some `FAIL` lines on purpose (no tables yet, then no functions yet); the run stays green. From functions on, a `FAIL` turns the run red.
 3. **functions** with `rewrite sync`: deploys the description writer and the sync between machines. (`billing` comes with Stripe, `lead` when the website's demo form opens.)
 4. **check**: the outside check on its own, any time.
 
@@ -91,7 +94,7 @@ In the Supabase Dashboard, **Authentication**:
 
 1. **[Owner]** Sign up at cloudflare.com (Free plan). You don't need to move lotcurrent.com's DNS to Cloudflare.
 2. **[Owner]** Your profile, **API Tokens, Create Token, Create Custom Token**: name `github-manager-deploy`, permission **Account, Cloudflare Pages, Edit**, your account only. Copy it. Also copy the **Account ID** (on the account's home page, right-hand column, or Workers & Pages overview).
-3. **[Owner]** In GitHub, repository secrets: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+3. **[Owner]** In GitHub, **Settings, Environments, New environment** `manager-view`, deployment branches: the default branch only; its environment secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 4. **[Claude]** Run the **Manager view** workflow (`.github/workflows/manager.yml`). It refuses to upload a page that isn't set to the production project (`npm run set-project -- --check`), runs the page's tests, creates the Cloudflare project `lotcurrent-app` on the first run and uploads `manager/` without the local demo server. It also runs by itself when a change to the page reaches the default branch. Before the Cloudflare secrets exist it says so and stops without failing.
 5. **[Owner]** In Cloudflare, **Workers & Pages, lotcurrent-app, Custom domains, Set up a custom domain**: `app.lotcurrent.com`. Do this **before** the DNS record: Cloudflare's docs say a CNAME added first will not resolve.
 6. **[Owner]** In GoDaddy DNS, add **CNAME**, name `app`, value the `.pages.dev` address Cloudflare shows for the project (usually `lotcurrent-app.pages.dev`).

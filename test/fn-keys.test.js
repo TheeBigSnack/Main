@@ -42,11 +42,13 @@ test('the caller\'s client: the publishable key when the runtime has one, the le
   world();
   const legacy = await loadFunction('sync');
   assert.equal((await sync(legacy)).status, 403);
+  assert.ok(fake.calls.length > 0);
   for (const c of fake.calls) assert.equal(c.key, ANON_KEY);
 
   world();
   const broken = await loadFunction('sync', { SUPABASE_PUBLISHABLE_KEYS: '{not json' });
   assert.equal((await sync(broken)).status, 403, 'a malformed set falls back to the legacy key');
+  assert.ok(fake.calls.length > 0);
   for (const c of fake.calls) assert.equal(c.key, ANON_KEY);
 
   world();

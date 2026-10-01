@@ -42,7 +42,8 @@ test('the Supabase workflow runs by hand only, against the committed project, an
   assert.match(supabase, /supabase db push --dry-run/);
   const steps = supabase.split(/\n      - /);
   assert.match(steps.at(-1), /npm run check-deploy/, 'the last step is the outside check');
-  assert.match(steps.at(-1), /^name: Check the project from the outside\n\s+run:/, 'and it runs for every step, plan included');
+  assert.match(steps.at(-1), /^name: Check the project from the outside\n\s+continue-on-error: \$\{\{ inputs\.step == 'plan' \|\| inputs\.step == 'database' \}\}\n\s+run:/, 'it runs for every step, and fails the run only once the functions should be there');
+  assert.match(supabase, /run: supabase db push --yes\n/, 'the real push answers its own prompt');
 });
 
 test('no workflow input or secret is written straight into a shell script; function names are checked against the four', () => {
@@ -79,5 +80,9 @@ test('docs/production-setup.md names every piece it relies on, and says the secr
   for (const s of ['SUPABASE_ACCESS_TOKEN', 'SUPABASE_DB_PASSWORD', 'SUPABASE_PROJECT_REF']) assert.ok(supabase.includes(s), s);
   for (const s of ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID']) assert.ok(manager.includes(s), s);
   assert.match(doc, /Never paste a password, a secret key or an access token/);
+  assert.match(doc, /name it `production`[\s\S]*default branch only[\s\S]*Environment secrets/, 'the Supabase secrets live on the production environment');
+  assert.match(doc, /`manager-view`, deployment branches: the default branch only; its environment secrets `CLOUDFLARE_API_TOKEN`/);
+  assert.doesNotMatch(doc, /repository secret[s]?:/i, 'no secret goes in the repository-wide list');
+  assert.match(manager, /environment:\n\s+name: manager-view/);
   assert.match(read('package.json'), /"set-project": "node scripts\/set-project\.mjs"/);
 });

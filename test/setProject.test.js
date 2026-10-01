@@ -57,6 +57,8 @@ test('setField refuses a file it cannot read the one line from, and quotes what 
   assert.throws(() => setField("  url: '',\n  url: '',\n", 'url', 'x'), /found 2/);
   assert.throws(() => setField('export const A = {};\n', 'url', 'x'), /found 0/);
   assert.equal(setField("  url: 'old',\n", 'url', "it's"), "  url: 'it\\'s',\n");
+  assert.equal(setField("a\r\n  url: '',\r\nb\r\n", 'url', 'x'), "a\r\n  url: 'x',\r\nb\r\n", 'a CRLF checkout keeps its line endings');
+  assert.equal(setField("  url: '',\n", 'url', "$1$&"), "  url: '$1$&',\n", 'a $ in the value is written as is');
 });
 
 test('the supabase-js address is pinned to an exact version; a bare major or a tag is not', () => {
