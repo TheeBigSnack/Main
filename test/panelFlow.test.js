@@ -193,3 +193,83 @@ test('the panel checks every description against the salesperson\'s own role', (
   // the checks' context carries the salesperson, so their title from Settings is the role looked for
   assert.match(src, /^const ctx = \(\) => \(\{[^\n]*\bsalesperson: state\.settings\.salesperson\b/m);
 });
+
+// dealerNamed and NO_DEALER_TEXT as sidepanel.js writes them, with fillBlocker when it is defined.
+function dealerChecks() {
+  const consts = ['dealerNamed', 'NO_DEALER_TEXT'].map((n) => {
+    const m = src.match(new RegExp(`^const ${n} = .*;$`, 'm'));
+    assert.ok(m, `${n} is defined`);
+    return m[0];
+  });
+  return [...consts, /function fillBlocker\(/.test(src) ? fnText('fillBlocker') : ''].join('\n');
+}
+
+test('no way of filling the form types a description that does not name the dealership', async () => {
+  const NO_NAME = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
+  // runFill is what "Fill it in now" (after a fields check) and "Fill again" call
+  const fill = async (dealer, description, step = 'probe') => {
+    const said = [];
+    const typed = [];
+    const state = { settings: { dealer }, listing: { fields: { description } }, step, map: { fields: [], photoLimitDefault: 20 } };
+    const runFill = new Function('state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', `${dealerChecks()}\n${fnText('runFill')}\nreturn runFill;`)(
+      state,
+      (text, tone) => said.push([text, tone]),
+      () => {},
+      { scripting: { executeScript: async (inj) => { typed.push(inj.args[1].fields.description); return [{ result: {} }]; } } },
+      async () => { throw new Error('filled'); }, // the first step after the form is filled
+      function fillFormInPage() {},
+    );
+    try {
+      await runFill();
+    } catch (e) {
+      assert.equal(e.message, 'filled');
+    }
+    return { said, typed, step: state.step };
+  };
+  for (const dealer of [{ name: '' }, { name: '  ' }, {}]) {
+    const r = await fill(dealer, 'A fine truck. Sales consultant.');
+    assert.deepEqual(r.typed, [], `nothing typed with no name: ${JSON.stringify(dealer)}`);
+    assert.deepEqual(r.said, [[NO_NAME, 'error']]);
+  }
+  const stale = await fill({ name: 'Example Motors' }, 'A fine truck. Sales consultant.');
+  assert.deepEqual(stale.typed, [], 'a description written before the name was set is not typed');
+  assert.match(stale.said[0][0], /^The description doesn't name Example Motors, and every description names the dealership\./);
+  assert.equal(stale.said[0][1], 'error');
+  assert.equal(stale.step, 'probe', 'the fields check stays on screen');
+  assert.equal((await fill({ name: 'Example Motors' }, 'A fine truck.', 'filling')).step, 'review', 'a blocked fill never leaves the panel on "Filling in the form"');
+  const good = await fill({ name: 'Example Motors' }, 'A fine truck. Sales consultant at example motors.');
+  assert.deepEqual(good.typed, ['A fine truck. Sales consultant at example motors.'], 'a description that names the dealership is typed');
+  assert.deepEqual(good.said, []);
+  // the fields check view says why and keeps "Fill it in now" off
+  assert.match(fnText('viewProbe'), /const blocked = fillBlocker\(state\.listing && state\.listing\.fields && state\.listing\.fields\.description\);/);
+  assert.match(fnText('viewProbe'), /id="fillNow" \$\{found\.length && !blocked \? '' : 'disabled'\}/);
+});
+
+test('Open the Marketplace form does not open a tab for a description that does not name the dealership', async () => {
+  const open = async (description, probeOnly = false) => {
+    const said = [];
+    const state = { origin: 'https://www.example-dealer.test', settings: { dealer: { name: 'Example Motors' } }, description, posted: {}, syncState: null };
+    const openForm = new Function('state', 'setStatus', 'siteKeys', 'chrome', 'dailyCap', '$', 'ctx', 'runGuardrails', `${dealerChecks()}\n${fnText('openForm')}\nreturn openForm;`)(
+      state,
+      (text, tone) => said.push([text, tone]),
+      () => ({ posted: 'p', sync: 's' }),
+      { storage: { local: { get: async () => ({}) } } },
+      () => ({ reached: false }),
+      () => null,
+      () => ({}),
+      never('runGuardrails'), // the next step: the form is on its way
+    );
+    try {
+      await openForm({ probeOnly });
+      return { said, opened: false };
+    } catch (e) {
+      assert.match(e.message, /runGuardrails must not run/);
+      return { said, opened: true };
+    }
+  };
+  const stale = await open('A fine truck. Sales consultant.');
+  assert.equal(stale.opened, false);
+  assert.match(stale.said[0][0], /^The description doesn't name Example Motors/);
+  assert.equal((await open('A fine truck. Sales consultant at Example Motors.')).opened, true);
+  assert.equal((await open('A fine truck. Sales consultant.', true)).opened, true, 'checking the form fills nothing, so it still opens');
+});

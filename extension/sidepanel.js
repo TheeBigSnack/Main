@@ -568,6 +568,18 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
 const dealerNamed = () => Boolean(String((state.settings && state.settings.dealer && state.settings.dealer.name) || '').trim());
 const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
 
+// Why a description can't be typed into the form, or '' when it can. Every
+// way of filling the form (Open the Marketplace form, Fill it in now after
+// a fields check, Fill again) goes through this, so none of them types a
+// description that does not name the dealership: not with no name set, and
+// not a description written before the name was added.
+function fillBlocker(description) {
+  if (!dealerNamed()) return NO_DEALER_TEXT;
+  const name = String(state.settings.dealer.name).trim();
+  if (String(description || '').toLowerCase().includes(name.toLowerCase())) return '';
+  return `The description doesn't name ${name}, and every description names the dealership. Add it to the description (or use Reset to template) before the form is filled.`;
+}
+
 async function openForm({ probeOnly = false } = {}) {
   if (!probeOnly && !dealerNamed()) return setStatus(NO_DEALER_TEXT, 'error');
   const k = siteKeys(state.origin);
@@ -581,6 +593,8 @@ async function openForm({ probeOnly = false } = {}) {
   }
   const box = $('description');
   if (box) state.description = box.value;
+  const blocked = probeOnly ? '' : fillBlocker(state.description);
+  if (blocked) return setStatus(blocked, 'error');
   state.guardrails = runGuardrails(state.description, ctx());
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
   state.step = 'filling';
@@ -608,6 +622,15 @@ async function openForm({ probeOnly = false } = {}) {
 }
 
 async function runFill() {
+  const blocked = fillBlocker(state.listing && state.listing.fields && state.listing.fields.description);
+  if (blocked) {
+    if (state.step === 'filling') {
+      state.step = 'review';
+      state.message = '';
+      render();
+    }
+    return setStatus(blocked, 'error');
+  }
   state.message = 'Filling in the form…';
   render();
   try {
@@ -1136,6 +1159,7 @@ function viewProbe() {
   const missing = p.missing || [];
   const controls = p.controls || [];
   const limit = p.photoLimit ? `${p.photoLimit.value}${p.photoLimit.verified ? '' : ' (unverified)'}` : '?';
+  const blocked = fillBlocker(state.listing && state.listing.fields && state.listing.fields.description);
   return `${carCard()}
   <div class="banner info">Nothing was filled. This is what Lot Current can see on the form (map ${esc(p.mapVersion || state.map.version)}, Lot Current ${esc(p.extensionVersion || VERSION)}).</div>
   ${p.error ? `<div class="banner bad">${esc(p.error)}</div>` : ''}
@@ -1148,8 +1172,9 @@ function viewProbe() {
     <details><summary>Controls on the page (${controls.length})</summary><ul class="list">${controls.map((c) => `<li>${esc(c.tag)}${c.type ? '[' + esc(c.type) + ']' : ''}${c.role ? '[' + esc(c.role) + ']' : ''}: "${esc(c.name)}"</li>`).join('')}</ul></details>
   </section>
   ${photoServersHtml()}
+  ${blocked ? `<div class="banner bad" id="noDealer">${esc(blocked)}</div>` : ''}
   <div class="actions">
-    <button type="button" class="primary" id="fillNow" ${found.length ? '' : 'disabled'}>Fill it in now</button>
+    <button type="button" class="primary" id="fillNow" ${found.length && !blocked ? '' : 'disabled'}>Fill it in now</button>
     <button type="button" class="plain" id="probeAgain">Check again</button>
     <button type="button" class="plain" id="copyReport">Copy report</button>
     <button type="button" class="plain" id="backToReview">Back</button>
@@ -1774,6 +1799,10 @@ function adoptChanges(changes) {
     capLine.outerHTML = capHtml(cap);
     for (const id of ['openForm', 'checkForm']) { const b = $(id); if (b) b.disabled = cap.reached || (id === 'openForm' && !dealerNamed()); }
   }
+  // a name added in Settings: the banner asking for one goes (a description
+  // written before it still has to name the dealership: fillBlocker)
+  const noDealer = $('noDealer');
+  if (noDealer && state.step === 'review' && dealerNamed()) noDealer.remove();
 }
 
 async function init() {
