@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -183,6 +183,39 @@ test('a to-do item joins to the listing that is up, and the ages sort longest fi
   assert.equal(s.soldStillListed[0].listingUrl, 'https://example.test/new');
   assert.equal(s.soldStillListed[0].name, 'New', 'no name on the item: the listing\'s');
   assert.deepEqual(s.priceMismatches.map((o) => [o.hoursOpen, o.overdue, o.toPrice]), [[25, true, 90], [1, false, 95]]);
+});
+
+test('a car still listed by someone no longer on the team is listed for the manager, since no rescan looks after it; the empty to-do cards claim only what the items show', () => {
+  const memberships = [{ user_id: 'u1', role: 'salesperson', name: 'Alex' }, { user_id: 'u3', role: 'manager', name: 'Jamie' }];
+  const listings = [
+    { user_id: 'u1', vin: 'V1', name: 'Alex car', posted_at: ago(5), salesperson: 'Alex', status: 'listed' },
+    { user_id: 'u9', vin: 'V9', name: 'Left behind', posted_at: ago(72), salesperson: 'Pat', status: 'listed', price: 18995, listing_url: 'https://example.test/v9' },
+    { user_id: 'u9', vin: 'V8', name: 'Taken down', posted_at: ago(90), salesperson: 'Pat', status: 'taken_down', taken_down_at: ago(80) },
+    { user_id: 'u9', vin: 'V7', name: 'Newer', posted_at: ago(10), salesperson: 'Pat', status: 'listed' },
+  ];
+  const s = summarize({ memberships, listings, todoItems: [], now: NOW });
+  assert.deepEqual(s.notOnTeam.map((o) => [o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]), [['V9', 'Pat', 72, 18995, 'https://example.test/v9'], ['V7', 'Pat', 10, null, '']], 'listed ones only, longest listed first');
+  assert.deepEqual(s.soldStillListed, [], 'no item ever opens for them');
+  assert.deepEqual(summarize({ listings, now: NOW }).notOnTeam, [], 'without the memberships nobody can be told apart');
+  assert.deepEqual(summarize({ memberships, listings: listings.slice(0, 1), now: NOW }).notOnTeam, []);
+  // the CSV carries them too
+  const lines = managerCsv({ memberships, listings }, { now: NOW, timeZone: 'UTC' }).split('\r\n');
+  assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},2`));
+  const at = lines.indexOf(NOT_ON_TEAM_TITLE);
+  assert.equal(lines[at + 1], 'Posted,Car,VIN,Salesperson,Hours listed,Price,Listing link');
+  assert.equal(lines[at + 2], '2026-11-13 15:00,Left behind,V9,Pat,72,18995,https://example.test/v9');
+  // the page shows them with the reason, and its empty cards say what an item is, never that every sold car is down
+  const page = read('manager/manager.js');
+  assert.doesNotMatch(page, /Every sold car is off Marketplace|Every listing shows the website price/);
+  assert.match(page, /esc\(EMPTY_TAKE_DOWNS\)/);
+  assert.match(page, /esc\(EMPTY_PRICE_ITEMS\)/);
+  assert.match(page, /id="notOnTeam"/);
+  for (const line of [EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS]) {
+    assert.doesNotMatch(line, /\bevery\b|\ball\b/i, line);
+    assert.match(line, /poster's own computer/);
+  }
+  assert.match(NOT_ON_TEAM_HINT, /nobody is told when these cars sell or change price/);
+  assert.match(TEAM_HINT, /show under "Listed by people no longer on the team"/);
 });
 
 test('empty or broken input gives zeros, not an exception', () => {

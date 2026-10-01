@@ -191,9 +191,11 @@ create trigger memberships_keep_a_manager
 -- listings (the posted registry): every member sees the dealership's whole
 -- registry (that is the point of syncing: two salespeople see the same
 -- list, and a manager sees both). A salesperson inserts and updates only
--- rows that carry their own user_id, inside their own dealership. A manager
--- updates any row of the dealership (fixing a link, marking a take-down
--- after the salesperson left). Only managers delete.
+-- rows that carry their own user_id, inside their own dealership. The policy
+-- lets a manager update any row of the dealership (fixing a link, marking a
+-- take-down after the salesperson left), but the manager view has no such
+-- action yet: it lists a former member's listed cars for the manager to
+-- chase. Only managers delete.
 -- ---------------------------------------------------------------------------
 create policy "members read their dealership's listings"
   on public.listings for select to authenticated
@@ -274,9 +276,10 @@ create trigger post_attempts_keep_salesperson
 -- ---------------------------------------------------------------------------
 -- todo_items (sold cars to take down, prices to update): an item belongs to
 -- the dealership, not to a person (the listing with the same VIN says who
--- posted), so any member may add one or close one: the rescan that flags it
--- may run on a colleague's machine, and a manager may tick it off. Only
--- managers delete.
+-- posted), so the policy lets any member add one or close one. Today only
+-- the poster's own extension does either (its rescan flags the salesperson's
+-- own listings, extension/src/pilot.js noteFlags), and the manager view has
+-- no tick-off. Only managers delete.
 -- ---------------------------------------------------------------------------
 create policy "members read their dealership's to-do items"
   on public.todo_items for select to authenticated

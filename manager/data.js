@@ -59,6 +59,16 @@ export const WEEK_MS = 7 * 24 * 3600 * 1000; // "this week" is the last 7 days
 export const OVERDUE_HOURS = 24; // an open item past this is shown in red
 export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is open; twice that and something is off
 
+// What the to-do cards say, claiming only what the items show: an item opens
+// only on the poster's own computer, when their extension's rescan finds the
+// car gone from the website or its price changed. So no open item does not
+// mean every sold car is down: the poster's Chrome may be closed, or they
+// may have left the team (summarize's notOnTeam lists those cars).
+export const EMPTY_TAKE_DOWNS = 'No open take-down items. One opens when a rescan on the poster\'s own computer finds their car gone from the website.';
+export const EMPTY_PRICE_ITEMS = 'No open price items. One opens when a rescan on the poster\'s own computer finds the website price changed.';
+export const NOT_ON_TEAM_TITLE = 'Listed by people no longer on the team';
+export const NOT_ON_TEAM_HINT = 'Their extension no longer syncs, and sold-car and price items come only from the poster\'s own extension, so nobody is told when these cars sell or change price. Check each one against the website, and have the person who posted it take it down or update the price on Facebook: the listing is on their own profile.';
+
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
   'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
@@ -227,6 +237,28 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
   const soldStillListed = T.filter((f) => f.kind === 'takeDown' && isOpen(f)).map(item).sort(longestFirst);
   const priceMismatches = T.filter((f) => f.kind === 'price' && isOpen(f)).map((f) => ({ ...item(f), fromPrice: num(f.from_price), toPrice: num(f.to_price) })).sort(longestFirst);
 
+  // ----- listings no rescan looks after -----
+  // A to-do item comes only from the poster's own extension (its rescan
+  // flags the salesperson's own listings, extension/src/pilot.js noteFlags),
+  // so a car still listed by someone who is no longer a member is checked by
+  // nobody: no item ever opens for it, whatever the website does. They are
+  // listed here, oldest first, for the manager to chase. Without the
+  // memberships nobody can be told apart, so none are listed.
+  const memberIds = new Set(M.map((m) => String(m.user_id || '')).filter(Boolean));
+  const notOnTeam = memberIds.size
+    ? L.filter((l) => isListed(l) && l.user_id && !memberIds.has(String(l.user_id)))
+      .map((l) => ({
+        vin: vinOf(l),
+        name: text(l.name, 80) || vinOf(l),
+        salesperson: nameOf(l),
+        listingUrl: l.listing_url ? String(l.listing_url) : '',
+        listedPrice: num(l.price),
+        postedAt: l.posted_at || null,
+        hoursListed: hoursBetween(l.posted_at, nowAt),
+      }))
+      .sort((a, b) => (b.hoursListed ?? -1) - (a.hoursListed ?? -1) || a.name.localeCompare(b.name))
+    : [];
+
   const flagStats = (flags) => {
     const done = flags.filter((f) => f.done_at && f.how !== 'cleared');
     const hours = done.map((f) => hoursBetween(f.flagged_at, f.done_at)).filter((h) => typeof h === 'number');
@@ -256,6 +288,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     totals,
     soldStillListed,
     priceMismatches,
+    notOnTeam,
     takeDowns: flagStats(T.filter((f) => f.kind === 'takeDown')),
     priceUpdates: flagStats(T.filter((f) => f.kind === 'price')),
   };
@@ -587,7 +620,7 @@ export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZo
 // ---------- the Team card ----------
 
 export const TEAM_LINE = 'Everyone in this dealership\'s Lot Current account. A manager can invite, bill and change the team; a salesperson posts.';
-export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
+export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers, and any they still have listed show under "Listed by people no longer on the team", because no one\'s rescans check them any more. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
 export const TEAM_UNCHANGED = 'Nothing changed: the team was changed elsewhere.';
 
 // The Team card's line after Make manager, Make salesperson or Remove, from
@@ -850,6 +883,7 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Price changes still open', s.priceUpdates.open]));
   out.push(csvRow(['Price changes cleared by the website', s.priceUpdates.cleared]));
   out.push(csvRow(['Median hours from the flagging scan until updated', s.priceUpdates.medianHours]));
+  out.push(csvRow([NOT_ON_TEAM_TITLE, s.notOnTeam.length]));
   out.push(csvRow(['Last scan', s.lastScan ? s.lastScan.line : 'none yet']));
   out.push('');
   out.push(csvRow(['Definitions']));
@@ -866,6 +900,10 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Price changes not yet updated']));
   out.push(csvRow(['Flagged', 'Car', 'VIN', 'Salesperson', 'Hours open', 'Price from', 'Price to', 'Listing link']));
   for (const o of s.priceMismatches) out.push(csvRow([local(o.flaggedAt), o.name, o.vin, o.salesperson, o.hoursOpen, o.fromPrice, o.toPrice, o.listingUrl]));
+  out.push('');
+  out.push(csvRow([NOT_ON_TEAM_TITLE]));
+  out.push(csvRow(['Posted', 'Car', 'VIN', 'Salesperson', 'Hours listed', 'Price', 'Listing link']));
+  for (const o of s.notOnTeam) out.push(csvRow([local(o.postedAt), o.name, o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]));
   out.push('');
   out.push(csvRow(['Listings']));
   out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link']));

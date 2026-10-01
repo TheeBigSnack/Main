@@ -55,7 +55,10 @@
 --                       would move a post uploaded late into the week it
 --                       reached the server.
 --   cars_listed_now     VINs with a listing marked listed
---   open_take_downs     open todo_items of kind takeDown: sold cars still listed
+--   open_take_downs     open todo_items of kind takeDown: sold cars the
+--                       poster's own extension flagged, not yet marked down
+--                       (a car left listed by a former member is never
+--                       flagged, so it is not in this count)
 --   open_price_changes  open todo_items of kind price: a website price the
 --                       listing does not show yet
 --   oldest_open_hours   hours since the oldest open item of either kind was

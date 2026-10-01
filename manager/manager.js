@@ -38,7 +38,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -389,7 +389,7 @@ function viewData() {
     ${s.soldStillListed.length
       ? `<div class="scroll"><table class="stats" id="soldStillListed"><thead><tr><th>Car</th><th class="n">Open for</th></tr></thead><tbody>${s.soldStillListed.map((o) => `<tr>${car(o)}${age(o)}</tr>`).join('')}</tbody></table></div>
          <p class="hint">Longest first. Red past ${OVERDUE_HOURS} hours. Hours run from the scan that flagged the car; the salesperson sees the same item on their To do tab.</p>`
-      : '<p class="empty">Every sold car is off Marketplace.</p>'}
+      : `<p class="empty">${esc(EMPTY_TAKE_DOWNS)}</p>`}
     ${s.takeDowns.done ? `<p class="hint">${s.takeDowns.done} taken down so far, median ${hrs(s.takeDowns.medianHours)} after the flagging scan${s.takeDowns.cleared ? `; ${s.takeDowns.cleared} cleared by the website (the car came back)` : ''}.</p>` : ''}
   </section>`;
 
@@ -402,11 +402,18 @@ function viewData() {
     ${s.priceMismatches.length
       ? `<div class="scroll"><table class="stats" id="priceMismatches"><thead><tr><th>Car</th><th class="n">Listing → website</th><th class="n">Open for</th></tr></thead><tbody>${s.priceMismatches.map((o) => `<tr>${car(o)}${priceCell(o)}${age(o)}</tr>`).join('')}</tbody></table></div>
          <p class="hint">The listing price must match the website; the salesperson updates it from their To do tab. Red past ${OVERDUE_HOURS} hours.</p>`
-      : '<p class="empty">Every listing shows the website price.</p>'}
+      : `<p class="empty">${esc(EMPTY_PRICE_ITEMS)}</p>`}
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>`;
+  const gone = s.notOnTeam.length
+    ? `<section><h2>${esc(NOT_ON_TEAM_TITLE)} ${pill('warn', String(s.notOnTeam.length))}</h2>
+    <div class="scroll"><table class="stats" id="notOnTeam"><thead><tr><th>Car</th><th class="n">Listed for</th></tr></thead><tbody>${s.notOnTeam.map((o) => `<tr>${car(o)}<td class="n">${hrs(o.hoursListed)}</td></tr>`).join('')}</tbody></table></div>
+    <p class="hint">${esc(NOT_ON_TEAM_HINT)}</p>
+  </section>`
+    : '';
+
+  $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>` + gone;
   const sel = $('pickDealer');
   if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; state.teamNote = ''; state.teamError = ''; state.teamConfirm = ''; loadLive().catch((e) => viewError(e.message)); });
 }

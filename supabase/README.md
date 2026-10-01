@@ -571,7 +571,7 @@ The window starts at `since`, a row stamped exactly then included, and has no en
 | `active_salespeople` | Members with the salesperson role who posted at least one listing in the window. A manager who posts is counted in `posts`, not here, and so is someone who is no longer a member: M6 asks for two salespeople and a manager, and a posting manager counted twice would meet it with one salesperson. |
 | `posts` | Listings posted in the window, by anyone, whatever their status now. The time is `posted_at`, when the salesperson's browser recorded the post. |
 | `cars_listed_now` | Cars (VINs) with a listing still marked listed. |
-| `open_take_downs` | Sold cars still listed: open to-do items of kind `takeDown`. |
+| `open_take_downs` | Open to-do items of kind `takeDown`: sold cars the poster's own extension flagged and not yet marked down. A car still listed by someone who is no longer a member is never flagged, so it is not counted here (`cars_listed_now` still counts it). |
 | `open_price_changes` | Website prices a listing does not show yet: open to-do items of kind `price`. |
 | `oldest_open_hours` | Hours since the oldest open to-do item of either kind was flagged; empty when none is open. |
 | `last_synced_scan_at` | When the newest scan to reach the database ran (`scan_summaries.taken_at`, on the clock of the machine that scanned). The database keeps no log of syncs, but every sync carries the counts of that machine's newest scan, so this is the nearest thing it holds to the dealership's last sync. It stops moving when nobody's extension syncs, and when the plan lapses (`/sync` then writes nothing). A sync with no newer scan to bring leaves it where it was. |
