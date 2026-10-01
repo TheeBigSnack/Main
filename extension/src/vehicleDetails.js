@@ -4,6 +4,7 @@
 // went sale-pending, sold or got retyped since the last scan can't be posted.
 
 import { probeTab, searchViaTab, detectAdapter } from './scanRunner.js';
+import { SITES_KEY } from './storageKeys.js';
 import { assessVehicle, DECISION } from './classify.js';
 
 // `url` is the car's page as the last scan kept it (the snapshot entry's
@@ -19,10 +20,14 @@ export async function fetchVehicleDetails(tabId, vin, { url = null } = {}) {
   }
   const adapter = probe && detectAdapter(probe);
   if (!adapter) return { ok: false, message: "This tab isn't a dealership inventory page Lot Sync can read. Open the used inventory page and click Post again." };
+  // What the probe could not see on this page (a car's own page has no
+  // inventory list to find) comes from the service the last scan of this
+  // website stored, when the same adapter read it; what the probe did see wins.
+  const service = await withStoredService(probe, adapter);
   let r;
   try {
-    const options = { ...adapter.scanOptions(probe.service), ...(typeof url === 'string' && url ? { url } : {}) };
-    r = await adapter.getDetails(searchViaTab(tabId, adapter, probe.service), wanted, options);
+    const options = { ...adapter.scanOptions(service), ...(typeof url === 'string' && url ? { url } : {}) };
+    r = await adapter.getDetails(searchViaTab(tabId, adapter, service), wanted, options);
   } catch (e) {
     return { ok: false, message: "Couldn't read the dealership website: " + ((e && e.message) || e) };
   }
@@ -31,6 +36,20 @@ export async function fetchVehicleDetails(tabId, vin, { url = null } = {}) {
     return { ok: false, notFound: true, message: "This car isn't on the website any more (sold, removed or hidden). Rescan before posting anything." };
   }
   return { ok: true, vehicle: adapter.normalize(r.record), site: probe.site, fetchedAt: r.fetchedAt };
+}
+
+async function withStoredService(probe, adapter) {
+  const probed = probe.service || {};
+  try {
+    const origin = probe.site && probe.site.origin;
+    const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
+    const stored = origin && sites[origin];
+    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return probed;
+    const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+    return { ...stored.service, ...seen };
+  } catch (e) {
+    return probed;
+  }
 }
 
 // Pure: is this fresh record still allowed into the posting flow?

@@ -18,7 +18,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const FLOWS = ['popup', 'post', 'queue', 'wizard', 'upkeep', 'standard'];
+const FLOWS = ['popup', 'post', 'queue', 'wizard', 'upkeep', 'standard', 'platforms'];
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 function usage(problem) {
