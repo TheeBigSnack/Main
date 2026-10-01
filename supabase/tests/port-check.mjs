@@ -2,12 +2,13 @@
 // repo are faithful ports: _shared/guardrails.ts against
 // extension/src/rewriteTemplate.js (runGuardrails) and
 // _shared/rewritePrompt.ts against backend/rewritePrompt.js
-// (buildRewritePrompt). Node runs the TypeScript directly:
+// (buildRewritePrompt). Node 22.18 or later runs the TypeScript directly,
+// with no flag:
 //
-//   node --experimental-strip-types supabase/tests/port-check.mjs
+//   node supabase/tests/port-check.mjs
 //
-// Exits 1 on the first difference. Not part of `npm test` (it needs the
-// flag); run it whenever either side changes.
+// Throws (and exits 1) on the first difference. `npm test` runs it through
+// test/portCheck.test.js, so CI fails when either side changes alone.
 
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';

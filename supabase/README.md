@@ -199,13 +199,13 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
 
 Either way each file ends with `every check passed` and psql exits 0; a failed check prints the reason and exits non-zero. Never run the shim against a Supabase database; it only exists for Postgres without Supabase.
 
-The two copies in `functions/_shared/` (the prompt and the guardrails) are checked against their originals with
+The two copies in `functions/_shared/` (the prompt and the guardrails) are checked against their originals by `supabase/tests/port-check.mjs`, which `npm test` runs (`test/portCheck.test.js`, so CI fails when one side changes alone) and which also runs on its own on Node 22.18 or later:
 
 ```
-node --experimental-strip-types supabase/tests/port-check.mjs
+node supabase/tests/port-check.mjs
 ```
 
-and `npm test` covers `extension/src/account.js` and `extension/src/sync.js`, and runs the four functions' real handlers under Node against a fake database, a fake Stripe and a fake Anthropic API (`test/fn-*.test.js`, `test/functions/`): each route's status codes, the order of its checks and its answer's fields, with no network.
+`npm test` also covers `extension/src/account.js` and `extension/src/sync.js`, and runs the four functions' real handlers under Node against a fake database, a fake Stripe and a fake Anthropic API (`test/fn-*.test.js`, `test/functions/`): each route's status codes, the order of its checks and its answer's fields, with no network.
 
 The CI job `stack` then runs Lot Current against a real local stack (`supabase start`, the functions served with a test env file): the extension's own account and sync modules against the real `/sync`, the invite and sign-up throttles through the real PostgREST, the last-manager rule, the lead function and `npm run check-deploy` (`docs/stack-test.md`; `npm run test:stack` on a machine with Docker). The local gateway answers CORS preflights itself, so the functions' own CORS answers are checked by the unit tests and by `check-deploy` on the hosted project.
 
