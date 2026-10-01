@@ -413,6 +413,27 @@ test('README\'s pre-owned rules say what classify.js decides when the signs mix'
 
 // node --test runs every test( and it( call site once; none of the files
 // makes tests in a loop, so the count of call sites is the count npm test prints.
+// The e2e flows are listed in four places besides their files, and a merge that keeps one side of a
+// conflicting list would quietly stop CI running a flow: the files are the one list the others follow.
+test('the e2e flows agree: test/e2e files, package.json scripts, the CI matrix, e2e-all.mjs and README\'s count', () => {
+  const files = readdirSync(new URL('./e2e/', import.meta.url)).filter((f) => f.endsWith('.e2e.mjs')).map((f) => f.replace(/\.e2e\.mjs$/, '')).sort();
+  assert.ok(files.length >= 1, 'test/e2e holds the flows');
+  const pkg = JSON.parse(read('../package.json'));
+  const scripts = Object.keys(pkg.scripts).filter((k) => /^test:e2e:/.test(k) && k !== 'test:e2e:parallel');
+  assert.deepEqual(scripts.map((k) => k.slice('test:e2e:'.length)).sort(), files, 'package.json has one test:e2e:<flow> script per test/e2e/<flow>.e2e.mjs');
+  for (const flow of files) assert.equal(pkg.scripts['test:e2e:' + flow], `node test/e2e/${flow}.e2e.mjs`, `test:e2e:${flow} runs its own file`);
+  const matrix = read('../.github/workflows/ci.yml').match(/^\s*flow: \[([^\]]*)\]/m);
+  assert.ok(matrix, 'ci.yml no longer has the e2e job\'s flow matrix');
+  assert.deepEqual(matrix[1].split(',').map((f) => f.trim()).sort(), files, 'ci.yml\'s e2e matrix runs every flow, and only those');
+  const all = read('../scripts/e2e-all.mjs').match(/^const FLOWS = \[([^\]]*)\];/m);
+  assert.ok(all, 'scripts/e2e-all.mjs no longer has its FLOWS list');
+  assert.deepEqual(all[1].split(',').map((f) => f.trim().replace(/^'|'$/g, '')).sort(), files, 'e2e-all.mjs runs every flow, and only those');
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const readme = read('../README.md').match(/^npm run test:e2e\s+# (\w+) e2e flows/m);
+  assert.ok(readme, 'README.md no longer counts the e2e flows on its npm run test:e2e line');
+  assert.equal(readme[1], WORDS[files.length] || String(files.length), 'README.md\'s count of e2e flows');
+});
+
 test('README\'s unit-test count is the number of tests npm test runs', () => {
   const dir = new URL('./', import.meta.url);
   const files = readdirSync(dir).filter((f) => f.endsWith('.test.js'));
