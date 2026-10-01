@@ -111,7 +111,15 @@ In the Supabase Dashboard, **Authentication**:
 ## Step 7. The first dealership and the end-to-end check [Claude, then the owner]
 
 1. **[Claude]** Prepares the two SQL statements of `supabase/README.md` step 5 for the pilot dealership, and the third, the pilot of the agreed length, when the signed pilot agreement names a length other than the standard `pilotDays`; **[Owner]** runs them in the Dashboard's SQL editor and keeps the manager invite code for the manager.
-2. **[Owner]** Signs in once in the manager view with a test address that belongs to no dealership; Claude says where to copy its access token from, and runs `check-deploy` with it (`LOTSYNC_TEST_TOKEN`). Done when no line reads `FAIL`.
+2. **[Owner]** The signed-in checks, run in your own terminal so the token never goes into the chat. Sign in once in the manager view with a test address that belongs to no dealership. In the browser's developer tools (F12, **Application**, **Local storage**, the manager view's address) open the entry `sb-<project ref>-auth-token` and copy only the value of its `access_token` field (the long text starting `eyJ`), never the whole entry: it also holds the refresh token, which keeps that session open. It works for an hour. Then, in Windows PowerShell in the repository folder:
+
+   ```
+   $env:LOTSYNC_TEST_TOKEN = '<the access_token value only>'
+   npm run check-deploy
+   Remove-Item Env:LOTSYNC_TEST_TOKEN
+   ```
+
+   (On macOS or Linux: `LOTSYNC_TEST_TOKEN=<the access_token value only> npm run check-deploy`.) Then click **Sign out** in the manager view, which ends that test session. Paste only the printed `ok`, `FAIL` and `note` lines into the thread for Claude to read; `check-deploy` never prints the token or a key. Done when no line reads `FAIL`.
 3. **[Owner]** On two computers, two test salespeople sign in and redeem invite codes; a car posted on one shows on the other after its next scan, and the manager view shows both. That is the launch checklist's "Supabase project live" and "The posted registry syncs".
 
 ---

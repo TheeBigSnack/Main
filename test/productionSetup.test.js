@@ -128,3 +128,24 @@ test('no doc tells the owner to turn CAPTCHA on while neither sign-in request se
   assert.match('5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.', turnOn);
   assert.match('and turn on **CAPTCHA protection** (Authentication, Attack protection) once the manager page is public.', turnOn);
 });
+
+// The page forbids pasting an access token into a chat, so the step that
+// needs one (check-deploy's signed-in checks) is the owner's to run in their
+// own terminal, with only the access_token field: the stored entry also
+// holds the refresh token.
+test('the signed-in deploy check is run by the owner in their own terminal, with the access token alone, never through the chat', () => {
+  const doc = read('docs/production-setup.md');
+  const readme = read('supabase/README.md');
+  const step = doc.slice(doc.indexOf('## Step 7.'), doc.indexOf('\n---', doc.indexOf('## Step 7.')));
+  const item = step.split(/\n(?=\d+\. )/).find((x) => x.includes('LOTSYNC_TEST_TOKEN'));
+  assert.ok(item, 'step 7 runs check-deploy with LOTSYNC_TEST_TOKEN');
+  assert.match(item, /^2\. \*\*\[Owner\]\*\*/, 'an owner step');
+  assert.doesNotMatch(item, /Claude (?:says|runs|takes|uses)[^.]*(?:token|check-deploy)/, 'Claude would need the token pasted into the chat to run it');
+  assert.doesNotMatch(item, /\[Claude\]/);
+  assert.match(item, /never goes into the chat/);
+  assert.match(item, /copy only the value of its `access_token` field[^.]*never the whole entry/);
+  assert.match(item, /\$env:LOTSYNC_TEST_TOKEN = '<the access_token value only>'\n\s+npm run check-deploy\n\s+Remove-Item Env:LOTSYNC_TEST_TOKEN/, 'the PowerShell form, and the variable removed afterwards');
+  assert.match(item, /\*\*Sign out\*\*/, 'the test session is ended afterwards');
+  assert.match(readme, /copy only the `access_token` field[^.]*never the whole entry/);
+  assert.doesNotMatch(readme, /copy `access_token` from the browser's local storage/);
+});
