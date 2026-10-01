@@ -279,6 +279,45 @@ function scanLine(s, nowAt, zone) {
   };
 }
 
+// ---------- reading every row ----------
+
+// The hosted API answers at most its "Max rows" per request (1,000 unless
+// the owner changed it) and drops the rest without an error, and a
+// dealership's listings, to-do items and post attempts are kept until the
+// dealership is deleted, so a table read in one request would lose its
+// oldest rows, and the numbers and the CSV with them. readAll() asks page
+// after page: `page(from, to)` is one request for that range of rows,
+// answering as supabase-js does ({ data, error, count }). It stops once it
+// holds `count` rows (the first page asks for it) or a page comes back
+// empty, so a server cap below PAGE_ROWS loses nothing either. A row with an
+// id is kept once (a row added between two requests shifts the order by
+// one). A failed page is an error, never a short list.
+export const PAGE_ROWS = 1000;
+export const MAX_PAGES = 1000;
+export async function readAll(page, { pageRows = PAGE_ROWS, maxPages = MAX_PAGES } = {}) {
+  const out = [];
+  const seen = new Set();
+  let total = null;
+  let offset = 0;
+  for (let n = 0; ; n += 1) {
+    if (n >= maxPages) throw new Error(`more than ${maxPages} pages of rows; the page stops reading rather than show part of them`);
+    const { data, error, count } = (await page(offset, offset + pageRows - 1)) || {};
+    if (error) throw new Error((error && error.message) || String(error));
+    const got = Array.isArray(data) ? data : [];
+    if (typeof count === 'number' && count >= 0) total = count;
+    for (const r of got) {
+      const id = r && typeof r === 'object' && r.id !== null && r.id !== undefined ? String(r.id) : null;
+      if (id !== null) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      out.push(r);
+    }
+    offset += got.length;
+    if (!got.length || (total !== null && offset >= total)) return out;
+  }
+}
+
 // ---------- a sign-in answer this page did not ask for ----------
 
 // The page signs in with the PKCE flow: its own link comes back with a

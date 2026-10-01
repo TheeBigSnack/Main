@@ -212,3 +212,41 @@ test('a stray #access_token on a browser already signed in: the person stays sig
   assert.equal(logouts.length, 1);
   assert.equal(logouts[0].init.headers.Authorization, 'Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig', 'the stray token\'s session, never the person\'s own');
 });
+
+// ---------- every row, past the API's row cap ----------
+
+test('loadLive reads every row past the API\'s 1,000-row cap: the oldest open take-down is still on the page', async () => {
+  const D = 'd1';
+  const NOW = Date.now();
+  const at = (hoursAgo) => new Date(NOW - hoursAgo * 3600 * 1000).toISOString();
+  const vin = (n) => `TESTVIN${String(n).padStart(10, '0')}`;
+  // 1,200 to-do items, all closed but the oldest: a sold car still listed after 1,500 hours
+  const todo = Array.from({ length: 1200 }, (_, i) => ({
+    id: `t${String(i).padStart(5, '0')}`, dealership_id: D, vin: vin(i), kind: i % 2 ? 'price' : 'takeDown', name: `Car ${i}`,
+    flagged_at: at(i + 1), done_at: i === 1198 ? null : at(i), how: i === 1198 ? null : 'detected', from_price: null, to_price: null,
+  }));
+  todo[1198].name = 'Sold car still up the longest';
+  todo[1198].flagged_at = at(1500);
+  const listings = Array.from({ length: 1100 }, (_, i) => ({ id: `l${String(i).padStart(5, '0')}`, dealership_id: D, user_id: 'u-sales', vin: vin(i), name: `Car ${i}`, price: 10000 + i, posted_at: at(i + 2), status: 'listed', salesperson: 'Sam' }));
+  const client = fakeClient({
+    session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } },
+    maxRows: 1000,
+    tables: {
+      dealerships: [{ id: D, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+      memberships: [{ user_id: 'u-manager', dealership_id: D, role: 'manager', name: 'Jamie' }, { user_id: 'u-sales', dealership_id: D, role: 'salesperson', name: 'Sam' }],
+      listings,
+      todo_items: todo,
+      post_attempts: [],
+      scan_summaries: [{ id: 's1', dealership_id: D, taken_at: at(1), cars: 1100, ready: 1000, take_down_count: 1, price_update_count: 0 }],
+    },
+  });
+  const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
+  const html = main(page);
+  assert.match(html, /id="soldStillListed"/, 'the open take-down past the first 1,000 rows is listed');
+  assert.match(html, /Sold car still up the longest/);
+  assert.match(html, /<td>Everyone<\/td><td class="n">\d+<\/td><td class="n">1100<\/td>/, 'All time counts all 1,100 listings, not the first 1,000');
+  const todoReads = client.requests.filter((q) => q.table === 'todo_items');
+  assert.ok(todoReads.length >= 2, 'more than one request');
+  assert.ok(todoReads.every((q) => q.range), 'each request asks for a range');
+  assert.deepEqual(todoReads[0].order.at(-1), ['id', true], 'the order ends on a unique column, so pages neither overlap nor skip');
+});

@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -1074,7 +1074,7 @@ test('the page: Getting started first, for managers only, redrawn with the cards
     assert.match(body, /renderGettingStarted\(\);/, `${fn} redraws Getting started too`);
   }
   // no query was added for it: the page reads the same tables as before
-  const reads = [...js.matchAll(/read\('([a-z_]+)'/g)].map((m) => m[1]);
+  const reads = [...js.matchAll(/(?:read|latest)\('([a-z_]+)'/g)].map((m) => m[1]);
   assert.deepEqual(reads, ['dealerships', 'memberships', 'listings', 'todo_items', 'post_attempts', 'scan_summaries']);
   assert.match(read('manager/manager.css'), /\.steps \{/);
 });
@@ -1092,4 +1092,61 @@ test('help.md names the Start your dealership form and the Getting started card 
   assert.ok(section.includes(SEATS_NOT_ADDED), 'the manager view section does not quote SEATS_NOT_ADDED word for word');
   assert.match(section, /managers don't/i, 'it says who takes a seat');
   assert.match(section, /invite code/i, 'a store that already uses Lot Current asks its manager for a code');
+});
+
+// ---------- reading every row ----------
+
+// A table as the hosted API serves it: rows in order, at most `cap` per
+// request whatever the range asks, and the total when it is asked for.
+function servedTable(rows, { cap = 1000, count = true } = {}) {
+  const calls = [];
+  const page = async (from, to) => {
+    calls.push([from, to]);
+    const end = Math.min(to, from + cap - 1);
+    return { data: rows.slice(from, end + 1), error: null, count: count && from === 0 ? rows.length : null };
+  };
+  return { page, calls };
+}
+
+test('readAll: every row of a table bigger than the API\'s row cap, in order, the oldest open item included', async () => {
+  assert.equal(PAGE_ROWS, 1000, 'Supabase\'s default "Max rows"');
+  const rows = Array.from({ length: 2345 }, (_, i) => ({ id: `r${i}`, n: i }));
+  const t = servedTable(rows);
+  const got = await readAll(t.page);
+  assert.equal(got.length, 2345);
+  assert.deepEqual(got.map((r) => r.n), rows.map((r) => r.n));
+  assert.deepEqual(t.calls, [[0, 999], [1000, 1999], [2000, 2999]], 'it stops once it holds the count');
+
+  // the summary on the newest 1,000 of 1,200 to-do items would miss the oldest open take-down
+  const items = Array.from({ length: 1200 }, (_, i) => ({ id: `t${i}`, vin: `TESTVIN${String(i).padStart(10, '0')}`, kind: 'takeDown', flagged_at: ago(i + 1), done_at: i === 1199 ? null : ago(i), how: i === 1199 ? null : 'detected', name: i === 1199 ? 'Oldest open' : `Car ${i}` }));
+  const cut = summarize({ todoItems: items.slice(0, 1000), now: NOW, timeZone: 'UTC' });
+  assert.equal(cut.soldStillListed.length, 0, 'one request\'s worth loses it');
+  const whole = summarize({ todoItems: await readAll(servedTable(items).page), now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(whole.soldStillListed.map((o) => o.name), ['Oldest open']);
+  assert.equal(whole.takeDowns.flagged, 1200);
+});
+
+test('readAll: a server cap below the page size, or no count in the answer, still gets every row', async () => {
+  const rows = Array.from({ length: 1234 }, (_, i) => ({ id: i }));
+  const low = servedTable(rows, { cap: 500 });
+  assert.equal((await readAll(low.page)).length, 1234);
+  assert.deepEqual(low.calls.map((c) => c[0]), [0, 500, 1000], 'each page starts where the last one ended, not a page size on');
+  const blind = servedTable(rows, { count: false });
+  assert.equal((await readAll(blind.page)).length, 1234);
+  assert.deepEqual(blind.calls.map((c) => c[0]), [0, 1000, 1234], 'without a count it reads until a page comes back empty');
+  assert.deepEqual(await readAll(servedTable([]).page), []);
+});
+
+test('readAll: a failed page is an error, never a short list; a row seen twice is kept once; it stops at maxPages', async () => {
+  let n = 0;
+  const failing = async (from) => (n++ === 0 ? { data: Array.from({ length: 1000 }, (_, i) => ({ id: from + i })), error: null, count: 1500 } : { data: null, error: { message: 'canceling statement due to statement timeout' } });
+  await assert.rejects(readAll(failing), /statement timeout/);
+  // a row added between two requests pushes the last row of page 1 onto page 2
+  const rows = Array.from({ length: 1500 }, (_, i) => ({ id: `r${i}` }));
+  const shifted = async (from, to) => (from === 0 ? { data: rows.slice(0, 1000), error: null, count: 1500 } : { data: [rows[999], ...rows.slice(1000, to)], error: null, count: null });
+  const got = await readAll(shifted);
+  assert.equal(new Set(got.map((r) => r.id)).size, got.length, 'no row twice');
+  assert.equal(got.length, 1500);
+  const endless = async (from) => ({ data: [{ id: `x${from}` }], error: null, count: null });
+  await assert.rejects(readAll(endless, { pageRows: 1, maxPages: 5 }), /more than 5 pages/);
 });

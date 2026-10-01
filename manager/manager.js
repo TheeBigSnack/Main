@@ -46,7 +46,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -779,15 +779,26 @@ async function connect() {
 // select() under row-level security: a member gets their own dealership's
 // rows and nothing else, whatever this page asks for. The eq() on
 // dealership_id only matters for someone who belongs to more than one.
+// Every table is read whole, page by page (data.js readAll: the API answers
+// at most its row cap per request and drops the rest silently), in an order
+// that ends on a unique column so the pages neither overlap nor skip; only
+// the scans stop at the latest 50, which is all the page shows of them.
 async function loadLive() {
   const supabase = state.supabase;
   setStatus('Loading…');
   const read = async (table, build = (q) => q) => {
+    try {
+      return await readAll((from, to) => build(supabase.from(table).select('*', from === 0 ? { count: 'exact' } : undefined)).range(from, to));
+    } catch (e) {
+      throw new Error(`Couldn't read ${table}: ${(e && e.message) || e}`);
+    }
+  };
+  const latest = async (table, build) => {
     const { data, error } = await build(supabase.from(table).select('*'));
     if (error) throw new Error(`Couldn't read ${table}: ${error.message}`);
     return data || [];
   };
-  const dealerships = await read('dealerships', (q) => q.order('name'));
+  const dealerships = await read('dealerships', (q) => q.order('name').order('id'));
   if (!dealerships.length) {
     setStatus('');
     state.dealerships = [];
@@ -804,11 +815,11 @@ async function loadLive() {
   state.dealershipId = dealership.id;
   const own = (q) => q.eq('dealership_id', dealership.id);
   const [memberships, listings, todoItems, postAttempts, scans, billing] = await Promise.all([
-    read('memberships', own),
-    read('listings', (q) => own(q).order('posted_at', { ascending: false })),
-    read('todo_items', (q) => own(q).order('flagged_at', { ascending: false })),
-    read('post_attempts', (q) => own(q).order('started_at', { ascending: false })),
-    read('scan_summaries', (q) => own(q).order('taken_at', { ascending: false }).limit(50)),
+    read('memberships', (q) => own(q).order('user_id')),
+    read('listings', (q) => own(q).order('posted_at', { ascending: false }).order('id')),
+    read('todo_items', (q) => own(q).order('flagged_at', { ascending: false }).order('id')),
+    read('post_attempts', (q) => own(q).order('started_at', { ascending: false }).order('id')),
+    latest('scan_summaries', (q) => own(q).order('taken_at', { ascending: false }).limit(50)),
     loadBilling(dealership.id),
   ]);
   state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };
