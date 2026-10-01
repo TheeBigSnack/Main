@@ -21,7 +21,7 @@ The extension works without it: descriptions then come from the built-in templat
    npm start
    ```
 
-   You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`.
+   You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`: it answers `{"ok":true}`, and, to a call that sends the `REWRITE_KEY` (or when none is set), also the month's spend, the cap and the number of requests.
 4. In the extension: click the Lot Current icon, **Settings**, **Description writer**. Tick "Use the Lot Current rewrite service", enter `http://localhost:8787` as the address and your `REWRITE_KEY` as the key. Save.
 
 From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, prices and mileage must be the listing's own, banned phrases, dealer name, the salesperson's role, length); a draft that fails is regenerated once, then the template is used.

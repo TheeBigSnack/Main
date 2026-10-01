@@ -7,8 +7,9 @@
 //
 // Protection: it listens on 127.0.0.1 unless HOST says otherwise (any other
 // address requires REWRITE_KEY), an optional shared key the extension must
-// send, a per-minute rate limit per caller, and a monthly cost cap (tracked
-// in usage.json).
+// send (GET /health answers anyone with { ok: true }, and the month's spend,
+// cap and request count only with the key), a per-minute rate limit per
+// caller, and a monthly cost cap (tracked in usage.json).
 //
 // Time: the extension waits 25 seconds (extension/src/rewriter.js
 // REWRITE_TIMEOUT_MS) and then shows its template. Each request has one
@@ -211,11 +212,14 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(body));
   };
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
+  const keyed = !config.key || req.headers.authorization === `Bearer ${config.key}`;
   if (req.method === 'GET' && req.url === '/health') {
+    // anyone may see that the service is up; the month's spend, cap and volume only with the key
+    if (!keyed) return send(200, { ok: true });
     return send(200, { ok: true, model: config.model, month: usage.month, usd: Number(usage.usd.toFixed(4)), capUsd: config.monthlyCapUsd, requests: usage.requests });
   }
   if (req.method !== 'POST' || !['/rewrite', '/color'].includes(req.url)) return send(404, { ok: false, error: 'not found' });
-  if (config.key && req.headers.authorization !== `Bearer ${config.key}`) return send(401, { ok: false, error: 'bad or missing service key' });
+  if (!keyed) return send(401, { ok: false, error: 'bad or missing service key' });
   if (!allow(req.socket.remoteAddress || 'unknown')) return send(429, { ok: false, error: 'too many requests; slow down' });
   if (usage.month === month() && usage.usd >= config.monthlyCapUsd) return send(429, { ok: false, error: `monthly cost cap of $${config.monthlyCapUsd} reached` });
 

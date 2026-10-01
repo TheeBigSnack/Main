@@ -80,6 +80,32 @@ async function start({ answers = [{ text: GOOD }], key = KEY, deadlineMs = null 
 
 const json = async (res) => ({ status: res.status, body: await res.json() });
 
+test('backend: /health says only that the service is up without the key; its month, spend, cap and volume need the key', async () => {
+  const s = await start();
+  try {
+    assert.deepEqual(await json(await s.call('/health', { method: 'GET', auth: '' })), { status: 200, body: { ok: true } });
+    assert.deepEqual(await json(await s.call('/health', { method: 'GET', auth: 'a-wrong-key' })), { status: 200, body: { ok: true } });
+    const ok = await json(await s.call('/rewrite', { body: FACTS }));
+    assert.deepEqual([ok.status, ok.body.ok], [200, true]);
+    const keyed = await json(await s.call('/health', { method: 'GET' }));
+    assert.equal(keyed.status, 200);
+    assert.deepEqual(Object.keys(keyed.body).sort(), ['capUsd', 'model', 'month', 'ok', 'requests', 'usd']);
+    assert.deepEqual([keyed.body.ok, keyed.body.requests, keyed.body.capUsd], [true, 1, 25]);
+    // the rewrite route itself still refuses a call without the key
+    assert.equal((await s.call('/rewrite', { body: FACTS, auth: '' })).status, 401);
+  } finally {
+    await s.stop();
+  }
+  // with no key set (one machine, loopback only), the figures are open as the routes are
+  const open = await start({ key: '' });
+  try {
+    const h = await json(await open.call('/health', { method: 'GET', auth: '' }));
+    assert.deepEqual([h.body.ok, h.body.requests], [true, 0]);
+  } finally {
+    await open.stop();
+  }
+});
+
 test('backend: one deadline under the extension\'s wait: a slow call is stopped (504, no cost booked), a second draft starts only with time left, and a caller who leaves stops the call', async () => {
   const source = readFileSync(SERVER, 'utf8');
   const deadline = Number(/deadlineMs: Number\(process\.env\.REWRITE_DEADLINE_MS\) \|\| ([\d_]+)/.exec(source)[1].replace(/_/g, ''));
