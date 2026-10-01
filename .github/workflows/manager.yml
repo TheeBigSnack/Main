@@ -20,9 +20,13 @@
 #   variable SENDER_DOMAIN    the sign-in email's sending domain once it is set (mail.<domain>)
 #
 # Every deploy ends with npm run check-hosting against the project's
-# <project>.pages.dev address, and against MANAGER_URL and SENDER_DOMAIN when
-# they are set. "Check only" runs that check without deploying (run it from
-# the default branch: other branches are skipped). Before the first deploy the
+# pages.dev address, and against MANAGER_URL and SENDER_DOMAIN when they are
+# set. That address is read from the project in Cloudflare (its subdomain,
+# with the same token): usually <project>.pages.dev, but Cloudflare gives a
+# suffixed one when the name is taken there, and the check must look at the
+# owner's project, not at whoever holds the name. "Check only" runs that
+# check without deploying (run it from the default branch: other branches are
+# skipped). Before the first deploy there is no project to read, and the
 # pages.dev line fails on a check-only run that has the Cloudflare secrets.
 name: Manager view
 
@@ -104,6 +108,20 @@ jobs:
             npx --yes wrangler@4.145.0 pages project create "$PAGES_PROJECT" --production-branch main
           fi
           npx --yes wrangler@4.145.0 pages deploy "$RUNNER_TEMP/manager" --project-name "$PAGES_PROJECT" --branch main --commit-hash "$GITHUB_SHA"
+      # The address Cloudflare gave the project, from the project itself
+      # (Cloudflare's API, the token's Pages permission): empty when it cannot
+      # be read, and then the check below fails rather than guess.
+      - name: Which pages.dev address the project has
+        id: pages
+        if: steps.ready.outputs.go == 'true'
+        run: |
+          host=$(curl -fsS --max-time 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT" | jq -r '.result.subdomain // empty') || host=''
+          case "$host" in
+            *[!a-z0-9.-]*) echo "::warning::Cloudflare's answer for the project $PAGES_PROJECT is not an address"; host='' ;;
+            *.pages.dev) echo "the project $PAGES_PROJECT answers at $host" ;;
+            *) echo "::warning::could not read the pages.dev address of the project $PAGES_PROJECT from Cloudflare (has it been deployed yet?)"; host='' ;;
+          esac
+          echo "host=$host" >> "$GITHUB_OUTPUT"
       # A first deploy can take a minute before its address answers, so after
       # a deploy the pages.dev check gets a few tries. The page's own address
       # and the sender's DNS are checked once, when their variables are set.
@@ -113,10 +131,14 @@ jobs:
         if: steps.ready.outputs.go == 'true' || env.CHECK_ONLY == 'true'
         env:
           DEPLOYED: ${{ steps.ready.outputs.go }}
+          PAGES_HOST: ${{ steps.pages.outputs.host }}
         run: |
           status=0
-          if [ "$DEPLOYED" = true ]; then
-            pages=(--app "https://$PAGES_PROJECT.pages.dev/" --pages "$PAGES_PROJECT")
+          if [ "$DEPLOYED" = true ] && [ -z "$PAGES_HOST" ]; then
+            echo "::error::the pages.dev address of $PAGES_PROJECT is not known, so the deployed page was not checked"
+            status=1
+          elif [ "$DEPLOYED" = true ]; then
+            pages=(--app "https://$PAGES_HOST/" --pages-host "$PAGES_HOST")
             tries=1
             if [ "$CHECK_ONLY" != true ]; then tries=5; fi
             status=1
@@ -126,7 +148,8 @@ jobs:
             done
           fi
           more=()
-          if [ -n "$MANAGER_URL" ]; then more+=(--app "$MANAGER_URL" --pages "$PAGES_PROJECT"); fi
+          if [ -n "$MANAGER_URL" ] && [ -n "$PAGES_HOST" ]; then more+=(--app "$MANAGER_URL" --pages-host "$PAGES_HOST");
+          elif [ -n "$MANAGER_URL" ]; then more+=(--app "$MANAGER_URL" --pages "$PAGES_PROJECT"); fi
           if [ -n "$SENDER_DOMAIN" ]; then more+=(--sender "$SENDER_DOMAIN"); fi
           if [ "${#more[@]}" -gt 0 ]; then
             node scripts/check-hosting.mjs "${more[@]}" || status=1

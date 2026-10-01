@@ -87,6 +87,30 @@ test('every manager view run ends with the hosting check; "check only" skips eve
   assert.match(manager, /test\/checkHosting\.test\.js/);
 });
 
+// Cloudflare gives a Pages project a suffixed pages.dev address when its
+// name is taken there, so the workflow reads the address from the project
+// itself and holds the page check and the app CNAME to it, never to
+// <project>.pages.dev guessed from the name (someone else may hold that one).
+test('the manager view workflow reads the project\'s pages.dev address from Cloudflare and checks that one, never a guess from the name', () => {
+  const steps = manager.split(/\n      - /);
+  const lookup = steps.find((x) => x.startsWith('name: Which pages.dev address the project has'));
+  assert.ok(lookup, 'a step reads the address');
+  assert.match(lookup, /^name: Which pages\.dev address the project has\n\s+id: pages\n\s+if: steps\.ready\.outputs\.go == 'true'\n/, 'only with the Cloudflare secrets');
+  assert.match(lookup, /curl -fsS --max-time 30 -H "Authorization: Bearer \$CLOUDFLARE_API_TOKEN" "https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/\$CLOUDFLARE_ACCOUNT_ID\/pages\/projects\/\$PAGES_PROJECT" \| jq -r '\.result\.subdomain \/\/ empty'/);
+  assert.match(lookup, /\*\[!a-z0-9\.-\]\*\) [^\n]*host='' ;;\n\s+\*\.pages\.dev\) [^\n]*\n\s+\*\) [^\n]*host='' ;;/, 'anything but a plain pages.dev address is dropped');
+  assert.match(lookup, /echo "host=\$host" >> "\$GITHUB_OUTPUT"/);
+  const check = steps.at(-1);
+  assert.ok(steps.indexOf(lookup) < steps.indexOf(check));
+  assert.match(check, /PAGES_HOST: \$\{\{ steps\.pages\.outputs\.host \}\}/);
+  assert.match(check, /if \[ "\$DEPLOYED" = true \] && \[ -z "\$PAGES_HOST" \]; then\n\s+echo "::error::[^\n]*"\n\s+status=1/, 'an address that could not be read fails the run, it is not guessed');
+  assert.match(check, /pages=\(--app "https:\/\/\$PAGES_HOST\/" --pages-host "\$PAGES_HOST"\)/);
+  assert.match(check, /more\+=\(--app "\$MANAGER_URL" --pages-host "\$PAGES_HOST"\)/);
+  assert.doesNotMatch(runText(manager), /\$PAGES_PROJECT\.pages\.dev/, 'no address made from the project\'s name');
+  const doc = read('docs/production-setup.md');
+  assert.doesNotMatch(doc, /CNAME points at `lotcurrent-app\.pages\.dev`/);
+  assert.match(doc, /Cloudflare gives a suffixed one/);
+});
+
 test('docs/production-setup.md names every piece it relies on, and says the secret values never go in chat or git', () => {
   const doc = read('docs/production-setup.md');
   for (const p of ['scripts/set-project.mjs', '.github/workflows/supabase.yml', '.github/workflows/manager.yml', 'manager/_headers', 'npm run set-project', 'SUPABASE_ACCESS_TOKEN', 'SUPABASE_DB_PASSWORD', 'SUPABASE_PROJECT_REF', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID']) {

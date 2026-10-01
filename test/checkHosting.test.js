@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { expectedHeaders, configUrl, parentDomain, dnsName, checkPage, checkAppDns, checkSenderDns, report, parseArgs } from '../scripts/check-hosting.mjs';
+import { expectedHeaders, configUrl, parentDomain, dnsName, checkPage, checkAppDns, checkSenderDns, report, parseArgs, pagesHostOf } from '../scripts/check-hosting.mjs';
 
 const headersText = readFileSync(new URL('../manager/_headers', import.meta.url), 'utf8');
 const WANT = expectedHeaders(headersText);
@@ -105,6 +105,31 @@ test('the app CNAME: right target passes, missing or wrong fails, a pages.dev ad
   assert.deepEqual(await checkAppDns({ resolver: fakeResolver({}), appUrl: 'https://lotcurrent-app.pages.dev/' }), []);
 });
 
+// Cloudflare gives a project a suffixed pages.dev address when its name is
+// taken there (production-setup.md step 6.6: "usually lotcurrent-app.pages.dev").
+// The CNAME the owner sets to the address Cloudflare shows is right, and the
+// check holds it to that address, never to the guess from the project's name.
+test('the app CNAME: a suffixed pages.dev address Cloudflare gave the project passes when given, and the guess no longer steers the owner to it', async () => {
+  const suffixed = fakeResolver({ 'CNAME app.example-product.com': ['lotcurrent-app-4xk.pages.dev.'] });
+  assert.deepEqual(failedChecks(await checkAppDns({ resolver: suffixed, appUrl: APP, pagesHost: 'lotcurrent-app-4xk.pages.dev' })), []);
+  const [given] = await checkAppDns({ resolver: suffixed, appUrl: APP, pagesHost: 'lotcurrent-app-4xk.pages.dev' });
+  assert.equal(given.check, 'app.example-product.com points at lotcurrent-app-4xk.pages.dev');
+  // the unsuffixed name, someone else's project, is a failure when Cloudflare named the suffixed one
+  const squatted = fakeResolver({ 'CNAME app.example-product.com': ['lotcurrent-app.pages.dev'] });
+  const [held] = await checkAppDns({ resolver: squatted, appUrl: APP, pagesHost: 'lotcurrent-app-4xk.pages.dev' });
+  assert.equal(held.ok, false);
+  assert.doesNotMatch(held.detail, /--pages-host/, 'the address was given: no hint to give it');
+  // without it, the guess fails, and the line says the address Cloudflare shows is the right one
+  const [guess] = await checkAppDns({ resolver: suffixed, appUrl: APP });
+  assert.equal(guess.ok, false);
+  assert.match(guess.detail, /^CNAME lotcurrent-app-4xk\.pages\.dev\.; if Cloudflare shows another \.pages\.dev address for the project, that one is right: give it with --pages-host$/);
+  // only a pages.dev address counts as one
+  assert.equal(pagesHostOf(' Lotcurrent-App-4xk.pages.dev. '), 'lotcurrent-app-4xk.pages.dev');
+  for (const bad of ['', 'lotcurrent-app', 'evil.example.com', 'x.pages.dev.evil.com', '-x.pages.dev', 'https://x.pages.dev/', 'a b.pages.dev']) assert.equal(pagesHostOf(bad), '', bad);
+  const junk = await checkAppDns({ resolver: squatted, appUrl: APP, pagesHost: 'evil.example.com' });
+  assert.equal(junk[0].check, 'app.example-product.com points at lotcurrent-app.pages.dev', 'a host that is not pages.dev is ignored, not trusted');
+});
+
 const SENDER = 'mail.example-product.com';
 const goodZone = {
   [`MX send.${SENDER}`]: [{ exchange: 'feedback-smtp.us-east-1.amazonses.com', priority: 10 }],
@@ -146,7 +171,9 @@ test('report and parseArgs', () => {
   assert.equal(r.notes, 1);
   assert.match(r.text, /^note {2}b \(x\)$/m);
   assert.equal(report([{ check: 'c', ok: false }]).failed, 1);
-  assert.deepEqual(parseArgs(['--app', APP, '--sender', SENDER]), { app: APP, sender: SENDER, pages: 'lotcurrent-app' });
+  assert.deepEqual(parseArgs(['--app', APP, '--sender', SENDER]), { app: APP, sender: SENDER, pages: 'lotcurrent-app', pagesHost: '' });
+  assert.equal(parseArgs(['--app', APP, '--pages-host', 'Lotcurrent-App-4xk.pages.dev']).pagesHost, 'lotcurrent-app-4xk.pages.dev');
+  assert.throws(() => parseArgs(['--app', APP, '--pages-host', 'app.example-product.com']), /--pages-host app\.example-product\.com is not a \.pages\.dev address/);
   assert.throws(() => parseArgs([]), /give --app, --sender or both/);
   assert.throws(() => parseArgs(['--app']), /unexpected --app/);
   assert.throws(() => parseArgs(['--bogus', 'x']), /unexpected --bogus/);

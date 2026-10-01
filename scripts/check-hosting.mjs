@@ -11,8 +11,11 @@
 //             manager/_headers' headers, serves the committed config.js (the
 //             same project as this checkout), and not the local demo server.
 //             For an address that is not *.pages.dev it also checks the CNAME
-//             to <project>.pages.dev (--pages names the project; default
-//             lotcurrent-app).
+//             to the project's pages.dev address: --pages-host, the address
+//             Cloudflare shows for the project (the Manager view workflow
+//             reads it from Cloudflare), else <project>.pages.dev (--pages
+//             names the project; default lotcurrent-app). Cloudflare gives a
+//             project a suffixed address when its name is taken there.
 // --sender    the domain sign-in email is sent from: the records Resend asks
 //             for (an MX and an SPF TXT on send.<domain>, the DKIM TXT on
 //             resend._domainkey.<domain>), and a DMARC record on the sender or
@@ -110,8 +113,19 @@ async function lookup(fn, name) {
 }
 const txtValues = (records) => records.map((parts) => (Array.isArray(parts) ? parts.join('') : String(parts)));
 
-/** The app address's CNAME to Cloudflare Pages. A *.pages.dev address has nothing to check. */
-export async function checkAppDns({ resolver, appUrl, pagesProject = DEFAULT_PAGES_PROJECT }) {
+// A pages.dev address as Cloudflare gives one (lotcurrent-app.pages.dev, or
+// lotcurrent-app-4xk.pages.dev when the name was taken), lower-cased, or ''.
+export function pagesHostOf(value) {
+  const v = String(value || '').trim().toLowerCase().replace(/\.$/, '');
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.pages\.dev$/.test(v) ? v : '';
+}
+
+/**
+ * The app address's CNAME to Cloudflare Pages: to pagesHost, the address
+ * Cloudflare shows for the project, else to <pagesProject>.pages.dev. A
+ * *.pages.dev address has nothing to check.
+ */
+export async function checkAppDns({ resolver, appUrl, pagesProject = DEFAULT_PAGES_PROJECT, pagesHost = '' }) {
   let host;
   try {
     host = new URL(appUrl).hostname;
@@ -119,10 +133,11 @@ export async function checkAppDns({ resolver, appUrl, pagesProject = DEFAULT_PAG
     return [];
   }
   if (host.endsWith('.pages.dev')) return [];
-  const want = `${pagesProject}.pages.dev`;
+  const want = pagesHostOf(pagesHost) || `${pagesProject}.pages.dev`;
   const { records, error } = await lookup((n) => resolver.resolveCname(n), host);
-  const ok = records.some((r) => r.replace(/\.$/, '') === want);
-  return [{ check: `${host} points at ${want}`, ok, detail: ok ? '' : records.length ? `CNAME ${records.join(', ')}` : `no CNAME (${error || 'none'}): add it in the domain's DNS (step 6), after the custom domain in Cloudflare` }];
+  const ok = records.some((r) => r.replace(/\.$/, '').toLowerCase() === want);
+  const named = pagesHostOf(pagesHost) ? '' : `; if Cloudflare shows another .pages.dev address for the project, that one is right: give it with --pages-host`;
+  return [{ check: `${host} points at ${want}`, ok, detail: ok ? '' : records.length ? `CNAME ${records.join(', ')}${named}` : `no CNAME (${error || 'none'}): add it in the domain's DNS (step 6), after the custom domain in Cloudflare` }];
 }
 
 /** The sign-in sender's records, as Resend asks for them. */
@@ -166,14 +181,19 @@ export function report(findings) {
 }
 
 export function parseArgs(argv) {
-  const opts = { app: '', sender: '', pages: DEFAULT_PAGES_PROJECT };
+  const opts = { app: '', sender: '', pages: DEFAULT_PAGES_PROJECT, pagesHost: '' };
   for (let i = 0; i < argv.length; i += 1) {
-    const key = { '--app': 'app', '--sender': 'sender', '--pages': 'pages' }[argv[i]];
+    const key = { '--app': 'app', '--sender': 'sender', '--pages': 'pages', '--pages-host': 'pagesHost' }[argv[i]];
     if (!key || !argv[i + 1]) throw new Error(`unexpected ${argv[i]}`);
     opts[key] = argv[i + 1];
     i += 1;
   }
   if (!opts.app && !opts.sender) throw new Error('give --app, --sender or both');
+  if (opts.pagesHost) {
+    const host = pagesHostOf(opts.pagesHost);
+    if (!host) throw new Error(`--pages-host ${opts.pagesHost} is not a .pages.dev address`);
+    opts.pagesHost = host;
+  }
   return opts;
 }
 
@@ -182,7 +202,7 @@ async function main(argv) {
   try {
     opts = parseArgs(argv);
   } catch (e) {
-    console.log(`${e.message}\nusage: npm run check-hosting -- [--app https://app.<domain>/] [--sender mail.<domain>] [--pages <Pages project>]`);
+    console.log(`${e.message}\nusage: npm run check-hosting -- [--app https://app.<domain>/] [--sender mail.<domain>] [--pages <Pages project>] [--pages-host <the project's .pages.dev address>]`);
     process.exitCode = 2;
     return;
   }
@@ -194,7 +214,7 @@ async function main(argv) {
       headersText: readFileSync(new URL('../manager/_headers', import.meta.url), 'utf8'),
       committedUrl: String(CONFIG.supabaseUrl || '').replace(/\/+$/, ''),
     }));
-    findings.push(...await checkAppDns({ resolver: dnsPromises, appUrl: opts.app, pagesProject: opts.pages }));
+    findings.push(...await checkAppDns({ resolver: dnsPromises, appUrl: opts.app, pagesProject: opts.pages, pagesHost: opts.pagesHost }));
   }
   if (opts.sender) findings.push(...await checkSenderDns({ resolver: dnsPromises, sender: opts.sender }));
   const { text, failed } = report(findings);
