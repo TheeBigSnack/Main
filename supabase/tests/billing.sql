@@ -270,6 +270,12 @@ begin
   update public.subscriptions set pilot_ends_at = now() - interval '1 second' where dealership_id = a;
   if public.subscription_state(a) <> 'lapsed' then raise exception 'canceled after the pilot should be lapsed'; end if;
 
+  -- a failed charge during the pilot (a trial ended early by hand) is still the pilot; once the pilot is over it is lapsed (docs/stripe-setup.md step 6.4)
+  update public.subscriptions set status = 'past_due', pilot_ends_at = now() + interval '29 days' where dealership_id = a;
+  if public.subscription_state(a) <> 'pilot' then raise exception 'a running pilot outranks past_due, got %', public.subscription_state(a); end if;
+  update public.subscriptions set pilot_ends_at = now() - interval '1 minute' where dealership_id = a;
+  if public.subscription_state(a) <> 'lapsed' then raise exception 'past_due after the pilot should be lapsed, got %', public.subscription_state(a); end if;
+
   -- every Stripe status the row accepts, without a pilot, is active or lapsed and never none
   foreach s in array array['trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused'] loop
     update public.subscriptions set status = s, pilot_ends_at = null where dealership_id = a;

@@ -71,6 +71,8 @@ test('subscriptionState: none, pilot, active, lapsed from the row and the clock'
   // a running pilot outranks a Stripe status that is not paid (the free period was promised)
   assert.equal(subscriptionState(row({ status: 'canceled', pilot_ends_at: iso(NOW + 3 * DAY) }), NOW), 'pilot');
   assert.equal(subscriptionState(row({ status: 'incomplete', pilot_ends_at: iso(NOW + 3 * DAY) }), NOW), 'pilot');
+  // a failed charge during the pilot (a trial ended early in the Stripe Dashboard) too: docs/stripe-setup.md step 6.4 ends the pilot first
+  for (const s of ['past_due', 'unpaid', 'paused']) assert.equal(subscriptionState(row({ status: s, pilot_ends_at: iso(NOW + 29 * DAY) }), NOW), 'pilot', s + ' inside the pilot');
   // everything else has lapsed
   for (const s of ['past_due', 'unpaid', 'canceled', 'incomplete', 'incomplete_expired', 'paused']) {
     assert.equal(subscriptionState(row({ status: s }), NOW), 'lapsed', s);
@@ -717,4 +719,28 @@ test('billing/index.ts: the four routes, fetch not an SDK, the secret key only i
   assert.ok(gate < src.indexOf('await ensureCustomer(service, dealership, row, caller.user.email)'), 'before a customer is made');
   assert.ok(gate < src.indexOf("'/v1/checkout/sessions'"), 'before a Checkout is opened');
   assert.match(src, /if \(route === 'webhook'\) \{\s*if \(req\.method !== 'POST'\)[^]*?return webhook\(req\);/);
+});
+
+// docs/stripe-setup.md step 6.4 walks the owner through a failed payment.
+// A running pilot outranks past_due (the state machine above), so the step
+// ends the pilot before the trial, and the card's words it promises are the
+// ones the manager page shows for that row.
+test('docs/stripe-setup.md: the failed-payment drive ends the pilot first and quotes the card the page shows', () => {
+  const doc = read('../docs/stripe-setup.md');
+  const step = doc.split('\n').find((l) => /^4\. \*\*A failed payment\.\*\*/.test(l));
+  assert.ok(step, 'step 6.4 is there');
+  const pilotEnded = step.indexOf('`pilot_ends_at` to a time in the past');
+  assert.ok(pilotEnded > 0, 'the step ends the pilot in the Table editor');
+  assert.ok(pilotEnded < step.indexOf('end its trial now'), 'before the trial ends, or the card stays on the pilot');
+  // the row the step leaves, as the page draws it
+  const failed = row({ status: 'past_due', pilot_ends_at: iso(NOW - 60 * 1000), stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' });
+  const status = { ...statusAnswer(failed, { role: 'manager', now: NOW }), role: 'manager' };
+  assert.equal(status.state, 'lapsed');
+  const card = page.billingCard(status, { now: iso(NOW), timeZone: 'UTC' });
+  assert.ok(step.includes(`The card says ${card.label}, "${card.detail}"`), `${card.label}: ${card.detail}`);
+  assert.equal(planOf(failed, NOW).state, 'lapsed', 'and /sync answers 402');
+  // skipped, the pilot still runs
+  assert.equal(subscriptionState({ ...failed, pilot_ends_at: iso(NOW + 29 * DAY) }, NOW), 'pilot');
+  assert.match(step, /the card stays on "Free pilot"/);
+  assert.doesNotMatch(doc, /end its trial now; the first charge fails\. The card says the payment failed/);
 });
