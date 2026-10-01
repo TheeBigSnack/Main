@@ -720,4 +720,8 @@ test('the browser checks cover every page: npm run test:site and npm run test:a1
   assert.doesNotMatch(pages, /branches:/, 'no branch name is written into the Pages workflow');
   assert.match(pages, /^ {4}if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)$/m, 'the deploy job runs only on the default branch');
   assert.match(pages, /path: site\n/, 'it deploys site/ and nothing else');
+  // the browser checks run in CI's demo job, which nothing waits for: the doc says so rather than promising a gate before every merge
+  const website = read('docs/website.md');
+  assert.doesNotMatch(website, /before every merge/, 'no merge waits for npm run test:site');
+  assert.match(website, /`npm run test:site` checks the same things against the committed files in a browser: CI's `demo` job runs it on every push and pull request, but neither a merge nor the deploy waits for it/);
 });

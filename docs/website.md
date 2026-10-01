@@ -69,7 +69,7 @@ After any change there: `npm run site-pages`, `npm run legal-pages`, `npm test`,
 
 ## After a deploy
 
-Open `https://lotcurrent.com/` and check: every page's browser tab shows its own title; `https://lotcurrent.com/does-not-exist/` shows the custom 404 page; `https://lotcurrent.com/legal/terms.html` lands on `/legal/terms/`; `https://www.lotcurrent.com/` redirects to the apex; and a demo request sent from the home page opens a message to the inbox. `npm run test:site` checks the same things against the committed files before every merge.
+Open `https://lotcurrent.com/` and check: every page's browser tab shows its own title; `https://lotcurrent.com/does-not-exist/` shows the custom 404 page; `https://lotcurrent.com/legal/terms.html` lands on `/legal/terms/`; `https://www.lotcurrent.com/` redirects to the apex; and a demo request sent from the home page opens a message to the inbox. `npm run test:site` checks the same things against the committed files in a browser: CI's `demo` job runs it on every push and pull request, but neither a merge nor the deploy waits for it, so check that job is green before merging a site change.
 
 Later, when they exist:
 
