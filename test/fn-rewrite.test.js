@@ -193,6 +193,22 @@ test('rewrite: bad bodies are 400 with the function\'s sentence: over 64 KiB, no
   assert.equal(net.calls.length, 0);
 });
 
+test('rewrite: facts with no dealership name are 400 before the model is asked, since no draft can name it; nothing is spent, and the extension shows its template with the reason', async () => {
+  world();
+  anthropic(says(GOOD));
+  const handler = await load();
+  for (const dealer of [{ name: '' }, { name: '   ', city: 'Springfield' }, {}, undefined]) {
+    const r = await rewrite(handler, TOKEN.u1, { ...FACTS, dealer, origin: ORIGIN });
+    assert.deepEqual([r.status, r.body], [400, { ok: false, error: "the dealership's name is missing: add it in Settings" }], JSON.stringify(dealer));
+  }
+  assert.equal(net.to(ANTHROPIC).length, 0, 'no model call');
+  assert.equal(fake.rows('rewrite_usage').length, 0, 'nothing logged or paid for');
+  // an older extension that still asks gets its template and this reason
+  const facts = { ...FACTS, dealer: { name: '' }, origin: ORIGIN };
+  const direct = await rewriteWithBackend({ endpoint: ENDPOINT, key: TOKEN.u1, facts, fetchImpl: functionsFetch({ rewrite: handler }) });
+  assert.deepEqual([direct.ok, direct.error], [false, "the dealership's name is missing: add it in Settings"]);
+});
+
 test('rewrite: a draft that passes answers the documented shape, logs its cost with the service role, and never sends the origin or a VIN', async () => {
   world();
   anthropic(says(GOOD));
