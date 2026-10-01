@@ -106,6 +106,14 @@ export async function downloadPhoto(url, index, { fetchImpl = globalThis.fetch, 
   deadline.catch(() => {}); // raced below; a photo that finished first leaves nothing waiting on it
   try {
     const res = await Promise.race([fetchImpl(url, { credentials: 'omit', signal: controller.signal }), deadline]);
+    // An address that redirected to one of Facebook's servers: its answer is
+    // dropped unread, as one asked for there directly is never requested.
+    // Redirects are still followed, since a dealer's image server may move a
+    // photo to its own CDN; res.url is where the answer came from.
+    if (isFacebookServer(res.url)) {
+      if (res.body && typeof res.body.cancel === 'function') res.body.cancel().catch(() => {});
+      return { url, ok: false, error: `redirected to Facebook's servers (${hostOf(res.url)}); Lot Current doesn't download from Facebook` };
+    }
     if (!res.ok) return { url, ok: false, error: `HTTP ${res.status} from ${hostOf(url)}` };
     const type = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
     // A server that says up front the photo is too large is not read at all.

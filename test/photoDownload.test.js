@@ -128,3 +128,29 @@ test('never from Facebook\'s own servers, even ones the manifest covers: nothing
   assert.equal(calls, 0, 'no request went out');
   assert.equal((await downloadPhoto('https://notfbcdn.net/ok.jpg', 0, { fetchImpl })).ok, true, 'a name that only ends the same way is not Facebook');
 });
+
+// fetch follows redirects, and res.url is where the answer came from. A
+// photo address on another server that redirects to Facebook's photo servers
+// is dropped unread; a redirect anywhere else still brings the photo.
+test('never from Facebook\'s own servers by a redirect either: the answer is dropped unread', LIMIT, async () => {
+  const redirectedTo = (final, body) => async () => {
+    const res = new Response(body, { headers: { 'content-type': 'image/jpeg' } });
+    Object.defineProperty(res, 'url', { value: final });
+    Object.defineProperty(res, 'redirected', { value: true });
+    return res;
+  };
+  for (const final of ['https://scontent-iad3-1.xx.fbcdn.net/v/1.jpg', 'https://lookaside.fbsbx.com/a.jpg', 'https://www.facebook.com/photo.jpg']) {
+    const { stream, counter } = chunkedBody(1);
+    const r = await downloadPhoto('https://images.dealer.example/car/1.jpg', 0, { fetchImpl: redirectedTo(final, stream) });
+    assert.equal(r.ok, false, final);
+    assert.equal(r.url, 'https://images.dealer.example/car/1.jpg', 'the failure is filed under the address the car gives');
+    assert.match(r.error, /^redirected to Facebook's servers \(/, final);
+    assert.ok(r.error.includes(new URL(final).hostname), `names the server it redirected to: ${r.error}`);
+    assert.ok(!('dataUrl' in r), 'nothing of it comes back');
+    assert.equal(counter.pulled, 0, 'not one chunk of the body was read');
+    assert.equal(counter.cancelled, true, 'the body is cancelled');
+  }
+  const elsewhere = await downloadPhoto('https://images.dealer.example/car/2.jpg', 1, { fetchImpl: redirectedTo('https://cdn.dealer.example/car/2.jpg', new Uint8Array([1, 2, 3])) });
+  assert.equal(elsewhere.ok, true, 'a redirect to another server that is not Facebook\'s still brings the photo');
+  assert.equal(elsewhere.bytes, 3);
+});

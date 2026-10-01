@@ -11,7 +11,9 @@
 // Facebook's: Lot Current fills Facebook's form, it doesn't read from Facebook.
 // That rule holds for downloads too, not only for the asking: the manifest
 // covers www.facebook.com/marketplace/ for the form, so the side panel and
-// the worker both check isFacebookServer before a photo is fetched.
+// the worker both check isFacebookServer before a photo is fetched, and the
+// worker drops unread the answer of an address that redirected to one of
+// Facebook's servers.
 
 // Facebook's own domains, the image servers included: a dealer page that
 // reuses photos from its Facebook page points at scontent-*.fbcdn.net or
