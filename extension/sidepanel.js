@@ -1790,6 +1790,11 @@ async function openUpkeep(req) {
   }
   endUpkeep();
   if (watcher) watcher.cancel();
+  // A post that is over (recorded, or stopped with the reason) is cleared
+  // first, as Post another car or Back clear it: left in place, its car would
+  // keep the Website menu shut once the item is closed (chooseSite). A saved
+  // post that is another window's panel's now stays where it is.
+  if (state.vin) await clearFlow({ keepSaved: !(await savedFlowIs(state.origin, state.vin)) });
   state.origin = req.origin;
   state.dealerTabId = req.dealerTabId || state.dealerTabId;
   await chrome.storage.local.set({ [GLOBAL_KEYS.lastPostOrigin]: req.origin });

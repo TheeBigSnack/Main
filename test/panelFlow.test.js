@@ -1059,6 +1059,62 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
   assert.equal(full.state.step, 'done', 'the post is recorded all the same');
 });
 
+// A To do item handled after a post is over (recorded, or stopped with the
+// reason) clears that post first, as Post another car or Back do: once the
+// item is closed the Website menu switches websites again. Left in place, the
+// old car kept the menu shut with no word why. A saved post that another
+// window's side panel started since stays. Run with sidepanel.js's own
+// openUpkeep, clearFlow, savedFlowIs and chooseSite.
+test('a To do item after a finished or stopped post clears it, so the Website menu works once the item is closed', async () => {
+  const A = 'https://www.example-motors.test';
+  const B = 'https://www.example-trucks.test';
+  const C = 'https://www.example-cars.test';
+  const run = async ({ step, savedVin = 'AAA' }) => {
+    const store = { ['postFlow:' + A]: { vin: savedVin, step } };
+    const state = { origin: A, vin: 'AAA', step, vehicle: { vin: 'AAA', name: 'Car A' }, dealerTabId: 4, windowId: 3, map: FORM_MAP, listFilter: '' };
+    const LIVE = ['checking', 'review', 'filling', 'probe', 'publish'];
+    const upkeeps = [];
+    const fns = compileMany(['openUpkeep', 'clearFlow', 'savedFlowIs', 'chooseSite'], {
+      state, flowRun: 0, watcher: null, lastUpkeepAt: 0, listBusy: false, FORM_MAP, applyOverrides,
+      GLOBAL_KEYS: { upkeepRequest: 'upkeepRequest', lastPostOrigin: 'lastPostOrigin', devOverrides: 'devOverrides' },
+      siteKeys: (o) => ({ flow: 'postFlow:' + o }),
+      chrome: { storage: { local: {
+        get: async (k) => ({ [k]: store[k] }),
+        set: async (o) => Object.assign(store, o),
+        remove: async (k) => { for (const key of [].concat(k)) delete store[key]; },
+      } } },
+      postUnderWay: () => Boolean(state.vin) && LIVE.includes(state.step),
+      endUpkeep: () => {}, startUpkeep: async (req) => upkeeps.push(req.vin), upkeepCtx: {}, loadSaved: async () => true,
+      pilotNote: async () => {}, endPost: () => {}, setStatus: () => {}, render: () => {}, $: () => null,
+    });
+    await fns.openUpkeep({ origin: B, vin: 'ZZZ', kind: 'price', price: 19000, at: 1 });
+    assert.deepEqual([upkeeps, state.step, state.origin], [['ZZZ'], 'upkeep', B], `${step}: the item opens`);
+    state.step = 'idle'; // the item's Close (upkeepCtx.onClose)
+    await fns.chooseSite(C);
+    return { state, store };
+  };
+  for (const step of ['done', 'blocked']) {
+    const r = await run({ step });
+    assert.equal(r.state.vin, null, `${step}: the old car is gone`);
+    assert.equal(r.state.origin, C, `${step}: the Website menu switched`);
+    assert.equal(r.store['postFlow:' + A], undefined, `${step}: its saved post is cleared with it`);
+  }
+  // another window's panel saved its own post for that website since: it stays
+  const other = await run({ step: 'done', savedVin: 'BBB' });
+  assert.equal(other.state.origin, C);
+  assert.deepEqual(other.store['postFlow:' + A], { vin: 'BBB', step: 'done' });
+  // a post still under way is never dropped for a To do item
+  const live = { origin: A, vin: 'AAA', step: 'publish', map: FORM_MAP };
+  const said = [];
+  const openUpkeep = compile('openUpkeep', {
+    state: live, lastUpkeepAt: 0, GLOBAL_KEYS: { upkeepRequest: 'upkeepRequest' }, chrome: { storage: { local: { remove: async () => {} } } },
+    postUnderWay: () => true, setStatus: (t) => said.push(t), clearFlow: never('clearFlow'), startUpkeep: never('startUpkeep'), endUpkeep: never('endUpkeep'),
+  });
+  await openUpkeep({ origin: B, vin: 'ZZZ', at: 2 });
+  assert.deepEqual([live.vin, live.step, live.origin], ['AAA', 'publish', A]);
+  assert.match(said.join(' '), /Finish or stop the current post/);
+});
+
 // The posted entry keeps the price the form was filled with. The dealer can
 // switch the price basis in Settings while a form waits for Publish (or
 // before a saved post comes back): working the price out again from the new
