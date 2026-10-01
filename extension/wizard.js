@@ -18,7 +18,7 @@ import { siteKeys } from './src/storageKeys.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount } from './src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary } from './src/wizardSteps.js';
 
 const steps = () => wizardSteps(accountsConfigured());
 // The Account step's own state: what was typed and answered, never a token.
@@ -249,7 +249,7 @@ export function wizardHtml() {
         <label class="block"><input type="checkbox" id="wizRulesRead" ${wiz.rulesRead ? 'checked' : ''} /> I have read the posting rules and will follow them</label>
         ${nav(true, 'Next', 'wizNext', !wiz.rulesRead)}`;
     case 'terms': {
-      const summary = `<p>In short: Lot Current reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login. You publish every post yourself. Lot Current is not affiliated with Meta Platforms, Inc.</p>`;
+      const summary = `<p>${esc(termsSummary(accountsConfigured()))}</p>`;
       if (!legalHosted()) {
         // The documents are not published yet: nobody is asked to accept what they cannot read.
         return `${progress}<h3>Terms and privacy</h3>

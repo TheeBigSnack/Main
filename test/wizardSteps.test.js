@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
 import { redeemInvite } from '../extension/src/account.js';
@@ -124,6 +124,22 @@ test('the step\'s words are the ones Settings\' Account section uses', () => {
   // the join sentence and the other-website sentence are Settings' too (popup.js accountAction)
   assert.ok(popup.includes("`Joined ${m.dealershipName || 'the dealership'} as ${m.role || 'a member'}.`"), 'Settings words the join differently now');
   assert.ok(popup.includes('` Its website is ${m.websiteOrigin}: open it there to sync its listings.`'), 'Settings words the other website differently now');
+});
+
+test('the Terms step\'s summary says what syncs to the dealership\'s account while signed in, when accounts are set up', () => {
+  const withAccounts = termsSummary(true);
+  assert.match(withAccounts, /keeps its data in your browser/);
+  assert.match(withAccounts, /While you are signed in, your posted list, those post timings and your to-do items also sync to your dealership's account/);
+  assert.doesNotMatch(termsSummary(false), /sync|account/i, 'with no account server nothing can sync, so the summary says nothing about it');
+  for (const s of [withAccounts, termsSummary(false)]) {
+    assert.match(s, /You publish every post yourself\./);
+    assert.match(s, /not affiliated with Meta Platforms, Inc\./);
+  }
+  // this build: the summary the salesperson reads matches whether accounts are on
+  assert.equal(termsSummary(accountsConfigured()).includes("dealership's account"), accountsConfigured());
+  const wizard = read('../extension/wizard.js');
+  assert.match(wizard, /const summary = `<p>\$\{esc\(termsSummary\(accountsConfigured\(\)\)\)\}<\/p>`;/, 'the Terms step shows termsSummary');
+  assert.doesNotMatch(wizard, /keeps its data in your browser/, 'one summary: src/wizardSteps.js termsSummary');
 });
 
 test('the welcome names no set-up time: none has been measured', () => {

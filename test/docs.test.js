@@ -455,3 +455,14 @@ test('every text that says what Lot Current does on its own names the upload a s
     for (const l of lines) assert.match(l, /[Ww]hile (you are|they are|the user is) signed in to a Lot Current account, (it also )?sends that rescan(\\)?'s results/, `${rel}: "${l.trim().slice(0, 90)}..." leaves out what a signed-in rescan sends`);
   }
 });
+
+// The screenshot captions once said the numbers were "kept in your browser"
+// after accounts began syncing them to the dealership's account.
+test('copy that says the numbers are kept in the browser also says they go to the dealership\'s account while signed in', () => {
+  const files = ['../store/listing.md', ...readdirSync(new URL('../site-src/pages/', import.meta.url)).filter((f) => f.endsWith('.html')).map((f) => '../site-src/pages/' + f), ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => '../marketing/' + f)];
+  for (const f of files) {
+    for (const line of read(f).split('\n').filter((l) => /kept in (?:your|this) browser(?!')/i.test(l))) {
+      assert.match(line, /dealership's account while you are signed in/, `${f.slice(3)}: "${line.trim().slice(0, 120)}" leaves out the sync to the dealership's account`);
+    }
+  }
+});
