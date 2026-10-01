@@ -3,7 +3,9 @@
 // (PLATFORM, probeInPage, searchInPage, detect, origins, scanOptions, scan,
 // getDetails, normalize, makeDirectSearch, photoOrigins). Dealer Inspire
 // reads its platform's inventory service; schemaOrg reads the standard
-// vehicle data any website may publish on its pages. schemaOrg comes last:
+// vehicle data any website may publish on its pages; DealerOn and Dealer.com
+// read the inventory data their list pages load from the website itself
+// (inventoryJson.js, shared). schemaOrg comes last:
 // its probe answers on any page that lists cars, so a platform with an
 // adapter of its own must be tried first. The platforms still to look at
 // are listed in README.md as TODOs, so the next one is chosen from demand,
@@ -12,9 +14,11 @@
 // contract test in test/adapters.test.js).
 
 import dealerInspire from './dealerInspire.js';
+import dealerOn from './dealerOn.js';
+import dealerCom from './dealerCom.js';
 import schemaOrg from './schemaOrg.js';
 
-export const ADAPTERS = Object.freeze([dealerInspire, schemaOrg]);
+export const ADAPTERS = Object.freeze([dealerInspire, dealerOn, dealerCom, schemaOrg]);
 
 export function adapterById(id) {
   return ADAPTERS.find((a) => a.PLATFORM.id === id) || null;

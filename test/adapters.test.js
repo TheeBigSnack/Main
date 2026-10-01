@@ -11,6 +11,7 @@ import { scanWithSearch, incompleteWarning } from '../extension/src/scanRunner.j
 import { withDefaults } from '../extension/src/settings.js';
 import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, MAX_FAILED_IN_A_ROW, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress } from '../extension/adapters/schemaOrg.js';
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
+import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, dealerOnPath, dealerComPath, platformSearch, fakePlatformPage } from './platformSites.js';
 import { fixtures, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage } from './helpers.js';
 
 const records = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => ({ ...r, media: { ...r.media, images: ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'] } }));
@@ -44,6 +45,8 @@ function fakeSearch(all, { unstable = false, fail = false } = {}) {
 // here (and a record or page in test/fixtures/).
 const LOT = standardCars(6);
 const GONE = standardCars(1, { from: 50 })[0];
+const PLATFORM_LOT = platformCars(6);
+const PLATFORM_GONE = platformCars(1, { from: 40 })[0];
 const PLATFORM_FIXTURES = {
   dealerInspire: {
     record: fixtures.usedNormal,
@@ -69,6 +72,28 @@ const PLATFORM_FIXTURES = {
       const node = standardCarNode(LOT[0]);
       return { node: { ...node, offers: { ...node.offers, seller: { '@type': 'AutoDealer', name } } }, url: STANDARD_ORIGIN + LOT[0].path, facts: { title: '', text: `$${LOT[0].price.toLocaleString('en-US')}`, carfaxLinks: [] } };
     },
+  },
+  dealerOn: {
+    record: { card: dealerOnCard(PLATFORM_LOT[0]).VehicleCard, origin: DEALERON_ORIGIN },
+    service: { kind: 'dealerOn', origin: DEALERON_ORIGIN, inventoryUrl: DEALERON_LIST, listUrl: DEALERON_ORIGIN + '/searchused.aspx' },
+    search: () => platformSearch(dealerOnSite({ cars: PLATFORM_LOT, gone: [PLATFORM_GONE] })),
+    page: () => fakePlatformPage({ site: dealerOnSite({ cars: PLATFORM_LOT }), origin: DEALERON_ORIGIN, path: '/searchused.aspx', requested: [DEALERON_LIST], text: 'Copyright © 2026 by DealerOn' }),
+    bare: () => fakePlatformPage({ origin: DEALERON_ORIGIN, path: '/about-us.aspx', text: 'About us' }),
+    request: { url: DEALERON_LIST },
+    answered: (data) => data.status === 200 && Array.isArray(data.json.DisplayCards),
+    missing: { vin: PLATFORM_GONE.vin, options: { confirmVins: [PLATFORM_GONE.vin], confirmUrls: { [PLATFORM_GONE.vin]: DEALERON_ORIGIN + dealerOnPath(PLATFORM_GONE) } } },
+    atStore: (name) => ({ card: { ...dealerOnCard(PLATFORM_LOT[0]).VehicleCard, DealerName: name }, origin: DEALERON_ORIGIN }),
+  },
+  dealerCom: {
+    record: { card: dealerComRecord(PLATFORM_LOT[0]), origin: DEALERCOM_ORIGIN },
+    service: { kind: 'dealerCom', origin: DEALERCOM_ORIGIN, inventoryUrl: DEALERCOM_LIST, listUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm' },
+    search: () => platformSearch(dealerComSite({ cars: PLATFORM_LOT, gone: [PLATFORM_GONE] })),
+    page: () => fakePlatformPage({ site: dealerComSite({ cars: PLATFORM_LOT }), origin: DEALERCOM_ORIGIN, path: '/used-inventory/index.htm', requested: [DEALERCOM_LIST], windowExtras: { DDC: {} } }),
+    bare: () => fakePlatformPage({ origin: DEALERCOM_ORIGIN, path: '/about-us.htm', text: 'About us' }),
+    request: { url: DEALERCOM_LIST },
+    answered: (data) => data.status === 200 && Array.isArray(data.json.inventory),
+    missing: { vin: PLATFORM_GONE.vin, options: { confirmVins: [PLATFORM_GONE.vin], confirmUrls: { [PLATFORM_GONE.vin]: DEALERCOM_ORIGIN + dealerComPath(PLATFORM_GONE) } } },
+    atStore: (name) => ({ card: { ...dealerComRecord(PLATFORM_LOT[0]), address: { accountName: name } }, origin: DEALERCOM_ORIGIN }),
   },
 };
 
@@ -222,8 +247,8 @@ test('the registry: by id, by probe, by stored service, and the unsupported-page
   assert.equal(adapterForService(null), null);
   assert.equal(adapterById('schemaOrg'), schemaOrg);
   assert.equal(detectAdapter({ site: {}, service: { kind: 'schemaOrg', origin: 'https://x.test', listUrl: null }, adapterId: null }), schemaOrg);
-  assert.deepEqual(platformNames(), ['Dealer Inspire', 'Standard vehicle data (schema.org)']);
-  assert.equal(unsupportedSiteMessage(), "Lot Current can't read the cars on this page. What it reads today: Dealer Inspire; Standard vehicle data (schema.org). Open your dealership's used inventory page and try again.");
+  assert.deepEqual(platformNames(), ['Dealer Inspire', 'DealerOn', 'Dealer.com', 'Standard vehicle data (schema.org)']);
+  assert.equal(unsupportedSiteMessage(), "Lot Current can't read the cars on this page. What it reads today: Dealer Inspire; DealerOn; Dealer.com; Standard vehicle data (schema.org). Open your dealership's used inventory page and try again.");
   for (const a of ADAPTERS) assert.ok(unsupportedSiteMessage().includes(a.PLATFORM.name));
 });
 

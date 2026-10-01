@@ -251,12 +251,12 @@ Seven reviewers (wizard, background rescans, adapter regressions, upkeep, Chrome
 
 1. **Round W (the website)**: if section 15.7 says it is still in the `website` worktree, finish it: integrate, set `SITE.siteUrl = 'https://lotcurrent.com'` and the contact inbox, run every check, merge, push; GitHub Pages deploys it (`.github/workflows/pages.yml`).
 2. **Round N (the rename to Lot Current)**: section 15.8. Everything people see; nothing internal.
-3. **The survey of real dealer websites** (section 15.2): the owner runs `npm run survey` on Windows against the seven addresses, or opens this environment's network policy; then fix the reader or write DealerOn / Dealer.com adapters from the reports.
+3. **The survey of real dealer websites** (section 15.2): the owner runs `npm run survey` on Windows against the seven addresses, or opens this environment's network policy; then check the DealerOn and Dealer.com readers against the reports (PR #6 built both from public sources and synthetic fixtures; `extension/adapters/README.md` lists what a survey run must confirm).
 4. **Roadmap items 6 and 7** (photo picking; the salesperson's closing line and their pick of highlights) were built on 2026-10-01 on branch `claude/project-thread-bkle5x` (section 15.12), then **round L** (post from the side panel without the dealer tab; listing links and VIN confirm; Fix all To do; colleague-aware lists).
 5. **With the owner, live**: reload the unpacked extension on the Windows machine from the branch; walk the wizard on the pilot site including "Allow automatic rescans"; one real upkeep item each way; delete the stale Honda Accord draft on Facebook; the first real scan of a standard-data website; Chrome's own photo-server prompt once by hand.
 6. **Owner-only items** (section 15.10): the attorney's USPTO check on "Lot Current"; the mailbox's MX records; the `www` record; the Supabase project and Stripe objects when ready; the attorney's answers on the legal texts; the pricing hypothesis; making the repo private.
 
-Engineering ideas the owner has not asked for (mention, don't build unasked): a DealerOn and a Dealer.com adapter (the survey decides), an "update re-reads the website first" option for upkeep, a manager summary export.
+Engineering ideas the owner has not asked for (mention, don't build unasked): an "update re-reads the website first" option for upkeep, a manager summary export.
 
 ---
 
@@ -334,7 +334,7 @@ This section is written for the instance that takes over (the owner said it will
   - Solomon Auto Group: `https://www.solomonauto.com/used-inventory/index.htm` and `https://www.solomonchryslerjeepdodgebrownsville.com/used-inventory/index.htm`; `/used-inventory/index.htm` is Dealer.com's shape.
   - John Sisson Motors: `https://www.johnsissonmotors.com/` (the used-inventory address is not known yet; one request to the home page finds it).
   - "Davies" is **Gerry Raymond Ford** in Charleroi / Belle Vernon, `https://www.daviescharleroi.com/` (the owner confirmed; Davies Ford of Charleroi changed hands; used-inventory address not known yet).
-  - The platform guesses above come from URL shapes only. DealerOn and Dealer.com have no adapter; whether the standard-data reader covers them is exactly what the survey answers.
+  - The platform guesses above come from URL shapes only. DealerOn and Dealer.com readers exist since PR #6 (2026-10-01, `extension/adapters/dealerOn.js`, `dealerCom.js`, shared `inventoryJson.js`) but have never met a live site; the survey is what confirms them.
 - **Two attempts to run it from the cloud failed on the network policy** (a child session in a fresh container got the same proxy 403). Either the owner opens the environment's network access and you run it here, or the owner runs it on the Windows machine (`docs/survey.md` has the PowerShell steps) and sends `survey-out/`. The plan after the reports: commit them under `survey-results/<date>/` with a `NOTES.md` (exact command, addresses, per-site observations for someone writing a reader: where the car data lives, JSON-LD types and fields, pagination, VIN/price/mileage/photo availability, photo hosts, bot checks), then fix the reader or write DealerOn and Dealer.com adapters from what the real pages show, with synthetic fixtures copied from their shapes, never claiming a platform the tool has not read.
 
 ### 15.3 Round K1: honest field words and vehicle kinds (`5f295d8`)

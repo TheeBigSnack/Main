@@ -94,7 +94,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 
 ## Limits
 
-- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page), checked on the pilot dealer's live site. Lot Current also tries any other website that publishes standard vehicle data (schema.org) on its car pages; that reader has been tested only on sample websites, so no other platform is known to work until a real site has been scanned. Each platform is one file under `extension/adapters/`.
+- Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page), checked on the pilot dealer's live site. DealerOn and Dealer.com websites have readers of their own, built from public documentation and a survey of local dealer websites and tested only on sample websites: open the used inventory page, wait until the cars show, then Scan. Neither has read a real DealerOn or Dealer.com website yet. Lot Current also tries any other website that publishes standard vehicle data (schema.org) on its car pages; that reader has been tested only on sample websites, so no other platform is known to work until a real site has been scanned. Each platform is one file under `extension/adapters/`.
 - Photos on a server Lot Current has not been allowed to download from yet: Chrome asks from your click on **Open the Marketplace form** (or Fill it in now, Fill again, or Download photos) and remembers a yes. Say no and the form is still filled, without those photos; Lot Current doesn't ask about that server again while the side panel stays open, unless you click **Allow photos from ...**.
 - If more than half the cars vanish between scans, nothing is marked gone and a warning shows.
 - The Facebook form map needs a live check (above). Photos go in through the form's file input; if that fails, **Download photos** saves them to your Downloads folder to add by hand.
@@ -102,10 +102,10 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 862 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 893 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
-npm run test:e2e      # six e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data
+npm run test:e2e      # seven e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com
 npm run screenshots   # the landing page's product images, taken from the sandbox with sample data (site/screenshots/)
 npm run site-pages    # the website's pages, robots.txt, llms.txt (and sitemap.xml, CNAME once config.js has siteUrl) from site-src/pages/ and site/config.js (--check: exit 1 when a file differs)
 npm run legal-pages   # the Terms, Privacy Policy and posting rules as site/legal/*/index.html from legal/*.md, plus the redirect stubs at the old addresses (--check: exit 1 when a page differs; legal/legal-status.json says draft)

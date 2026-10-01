@@ -1,0 +1,556 @@
+// The DealerOn and Dealer.com adapters and the inventory-data reader they
+// share (extension/adapters/inventoryJson.js). The sites are synthetic
+// stand-ins (test/platformSites.js): no live DealerOn or Dealer.com page has
+// been read yet, so these tests pin the behaviour the adapters promise, not
+// the platforms' exact data.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import dealerOn, { pageAddress as dealerOnPage, pagePhotos } from '../extension/adapters/dealerOn.js';
+import dealerCom, { pageAddress as dealerComPage } from '../extension/adapters/dealerCom.js';
+import dealerInspire from '../extension/adapters/dealerInspire.js';
+import schemaOrg from '../extension/adapters/schemaOrg.js';
+import { keyName, pick, findCards, totalCount, labeledPrices, choosePrices, priceKind, imageUrls, normalizeInventoryRecord, MAX_INVENTORY_PAGES } from '../extension/adapters/inventoryJson.js';
+import { assessVehicle, DECISION, checkPreOwned } from '../extension/src/classify.js';
+import { basisPrice } from '../extension/src/rescan.js';
+import { feeGap, withDefaults } from '../extension/src/settings.js';
+import { scanWithSearch } from '../extension/src/scanRunner.js';
+import { VEHICLE_FIELDS } from '../extension/src/vehicle.js';
+import { fakeDealerPage, fakeStandardPage, runInPage } from './helpers.js';
+import {
+  DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord,
+  dealerOnPath, dealerComPath, dealerOnCarPage, platformSearch, fakePlatformPage, answerWith,
+} from './platformSites.js';
+
+const onService = { kind: 'dealerOn', origin: DEALERON_ORIGIN, inventoryUrl: DEALERON_LIST, listUrl: DEALERON_ORIGIN + '/searchused.aspx' };
+const comService = { kind: 'dealerCom', origin: DEALERCOM_ORIGIN, inventoryUrl: DEALERCOM_LIST, listUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm' };
+
+// ---------- the shared reader ----------
+
+test('keyName and pick read a field by its usual names, with or without a Vehicle prefix, nested one level or in an attribute list', () => {
+  assert.equal(keyName('VehicleVin'), 'vin');
+  assert.equal(keyName('stock_number'), 'stocknumber');
+  assert.equal(keyName('Vehicle'), 'vehicle', 'a bare "Vehicle" stays a word');
+  assert.equal(pick({ VehicleMake: 'Jeep' }, ['make']), 'Jeep');
+  assert.equal(pick({ address: { accountName: 'Sample Ford' } }, ['accountname'], { nested: true }), 'Sample Ford');
+  assert.equal(pick({ address: { accountName: 'Sample Ford' } }, ['accountname']), undefined, 'nested objects only when asked');
+  assert.equal(pick({ attributes: [{ name: 'exteriorColor', value: 'Red' }] }, ['exteriorcolor']), 'Red');
+  assert.equal(pick({ make: '', brand: 'Kia' }, ['make', 'brand']), 'Kia', 'an empty value is no value');
+  assert.equal(pick({ make: 'Kia', inner: { make: 'Ford' } }, ['make'], { nested: true }), 'Kia', 'own keys first');
+  assert.equal(pick({ brand: 'Kia', inner: { make: 'Ford' } }, ['make', 'brand'], { nested: true }), 'Kia', 'any own name before a nested one');
+  assert.equal(pick(null, ['make']), undefined);
+});
+
+test('findCards finds the records that carry a valid VIN in the answer\'s largest list, one per VIN, and lifts a nested card', () => {
+  const [a, b, c] = platformCars(3);
+  const json = {
+    featured: { vin: a.vin }, // not in a list: not a car of the list
+    DisplayCards: [{ VehicleCard: { VehicleVin: b.vin, VehicleYear: 2019 }, Badge: 'Great deal' }, { VehicleCard: { VehicleVin: b.vin } }, { VehicleCard: { VehicleVin: c.vin } }, { VehicleCard: { VehicleVin: 'NOTAVIN' } }],
+    more: { similar: [{ vin: a.vin.toLowerCase(), year: 2018 }] },
+  };
+  const cards = findCards(json);
+  assert.deepEqual(cards.map((x) => x.VehicleVin), [b.vin, c.vin], 'the two-car list, not the one-car list beside it');
+  assert.equal(cards[0].Badge, 'Great deal', 'what sits next to the nested card is kept');
+  assert.equal(cards[0].VehicleCard, undefined, 'the nested card is lifted, not copied');
+  assert.deepEqual(findCards({ inventory: [{ vin: a.vin.toLowerCase() }] }).map((x) => x.vin), [a.vin.toLowerCase()]);
+  assert.deepEqual(findCards(null), []);
+  assert.deepEqual(findCards({ inventory: [] }), []);
+});
+
+test('totalCount reads only a field named as a count, never a bare total or a car', () => {
+  assert.equal(totalCount({ Paging: { PaginationDataModel: { TotalCount: 41 } } }), 41);
+  assert.equal(totalCount({ pageInfo: { totalCount: 7 } }), 7);
+  assert.equal(totalCount({ total: 25999, pricing: { total: 3 } }), null, 'a bare total can be a price');
+  assert.equal(totalCount({ inventory: [{ vin: platformCars(1)[0].vin, totalCount: 9 }] }), null, 'never inside a car');
+  assert.equal(totalCount({ pageInfo: { totalCount: 'many' } }), null);
+});
+
+test('labeledPrices reads labelled entries and price-named fields; never payments, photos or "Call"', () => {
+  const got = labeledPrices({
+    pricing: { retailPrice: '$23,495', dprice: [{ typeClass: 'internetPrice', label: 'Sample Price', value: '$23,985', isFinalPrice: true }, { label: 'Payment', value: 'From $399/mo' }] },
+    VehiclePriceLabel: 'Sample Price',
+    images: [{ price: 1 }],
+    callPrice: 'Call for price',
+  });
+  assert.deepEqual(got.map((e) => [e.value, e.label, e.final]), [[23495, 'retail Price', false], [23985, 'Sample Price', true]]);
+});
+
+test('priceKind: selling, base, plain, named and everything that is not the price', () => {
+  const k = (label, key = '', final = false, dealer = '') => priceKind({ label, key, final, value: 1 }, dealer);
+  assert.equal(k('Example Price', '', false, 'Example Motors of Springfield'), 'selling', 'a price named for this dealership');
+  assert.equal(k('E. Example Price', '', false, 'E. Example Auto Group'), 'selling');
+  assert.equal(k('Example Price'), 'named', 'with no dealership name to match, a named price is not taken as the dealer\'s');
+  assert.equal(k('Other Price', '', false, 'Example Motors'), 'named');
+  assert.equal(k('Internet Price'), 'selling');
+  assert.equal(k('Price', 'x.retailPrice'), 'base', 'Dealer.com labels its retail entry just "Price"');
+  assert.equal(k('Retail Value'), 'base');
+  assert.equal(k('Retail Price'), 'base');
+  assert.equal(k('Price'), 'plain');
+  assert.equal(k('MSRP', '', true), 'other', 'a final flag never makes an MSRP the price');
+  for (const label of ['MSRP', 'Was', 'Doc Fee', 'Conditional Offer', 'Payment', 'Est. Monthly', 'Dealer Discount', 'Factory Rebate', 'Cash Back', 'Total Savings',
+    'KBB Price', 'Kelley Blue Book Value', 'Market Price', 'Market Value', 'Employee Price', 'Supplier Price', 'Military Price', 'Loyalty Price', 'Wholesale Price',
+    'Previous Price', 'Prior Price', 'Lowest Price', 'Highest Price', 'Estimated Value', 'Book Value', 'Trade-In Value']) {
+    assert.equal(k(label, '', false, 'KBB Market Employee Wholesale Motors'), 'other', label);
+  }
+  assert.equal(k('Final price', 'finalPrice', true), 'selling');
+});
+
+test('choosePrices: the dealer\'s selling price, the lower base price beside it, and no price when it can\'t tell', () => {
+  const e = (value, label, extra = {}) => ({ value, label, key: '', final: false, ...extra });
+  const dealer = 'Example Motors';
+  // the surveyed shape (made-up amounts): a retail figure, a doc fee, and the dealer-named price with the fee in it
+  assert.deepEqual(choosePrices([e(31000, 'Retail Value'), e(700, 'Doc Fee'), e(31700, 'Example Price')], { dealer }), { price: 31700, priceLabel: 'Example Price', priceBeforeFees: 31000 });
+  assert.deepEqual(choosePrices([e(23000, 'Price', { key: 'p.retailPrice' }), e(23500, 'Example Price', { final: true })]), { price: 23500, priceLabel: 'Example Price', priceBeforeFees: 23000 });
+  // the same dealer-named price on a record that names no dealership: no guess
+  assert.deepEqual(choosePrices([e(31000, 'Retail Value'), e(31700, 'Example Price')]), { price: null, priceLabel: 'Two prices on the website', priceBeforeFees: null });
+  // a retail price above a sale price is not a "before fees" price
+  assert.deepEqual(choosePrices([e(26000, 'Retail Price'), e(24500, 'Sale Price')]), { price: 24500, priceLabel: 'Sale Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([e(19999, 'Price')]), { price: 19999, priceLabel: 'Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([e(19999, 'Retail Price')]), { price: 19999, priceLabel: 'Retail Price', priceBeforeFees: null }, 'a base price that is the only price is the price');
+  assert.deepEqual(choosePrices([e(30000, 'MSRP')]), { price: null, priceLabel: 'Call for price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([]), { price: null, priceLabel: 'Call for price', priceBeforeFees: null });
+  assert.equal(choosePrices([e(20000, 'Internet Price'), e(20500, 'Example Price')], { dealer }).price, null, 'two selling prices, nothing to rank them: no price');
+  assert.equal(choosePrices([e(20000, 'Internet Price'), e(20500, 'Example Price', { final: true })]).price, 20500, 'the one the platform marks final wins');
+  assert.equal(choosePrices([e(20000, 'Price'), e(21000, 'Price')]).price, null);
+  // book, market and conditional figures never become the price or the lower price
+  assert.deepEqual(choosePrices([e(20000, 'Price'), e(22500, 'KBB Price')]), { price: 20000, priceLabel: 'Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([e(20000, 'Price'), e(19000, 'Employee Price')]), { price: 20000, priceLabel: 'Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([e(21000, 'Internet Price'), e(18500, 'KBB Value')]), { price: 21000, priceLabel: 'Internet Price', priceBeforeFees: null });
+  assert.equal(choosePrices([e(18500, 'Kelley Blue Book Value')]).price, null);
+  const fields = labeledPrices({ price: 21000, previousPrice: 23000, wholesalePrice: 17000 });
+  assert.deepEqual(choosePrices(fields), { price: 21000, priceLabel: 'price', priceBeforeFees: null });
+});
+
+test('imageUrls: strings or { uri | url | src }, absolute, http(s) only, once each', () => {
+  assert.deepEqual(imageUrls(['/a.jpg', { uri: 'https://pictures.dealer.com/x.jpg' }, { src: '/a.jpg' }, 'javascript:alert(1)', { nope: 1 }], 'https://d.test/car'), ['https://d.test/a.jpg', 'https://pictures.dealer.com/x.jpg']);
+  assert.deepEqual(imageUrls(null, 'https://d.test/'), []);
+  assert.deepEqual(imageUrls('https://d.test/one.jpg'), ['https://d.test/one.jpg']);
+});
+
+// ---------- DealerOn: the record ----------
+
+test('a DealerOn card becomes the flat vehicle; three signs say pre-owned and it is ready', () => {
+  const [c] = platformCars(1, { from: 1 });
+  const v = dealerOn.normalize({ card: dealerOnCard(c).VehicleCard, origin: DEALERON_ORIGIN });
+  assert.deepEqual(Object.keys(v).sort(), [...VEHICLE_FIELDS].sort());
+  assert.equal(v.vin, c.vin);
+  assert.equal(v.name, `${c.year} ${c.make} ${c.model} ${c.trim}`);
+  assert.equal(v.stock, c.stock);
+  assert.equal(v.mileage, c.miles, 'the "34,512"-style text is a number');
+  assert.equal(v.url, DEALERON_ORIGIN + dealerOnPath(c));
+  assert.equal(v.urlConditionWord, 'used');
+  assert.equal(v.inventoryType, 'Used');
+  assert.equal(v.siteTitle, `Used ${c.year} ${c.make} ${c.model} ${c.trim}`);
+  assert.equal(v.price, c.base + c.fee, 'the dealer\'s price, fee included, by default');
+  assert.equal(v.priceBeforeFees, c.base);
+  assert.equal(v.location, 'Sample Motors');
+  assert.equal(v.photoCount, c.photos, 'the list says how many photos the car has');
+  assert.equal(v.photos.length, 1, 'the list carries one thumbnail; the post-time read brings the rest');
+  assert.equal(v.descriptionRaw, null, 'the list has no description: this read did not have one');
+  assert.equal(v.bodyType, c.body);
+  assert.equal(checkPreOwned(v).verdict, 'pre-owned');
+  assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY);
+});
+
+test('DealerOn: a certified car, a new car, a one-letter condition code and a card with no condition at all', () => {
+  const [c] = platformCars(1); // i = 200: certified
+  const cert = dealerOn.normalize({ card: dealerOnCard(c).VehicleCard, origin: DEALERON_ORIGIN });
+  assert.equal(cert.inventoryType, 'Certified Used');
+  assert.equal(checkPreOwned(cert).verdict, 'pre-owned');
+  const fresh = { ...dealerOnCard(c).VehicleCard, VehicleIsCertified: false, VehicleCondition: 'New', VehicleName: `New ${c.year} ${c.make}`, VehicleDetailUrl: `/new-Springfield-${c.year}-${c.make}-${c.vin}` };
+  assert.equal(assessVehicle(dealerOn.normalize({ card: fresh, origin: DEALERON_ORIGIN }), {}).decision, DECISION.SKIP, 'new never enters a posting flow');
+  const coded = dealerOn.normalize({ card: { ...dealerOnCard(c).VehicleCard, VehicleIsCertified: false, VehicleCondition: 'U' }, origin: DEALERON_ORIGIN });
+  assert.equal(coded.inventoryType, 'Used');
+  const bare = { VehicleVin: c.vin, VehicleYear: c.year, VehicleMake: c.make, VehicleModel: c.model, VehicleInternetPrice: 19999, Mileage: 40000, VehicleDetailUrl: '/vehicle-details/' + c.vin, VehiclePhotos: ['/p.jpg'] };
+  const unknown = dealerOn.normalize({ card: bare, origin: DEALERON_ORIGIN });
+  assert.equal(unknown.inventoryType, null);
+  assert.equal(assessVehicle(unknown, {}).decision, DECISION.REVIEW, 'nothing says used: Needs a look, never Ready');
+  const bodyWord = dealerOn.normalize({ card: { ...bare, VehicleType: 'SUV' }, origin: DEALERON_ORIGIN });
+  assert.equal(bodyWord.inventoryType, null, 'a type field that names a body is not a condition');
+});
+
+test('the price basis setting chooses between the dealer\'s price and the base price below it', () => {
+  const lot = platformCars(5).map((c) => dealerOn.normalize({ card: dealerOnCard(c).VehicleCard, origin: DEALERON_ORIGIN }));
+  for (const v of lot) {
+    assert.equal(basisPrice(v, 'website'), v.price);
+    assert.equal(basisPrice(v, 'beforeFees'), v.priceBeforeFees);
+    assert.ok(v.priceBeforeFees < v.price);
+  }
+  assert.equal(feeGap(lot).gap, 490, 'the fee the wizard suggests for the price note, read from this lot');
+  const com = platformCars(3).map((c) => dealerCom.normalize({ card: dealerComRecord(c), origin: DEALERCOM_ORIGIN }));
+  assert.equal(feeGap(com).gap, 490);
+});
+
+// ---------- Dealer.com: the record ----------
+
+test('a Dealer.com record becomes the flat vehicle from its published field names', () => {
+  const [c] = platformCars(1, { from: 1 });
+  const v = dealerCom.normalize({ card: dealerComRecord(c), origin: DEALERCOM_ORIGIN });
+  assert.deepEqual(Object.keys(v).sort(), [...VEHICLE_FIELDS].sort());
+  assert.equal(v.vin, c.vin);
+  assert.equal(v.mileage, c.miles);
+  assert.equal(v.inventoryType, 'used');
+  assert.equal(v.urlConditionWord, 'used');
+  assert.equal(v.url, DEALERCOM_ORIGIN + dealerComPath(c));
+  assert.equal(v.price, c.base + c.fee);
+  assert.equal(v.priceLabel, 'Sample Price');
+  assert.equal(v.priceBeforeFees, c.base);
+  assert.equal(v.location, 'Sample Chevrolet');
+  assert.equal(v.drivetrain, 'FWD');
+  assert.equal(v.photos.length, c.photos);
+  assert.ok(v.photos.every((u) => u.startsWith('https://pictures.dealer.com/')));
+  assert.equal(checkPreOwned(v).verdict, 'pre-owned', 'type and address agree');
+  assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY);
+  const cert = dealerCom.normalize({ card: dealerComRecord(platformCars(1)[0]), origin: DEALERCOM_ORIGIN });
+  assert.equal(cert.inventoryType, 'Certified Used');
+  assert.equal(cert.urlConditionWord, 'certified');
+  assert.equal(dealerCom.normalize({ card: { vin: 'short' }, origin: DEALERCOM_ORIGIN }), null);
+  assert.equal(normalizeInventoryRecord({ ...dealerComRecord(c), link: 'javascript:void(0)' }, { origin: DEALERCOM_ORIGIN }).url, null);
+});
+
+// ---------- the in-page probes ----------
+
+test('the DealerOn probe takes the list address the page itself asked for, on its own website only', async () => {
+  const other = 'https://tracking.example-analytics.test/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/1/2';
+  const page = fakePlatformPage({ origin: DEALERON_ORIGIN, path: '/searchused.aspx#top', requested: [other, DEALERON_LIST, DEALERON_LIST + '&pt=2'] });
+  assert.deepEqual(await runInPage(page, dealerOn.probeInPage), { kind: 'dealerOn', origin: DEALERON_ORIGIN, inventoryUrl: DEALERON_LIST, listUrl: DEALERON_ORIGIN + '/searchused.aspx' });
+  // a DealerOn car page: the platform is known, the list is not
+  const car = fakePlatformPage({ origin: DEALERON_ORIGIN, path: '/used-Springfield-2019-Jeep', text: 'Copyright © 2026 by DealerOn. All rights reserved.' });
+  assert.equal((await runInPage(car, dealerOn.probeInPage)).inventoryUrl, null);
+  const scripted = fakePlatformPage({ origin: DEALERON_ORIGIN, scripts: ['https://cdn.dealeron.com/app.js'] });
+  assert.equal((await runInPage(scripted, dealerOn.probeInPage)).kind, 'dealerOn');
+  assert.equal(await runInPage(fakePlatformPage({ origin: DEALERON_ORIGIN, text: 'We sell cars. DealerOne Motors.' }), dealerOn.probeInPage), null);
+  assert.equal(await runInPage(fakePlatformPage({ origin: 'https://www.facebook.com', text: 'Copyright by DealerOn' }), dealerOn.probeInPage), null, 'never on Facebook');
+});
+
+test('the Dealer.com probe: the getInventory request, the page\'s DDC object, its files or its credit line', async () => {
+  const page = fakePlatformPage({ origin: DEALERCOM_ORIGIN, path: '/used-inventory/index.htm', requested: [DEALERCOM_ORIGIN + '/static/app.js', DEALERCOM_LIST] });
+  assert.deepEqual(await runInPage(page, dealerCom.probeInPage), { kind: 'dealerCom', origin: DEALERCOM_ORIGIN, inventoryUrl: DEALERCOM_LIST, listUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm' });
+  assert.equal((await runInPage(fakePlatformPage({ origin: DEALERCOM_ORIGIN, windowExtras: { DDC: {} } }), dealerCom.probeInPage)).inventoryUrl, null);
+  assert.equal((await runInPage(fakePlatformPage({ origin: DEALERCOM_ORIGIN, scripts: ['https://static.dealer.com/v9/x.js'] }), dealerCom.probeInPage)).kind, 'dealerCom');
+  assert.equal((await runInPage(fakePlatformPage({ origin: DEALERCOM_ORIGIN, text: 'Website by Dealer.com' }), dealerCom.probeInPage)).kind, 'dealerCom');
+  assert.equal(await runInPage(fakePlatformPage({ origin: DEALERCOM_ORIGIN, text: 'Your trusted dealer. com-munity first.' }), dealerCom.probeInPage), null);
+  assert.equal(await runInPage(fakePlatformPage({ origin: DEALERCOM_ORIGIN, scripts: ['https://cdn.notdealer.com/x.js'] }), dealerCom.probeInPage), null, 'a look-alike host is not dealer.com');
+});
+
+test('neither probe claims another platform\'s page, and no other probe claims theirs', async () => {
+  const onPage = () => fakePlatformPage({ origin: DEALERON_ORIGIN, path: '/searchused.aspx', requested: [DEALERON_LIST], text: 'Copyright © 2026 by DealerOn' });
+  const comPage = () => fakePlatformPage({ origin: DEALERCOM_ORIGIN, path: '/used-inventory/index.htm', requested: [DEALERCOM_LIST], windowExtras: { DDC: {} }, text: 'Website by Dealer.com' });
+  assert.equal(await runInPage(onPage(), dealerCom.probeInPage), null);
+  assert.equal(await runInPage(comPage(), dealerOn.probeInPage), null);
+  for (const p of [onPage, comPage]) {
+    assert.equal(await runInPage(p(), dealerInspire.probeInPage), null);
+    assert.equal(await runInPage(p(), schemaOrg.probeInPage), null, 'a script-drawn list shows the standard reader no car links');
+  }
+  for (const a of [dealerOn, dealerCom]) {
+    assert.equal(await runInPage(fakeDealerPage(), a.probeInPage), null, `${a.PLATFORM.id} on a Dealer Inspire page`);
+    assert.equal(await runInPage(fakeStandardPage(), a.probeInPage), null, `${a.PLATFORM.id} on a standard-data page`);
+  }
+});
+
+// ---------- the in-page and worker searches ----------
+
+test('searchInPage: one GET on the website, JSON parsed, a web page as text, nothing off the website', async () => {
+  const [c] = platformCars(1);
+  const site = dealerOnSite({ cars: [c] });
+  for (const a of [dealerOn, dealerCom]) {
+    const origin = a === dealerOn ? DEALERON_ORIGIN : DEALERCOM_ORIGIN;
+    const page = fakePlatformPage({ site: a === dealerOn ? site : dealerComSite({ cars: [c] }), origin });
+    const service = { kind: a.PLATFORM.id, origin };
+    const list = await runInPage(page, a.searchInPage, service, { url: a === dealerOn ? DEALERON_LIST : DEALERCOM_LIST });
+    assert.equal(list.ok, true);
+    assert.equal(list.data.status, 200);
+    assert.ok(list.data.json && typeof list.data.json === 'object');
+    assert.equal(list.data.text, '');
+    const off = await runInPage(page, a.searchInPage, service, { url: 'https://elsewhere.test/x' });
+    assert.equal(off.ok, false);
+    assert.match(off.error, /reads only/);
+    assert.equal(page.fetchCalls.length, 1, 'nothing was sent off the website');
+    assert.deepEqual(page.fetchCalls[0].init.headers, undefined, 'no header of its own');
+    assert.equal((await runInPage(page, a.searchInPage, service, {})).ok, false);
+  }
+  const page = fakePlatformPage({ site, origin: DEALERON_ORIGIN });
+  const car = await runInPage(page, dealerOn.searchInPage, onService, { url: DEALERON_ORIGIN + dealerOnPath(c) });
+  assert.equal(car.data.json, null);
+  assert.match(car.data.text, new RegExp(c.vin));
+  const gone = await runInPage(page, dealerOn.searchInPage, onService, { url: DEALERON_ORIGIN + '/used-nothing' });
+  assert.deepEqual([gone.ok, gone.data.status, gone.data.ok], [true, 404, false]);
+});
+
+test('makeDirectSearch: the same GET from the worker, without cookies, never off the website', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    seen.push({ url, init });
+    return { ok: true, status: 200, url, redirected: false, headers: { get: () => 'application/json' }, text: async () => '{"inventory":[]}' };
+  };
+  for (const [a, service] of [[dealerOn, onService], [dealerCom, comService]]) {
+    const search = a.makeDirectSearch(service, fetchImpl);
+    const r = await search({ url: service.inventoryUrl });
+    assert.deepEqual(r.json, { inventory: [] });
+    assert.equal(seen.at(-1).init.credentials, 'omit');
+    await assert.rejects(search({ url: 'https://elsewhere.test/' }), /reads only/);
+  }
+  assert.equal(seen.length, 2);
+});
+
+// ---------- scan ----------
+
+test('DealerOn scan pages by "pt" until the stated count is read', async () => {
+  const cars = platformCars(10);
+  const search = platformSearch(dealerOnSite({ cars, perPage: 4 }));
+  const res = await dealerOn.scan(search, dealerOn.scanOptions(onService));
+  assert.equal(res.ok, true);
+  assert.equal(res.complete, true);
+  assert.equal(res.total, 10);
+  assert.equal(res.records.length, 10);
+  assert.equal(res.requests, 3);
+  assert.equal(search.calls[0], DEALERON_LIST, 'page 1 is the address the page itself asked for');
+  assert.match(search.calls[1], /[?&]pt=2(&|$)/);
+  assert.equal(new URL(search.calls[1]).searchParams.get('pn'), '24', 'the page\'s own parameters are kept');
+});
+
+test('without a stated count the list ends at a short page, and a page number that does not move the list leaves the scan not complete', async () => {
+  const cars = platformCars(10);
+  const res = await dealerOn.scan(platformSearch(dealerOnSite({ cars, perPage: 4, withTotal: false })), dealerOn.scanOptions(onService));
+  assert.equal(res.complete, true);
+  assert.equal(res.records.length, 10);
+  assert.equal(res.total, 10);
+  // a site whose pages all answer the first page
+  const site = dealerOnSite({ cars, perPage: 4, withTotal: false });
+  const first = site.get(DEALERON_LIST);
+  const stuck = platformSearch({ get: (u) => (u.startsWith(DEALERON_ORIGIN + '/api/') ? first : site.get(u)) });
+  const res2 = await dealerOn.scan(stuck, dealerOn.scanOptions(onService));
+  assert.equal(res2.ok, true);
+  assert.equal(res2.complete, false, 'four cars read, and nothing says that is all');
+  assert.equal(res2.records.length, 4);
+  assert.equal(res2.requests, 2);
+});
+
+test('Dealer.com scan pages by "start", counted from the first car', async () => {
+  const cars = platformCars(9);
+  const search = platformSearch(dealerComSite({ cars, perPage: 4 }));
+  const res = await dealerCom.scan(search, dealerCom.scanOptions(comService));
+  assert.equal(res.complete, true);
+  assert.equal(res.records.length, 9);
+  assert.deepEqual(search.calls.map((u) => new URL(u).searchParams.get('start')), ['0', '4', '8']);
+  assert.equal(dealerComPage(DEALERCOM_LIST.replace('start=0', 'start=35'), 1, 35), DEALERCOM_LIST, 'a page the person had moved to still starts from the first car');
+  assert.equal(dealerOnPage(DEALERON_LIST, 1), DEALERON_LIST);
+  assert.equal(dealerOnPage(DEALERON_LIST + '&pt=3', 1), DEALERON_LIST + '&pt=1');
+});
+
+test('a scan stops at the list\'s limit, and a refusal or a bad first answer stops it with the reason', async () => {
+  const many = { get: (u) => {
+    const p = Number(new URL(u).searchParams.get('pt') || 1);
+    return { ok: true, status: 200, contentType: 'application/json', json: { DisplayCards: platformCars(2, { from: p * 2 }).map((c) => dealerOnCard(c)) } };
+  } };
+  const capped = await dealerOn.scan(platformSearch(many), dealerOn.scanOptions(onService));
+  assert.equal(capped.requests, MAX_INVENTORY_PAGES);
+  assert.equal(capped.complete, false);
+  for (const status of [401, 403, 429, 503]) {
+    const res = await dealerOn.scan(platformSearch({ get: () => answerWith(status) }), dealerOn.scanOptions(onService));
+    assert.equal(res.ok, false);
+    assert.match(res.message, new RegExp(String(status)));
+    assert.equal(res.requests, 1, 'never retried');
+  }
+  const htmlAnswer = await dealerCom.scan(platformSearch({ get: () => answerWith(200, '<html>sign in</html>') }), dealerCom.scanOptions(comService));
+  assert.equal(htmlAnswer.ok, false);
+  assert.match(htmlAnswer.message, /not inventory data/);
+  const offsite = await dealerCom.scan(async () => ({ ok: true, status: 200, finalUrl: 'https://elsewhere.test/x', json: { inventory: [] } }), dealerCom.scanOptions(comService));
+  assert.equal(offsite.ok, false);
+  assert.match(offsite.message, /elsewhere\.test/);
+  const noList = await dealerOn.scan(platformSearch(new Map()), dealerOn.scanOptions({ ...onService, inventoryUrl: null }));
+  assert.equal(noList.ok, false);
+  assert.match(noList.message, /used inventory page, wait until the cars show/);
+  assert.equal(noList.requests, 0);
+  // a later page failing keeps what was read and says the scan is not complete
+  const site = dealerOnSite({ cars: platformCars(8), perPage: 4 });
+  const flaky = platformSearch({ get: (u) => (/pt=2/.test(u) ? answerWith(500) : site.get(u)) });
+  const part = await dealerOn.scan(flaky, dealerOn.scanOptions(onService));
+  assert.deepEqual([part.ok, part.complete, part.records.length], [true, false, 4]);
+  assert.deepEqual(dealerOn.scanOptions({ ...onService, inventoryUrl: 'https://elsewhere.test/api' }), { origin: DEALERON_ORIGIN, inventoryUrl: null }, 'a stored list address off the website is never used');
+});
+
+test('a car missing from the list is gone only when its own page answers 404 or 410; anything readable leaves it unconfirmed; a server error marks nothing', async () => {
+  const cars = platformCars(4);
+  const [sold, banner, redirected, unknown, broken] = platformCars(5, { from: 60 });
+  const site = dealerComSite({ cars, gone: [sold] });
+  site.set(DEALERCOM_ORIGIN + dealerComPath(banner), { ok: true, status: 200, contentType: 'text/html', text: `<p>SOLD</p><p>VIN ${banner.vin}</p>` });
+  site.set(DEALERCOM_ORIGIN + dealerComPath(broken), answerWith(500));
+  const confirmUrls = Object.fromEntries([sold, banner, redirected, broken].map((c) => [c.vin, DEALERCOM_ORIGIN + dealerComPath(c)]));
+  confirmUrls[unknown.vin] = 'https://elsewhere.test' + dealerComPath(unknown);
+  const base = platformSearch(site);
+  const search = async (r) => (r.url === confirmUrls[redirected.vin] ? { ...answerWith(404), finalUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm', redirected: true } : base(r));
+  const res = await dealerCom.scan(search, { ...dealerCom.scanOptions(comService), confirmVins: [cars[0].vin, sold.vin, banner.vin, redirected.vin, unknown.vin], confirmUrls });
+  assert.deepEqual(res.confirm.notFound, [sold.vin]);
+  assert.deepEqual(res.confirm.checked, [sold.vin, banner.vin, redirected.vin], 'the car with no page on the website is not asked for');
+  assert.equal(res.confirm.error, null, 'a page that still shows the car, a redirect and an unknown page are unsure, not errors');
+  assert.equal(res.unread, undefined, 'a car off the list is never kept as if it were still listed');
+  const res2 = await dealerCom.scan(platformSearch(site), { ...dealerCom.scanOptions(comService), confirmVins: [sold.vin, broken.vin], confirmUrls: { ...confirmUrls, [broken.vin]: DEALERCOM_ORIGIN + dealerComPath(broken) } });
+  assert.match(res2.confirm.error, /500/);
+  // through the rescan: the sold car is taken down, the others wait as "not confirmed gone"
+  const settings = withDefaults({});
+  const siteInfo = { origin: DEALERCOM_ORIGIN, host: 'www.sample-dealercom.test', name: 'Sample Chevrolet', title: '', adapter: 'dealerCom' };
+  const all = [...cars, sold, banner];
+  const first = await scanWithSearch({ adapter: dealerCom, search: platformSearch(dealerComSite({ cars: all })), site: siteInfo, settings, options: dealerCom.scanOptions(comService) });
+  const second = await scanWithSearch({ adapter: dealerCom, search: platformSearch(site), site: siteInfo, settings, prevSnapshot: first.snapshot, options: dealerCom.scanOptions(comService) });
+  assert.deepEqual(second.diff.takeDown.map((t) => t.vin), [sold.vin]);
+  assert.deepEqual(second.diff.needsALook.map((t) => t.vin), [banner.vin]);
+  assert.match(second.diff.needsALook[0].text, /not confirmed gone/);
+});
+
+test('a rescan through scanWithSearch: a sold car goes on To do, the dealer\'s price is what changes are measured in', async () => {
+  const cars = platformCars(5, { from: 1 });
+  const settings = withDefaults({});
+  const site = { origin: DEALERON_ORIGIN, host: 'www.sample-dealeron.test', name: 'Sample Motors', title: '', adapter: 'dealerOn' };
+  const first = await scanWithSearch({ adapter: dealerOn, search: platformSearch(dealerOnSite({ cars })), site, settings, options: dealerOn.scanOptions(onService) });
+  assert.equal(first.ok, true);
+  const ready = Object.values(first.snapshot.vehicles).filter((e) => e.decision === DECISION.READY);
+  assert.equal(ready.length, cars.length);
+  const [gone, ...kept] = cars;
+  const cheaper = kept.map((c, i) => (i === 0 ? { ...c, base: c.base - 1000 } : c));
+  const second = await scanWithSearch({ adapter: dealerOn, search: platformSearch(dealerOnSite({ cars: cheaper, gone: [gone] })), site, settings, prevSnapshot: first.snapshot, posted: { [gone.vin]: { price: gone.base + gone.fee }, [kept[0].vin]: { price: kept[0].base + kept[0].fee } }, options: dealerOn.scanOptions(onService) });
+  assert.equal(second.ok, true);
+  assert.deepEqual(second.diff.takeDown.map((t) => t.vin), [gone.vin]);
+  const drop = second.diff.priceUpdates.find((p) => p.vin === kept[0].vin);
+  assert.deepEqual([drop.from, drop.to], [kept[0].base + kept[0].fee, kept[0].base - 1000 + kept[0].fee]);
+});
+
+// ---------- getDetails ----------
+
+test('DealerOn getDetails: the car from the list, then every full-size photo of this car from its page', async () => {
+  const cars = platformCars(3);
+  const search = platformSearch(dealerOnSite({ cars }));
+  const d = await dealerOn.getDetails(search, cars[1].vin.toLowerCase(), dealerOn.scanOptions(onService));
+  assert.equal(d.ok, true);
+  const v = dealerOn.normalize(d.record);
+  assert.equal(v.vin, cars[1].vin);
+  assert.equal(v.photos.length, cars[1].photos);
+  assert.ok(v.photos.every((u) => u.includes(`/${cars[1].vin.toLowerCase()}/ip/`) && !/thumbs/.test(u)), 'this car\'s photos only, full size');
+  assert.equal(v.photos[0], `${DEALERON_ORIGIN}/inventoryphotos/12345/${cars[1].vin.toLowerCase()}/ip/1.jpg`, 'the address without its resize query');
+  assert.equal(search.calls.at(-1), DEALERON_ORIGIN + dealerOnPath(cars[1]));
+  assert.deepEqual(pagePhotos(dealerOnCarPage(cars[0]), cars[0].vin, DEALERON_ORIGIN + '/x').length, cars[0].photos);
+  assert.deepEqual(pagePhotos('', cars[0].vin, DEALERON_ORIGIN), []);
+  const none = await dealerOn.getDetails(search, platformCars(1, { from: 90 })[0].vin, dealerOn.scanOptions(onService));
+  assert.deepEqual([none.ok, none.record], [true, null]);
+  const failing = await dealerOn.getDetails(platformSearch({ get: () => answerWith(403) }), cars[0].vin, dealerOn.scanOptions(onService));
+  assert.equal(failing.ok, false);
+  assert.match(failing.message, /403/);
+});
+
+test('Dealer.com getDetails: a car page\'s photos of other cars are never taken; its standard data for this VIN is', async () => {
+  const cars = platformCars(2, { from: 1 });
+  const site = dealerComSite({ cars });
+  const d = await dealerCom.getDetails(platformSearch(site), cars[0].vin, dealerCom.scanOptions(comService));
+  const v = dealerCom.normalize(d.record);
+  assert.equal(v.photos.length, cars[0].photos, 'the list\'s own images; the page\'s similar-car photo is not one');
+  assert.ok(!v.photos.some((u) => /othercar/.test(u)));
+  const node = { '@context': 'https://schema.org', '@type': 'Car', vehicleIdentificationNumber: cars[0].vin, name: 'Used car', description: 'One owner, clean.', image: Array.from({ length: 8 }, (_, n) => `https://pictures.dealer.com/s/sampledealer/${n}/p${n}.jpg`) };
+  site.set(DEALERCOM_ORIGIN + dealerComPath(cars[0]), { ok: true, status: 200, contentType: 'text/html', text: `<html><head><script type="application/ld+json">${JSON.stringify(node)}</script></head><body>${cars[0].vin}</body></html>` });
+  const d2 = await dealerCom.getDetails(platformSearch(site), cars[0].vin, dealerCom.scanOptions(comService));
+  const v2 = dealerCom.normalize(d2.record);
+  assert.equal(v2.photos.length, 8);
+  assert.equal(v2.descriptionRaw, 'One owner, clean.');
+});
+
+test('origins and photoOrigins: the website itself, and where the photos are', () => {
+  assert.deepEqual(dealerOn.origins(onService), [DEALERON_ORIGIN + '/*']);
+  assert.deepEqual(dealerCom.origins(comService), [DEALERCOM_ORIGIN + '/*']);
+  assert.deepEqual(dealerOn.origins({ origin: 'ftp://x' }), []);
+  const records = platformCars(2).map((c) => ({ card: dealerComRecord(c), origin: DEALERCOM_ORIGIN }));
+  assert.deepEqual(dealerCom.photoOrigins(records), ['https://pictures.dealer.com']);
+  const onRecords = platformCars(2).map((c) => ({ card: dealerOnCard(c).VehicleCard, origin: DEALERON_ORIGIN }));
+  assert.deepEqual(dealerOn.photoOrigins(onRecords), [DEALERON_ORIGIN], 'DealerOn photos are on the website itself');
+});
+
+test('DealerOn keeps the 10-second gap its robots.txt asks for between car-page reads, the same gap every time', async () => {
+  const { PAGE_GAP_MS } = await import('../extension/adapters/dealerOn.js');
+  assert.equal(PAGE_GAP_MS, 10000);
+  const [a, b] = platformCars(2, { from: 70 });
+  const site = dealerOnSite({ cars: platformCars(2), gone: [a, b] });
+  const confirmUrls = { [a.vin]: DEALERON_ORIGIN + dealerOnPath(a), [b.vin]: DEALERON_ORIGIN + dealerOnPath(b) };
+  const times = [];
+  const search = platformSearch(site);
+  const timed = async (r) => { times.push(Date.now()); return search(r); };
+  const res = await dealerOn.scan(timed, { ...dealerOn.scanOptions(onService), confirmVins: [a.vin, b.vin], confirmUrls, pageGapMs: 60 });
+  assert.deepEqual(res.confirm.notFound, [a.vin, b.vin]);
+  const [, first, second] = times; // the list, then the two car pages
+  assert.ok(second - first >= 55, `the second car page waited for the gap (${second - first} ms)`);
+  // the list pages themselves are not held up
+  const quick = await dealerOn.scan(platformSearch(dealerOnSite({ cars: platformCars(10), perPage: 4 })), { ...dealerOn.scanOptions(onService), pageGapMs: 60000 });
+  assert.equal(quick.complete, true);
+});
+
+test('a scan checks at most MAX_CONFIRM_PAGES missing cars at their pages; the rest wait unconfirmed and the checked ones still count', async () => {
+  const { MAX_CONFIRM_PAGES } = await import('../extension/adapters/inventoryJson.js');
+  const missing = platformCars(MAX_CONFIRM_PAGES + 3, { from: 100 });
+  const search = platformSearch(dealerComSite({ cars: platformCars(2), gone: missing }));
+  const confirmUrls = Object.fromEntries(missing.map((c) => [c.vin, DEALERCOM_ORIGIN + dealerComPath(c)]));
+  const res = await dealerCom.scan(search, { ...dealerCom.scanOptions(comService), confirmVins: missing.map((c) => c.vin), confirmUrls });
+  assert.equal(res.confirm.checked.length, MAX_CONFIRM_PAGES);
+  assert.deepEqual(res.confirm.notFound, missing.slice(0, MAX_CONFIRM_PAGES).map((c) => c.vin));
+  assert.equal(res.confirm.error, null, 'the cars left for later are not an error, so the checked ones are marked gone');
+});
+
+test('findCards takes the lot\'s own list, not a featured list beside it, so paging by count still reads every car', async () => {
+  const lot = platformCars(10, { from: 300 });
+  const featured = platformCars(2, { from: 400 });
+  const site = new Map();
+  for (let start = 0; start < 12; start += 4) {
+    const u = new URL(DEALERCOM_LIST);
+    u.searchParams.set('start', String(start));
+    const body = { featured: featured.map((c) => dealerComRecord(c)), inventory: lot.slice(start, start + 4).map((c) => dealerComRecord(c)) };
+    site.set(u.href, { ok: true, status: 200, contentType: 'application/json', json: body, text: '' });
+  }
+  const res = await dealerCom.scan(platformSearch(site), dealerCom.scanOptions(comService));
+  assert.deepEqual(res.records.map((r) => r.card.vin).sort(), lot.map((c) => c.vin).sort());
+  assert.equal(res.complete, true);
+});
+
+test('a first answer with no cars and no count of zero is not an empty lot', async () => {
+  const bad = await dealerCom.scan(platformSearch({ get: () => ({ ok: true, status: 200, contentType: 'application/json', json: { error: 'Session expired' } }) }), dealerCom.scanOptions(comService));
+  assert.equal(bad.ok, false);
+  assert.match(bad.message, /held no cars/);
+  const empty = await dealerCom.scan(platformSearch({ get: () => ({ ok: true, status: 200, contentType: 'application/json', json: { pageInfo: { totalCount: 0 }, inventory: [] } }) }), dealerCom.scanOptions(comService));
+  assert.deepEqual([empty.ok, empty.complete, empty.records.length], [true, true, 0], 'a lot the website says is empty');
+});
+
+test('pick never takes the car\'s address, title or condition from a nested object', () => {
+  const [c] = platformCars(1, { from: 1 });
+  const card = { vin: c.vin, year: c.year, make: c.make, model: c.model, heading: `Used ${c.year} ${c.make}`, link: dealerComPath(c), carfax: { link: `https://www.carfax.com/vehiclehistory/ar20/${c.vin}` }, dealer: { name: 'Store' }, offer: { type: 'Used Car Special' } };
+  const v = normalizeInventoryRecord(card, { origin: DEALERCOM_ORIGIN });
+  assert.equal(v.url, DEALERCOM_ORIGIN + dealerComPath(c));
+  assert.equal(v.siteTitle, `Used ${c.year} ${c.make}`);
+  assert.equal(v.inventoryType, null);
+  assert.equal(v.carfaxUrl, `https://www.carfax.com/vehiclehistory/ar20/${c.vin}`, 'the Carfax link is still found as a Carfax link');
+  const bare = normalizeInventoryRecord({ vin: c.vin, carfax: { link: 'https://www.carfax.com/x' } }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(bare.url, null);
+});
+
+test('at post time from a car\'s own page, the list address comes from the last scan of this website', async () => {
+  const { fetchVehicleDetails } = await import('../extension/src/vehicleDetails.js');
+  const cars = platformCars(3, { from: 1 });
+  const site = dealerOnSite({ cars });
+  const page = fakePlatformPage({ site, origin: DEALERON_ORIGIN, path: dealerOnPath(cars[1]), text: 'Copyright © 2026 by DealerOn' });
+  page.document.querySelectorAll = (sel) => (sel === 'script[src], link[href]' ? [] : []);
+  const store = {};
+  const prev = globalThis.chrome;
+  globalThis.chrome = {
+    scripting: { executeScript: async ({ func, args = [] }) => [{ result: await runInPage(page, func, ...args) }] },
+    storage: { local: { get: async (k) => (k in store ? { [k]: store[k] } : {}), set: async (o) => Object.assign(store, o) } },
+  };
+  try {
+    const before = await fetchVehicleDetails(1, cars[1].vin);
+    assert.equal(before.ok, false);
+    assert.match(before.message, /used inventory page, wait until the cars show, and try again/);
+    const { SITES_KEY } = await import('../extension/src/storageKeys.js');
+    store[SITES_KEY] = { [DEALERON_ORIGIN]: { adapter: 'dealerOn', service: onService } };
+    const after = await fetchVehicleDetails(1, cars[1].vin);
+    assert.equal(after.ok, true, after.message);
+    assert.equal(after.vehicle.vin, cars[1].vin);
+    assert.equal(after.vehicle.photos.length, cars[1].photos);
+    store[SITES_KEY] = { [DEALERON_ORIGIN]: { adapter: 'dealerCom', service: comService } };
+    assert.equal((await fetchVehicleDetails(1, cars[1].vin)).ok, false, 'a service another adapter stored is never borrowed');
+  } finally {
+    globalThis.chrome = prev;
+  }
+});

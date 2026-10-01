@@ -1,0 +1,773 @@
+// The inventory data a dealer website's own list page loads as JSON, read
+// without knowing the platform's exact field names. Shared by the DealerOn
+// and Dealer.com adapters (dealerOn.js, dealerCom.js), the way
+// schemaOrgParse.js is shared: pure, string- and object-level, so the service
+// worker can run it.
+//
+// Why tolerant: the two platforms' inventory answers were described from
+// public sources only (Dealer.com's Web Integration API documentation, a
+// public write-up of DealerOn's list data, the 2026-10-01 survey of local
+// dealer websites), never read from a live site from here. So nothing below
+// depends on one wrapper name or one spelling of a field:
+//   - findCards walks the answer for the objects that carry a valid VIN;
+//   - pick reads a field by any of its usual names, ignoring case, a
+//     "Vehicle" prefix (DealerOn's VehicleVin, VehicleYear) and one level of
+//     nesting (Dealer.com's address.accountName), and also reads
+//     [{ name, value }] attribute lists;
+//   - labeledPrices / choosePrices read every price the record labels and
+//     pick the website's selling price by its label (see choosePrices).
+// What a field means is never guessed past its name: a field this file
+// can't name stays empty, and the pre-owned gate and the ready check treat
+// an empty field as they always do (Needs a look, Not ready).
+
+import { toNumber, shortLocation, conditionWordFromPath } from '../src/normalize.js';
+import { parseVehiclePage } from './schemaOrgParse.js';
+import { normalizeVehicle as normalizeStandard } from './schemaOrgNormalize.js';
+
+const VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
+const MAX_DEPTH = 8;
+
+// "VehicleVin" -> "vin", "stock_number" -> "stocknumber", "Year" -> "year".
+export function keyName(key) {
+  const k = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return k.length > 7 && k.startsWith('vehicle') ? k.slice(7) : k;
+}
+
+const isPlain = (x) => Boolean(x) && typeof x === 'object' && !Array.isArray(x);
+
+// A record's attribute lists ([{ name, value }], as some platforms send the
+// car's details) read as plain fields.
+function attributeFields(record) {
+  const out = {};
+  for (const [k, v] of Object.entries(record)) {
+    if (!Array.isArray(v) || !/attributes?$/i.test(k)) continue;
+    for (const a of v) {
+      if (!isPlain(a) || typeof a.name !== 'string') continue;
+      const value = a.value ?? a.normalizedValue ?? a.labeledValue;
+      if (value !== undefined && value !== null && value !== '') out[a.name] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * The first value found under any of the names, in this order: the
+ * record's own keys (the names in their order), then its attribute lists,
+ * then, only when `nested` is set, one level of nested objects (Dealer.com's
+ * address.accountName). Nested objects are never read otherwise: a Carfax
+ * object's link, a dealer object's name or an offer's type is not the car's.
+ * @param {object} record
+ * @param {string[]} names  already in keyName() form
+ * @param {{ nested?: boolean }} [how]
+ */
+export function pick(record, names, { nested = false } = {}) {
+  if (!isPlain(record)) return undefined;
+  const layers = [record, attributeFields(record), ...(nested ? Object.values(record).filter(isPlain) : [])];
+  for (const layer of layers) {
+    for (const name of names) {
+      for (const [k, v] of Object.entries(layer)) {
+        if (keyName(k) === name && v !== undefined && v !== null && v !== '') return v;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function textOf(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value.replace(/\s+/g, ' ').trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (isPlain(value)) return textOf(value.value ?? value.name ?? value.label ?? value.text ?? '');
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string' || typeof v === 'number')) return textOf(value.join(' '));
+  return '';
+}
+
+const truthy = (value) => value === true || (typeof value === 'string' && /^(?:true|yes|y|1)$/i.test(value.trim())) || value === 1;
+
+export function vinIn(x) {
+  if (!isPlain(x)) return '';
+  for (const [k, v] of Object.entries(x)) {
+    const name = keyName(k);
+    if (name === 'vin' || name === 'identificationnumber' || name === 'vinnumber') {
+      const vin = textOf(v).replace(/\s+/g, '').toUpperCase();
+      if (VIN.test(vin)) return vin;
+    }
+  }
+  return '';
+}
+
+/**
+ * The car records of an inventory answer, in the order it gives them, one
+ * per VIN: the objects that carry a valid VIN under a VIN name, in the one
+ * list of the answer that holds the most of them. An element without a VIN
+ * of its own gives the nested object that has it (DealerOn's
+ * DisplayCards[].VehicleCard). Objects outside lists are not cars, and a
+ * smaller list beside the lot's (featured cars, specials) is not the lot:
+ * its cars would also throw out the page size the paging counts by.
+ * @param {unknown} json
+ * @returns {object[]}
+ */
+export function findCards(json) {
+  return findCardList(json).cards;
+}
+
+/**
+ * findCards, saying where the list was ({ cards, path }: the keys leading
+ * to it). With `path` from the list's first page, a later page reads the
+ * list at the same place even when it holds fewer cars than a list beside
+ * it (the last page of the lot next to two featured cars).
+ * @param {unknown} json
+ * @param {string|null} [path]
+ */
+export function findCardList(json, path = null) {
+  let best = { cards: [], path: null };
+  let same = null;
+  const visit = (x, depth, at) => {
+    if (depth > MAX_DEPTH || !x || typeof x !== 'object') return;
+    if (Array.isArray(x)) {
+      const cards = [];
+      const seen = new Set();
+      for (const el of x) {
+        if (!isPlain(el)) {
+          visit(el, depth + 1, at);
+          continue;
+        }
+        const inner = vinIn(el) ? null : Object.entries(el).find(([, v]) => isPlain(v) && vinIn(v));
+        let card = vinIn(el) ? el : null;
+        if (inner) {
+          card = { ...el, ...inner[1] };
+          if (!Object.prototype.hasOwnProperty.call(inner[1], inner[0])) delete card[inner[0]];
+        }
+        if (card) {
+          const vin = vinIn(card);
+          if (!seen.has(vin)) {
+            seen.add(vin);
+            cards.push(card);
+          }
+        } else {
+          visit(el, depth + 1, at);
+        }
+      }
+      if (path !== null && at === path && !same) same = { cards, path: at };
+      if (cards.length > best.cards.length) best = { cards, path: at };
+      return;
+    }
+    for (const [k, v] of Object.entries(x)) visit(v, depth + 1, at ? `${at}.${k}` : k);
+  };
+  visit(json, 0, '');
+  return same || best;
+}
+
+const TOTAL_NAMES = new Set(['totalcount', 'totalrecords', 'totalresults', 'totalvehicles', 'totalvehiclecount', 'totalitems', 'resultcount', 'recordcount', 'totalrecordcount']);
+
+/**
+ * The number of cars the answer says the whole list holds, or null. Read
+ * only under a name that says so (totalCount, TotalRecords...), never a bare
+ * "total", which can be a price, and never inside a car record.
+ * @param {unknown} json
+ */
+export function totalCount(json) {
+  let found = null;
+  const visit = (x, depth) => {
+    if (found !== null || depth > MAX_DEPTH || !x || typeof x !== 'object') return;
+    if (Array.isArray(x)) {
+      for (const el of x) if (!vinIn(el)) visit(el, depth + 1);
+      return;
+    }
+    if (vinIn(x)) return;
+    for (const [k, v] of Object.entries(x)) {
+      if (TOTAL_NAMES.has(keyName(k))) {
+        const n = toNumber(v);
+        if (n !== null && n >= 0 && Number.isInteger(n)) {
+          found = n;
+          return;
+        }
+      }
+    }
+    for (const v of Object.values(x)) visit(v, depth + 1);
+  };
+  visit(json, 0);
+  return found;
+}
+
+// ---------- prices ----------
+
+// Words that make an amount something other than the price a buyer pays
+// today: a manufacturer's, earlier or book price, a payment, a fee or a
+// discount on its own, a price only some buyers get, an estimate.
+const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|^list|compare|strike|payment|per ?month|monthly|\bmo\b|lease|financ|rebate|incentive|saving|discount|conditional|\bfees?\b|docfee|\btax|invoice|trade|down ?payment|\bapr\b|cash ?back|bonus|wholesale|employee|supplier|military|loyalty|conquest|lowest|highest|market|book|kbb|kelley|edmunds|estimat|\bvalue\b(?<!retail value)/i;
+// The base price a dealer's own price is built from on these platforms:
+// "Retail Price", "Retail Value", a "starting" price.
+const BASE_WORDS = /retail|\bbase\b|asking|starting/i;
+// The price the website says it sells at: a platform's final price, an
+// internet, sale or selling price.
+const SELLING_WORDS = /\bfinal|internet|\bdealer\b|\bsale\b|selling|\bour\b|\byour\b|e-?price|\bnow\b/i;
+const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
+const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
+
+// "finalPrice" -> "final Price", "VehicleInternetPrice" -> "Vehicle Internet Price".
+const spaced = (key) => String(key).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
+
+function amount(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  // only a plain amount: "$23,985", "23985", "23,985.00"; never "From $199/mo" or "Call"
+  if (!/^\$?\s*\d{1,3}(?:,\d{3})+(?:\.\d{2})?$|^\$?\s*\d+(?:\.\d{2})?$/.test(s)) return null;
+  const n = toNumber(s.replace(/[$\s,]/g, ''));
+  return n !== null && n > 0 ? n : null;
+}
+
+/**
+ * Every amount the record labels as a price, with its label and where it
+ * came from: label/value objects (Dealer.com's pricing entries:
+ * { label, value, typeClass, isFinalPrice }) and fields named for a price
+ * (finalPrice, VehicleInternetPrice, retailPrice). Nested up to four levels;
+ * never inside photos or features.
+ * @param {object} record
+ * @returns {{ value: number, label: string, key: string, final: boolean }[]}
+ */
+export function labeledPrices(record) {
+  const out = [];
+  const visit = (x, key, depth) => {
+    if (depth > 4 || !x || typeof x !== 'object') return;
+    if (Array.isArray(x)) {
+      for (const el of x) visit(el, key, depth + 1);
+      return;
+    }
+    const label = textOf(x.label ?? x.title ?? x.displayName ?? '');
+    const kind = textOf(x.typeClass ?? x.type ?? x.name ?? '');
+    const value = amount(x.value ?? x.amount ?? x.price ?? x.displayValue);
+    if (value !== null && (label || kind)) {
+      out.push({ value, label: label || spaced(kind), key: `${key}.${kind}`, final: truthy(x.isFinalPrice) || truthy(x.isFinal) });
+      return;
+    }
+    for (const [k, v] of Object.entries(x)) {
+      if (/image|photo|picture|feature|option|media|attribute/i.test(k)) continue;
+      const n = /price/i.test(k) ? amount(v) : null;
+      if (n !== null) out.push({ value: n, label: spaced(k).replace(/^Vehicle\s+/i, ''), key: k, final: keyName(k) === 'finalprice' });
+      else if (v && typeof v === 'object') visit(v, k, depth + 1);
+    }
+  };
+  visit(record, '', 0);
+  return out;
+}
+
+// Words of a name, for matching a "<Dealer> Price" label to the dealership.
+const nameWords = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+
+/**
+ * What one labeled price is: 'selling', 'base', 'plain' (just "Price"),
+ * 'named' (a "<Something> Price" this record's dealership name does not
+ * explain) or 'other' (never used). "<Dealer> Price" is a selling price
+ * only when every word before "Price" is in the dealership's own name as
+ * the record gives it ("Sample Price" at "Sample Chevrolet"): a "KBB Price"
+ * or "Market Price" is never mistaken for the dealer's.
+ * @param {{ label: string, key: string, final: boolean }} entry
+ * @param {string} [dealer]  the dealership name the record carries
+ */
+export function priceKind(entry, dealer = '') {
+  const words = `${entry.label} ${spaced(entry.key)}`;
+  if (NOT_THE_PRICE.test(words)) return 'other';
+  if (entry.final) return 'selling';
+  if (BASE_WORDS.test(words)) return 'base';
+  if (SELLING_WORDS.test(words)) return 'selling';
+  if (GENERIC_PRICE.test(entry.label) || /^price$/i.test(keyName(entry.key.split('.').pop()))) return 'plain';
+  const named = NAMED_PRICE.exec(entry.label);
+  if (named) {
+    const own = nameWords(entry.label.replace(/\s+price\s*:?\s*$/i, ''));
+    const theirs = new Set(nameWords(dealer));
+    return own.length && own.every((w) => theirs.has(w)) ? 'selling' : 'named';
+  }
+  return 'other';
+}
+
+const NO_PRICE = (label) => ({ price: null, priceLabel: label, priceBeforeFees: null });
+
+/**
+ * The website's price and, when it shows one, the lower base price.
+ *   price           the selling price: one the platform marks as final, else
+ *                   one labelled final/internet/sale/dealer or named for the
+ *                   dealership ("<Dealer> Price"), else a plain "Price", else
+ *                   the base price when it is the only one. On the sites
+ *                   surveyed this is the dealer's price with its doc fee.
+ *   priceBeforeFees a base ("Retail", plain "Price") amount below it, when
+ *                   the record has one; the dealer's price basis setting
+ *                   (settings.js, rescan.js basisPrice) chooses between them.
+ * When it can't tell, there is no price and the label says why, so the car
+ * waits on Not ready rather than going out at a price picked by chance: two
+ * selling prices that disagree, or a "<Something> Price" the dealership's
+ * name does not explain next to the plain or base price ("Two prices on
+ * the website").
+ * @param {{ value: number, label: string, key: string, final: boolean }[]} entries
+ * @param {{ dealer?: string }} [context]
+ */
+export function choosePrices(entries, { dealer = '' } = {}) {
+  const kinds = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
+  const of = (kind) => kinds.filter((e) => e.kind === kind);
+  const selling = of('selling');
+  const plain = of('plain');
+  const base = of('base');
+  const named = of('named');
+  const differ = (list) => new Set(list.map((e) => e.value)).size > 1;
+  const TWO = 'Two prices on the website';
+  let main = null;
+  const flagged = selling.filter((e) => e.final);
+  const pool = flagged.length ? flagged : selling;
+  if (pool.length) {
+    if (differ(pool)) return NO_PRICE(TWO);
+    main = pool[0];
+  } else if (named.length) {
+    return NO_PRICE(TWO);
+  } else if (plain.length) {
+    if (differ(plain)) return NO_PRICE(TWO);
+    main = plain[0];
+  } else if (base.length) {
+    if (differ(base)) return NO_PRICE(TWO);
+    main = base[0];
+  }
+  if (!main) return NO_PRICE('Call for price');
+  const lower = [...base, ...plain].filter((e) => e !== main && e.value < main.value).map((e) => e.value);
+  return { price: main.value, priceLabel: main.label || 'Price', priceBeforeFees: lower.length ? Math.max(...lower) : null };
+}
+
+// ---------- photos ----------
+
+/**
+ * Photo addresses from an images field: strings, or objects with
+ * uri/url/src/href. Made absolute against the website; only http(s).
+ * @param {unknown} value
+ * @param {string} base
+ */
+export function imageUrls(value, base) {
+  const out = [];
+  const add = (u) => {
+    if (typeof u !== 'string' || !u.trim()) return;
+    try {
+      const abs = new URL(u.trim(), base || undefined);
+      if ((abs.protocol === 'https:' || abs.protocol === 'http:') && !out.includes(abs.href)) out.push(abs.href);
+    } catch (e) {
+      // not an address
+    }
+  };
+  for (const item of Array.isArray(value) ? value : value ? [value] : []) {
+    if (typeof item === 'string') add(item);
+    else if (isPlain(item)) add(item.uri ?? item.url ?? item.src ?? item.href ?? item.imageUrl ?? item.large ?? item.full);
+  }
+  return out;
+}
+
+// ---------- the flat vehicle ----------
+
+const N = {
+  vin: ['vin', 'identificationnumber', 'vinnumber'],
+  stock: ['stocknumber', 'stock', 'stockno', 'stocknum'],
+  year: ['year', 'modelyear'],
+  make: ['make', 'makename', 'brand'],
+  model: ['model', 'modelname'],
+  trim: ['trim', 'trimname', 'trimlevel'],
+  mileage: ['odometer', 'mileage', 'miles', 'odometervalue'],
+  url: ['link', 'detailurl', 'detailsurl', 'vdpurl', 'detailpageurl', 'url', 'href'],
+  images: ['images', 'photos', 'imageurls', 'photourls', 'pictures', 'photo', 'image', 'imageurl', 'photourl'],
+  photoCount: ['photocount', 'imagecount', 'numberofphotos', 'numberofimages', 'photoscount'],
+  condition: ['inventorytype', 'condition', 'conditiontype', 'newused', 'stocktype', 'type'],
+  certified: ['certified', 'iscertified', 'cpo', 'iscpo'],
+  title: ['title', 'name', 'displayname', 'heading'],
+  status: ['status', 'statuscode'],
+  statusLabel: ['statuslabel', 'statustext', 'availabilitystatus'],
+  inTransit: ['intransit', 'isintransit'],
+  demo: ['isdemo', 'demo'],
+  loaner: ['isloaner', 'loaner'],
+  exterior: ['exteriorcolor', 'extcolor', 'exteriorcolorname', 'colorexterior'],
+  interior: ['interiorcolor', 'intcolor', 'interiorcolorname', 'colorinterior'],
+  body: ['bodystyle', 'bodytype', 'body'],
+  drivetrain: ['driveline', 'drivetrain', 'drivetype'],
+  engine: ['engine', 'enginedescription'],
+  transmission: ['transmission', 'transmissiondescription'],
+  fuel: ['fueltype', 'fuel'],
+  location: ['accountname', 'dealershipname', 'dealername', 'locationname', 'storename', 'location'],
+  description: ['description', 'dealercomments', 'comments', 'sellercomments', 'vehiclecomments'],
+  features: ['features', 'highlights', 'highlightedfeatures'],
+  dateInStock: ['dateinstock', 'instockdate', 'stockdate', 'datereceived', 'inventorydate'],
+  carfax: ['carfaxurl', 'carfaxlink', 'historyreporturl', 'carfax'],
+};
+
+// A condition word the gate can read, from a condition field; a field that
+// says nothing about new or used ("Car", "SUV") is not a condition.
+function conditionOf(card) {
+  const raw = textOf(pick(card, N.condition));
+  if (/^\s*u\s*$/i.test(raw)) return 'Used'; // a one-letter code, as some list data sends it
+  if (/^\s*n\s*$/i.test(raw)) return 'New';
+  return /\b(?:new|used|pre-?\s?owned|certified|cpo|demo|loaner|courtesy)\b/i.test(raw) ? raw : '';
+}
+
+function carfaxOf(card, vin) {
+  const named = textOf(pick(card, N.carfax));
+  if (/^https?:\/\//i.test(named)) return named;
+  // any address in the record that is a Carfax report for this car
+  let found = null;
+  const visit = (x, depth) => {
+    if (found || depth > 4 || !x) return;
+    if (typeof x === 'string') {
+      if (/^https?:\/\/[^\s"']*carfax\.com\//i.test(x) && x.toUpperCase().includes(vin)) found = x;
+      return;
+    }
+    if (typeof x === 'object') for (const v of Object.values(x)) visit(v, depth + 1);
+  };
+  visit(card, 0);
+  return found;
+}
+
+// A date the website gives, kept only when it reads as one.
+function dateOf(value) {
+  const s = textOf(value);
+  return s && !Number.isNaN(Date.parse(s)) ? s : null;
+}
+
+const strings = (value) => (Array.isArray(value) ? value : []).map((f) => textOf(f)).filter(Boolean);
+
+/**
+ * One inventory record -> the flat vehicle (src/vehicle.js VEHICLE_FIELDS).
+ * `page` is what the car's own page added at post time (all its photos, its
+ * description), when it was read.
+ * @param {object} card
+ * @param {{ origin: string, page?: { photos?: string[], description?: string|null, carfaxUrl?: string|null } }} where
+ */
+export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
+  const vin = vinIn(card);
+  if (!vin) return null;
+  const year = toNumber(textOf(pick(card, N.year)));
+  const make = textOf(pick(card, N.make));
+  const model = textOf(pick(card, N.model));
+  const trim = textOf(pick(card, N.trim));
+  let url = null;
+  const link = textOf(pick(card, N.url));
+  if (link) {
+    try {
+      const u = new URL(link, origin);
+      if (u.protocol === 'https:' || u.protocol === 'http:') url = u.href;
+    } catch (e) {
+      // not an address
+    }
+  }
+  const certified = truthy(pick(card, N.certified));
+  const condition = conditionOf(card);
+  const inventoryType = certified && !/new/i.test(condition) ? 'Certified Used' : condition || null;
+  const title = textOf(pick(card, N.title));
+  const location = textOf(pick(card, N.location, { nested: true })) || null;
+  const prices = choosePrices(labeledPrices(card), { dealer: location || '' });
+  const cardPhotos = imageUrls(pick(card, N.images), url || origin);
+  const photos = page && Array.isArray(page.photos) && page.photos.length ? page.photos.slice() : cardPhotos;
+  const counted = toNumber(textOf(pick(card, N.photoCount)));
+  const status = textOf(pick(card, N.status));
+  const statusLabel = textOf(pick(card, N.statusLabel));
+  const mileage = toNumber(textOf(pick(card, N.mileage)).replace(/[^0-9.]/g, ''));
+  const described = page && typeof page.description === 'string' ? page.description : textOf(pick(card, N.description));
+  const inTransit = truthy(pick(card, N.inTransit)) || /transit/i.test(`${status} ${statusLabel}`);
+
+  return {
+    vin,
+    stock: textOf(pick(card, N.stock)),
+    year,
+    make,
+    model,
+    trim,
+    name: [year, make, model, trim].filter(Boolean).join(' '),
+
+    // the pre-owned gate: the record's condition, the car's address, its title
+    inventoryType,
+    siteTitle: title || null,
+    readableType: null,
+    url,
+    urlConditionWord: conditionWordFromPath(url),
+    isDemo: truthy(pick(card, N.demo)),
+    isLoaner: truthy(pick(card, N.loaner)),
+    carfaxUrl: (page && page.carfaxUrl) || carfaxOf(card, vin),
+    carfaxOneOwner: false, // never inferred: only a Carfax report says one owner
+    mileage,
+
+    // the ready check and the rescan
+    price: prices.price,
+    priceLabel: prices.priceLabel,
+    priceBeforeFees: prices.priceBeforeFees,
+    status,
+    statusLabel,
+    availability: inTransit ? 'In-Transit' : null,
+    inTransit,
+    location,
+    locationShort: shortLocation(location), // a guess from brand words, settled over the lot's store names by scanWithSearch
+    photoCount: photos.length > (counted || 0) ? photos.length : counted ?? photos.length,
+    photos,
+    dateInStock: dateOf(pick(card, N.dateInStock)),
+
+    // text for the description writer: null means this read had none
+    descriptionRaw: described ? described : null,
+    features: strings(pick(card, N.features)),
+
+    // listing details
+    exteriorColor: textOf(pick(card, N.exterior)),
+    interiorColor: textOf(pick(card, N.interior)),
+    bodyType: textOf(pick(card, N.body)),
+    drivetrain: textOf(pick(card, N.drivetrain)),
+    engine: textOf(pick(card, N.engine)),
+    transmission: textOf(pick(card, N.transmission)),
+    fuelType: textOf(pick(card, N.fuel)),
+  };
+}
+
+/**
+ * Where the photos are hosted, from a scan's records ({ card, origin }).
+ * @param {{ card: object, origin: string }[]} records
+ */
+export function photoOriginsOf(records) {
+  const out = new Set();
+  for (const r of Array.isArray(records) ? records : []) {
+    if (!r || !r.card) continue;
+    const v = normalizeInventoryRecord(r.card, { origin: r.origin, page: r.page });
+    for (const u of v ? v.photos : []) {
+      try { out.add(new URL(u).origin); } catch (e) { /* not absolute */ }
+    }
+  }
+  return [...out].sort();
+}
+
+// ---------- reading the list, checking a missing car, one car's details ----------
+//
+// scanInventory and detailsFor are the scan() and getDetails() of an adapter
+// whose website loads its list as JSON from its own origin. The adapter
+// gives:
+//   search(request)        one GET on the website, { url } -> { ok, status,
+//                          finalUrl, redirected, contentType, json, text }
+//                          (its searchInPage or makeDirectSearch)
+//   pageAddress(url, n, firstCount)  the inventory address for list page n
+//                          (1-based), from the address the page itself
+//                          called; firstCount is how many cars page 1 held
+//   pagePhotos(html, vin, pageUrl)   the photo addresses its car pages carry
+//   pageGapMs              the fixed gap between two car-page reads the
+//                          website asks for (0: none); options.pageGapMs
+//                          overrides it (the tests)
+// Requests go one at a time, with no pauses between list pages and nothing random about
+// their timing. A refusal (403, 429, 503) stops the scan and says so; nothing is
+// retried and nothing is worked around.
+
+export const MAX_INVENTORY_PAGES = 30;
+// The most missing cars one scan checks at their own pages. The rest wait
+// for the next scan (nothing is marked gone for them): a list that lost
+// many cars at once is more likely a website hiccup than a sales day, and
+// with a fixed gap between page reads the check stays short.
+export const MAX_CONFIRM_PAGES = 12;
+
+const REFUSED = { 401: 'asked for a sign-in (401)', 403: 'turned the read away (403)', 429: 'asked for fewer requests (429)', 503: 'said it is unavailable right now (503)' };
+
+function originOf(href) {
+  try {
+    return new URL(String(href)).origin;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Why an answer can't be used, or null when it can.
+function problemWith(answer, origin) {
+  if (!answer || typeof answer !== 'object') return 'no answer';
+  if (answer.finalUrl && originOf(answer.finalUrl) !== origin) return `the answer came from ${originOf(answer.finalUrl) || 'another website'}`;
+  if (REFUSED[answer.status]) return `the website ${REFUSED[answer.status]}`;
+  if (!answer.ok) return `the website answered ${answer.status}`;
+  return null;
+}
+
+/**
+ * The adapter's scan(): the list through the inventory address its page
+ * called, page by page, then the cars the last scan had that did not come
+ * back, each checked at its own page.
+ */
+export async function scanInventory(search, options, platform) {
+  options = options || {};
+  const { origin, inventoryUrl, confirmVins = [], confirmUrls = {} } = options;
+  let requests = 0;
+  const call = async (url) => {
+    requests += 1;
+    return search({ url });
+  };
+  if (!origin || !inventoryUrl) {
+    return { ok: false, error: 'no-inventory-call', message: "Couldn't see the list of cars this page loads. Open the website's used inventory page, wait until the cars show, and try again.", requests };
+  }
+
+  const byVin = new Map();
+  let total = null;
+  let ended = false;
+  let firstCount = 0;
+  let listPath = null;
+  try {
+    for (let n = 1; n <= MAX_INVENTORY_PAGES; n += 1) {
+      const answer = await call(platform.pageAddress(inventoryUrl, n, firstCount));
+      const problem = problemWith(answer, origin);
+      if (problem) {
+        if (n === 1 || REFUSED[answer && answer.status]) return { ok: false, error: 'search-failed', message: `Couldn't read the inventory: ${problem}.`, requests };
+        break; // a later page failed: what was read stands, and the scan is not complete
+      }
+      if (!answer.json || typeof answer.json !== 'object') {
+        if (n === 1) return { ok: false, error: 'search-failed', message: "Couldn't read the inventory: the website's answer was not inventory data.", requests };
+        break;
+      }
+      const found = findCardList(answer.json, listPath);
+      if (n === 1) listPath = found.path;
+      const cards = found.cards;
+      const said = totalCount(answer.json);
+      if (said !== null) total = said;
+      if (n === 1) firstCount = cards.length;
+      let added = 0;
+      for (const card of cards) {
+        const vin = vinIn(card);
+        if (!byVin.has(vin)) {
+          byVin.set(vin, { card, origin });
+          added += 1;
+        }
+      }
+      if (!cards.length) {
+        // an answer with no car that does not say the lot is empty is not a
+        // lot: a session that ran out, an error object, another widget's data
+        if (n === 1 && total !== 0) return { ok: false, error: 'search-failed', message: "Couldn't read the inventory: the website's answer held no cars.", requests };
+        ended = true;
+        break;
+      }
+      if (total !== null && byVin.size >= total) {
+        ended = true;
+        break;
+      }
+      // the same cars again: the page number didn't move the list on
+      if (!added) break;
+      if (total === null && cards.length < firstCount) {
+        ended = true;
+        break;
+      }
+    }
+  } catch (e) {
+    return { ok: false, error: 'search-failed', message: "Couldn't read the inventory: " + ((e && e.message) || e), requests };
+  }
+  const complete = total !== null ? byVin.size >= total : ended;
+
+  // A car from the last scan that is not in this one is gone only when its
+  // own page answers 404 or 410 without being redirected (Dealer.com's 410
+  // for a sold car's page was reported by the 2026-10-01 page-text survey).
+  // Any other readable answer, such as a page that still shows the car (a
+  // "sold" banner, or a car only hidden from the list), and a car with no
+  // known page or past this scan's limit, is left unconfirmed: the rescan
+  // lists it as missing but not confirmed gone. A server error, a refusal
+  // or a failed request sets confirm.error, and the rescan then marks
+  // nothing gone at all.
+  const confirm = { checked: [], notFound: [], error: null };
+  const toCheck = [...new Set((confirmVins || []).map((v) => String(v).toUpperCase()))].filter((v) => !byVin.has(v));
+  // A website that asks automated readers for a gap between page reads
+  // (DealerOn's robots.txt: Crawl-delay 10) gets it, the same fixed gap
+  // every time; nothing about the timing is varied.
+  const gap = Number.isFinite(options.pageGapMs) ? options.pageGapMs : Number(platform.pageGapMs) || 0;
+  let pagesRead = 0;
+  for (const vin of toCheck) {
+    if (pagesRead >= MAX_CONFIRM_PAGES) break;
+    const href = confirmUrls && confirmUrls[vin];
+    let url = null;
+    try { url = href ? new URL(href, origin) : null; } catch (e) { url = null; }
+    if (!url || url.origin !== origin) continue;
+    let answer;
+    try {
+      if (pagesRead > 0 && gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
+      pagesRead += 1;
+      answer = await call(url.href);
+    } catch (e) {
+      confirm.error = String((e && e.message) || e);
+      break;
+    }
+    confirm.checked.push(vin);
+    const sameOrigin = !answer || !answer.finalUrl || originOf(answer.finalUrl) === origin;
+    if (answer && (answer.status === 404 || answer.status === 410) && sameOrigin && !answer.redirected) {
+      confirm.notFound.push(vin);
+      continue;
+    }
+    if (answer && (answer.ok || answer.status === 404 || answer.status === 410) && sameOrigin) continue; // readable, but not a clear "gone"
+    confirm.error = confirm.error || `the page of ${vin}: ${problemWith(answer, origin) || 'no answer'}`;
+    if (answer && REFUSED[answer.status]) break;
+  }
+
+  return { ok: true, fetchedAt: new Date().toISOString(), total: total ?? byVin.size, complete, requests, records: [...byVin.values()], confirm };
+}
+
+// What a car's own page adds at post time: every photo it carries, its
+// description and a Carfax link, from the page's standard vehicle data when
+// it has some, and the platform's own photo addresses.
+export function pageExtras(html, pageUrl, vin, platform) {
+  const out = { photos: [], description: null, carfaxUrl: null };
+  if (typeof html !== 'string' || !html) return out;
+  try {
+    const { vehicles, facts } = parseVehiclePage(html, pageUrl);
+    for (const node of vehicles) {
+      const v = normalizeStandard(node, { url: pageUrl, facts });
+      if (!v || v.vin !== vin) continue;
+      out.photos = v.photos;
+      out.description = v.descriptionRaw || null;
+      out.carfaxUrl = v.carfaxUrl;
+      break;
+    }
+  } catch (e) {
+    // a page the standard reader can't read: the platform's own photos below
+  }
+  const own = platform && typeof platform.pagePhotos === 'function' ? platform.pagePhotos(html, vin, pageUrl) : [];
+  if (own.length > out.photos.length) out.photos = own;
+  return out;
+}
+
+/**
+ * The adapter's getDetails(): the car from the list (any car the list
+ * gives), then its own page for every photo and its description. A car the
+ * list doesn't have is gone (record null): the side panel then refuses it.
+ */
+export async function detailsFor(search, vin, options, platform) {
+  const wanted = String(vin || '').toUpperCase();
+  const res = await scanInventory(search, { ...options, confirmVins: [] }, platform);
+  if (!res.ok) return { ok: false, message: res.message };
+  const found = res.records.find((r) => vinIn(r.card) === wanted);
+  if (!found) return { ok: true, record: null, fetchedAt: res.fetchedAt };
+  const v = normalizeInventoryRecord(found.card, { origin: found.origin });
+  const href = (v && v.url) || options.url;
+  let page = null;
+  if (href && originOf(href) === options.origin) {
+    try {
+      const answer = await search({ url: href });
+      if (!problemWith(answer, options.origin)) page = pageExtras(answer.text, answer.finalUrl || href, wanted, platform);
+    } catch (e) {
+      page = null; // the list's own data stands
+    }
+  }
+  return { ok: true, record: page ? { ...found, page } : found, fetchedAt: res.fetchedAt };
+}
+
+// A search(request) from the service worker: one GET on the website, without the browser's cookies, no
+// header of its own, never off the website.
+export function directSearch(service, fetchImpl = globalThis.fetch) {
+  const origin = webOrigin(service && service.origin);
+  return async (request) => {
+    let target = null;
+    try { target = new URL(String((request && request.url) || ''), origin || undefined); } catch (e) { target = null; }
+    if (!origin || !target || target.origin !== origin) throw new Error(`reads only ${origin || 'the dealership website'}`);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    try {
+      const res = await fetchImpl(target.href, { credentials: 'omit', signal: ctrl.signal });
+      const contentType = (res.headers && typeof res.headers.get === 'function' && res.headers.get('content-type')) || '';
+      const text = String(await res.text()).slice(0, 3000000);
+      let json = null;
+      if (/json/i.test(contentType) || /^\s*[[{]/.test(text)) {
+        try { json = JSON.parse(text); } catch (e) { json = null; }
+      }
+      return { ok: Boolean(res.ok), status: res.status, finalUrl: res.url || target.href, redirected: Boolean(res.redirected), contentType, json, text: json ? '' : text };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+
+function webOrigin(value) {
+  const origin = originOf(value);
+  return origin && /^https?:/.test(origin) ? origin : null;
+}
