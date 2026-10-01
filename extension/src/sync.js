@@ -82,10 +82,16 @@ const isoOrNull = (x) => {
 const isObject = (x) => Boolean(x) && typeof x === 'object' && !Array.isArray(x);
 const text = (s, max) => String(s ?? '').trim().slice(0, max);
 const vinOf = (v) => text(v, 17).toUpperCase();
+// A whole number for an integer column (Postgres integer, 4 bytes), or
+// null: the sync function's intOrNull, which stores a number outside that
+// range as unknown rather than fail every sync of this machine.
+const INT_MIN = -2147483648;
+const INT_MAX = 2147483647;
 const intOrNull = (v) => {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Math.round(Number(v));
-  return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r >= INT_MIN && r <= INT_MAX ? r : null;
 };
 const httpsUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u.trim()) ? u.trim().slice(0, 500) : null);
 const sameMoment = (a, b) => {

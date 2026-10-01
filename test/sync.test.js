@@ -256,6 +256,18 @@ test('mergeRegistry: the same post read listed and then taken down in one answer
   assert.deepEqual(mergeRegistry({}, { listings: [down, listed] }, { userId: U1 }), {}, 'in either order');
 });
 
+test('toServerRows and syncPayload store a number too big for an integer column as unknown, as the sync function does', () => {
+  const huge = 2499525495;
+  const posted = { [VIN_A]: { name: 'A', price: huge, postedAt: T(0) }, [VIN_B]: { name: 'B', price: '2147483647', postedAt: T(1) } };
+  const pilot = { posts: [{ vin: VIN_A, startedAt: T(0), endedAt: T(1), outcome: 'posted', seconds: 9e12 }], flags: [{ vin: VIN_A, kind: 'price', flaggedAt: T(2), from: 20000, to: huge }] };
+  const rows = toServerRows({ posted, pilot, userId: U1 });
+  assert.deepEqual(rows.listings.map((l) => l.price), [null, 2147483647]);
+  assert.equal(rows.postAttempts[0].seconds, null);
+  assert.deepEqual([rows.todoItems[0].from_price, rows.todoItems[0].to_price], [20000, null]);
+  assert.equal(syncPayload({ posted, userId: U1 }).posted[VIN_A].price, null);
+  assert.equal(scanSummary({ takenAt: T(3), cars: -3e9, ready: 1 }).cars, null);
+});
+
 test('mergeFlags: a flag closed on another machine closes here; nothing is added or reopened', () => {
   let pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [{ vin: VIN_B, name: 'B', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
   const remote = {

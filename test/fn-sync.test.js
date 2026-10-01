@@ -407,6 +407,32 @@ test('sync: postsToday counts the caller\'s own rows posted inside the day they 
   }
 });
 
+test('sync: a number too big for an integer column is stored as unknown, and the sync still answers 200, again and again', async () => {
+  world();
+  const handler = await load();
+  const runTogether = 2499525495; // two website prices run together by a parse slip: past Postgres integer
+  const body = {
+    posted: { [VIN(1)]: { name: 'A car', price: runTogether, postedAt: at(-30) }, [VIN(2)]: { name: 'Another', price: String(-runTogether), postedAt: at(-20) } },
+    pilot: {
+      posts: [{ vin: VIN(1), startedAt: at(-31), endedAt: at(-30), outcome: 'posted', seconds: 9e12 }],
+      flags: [{ vin: VIN(1), kind: 'price', flaggedAt: at(-10), from: 20000, to: runTogether }],
+    },
+    scan: { takenAt: at(-5), cars: 3e9, ready: 2, takeDownCount: 0, priceUpdateCount: 1 },
+  };
+  for (const round of [1, 2]) {
+    const r = await sync(handler, TOKEN.u1, body);
+    assert.equal(r.status, 200, `round ${round}: ${JSON.stringify(r.body)}`);
+  }
+  assert.deepEqual(fake.rows('listings').map((l) => [l.vin, l.price]).sort(), [[VIN(1), null], [VIN(2), null]], 'the posts are kept, their price unknown');
+  assert.deepEqual(fake.rows('post_attempts').map((a) => a.seconds), [null]);
+  assert.deepEqual(fake.rows('todo_items').map((t) => [t.from_price, t.to_price]), [[20000, null]]);
+  assert.deepEqual(fake.rows('scan_summaries').map((x) => [x.cars, x.ready]), [[null, 2]]);
+  // the edges of the column still go in as they are
+  const edge = await sync(handler, TOKEN.u1, { posted: { [VIN(3)]: { name: 'Edge', price: 2147483647, postedAt: at(-1) } } });
+  assert.equal(edge.status, 200);
+  assert.equal(fake.rows('listings').find((l) => l.vin === VIN(3)).price, 2147483647);
+});
+
 test('sync: to-do items: a new flag goes in, an upload closes an open one, a closed one is never reopened, an open price flag takes the new prices', async () => {
   const flags = [
     { dealership_id: D1, vin: VIN(1), kind: 'takeDown', flagged_at: '2026-09-20T10:00:00.000Z' },

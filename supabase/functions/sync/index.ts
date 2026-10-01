@@ -135,10 +135,17 @@ const isoOrNull = (x: unknown): string | null => {
 };
 const text = (s: unknown, max: number): string => String(s ?? '').trim().slice(0, max);
 const vinOf = (v: unknown): string => text(v, 17).toUpperCase();
+// A whole number for an integer column (Postgres integer, 4 bytes), or
+// null. A number outside that range (two website prices run together by a
+// parse slip, say) would fail the whole request with 22003 on every sync of
+// that machine, so it is stored as unknown instead.
+const INT_MIN = -2147483648;
+const INT_MAX = 2147483647;
 const intOrNull = (v: unknown): number | null => {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Math.round(Number(v));
-  return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r >= INT_MIN && r <= INT_MAX ? r : null;
 };
 const httpsUrl = (u: unknown): string | null => (typeof u === 'string' && /^https:\/\//i.test(u.trim()) ? u.trim().slice(0, 500) : null);
 function chunk<T>(list: T[], size: number): T[][] {

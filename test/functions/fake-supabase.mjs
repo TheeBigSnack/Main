@@ -183,6 +183,8 @@ function stored(table, column, value) {
     case 'serial': {
       const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
       if (typeof n !== 'number' || !Number.isInteger(n)) throw bad();
+      // int is Postgres integer (4 bytes); serial stands for bigint identities
+      if (type === 'int' && (n < -2147483648 || n > 2147483647)) throw new PgError('22003', `value "${n}" is out of range for type integer`);
       return n;
     }
     case 'num': {
