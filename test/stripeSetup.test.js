@@ -322,6 +322,12 @@ test('stripe setup doc: the live switch resets every Stripe column test mode wro
   assert.match(sql, /status = case when pilot_ends_at is not null then 'pilot' end/, 'a free pilot stays a pilot');
   assert.doesNotMatch(sql, /pilot_ends_at = /, 'the free pilots keep their end dates');
   assert.ok(live.indexOf('```sql') > live.indexOf('the new webhook secret and the live key'), 'after the live key and webhook secret, so no test event lands after it');
+  // The reset sets columns later migrations add (cancel_at, 0009_cancel_at.sql):
+  // on a project that has not pushed them the statement fails, so the live
+  // switch pushes the migrations itself before it, rather than relying on step 5
+  // having been run since the column was added.
+  const push = live.indexOf('`supabase db push`');
+  assert.ok(push >= 0 && push < live.indexOf('```sql'), 'the live switch runs supabase db push before the reset');
   assert.doesNotMatch(doc, /nothing made here leaks into live mode/);
   assert.match(doc.slice(0, doc.indexOf('## What you need first')), /stay there until the live switch resets them/);
 });

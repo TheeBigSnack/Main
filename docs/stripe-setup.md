@@ -97,7 +97,7 @@ Not before the company exists and the attorney has answered the sales-tax questi
 1. Activate the Stripe account: the company's legal name, EIN, address, the business bank account for payouts.
 2. Sales tax, as the attorney advises. If tax is to be collected: turn on Stripe Tax, set the default tax behavior to exclusive and add the registrations in the Dashboard (Stripe Tax charges a fee per transaction: decide with the price), then `supabase secrets set STRIPE_AUTOMATIC_TAX=true`. Checkout then asks for the billing address and adds the tax. Until the word `true` is set, no tax is added.
 3. With the live secret key (`sk_live_`): `npm run stripe-setup -- --apply --live --webhook-url <ref>`. The `--live` flag is required; without it a live key is refused before anything is read.
-4. Set the printed ids, the new webhook secret and the live key in the function secrets, as in step 5; `npm run check-deploy`. From now on the Billing card no longer says test mode, and test-mode events no longer pass the webhook's signature check.
+4. Set the printed ids, the new webhook secret and the live key in the function secrets, as in step 5; run `supabase db push` (the reset below sets `cancel_at`, which `0009_cancel_at.sql` adds, and fails on a project without it; on a project that has every migration it changes nothing); `npm run check-deploy`. From now on the Billing card no longer says test mode, and test-mode events no longer pass the webhook's signature check.
 5. Reset what test mode wrote, right away and before telling any dealership that billing is live. Supabase Dashboard, SQL editor:
 
    ```sql
