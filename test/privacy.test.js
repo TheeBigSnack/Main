@@ -252,3 +252,23 @@ test('what forget_person keeps is put to the attorney in full, and a colleague\'
   assert.match(support, /a colleague's extension drops the name from a car still listed at its next sync/);
   assert.doesNotMatch(readme, /Copies the dealership already holds \(colleagues' extensions/, 'a colleague\'s synced copy is no longer out of reach');
 });
+
+// review: the pilot agreement promises deletion within 30 days of a pilot's end, but a dealership the owner
+// made in SQL sat in `none` (served with no end, never on the retention line) and a pilot ended early on
+// notice was listed only from its original end date
+test('every pilot reaches the retention line: its clock starts when the owner makes the dealership, an early end is recorded, and dealerships with no plan are listed', () => {
+  const step5 = readme.slice(readme.indexOf('5. **The first dealership and its manager**'), readme.indexOf('Invite codes and the rules around them'));
+  assert.match(step5, /insert into public\.subscriptions \(dealership_id, status, pilot_ends_at\)\s+values \('<the id returned above>', 'pilot', '<the agreement''s start date, YYYY-MM-DD>'::date \+ <its pilot length in days>\);/, 'step 5 starts the pilot clock from the signed agreement');
+  assert.doesNotMatch(step5, /start_pilot\(/, 'not start_pilot: the SQL editor has no auth.uid(), and start_pilot refuses without a manager');
+  const retention = readme.slice(readme.indexOf('**The retention line.**'), readme.indexOf('### Forget a person'));
+  assert.match(retention, /coalesce\(s\.status, 'pilot'\) in \('pilot', 'canceled', 'incomplete_expired'\)/, 'an ended pilot is on the retention line');
+  const early = retention.slice(retention.indexOf('**A pilot ended early.**'));
+  assert.ok(early.length > 0, 'the README says how to record a pilot ended early');
+  assert.match(early, /values \('<dealership id>', 'pilot', now\(\)\)\non conflict \(dealership_id\) do update\n {2}set status = 'pilot', pilot_ends_at = excluded\.pilot_ends_at, updated_at = now\(\)\n {2}where s\.status is null or \(s\.status = 'pilot' and s\.pilot_ends_at > excluded\.pilot_ends_at\);/, 'it ends a pilot, or a dealership with no plan, and leaves a paying one alone');
+  assert.match(early, /\*\*Dealerships with no plan\.\*\*[\s\S]*where public\.subscription_state\(d\.id\) = 'none'/, 'the weekly run lists the dealerships served with no end');
+  const pilot = read('../PILOT.md');
+  assert.match(pilot, /its pilot row with the signed agreement's start date and length/, 'PILOT.md\'s account step starts the clock');
+  assert.match(pilot, /record the end in the database that day \(`supabase\/README\.md`, "A pilot ended early"\)/, 'PILOT.md records a stop or an early end');
+  assert.match(pilot, /those records are the CSVs the owner collected and, for a dealership on accounts, its rows in the database/, 'the database rows are pilot records too');
+  assert.match(read('../docs/launch-checklist.md'), /an early end recorded the day the notice comes/);
+});

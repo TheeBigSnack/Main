@@ -83,7 +83,13 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    insert into public.invites (code, dealership_id, role)
    values (upper(substr(md5(gen_random_uuid()::text || clock_timestamp()::text), 1, 12)), '<the id returned above>', 'manager')
    returning code;
+
+   -- the free pilot's clock, from the signed pilot agreement: its start date and its length in days
+   insert into public.subscriptions (dealership_id, status, pilot_ends_at)
+   values ('<the id returned above>', 'pilot', '<the agreement''s start date, YYYY-MM-DD>'::date + <its pilot length in days>);
    ```
+
+   The `subscriptions` row starts the pilot's clock, so the dealership is on its pilot until the agreement's end and lapses then unless someone subscribes, and the weekly retention line (below, "Export or delete a dealership's data") lists it if it stops. Without the row it sits in the `none` state, which `/sync` and `/rewrite` serve with no end and the retention line never lists. Leave it out only for a dealership that is on no pilot agreement (a test dealership of your own); the weekly list of dealerships with no plan, next to the retention line, shows those. The manager view's Billing card then shows the pilot and its end date (it offers **Start the free pilot** only in `none`, and `start_pilot` never restarts a pilot), and a manager who subscribes before the end replaces the row's status with Stripe's.
 
    `website_origin` is the dealer website's origin exactly as the extension sees it (scheme and host, no path, no trailing slash): the extension keeps its registry under `posted:<origin>` and the sync function matches on it. `website_origin_of` makes it from any address you paste, the way sign-up does; an address it refuses gives null, and the insert fails. The manager signs in with the magic link, redeems the code in the extension's Settings (typed in any case, spaces around it ignored: `redeem_invite` folds both sides, and the extension sends codes in upper case), and from then on makes codes for the salespeople, and for other managers, in the manager view: **Invite a salesperson** and **Invite a manager** in its Invite codes card call `create_invite`, which answers a 12-character upper-case code that works once, shown with a Copy button. The owner's SQL path stays for the first manager (the statement above), and a new one the same way if that code expires unused. The table itself is never readable through the API: a manager sees the dealership's open codes through `list_invites` and cancels one with `revoke_invite`, both in the manager view's Invite codes card, and a code is a secret you hand to one person.
 
@@ -513,6 +519,29 @@ order by ended_about;
 ```
 
 Each row is a dealership whose free pilot ended unpaid or whose Stripe subscription was cancelled or expired. `past_due` and `unpaid` are left out: the subscription is still open (Stripe is retrying a `past_due` invoice; an `unpaid` one is retried no more but can still be paid in Manage billing), so it has not ended. With Stripe's **If all retries for a payment fail** set to **Cancel the subscription** (`docs/stripe-setup.md` step 3), a dealership that stops paying reaches `canceled` when the retries run out and is listed here then; on any other choice it would never be listed. `paused` does not arise with this setup: Checkout takes a card for the pilot and the Billing Portal offers no pause. Offer each one's managers an export, delete it within 30 days of `ended_about`, and forget the accounts its answer lists in `accounts_without_a_dealership` (step 4): with no dealership they serve no purpose.
+
+**A pilot ended early.** Either party may end a pilot at any time on notice (pilot agreement section 6), and the 30 days run from that day, not from the end date the row holds. Record the end the day the notice comes, so the dealership lapses at once and the retention line lists it with that day as `ended_about`:
+
+```sql
+insert into public.subscriptions as s (dealership_id, status, pilot_ends_at)
+values ('<dealership id>', 'pilot', now())
+on conflict (dealership_id) do update
+  set status = 'pilot', pilot_ends_at = excluded.pilot_ends_at, updated_at = now()
+  where s.status is null or (s.status = 'pilot' and s.pilot_ends_at > excluded.pilot_ends_at);
+```
+
+It also covers a dealership whose pilot clock was never started (no row, or a row with no status). It changes nothing for one that has a Stripe subscription, or whose pilot has already ended.
+
+**Dealerships with no plan.** In the same weekly run, list the dealerships whose pilot clock was never started (step 5 without its `subscriptions` row, or one made before that step had it). They are served with no end, so the retention line never lists them:
+
+```sql
+select d.id, d.name, d.website_origin, d.created_at
+from public.dealerships d
+where public.subscription_state(d.id) = 'none'
+order by d.created_at;
+```
+
+For each one on a pilot agreement whose pilot has ended or that has stopped, record the end with the statement above (the 30 days run from the day it really ended, which can be sooner than the `ended_about` it then shows); one still running gets its clock (step 5's `subscriptions` insert). A test dealership of your own is listed too: delete it when you are done with it.
 
 ### Forget a person: the person asked
 
