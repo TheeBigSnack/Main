@@ -1045,12 +1045,20 @@ function queuePanel(store, { onNext = null, onUp = null, queueMode = true, detec
     detected, queue: null, posted: {}, postLog: [], drafts: {},
   };
   let fns;
-  fns = compileMany(['confirmPosted', 'savedDraft', 'afterQueueStep', 'clearFlow'], {
+  fns = compileMany(['confirmPosted', 'savedDraft', 'afterQueueStep', 'clearFlow', 'savedFlowIs'], {
     state, flowRun: 0, confirmedRun: -1, advancing: false, watcher: null, FORM_MAP, draftRecord,
     $: () => null, updateKey, panelStorage: storage, markPosted, logPost, advance, currentVin,
     siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o, queue: 'postQueue:' + o, flow: 'postFlow:' + o, drafts: 'drafts:' + o }),
     pilotNote: async () => { await tick(); }, endPost: () => {}, accountsConfigured: () => false,
-    chrome: { storage: { local: { remove: async () => { await tick(); } } }, runtime: { sendMessage: async () => {} } },
+    chrome: {
+      storage: {
+        local: {
+          get: async (k) => { await tick(); return { [k]: store[k] }; },
+          remove: async (k) => { await tick(); for (const key of [].concat(k)) delete store[key]; },
+        },
+      },
+      runtime: { sendMessage: async () => {} },
+    },
     storageErrorText: (e) => String(e), setStatus: (text) => calls.push('status: ' + text), render: () => calls.push('render:' + state.step), saveFlow: async () => {},
     nameOf: (vin) => vin,
     startNextInQueue: async () => {
@@ -1162,6 +1170,43 @@ test('It\'s posted in a second window\'s side panel keeps the link and the count
   assert.equal(shared['posted:' + O].AAA.mine, undefined, 'recorded as this person\'s');
   assert.equal(shared['posted:' + O].AAA.listingUrl, ITEM);
   assert.equal(shared['postLog:' + O].length, 1, 'and counted');
+});
+
+// The first window's panel recorded the car and went on (the queue's next car,
+// or another single post) and saved that post, with its open form's tab.
+// A late It's posted in the second window's panel, still showing the first
+// car, leaves that saved post alone: closing and reopening the first
+// window's panel brings its open form back instead of forgetting it.
+test('a late It\'s posted in a second window\'s side panel never removes or overwrites the post the first window saved since', async () => {
+  const O = 'https://www.example-motors.test';
+  const ITEM = 'https://www.facebook.com/marketplace/item/555/';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  for (const queueMode of [true, false]) {
+    const what = queueMode ? 'queue' : 'single post';
+    const store = queueMode ? { ['postQueue:' + O]: { vins: ['AAA', 'BBB'], index: 0, status: 'running', results: {} } } : {};
+    const next = { vin: queueMode ? 'BBB' : 'CCC', step: 'publish', fbTabId: 88 };
+    let two = null;
+    const one = queuePanel(store, { queueMode, detected: { status: 'listing', url: ITEM }, onUp: () => { store['postFlow:' + O] = next; } });
+    two = queuePanel(store, { queueMode, detected: { status: 'listing', url: ITEM }, scope: { saveFlow: async () => { store['postFlow:' + O] = { vin: two.state.vin, step: two.state.step }; } } });
+    await one.fns.confirmPosted();
+    await settle();
+    if (!queueMode) store['postFlow:' + O] = next; // the first window's next post, its form open
+    assert.deepEqual(store['postFlow:' + O], next, `${what}: the first window's next post is saved`);
+    await two.fns.confirmPosted(); // the late click
+    await settle();
+    assert.deepEqual(store['postFlow:' + O], next, `${what}: still saved after the second window's click (${two.calls.join(' | ')})`);
+    assert.equal(store['postLog:' + O].length, 1, `${what}: counted once`);
+    if (queueMode) assert.deepEqual([store['postQueue:' + O].index, two.state.step], [1, 'idle']);
+    else assert.equal(two.state.step, 'done');
+  }
+
+  // a single panel whose queue moved on without it (the popup skipped the car): its own saved post goes, as before
+  const store = { ['postQueue:' + O]: { vins: ['AAA', 'BBB'], index: 1, status: 'running', results: { AAA: 'skipped' } }, ['postFlow:' + O]: { vin: 'AAA', step: 'publish', fbTabId: 77 } };
+  const alone = queuePanel(store);
+  await alone.fns.confirmPosted();
+  await settle();
+  assert.equal(store['postFlow:' + O], undefined, 'this car\'s own saved post is cleared');
+  assert.deepEqual([alone.state.vin, alone.state.step], [null, 'idle']);
 });
 
 // A post recorded whose queue then could not be saved (a full storage):

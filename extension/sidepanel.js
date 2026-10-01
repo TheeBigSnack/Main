@@ -182,19 +182,34 @@ async function saveFlow() {
 }
 
 // Resolves the new count (flowRun): the number of the post started next.
-async function clearFlow() {
+// keepSaved: the saved post is left as it is (it is another panel's now).
+async function clearFlow({ keepSaved = false } = {}) {
   const run = ++flowRun;
   if (watcher) watcher.cancel();
   watcher = null;
   const { vin, origin } = state;
   if (vin) await pilotNote((p) => endPost(p, vin, 'abandoned')); // only an attempt still open changes
-  if (origin) await chrome.storage.local.remove(siteKeys(origin).flow);
+  if (origin && !keepSaved) await chrome.storage.local.remove(siteKeys(origin).flow);
   if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, readAt: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
   return run;
+}
+
+// Whether the post saved for this website is still this car's, or none is.
+// A side panel in a second window that finds its car already recorded and
+// moved on from elsewhere must not remove or overwrite the post the panel of
+// the first window saved since (its next car, with its open form's tab).
+async function savedFlowIs(origin, vin) {
+  try {
+    const k = siteKeys(origin).flow;
+    const saved = (await chrome.storage.local.get(k))[k];
+    return !saved || saved.vin === vin;
+  } catch (e) {
+    return true; // unknown: as before, this panel's
+  }
 }
 
 function setStatus(text, kind = '') {
@@ -586,7 +601,8 @@ async function afterQueueStep(outcome, vin = state.vin) {
     if (stored && !moved) {
       state.queue = stored;
       if (state.vin !== vin) return; // this panel is on another car already: it stays on it
-      await clearFlow();
+      // the panel that moved the queue on (another window's) may have saved its next car since: that stays
+      await clearFlow({ keepSaved: !(await savedFlowIs(state.origin, vin)) });
       state.step = stored.status === 'done' ? 'queueDone' : 'idle';
       setStatus(`The queue had already moved on from ${nameOf(vin)}, so nothing more was recorded for it here.`);
       render();
@@ -1097,7 +1113,8 @@ async function confirmPosted() {
   state.doneAt = (kept && kept.postedAt) || now;
   if (kept) setStatus(`${nameOf(vin)} was already recorded as posted, so it was not recorded or counted again.`);
   render();
-  await saveFlow();
+  // recorded elsewhere first (another window's panel), which may have started another post since: its saved post stays
+  if (!kept || (await savedFlowIs(origin, vin))) await saveFlow();
 }
 
 async function notPosted() {
