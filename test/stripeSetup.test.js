@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  keyMode, webhookUrlFor, wantedObjects, runSetup, secretsCommands, priceMismatch, portalMismatch, webhookMismatch,
+  keyMode, webhookUrlFor, wantedObjects, runSetup, secretsCommands, webhookSecretLines, priceMismatch, portalMismatch, webhookMismatch,
   LOOKUP_KEYS, FOUNDING_COUPON_ID, TAG,
 } from '../scripts/stripe-setup-lib.mjs';
 import { parseArgs } from '../scripts/stripe-setup.mjs';
@@ -215,8 +215,14 @@ test('stripe setup: --apply creates everything once, prints the ids and the sign
   const cmds = secretsCommands(first);
   assert.deepEqual(cmds, [
     `supabase secrets set STRIPE_PRICE_ROOFTOP=${s.db.prices[0].id} STRIPE_PRICE_SEAT=${s.db.prices[1].id} STRIPE_PORTAL_CONFIGURATION=${s.db.portals[0].id}`,
-    'supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_madeup',
   ]);
+  // the signing secret is printed on its own for the Dashboard, never as a command a shell's history would keep
+  assert.equal(cmds.join(' ').includes('whsec_'), false, 'no command carries the webhook secret');
+  const hook = webhookSecretLines(first);
+  assert.equal(hook[0], 'STRIPE_WEBHOOK_SECRET: whsec_madeup');
+  assert.match(hook.join(' '), /Supabase Dashboard \(Edge Functions, Secrets\)/);
+  assert.doesNotMatch(hook.join(' '), /supabase secrets set STRIPE_WEBHOOK_SECRET=/);
+  assert.deepEqual(webhookSecretLines({ webhookSecret: '' }), []);
   assert.equal(cmds.join(' ').includes(KEY), false, 'the secret key is never echoed');
   for (const c of s.calls) {
     assert.equal(c.url.includes(KEY), false, 'the key is never in an address');
@@ -339,4 +345,23 @@ test('stripe setup: a new --site-url is applied to the portal and the next read 
   assert.equal((await run(s, { apply: true, siteUrl: 'https://lotcurrent.example' })).ok, true);
   assert.equal(s.db.portals[0].business_profile.terms_of_service_url, 'https://lotcurrent.example/legal/terms/');
   assert.equal((await run(s, { siteUrl: 'https://lotcurrent.example' })).ok, true);
+});
+
+// A secret written into a command stays in the shell's history file: Windows
+// PowerShell 5.1's PSReadLine keeps every line in ConsoleHost_history.txt,
+// bash and zsh keep theirs. The guides set the Stripe key at a prompt and put
+// the secrets in the Supabase Dashboard, and the setup prints the webhook
+// secret on its own rather than inside a command.
+test('stripe setup: no guide has the owner type a secret key or signing secret into a command', () => {
+  const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+  const typed = /(STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|ANTHROPIC_API_KEY)\s*=\s*['"]?(?:sk_|rk_|whsec_|sk-ant-)/;
+  for (const f of ['docs/stripe-setup.md', 'docs/production-setup.md', 'supabase/README.md', 'scripts/stripe-setup.mjs', 'scripts/stripe-setup-lib.mjs', 'README.md', 'backend/README.md']) {
+    for (const l of read(f).split('\n')) assert.doesNotMatch(l, typed, `${f}: ${l.trim().slice(0, 100)}`);
+  }
+  const doc = read('docs/stripe-setup.md');
+  assert.ok(doc.includes("$env:STRIPE_SECRET_KEY = Read-Host 'Stripe secret key'"), 'PowerShell reads the key at a prompt');
+  assert.ok(doc.includes('read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY'), 'macOS and Linux read it at a prompt');
+  assert.match(doc, /ConsoleHost_history\.txt/, 'the guide names the file a typed key would stay in');
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
+  assert.match(live, /live secret key \(`sk_live_`\) set at the prompt as in step 3/);
 });

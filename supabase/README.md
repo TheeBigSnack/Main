@@ -59,10 +59,9 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
    - URL configuration: set **Site URL** to the manager page's own address (for example `https://app.<your domain>/`, where `docs/production-setup.md` hosts it) and add the same address under **Redirect URLs**. The manager page asks Supabase to send its magic link back to itself (PKCE flow: the link carries a one-time code, never the tokens), and Supabase only honours a redirect it has on this list; anything else falls back to the Site URL. Never leave the Site URL at the `http://localhost:3000` default on a hosted project: a manager's link would then go to whatever listens on that port of their computer. `config.toml` carries the same setting for a local stack.
    - Rate limits: lower them. With the public anon key anyone can ask for sign-in emails to any address, and one cheap loop would use up the project's email budget and lock every salesperson out of signing in. Set **Rate limit for sending emails** to about 30 an hour and **sign-ups and sign-ins** to about 30 per 5 minutes per IP address (`config.toml`'s `[auth.rate_limit]` block has the same numbers for a local stack), set up **custom SMTP** (Authentication, Emails) before the first dealership so the budget is yours rather than the shared test sender's, and turn on **CAPTCHA protection** (Authentication, Attack protection) once the manager page is public.
 
-4. **Secrets and the two functions.** The functions get `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` from Supabase automatically. Set the rest:
+4. **Secrets and the two functions.** The functions get `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` from Supabase automatically. Add `ANTHROPIC_API_KEY` in the Dashboard (Edge Functions, Secrets), not in a command: a terminal keeps every command typed into it in a history file (on Windows PowerShell, PSReadLine's `ConsoleHost_history.txt`), and the key would stay there in plain text. Set the rest:
 
    ```
-   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
    supabase secrets set REWRITE_MODEL=claude-haiku-4-5 MONTHLY_COST_CAP_USD=25 RATE_LIMIT_PER_MINUTE=20
    supabase functions deploy rewrite
    supabase functions deploy sync
@@ -290,10 +289,9 @@ In the Stripe Dashboard, in **test mode** first (the toggle at the top; everythi
 
 4. The **secret key** from Developers, API keys (`sk_test_...` in test mode, `sk_live_...` in live mode). It only ever goes into the function secrets.
 
-Then the secrets and the function. On the production project the secrets go in the Dashboard (Edge Functions, Secrets) and the function goes up through the Supabase workflow's **database** and **functions** steps (`docs/stripe-setup.md`, step 5); by hand, on a project of your own:
+Then the secrets and the function. On the production project the secrets go in the Dashboard (Edge Functions, Secrets) and the function goes up through the Supabase workflow's **database** and **functions** steps (`docs/stripe-setup.md`, step 5); by hand, on a project of your own, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` still go in the Dashboard (never into a command, which the terminal's history file keeps), and the rest from a terminal:
 
 ```
-supabase secrets set STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_...
 supabase secrets set STRIPE_PRICE_ROOFTOP=price_... STRIPE_PRICE_SEAT=price_...
 supabase secrets set ALLOWED_RETURN_ORIGINS=https://<where the manager page is served>
 supabase db push                                # applies 0004_billing.sql

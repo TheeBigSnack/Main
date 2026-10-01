@@ -398,12 +398,24 @@ export async function runSetup(opts) {
   return done();
 }
 
-// The commands that put the ids into the function's secrets. The secret key
-// itself is never echoed: the owner types it.
-export function secretsCommands({ secrets, webhookSecret }) {
-  const out = [];
-  const ids = Object.entries(secrets).map(([k, v]) => `${k}=${v}`);
-  if (ids.length) out.push(`supabase secrets set ${ids.join(' ')}`);
-  if (webhookSecret) out.push(`supabase secrets set STRIPE_WEBHOOK_SECRET=${webhookSecret}`);
-  return out;
+// The command that puts the ids into the function's secrets. The ids are not
+// secret. The secret key is never echoed (the owner types it), and the
+// webhook signing secret is never part of a command: a terminal keeps every
+// command typed or pasted into it in a history file (on Windows PowerShell,
+// PSReadLine's ConsoleHost_history.txt), so webhookSecretLines prints it on
+// its own for the Supabase Dashboard.
+export function secretsCommands({ secrets }) {
+  const ids = Object.entries(secrets || {}).map(([k, v]) => `${k}=${v}`);
+  return ids.length ? [`supabase secrets set ${ids.join(' ')}`] : [];
+}
+
+// What the run prints when it created the webhook endpoint: the signing
+// secret Stripe shows only this once, and where it goes.
+export function webhookSecretLines({ webhookSecret }) {
+  if (!webhookSecret) return [];
+  return [
+    `STRIPE_WEBHOOK_SECRET: ${webhookSecret}`,
+    'Stripe shows this signing secret only now. Before closing this window, add it in the Supabase Dashboard (Edge Functions, Secrets) under that name.',
+    'Not in a supabase secrets set command: the terminal would keep it in its history file. Never paste it into a chat or a file in the repository.',
+  ];
 }

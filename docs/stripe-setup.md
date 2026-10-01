@@ -18,18 +18,22 @@ Sign up at stripe.com with the business email. There is no monthly fee; Stripe t
 
 ## 2. Copy the test secret key [owner]
 
-In the Stripe Dashboard: Developers, API keys, the **Secret key** that starts `sk_test_`. Treat it like a password: it goes into your terminal and into the Supabase function secrets, never into a chat message, an email or a file in this repository.
+In the Stripe Dashboard: Developers, API keys, the **Secret key** that starts `sk_test_`. Treat it like a password: it goes into your terminal at a prompt (step 3) and into the Supabase function secrets, never into a chat message, an email, a file in this repository or a command line. A terminal keeps every command typed or pasted into it in a history file on your computer (on Windows PowerShell, `%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`; on macOS or Linux, `~/.zsh_history` or `~/.bash_history`), so a key written into a command stays there in plain text.
 
 ## 3. Create the products, prices, coupon and portal [owner runs, Claude checks]
 
 In a terminal in the repository folder. On Windows PowerShell:
 
 ```
-$env:STRIPE_SECRET_KEY = 'sk_test_...'
+$env:STRIPE_SECRET_KEY = Read-Host 'Stripe secret key'
 npm run stripe-setup
 ```
 
-(On macOS or Linux: `STRIPE_SECRET_KEY=sk_test_... npm run stripe-setup`.)
+The first line asks for the key: paste it at the prompt and press Enter. Pasted there, it is an answer, not part of a command, so the history file does not keep it. It stays set in that window only; `Remove-Item Env:STRIPE_SECRET_KEY` or closing the window clears it.
+
+(On macOS or Linux: `read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY`, paste the key (nothing shows) and press Enter, then `npm run stripe-setup`; `unset STRIPE_SECRET_KEY` clears it.)
+
+If a key was ever typed into a command instead, delete that line from the history file named in step 2, or roll the key in the Stripe Dashboard (Developers, API keys).
 
 That first run only reads. On a new account each object's line says FAIL and "missing": nothing exists yet (the webhook line is a note until step 4). Then create them:
 
@@ -52,13 +56,13 @@ The prices are a hypothesis until a dealer has agreed to one in writing (`docs/l
 
 ## 4. Create the webhook [owner runs]
 
-With the Supabase project's ref (the 20 letters in `https://<ref>.supabase.co`; the project exists, and its address is the `url` in `extension/src/accountConfig.js`):
+With the Supabase project's ref (the 20 letters in `https://<ref>.supabase.co`; the project exists, and its address is the `url` in `extension/src/accountConfig.js`), in the window where step 3 set the key (in a new window, set it again the same way):
 
 ```
 npm run stripe-setup -- --apply --webhook-url <ref>
 ```
 
-It creates the endpoint at `https://<ref>.supabase.co/functions/v1/billing/webhook` for exactly the five events billing handles, and prints a second line, `supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...`. Stripe shows that signing secret only this once: put it in the function's secrets (step 5) before closing the window, and do not paste it anywhere else. If it is lost, delete the endpoint in the Dashboard (Developers, Webhooks) and run the command again.
+It creates the endpoint at `https://<ref>.supabase.co/functions/v1/billing/webhook` for exactly the five events billing handles, and prints its signing secret on a line of its own, `STRIPE_WEBHOOK_SECRET: whsec_...`. Stripe shows that secret only this once: copy it into the Supabase Dashboard (step 5) before closing the window, and do not paste it anywhere else, a terminal command included. If it is lost, delete the endpoint in the Dashboard (Developers, Webhooks) and run the command again.
 
 ## 5. Give the billing function its secrets and deploy it [owner sets the secrets; Claude runs the deploy with the owner's go]
 
@@ -68,11 +72,11 @@ In the Supabase Dashboard, **Edge Functions, Secrets**, add each name with its v
 |---|---|
 | `STRIPE_SECRET_KEY` | the `sk_test_...` key from step 2 |
 | `STRIPE_PRICE_ROOFTOP`, `STRIPE_PRICE_SEAT`, `STRIPE_PORTAL_CONFIGURATION` | the ids on the line step 3 printed |
-| `STRIPE_WEBHOOK_SECRET` | the `whsec_...` on the line step 4 printed |
+| `STRIPE_WEBHOOK_SECRET` | the `whsec_...` step 4 printed |
 | `ALLOWED_RETURN_ORIGINS` | `https://<the manager view's address>` |
 | `ALLOWED_ORIGINS` | `https://<the manager view's address>` |
 
-The `supabase secrets set ...` lines steps 3 and 4 printed do the same from a terminal where the `supabase` command is signed in, with `--project-ref <ref>` added to each. Both origins are the manager view's address with no path. `ALLOWED_RETURN_ORIGINS` is where Stripe may send a manager back to; `ALLOWED_ORIGINS` lets the page call the functions at all: without it the browser blocks the Billing card's calls and the card shows only a network error. If `ALLOWED_ORIGINS` already lists an origin (a local page during development, say), keep it and add this one after a comma. Leave `STRIPE_AUTOMATIC_TAX` unset for now (the last section).
+The `supabase secrets set ...` line step 3 printed sets the ids from a terminal where the `supabase` command is signed in, with `--project-ref <ref>` added; the ids are not secret. `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` go in the Dashboard only, never into a command, which the terminal's history file would keep. Both origins are the manager view's address with no path. `ALLOWED_RETURN_ORIGINS` is where Stripe may send a manager back to; `ALLOWED_ORIGINS` lets the page call the functions at all: without it the browser blocks the Billing card's calls and the card shows only a network error. If `ALLOWED_ORIGINS` already lists an origin (a local page during development, say), keep it and add this one after a comma. Leave `STRIPE_AUTOMATIC_TAX` unset for now (the last section).
 
 Then the billing function goes up the way every production deploy does: the **Supabase** workflow (`docs/production-setup.md`, step 3), run from the default branch. **plan** first; if it lists a migration (billing's are `0004_billing.sql` and `0009_cancel_at.sql`), **database**; then **functions** with `billing` in the box (the default deploys all four); then **check**, which runs `npm run check-deploy` and should now show every billing line as ok. The line about the manager view's preflight needs that page's address: with the `MANAGER_URL` variable on the `production` environment (`docs/production-setup.md`, step 6) the workflow passes it, or run `LOTSYNC_MANAGER_ORIGIN=https://<the manager view's address> npm run check-deploy` from your own terminal (it only reads). Until then that line is a note, not an ok. Not `supabase db push` or `supabase functions deploy` from your own terminal: the workflow deploys the committed code with the pinned command line, only to the project the config files name, and `supabase/config.toml` already turns the gateway's token check off for billing (`verify_jwt = false`), so Stripe's webhook gets through with no extra flag.
 
@@ -94,7 +98,7 @@ Not before the company exists and the attorney has answered the sales-tax questi
 
 1. Activate the Stripe account: the company's legal name, EIN, address, the business bank account for payouts.
 2. Sales tax, as the attorney advises. If tax is to be collected: turn on Stripe Tax, set the default tax behavior to exclusive and add the registrations in the Dashboard (Stripe Tax charges a fee per transaction: decide with the price), then add the function secret `STRIPE_AUTOMATIC_TAX` = `true` (Dashboard, Edge Functions, Secrets). Checkout then asks for the billing address and adds the tax. Until the word `true` is set, no tax is added.
-3. With the live secret key (`sk_live_`): `npm run stripe-setup -- --apply --live --webhook-url <ref>`. The `--live` flag is required; without it a live key is refused before anything is read.
+3. With the live secret key (`sk_live_`) set at the prompt as in step 3, never typed into a command: `npm run stripe-setup -- --apply --live --webhook-url <ref>`. The `--live` flag is required; without it a live key is refused before anything is read.
 4. Replace the function secrets with the printed ids, the new webhook secret and the live key, as in step 5 (Dashboard, Edge Functions, Secrets); then the Supabase workflow's **check** step. The function itself is the one already deployed: nothing is redeployed for the live switch.
 5. Optional and safer: instead of the full live secret key, give the function a restricted key that may only write customers, Checkout Sessions and portal sessions (Developers, API keys, Create restricted key; check the permission names on that screen). The setup script itself still needs the full key, so run it from your own terminal only.
 6. Check one real charge end to end, then undo it. Not by running step 6 again: a pilot moves the first charge to the pilot's end, so Checkout would charge nothing and there would be nothing to refund; the test cards are declined in live mode; and a subscription left running, or renewed in the portal, would charge your card when the pilot ends and every month after. Instead:

@@ -6,8 +6,8 @@
 // what each must look like). Then it prints the `supabase secrets set` lines
 // for the ids. docs/stripe-setup.md is the owner's step-by-step.
 //
-//   STRIPE_SECRET_KEY=sk_test_... npm run stripe-setup                       read only: what exists, what is missing
-//   STRIPE_SECRET_KEY=sk_test_... npm run stripe-setup -- --apply --webhook-url <project ref>
+//   npm run stripe-setup                                       read only: what exists, what is missing
+//   npm run stripe-setup -- --apply --webhook-url <project ref>
 //
 //   --apply            create what is missing; set the portal's features and the webhook's events back
 //   --webhook-url X    a Supabase project ref, or the full https address ending in /billing/webhook
@@ -17,13 +17,16 @@
 //   --reprice          with --apply, replace a price whose amount differs from pricing.json
 //   --live             allow a live key (sk_live_ / rk_live_); refused without it
 //
-// The key is read from the environment and never printed. On Windows
-// PowerShell: $env:STRIPE_SECRET_KEY = 'sk_test_...'; npm run stripe-setup
+// The key is read from STRIPE_SECRET_KEY in the environment and never
+// printed. Set it at a prompt, not in a command a shell's history file keeps:
+// on Windows PowerShell $env:STRIPE_SECRET_KEY = Read-Host 'Stripe secret key',
+// on macOS or Linux read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY
+// (docs/stripe-setup.md, step 3).
 // Exit code 0 when nothing failed.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { runSetup, secretsCommands } from './stripe-setup-lib.mjs';
+import { runSetup, secretsCommands, webhookSecretLines } from './stripe-setup-lib.mjs';
 
 export function parseArgs(argv) {
   const out = { apply: false, live: false, reprice: false, webhookUrl: '', siteUrl: '', productName: 'Lot Current', unknown: [] };
@@ -57,10 +60,11 @@ async function main() {
   for (const l of result.lines) console.log(`${l.ok ? 'ok  ' : l.note ? 'note' : 'FAIL'}  ${l.check}${l.detail ? ': ' + l.detail : ''}`);
   const commands = secretsCommands(result);
   if (commands.length) {
-    console.log('\nPut these in the billing function\'s secrets (and STRIPE_SECRET_KEY yourself, if it is not set yet):');
+    console.log('\nPut these ids in the billing function\'s secrets (and STRIPE_SECRET_KEY yourself, in the Supabase Dashboard, if it is not set yet):');
     for (const c of commands) console.log('  ' + c);
   }
-  if (result.webhookSecret) console.log('\nThe webhook signing secret above is shown by Stripe only now. Set it before closing this window; never paste it into a chat or a file in the repository.');
+  const webhook = webhookSecretLines(result);
+  if (webhook.length) console.log('\n' + webhook.join('\n'));
   if (result.mode === 'test' && result.ok) console.log('\nTest mode: nobody is charged. Stripe keeps test and live objects apart, so the live switch runs this again with the live key and --live.');
   console.log(result.ok ? '\nNothing failed.' : '\nSomething failed: see the FAIL lines.');
   process.exit(result.ok ? 0 : 1);
