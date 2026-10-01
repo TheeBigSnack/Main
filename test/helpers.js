@@ -254,12 +254,14 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
 
 // The comment stripper the guard tests read source through (test/posting,
 // anyDealer, dataInventory and demo): block comments, whole-line // comments
-// and, with trailing, a // comment after code (never the // of an address).
+// and, with trailing, a // comment after code. A // right after ":", a quote
+// or a backslash is not cut: that is an address ("https://"), a string ('//')
+// or the end of a regex literal (/^https?:\/\//), with code after it.
 // It is a regex, so it trusts every "/*" to open a comment; the files it reads
 // are held to that by commentStripperBlindSpots below.
 export function stripComments(src, { trailing = false } = {}) {
   const out = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  return trailing ? out.replace(/([^:'"`])\/\/[^\n]*$/gm, '$1') : out;
+  return trailing ? out.replace(/([^:'"`\\])\/\/[^\n]*$/gm, '$1') : out;
 }
 
 // Every place in a source file where stripComments would cut real code: a

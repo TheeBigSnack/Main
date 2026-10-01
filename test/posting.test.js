@@ -114,6 +114,10 @@ test('no file the guard tests read has a "/*" the comment stripper would mistake
   assert.deepEqual(commentStripperBlindSpots('// reads src/*.js\nhidden();\n/* real */\n'), ['line 1: "/*" inside a // comment']);
   assert.deepEqual(commentStripperBlindSpots('const re = /[/*]/; hidden();\n/* real */\n'), ['line 1: a block comment that runs past its line starts after code']);
   assert.deepEqual(commentStripperBlindSpots("const p = origin + '/' + '*'; /* skip */"), [], 'the split form the extension uses');
+  // the trailing mode cuts a // comment after code, never the code after a regex literal that ends in \/\/
+  const afterRegex = "const isWeb = (u) => /^https?:\\/\\//i.test(u) && hidden(u); // why\n";
+  assert.equal(stripComments(afterRegex, { trailing: true }), "const isWeb = (u) => /^https?:\\/\\//i.test(u) && hidden(u); \n");
+  assert.equal(stripComments("go('https://x'); // why\n", { trailing: true }), "go('https://x'); \n");
   // every file the guard tests read: the extension, the rewrite service, the manager view, the website, the Edge Functions, the sandbox
   const files = strippedSourceFiles();
   for (const must of ['extension/wizard.js', 'extension/sidepanel.js', 'extension/src/rescanSchedule.js', 'extension/facebook/fillForm.js', 'backend/server.js', 'manager/manager.js', 'demo/demo.js']) assert.ok(files.includes(must), `${must} is not read`);
