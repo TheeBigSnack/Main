@@ -19,10 +19,10 @@ test('typos and impossible VINs are caught', () => {
   const typo = checkVinFormat('1C6RR7FT0KS643298'); // last two digits swapped
   assert.equal(typo.ok, false);
   assert.match(typo.problems[0], /check digit/);
-  // a Japanese-built VIN without a matching check digit is only a note
+  // a car built outside North America for the US market carries a check digit too, so a mismatch is a problem
   const jp = checkVinFormat('JTDKN3DU0A0000000');
-  assert.equal(jp.ok, true);
-  assert.equal(jp.notes.length, 1);
+  assert.equal(jp.ok, false);
+  assert.match(jp.problems[0], /check digit is 0 but should be \d: most likely a typo in the VIN .*outside North America.*check the VIN plate/);
   assert.equal(normalizeVin(' 1c6rr7ft0ks643289 '), '1C6RR7FT0KS643289');
   assert.equal(modelYearFromVin('nope'), null);
 });
@@ -136,5 +136,27 @@ test('the model is compared without its punctuation: "F150" and "F-150", "CRV" a
   assert.equal(verdict('F150', 'F-150', 'XLT'), 'agree', 'the trim beside the model');
   for (const [website, decodedModel] of [['F-150', 'F-250'], ['F150', 'F-250'], ['Grand Cherokee', 'Wrangler'], ['Sierra 2500HD', 'Sierra 1500'], ['CX-5', 'CX-9']]) {
     assert.equal(verdict(website, decodedModel), 'differ', `${website} / ${decodedModel}`);
+  }
+});
+
+test('a check-digit typo is caught whatever country built the car; a correct non-North-American VIN passes', () => {
+  const valid = (vin) => vin.slice(0, 8) + vinCheckDigit(vin) + vin.slice(9);
+  const cars = [
+    [valid('WBA8E9G50GNT12345'), 'BMW', 2016],
+    [valid('JTDKN3DU0A1000001'), 'Toyota', 2010],
+    [valid('KMHD84LF0HU000001'), 'Hyundai', 2017],
+    [valid('3VWDB7AJ0HM000001'), 'Volkswagen', 2017],
+  ];
+  for (const [vin, make, year] of cars) {
+    const good = localVinCheck({ vin, make, year });
+    assert.equal(good.ok, true, `${vin}: ${good.problems.map((p) => p.detail).join('; ')}`);
+    assert.equal(good.checks[0].detail, '17 characters, check digit correct');
+    // one character off, as a typo in the inventory system would be
+    const last = vin[16] === '1' ? '2' : '1';
+    const typo = vin.slice(0, 16) + last;
+    const r = localVinCheck({ vin: typo, make, year });
+    assert.equal(r.ok, false, typo);
+    assert.equal(r.checks[0].ok, false, typo);
+    assert.match(r.checks[0].detail, /check digit is .* but should be .*typo in the VIN/, typo);
   }
 });

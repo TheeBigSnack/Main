@@ -35,8 +35,11 @@ export function vinCheckDigit(vin) {
   return r === 10 ? 'X' : String(r);
 }
 
-// North American VINs (first character 1-5) always carry a check digit;
-// others may not, so for them a mismatch is only a note.
+// Every vehicle built for sale in the US carries a check digit in position 9
+// (49 CFR 565), wherever it was made, and Canada's rule follows the US one,
+// so a mismatch is a problem whatever the first character: most likely a
+// typo. Only a car built for a market outside North America may lack one,
+// and the VIN plate settles it. (`notes` is kept, empty, for callers that read it.)
 export function checkVinFormat(vin) {
   const v = normalizeVin(vin);
   const problems = [];
@@ -47,7 +50,7 @@ export function checkVinFormat(vin) {
     const expected = vinCheckDigit(v);
     if (expected !== v[8]) {
       if (/^[1-5]/.test(v)) problems.push(`check digit is ${v[8]} but should be ${expected}: a typo in the VIN`);
-      else notes.push('check digit does not match (not all non-US makers use one)');
+      else problems.push(`check digit is ${v[8]} but should be ${expected}: most likely a typo in the VIN (only a car built for a market outside North America may lack one); check the VIN plate`);
     }
   }
   return { ok: problems.length === 0, problems, notes };
