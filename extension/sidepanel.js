@@ -25,6 +25,7 @@ import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWi
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
 import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
+import { askChrome } from './src/askChrome.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
@@ -253,7 +254,7 @@ async function askForPhotos(urls = photoList(), { again = false } = {}) {
   promptOpen = true;
   let granted = false;
   try {
-    granted = await chrome.permissions.request({ origins: patterns });
+    granted = await askChrome(patterns);
   } catch (e) {
     setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
     return false;
@@ -752,7 +753,7 @@ async function notPosted() {
 async function checkVinOnline() {
   let granted = false;
   try {
-    granted = await chrome.permissions.request({ origins: [NHTSA_ORIGIN + '/' + '*'] }); // split so the guard test's comment stripper never sees a block-comment opener
+    granted = await askChrome([NHTSA_ORIGIN + '/' + '*']); // split so the guard test's comment stripper never sees a block-comment opener
   } catch (e) {
     setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
     return;
@@ -840,7 +841,7 @@ async function askForSite(origins = siteMissing()) {
   promptOpen = true;
   let granted = false;
   try {
-    granted = await chrome.permissions.request({ origins });
+    granted = await askChrome(origins);
   } catch (e) {
     setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
     return false;

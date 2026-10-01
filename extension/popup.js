@@ -2,6 +2,7 @@ import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
+import { askChrome } from './src/askChrome.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -1058,7 +1059,7 @@ async function onPanelClick(ev) {
       if (!state.site) return;
       let granted = false;
       try {
-        granted = await chrome.permissions.request({ origins: rescanOrigins() });
+        granted = await askChrome(rescanOrigins());
       } catch (e) {
         setStatus("Couldn't ask Chrome for permission: " + ((e && e.message) || e), 'error');
       }
@@ -1336,7 +1337,7 @@ async function onSettingsSubmit(ev) {
   if (state.settings.autoRescan && state.site && !state.rescanPermission) {
     // Rescans need the host permission; the Save click is a user gesture, so ask now.
     try {
-      state.rescanPermission = await chrome.permissions.request({ origins: rescanOrigins() });
+      state.rescanPermission = await askChrome(rescanOrigins());
     } catch (e) {
       state.rescanPermission = false;
     }

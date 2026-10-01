@@ -185,7 +185,7 @@ Before a first day of posting, delete any old Marketplace drafts.
 
 ## When Chrome asks for a permission
 
-Chrome only asks because you clicked something in Lot Current. Five cases:
+Chrome only asks because you clicked something in Lot Current, and each prompt names particular websites: never every website, and never one of Facebook's servers. Five cases:
 
 - **Allow automatic rescans** (in set-up, on the To do tab or in Settings): permission to read your dealership's website and its inventory service in the background, for the 3-hourly rescans. Allow it, or decline and scan by hand; the popup then says "Not allowed, so automatic rescans stay off."
 - **Post**, **Post the next N** or **Rescan the website** in the side panel's own list, when the dealership website is not open in a tab: the same permission, so the panel can re-check the car or rescan without the tab. If you already allowed automatic rescans, Chrome does not ask again. Decline and the panel says "Not allowed, so Lot Current can't read [website] from the side panel"; open the website's used inventory page and post from the popup there instead, or click **Allow reading [website]** to be asked again.

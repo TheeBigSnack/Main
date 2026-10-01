@@ -194,19 +194,22 @@ test('the two agreements are templates: no pilot-dealer value, every dollar amou
 
 // Chrome's permission prompt can come from three places now (round J added
 // the photo servers), and the demo script tells the presenter what each one
-// is. A new place the extension asks from fails here until it is added to
-// KNOWN and to the script. Every use of chrome.permissions in the code is
-// read, not only calls with an object written out: a request through a
-// variable, an alias or a computed name fails too, and so does a second call
-// with the same words as a known one.
+// is. Every prompt goes through askChrome (src/askChrome.js), the extension's
+// one call to chrome.permissions.request, which refuses Facebook's servers and
+// wildcard hosts whatever list it is handed (test/askChrome.test.js). So this
+// reads every use of chrome.permissions and of askChrome in the code: a
+// request made anywhere else, an alias, a renamed import or a computed name on
+// chrome fails; a new place to ask from fails until it is added to KNOWN and
+// to the script; and so does a second call with the same words as a known one.
 test('the demo script says what every Chrome permission prompt the extension raises is for', () => {
-  // the call's argument, as written, in that file: [what it asks for, how many calls]
+  const GATE = 'src/askChrome.js';
+  // each askChrome call's argument, as written, in that file: [what it asks for, how many calls]
   const KNOWN = {
-    'wizard.js { origins }': ['rescan', 1],
-    'popup.js { origins: rescanOrigins() }': ['rescan', 2],
-    'sidepanel.js { origins: patterns }': ['photos', 1],
-    'sidepanel.js { origins }': ['rescan', 1], // the website itself, when posting or rescanning from the side panel's list
-    "sidepanel.js { origins: [NHTSA_ORIGIN + '/' + '*'] }": ['NHTSA', 1],
+    'wizard.js origins': ['rescan', 1],
+    'popup.js rescanOrigins()': ['rescan', 2],
+    'sidepanel.js patterns': ['photos', 1],
+    'sidepanel.js origins': ['rescan', 1], // the website itself, when posting or rescanning from the side panel's list
+    "sidepanel.js [NHTSA_ORIGIN + '/' + '*']": ['NHTSA', 1],
   };
   // what else the code may do with chrome.permissions (none of these prompts)
   const QUIET = ['contains', 'getAll', 'onAdded', 'onRemoved'];
@@ -221,14 +224,26 @@ test('the demo script says what every Chrome permission prompt the extension rai
   };
   const kinds = new Set();
   const calls = {};
+  const requests = [];
   const files = readdirSync(new URL('../extension/', import.meta.url), { recursive: true }).filter((f) => f.endsWith('.js'));
-  assert.ok(files.includes('sidepanel.js') && files.includes('wizard.js'), 'the extension folder moved: fix this test');
+  assert.ok(files.includes('sidepanel.js') && files.includes('wizard.js') && files.includes(GATE), 'the extension folder moved: fix this test');
   for (const file of files) {
-    const code = stripComments(read('../extension/' + file), { trailing: true });
+    let code = stripComments(read('../extension/' + file), { trailing: true });
+    assert.doesNotMatch(code, /\bchrome\s*(?:\?\.)?\s*\[/, `extension/${file} reads chrome by a computed name (chrome[...]): write chrome.<name>, so this inventory reads what it uses`);
     for (const m of code.matchAll(/\bpermissions\b(\s*\??\.\s*([A-Za-z_$][\w$]*)(\s*\()?)?/g)) {
       const [, , method, paren] = m;
       if (QUIET.includes(method)) continue;
-      assert.ok(method === 'request' && paren, `extension/${file}: chrome.permissions is used as "${m[0]}"; ask Chrome only with chrome.permissions.request({ ... }) written out, so this inventory reads it`);
+      assert.ok(method === 'request' && paren, `extension/${file}: "permissions" appears as "${m[0]}". In code, use only chrome.permissions.${QUIET.join('/')}, and ask Chrome through askChrome(origins) (src/askChrome.js); in text a person reads, word it another way (this test reads strings as code)`);
+      requests.push(`${file} ${argumentAt(code, m.index + m[0].length - 1)}`);
+    }
+    if (file === GATE) continue;
+    // the one import form, on one line and under its own name, so every call below is read
+    code = code.replace(/^import \{([^}\n]*)\} from '\.\/src\/askChrome\.js';$/gm, (line, names) => {
+      assert.deepEqual(names.split(',').map((n) => n.trim()).filter(Boolean), ['askChrome'], `extension/${file}: import { askChrome } from './src/askChrome.js', nothing renamed and nothing else`);
+      return '';
+    });
+    for (const m of code.matchAll(/\baskChrome\b(\s*\()?/g)) {
+      assert.ok(m[1], `extension/${file}: askChrome appears as "${code.slice(m.index, m.index + 40).split('\n')[0]}"; import it as import { askChrome } from './src/askChrome.js' and call it as askChrome(origins), never under another name, so this inventory reads every request`);
       const arg = argumentAt(code, m.index + m[0].length - 1);
       const key = `${file} ${arg}`;
       assert.ok(KNOWN[key], `extension/${file} asks Chrome for ${arg}: add it to KNOWN here and say what it is in the demo script`);
@@ -236,6 +251,7 @@ test('the demo script says what every Chrome permission prompt the extension rai
       kinds.add(KNOWN[key][0]);
     }
   }
+  assert.deepEqual(requests, [`${GATE} { origins: asked }`], 'Chrome is asked for a permission only inside askChrome (src/askChrome.js), which refuses Facebook\'s servers and wildcard hosts: call askChrome(origins) instead of chrome.permissions.request');
   for (const [key, [, count]] of Object.entries(KNOWN)) {
     assert.equal(calls[key] || 0, count, `extension/${key.replace(' ', ' asks Chrome for ')} in ${calls[key] || 0} places, not ${count}: a new place to ask from is added to KNOWN here and to the demo script; a removed one is taken out of both`);
   }
