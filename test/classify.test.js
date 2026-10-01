@@ -122,6 +122,44 @@ test('listed as used but flagged demo: needs a look; flagged demo and new: skipp
   assert.equal(assess('usedNormal', { extra_fields: { title: 'Demo 2019 Ram 1500 Classic Express' } }).decision, DECISION.REVIEW);
 });
 
+test('a demo or loaner named after the model year is never Ready: in the title, the trim or the page address', () => {
+  const vin = '1C4RJFBG0RC000001';
+  const used = {
+    vin, year: 2024, make: 'Jeep', model: 'Grand Cherokee', trim: 'Limited', inventoryType: 'Used', readableType: null, isDemo: false, isLoaner: false,
+    siteTitle: 'Used 2024 Jeep Grand Cherokee Limited', url: `https://www.example-dealer.test/used/2024-jeep-grand-cherokee-limited-${vin.toLowerCase()}/`, urlConditionWord: 'used',
+    carfaxUrl: 'https://www.carfax.com/x', mileage: 3120, price: 40000, photoCount: 10, availability: 'In-Stock',
+  };
+  const ready = assessVehicle(used, {});
+  assert.equal(ready.decision, DECISION.READY, 'the plain used car is ready');
+  const held = {
+    'Demo after the year in the title': { siteTitle: '2024 Jeep Grand Cherokee Limited Demo' },
+    'Service Loaner after the year in the title': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Service Loaner' },
+    'Demonstrator before the page title\'s dealership part': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Demonstrator | Example Motors' },
+    'Courtesy vehicle in the title': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Courtesy Vehicle' },
+    'Loaner in the trim': { trim: 'Limited Loaner' },
+    'demo in the page address after the year': { url: `https://www.example-dealer.test/used/2024-jeep-grand-cherokee-limited-demo-${vin.toLowerCase()}/` },
+    'loaner in a later part of the page address': { url: `https://www.example-dealer.test/used/2024-jeep-grand-cherokee/loaner/${vin.toLowerCase()}` },
+    'demo in an address with no model year': { url: `https://www.example-dealer.test/vehicle/jeep-grand-cherokee-limited-demo-${vin.toLowerCase()}` },
+  };
+  for (const [what, patch] of Object.entries(held)) {
+    const a = assessVehicle({ ...used, ...patch }, {});
+    assert.equal(a.decision, DECISION.REVIEW, what);
+    assert.match(a.reason, /Demos and loaners are usually sold as new/, what);
+    assert.ok(a.notes.some((n) => /^The website's (title|trim|web address) says "/.test(n)), `${what}: the website's words are shown`);
+  }
+  assert.match(assessVehicle({ ...used, siteTitle: '2024 Jeep Grand Cherokee Limited Demo' }, {}).reason, /its title says "Demo"/);
+  // with nothing saying used, the word alone makes it a demo: skipped, as a flagged demo is
+  const bare = assessVehicle({ ...used, inventoryType: null, urlConditionWord: null, siteTitle: '2024 Jeep Grand Cherokee Limited Loaner', url: null }, {});
+  assert.equal(bare.decision, DECISION.SKIP);
+  assert.match(bare.reason, /^Loaner unit, sold as new/);
+  // a dealership's name is never read as a demo or loaner word
+  for (const siteTitle of ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Chrysler Dodge Jeep Ram', 'Used 2024 Jeep Grand Cherokee Limited - Courtesy Motors', 'Used 2024 Jeep Grand Cherokee Limited – Courtesy Cars of Springfield']) {
+    assert.equal(assessVehicle({ ...used, siteTitle }, {}).decision, DECISION.READY, siteTitle);
+  }
+  // nor a word that only contains one
+  assert.equal(assessVehicle({ ...used, siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Demolition Package' }, {}).decision, DECISION.READY);
+});
+
 test('new car with a Carfax link is still skipped, with a note to fix its type', () => {
   const a = assess('newNormal', { history_report: { carfax_url: 'https://www.carfax.com/vehiclehistory/ar20/x' } });
   assert.equal(a.decision, DECISION.SKIP);

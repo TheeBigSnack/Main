@@ -401,7 +401,7 @@ export function normalizeVehicle(node, { url = null, facts = null } = {}) {
     readableType: null, // schema.org has no second condition field
     url: carUrl,
     urlConditionWord: conditionWordFromPath(carUrl),
-    isDemo: false, // schema.org has no demo or loaner flag; a "demo" in the address or title still counts
+    isDemo: false, // schema.org has no demo or loaner flag; a "demo" or "loaner" in the address or title, before or after the model year, still counts (classify.js)
     isLoaner: false,
     carfaxUrl: carfax || null, // only a Carfax link that names this car's VIN
     carfaxOneOwner: false, // never read from numberOfPreviousOwners: that is not a Carfax report

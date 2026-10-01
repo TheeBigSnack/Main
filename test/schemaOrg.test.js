@@ -623,6 +623,23 @@ test('the gate: the same three signs, a lone sign never admits a car, damaged an
   assert.equal(assessVehicle(carousel[3], {}).decision, DECISION.SKIP, 'the new car in the carousel');
 });
 
+test('the gate: a schema.org car called a demo or loaner after its model year waits for a person', () => {
+  // schema.org has no demo or loaner flag, so the car's own words carry it
+  const carfax = { carfaxLinks: ['https://www.carfax.com/r?vin=2HGSAMPL8KH000101'] };
+  assert.equal(assessVehicle(flat({}, shown(undefined, carfax)), {}).decision, DECISION.READY, 'the plain used car is ready');
+  const demo = flat({ name: 'Used 2019 Honda Civic EX Demo' }, shown(undefined, carfax));
+  assert.equal(demo.isDemo, false, 'no flag');
+  const a = assessVehicle(demo, {});
+  assert.equal(a.decision, DECISION.REVIEW);
+  assert.match(a.reason, /its title says "Demo"/);
+  const loaner = flat({}, shown(undefined, carfax), SITE + '/inventory/used-2019-honda-civic-ex-loaner-2hgsampl8kh000101/');
+  assert.equal(assessVehicle(loaner, {}).decision, DECISION.REVIEW, 'loaner in the page address after the year');
+  // the page title's dealership part is not the car's words: a "Courtesy" store stays ready
+  const store = flat({ name: '' }, shown(undefined, { ...carfax, title: 'Used 2019 Honda Civic EX | Courtesy Honda of Springfield' }));
+  assert.equal(store.siteTitle, 'Used 2019 Honda Civic EX | Courtesy Honda of Springfield');
+  assert.equal(assessVehicle(store, {}).decision, DECISION.READY);
+});
+
 // ---------- parity with the Dealer Inspire reader ----------
 
 const DRIVE_MEMBERS = { '4WD': 'FourWheelDriveConfiguration', AWD: 'AllWheelDriveConfiguration', FWD: 'FrontWheelDriveConfiguration', RWD: 'RearWheelDriveConfiguration' };
