@@ -287,12 +287,21 @@ export const CLAIM_KINDS: readonly ClaimKind[] = Object.freeze([
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
 ]);
 
-// The write-up split at its line breaks, markup set aside, spacing made
-// plain, as the extension's template copies it (here the facts' narrative
-// is already plain text, so this changes nothing but the spacing).
+// The write-up split at its line breaks, paragraphs and list items, markup
+// set aside, spacing made plain, as the extension's template copies it
+// (extension/src/description.js splitSegments; claimSource makes it one
+// line, so where a wrapped line is joined again makes no difference here).
+// Here the facts' narrative is already plain text, so this changes nothing
+// but the spacing.
+const BLOCK_BREAK = /<\/?(?:br|p|div|li|ul|ol|h[1-6]|tr|td|th|dt|dd|section|article|blockquote)\b[^>]*>/i;
 function writeUpText(raw: unknown): unknown {
   if (typeof raw !== 'string') return raw;
-  return raw.split(/<br\s*\/?>/i).map((s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+  return raw
+    .split(BLOCK_BREAK)
+    .flatMap((block) => block.split(/\r\n|\r|\n/))
+    .map((s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
 }
 
 function claimSource({ vehicle = {}, priceNote = '' }: GuardrailContext): string {

@@ -531,6 +531,17 @@ test('a write-up with markup inside a claim still backs the template that copies
   }
 });
 
+test('a write-up in paragraphs backs a claim in its second paragraph, as the template reads it', async () => {
+  // "<p>Clean interior</p><p>Runs great...</p>" is two paragraphs, never "Clean interiorRuns great"
+  for (const raw of ['<p>Clean interior</p><p>Runs great and drives smooth.</p>', '<div>Clean interior</div><div>Runs great and drives smooth.</div>', '<ul><li>Clean interior</li><li>Runs great and drives smooth.</li></ul>']) {
+    const v = { ...PLAIN(), descriptionRaw: raw };
+    assert.deepEqual(codesAfter('It runs great.', plainCtx(v)), [], raw);
+    const r = await generateDescription({ ...plainCtx(v), settings: {} });
+    assert.deepEqual(r.narrative, ['Clean interior', 'Runs great and drives smooth.'], raw);
+    assert.deepEqual(r.guardrails.problems, [], raw);
+  }
+});
+
 test('every claimed part is checked: a part the website names never covers one the text adds', () => {
   const v = { ...PLAIN(), descriptionRaw: 'Local trade with new tires.' };
   const c = plainCtx(v);

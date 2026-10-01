@@ -20,6 +20,7 @@
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
+import { splitSegments } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -469,12 +470,12 @@ export const CLAIM_KINDS = Object.freeze([
 ]);
 
 // The write-up as the website shows it, and as the template copies it
-// (description.js splitSegments): split at its line breaks, markup set
-// aside, spacing made plain. A claim the template copies from "new
-// <b>tires</b>" is then found in its own source.
+// (description.js splitSegments): split at its line breaks, paragraphs and
+// list items, markup set aside, spacing made plain. A claim the template
+// copies from "new <b>tires</b>" is then found in its own source.
 function writeUpText(raw) {
   if (typeof raw !== 'string') return raw;
-  return raw.split(/<br\s*\/?>/i).map((s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+  return splitSegments(raw).join('\n');
 }
 
 // The website's own words for this car, where its claims may come from.

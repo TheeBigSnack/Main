@@ -58,7 +58,8 @@ test('the absolute floor: a share alone never decides on a tiny lot', () => {
   // a 10-car lot drops a sentence 4 cars share (40%, above the floor)
   const ten = Array.from({ length: 10 }, (_, i) => (i < 4 ? `Car ${i}.<br>${DISCLAIMER}` : `Car ${i}.`));
   assert.ok(findBoilerplate(ten).has(DISCLAIMER));
-  assert.equal(findBoilerplate(ten).size, 1);
+  // the disclaimer and its own sentences, nothing a car says
+  assert.deepEqual([...findBoilerplate(ten)].filter((t) => !DISCLAIMER.includes(t)), []);
   // the floor can be tuned like the share; a floor of 1 is the old share-only rule
   assert.ok(findBoilerplate(three, 0.3, 1).has(DISCLAIMER));
   assert.ok(findBoilerplate(three, 0.3, 1).has('Local trade.'));
@@ -86,6 +87,49 @@ test('without a boilerplate set the disclaimer would survive, so the scan must s
 test('a short real sentence after a Carfax prefix is kept', () => {
   assert.deepEqual(cleanDescription('Recent Arrival! Clean CARFAX. Local trade with new tires and brakes.'), ['Local trade with new tires and brakes.']);
   assert.deepEqual(cleanDescription('CARFAX One-Owner.'), []);
+});
+
+// A lot-wide line written the ways other websites write it: on a line of its
+// own in plain text (a schema.org or inventory-feed description), in its own
+// paragraph, or run on from the car's own write-up with no break at all.
+const NOTE = 'All prices exclude tax and the documentation fee.';
+const WRITE_UPS = ['Local trade with new brakes.', 'Sharp truck with the towing package.', 'Low miles and a fresh detail.', 'Leather seats and a sunroof.', 'Room for the whole family.'];
+
+test('a lot-wide line is found however the website separates it from the write-up', () => {
+  for (const [how, join] of [
+    ['a line break in the text', (car) => `${car}\n${NOTE}`],
+    ['a blank line', (car) => `${NOTE}\r\n\r\n${car}`],
+    ['paragraphs', (car) => `<p>${car}</p><p>${NOTE}</p>`],
+    ['divisions', (car) => `<div>${car}</div>\n<div class="legal">${NOTE}</div>`],
+    ['list items', (car) => `<ul><li>${car}</li><li>${NOTE}</li></ul>`],
+    ['no break at all', (car) => `${car} ${NOTE}`],
+    ['a <br>', (car) => `${car}<br>${NOTE}`],
+  ]) {
+    const lot = WRITE_UPS.map(join);
+    const found = findBoilerplate(lot);
+    assert.ok(found.has(NOTE), how);
+    assert.ok(WRITE_UPS.every((car) => !found.has(car)), how);
+    assert.deepEqual(cleanDescription(lot[0], found), [WRITE_UPS[0]], how);
+  }
+});
+
+test('paragraphs and wrapped lines are read as the website shows them', () => {
+  // a paragraph break never glues two sentences into one word
+  assert.deepEqual(splitSegments('<p>New brakes.</p><p>All set.</p>'), ['New brakes.', 'All set.']);
+  assert.deepEqual(splitSegments('Line one of the write-up.\nLine two.'), ['Line one of the write-up.', 'Line two.']);
+  // a line that only wraps a sentence joins the line before it again
+  assert.deepEqual(splitSegments('Local trade with new\nbrakes and tires.\n- Heated seats'), ['Local trade with new brakes and tires.', '- Heated seats']);
+});
+
+test('an equipment list or a lot-wide sentence inside a paragraph takes only itself out', () => {
+  const dump = 'Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package.';
+  assert.deepEqual(cleanDescription(`Local trade with new brakes. ${dump}`), ['Local trade with new brakes.']);
+  // a disclaimer full of commas, glued to the write-up, is found as a sentence and the write-up stays
+  const legal = 'Price excludes tax, title, license, registration, the documentation fee, dealer add-ons, and finance charges.';
+  const lot = WRITE_UPS.map((car) => `${car} ${legal}`);
+  assert.deepEqual(cleanDescription(lot[0], findBoilerplate(lot)), [WRITE_UPS[0]]);
+  // the floor still holds: on a 2-car lot nothing is lot-wide, sentence or segment
+  assert.equal(findBoilerplate(lot.slice(0, 2)).size, 0);
 });
 
 test('non-text input is handled', () => {

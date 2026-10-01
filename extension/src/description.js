@@ -19,13 +19,33 @@
 // The rewriter should only ever draw on (3), and only the paragraph, not the
 // bullets (the structured `features` field already covers those cleanly).
 
-// Segments are split on <br> the way the website itself renders them.
+// A website separates the parts of a description in different ways: line
+// breaks (<br>), paragraphs, divisions or list items, or plain line breaks
+// in the text itself (a schema.org or inventory-feed description). Each of
+// those ends a segment; other markup is set aside. A plain line break that
+// only wraps a sentence (the line before leaves it open and the next one
+// carries on in lower case) joins the two lines again.
+const BLOCK_BREAK = /<\/?(?:br|p|div|li|ul|ol|h[1-6]|tr|td|th|dt|dd|section|article|blockquote)\b[^>]*>/i;
+const OPEN_SENTENCE = /[^.!?:;)"'\u201d]$/;
+const plain = (s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+
 export function splitSegments(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return [];
-  return raw
-    .split(/<br\s*\/?>/i)
-    .map((s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
+  const out = [];
+  for (const block of raw.split(BLOCK_BREAK)) {
+    const lines = [];
+    for (const line of block.split(/\r\n|\r|\n/).map(plain).filter(Boolean)) {
+      if (lines.length && OPEN_SENTENCE.test(lines[lines.length - 1]) && /^[a-z]/.test(line)) lines[lines.length - 1] += ` ${line}`;
+      else lines.push(line);
+    }
+    out.push(...lines);
+  }
+  return out;
+}
+
+// The sentences of one segment, split where the template splits them.
+export function splitSentences(segment) {
+  return String(segment || '').split(/(?<=[.!?])\s+/).filter(Boolean);
 }
 
 // The absolute floor under the share: a share alone misbehaves on a tiny
@@ -38,21 +58,26 @@ export const MIN_BOILERPLATE_COUNT = 3;
 
 // A segment that repeats across a large share of the current lot's
 // descriptions is boilerplate (a disclaimer, a legal paragraph), not
-// anything specific to one car. Default threshold matches the brief: ~30%,
-// with MIN_BOILERPLATE_COUNT as the floor. Both are re-derived from each
-// website's own lot on every scan; nothing about one lot is kept.
+// anything specific to one car. So is a sentence that repeats that way, so a
+// disclaimer the website runs on from a car's own write-up, with no break
+// between them, is found too. Default threshold matches the brief: ~30%,
+// with MIN_BOILERPLATE_COUNT as the floor for both. Both are re-derived from
+// each website's own lot on every scan; nothing about one lot is kept.
 export function findBoilerplate(allDescriptions, threshold = 0.3, minCount = MIN_BOILERPLATE_COUNT) {
   const counts = new Map();
   const total = Array.isArray(allDescriptions) ? allDescriptions.length : 0;
   for (const raw of allDescriptions || []) {
-    for (const seg of new Set(splitSegments(raw))) {
-      counts.set(seg, (counts.get(seg) || 0) + 1);
+    const seen = new Set();
+    for (const seg of splitSegments(raw)) {
+      seen.add(seg);
+      for (const sentence of splitSentences(seg)) seen.add(sentence);
     }
+    for (const text of seen) counts.set(text, (counts.get(text) || 0) + 1);
   }
   const boilerplate = new Set();
   if (total > 0) {
-    for (const [seg, count] of counts) {
-      if (count >= minCount && count / total >= threshold) boilerplate.add(seg);
+    for (const [text, count] of counts) {
+      if (count >= minCount && count / total >= threshold) boilerplate.add(text);
     }
   }
   return boilerplate;
@@ -69,23 +94,25 @@ function looksLikeBullet(segment) {
 
 // A raw equipment dump has no real sentences, just a long comma list of
 // feature/option names pulled from the options field.
-function looksLikeEquipmentDump(segment) {
-  const commas = segment.split(',').length - 1;
+function looksLikeEquipmentDump(text) {
+  const commas = text.split(',').length - 1;
   return commas >= 6;
 }
 
-// Returns the car-specific narrative sentences left after boilerplate, award
-// blurbs, feature bullets and raw equipment dumps are removed.
+// Returns the car-specific narrative left after boilerplate, award blurbs,
+// feature bullets and raw equipment dumps are removed: one string per
+// segment, with any lot-wide sentence or equipment list inside it taken out
+// and the rest of the segment kept as written.
 export function cleanDescription(raw, boilerplate = new Set()) {
   const kept = [];
   for (const seg of splitSegments(raw)) {
     if (boilerplate.has(seg)) continue;
     if (AWARDS_PREFIX.test(seg)) continue;
     if (looksLikeBullet(seg)) continue;
-    const stripped = seg.replace(CARFAX_PREFIX, '').trim();
-    if (!stripped) continue;
-    if (looksLikeEquipmentDump(stripped)) continue;
-    kept.push(stripped);
+    const own = splitSentences(seg).filter((s) => !boilerplate.has(s)).join(' ');
+    const stripped = own.replace(CARFAX_PREFIX, '').trim();
+    const text = splitSentences(stripped).filter((s) => !looksLikeEquipmentDump(s)).join(' ');
+    if (text) kept.push(text);
   }
   return kept;
 }

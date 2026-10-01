@@ -63,6 +63,7 @@ const contexts = [
   { vehicle: { ...vehicle, urlConditionWord: 'certified used', descriptionRaw: 'Thirty thousand miles of service records. New tires and brakes, inspected, warranty included, non-smoker.' }, dealer: { name: 'Certified Credit Motors', city: 'Thousand Oaks' }, salesperson: { title: 'finance manager' }, priceNote: 'Financing through the dealership.', price: 28995 },
   { vehicle: { ...vehicle, inventoryType: 'Certified Used', features: ['Clean CARFAX', 'Garage Kept'] }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Local trade with new <b>tires</b>.<br>Runs\n <strong>great</strong>.' }, dealer, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, descriptionRaw: '<p>Clean interior</p><p>Runs great with new</p><div>brakes.</div>\r\nSmoke-free.<li>Inspected</li>' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, location: 'Example Certified Motors Route 19' }, dealer, priceNote: '', price: 28995 },
   {},
 ];
