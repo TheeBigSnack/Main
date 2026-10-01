@@ -87,7 +87,11 @@ function startFlowWith({ posted, queue }) {
     chrome: { storage: { local: { remove: async () => {} } } },
     GLOBAL_KEYS: { postRequest: 'postRequest' },
     endUpkeep: () => {},
-    clearFlow: async () => calls.push('clearFlow'),
+    flowRun: 0,
+    clearFlow: async () => {
+      calls.push('clearFlow');
+      return 0;
+    },
     loadSaved: async () => true,
     nameOf: (vin) => state.snapshotVehicles[vin].name,
     afterQueueStep: async (outcome) => {
@@ -175,11 +179,14 @@ test('a load for a website the panel has moved away from is dropped, so its cars
 // that record they were reached. `description` is what the box holds.
 const DEALER = { name: 'Example Motors', city: 'Exampletown', state: 'PA', zip: '15000' };
 const READ_MAX_AGE_MS = Number(new Function(`return ${/const READ_MAX_AGE_MS = ([^;]+);/.exec(src)[1]}`)());
+const LIVE_STEPS = new Function(`return ${/const LIVE_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)();
 const FLOW_FIELDS = new Function(`return ${/const FLOW_FIELDS = (\[[^\]]*\]);/.exec(src)[1]}`)();
 // also: more of sidepanel.js's functions compiled into the same scope (a
 // post request arriving while the form is being opened); their other calls
-// are stubs that record they ran.
-function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, car = vehicle('usedNormal'), also = [] }) {
+// are stubs that record they ran. autoOpen: what canAutoOpen says (a queued
+// car that passes every check opens its form by itself); gen: the stand-in
+// for writing the description, given the state.
+function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, car = vehicle('usedNormal'), also = [], autoOpen = false, gen = null, tabLoad = null }) {
   const v = car;
   const calls = [];
   const forms = []; // each Marketplace tab opened: the car it was opened for, and the post the panel was on
@@ -196,11 +203,14 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
     state, ctx, runGuardrails, ruleProblems, buildListingData, READ_MAX_AGE_MS, FLOW_FIELDS, flowRun: 0,
     FORM_STEPS: new Function(`return ${/const FORM_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)(),
     watcher: null, endPost: () => {}, beginPost: () => {}, endUpkeep: () => {}, refreshGranted: async () => {}, nameOf: (vin) => vin,
-    afterQueueStep: async (outcome) => calls.push('afterQueueStep ' + outcome), canAutoOpen: () => false, maybeGuessColors: async () => {},
+    afterQueueStep: async (outcome) => calls.push('afterQueueStep ' + outcome), canAutoOpen: () => autoOpen, maybeGuessColors: async () => {},
     generate: async () => {
       calls.push(`generate ${state.vin} with ${state.vehicle.vin}`);
+      if (gen) return gen(state);
       state.description = `Pre-owned at ${DEALER.name}. VIN ${state.vehicle.vin}.`;
+      return undefined;
     },
+    LIVE_STEPS, postUnderWay: () => Boolean(state.vin) && LIVE_STEPS.includes(state.step),
     finishFirstText: (button) => `Finish or stop the current post first. Then click ${button} again.`,
     loadSaved: async () => true, startWatcher: () => calls.push('startWatcher'),
     recheck, basisPrice, shortLocation, storeNames, localVinCheck, money: (n) => '$' + n.toLocaleString('en-US'),
@@ -216,9 +226,9 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
     pickedPhotos: () => [],
     render: () => calls.push('render:' + state.step), saveFlow: async () => {}, pilotNote: async () => {}, notePostStep: () => {},
     GLOBAL_KEYS: { devOverrides: 'devOverrides', postRequest: 'postRequest' }, FORM_MAP, applyOverrides: (m) => m,
-    chrome: { storage: { local: { get: async () => ({}), remove: async () => {} } }, tabs: { create: async () => { calls.push('tabs.create'); forms.push(`${state.vehicle.vin} while vin=${state.vin}`); return { id: 77 }; } } },
-    waitForTabLoad: async () => {}, sleep: async () => {},
-    runFill: async () => calls.push(`runFill: ${state.listing.fields.description}`),
+    chrome: { storage: { local: { get: async () => ({}), remove: async () => {} } }, tabs: { create: async () => { calls.push('tabs.create'); forms.push(`${state.vehicle ? state.vehicle.vin : '(no car)'} while vin=${state.vin}`); return { id: 77 }; } } },
+    waitForTabLoad: async (id) => (tabLoad ? tabLoad(id) : undefined), sleep: async () => {},
+    runFill: async () => calls.push(`runFill: ${state.listing ? state.listing.fields.description : '(no listing)'}`),
     runProbe: async () => calls.push('runProbe'),
     readCarForPost: async (req) => {
       calls.push(`readCarForPost ${req.vin} tab ${req.tabId}`);
@@ -408,7 +418,7 @@ test('after the re-read, the description is checked against the car as the websi
   assert.equal(o.calls.filter((c) => c.startsWith('readCarForPost')).length, 1);
 });
 
-test('a Post for another car, the same car again, or Stop queue while the form waits on its re-read: no form opens for the post left behind, and its read never lands in the new one', async () => {
+test('a Post for another car, the same car again, or Stop queue while the form waits on its re-read: no form opens for the post left behind, the same car is not started over, and a read never lands in another post', async () => {
   const A = vehicle('usedNormal');
   const B = vehicle('certified');
   const description = buildTemplateDescription({ vehicle: A, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
@@ -458,20 +468,16 @@ test('a Post for another car, the same car again, or Stop queue while the form w
     await posting2;
     assert.deepEqual([failed.state.vin, failed.state.step], [B.vin, 'review']);
 
-    // the same car again (Continue in the side panel): one post for A, started over, and no form from the old click
+    // the same car again (Continue in the side panel): the panel stays on A's post, which is read once and goes on to one form
     const again = panel(opener);
     const first = again.open();
     await tick();
-    const restart = again.fns.postRequested({ origin: again.state.origin, vin: A.vin, dealerTabId: 9 });
-    await tick();
-    assert.equal(again.calls.filter((c) => c.startsWith('readCarForPost')).length, 2, 'the restart reads the car too');
-    again.answer(A.vin, { ok: true, vehicle: { ...A } }); // the old click's read
+    await again.fns.postRequested({ origin: again.state.origin, vin: A.vin, dealerTabId: 9 });
+    assert.equal(again.calls.filter((c) => c.startsWith('readCarForPost')).length, 1, 'A is not started over');
+    again.answer(A.vin, { ok: true, vehicle: { ...A } });
     await first;
-    nothingOpened(again, `${opener}, the same car again`);
-    again.answer(A.vin, { ok: true, vehicle: { ...A } }); // the restart's read
-    await restart;
-    nothingOpened(again, `${opener}, the same car again, restarted`);
-    assert.deepEqual([again.state.vin, again.state.step], [A.vin, 'review']);
+    assert.deepEqual(again.forms, opener === 'openForm' ? [`${A.vin} while vin=${A.vin}`] : [], `${opener}, the same car again: one form, A's`);
+    assert.deepEqual(again.calls.filter((c) => c.startsWith('runFill') || c === 'runProbe'), [`runFill: ${description}`], `${opener}, the same car again: filled once`);
 
     // Stop queue (or Back, or Skip this car, which starts the next car) clears the post while it is read: nothing opens afterwards
     const stopped = panel(opener);
@@ -485,6 +491,180 @@ test('a Post for another car, the same car again, or Stop queue while the form w
   }
 });
 
+// Two posts started close together (Post on one car, then Post N cars or
+// another Post; a double click; Skip this car while the next is read): the
+// post left behind stops at its next step, whichever order the website and
+// the description writer answer in. One form opens, for the car the panel is
+// on, and that car's post holds only its own read.
+test('two posts started close together never run into each other: one form, for the car the panel is on', async () => {
+  const A = vehicle('usedNormal');
+  const B = vehicle('certified');
+  const tick = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+  const make = () => {
+    const reads = {};
+    const gens = [];
+    const o = formOpener({
+      description: '', step: 'idle', autoOpen: true, also: ['clearFlow', 'startFlow', 'postRequested', 'formOpen'],
+      read: (req) => new Promise((resolve) => { (reads[req.vin] ||= []).push(resolve); }),
+      // the description is written from the car read for this post, and lands when the writer answers
+      gen: (state) => {
+        const text = `Pre-owned at ${DEALER.name}. VIN ${state.vehicle.vin}.`;
+        return new Promise((resolve) => gens.push({ vin: state.vehicle.vin, done: () => { state.description = text; resolve(); } }));
+      },
+    });
+    Object.assign(o.state, { vin: null, vehicle: null, step: 'idle', queueMode: false });
+    const waiting = (vin) => (reads[vin] || []).length;
+    const answer = (vin, car) => reads[vin].shift()({ ok: true, vehicle: { ...car } });
+    const write = (vin) => gens.splice(gens.findIndex((g) => g.vin === vin), 1)[0].done();
+    const post = (vin, queue = true) => o.fns.postRequested({ origin: o.state.origin, vin, dealerTabId: 9, queue });
+    return { ...o, waiting, answer, write, post };
+  };
+  const onlyB = (o, what) => {
+    assert.deepEqual(o.forms, [`${B.vin} while vin=${B.vin}`], `${what}: one form, B's (${o.calls.join(' | ')})`);
+    assert.deepEqual([o.state.vin, o.state.vehicle.vin, o.state.price, o.state.step], [B.vin, B.vin, B.price, 'filling'], `${what}: B's post holds B, its form being filled`);
+    assert.deepEqual(o.calls.filter((c) => c.startsWith('runFill')), [`runFill: Pre-owned at ${DEALER.name}. VIN ${B.vin}.`], `${what}: filled once, with B's text`);
+    assert.equal(o.state.description, `Pre-owned at ${DEALER.name}. VIN ${B.vin}.`, `${what}: B's description`);
+  };
+
+  // A is read first; B's queue starts while A's description is written; then A's writer answers
+  const inOrder = make();
+  const a1 = inOrder.post(A.vin, false);
+  await tick();
+  inOrder.answer(A.vin, A);
+  await tick();
+  const b1 = inOrder.post(B.vin);
+  await tick();
+  assert.equal(inOrder.waiting(B.vin), 1, 'B is being read');
+  inOrder.write(A.vin); // the post left behind: goes no further
+  await a1;
+  assert.deepEqual(inOrder.forms, [], 'nothing opened for A');
+  inOrder.answer(B.vin, B);
+  await tick();
+  inOrder.write(B.vin);
+  await b1;
+  onlyB(inOrder, 'A read first');
+
+  // B's read answers first, A's last
+  const outOfOrder = make();
+  const a2 = outOfOrder.post(A.vin, false);
+  await tick();
+  const b2 = outOfOrder.post(B.vin);
+  await tick();
+  outOfOrder.answer(B.vin, B);
+  await tick();
+  outOfOrder.write(B.vin);
+  await b2;
+  outOfOrder.answer(A.vin, A);
+  await a2;
+  onlyB(outOfOrder, 'A read last');
+
+  // B's request arrives before A is even read (a double click, Post then Post N cars at once): only B is read
+  const atOnce = make();
+  const a3 = atOnce.post(A.vin, false);
+  const b3 = atOnce.post(B.vin);
+  await tick(10);
+  assert.deepEqual([atOnce.waiting(A.vin), atOnce.waiting(B.vin)], [0, 1], `only B is read (${atOnce.calls.join(' | ')})`);
+  atOnce.answer(B.vin, B);
+  await tick();
+  atOnce.write(B.vin);
+  await Promise.all([a3, b3]);
+  onlyB(atOnce, 'both at once');
+
+  // the same car twice at once (a double click on Post N cars): read once, one form
+  const twice = make();
+  const t1 = twice.post(B.vin);
+  const t2 = twice.post(B.vin);
+  await tick(10);
+  assert.equal(twice.waiting(B.vin), 1, `B is read once (${twice.calls.join(' | ')})`);
+  twice.answer(B.vin, B);
+  await tick();
+  twice.write(B.vin);
+  await Promise.all([t1, t2]);
+  onlyB(twice, 'the same car twice');
+});
+
+// The steps of a post that wait on the Marketplace tab, the rewrite service
+// or the photo downloads: a post dropped meanwhile (Skip this car, Stop
+// queue, another post) gets no form, no fill, no photos and no text.
+test('a post dropped while its form loads, fills or gets its photos, or while its text is written, goes no further', async () => {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+  const tick = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+
+  // openForm: the tab is loading when the post is dropped
+  const load = deferred();
+  const o = formOpener({ description, also: ['clearFlow'], tabLoad: () => load.promise });
+  const opening = o.fns.openForm();
+  await tick();
+  assert.deepEqual(o.forms, [`${v.vin} while vin=${v.vin}`]);
+  await o.fns.clearFlow();
+  load.resolve();
+  await opening;
+  assert.ok(!o.calls.some((c) => c.startsWith('runFill')), `nothing filled into the tab (${o.calls.join(' | ')})`);
+  assert.deepEqual([o.state.step, o.state.fbTabId], ['idle', null]);
+
+  // runFill and attachPhotos, as written: the fill and each photo batch wait on Chrome
+  const panel = () => {
+    const calls = [];
+    const pending = [];
+    const wait = (what, result) => new Promise((resolve) => pending.push({ what, done: () => resolve(result) }));
+    const state = {
+      origin: 'https://www.example-motors.test', vin: v.vin, step: 'filling', fbTabId: 77, map: FORM_MAP, settings: { basis: 'website' },
+      listing: buildListingData(v, { dealer: DEALER, description, price: v.price, photos: ['https://img.example.test/1.jpg', 'https://img.example.test/2.jpg'] }),
+      fill: null, photos: null,
+    };
+    const fns = compileMany(['runFill', 'attachPhotos', 'clearFlow'], {
+      state, flowRun: 0, watcher: null, FORM_MAP, VERSION: '0.0.0',
+      fillFormInPage: () => {}, attachPhotosInPage: () => {},
+      chrome: {
+        scripting: { executeScript: (opts) => { calls.push('executeScript ' + (opts.args[1] && opts.args[1].fields ? 'fill' : 'photos')); return wait('inject', [{ result: opts.args[1] && opts.args[1].fields ? { filled: [], partial: [], blocked: [], photoLimit: { value: 20, verified: true } } : { ok: true, attached: 1 } }]); } },
+        runtime: { sendMessage: (msg) => { calls.push('download ' + msg.urls.length); return wait('download', { photos: msg.urls.map((url) => ({ ok: true, url, name: 'p.jpg', type: 'image/jpeg', dataUrl: 'data:' })) }); } },
+        storage: { local: { remove: async () => {} } },
+      },
+      render: () => calls.push('render:' + state.step), saveFlow: async () => calls.push('saveFlow'), pilotNote: async () => {}, endPost: () => {}, noteFill: (p) => p, notePostStep: (p) => p,
+      startWatcher: () => calls.push('startWatcher'), photoPatterns: () => [], refusedPhotoServers: new Set(), patternCovers: () => false, isFacebookServer: () => false,
+      siteKeys: (o) => ({ flow: 'postFlow:' + o }),
+    });
+    return { state, calls, fns, pending, next: () => pending.shift().done() };
+  };
+  const filling = panel();
+  const fill = filling.fns.runFill();
+  await tick();
+  await filling.fns.clearFlow();
+  filling.next(); // the fill answers after the drop
+  await fill;
+  assert.deepEqual(filling.calls.filter((c) => !c.startsWith('render')), ['executeScript fill'], 'no publish step, watcher or photos for the dropped post');
+  assert.deepEqual([filling.state.step, filling.state.fill], ['idle', null]);
+
+  const photos = panel();
+  photos.state.step = 'publish';
+  photos.state.fill = { photoLimit: { value: 20, verified: true } };
+  const attaching = photos.fns.attachPhotos();
+  await tick();
+  await photos.fns.clearFlow();
+  photos.next(); // the download answers after the drop
+  await attaching;
+  assert.deepEqual(photos.calls.filter((c) => !c.startsWith('render')), ['download 2'], 'nothing attached after the drop');
+
+  // generate, as written: the writer answers after the post was dropped and the next car's began
+  const answer = deferred();
+  const state = { origin: 'o', vin: 'BBB', vehicle: { ...v, vin: 'BBB' }, description: 'B text', settings: { rewrite: {}, dealer: DEALER, salesperson: {} }, highlights: null };
+  const writing = compileMany(['generate', 'clearFlow'], {
+    state, flowRun: 0, watcher: null, FORM_MAP, pilotNote: async () => {}, endPost: () => {}, siteKeys: (o) => ({ flow: 'f:' + o }),
+    chrome: { storage: { local: { remove: async () => {} } } },
+    rewriteWithKey: async (r) => r, vehicleForText: () => state.vehicle, noteFor: () => '',
+    generateDescription: () => answer.promise, settleHighlights: () => [], LAPSED_MESSAGE: 'lapsed', LAPSED_SENTENCE: 'lapsed',
+  });
+  const text = writing.generate();
+  await tick();
+  await writing.clearFlow();
+  Object.assign(state, { vin: 'CCC', description: 'C text', guardrails: 'C checks' });
+  answer.resolve({ text: 'B written late', source: 'template', note: '', guardrails: 'B checks' });
+  await text;
+  assert.deepEqual([state.description, state.guardrails], ['C text', 'C checks'], 'the next car keeps its own text');
+});
+
 // A post request (the popup's Post, its Continue in the side panel, the queue
 // bar's Post next car) while car A's Marketplace form is open: A is never
 // dropped. The request for A itself leaves the panel on A; one for another
@@ -495,6 +675,8 @@ function requestPanel({ step, vin = 'AAA', queueMode = false, queue = null }) {
   const state = { origin: 'https://www.example-motors.test', vin, step, queueMode, queue, vehicle: vin ? { name: '2020 Make Model A' } : null, fbTabId: 55, snapshotVehicles: { BBB: { name: 'Car B' } } };
   const fns = compileMany(['formOpen', 'postRequested', 'resumeOpenForm', 'queueBar'], {
     state, FORM_STEPS, GLOBAL_KEYS: { postRequest: 'postRequest' },
+    LIVE_STEPS, postUnderWay: () => Boolean(state.vin) && LIVE_STEPS.includes(state.step),
+    saveFlow: async () => calls.push('saveFlow queueMode=' + state.queueMode),
     siteKeys: (o) => ({ flow: 'postFlow:' + o }),
     finishFirstText: new Function('state', 'nameOf', `return ${/const finishFirstText = ([^\n]+);\n/.exec(src)[1]}`)(state, (v) => v),
     chrome: { storage: { local: { remove: async (k) => calls.push('remove ' + k), get: async (k) => ({ [k]: state.saved }) } } },
@@ -533,6 +715,23 @@ test('a Post for another car never drops a Marketplace form that is open; the sa
     await p.fns.postRequested({ origin: p.state.origin, vin: 'BBB' });
     assert.deepEqual(p.calls, ['startFlow BBB'], step);
   }
+  // the car under way itself, still being checked or reviewed (Continue in the side panel, a second click on Post): the post goes on, not started over
+  for (const step of ['checking', 'review']) {
+    const p = requestPanel({ step, queueMode: true });
+    await p.fns.postRequested({ origin: p.state.origin, vin: 'aaa', queue: true });
+    assert.deepEqual(p.calls, ['remove postRequest', 'status: ', 'render'], step);
+    // a queue that starts with the car a single post is on takes that post into the queue
+    const single = requestPanel({ step });
+    await single.fns.postRequested({ origin: single.state.origin, vin: 'AAA', queue: true });
+    assert.deepEqual(single.calls, ['remove postRequest', 'saveFlow queueMode=true', 'status: ', 'render'], `${step}, single post`);
+    assert.equal(single.state.queueMode, true);
+  }
+  // a stopped or finished post of the same car starts again: it is read and checked afresh
+  for (const step of ['blocked', 'done']) {
+    const p = requestPanel({ step });
+    await p.fns.postRequested({ origin: p.state.origin, vin: 'AAA' });
+    assert.deepEqual(p.calls, ['startFlow AAA'], step);
+  }
   const none = requestPanel({ step: 'idle', vin: null });
   await none.fns.postRequested({ origin: none.state.origin, vin: 'BBB' });
   assert.deepEqual(none.calls, ['startFlow BBB']);
@@ -553,6 +752,25 @@ test('a form left open when the panel closed comes back before a post request is
     await r.fns.resumeOpenForm(r.state.origin);
     await r.fns.postRequested({ origin: r.state.origin, vin: 'BBB' });
     assert.deepEqual(r.calls, ['startFlow BBB'], step);
+  }
+  // a post of the very car the request is for, saved while it was checked or reviewed: it comes back, typed text and all, and the request leaves it there
+  for (const step of ['checking', 'review']) {
+    const r = requestPanel({ step: 'idle', vin: null });
+    r.state.saved = { vin: 'AAA', step, vehicle: { name: '2020 Make Model A' }, description: 'typed by the person' };
+    const req = { origin: r.state.origin, vin: 'aaa', queue: true };
+    await r.fns.resumeOpenForm(r.state.origin, req);
+    await r.fns.postRequested(req);
+    assert.equal(r.calls[0], 'resumeFlow AAA', step);
+    assert.ok(!r.calls.some((c) => c.startsWith('startFlow')), `${step}: not started over`);
+    assert.equal(r.state.description, 'typed by the person');
+  }
+  for (const step of ['blocked', 'done']) {
+    const r = requestPanel({ step: 'idle', vin: null });
+    r.state.saved = { vin: 'AAA', step };
+    const req = { origin: r.state.origin, vin: 'AAA' };
+    await r.fns.resumeOpenForm(r.state.origin, req);
+    await r.fns.postRequested(req);
+    assert.deepEqual(r.calls, ['startFlow AAA'], step);
   }
   const nothing = requestPanel({ step: 'idle', vin: null });
   await nothing.fns.resumeOpenForm(undefined);

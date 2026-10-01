@@ -339,6 +339,7 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
     photoList: () => photos,
     hostList: (patterns) => patterns.map(patternHost).join(', '),
     sleep: async () => {},
+    flowRun: 0, // the post under way (sidepanel.js clearFlow); nothing drops it here
     document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
     status: '',
   };

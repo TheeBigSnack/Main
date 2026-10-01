@@ -76,8 +76,10 @@ const state = {
 };
 let watcher = null;
 // Counts the posts the panel has dropped (clearFlow: a new post, Stop queue,
-// Back, a set-up). A website read that answers after its post was dropped is
-// thrown away (readCarNow), so it never lands in the post that took over.
+// Back, Skip, a set-up). Each step of a post that waits on something (the
+// website, the rewrite service, storage, the Marketplace tab) notes the count
+// first and goes no further when it changed meanwhile, so a post left behind
+// never writes into the post that took over, and never opens or fills a form.
 let flowRun = 0;
 
 // ---------- saved data ----------
@@ -174,16 +176,20 @@ async function saveFlow() {
   }
 }
 
+// Resolves the new count (flowRun): the number of the post started next.
 async function clearFlow() {
-  flowRun += 1;
+  const run = ++flowRun;
   if (watcher) watcher.cancel();
   watcher = null;
-  if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
-  if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
+  const { vin, origin } = state;
+  if (vin) await pilotNote((p) => endPost(p, vin, 'abandoned')); // only an attempt still open changes
+  if (origin) await chrome.storage.local.remove(siteKeys(origin).flow);
+  if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, readAt: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
+  return run;
 }
 
 function setStatus(text, kind = '') {
@@ -399,6 +405,7 @@ function formValues() {
 // goes no further. Resolves true to go on.
 async function carStillCurrent() {
   if (!readIsOld()) return true;
+  const run = flowRun;
   const was = state.step;
   const before = { price: state.price, values: formValues() };
   state.step = 'checking';
@@ -419,7 +426,7 @@ async function carStillCurrent() {
     if (state.vinCheck && online) state.vinCheck.online = online; // the same car: the NHTSA comparison still stands
     state.step = was;
     await saveFlow();
-    return true;
+    return run === flowRun; // false when the post was dropped while it saved
   }
   const said = changed.map((k) => (k === 'price' ? `price ${money(before.price)} to ${money(state.price)}` : k === 'photos' ? 'photos' : (labels[k] || k).toLowerCase()));
   state.listing = null;
@@ -437,13 +444,18 @@ async function carStillCurrent() {
 async function startFlow(req) {
   await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
   endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
-  await clearFlow();
+  // This post's number: another post started, Stop queue, Skip or Back
+  // changes it, and this one then stops at its next step (flowRun).
+  const run = await clearFlow();
+  const dropped = () => run !== flowRun;
+  if (dropped()) return undefined;
   state.origin = req.origin;
   state.vin = String(req.vin || '').toUpperCase();
   state.dealerTabId = req.dealerTabId;
   state.windowId = req.windowId || null;
   state.queueMode = Boolean(req.queue);
   await loadSaved();
+  if (dropped()) return undefined;
   if (state.posted[state.vin]) {
     // posted meanwhile (from the panel's own list while a queue was paused,
     // from the popup, or on another computer): never a second form for it
@@ -458,10 +470,12 @@ async function startFlow(req) {
     return render();
   }
   await refreshGranted(); // current before canAutoOpen below looks at the photo servers
+  if (dropped()) return undefined;
   state.step = 'checking';
   setStatus('');
   render();
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
+  if (dropped()) return undefined;
 
   const car = await readCarNow();
   if (!car) return undefined; // stopped, and block() says why
@@ -470,12 +484,16 @@ async function startFlow(req) {
   state.message = 'Writing the description…';
   render();
   await maybeGuessColors();
+  if (dropped()) return undefined;
   await generate();
+  if (dropped()) return undefined;
   state.step = 'review';
   state.message = '';
   render();
   await saveFlow();
+  if (dropped()) return undefined;
   await pilotNote((p) => notePostStep(p, state.vin, 'reviewedAt'));
+  if (dropped()) return undefined;
   // In a queue, a car that passes every check goes straight to the form;
   // one with a warning waits here so the person sees it.
   if (state.queueMode && canAutoOpen()) await openForm();
@@ -637,13 +655,16 @@ async function maybeGuessColors(force = false) {
     state.colorGuess = { error: 'no photos to look at' };
     return;
   }
+  const run = flowRun;
   const rw = await rewriteWithKey(base);
+  let guess;
   try {
     const r = await guessColorsWithBackend({ endpoint: rw.endpoint, key: rw.key, photos, options: COLORS, origin: state.origin }); // the origin tells the service which store this is
-    state.colorGuess = r.ok ? { exterior: need.exterior ? r.exterior : '', interior: need.interior ? r.interior : '', confidence: r.confidence, model: r.model } : { error: r.error };
+    guess = r.ok ? { exterior: need.exterior ? r.exterior : '', interior: need.interior ? r.interior : '', confidence: r.confidence, model: r.model } : { error: r.error };
   } catch (e) {
-    state.colorGuess = { error: String((e && e.message) || e) };
+    guess = { error: String((e && e.message) || e) };
   }
+  if (run === flowRun) state.colorGuess = guess; // a dropped post's guess never lands in the next car's
 }
 
 // The rewrite settings as the writer should use them. Signed in, with the
@@ -668,10 +689,13 @@ function vehicleForText() {
 }
 
 async function generate({ useClaude } = {}) {
+  const run = flowRun;
   const s = state.settings;
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
+  if (run !== flowRun) return;
   const settings = { ...s, rewrite };
   const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
+  if (run !== flowRun) return; // a dropped post's text never lands in the next car's
   state.highlightsUsed = settleHighlights(state.highlights, state.vehicle.features);
   state.description = r.text;
   state.descriptionSource = r.source;
@@ -697,8 +721,11 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
 async function openForm({ probeOnly = false } = {}) {
+  const run = flowRun;
+  const dropped = () => run !== flowRun; // the post was dropped meanwhile: no tab for it, nothing filled
   const k = siteKeys(state.origin);
   const fresh = await chrome.storage.local.get([k.posted, k.postLog, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
+  if (dropped()) return;
   state.posted = fresh[k.posted] || state.posted;
   state.postLog = fresh[k.postLog] || state.postLog;
   state.syncState = fresh[k.sync] || state.syncState;
@@ -708,24 +735,31 @@ async function openForm({ probeOnly = false } = {}) {
     return;
   }
   if (descriptionStopped()) return;
-  if (!(await carStillCurrent())) return;
+  if (!(await carStillCurrent()) || dropped()) return;
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
   render();
   await saveFlow();
+  if (dropped()) return;
   await pilotNote((p) => notePostStep(p, state.vin, 'formOpenedAt'));
+  if (dropped()) return;
   try {
     const devOverrides = (await chrome.storage.local.get(GLOBAL_KEYS.devOverrides))[GLOBAL_KEYS.devOverrides]; // test hook: addresses and timings only, see formMap.js
+    if (dropped()) return;
     state.map = applyOverrides(FORM_MAP, devOverrides);
     const tab = await chrome.tabs.create({ url: state.map.createUrl, active: true });
+    if (dropped()) return; // the tab stays empty
     state.fbTabId = tab.id;
     await waitForTabLoad(tab.id);
+    if (dropped()) return;
     await sleep(state.map.settleMs ?? FORM_MAP.settleMs);
+    if (dropped()) return;
     if (probeOnly) await runProbe();
     else await runFill();
   } catch (e) {
+    if (dropped()) return;
     state.step = 'review';
     state.message = '';
     setStatus(String((e && e.message) || e), 'error');
@@ -735,25 +769,32 @@ async function openForm({ probeOnly = false } = {}) {
 }
 
 async function runFill() {
+  const run = flowRun;
+  const { map, listing } = state;
   state.message = 'Filling in the form…';
   render();
+  let fill;
   try {
     const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields, match: state.listing.match || {} }] });
-    state.fill = (inj && inj.result) || { filled: [], partial: [], blocked: [], photoLimit: { value: state.map.photoLimitDefault, verified: false } };
+    fill = (inj && inj.result) || { filled: [], partial: [], blocked: [], photoLimit: { value: map.photoLimitDefault, verified: false } };
   } catch (e) {
     // e.g. no permission for this page: the form is open, so let the salesperson copy everything by hand
-    state.fill = {
+    fill = {
       filled: [], partial: [],
-      blocked: state.map.fields.map((f) => ({ key: f.key, label: f.label, value: state.listing.fields[f.key] || '', reason: "couldn't run on this page: " + ((e && e.message) || e) })),
-      photoLimit: { value: state.map.photoLimitDefault, verified: false },
+      blocked: map.fields.map((f) => ({ key: f.key, label: f.label, value: listing.fields[f.key] || '', reason: "couldn't run on this page: " + ((e && e.message) || e) })),
+      photoLimit: { value: map.photoLimitDefault, verified: false },
     };
   }
+  if (run !== flowRun) return; // the post was dropped while the form filled: nothing of it lands in the next car's, and no photos follow
+  state.fill = fill;
   state.step = 'publish';
   state.detected = null;
   state.message = '';
   render();
   await saveFlow();
+  if (run !== flowRun) return;
   await pilotNote((p) => notePostStep(noteFill(p, { vin: state.vin, fill: state.fill, mapVersion: state.map.version, version: VERSION }), state.vin, 'filledAt'));
+  if (run !== flowRun) return;
   startWatcher();
   await attachPhotos();
 }
@@ -768,19 +809,24 @@ async function fillFromProbe() {
 
 // Read-only: which fields the map can find on the open page. Nothing is filled.
 async function runProbe() {
+  const run = flowRun;
+  const { map } = state;
   state.step = 'filling';
   state.message = 'Checking the form (nothing is filled)…';
   render();
+  let probe;
   try {
     const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: probeFormInPage, args: [state.map] });
-    state.probe = { ...((inj && inj.result) || { error: 'no result came back', found: [], missing: [], controls: [] }), extensionVersion: VERSION };
+    probe = { ...((inj && inj.result) || { error: 'no result came back', found: [], missing: [], controls: [] }), extensionVersion: VERSION };
   } catch (e) {
-    state.probe = {
+    probe = {
       error: "couldn't run on this page: " + ((e && e.message) || e),
       found: [], controls: [],
-      missing: state.map.fields.map((f) => ({ key: f.key, label: f.label, patterns: f.name })),
+      missing: map.fields.map((f) => ({ key: f.key, label: f.label, patterns: f.name })),
     };
   }
+  if (run !== flowRun) return;
+  state.probe = probe;
   state.step = 'probe';
   state.message = '';
   render();
@@ -790,6 +836,7 @@ async function runProbe() {
 // only: photos to try again (after Allow photos), added to what is already
 // attached; otherwise the car's photos up to the form's limit.
 async function attachPhotos(only = null) {
+  const run = flowRun; // the post was dropped meanwhile: no more photos, and nothing written into the next car's post
   const limit = (state.fill && state.fill.photoLimit && state.fill.photoLimit.value) || state.map.photoLimitDefault;
   let urls = state.listing.photos.slice(0, limit);
   if (only && state.photos) {
@@ -817,19 +864,23 @@ async function attachPhotos(only = null) {
     try {
       res = await chrome.runtime.sendMessage({ type: 'downloadPhotos', urls: batch, offset: i });
     } catch (e) {
+      if (run !== flowRun) return;
       state.photos.error = 'Downloading photos failed: ' + ((e && e.message) || e);
       break;
     }
+    if (run !== flowRun) return;
     const photos = (res && res.photos) || [];
     for (const p of photos.filter((p) => !p.ok)) state.photos.failed.push({ url: p.url, error: p.error });
     const good = photos.filter((p) => p.ok).map(({ name, type, dataUrl }) => ({ name, type, dataUrl }));
     if (good.length) {
       try {
         const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: attachPhotosInPage, args: [state.map, good] });
+        if (run !== flowRun) return;
         const r = inj && inj.result;
         if (r && r.ok) state.photos.attached += r.attached;
         else state.photos.error = (r && r.reason) || "couldn't attach the photos";
       } catch (e) {
+        if (run !== flowRun) return;
         state.photos.error = 'Attaching photos failed: ' + ((e && e.message) || e);
       }
     }
@@ -1482,15 +1533,23 @@ function formOpen() {
 }
 const finishFirstText = (button) => `Finish or stop the current post (${state.vehicle ? state.vehicle.name : nameOf(state.vin)}) first: its Marketplace form is open. Then click ${button} again.`;
 
-// A post request from the popup (Post, or Continue in the side panel). While
-// a form is open, a request for the same car leaves the panel on it, and one
-// for another car is refused until the person says whether that form
-// posted. Otherwise the new post starts; a review with nothing on Facebook
-// yet gives way to it, as before.
+// A post request from the popup (Post, or Continue in the side panel). A
+// request for the car already under way (being checked, reviewed, filled or
+// waiting for Publish) leaves the panel on it: the post goes on, the text
+// typed into the review is kept, and no second form is opened. A queue's
+// request takes that car into the queue. While a form is open, a request for
+// another car is refused until the person says whether that form posted.
+// Otherwise the new post starts; a review with nothing on Facebook yet gives
+// way to it, as before, and the post left behind stops (flowRun).
 async function postRequested(req) {
-  if (!formOpen()) return startFlow(req);
+  const sameCar = req.origin === state.origin && String(req.vin || '').toUpperCase() === state.vin;
+  if (!(sameCar && postUnderWay()) && !formOpen()) return startFlow(req);
   await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
-  if (req.origin === state.origin && String(req.vin || '').toUpperCase() === state.vin) {
+  if (sameCar) {
+    if (req.queue && !state.queueMode) {
+      state.queueMode = true;
+      await saveFlow();
+    }
     setStatus('');
     return render();
   }
@@ -1500,12 +1559,15 @@ async function postRequested(req) {
 
 // A form left open on Facebook when the panel closed comes back before a
 // post request is handled, so the request meets it (postRequested) instead
-// of starting over it.
-async function resumeOpenForm(origin) {
+// of starting over it; so does a post of the very car the request is for
+// that was still being checked or reviewed, with its typed text.
+async function resumeOpenForm(origin, req = null) {
   if (!origin) return;
   const k = siteKeys(origin).flow;
   const flow = (await chrome.storage.local.get(k))[k];
-  if (flow && flow.vin && FORM_STEPS.includes(flow.step)) await resumeFlow(origin, flow);
+  if (!flow || !flow.vin) return;
+  const sameCar = Boolean(req) && req.origin === origin && String(req.vin || '').toUpperCase() === flow.vin;
+  if (FORM_STEPS.includes(flow.step) || (sameCar && LIVE_STEPS.includes(flow.step))) await resumeFlow(origin, flow);
 }
 
 let lastUpkeepAt = 0;
@@ -2027,7 +2089,7 @@ async function init() {
   const lastPostOrigin = stored[GLOBAL_KEYS.lastPostOrigin];
   if (pending.length) {
     await chrome.storage.local.remove(REQUEST_KEYS);
-    if (pending[0].name === GLOBAL_KEYS.postRequest) await resumeOpenForm(lastPostOrigin);
+    if (pending[0].name === GLOBAL_KEYS.postRequest) await resumeOpenForm(lastPostOrigin, pending[0].req);
     return handlers[pending[0].name](pending[0].req);
   }
   if (lastPostOrigin) {
