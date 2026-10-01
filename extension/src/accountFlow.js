@@ -20,8 +20,9 @@
 // What a sync writes, all under the key's lock (src/storage.js): the merged
 // registry to posted:<origin> (colleagues' entries marked `mine: false`, so
 // the cap and the rescan flags stay the salesperson's own), closed flags to
-// pilot:<origin>, and the state for the next call (since, the keys of the
-// salesperson's own posts it sent or received, dealership, role, the plan,
+// pilot:<origin>, and the state for the next call (since, this machine's
+// clock when the sync began, the keys of the salesperson's own posts it
+// sent or received, dealership, role, the plan,
 // the server's count of today's posts) to sync:<origin>. The access token is
 // only ever read from the session in chrome.storage.local; it is never
 // copied into the settings or the synced profile.
@@ -262,7 +263,11 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
   }
   const since = state && state.since ? state.since : null;
   const userId = (session.user && session.user.id) || '';
-  const body = syncPayload({ origin: o, posted, known: state && state.known, pilot, scan: summary, since, userId, now: new Date(now) }); // `today` is built from this clock
+  // The pilot's attempts and flags go up by this machine's own clock (the
+  // last successful sync's start, `localSince`), never by the server's
+  // `since`: a clock running behind would otherwise keep them home for good.
+  const localSince = new Date(now).toISOString(); // taken before storage was read
+  const body = syncPayload({ origin: o, posted, known: state && state.known, pilot, scan: summary, since, localSince: state && state.localSince, userId, now: new Date(now) }); // `today` is built from this clock
   // A clear while the request is out (Clear everything for this website)
   // removes the sync state, and a sync state missing when the answer comes
   // back is how that clear is seen: nothing the request carried is then
@@ -346,7 +351,7 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
     // A state gone by now means a clear landed after the merge: nothing is
     // written back, and the next sync is a first sync, which takes nothing
     // down and refills the registry from the server.
-    next = await updateKey(k.sync, (prev) => (prev ? nextSyncState(prev, answer, { today: body.today, sent: body.posted, userId, held }) : undefined), storage);
+    next = await updateKey(k.sync, (prev) => (prev ? nextSyncState(prev, answer, { today: body.today, sent: body.posted, userId, held, localSince }) : undefined), storage);
   } catch (e) {
     return { ok: false, error: storageErrorText(e) };
   }

@@ -221,7 +221,10 @@ test('supabase/README.md says what the code does: the code folding, the known-ke
   assert.match(readme, /the answer looks back 10 minutes before `since`/);
   assert.match(readme, /matches none of their dealerships gets 403/);
   assert.match(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/);
-  assert.match(readme, /The pilot lists are the one place a client clock still meets `since`/);
+  // the pilot lists go up by the machine's own clock, never by the server's `since`
+  assert.match(readme, /The pilot lists never meet `since`: their stamps are the machine's own clock/);
+  assert.match(readme, /`localSince`, its own clock when its last successful sync began/);
+  assert.doesNotMatch(readme, /a clock running far behind can keep an attempt or a flag from going up/);
 });
 
 // Security audit (2026-09-29): invite codes expire, die with their maker, give one answer and are throttled;

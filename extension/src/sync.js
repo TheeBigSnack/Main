@@ -3,12 +3,13 @@
 // touches the network or chrome.storage. The caller (the popup, the side
 // panel or the worker, wired in with the Settings UI) does:
 //
-//   const body = syncPayload({ origin, posted, pilot, scan, since, known: state.known, userId });
+//   const localSince = new Date().toISOString(); // this machine's clock, before reading storage
+//   const body = syncPayload({ origin, posted, pilot, scan, since, localSince: state.localSince, known: state.known, userId });
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
 //   posted = mergeRegistry(posted, response, { since, userId, sent: body.posted });
 //   pilot  = mergeFlags(pilot, response);
-//   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId })
-//            // since, known, dealership id and role, the plan, the server's count of today's posts
+//   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId, localSince })
+//            // since, localSince, known, dealership id and role, the plan, the server's count of today's posts
 //
 // The state is per website; the wiring keeps it under a `sync` entry added
 // to SITE_KEY_NAMES in src/storageKeys.js, so clearing a website removes it.
@@ -48,6 +49,15 @@ export const SYNC_VERSION = 1;
 // A taken-down listing older than this is not sent back to a machine that
 // has never synced (it cannot have the entry anyway).
 export const TAKEN_DOWN_WINDOW_DAYS = 90;
+
+// The pilot's post attempts and closed flags go up when one of their stamps
+// is later than this long before `localSince`: the machine's own clock when
+// its last successful sync began, so the stamps and the cutoff come from one
+// clock however far it is from the server's. The margin covers an entry
+// stamped just before that sync read storage and written just after, and a
+// clock set back a little between two syncs. Sending one again is harmless:
+// attempts are upserted on their key and a closed item is never reopened.
+export const UPLOAD_MARGIN_MS = 10 * 60 * 1000;
 
 // At most this many keys in `known`: the sync function's cap on the rows of
 // one request (MAX_ROWS), which a registry that syncs at all stays under. A
@@ -222,15 +232,20 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
  *           received at its last sync (the state's `known`, nextSyncState);
  *           the function takes down only those missing from `posted`, so a
  *           machine that never synced takes nothing down
- *   pilot:  posts that changed after `since`, every open flag, and the flags
- *           closed after `since` (all of them the first time)
+ *   pilot:  every open flag, and the posts and closed flags with a stamp
+ *           later than UPLOAD_MARGIN_MS before `localSince` (all of them
+ *           when there is none: the first sync, or the first one after an
+ *           update from a build that kept no `localSince`)
  *   scan:   this scan's counts, or null when nothing was scanned
- *   since:  the serverTime of the last answer, or null
+ *   since:  the serverTime of the last answer, or null; it only picks what
+ *           comes back down, never what goes up, since the stamps above are
+ *           this machine's clock and the server's clock is another
+ *   localSince: this machine's clock when its last successful sync began
  *   today:  the caller's local calendar day ({ from, to }, localDayRange), so
  *           the function can count their posts in it (postsToday); `now` is
  *           the moment, a parameter for the tests
  */
-export function syncPayload({ origin = '', posted = {}, known = null, pilot = null, scan = null, since = null, userId = '', now = new Date() } = {}) {
+export function syncPayload({ origin = '', posted = {}, known = null, pilot = null, scan = null, since = null, localSince = null, userId = '', now = new Date() } = {}) {
   const own = {};
   for (const [key, e] of Object.entries(isObject(posted) ? posted : {})) {
     if (!isObject(e) || !isOwn(e, userId)) continue;
@@ -246,12 +261,14 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
     };
   }
   const p = withPilotDefaults(pilot);
-  const posts = p.posts.filter((a) => changedAfter(since, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
+  const last = ms(localSince);
+  const cutoff = last === null ? null : last - UPLOAD_MARGIN_MS;
+  const posts = p.posts.filter((a) => changedAfter(cutoff, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
   // An open flag goes up on every sync: its prices change in place when the
   // website price moves again while it is open (noteFlags), with no new
   // stamp, and the function's step 4 applies the new prices to the open item
-  // or changes nothing. A closed flag goes up once more after it closed.
-  const flags = p.flags.filter((f) => !f.doneAt || changedAfter(since, f.flaggedAt, f.doneAt));
+  // or changes nothing. A closed flag goes up again after it closed.
+  const flags = p.flags.filter((f) => !f.doneAt || changedAfter(cutoff, f.flaggedAt, f.doneAt));
   return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, known: keyList(known), pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
 }
 
@@ -450,7 +467,9 @@ export function planFrom(plan) {
 // known and never taken down from here. Without `held` (direct callers), the
 // caller's own listed rows in the answer stand in. Only an answer that
 // synced (it carries a serverTime) replaces it; a 402 keeps the last one.
-export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null } = {}) {
+// `localSince` is this machine's clock when the sync began (before it read
+// storage); only an answer that synced keeps it, for the next syncPayload.
+export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null, localSince = null } = {}) {
   const prev = isObject(previous) ? previous : {};
   const r = isObject(response) ? response : {};
   const d = isObject(r.dealership) ? r.dealership : {};
@@ -462,6 +481,7 @@ export function nextSyncState(previous, response, { today = null, sent = null, u
   return {
     version: SYNC_VERSION,
     since: isoOrNull(r.serverTime) || prev.since || null,
+    localSince: (synced && isoOrNull(localSince)) || isoOrNull(prev.localSince) || null,
     known: synced ? keyList([...sentKeys(sent), ...received]) : keyList(prev.known),
     dealershipId: d.id || prev.dealershipId || null,
     dealershipName: d.name || prev.dealershipName || '',

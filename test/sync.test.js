@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN } from '../extension/src/sync.js';
+import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, UPLOAD_MARGIN_MS } from '../extension/src/sync.js';
 import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
@@ -69,7 +69,7 @@ test('scan summary and row', () => {
   });
 });
 
-test('syncPayload: the caller\'s whole registry, only the pilot entries that changed since the last sync, the scan and since', () => {
+test('syncPayload: the caller\'s whole registry, only the pilot entries that changed since the last sync (by this machine\'s clock), the scan and since', () => {
   const posted = {
     [VIN_A]: { name: 'A', price: 1, postedAt: T(0), listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', postedWith: '0.4.0' },
     [VIN_C]: { name: 'C', price: 3, postedAt: T(0), userId: U2 },
@@ -78,7 +78,8 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   pilot = endPost(pilot, VIN_A, 'posted', { at: T(1) });
   pilot = beginPost(pilot, { vin: VIN_B, at: T(20) });
   pilot = noteFlags(pilot, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [], warnings: [] }, { at: T(2) });
-  const body = syncPayload({ origin: ORIGIN, posted, pilot, scan: { takenAt: T(30), cars: 10 }, since: T(15), userId: U1 });
+  const localSince = new Date(Date.parse(T(15)) + UPLOAD_MARGIN_MS).toISOString(); // T(15) once the margin is taken off
+  const body = syncPayload({ origin: ORIGIN, posted, pilot, scan: { takenAt: T(30), cars: 10 }, since: T(15), localSince, userId: U1 });
   assert.equal(body.version, SYNC_VERSION);
   assert.equal(body.origin, ORIGIN);
   assert.deepEqual(Object.keys(body.posted), [VIN_A], 'the colleague\'s entry is theirs to sync');
@@ -97,10 +98,12 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   assert.deepEqual(first.known, []);
   // a flag closed after since goes up again so the server closes it too
   const closed = resolveFlag(pilot, VIN_A, 'takeDown', { at: T(16), how: 'manual' });
-  assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closed, since: T(15), userId: U1 }).pilot.flags.length, 1);
+  assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closed, since: T(15), localSince, userId: U1 }).pilot.flags.length, 1);
   // a flag closed before since is already closed on the server
   const closedBefore = resolveFlag(pilot, VIN_A, 'takeDown', { at: T(14), how: 'manual' });
-  assert.deepEqual(syncPayload({ origin: ORIGIN, posted, pilot: closedBefore, since: T(15), userId: U1 }).pilot.flags, []);
+  assert.deepEqual(syncPayload({ origin: ORIGIN, posted, pilot: closedBefore, since: T(15), localSince, userId: U1 }).pilot.flags, []);
+  // the server's since never decides what goes up: with no localSince (a state from an older build) everything goes once
+  assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closedBefore, since: T(15), userId: U1 }).pilot.posts.length, 2);
   // fills never leave the browser
   assert.equal('fills' in body.pilot, false);
 });
@@ -109,7 +112,7 @@ test('syncPayload: an open price flag whose website price moved again goes up wi
   let pilot = noteFlags(null, { takeDown: [], priceUpdates: [{ vin: VIN_A, name: 'A', yours: true, from: 20000, to: 19000 }], warnings: [] }, { at: T(2) });
   pilot = noteFlags(pilot, { takeDown: [], priceUpdates: [{ vin: VIN_A, name: 'A', yours: true, from: 20000, to: 18000 }], warnings: [] }, { at: T(20) });
   assert.equal(pilot.flags[0].flaggedAt, T(2), 'the open item keeps its stamp');
-  const body = syncPayload({ origin: ORIGIN, posted: {}, pilot, since: T(15), userId: U1 });
+  const body = syncPayload({ origin: ORIGIN, posted: {}, pilot, since: T(15), localSince: T(15), userId: U1 });
   assert.deepEqual(body.pilot.flags.map((f) => [f.vin, f.from, f.to, f.flaggedAt]), [[VIN_A, 20000, 18000, T(2)]]);
 });
 
@@ -250,10 +253,11 @@ test('mergeFlags: a flag closed on another machine closes here; nothing is added
 test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {
   const today = { from: T(0), to: new Date(Date.UTC(2026, 10, 17, 9, 0)).toISOString() };
   const s = nextSyncState(null, { serverTime: T(1), dealership: { id: D, name: 'Example Motors' }, role: 'salesperson' });
-  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), known: [], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: null, postsToday: null }, 'an answer without a plan or a count (an older function) leaves both null');
+  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), localSince: null, known: [], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: null, postsToday: null }, 'an answer without a plan or a count (an older function) leaves both null');
   assert.equal(nextSyncState(s, { ok: false }).since, T(1), 'a failed answer keeps the last state');
   const plan = { state: 'pilot', pilotEndsAt: T(30), currentPeriodEnd: null, seats: 5 };
-  const s2 = nextSyncState(s, { serverTime: T(2), plan, postsToday: 3 }, { today });
+  const s2 = nextSyncState(s, { serverTime: T(2), plan, postsToday: 3 }, { today, localSince: T(1, 50) });
+  assert.equal(s2.localSince, T(1, 50), 'the machine\'s own clock when this sync began, for what goes up next');
   assert.deepEqual(s2.plan, plan);
   assert.deepEqual(s2.postsToday, { count: 3, from: today.from, to: today.to });
   assert.equal(s2.dealershipName, 'Example Motors', 'what the answer leaves out is kept');
@@ -269,6 +273,7 @@ test('the state kept for the next sync: since, the dealership, the role, the pla
   const lapsed = nextSyncState(s2, { ok: false, error: 'lapsed', code: 'lapsed', plan: { state: 'lapsed', pilotEndsAt: T(0), currentPeriodEnd: null, seats: null } });
   assert.deepEqual(lapsed.plan, { state: 'lapsed', pilotEndsAt: T(0), currentPeriodEnd: null, seats: null });
   assert.equal(lapsed.since, T(2));
+  assert.equal(nextSyncState(s2, { ok: false, code: 'lapsed' }, { localSince: T(9) }).localSince, T(1, 50), 'an answer that did not sync keeps the last localSince');
   assert.equal(lapsed.lastSyncAt, T(2));
   assert.equal(lapsed.postsToday, null);
   // an answer without a plan keeps the last one learned
