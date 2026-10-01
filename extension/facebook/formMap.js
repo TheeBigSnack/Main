@@ -112,6 +112,8 @@ export const FORM_MAP = Object.freeze({
 // keys can be overridden (addresses and timings), never the fields, their
 // options or neverFill, so nothing written to storage can change what the
 // fill code may touch (non-negotiable 1; test/posting.test.js checks it).
+// The side panel builds its map this way for every form, and a saved post
+// does not carry one: a reopened panel builds it again.
 export const DEV_OVERRIDE_KEYS = Object.freeze(['createUrl', 'listingUrlPattern', 'afterPublishPatterns', 'yourListingsUrl', 'settleMs', 'recheckMs']);
 
 export function applyOverrides(map, overrides) {

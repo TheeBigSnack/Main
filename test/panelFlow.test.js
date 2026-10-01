@@ -19,7 +19,7 @@ import { basisPrice } from '../extension/src/rescan.js';
 import { draftRecord } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
-import { FORM_MAP } from '../extension/facebook/formMap.js';
+import { FORM_MAP, applyOverrides } from '../extension/facebook/formMap.js';
 import { vehicle } from './helpers.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
@@ -151,6 +151,27 @@ test('a car marked as posted while it waits at review gets no form: Open the Mar
   const free = formOpener({ description, extra: { stopPosted: never('stopPosted') } });
   await free.fns.openForm();
   assert.deepEqual(free.forms, [`${v.vin} while vin=${v.vin}`]);
+});
+
+// A post saved at the dry run or at Publish comes back when the panel
+// reopens. The form map is built again from formMap.js (with the test hook's
+// addresses only), never taken from the saved post: a map fixed in a newer
+// version applies, and nothing in storage widens what the fill may touch.
+test('a post that comes back when the panel reopens uses the form map this version ships, never one saved with the post', async () => {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const saved = { ...FORM_MAP, version: 'from-storage', fields: [{ key: 'publish', label: 'Publish', kind: 'choice', name: ['^next\\b|^publish\\b'] }], fileInput: '[role="button"]', listingUrlPattern: '.' };
+  assert.ok(!FLOW_FIELDS.includes('map'), 'a saved post does not carry the map');
+  for (const step of ['probe', 'publish']) {
+    const o = formOpener({ description, step: 'idle', stored: { devOverrides: { createUrl: 'http://127.0.0.1:1/marketplace/create/vehicle', fields: [] } }, extra: { applyOverrides } });
+    await o.fns.resumeFlow(o.state.origin, { vin: v.vin, step, vehicle: v, price: v.price, description, fbTabId: null, map: saved });
+    assert.equal(o.state.step, step);
+    assert.equal(o.state.map.fields, FORM_MAP.fields, `${step}: the fields are formMap.js's`);
+    assert.equal(o.state.map.fileInput, FORM_MAP.fileInput);
+    assert.equal(o.state.map.listingUrlPattern, FORM_MAP.listingUrlPattern);
+    assert.equal(o.state.map.version, FORM_MAP.version, `${step}: the version reported is this one's`);
+    assert.equal(o.state.map.createUrl, 'http://127.0.0.1:1/marketplace/create/vehicle', 'the test hook still moves the address');
+  }
 });
 
 test('one list action at a time, and the action itself still runs inside the click', async () => {

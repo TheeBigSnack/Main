@@ -75,7 +75,15 @@ test('the test hook can only move addresses and timings, never the fields the fi
   // the panel never spreads storage over the map any other way
   const panel = read('../extension/sidepanel.js');
   assert.ok(!/\.\.\.FORM_MAP/.test(panel), 'sidepanel.js must build its map with applyOverrides only');
-  assert.equal((panel.match(/applyOverrides\(FORM_MAP, devOverrides\)/g) || []).length, 2);
+  // every map the panel uses is formMap.js's own or built from it with applyOverrides: none comes back from a saved post
+  const flowFields = new Function(`return ${/const FLOW_FIELDS = (\[[^\]]*\]);/.exec(panel)[1]}`)();
+  assert.ok(!flowFields.includes('map'), 'a saved post must not carry the form map (FLOW_FIELDS)');
+  const assigned = [...panel.matchAll(/state\.map\s*=(?!=)\s*([^;\n]+)/g)].map((m) => m[1].trim());
+  assert.ok(assigned.length >= 3, 'the panel builds its map when a form opens, an upkeep starts and a post comes back');
+  for (const rhs of assigned) assert.ok(['FORM_MAP', 'applyOverrides(FORM_MAP, devOverrides)'].includes(rhs), `state.map = ${rhs}`);
+  const inAssign = [...panel.matchAll(/Object\.assign\(state,[\s\S]*?\}\);/g)].flatMap((m) => [...m[0].matchAll(/\bmap:\s*([^,}\n]+)/g)].map((x) => x[1].trim()));
+  for (const rhs of inAssign) assert.equal(rhs, 'FORM_MAP', `Object.assign(state, { map: ${rhs} })`);
+  assert.equal((panel.match(/applyOverrides\(FORM_MAP, devOverrides\)/g) || []).length, 3);
 });
 
 // The text of a function declared in `src`, from `function name(` to its

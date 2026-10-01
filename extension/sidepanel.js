@@ -164,7 +164,11 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
+// What a post under way keeps across a closed panel. Not the form map: a
+// reopened panel builds it from formMap.js again (resumeFlow), so nothing
+// saved can change what the fill code may touch, and a map fixed in a newer
+// version applies to a post saved before the update.
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -636,7 +640,8 @@ async function block(message, code = 'blocked') {
 async function resumeFlow(origin, flow) {
   state.origin = origin;
   for (const f of FLOW_FIELDS) if (f in flow) state[f] = flow[f];
-  if (!state.map) state.map = FORM_MAP;
+  const devOverrides = (await chrome.storage.local.get(GLOBAL_KEYS.devOverrides))[GLOBAL_KEYS.devOverrides]; // test hook: addresses and timings only, see formMap.js
+  state.map = applyOverrides(FORM_MAP, devOverrides);
   await loadSaved();
   if (state.step === 'checking' || state.step === 'filling') state.step = state.vehicle ? 'review' : 'idle';
   render();
