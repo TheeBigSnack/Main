@@ -78,6 +78,18 @@ test('the Supabase workflow runs by hand only, against the committed project, an
 // The workflow's leading comment block as one line of text
 const headerOf = (yml) => yml.split('\n').filter((l) => l.startsWith('#')).map((l) => l.replace(/^#\s?/, '')).join(' ').replace(/\s+/g, ' ');
 
+// workflow_dispatch can start the workflow from any branch that carries it; the
+// job itself refuses every branch but the default, as manager.yml's does, so a
+// branch's edited migration or function never reaches production by mistake
+test('the Supabase job runs only when started on the default branch, and the header and the doc say what that guards', () => {
+  assert.match(supabase, /^jobs:\n  run:\n    if: github\.ref_name == github\.event\.repository\.default_branch\n/m, 'a job-level guard, before anything runs');
+  assert.doesNotMatch(supabase, /branches:/, 'no branch name is written into the workflow');
+  const header = headerOf(supabase);
+  assert.match(header, /The job runs only when started on the repository's default branch; started on any other branch it is skipped and nothing is deployed\./);
+  assert.match(header, /a run uses the branch's own copy of this file, which could drop the check, so the environment's branch limit below is what keeps the secrets from another branch\./);
+  assert.match(read('docs/production-setup.md'), /runs by hand only, from the repository's \*\*Actions\*\* tab or by Claude through GitHub, and only on the default branch: started on any other branch, its job is skipped and nothing is deployed\./);
+});
+
 test('the workflow and the doc say a run waits for the owner only once he is a required reviewer', () => {
   // A run with no required reviewer on the environment starts at once; saying it "waits for the owner's approval" told him a gate existed that did not
   const header = headerOf(supabase);

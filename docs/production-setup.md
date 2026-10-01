@@ -53,7 +53,7 @@ Put them on the environment, not under the repository's own Secrets: a repositor
 
 ## Step 3. The database and the functions [Claude, with the owner's go]
 
-The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, from the repository's **Actions** tab or by Claude through GitHub. It refuses to start unless the committed config files name the project in `SUPABASE_PROJECT_REF`, and it ends every run with `npm run check-deploy`.
+The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, from the repository's **Actions** tab or by Claude through GitHub, and only on the default branch: started on any other branch, its job is skipped and nothing is deployed. That guards against a mistake only (a branch's own copy of the workflow could leave the check out), so step 2's branch limit on the `production` environment is still what keeps the secrets from other branches. It refuses to start unless the committed config files name the project in `SUPABASE_PROJECT_REF`, and it ends every run with `npm run check-deploy`.
 
 1. **plan**: shows the migrations in `supabase/migrations` the project has not applied yet. Changes nothing.
 2. **database**: applies them. When a change brings a new migration, run this before **functions**: a function may write the column it adds (`0009_cancel_at.sql` and the `billing` function, for one). **functions** checks: it deploys nothing while a migration is still to be applied.

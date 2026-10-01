@@ -1,6 +1,11 @@
 # Deploys the database and the Edge Functions to the production Supabase
 # project, by hand only (Actions, Supabase, Run workflow): nothing here runs
 # on a push. docs/production-setup.md, step 3, says when to run each step.
+# The job runs only when started on the repository's default branch; started
+# on any other branch it is skipped and nothing is deployed. That stops a
+# mistake, not a determined branch: a run uses the branch's own copy of this
+# file, which could drop the check, so the environment's branch limit below
+# is what keeps the secrets from another branch.
 #
 #   plan       links the project and shows which migrations db push would
 #              apply (supabase db push --dry-run); changes nothing
@@ -62,6 +67,7 @@ concurrency:
 
 jobs:
   run:
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     # verify starts a local database in Docker on the runner for db diff,
     # which takes a few minutes
