@@ -1,0 +1,48 @@
+# Deploys the website (site/) to GitHub Pages: on every push to the default
+# branch and by hand (Actions, Pages, Run workflow). Pages must be set to the
+# GitHub Actions source once (docs/website.md). The claude/* and other work
+# branches never deploy. Nothing is built: site/ is committed as served, and
+# the two --check runs refuse the deploy when a committed page differs from
+# what its generator would write (someone edited an output by hand, or
+# changed site/config.js, a fragment or a legal text without rerunning it).
+name: Pages
+
+on:
+  push:
+    branches: [master]   # the repository's default branch; confirm under Settings, General, Default branch
+  workflow_dispatch:
+
+# The deploy reads the checkout and asks GitHub's OIDC provider for the
+# token that deploy-pages needs; nothing writes to the repository.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and a running one finishes: Pages does not take a
+# cancelled deploy well.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      # Both checks need only Node: no npm ci, no browser.
+      - run: node scripts/site-pages.mjs --check
+      - run: node scripts/legal-pages.mjs --check
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

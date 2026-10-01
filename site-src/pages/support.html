@@ -1,0 +1,65 @@
+
+    <section class="intro" aria-labelledby="page-h">
+      <div class="wrap narrow">
+        <h1 id="page-h">Support</h1>
+        <p class="lead">How to get help with Lot Sync, what to send with a report, what support never asks for, and how to ask for your data to be exported or deleted.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="reach-h">
+      <div class="wrap narrow">
+        <h2 id="reach-h">How to reach us</h2>
+        {{#supportEmail}}<p>Email <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>. A salesperson may also send a report to their manager, who forwards it.</p>{{/supportEmail}}
+        {{^supportEmail}}<p>Tell your manager or the person who set Lot Sync up for your store; a public support address will be listed here once it exists.</p>{{/supportEmail}}
+        <p>Every support request is answered within one business day: a reply with the fix, a workaround, or what happens next. A report about a Facebook warning is answered the same day with the same advice the posting rules give: stop posting and tell your manager. No promise is made about what Facebook will do.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="send-h">
+      <div class="wrap narrow">
+        <h2 id="send-h">What to send</h2>
+        <ol>
+          <li><b>The report from the panel.</b> When the side panel shows <b>Couldn't fill</b>, that list; or the text from <b>Copy report</b> on the dry run (<b>Open the form and check fields only (nothing filled)</b>). It says what the form showed, which is what the fix is made from.</li>
+          <li><b>The version.</b> The first line of <b>Settings</b> in the popup. A fix already shipped in a newer zip is the most common answer.</li>
+          <li><b>The website.</b> The address of the dealership's used inventory page, and the tab you were on when it happened.</li>
+          <li><b>What was on screen.</b> In your own words: which button you clicked, what the panel said, what Facebook showed. A screenshot of the panel is welcome. A screenshot of Facebook is fine only with no messages, buyer names or account details in it.</li>
+        </ol>
+        <p>Never send a Facebook password, a cookie, a token, a two-factor code or a login link. Support never asks for them, and a request for one is a sign something is wrong.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="report-h">
+      <div class="wrap narrow">
+        <h2 id="report-h">Report a problem from the extension</h2>
+        <p>In the popup, open <b>Settings</b>, then <b>Report a problem</b>, and click <b>Copy problem report</b>. It copies the version, the website, the adapter, the last scan, the last error and the field names of the last fill, for the same message as the panel's report. It contains no names, no cars and no listing links. Paste it into your message with the four items above.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="privacy-h">
+      <div class="wrap narrow">
+        <h2 id="privacy-h">Privacy requests</h2>
+        <p>The <a href="{{root}}legal/privacy/">privacy policy</a> lets a dealership ask for its records to be exported or deleted, and a person ask for their own data to be deleted. Three request types:</p>
+        <ul class="plain">
+          <li><b>Export a dealership's records.</b> A manager of that dealership asks. The request comes from, or is confirmed by a reply from, the email of an account that is a manager of that dealership. The file goes to that address and nowhere else.</li>
+          <li><b>Delete a dealership.</b> A manager of that dealership asks, verified as for an export, and then by a phone call to the dealership's main number, taken from its own website, before anything is deleted. A delete cannot be undone.</li>
+          <li><b>Forget a person.</b> The person asks for themself, from, or confirmed by a reply from, the email of their own Lot Sync account.</li>
+        </ul>
+        <p>The first reply goes out within one business day, like every request, and the request is finished within 30 days of being verified. Replies go to the address on the account, never to a new address the request gives; a request that cannot be verified gets a reply saying what is needed, and nothing is run until it is.</p>
+        <p>Three things the database cannot reach, so the request cannot cover them: your own browser (Settings has <b>Clear everything for this website</b> and <b>Forget my synced profile</b>), your listings on Facebook (yours to delete; Lot Sync never does), and copies your dealership already holds.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="never-h">
+      <div class="wrap narrow">
+        <h2 id="never-h">What support never does</h2>
+        <ul class="wont">
+          <li>Touch a salesperson's Facebook account: never logs in as them, never takes remote control of a Facebook tab, never publishes, edits, marks sold or deletes a listing for them, and never asks them to hand over the account for a quick look. If a listing must change, the salesperson changes it.</li>
+          <li>Ask for passwords, cookies, session tokens, two-factor codes or login links, for Facebook or for anything else.</li>
+          <li>Ask for buyer names, messages or anything from Marketplace conversations.</li>
+          <li>Tell a person that a listing is allowed or that Meta has signed off on anything. The honest line stays the same: a person clicking Publish is the safest design available, not a guarantee.</li>
+          <li>Install anything on a salesperson's computer other than the extension's zip, or change their Chrome settings beyond the install steps.</li>
+          <li>Send a dealership's export to anyone but the verified manager who asked, or delete anything for a request that has not been verified.</li>
+        </ul>
+        <p>The rules every salesperson reads before posting are on the <a href="{{root}}legal/posting-rules/">posting rules</a> page; the short answers to the common questions are in the <a href="{{root}}faq/">FAQ</a>.</p>
+      </div>
+    </section>

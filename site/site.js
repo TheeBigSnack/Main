@@ -1,10 +1,15 @@
-// Lot Sync landing page. Three jobs: fill the pricing section from
-// pricing.json (the one pricing config, copied from marketing/), send the demo
-// request form, and show the Start a free pilot links once config.js names the
-// manager view. Everything else on the page works with this file switched off;
-// the pricing numbers are already in the HTML as fallback text.
+// Lot Sync website. Three jobs: fill the pricing numbers from pricing.json
+// (the one pricing config, copied from marketing/), send the demo request
+// form, and show the Start a free pilot links once config.js names the
+// manager view. Every page works with this file switched off; the pricing
+// numbers are already in the HTML as fallback text. The home page and the
+// pricing page load it; <html data-root> says where site/ is from the page.
 
 import { SITE } from './config.js';
+
+// Where site/ is from this page ('./' on the home page, '../' on /pricing/),
+// written by scripts/site-pages.mjs into <html data-root>.
+const ROOT = (typeof document !== 'undefined' && document.documentElement && document.documentElement.dataset && document.documentElement.dataset.root) || './';
 
 const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 const money = (n) => '$' + Number(n).toLocaleString('en-US');
@@ -25,7 +30,7 @@ const FORMAT = {
 async function fillPricing() {
   let pricing;
   try {
-    const res = await fetch('./pricing.json', { cache: 'no-store' });
+    const res = await fetch(ROOT + 'pricing.json', { cache: 'no-store' });
     if (!res.ok) return null;
     pricing = await res.json();
   } catch {
@@ -69,27 +74,44 @@ function fields(form) {
   return out;
 }
 
+// Only reached when SITE.demoMailto is set.
 function mailtoFor(data) {
   const lines = Object.entries(data).filter(([k]) => k !== 'company_url').map(([k, v]) => `${k}: ${v}`);
   const sep = SITE.demoMailto.includes('?') ? '&' : '?';
   return `${SITE.demoMailto}${sep}subject=${encodeURIComponent('Lot Sync demo request')}&body=${encodeURIComponent(lines.join('\n'))}`;
 }
 
+// The demo request form is open once config.js names an endpoint or an
+// inbox. Until then the form stays hidden and the page says it is not open
+// yet, without any address.
 function wireForm() {
   const form = document.getElementById('demo-form');
   const status = document.getElementById('demo-status');
+  const closed = document.getElementById('demo-closed');
   if (!form || !status) return;
+  const endpoint = String(SITE.demoEndpoint || '');
+  const mailto = String(SITE.demoMailto || '');
+  if (!endpoint && !mailto) {
+    form.hidden = true;
+    if (closed) closed.hidden = false;
+    return;
+  }
+  form.hidden = false;
+  if (closed) closed.hidden = true;
+  const button = form.querySelector('button[type="submit"]');
+  if (button) button.disabled = false;
   const say = (text, kind) => {
     status.textContent = text;
     status.className = 'status ' + (kind || '');
   };
-  const mail = SITE.demoMailto.replace(/^mailto:/, '');
-  const failed = 'That did not send. Please try again, or email ' + mail + '.';
+  const mail = mailto.replace(/^mailto:/, '').replace(/\?.*$/, '');
+  const failed = 'That did not send. Please try again' + (mail ? ', or email ' + mail + '.' : '.');
+  const also = mail ? ' You can also email ' + mail + '.' : '';
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const data = fields(form);
-    if (!SITE.demoEndpoint) {
+    if (!endpoint) {
       // No endpoint yet: open the visitor's own mail app with the fields in the body.
       window.location.href = mailtoFor(data);
       say('Your email app should open with the request filled in. If it did not, email ' + mail + '.', 'ok');
@@ -97,7 +119,6 @@ function wireForm() {
     }
     // SITE.demoEndpoint is the lead Edge Function, which stores the request in
     // demo_requests (PLAN.md M5). The form is sent there and nowhere else.
-    const button = form.querySelector('button[type="submit"]');
     if (button) button.disabled = true;
     say('Sending…');
     try {
@@ -117,7 +138,7 @@ function wireForm() {
         }
         const field = answer.field ? form.elements.namedItem(answer.field) : null;
         if (field && typeof field.focus === 'function') field.focus();
-        say(answer.error.charAt(0).toUpperCase() + answer.error.slice(1) + '. You can also email ' + mail + '.', 'error');
+        say(answer.error.charAt(0).toUpperCase() + answer.error.slice(1) + '.' + also, 'error');
         return;
       }
       form.reset();

@@ -1,23 +1,36 @@
 #!/usr/bin/env node
 // Writes the Terms of Service, the Privacy Policy and the posting rules as
-// pages of the landing site, from the Markdown the attorney reviews:
+// pages of the website, from the Markdown the attorney reviews:
 //
-//   legal/terms-of-service.md  -> site/legal/terms.html
-//   legal/privacy-policy.md    -> site/legal/privacy.html
-//   legal/posting-rules.md     -> site/legal/posting-rules.html
+//   legal/terms-of-service.md  -> site/legal/terms/index.html          (/legal/terms/)
+//   legal/privacy-policy.md    -> site/legal/privacy/index.html        (/legal/privacy/)
+//   legal/posting-rules.md     -> site/legal/posting-rules/index.html  (/legal/posting-rules/)
 //
-// Run:  npm run legal-pages                         -> writes the three pages
+// and a redirect stub at each document's old address (site/legal/terms.html,
+// privacy.html, posting-rules.html) that sends the browser on to the new
+// page, so a link saved before the move still works.
+//
+// Run:  npm run legal-pages                         -> writes the six files
 //       node scripts/legal-pages.mjs --check        -> writes nothing; exit 1 when a
-//                                                      page differs from what it would write
+//                                                      file differs from what it would write
+//
+// The pages take their shared header, navigation, breadcrumbs, footer, head
+// tags and structured data from scripts/site-pages.mjs (renderPage), so they
+// look and behave like every other page of the site; the page map there
+// (PAGES, the kind 'legal' entries) names each document's address, title and
+// description. Everything that needs the site's absolute address comes from
+// site/config.js siteUrl and is left out while it is ''.
 //
 // legal/legal-status.json says whether the texts are still drafts. While
 // "draft" is true, every page opens with a banner: a draft under attorney
-// review, not in effect. The owner sets it to false once the attorney has
-// approved the texts and their approved wording is in legal/, then runs this
-// again. It refuses to write a page as final while its Markdown still has the
-// DRAFT line or a blank in [brackets], so a page never claims to be in effect
-// with "[date]" in it. After that, extension/src/legalLinks.js gets the pages'
-// real addresses and a new version (the comment there says how).
+// review, not in effect, and its title says (draft). The owner sets it to
+// false once the attorney has approved the texts and their approved wording
+// is in legal/, then runs this again. It refuses to write a page as final
+// while its Markdown still has the DRAFT line or a blank in [brackets], so a
+// page never claims to be in effect with "[date]" in it. After that,
+// extension/src/legalLinks.js gets the pages' real addresses
+// (https://<the site's host>/legal/terms/, /legal/privacy/,
+// /legal/posting-rules/) and a new version (the comment there says how).
 //
 // The Markdown is rendered by the small renderer below, not a dependency: it
 // knows what the legal texts use (headings, paragraphs, lists, nested lists,
@@ -31,26 +44,24 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  LEGAL_PAGES, REDIRECTS, NO_SCRIPT_CSP, FOOTER_LINE, SITE_NAME, TITLE_SUFFIX, STATUS_FILE, escapeHtml, readStatus, readContext, renderPage as renderSitePage, rootFor, assertClean,
+} from './site-pages.mjs';
 
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
-export const STATUS_FILE = 'legal/legal-status.json';
+export { STATUS_FILE, FOOTER_LINE, escapeHtml, readStatus, REDIRECTS };
 
-// label is what the header and the footer call the page, as the landing page's footer does.
-export const PAGES = Object.freeze([
-  Object.freeze({ source: 'legal/terms-of-service.md', page: 'site/legal/terms.html', label: 'Terms of service' }),
-  Object.freeze({ source: 'legal/privacy-policy.md', page: 'site/legal/privacy.html', label: 'Privacy policy' }),
-  Object.freeze({ source: 'legal/posting-rules.md', page: 'site/legal/posting-rules.html', label: 'Posting rules' }),
-]);
+// The three documents: the kind 'legal' entries of the site's page map
+// ({ slug, path, file, source, title, description, crumb, ... }).
+export const PAGES = LEGAL_PAGES;
 
-// The landing page's policy, narrowed to what these pages load: the stylesheet
-// and nothing else. No script runs, no form is sent, nothing is called.
-export const CSP = "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'";
+// The policy of a page without site.js: the stylesheet and the images
+// (favicons), nothing else. No script runs, no form is sent, nothing is called.
+export const CSP = NO_SCRIPT_CSP;
+// A redirect stub loads nothing at all.
+export const REDIRECT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'";
 
-export const FOOTER_LINE = 'Lot Sync is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.';
 export const DRAFT_BANNER = '<strong>Draft under attorney review.</strong> Not in effect: nothing on this page applies to anyone yet, and the text may change before it does.';
-
-const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-export const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ENTITIES[c]);
 
 // A link target the page may carry: http(s), mailto, a relative address or a
 // #anchor. Anything with a space, a control character or a backslash is
@@ -276,26 +287,15 @@ export function renderMarkdown(markdown) {
   return { html: out.join('\n'), title, blanks };
 }
 
-// legal/legal-status.json: { "draft": true|false, "note": "..." }. A missing
-// or unreadable file stops the script: whether a page says "not in effect"
-// is never guessed.
-export function readStatus(text) {
-  let status;
-  try {
-    status = JSON.parse(text);
-  } catch (e) {
-    throw new Error(`${STATUS_FILE} is not JSON (${e.message})`);
-  }
-  if (!status || typeof status.draft !== 'boolean') throw new Error(`${STATUS_FILE} needs "draft": true or false`);
-  return { draft: status.draft };
-}
-
 /**
- * One page: the landing page's header, look and footer around the rendered
- * document, with the draft banner on top while the status says draft.
- * Throws when the status says final but the Markdown still reads as a draft.
+ * One document as a page of the site: the shared chrome around the rendered
+ * Markdown, with the draft banner on top while the status says draft.
+ * ctx is readContext's ({ site, pricing, ... }); the draft flag is the
+ * status's. Throws when the status says final but the Markdown still reads
+ * as a draft.
  */
-export function renderPage(entry, markdown, status) {
+export function renderPage(entry, markdown, status, ctx) {
+  if (!ctx || !ctx.site) throw new Error('renderPage needs the site context (readContext)');
   const doc = renderMarkdown(markdown);
   if (!doc.title) throw new Error(`${entry.source} has no "# " title`);
   if (!status.draft) {
@@ -306,103 +306,102 @@ export function renderPage(entry, markdown, status) {
       throw new Error(`${entry.source} still has ${left.join(' and ')}, but ${STATUS_FILE} says the texts are final ("draft": false). Put the attorney's approved text in the file, or set "draft" back to true.`);
     }
   }
-  const title = (/\bLot Sync\b/.test(doc.title) ? doc.title : `${doc.title}: Lot Sync`) + (status.draft ? ' (draft)' : '');
-  const here = entry.page.split('/').pop();
-  const links = (current) => PAGES.map((p) => {
-    const file = p.page.split('/').pop();
-    return `          <li><a href="${file}"${current && file === here ? ' aria-current="page"' : ''}>${escapeHtml(p.label)}</a></li>`;
-  });
-  const body = doc.html.split('\n').map((l) => `      ${l}`);
-  return [
+  const h1s = (doc.html.match(/<h1\b/g) || []).length;
+  if (h1s !== 1) throw new Error(`${entry.source} has ${h1s} "# " headings; exactly one`);
+  const body = [
+    '    <div class="wrap narrow legal">',
+    ...(status.draft ? [`      <p class="draft">${DRAFT_BANNER}</p>`] : []),
+    ...doc.html.split('\n').map((l) => `      ${l}`),
+    '    </div>',
+  ].join('\n');
+  const html = renderSitePage(entry, body, { root: rootFor(entry), site: ctx.site, pricing: ctx.pricing, legalDraft: status.draft });
+  assertClean(html, entry.file);
+  return html;
+}
+
+/**
+ * The stub at a document's old address: sends the browser on to the new
+ * page at once, says where it went for anyone who lands on it, and carries
+ * the new address as its canonical once siteUrl is set. No stylesheet, no
+ * script, nothing loaded.
+ */
+export function renderRedirect(entry, ctx) {
+  if (!ctx || !ctx.site) throw new Error('renderRedirect needs the site context (readContext)');
+  const html = [
     '<!doctype html>',
-    `<!-- Written by scripts/legal-pages.mjs from ${entry.source} and ${STATUS_FILE}. Change those and run`,
-    '     npm run legal-pages; an edit made here is lost at the next run, and npm test fails until then. -->',
+    `<!-- Written by scripts/legal-pages.mjs: the old address of ${entry.target}. Run npm run legal-pages to rewrite it. -->`,
     '<html lang="en">',
     '<head>',
     '  <meta charset="utf-8">',
     '  <meta name="viewport" content="width=device-width, initial-scale=1">',
-    '  <meta name="color-scheme" content="light dark">',
-    `  <meta http-equiv="Content-Security-Policy" content="${CSP}">`,
-    `  <title>${escapeHtml(title)}</title>`,
-    '  <link rel="stylesheet" href="../site.css">',
+    `  <meta http-equiv="Content-Security-Policy" content="${REDIRECT_CSP}">`,
+    `  <meta http-equiv="refresh" content="0; url=${entry.to}">`,
+    '  <meta name="robots" content="noindex">',
+    ...(ctx.site.siteUrl ? [`  <link rel="canonical" href="${escapeHtml(ctx.site.siteUrl + entry.target)}">`] : []),
+    `  <title>${escapeHtml(entry.label)} has moved${TITLE_SUFFIX}</title>`,
     '</head>',
     '<body>',
-    '  <a class="skip" href="#main">Skip to content</a>',
-    '',
-    '  <header class="top">',
-    '    <div class="wrap">',
-    '      <a class="brand" href="../index.html">Lot Sync <small>A Chrome extension for dealership salespeople</small></a>',
-    '      <nav aria-label="Legal documents">',
-    '        <ul>',
-    ...links(true),
-    '        </ul>',
-    '      </nav>',
-    '    </div>',
-    '  </header>',
-    '',
-    '  <main id="main">',
-    '    <div class="wrap narrow legal">',
-    ...(status.draft ? [`      <p class="draft">${DRAFT_BANNER}</p>`] : []),
-    ...body,
-    '    </div>',
-    '  </main>',
-    '',
-    '  <footer>',
-    '    <div class="wrap">',
-    '      <ul>',
-    ...links(false).map((l) => l.slice(2)),
-    '      </ul>',
-    `      <p>${FOOTER_LINE}</p>`,
-    '    </div>',
-    '  </footer>',
+    '  <h1>This page has moved</h1>',
+    `  <p>The ${SITE_NAME} ${escapeHtml(entry.label.toLowerCase())} page is now at <a href="${entry.to}">${escapeHtml(entry.label)}</a>.</p>`,
     '</body>',
     '</html>',
     '',
   ].join('\n');
+  assertClean(html, entry.file);
+  return html;
 }
 
-// Every page as it would be written now: [{ page, html }]. Throws before
-// anything is written when one of them cannot be.
-export function buildPages(root = ROOT) {
+// Every file as it would be written now: [{ file, html }], the three pages
+// then the three stubs. Throws before anything is written when one of them
+// cannot be.
+export async function buildPages(root = ROOT) {
+  const ctx = await readContext(root);
   const status = readStatus(readFileSync(join(root, STATUS_FILE), 'utf8'));
-  return PAGES.map((entry) => ({ page: entry.page, html: renderPage(entry, readFileSync(join(root, entry.source), 'utf8'), status) }));
+  return [
+    ...PAGES.map((entry) => ({ file: entry.file, html: renderPage(entry, readFileSync(join(root, entry.source), 'utf8'), status, ctx) })),
+    ...REDIRECTS.map((entry) => ({ file: entry.file, html: renderRedirect(entry, ctx) })),
+  ];
 }
 
-// The pages that are missing or differ from what buildPages would write.
-export function stalePages(root = ROOT) {
-  return buildPages(root)
-    .filter(({ page, html }) => {
-      const file = join(root, page);
-      return !existsSync(file) || readFileSync(file, 'utf8') !== html;
+// The files that are missing or differ from what buildPages would write.
+export async function stalePages(root = ROOT) {
+  return (await buildPages(root))
+    .filter(({ file, html }) => {
+      const full = join(root, file);
+      return !existsSync(full) || readFileSync(full, 'utf8') !== html;
     })
-    .map(({ page }) => page);
+    .map(({ file }) => file);
 }
 
-export function writePages(root = ROOT) {
-  const pages = buildPages(root);
-  for (const { page, html } of pages) {
-    mkdirSync(dirname(join(root, page)), { recursive: true });
-    writeFileSync(join(root, page), html);
+export async function writePages(root = ROOT) {
+  const pages = await buildPages(root);
+  for (const { file, html } of pages) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), html);
   }
-  return pages.map(({ page }) => page);
+  return pages.map(({ file }) => file);
 }
 
 export const USAGE = [
-  'Usage: npm run legal-pages            write the three pages',
+  'Usage: npm run legal-pages            write the three pages and the three redirect stubs',
   '       node scripts/legal-pages.mjs --check',
-  '                                      write nothing; exit 1 when a page differs from what would be written',
+  '                                      write nothing; exit 1 when a file differs from what would be written',
   '',
-  ...PAGES.map((p) => `  ${p.source.padEnd(28)}-> ${p.page}`),
+  ...PAGES.map((p) => `  ${p.source.padEnd(28)}-> ${p.file}  (${p.path})`),
+  ...REDIRECTS.map((r) => `  (the old address)            -> ${r.file}  (sends on to ${r.target})`),
   '',
   `${STATUS_FILE} says whether the texts are drafts. While "draft" is true,`,
   'every page opens with a banner: a draft under attorney review, not in effect.',
   'Once the attorney approves the texts, put the approved wording in the three',
   'Markdown files (no DRAFT line, every [bracket] filled in), set "draft" to',
   'false and run this again; it refuses while a file still reads as a draft.',
-  'Then give extension/src/legalLinks.js the pages\' addresses and a new version.',
+  'Then give extension/src/legalLinks.js the pages\' addresses',
+  '(https://<the site\'s host>/legal/terms/, /legal/privacy/, /legal/posting-rules/)',
+  'and a new version. The header, footer and head tags come from',
+  'scripts/site-pages.mjs; site/config.js siteUrl gives the canonical addresses.',
 ];
 
-export function main(argv, io = { log: (s) => console.log(s), error: (s) => console.error(s) }, root = ROOT) {
+export async function main(argv, io = { log: (s) => console.log(s), error: (s) => console.error(s) }, root = ROOT) {
   if (argv.includes('--help') || argv.includes('-h')) {
     io.log(USAGE.join('\n'));
     return 0;
@@ -414,12 +413,12 @@ export function main(argv, io = { log: (s) => console.log(s), error: (s) => cons
   }
   try {
     if (argv.includes('--check')) {
-      const stale = stalePages(root);
-      for (const page of stale) io.error(`${page} is not what the Markdown and ${STATUS_FILE} make: run npm run legal-pages`);
-      if (!stale.length) io.log('The legal pages match the Markdown and the draft status.');
+      const stale = await stalePages(root);
+      for (const file of stale) io.error(`${file} is not what the Markdown, ${STATUS_FILE} and site/config.js make: run npm run legal-pages`);
+      if (!stale.length) io.log('The legal pages and their redirect stubs match the Markdown, the draft status and site/config.js.');
       return stale.length ? 1 : 0;
     }
-    for (const page of writePages(root)) io.log(`wrote ${page}`);
+    for (const file of await writePages(root)) io.log(`wrote ${file}`);
     return 0;
   } catch (e) {
     io.error(`legal-pages: ${e.message}`);
@@ -427,4 +426,4 @@ export function main(argv, io = { log: (s) => console.log(s), error: (s) => cons
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) process.exitCode = main(process.argv.slice(2));
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) process.exitCode = await main(process.argv.slice(2));

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Lot Sync's mark, the same as the extension's icon (extension/icons/): a green rounded
+       square with a white check, no text. scripts/favicons.mjs draws favicon.ico,
+       favicon-32.png and apple-touch-icon.png from this file; site-src/social/template.html
+       puts it on the share images. -->
+  <rect width="64" height="64" rx="14" fill="#14532d"/>
+  <path d="M17 33.75 27.5 44.5 48 22.25" fill="none" stroke="#ffffff" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

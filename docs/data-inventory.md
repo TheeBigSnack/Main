@@ -118,13 +118,13 @@ The page writes no cookie and nothing to web storage itself; the only browser st
 
 ## The website (`site/`)
 
-No cookies, no web storage, no analytics, and nothing loaded from another host: the pages load only files from the same site (`site.css`, `site.js`, `pricing.json`, the screenshots, the legal pages).
+No cookies, no web storage, no analytics, and nothing loaded from another host: every page loads only files from the same site (`site.css`, `site.js` on the home and pricing pages, `pricing.json`, the screenshots, the favicon files, the share image a page names for social previews, and the legal pages). Each page carries structured data for search engines (`<script type="application/ld+json">`: Organization, WebSite and SoftwareApplication on the home page, a BreadcrumbList on the others, FAQPage on the FAQ; LocalBusiness only once `site/config.js` holds the business's address, and never a rating, review, phone, price or opening hours that is not in `site/config.js` or `pricing.json`). It names `schema.org` as its vocabulary, and nothing is fetched from it: the block is data a visiting search engine reads, not a request the page makes. `sitemap.xml`, `robots.txt`'s sitemap line, the canonical and share-tag addresses and the `CNAME` file exist only once `site/config.js` has `siteUrl`, and all name that one address (`docs/website.md`). The website is served by GitHub Pages from this repository (`.github/workflows/pages.yml`), so for the website the `[hosting provider]` below is GitHub once it is deployed; where the manager view is served is not decided yet, and the privacy policy's bracket is filled in with both when they are.
 
 | Item | Fields | Where; who can read it | How long; how deleted | Recipient |
 |---|---|---|---|---|
 | Visiting the page | What any web server sees: the visitor's IP address, browser and the pages asked for | The host's access logs | The host's schedule [Pending attorney answer: questions-for-attorney.md 8.6] | [hosting provider] |
 | **Request a demo**, sent to the `lead` function (`site/config.js`, `demoEndpoint`) | `name`, `dealership`, `website`, `email`, optional `phone` and `message`, the hidden `company_url` (a bot trap: when filled, nothing is stored) | `demo_requests` below | As `demo_requests` | Supabase |
-| **Request a demo** without the function | The same fields, as an email the visitor's own mail app opens and they send | Our inbox | As support email | [email provider] |
+| **Request a demo** without the function (only once `site/config.js` has `demoMailto`; while it and `demoEndpoint` are both empty the page says the form is not open yet and sends nothing anywhere) | The same fields, as an email the visitor's own mail app opens and they send | Our inbox | As support email | [email provider] |
 
 The in-browser sandbox (`demo/`) keeps its sample listings and a count of Publish clicks in that tab's `sessionStorage` and sends nothing anywhere.
 
@@ -207,4 +207,4 @@ Logs are Supabase's function logs (Dashboard, Edge Functions, the function, Logs
 
 Facebook is not a recipient of anything Lot Sync sends: the extension types into the form in the person's own tab, and the person publishes. What Facebook receives then, it receives from the person under Facebook's own terms.
 
-The outside hosts the shipped code names, which the test compares with the code: `www.facebook.com` (the Marketplace pages the person opens), `vehicle-images.carscommerce.inc` (a dealership website platform's image host), `vpic.nhtsa.dot.gov` (NHTSA), `supabase.co` (Supabase), `api.anthropic.com` (Anthropic), `api.stripe.com` (Stripe), `cdn.jsdelivr.net` (jsDelivr).
+The outside hosts the shipped code names, which the test compares with the code: `www.facebook.com` (the Marketplace pages the person opens), `vehicle-images.carscommerce.inc` (a dealership website platform's image host), `vpic.nhtsa.dot.gov` (NHTSA), `supabase.co` (Supabase), `api.anthropic.com` (Anthropic), `api.stripe.com` (Stripe), `cdn.jsdelivr.net` (jsDelivr), `schema.org` (named in the website's structured data as its vocabulary; never contacted).

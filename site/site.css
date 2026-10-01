@@ -1,6 +1,8 @@
-/* Lot Sync landing page. Colours are the extension's (extension/popup.css),
-   light and dark by the visitor's setting. System fonts, no external assets.
-   Mobile first: one column with 16px gutters; wider layouts from 720px. */
+/* Lot Sync website (every page under site/, written by scripts/site-pages.mjs
+   and scripts/legal-pages.mjs). Colours are the extension's
+   (extension/popup.css), light and dark by the visitor's setting. System
+   fonts, no external assets. Mobile first: one column with 16px gutters;
+   wider layouts from 720px. */
 
 :root {
   --bg: #ffffff;
@@ -81,6 +83,13 @@ li { margin-bottom: 6px; }
 .top nav a:hover { text-decoration: underline; }
 .top nav a[aria-current="page"] { font-weight: 600; text-decoration: underline; }
 
+/* Breadcrumbs: the trail under the header on every page but home and 404 */
+.crumbs { border-bottom: 1px solid var(--line); font-size: 0.9rem; color: var(--muted); }
+.crumbs ol { display: flex; flex-wrap: wrap; gap: 4px 0; list-style: none; margin: 0; padding: 8px 0; }
+.crumbs li { margin: 0; }
+.crumbs li + li::before { content: "\203A"; padding: 0 8px; color: var(--muted); }
+.crumbs a { color: var(--text); }
+
 /* Sections */
 section { padding: 36px 0; border-top: 1px solid var(--line); }
 section:first-of-type { border-top: 0; }
@@ -126,7 +135,7 @@ section:first-of-type { border-top: 0; }
 .notice { background: var(--info-bg); border-radius: var(--radius); padding: 14px 16px; margin-top: 20px; }
 .notice p:last-child { margin-bottom: 0; }
 
-/* Needs, pilot */
+/* A plain list of points (what it needs, the privacy requests, the 404 page's links) */
 .plain { list-style: disc; }
 
 /* Pricing */
@@ -135,9 +144,22 @@ section:first-of-type { border-top: 0; }
 .price-box ul { margin-bottom: 0; }
 .tag { display: inline-block; background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 2px 10px; font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; }
 
-/* FAQ */
-.faq h3 { margin-top: 22px; }
-.faq h3:first-of-type { margin-top: 0; }
+/* FAQ: one article per question, the h3 question then the answer */
+article.qa { margin-top: 22px; }
+article.qa:first-of-type { margin-top: 0; }
+article.qa p:last-child { margin-bottom: 0; }
+.faq article.qa + p { margin-top: 24px; }
+
+/* An inner page: the h1 and its lead at the top, the sections below */
+.intro { padding-bottom: 20px; }
+.intro .lead { font-size: 1.1rem; }
+.not-found .plain { margin-top: 16px; }
+
+/* A single screenshot inside a section (How it works): the same frame as the home page's list */
+.shot { margin: 20px 0 0; }
+.shot img { display: block; width: 100%; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.shot figcaption { margin-top: 8px; color: var(--muted); font-size: 0.95rem; }
+.shot .from { display: block; font-size: 0.85rem; }
 
 /* Demo form */
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
@@ -163,7 +185,6 @@ footer a { color: var(--text); }
   h2 { font-size: 1.7rem; }
   .cards { grid-template-columns: repeat(2, 1fr); }
   .steps { grid-template-columns: repeat(2, 1fr); gap: 24px; }
-  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; align-items: start; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
   .form-grid .full { grid-column: 1 / -1; }
   .price-box { padding: 24px; }

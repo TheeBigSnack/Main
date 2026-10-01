@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// Lot Sync accessibility check (`npm run test:a11y`): opens the landing page
-// (also as it looks once sign-up is open), the three legal pages
-// (site/legal/), the manager view (sample data) and, through the in-browser
-// sandbox, the real popup and side panel, and checks each for the failures a
-// keyboard or screen-reader user meets first. No dependency beyond Playwright: the rules
-// are plain DOM checks run inside each page (auditPage, below).
+// Lot Sync accessibility check (`npm run test:a11y`): opens every page of the
+// website (the site map of scripts/site-pages.mjs: home, how it works,
+// pricing, FAQ, for managers, support, the legal pages and the 404 page, each
+// at a desktop and a phone width, in light and dark; the home and pricing
+// pages also as they look once sign-up is open), the manager view (sample
+// data) and, through the in-browser sandbox, the real popup and side panel,
+// and checks each for the failures a keyboard or screen-reader user meets
+// first. No dependency beyond Playwright: the rules are plain DOM checks run
+// inside each page (auditPage, below).
 //
 //   - every form control has a name (a label, aria-label or aria-labelledby);
 //   - every button and link has a name, every image an alt attribute;
@@ -20,9 +23,9 @@
 
 import { chromium } from 'playwright';
 import { existsSync, readFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startServer } from '../demo/serve.mjs';
-import { PAGES as LEGAL_PAGES } from './legal-pages.mjs';
+import { PAGES } from './site-pages.mjs';
 
 // Runs inside the page: must be self-contained.
 export function auditPage() {
@@ -241,6 +244,9 @@ async function main() {
   const executablePath = process.env.LOTSYNC_CHROME || (existsSync(DEFAULT_CHROME) ? DEFAULT_CHROME : undefined);
   const server = await startServer({ port: 0 });
   const base = `http://127.0.0.1:${server.address().port}`;
+  // the website from its own root, as its host serves it (site/ is the whole site; ../manager/ is not on it)
+  const siteServer = await startServer({ port: 0, root: fileURLToPath(new URL('../site', import.meta.url)) });
+  const siteBase = `http://127.0.0.1:${siteServer.address().port}`;
   const browser = await chromium.launch({ executablePath, headless: true });
   const results = [];
   const reachedBy = new Map(); // page -> controls the Tab walk reached, printed so the coverage shows
@@ -259,29 +265,32 @@ async function main() {
     for (const scheme of ['light', 'dark']) {
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: scheme });
       current = page;
-      await page.goto(`${base}/site/index.html`);
-      await audit(`landing page (${scheme})`, page);
-      await page.setViewportSize({ width: 390, height: 844 });
-      await audit(`landing page, phone (${scheme})`, page);
-      // the Start a free pilot links show only once config.js names the manager view: audit the page as it
-      // will look then, from a config.js served with signupUrl set (the file on disk is not touched)
-      const config = readFileSync(new URL('../site/config.js', import.meta.url), 'utf8');
-      const open = config.replace(/signupUrl: '[^']*'/, "signupUrl: '../manager/index.html'");
-      if (open === config) results.push({ page: `landing page, sign-up open (${scheme})`, rule: 'site/config.js has no signupUrl to set for the audit', el: '', text: '', detail: '' });
-      await page.route('**/site/config.js', (route) => route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: open }));
-      await page.setViewportSize({ width: 1280, height: 900 });
-      await page.goto(`${base}/site/index.html`);
-      await page.locator('a[data-signup]').first().waitFor({ state: 'visible', timeout: 15000 });
-      await audit(`landing page, sign-up open (${scheme})`, page);
-      await page.unroute('**/site/config.js');
-      for (const legal of LEGAL_PAGES) {
-        const name = `${legal.label} page (${scheme})`;
+      // every page of the website, served from site/ as GitHub Pages serves it (the 404 page's links and
+      // stylesheet are root-relative, so it needs that root), at a desktop and a phone width
+      for (const entry of PAGES) {
+        const label = entry.nav || entry.crumb || entry.h1;
+        const name = `${label}${/page/i.test(label) ? '' : ' page'} (${scheme})`;
         await page.setViewportSize({ width: 1280, height: 900 });
-        await page.goto(`${base}/${legal.page}`);
+        await page.goto(`${siteBase}${entry.path}`);
         await audit(name, page);
         await page.setViewportSize({ width: 390, height: 844 });
         await audit(name.replace(' (', ', phone ('), page);
       }
+      // the Start a free pilot links show only once config.js names the manager view: audit the home and
+      // pricing pages as they will look then, from a config.js served with signupUrl set (the file on disk
+      // is not touched), on the repo-root server so the link's path resolves to the manager view
+      const config = readFileSync(new URL('../site/config.js', import.meta.url), 'utf8');
+      if (!/signupUrl: '[^']*'/.test(config)) results.push({ page: `Home page, sign-up open (${scheme})`, rule: 'site/config.js has no signupUrl to set for the audit', el: '', text: '', detail: '' });
+      let signupPath = '';
+      await page.route('**/site/config.js', (route) => route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: config.replace(/signupUrl: '[^']*'/, `signupUrl: '${signupPath}'`) }));
+      for (const [entry, up] of PAGES.filter((p) => p.script).map((p) => [p, p.path === '/' ? '../' : '../../'])) {
+        signupPath = `${up}manager/index.html`;
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.goto(`${base}/${entry.file}`);
+        await page.locator('a[data-signup]').first().waitFor({ state: 'visible', timeout: 15000 });
+        await audit(`${entry.nav} page, sign-up open (${scheme})`, page);
+      }
+      await page.unroute('**/site/config.js');
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.goto(`${base}/manager/index.html?mock=1`);
       await page.locator('#invites').waitFor({ timeout: 15000 });
@@ -376,6 +385,7 @@ async function main() {
   } finally {
     await browser.close();
     server.close();
+    siteServer.close();
   }
   for (const [page, n] of reachedBy) console.log(`${page}: the Tab key reached ${n} control${n === 1 ? '' : 's'}`);
   const byPage = new Map();
