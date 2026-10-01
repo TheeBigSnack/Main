@@ -130,6 +130,21 @@ test('the manager page\'s copies of MAX_SEATS and the open-subscription rule are
   assert.equal(page.subscribeSeats({ role: 'manager', salespeople: 250, includedSalespeople: 5 }), MAX_SEATS, 'the card asks for no more seats than Checkout bills');
 });
 
+// Before billing opens the page offers Start the free pilot from the row it
+// reads itself (manager/data.js closedBillingStatus); it must offer it exactly
+// when the function would, and start_pilot() would start one.
+test('before billing opens the manager page offers the free pilot on the billing function\'s own rule', async () => {
+  const page = await import('../manager/data.js');
+  const rows = [null, undefined, row(), row({ stripe_customer_id: 'cus_1' }), row({ status: 'pilot', pilot_ends_at: iso(NOW + DAY) }), row({ status: null, pilot_ends_at: iso(NOW - DAY) }), row({ status: 'canceled' }), row({ status: 'active', stripe_subscription_id: 'sub_1' }), { status: undefined }];
+  for (const r of rows) {
+    assert.equal(page.pilotAvailable(r), pilotAvailable(r), JSON.stringify(r));
+    for (const role of ['manager', 'salesperson', '']) {
+      const word = subscriptionState(r, NOW);
+      assert.equal(page.closedBillingStatus(word, r, { role }).canStartPilot, statusAnswer(r, { role, now: NOW }).canStartPilot, `${role} ${JSON.stringify(r)}`);
+    }
+  }
+});
+
 // ---------- seats ----------
 
 test('seatCount: a seat is a member with the salesperson role, each person once; managers and other dealerships do not count', () => {
@@ -252,13 +267,13 @@ test('planOf: the state word plus the dates and the seats the extension shows, i
 
 test('lapsedAnswer: what /sync and /rewrite answer with 402, with the plan for the extension', () => {
   assert.equal(LAPSED_CODE, 'lapsed');
-  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view");
+  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how");
   const plan = planOf(row({ status: 'canceled', stripe_customer_id: 'cus_1' }), NOW);
   assert.deepEqual(lapsedAnswer(plan), { ok: false, error: LAPSED_MESSAGE, code: 'lapsed', plan });
   assert.equal(lapsedAnswer(plan).plan, plan, 'the plan itself');
   assert.equal(lapsedAnswer(plan).plan.state, 'lapsed');
   // the sentence says who can fix it and where, and promises nothing else
-  assert.match(LAPSED_MESSAGE, /a manager can renew it in the manager view$/);
+  assert.match(LAPSED_MESSAGE, /a manager can renew it, and the manager view's Billing card says how$/);
   assert.doesNotMatch(LAPSED_MESSAGE, /\$|guarantee|Facebook|Meta/);
 });
 

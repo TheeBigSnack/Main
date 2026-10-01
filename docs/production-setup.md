@@ -59,7 +59,7 @@ The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, 
 2. **database**: applies them.
 
    After plan and database the outside check prints some `FAIL` lines on purpose (no tables yet, then no functions yet); the run stays green. From functions on, a `FAIL` turns the run red.
-3. **functions** with `rewrite sync`: deploys the description writer and the sync between machines. (`billing` comes with Stripe, `lead` when the website's demo form opens. Until billing is deployed, `billing: false` in `manager/config.js` keeps the manager view from calling it: its Billing card says billing is not open yet, and `docs/stripe-setup.md` step 5 turns it on.)
+3. **functions** with `rewrite sync`: deploys the description writer and the sync between machines. (`billing` comes with Stripe, `lead` when the website's demo form opens. Until billing is deployed, `billing: false` in `manager/config.js` keeps the manager view from calling it: a manager can still start the free pilot there (`start_pilot()` is in the database), the Billing card says paying by card is not open yet, and `docs/stripe-setup.md` step 5 turns it on.)
 4. **check**: the outside check on its own, any time.
 
 After step 3, `check-deploy` should show no `FAIL`; the billing and lead lines read `note` until those functions are deployed.

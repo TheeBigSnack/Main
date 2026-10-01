@@ -278,7 +278,7 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
     if (!userId) return { status: 401, body: { ok: false, error: 'sign in again (the token was rejected or has expired)' } };
     const body = call.body;
     if (body.origin !== ORIGIN) return { status: 403, body: { ok: false, error: `your account is not a member of the dealership for ${body.origin}` } };
-    if (thePlan.state === 'lapsed') return { status: 402, body: { ok: false, error: "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view", code: 'lapsed', plan: { ...thePlan } } };
+    if (thePlan.state === 'lapsed') return { status: 402, body: { ok: false, error: "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how", code: 'lapsed', plan: { ...thePlan } } };
     const now = tick();
     const rows = toServerRows({ origin: body.origin, posted: body.posted, pilot: body.pilot, dealershipId: D, userId });
     // a listing stamped more than five minutes ahead of the server's clock is rejected, not written
@@ -631,8 +631,8 @@ test('planText: one line per plan state for the Account section', () => {
   assert.equal(planText({ state: 'pilot', pilotEndsAt: null }, NOW), 'Free pilot');
   assert.equal(planText({ state: 'active', pilotEndsAt: null, currentPeriodEnd: new Date(NOW + 20 * day).toISOString(), seats: 5 }, NOW), 'Subscribed');
   assert.equal(planText({ state: 'lapsed' }), LAPSED_SENTENCE);
-  assert.equal(LAPSED_SENTENCE, "The dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view");
-  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view", 'the sentence the functions answer with (supabase/functions/_shared/billing.mjs)');
+  assert.equal(LAPSED_SENTENCE, "The dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how");
+  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how", 'the sentence the functions answer with (supabase/functions/_shared/billing.mjs)');
   assert.equal(LAPSED_CODE, 'lapsed');
 });
 

@@ -494,26 +494,67 @@ test('a return that names a dealership the person is not in: the first opens, wi
 // ---------- before billing opens ----------
 
 // config.js billing false: the billing function is not deployed yet (it
-// comes with Stripe). The page must not call it, show an error for it, or
-// send the manager to a card that cannot do the step.
-test('before billing opens: no billing route is called, the card says billing is not open yet with nothing to press, and Getting started has no plan step', async () => {
+// comes with Stripe). The page must not call it or show an error for it. The
+// free pilot is start_pilot() in the database, so the manager of a dealership
+// with no plan still starts it from the Billing card, as PILOT.md and
+// supabase/README.md step 5 say, and Getting started points there.
+const BILLING_CLOSED_NOTE = 'Paying by card is not open yet, so nothing is charged; to carry on after the free pilot, ask your Lot Current contact.';
+const billingCardOf = (html) => html.slice(html.indexOf('<section class="card" id="billing">'), html.indexOf('</section>', html.indexOf('id="billing"')));
+
+test('before billing opens: a manager with no plan starts the free pilot from the Billing card through the database alone, and no billing route is called', async () => {
+  const tables = { ...twoDealerships(), subscriptions: [] };
+  const word = () => (tables.subscriptions.some((x) => x.dealership_id === ALPHA) ? 'pilot' : 'none');
   const client = fakeClient({
     session: ME,
-    tables: { ...twoDealerships(), subscriptions: [] },
-    rpcs: { subscription_state: () => ({ data: 'none', error: null }) },
+    tables,
+    rpcs: {
+      subscription_state: () => ({ data: word(), error: null }),
+      start_pilot: (args) => {
+        const row = { dealership_id: args.dealership_id, status: 'pilot', pilot_ends_at: new Date(Date.now() + 29.5 * DAY).toISOString(), seats: 5 };
+        tables.subscriptions.push(row);
+        return { data: { dealership_id: args.dealership_id, started: true, status: 'pilot', pilot_ends_at: row.pilot_ends_at, state: 'pilot' }, error: null };
+      },
+    },
   });
   const page = await openPage(PAGE, { client, billing: false });
   assert.equal(page.elements.get('dealer').textContent, 'Alpha Motors');
+  let html = main(page);
+  let card = billingCardOf(html);
+  assert.match(card, /Billing <span class="pill ">No plan yet<\/span>/);
+  assert.match(card, /No plan yet\. Start the free pilot: no card\./);
+  assert.ok(card.includes(`<p class="hint">${BILLING_CLOSED_NOTE}</p>`), 'the card says paying by card is not open yet');
+  assert.match(card, /data-billing="pilot"[^>]*>Start the free pilot<\/button>/);
+  assert.doesNotMatch(card, /data-billing="(subscribe|portal|reload)"|Couldn&#39;t read the plan/, 'nothing that needs the billing function, and no error');
+  assert.match(html, /<span class="name">Start the free pilot<\/span><span class="pill ">To do<\/span><button type="button" class="ghost" data-action="goto" data-target="billing">Go to Billing<\/button>/, 'Getting started points at the card that can do it');
+  assert.match(html, /Getting started <span class="pill ">1 of 4 done<\/span>/);
+  assert.doesNotMatch(html, /or subscribe/, 'nothing asks for what the page cannot do yet');
+
+  page.click({ action: 'billing', billing: 'pilot' }, 'Start the free pilot');
+  await settle();
+  const started = client.requests.filter((r) => r.rpc === 'start_pilot');
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].args, { dealership_id: ALPHA });
+  // the page redraws the two cards in place
+  card = page.elements.get('billing').outerHTML;
+  assert.match(card, /Billing <span class="pill good">Free pilot<\/span>/);
+  assert.match(card, /The free pilot has started\./);
+  assert.match(card, /Free pilot: 30 days left \(ends /);
+  assert.doesNotMatch(card, /<button/, 'the pilot never restarts, and Subscribe waits for billing');
+  assert.match(page.elements.get('gettingStarted').outerHTML, /<span class="name">Start the free pilot<\/span><span class="pill good">Done<\/span>/);
   assert.equal(page.fetches.filter((f) => f.url.includes('/functions/v1/billing')).length, 0, 'the billing function is never called');
-  const html = main(page);
-  const billingCardHtml = html.slice(html.indexOf('<section class="card" id="billing">'), html.indexOf('</section>', html.indexOf('id="billing"')));
-  assert.match(billingCardHtml, /Billing <span class="pill ">Not open yet<\/span>/);
-  assert.match(billingCardHtml, /Billing is not open yet, so there is no plan to start or pay for here, and nothing is charged\./);
-  assert.doesNotMatch(billingCardHtml, /Couldn&#39;t read the plan|Couldn't read the plan|<button/, 'no error and no button');
-  assert.doesNotMatch(html, /Start the free pilot or subscribe|Go to Billing/, 'Getting started leaves the plan step out');
-  assert.match(html, /Getting started <span class="pill ">1 of 3 done<\/span>/);
   assert.ok(client.requests.some((r) => r.rpc === 'subscription_state' && r.args.dealership_id === ALPHA), 'the plan comes from the database');
   assert.ok(client.requests.some((r) => r.table === 'subscriptions' && r.eq.some(([c, v]) => c === 'dealership_id' && v === ALPHA)));
+});
+
+test('before billing opens: a salesperson sees the plan and nothing to press', async () => {
+  const client = fakeClient({
+    session: { access_token: 'tok', user: { id: 'u-sam', email: 'sam@example.test' } },
+    tables: { ...twoDealerships(), memberships: [{ user_id: 'u-sam', dealership_id: ALPHA, role: 'salesperson', name: 'Sam' }], subscriptions: [] },
+    rpcs: { subscription_state: () => ({ data: 'none', error: null }) },
+  });
+  const html = main(await openPage(PAGE, { client, billing: false }));
+  assert.match(billingCardOf(html), /No plan yet\. A manager can start the free pilot: no card\./);
+  assert.doesNotMatch(html, /data-action="billing"|id="gettingStarted"/);
 });
 
 test('before billing opens: a pilot the owner recorded by agreement shows with its end date, and a lapsed one says whom to ask', async () => {
@@ -525,6 +566,7 @@ test('before billing opens: a pilot the owner recorded by agreement shows with i
   });
   const html = main(await openPage(PAGE, { client: pilot, billing: false }));
   assert.match(html, /Billing <span class="pill good">Free pilot<\/span><\/h2><p class="plan">Free pilot: 21 days left \(ends /);
+  assert.ok(html.includes(`<p class="hint">${BILLING_CLOSED_NOTE}</p>`), 'whom to ask about what comes after');
   assert.doesNotMatch(html, /data-action="billing"/);
   const lapsed = fakeClient({
     session: ME,
@@ -533,5 +575,6 @@ test('before billing opens: a pilot the owner recorded by agreement shows with i
   });
   const lapsedHtml = main(await openPage(PAGE, { client: lapsed, billing: false }));
   assert.match(lapsedHtml, /Billing is not open yet: ask your Lot Current contact\./);
+  assert.match(lapsedHtml, /The plan has lapsed, and billing is not open yet: ask your Lot Current contact\./, 'Getting started says the same');
   assert.doesNotMatch(lapsedHtml, /data-action="billing"/, 'nothing to press that would call a function that is not there');
 });

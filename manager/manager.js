@@ -13,8 +13,10 @@
 // the card shows, never fewer than the plan includes (data.js billingBody).
 // Until config.js turns billing on (it comes with Stripe, docs/stripe-setup.md
 // step 5) the page never calls the billing function: it reads the plan from
-// the database as row-level security allows a member, and the card says
-// billing is not open yet (data.js closedBillingStatus), with no button.
+// the database as row-level security allows a member (data.js
+// closedBillingStatus), a manager can still start the free pilot (it is the
+// database's start_pilot(), not the function's), and the card says paying by
+// card is not open yet, with no Subscribe or Manage billing.
 // Stripe sends the manager back to this page with ?billing=success or
 // ?billing=canceled, which becomes one note, and with ?dealership=<id>, so
 // the page opens the dealership that paid (or opened the portal) and puts
@@ -765,7 +767,9 @@ async function loadBilling(dealershipId) {
 // their own dealership's, 0004_billing.sql) and subscription_state(), the
 // word /sync serves by, so a pilot the owner recorded by agreement shows
 // with its end date. No billing function, so nothing a browser's origin
-// could be refused for.
+// could be refused for. The function's answer would carry the caller's role;
+// this one gets it from the page's own memberships (withRole), which decide
+// whether Start the free pilot shows.
 async function readPlan(dealershipId) {
   const [row, word] = await Promise.all([
     state.supabase.from('subscriptions').select('*').eq('dealership_id', dealershipId),
@@ -776,11 +780,16 @@ async function readPlan(dealershipId) {
   return closedBillingStatus(word.data, Array.isArray(row.data) ? row.data[0] || null : null);
 }
 
+function withRole(billing, role) {
+  const s = billing && billing.status;
+  return s && s.open === false ? { ...billing, status: closedBillingStatus(s.state, s.subscription, { role }) } : billing;
+}
+
 async function reloadBilling() {
   const dealershipId = state.dealershipId;
   const billing = await loadBilling(dealershipId);
   if (state.dealershipId !== dealershipId) return; // another dealership is on screen now: its own plan is there
-  state.billing = billing;
+  state.billing = withRole(billing, myRole());
   renderBilling();
 }
 
@@ -901,7 +910,7 @@ async function loadDealership(wanted, current) {
   state.dealerships = dealerships;
   state.dealershipId = dealership.id;
   state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };
-  state.billing = billing;
+  state.billing = withRole(billing, role);
   state.invites = invites.invites;
   state.inviteError = invites.error;
   viewData();

@@ -175,7 +175,7 @@ export function planOf(row, now = Date.now()) {
 // on; `plan` lets it say since when. The billing function is never gated:
 // a lapsed dealership must be able to renew.
 export const LAPSED_CODE = 'lapsed';
-export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how";
 export function lapsedAnswer(plan) {
   return { ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan };
 }

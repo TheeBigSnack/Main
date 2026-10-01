@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -386,6 +386,45 @@ test('billingCard: no answer, a broken one, or an unknown state gives a card tha
   assert.deepEqual(Object.keys(BILLING_BUTTONS), ['pilot', 'subscribe', 'portal']);
   assert.ok(Object.isFrozen(BILLING_BUTTONS.pilot));
   assert.doesNotMatch(JSON.stringify(BILLING_BUTTONS), /\$|\d/);
+});
+
+// Before billing opens (manager/config.js billing false) the page reads the
+// plan from the database and shapes it with closedBillingStatus(). The free
+// pilot is the database's start_pilot(), so a manager still gets it; the
+// buttons that need the billing function do not show, and the card says
+// whom to ask, so the runbook's "the manager starts the standard pilot with
+// Start the free pilot" holds before Stripe exists.
+test('billingCard before billing opens: a manager with no plan can start the free pilot and nothing else; a pilot and a lapsed plan say whom to ask', () => {
+  const none = card(closedBillingStatus('none', null, { role: 'manager' }), { pricing });
+  assert.deepEqual([none.state, none.label, none.tone], ['none', 'No plan yet', '']);
+  assert.equal(none.line, `No plan yet. Start the free pilot: ${pricing.pilotDays} days, ${pricing.includedSalespeople} salespeople included, no card.`);
+  assert.equal(none.detail, BILLING_CLOSED_NOTE);
+  assert.deepEqual(none.buttons.map((b) => b.action), ['pilot']);
+  // flags the function would set never bring Subscribe or Manage billing back while it is not there
+  assert.deepEqual(card({ ...closedBillingStatus('none', null, { role: 'manager' }), canSubscribe: true, canManageBilling: true }).buttons.map((b) => b.action), ['pilot']);
+  // the shell of a row (a customer id, no status, no pilot) still allows the pilot, as start_pilot() does; a pilot or a status never
+  assert.equal(closedBillingStatus('none', subRow({ stripe_customer_id: 'cus_1' }), { role: 'manager' }).canStartPilot, true);
+  assert.equal(closedBillingStatus('lapsed', subRow({ status: 'pilot', pilot_ends_at: inDays(-2) }), { role: 'manager' }).canStartPilot, false);
+  assert.equal(closedBillingStatus('lapsed', subRow({ status: 'canceled' }), { role: 'manager' }).canStartPilot, false);
+  // a salesperson: the sentence, nothing to press, no note meant for a manager; no role known: nothing to press
+  const sp = card(closedBillingStatus('none', null, { role: 'salesperson' }));
+  assert.equal(sp.line, 'No plan yet. A manager can start the free pilot: no card.');
+  assert.deepEqual([sp.buttons, sp.detail], [[], '']);
+  assert.deepEqual(card(closedBillingStatus('none', null)).buttons, []);
+  assert.equal(closedBillingStatus('none', null, { role: 42 }).role, '');
+  // a pilot running, started here or recorded by the owner by agreement: its end, and whom to ask about what comes after
+  const pilot = card(closedBillingStatus('pilot', subRow({ status: 'pilot', pilot_ends_at: inDays(18.5) }), { role: 'manager' }));
+  assert.equal(pilot.line, 'Free pilot: 19 days left (ends 2026-12-05).');
+  assert.equal(pilot.detail, BILLING_CLOSED_NOTE, 'not "Subscribe any time"');
+  assert.deepEqual(pilot.buttons, [], 'the pilot never restarts, and Subscribe waits for billing');
+  // lapsed: why, and whom to ask, since nothing here can renew it yet
+  const lapsed = card(closedBillingStatus('lapsed', subRow({ status: 'pilot', pilot_ends_at: inDays(-2) }), { role: 'manager' }));
+  assert.equal(lapsed.detail, `The free pilot ended 2026-11-14. ${BILLING_CLOSED_ASK}`);
+  assert.deepEqual(lapsed.buttons, []);
+  assert.match(BILLING_CLOSED_NOTE, /not open yet[^]*nothing is charged[^]*ask your Lot Current contact/);
+  assert.doesNotMatch(BILLING_CLOSED_NOTE + BILLING_CLOSED_ASK, /\$|\d/, 'no price and no number');
+  // the page's rule for the pilot is the billing function's (test/billing.test.js holds the two equal)
+  assert.deepEqual([pilotAvailable(null), pilotAvailable(subRow()), pilotAvailable(subRow({ status: 'pilot', pilot_ends_at: inDays(3) }))], [true, true, false]);
 });
 
 // ---------- the seat line ----------
@@ -1054,11 +1093,22 @@ test('gettingStarted on the ?mock=1 sample: all four done, so the card is one li
   // and without a dealership id, or with junk, it neither throws nor counts anything
   assert.doesNotThrow(() => gettingStarted());
   assert.equal(gettingStarted({ billing: 'x', invites: 'x', memberships: 'x', listings: 'x', now: 'not a time' }).done, 0);
-  // before billing opens the plan step is left out, whatever the plan, so nothing points at a card that cannot do it
-  const closed = gettingStarted({ ...d, billing: null, dealershipId: d.dealership.id, now: NOW, billingOpen: false });
-  assert.deepEqual(closed.steps.map((s) => s.key), ['invite', 'firstCar', 'twoPosting']);
-  assert.equal(closed.line, 'All three steps done');
-  assert.ok(!closed.steps.some((s) => s.action && s.action.target === 'billing'));
+});
+
+test('gettingStarted before billing opens: step 1 is the free pilot alone, which the Billing card can still do, and a lapsed plan says whom to ask', () => {
+  const d = mockData(NOW);
+  const closed = (billing) => gettingStarted({ ...d, billing, dealershipId: d.dealership.id, now: NOW, billingOpen: false });
+  assert.deepEqual(closed(null).steps.map((s) => s.key), ['plan', 'invite', 'firstCar', 'twoPosting']);
+  const none = closed(closedBillingStatus('none', null, { role: 'manager' })).steps[0];
+  assert.deepEqual([none.title, none.done, none.line, none.action], [PLAN_STEP_CLOSED_TITLE, false, 'No plan yet: start the free pilot in the Billing card.', { target: 'billing', label: 'Go to Billing' }]);
+  assert.equal(PLAN_STEP_CLOSED_TITLE, 'Start the free pilot');
+  const pilot = closed(closedBillingStatus('pilot', { status: 'pilot', pilot_ends_at: inDays(10) }, { role: 'manager' }));
+  assert.deepEqual([pilot.steps[0].done, pilot.steps[0].line, pilot.line], [true, 'The free pilot is running.', 'All four steps done']);
+  const lapsed = closed(closedBillingStatus('lapsed', { status: 'pilot', pilot_ends_at: inDays(-2) }, { role: 'manager' })).steps[0];
+  assert.deepEqual([lapsed.done, lapsed.line], [false, 'The plan has lapsed, and billing is not open yet: ask your Lot Current contact.']);
+  assert.doesNotMatch(JSON.stringify([none, lapsed]), /subscribe/i, 'nothing asks for what the page cannot do yet');
+  // once billing is open, the step is as before
+  assert.equal(gettingStarted({ ...d, billing: closedBillingStatus('none', null), dealershipId: d.dealership.id, now: NOW }).steps[0].title, GETTING_STARTED.plan.title);
 });
 
 test('the page: the Start your dealership form behind the flag, the rpc with the three fields, a live region, and every box labelled', () => {
