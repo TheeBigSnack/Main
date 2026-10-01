@@ -310,3 +310,26 @@ test('regression: every Dealer Inspire record and every sandbox car is decided e
   const decisions = new Set(Object.values(before).map((c) => (typeof c === 'string' ? c : c.decision)));
   assert.deepEqual([...decisions].sort(), ['not-ready', 'ready', 'review', 'skip']);
 });
+
+// ---------- what the field notes and the README say about the gate ----------
+
+import { checkPreOwned } from '../extension/src/classify.js';
+
+test('the field notes and the README describe the gate as it decides: its signs in its order, and Carfax backing a lone sign', () => {
+  const fields = readFileSync(new URL('../extension/src/vehicle.js', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const car = { inventoryType: 'Used', urlConditionWord: 'used', siteTitle: 'Used 2021 Example Sedan', readableType: null, carfaxUrl: null, mileage: 34567 };
+  // the signs are numbered in the order the gate reads them
+  const order = checkPreOwned(car).checks.map((c) => c.key);
+  const sign = (field) => Number(new RegExp(`'${field}', //[^\\n]*?sign (\\d)`).exec(fields)[1]);
+  assert.deepEqual({ type: sign('inventoryType'), url: sign('urlConditionWord'), title: sign('siteTitle') }, { type: order.indexOf('type') + 1, url: order.indexOf('url') + 1, title: order.indexOf('title') + 1 });
+  // two signs pass with no Carfax link; one sign needs it
+  assert.equal(checkPreOwned({ ...car, siteTitle: '2021 Example Sedan' }).verdict, 'pre-owned');
+  assert.equal(checkPreOwned({ ...car, siteTitle: '2021 Example Sedan', urlConditionWord: null }).verdict, 'review');
+  assert.equal(checkPreOwned({ ...car, siteTitle: '2021 Example Sedan', urlConditionWord: null, carfaxUrl: 'https://www.carfax.com/x' }).verdict, 'pre-owned');
+  // and the notes say so: not "three signs must agree", not "no report = needs a look" on its own, not "never blocks"
+  assert.doesNotMatch(fields, /three signs must agree/);
+  assert.match(fields, /'carfaxUrl', \/\/ the pre-owned gate: backs up a lone pre-owned sign/);
+  assert.doesNotMatch(readme, /a missing one never blocks a car/);
+  assert.match(readme, /a car with only one pre-owned sign [^.]*needs the report, or it goes to \*\*Needs a look\*\*/);
+});

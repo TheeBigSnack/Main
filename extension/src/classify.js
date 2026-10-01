@@ -8,8 +8,10 @@
 //   Demo and loaner flags always win: those units are sold as new. So does a
 //   demo or loaner word after the model year in the car's own title, trim or
 //   page address (unitWordAfterYear).
-//   A Carfax report link counts as a supporting sign of pre-owned, but a missing
-//   one never blocks a car (7 of 124 used cars on the test site have none).
+//   A Carfax report link counts as a supporting sign of pre-owned: a car two
+//   signs call pre-owned needs none (7 of 124 used cars on the test site have
+//   none), but a car with only one pre-owned sign needs the link, or it goes
+//   to "needs a look".
 //   Mileage is never used to call a car used: the test site has "New" units
 //   with 3,000-29,000 miles (demos/loaners that aren't flagged as such).
 //   When the signs disagree, or look off, the car goes to "needs a look".
