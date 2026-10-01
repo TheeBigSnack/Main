@@ -10,7 +10,7 @@ Lot Current is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketp
 - [How it works](https://lotcurrent.com/how-it-works/): Lot Current reads your website's used inventory, fills in the Marketplace form for each pre-owned car, and rescans to show what sold or changed price.
 - [Pricing](https://lotcurrent.com/pricing/): Lot Current is priced per rooftop per month, with a free pilot first; the planned prices are confirmed with you before any paid subscription starts.
 - [FAQ](https://lotcurrent.com/faq/): Straight answers about Lot Current: whether it is allowed on Facebook, what it reads, where your data is, and why you click Publish, never the tool.
-- [For managers](https://lotcurrent.com/for-managers/): The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.
+- [For managers](https://lotcurrent.com/for-managers/): The manager view will show who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.
 - [Support](https://lotcurrent.com/support/): How to get help with Lot Current, what to send with a report, what support never asks for, and how to ask for your data to be exported or deleted.
 
 ## Legal

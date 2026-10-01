@@ -76,11 +76,13 @@ test('site/pricing.json is the marketing pricing config, and the page quotes it'
   // the fallback text (what a visitor sees with JavaScript off) carries the same numbers
   assert.match(text, new RegExp(`\\${money(pricing.perRooftopMonthly)} per rooftop per month`), 'quotes the monthly price');
   assert.match(text, new RegExp(`\\${money(pricing.extraSalespersonMonthly)} a month`), 'quotes the seat price');
-  assert.match(text, new RegExp(`\\${money(pricing.foundingDealerMonthly)} a month`), 'quotes the founding rate');
+  // the home page gives the short version and links the pricing page for the rest
   const priced = text + ' ' + stripTags(pricingPage);
+  assert.match(stripTags(pricingPage), new RegExp(`\\${money(pricing.foundingDealerMonthly)} a month`), 'the pricing page quotes the founding rate');
   assert.match(priced, new RegExp(`${pricing.pilotDays}[ -]day`), 'quotes the pilot length');
   assert.match(text, new RegExp(`${pricing.includedSalespeople === 5 ? 'five' : pricing.includedSalespeople} salespeople included`), 'quotes the included seats');
-  assert.match(text, new RegExp(`first ${pricing.foundingDealerCount === 5 ? 'five' : pricing.foundingDealerCount} stores`), 'quotes the founding count');
+  assert.match(stripTags(pricingPage), new RegExp(`first ${pricing.foundingDealerCount === 5 ? 'five' : pricing.foundingDealerCount} stores`), 'the pricing page quotes the founding count');
+  assert.match(html, /<a href="\.\/pricing\/">The pricing page<\/a> has the founding-dealer price/, 'the home page links the rest');
   assert.match(text, /planned pric/i, 'labelled as planned pricing');
   assert.match(text, /confirmed with you before any paid subscription/i, 'confirmed before any paid subscription');
   // no other dollar-per-month figure

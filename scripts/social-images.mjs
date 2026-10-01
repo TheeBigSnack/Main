@@ -62,7 +62,7 @@ export function restingHeading(html) {
 }
 
 // The og:image:alt sentence for a heading: what the image shows, in words.
-export const altFor = (heading) => `Lot Current's green check mark with the words "${heading}" and "${LINE}"`;
+export const altFor = (heading) => `The Lot Current check mark and name, with the words "${heading}" and "${LINE}"`;
 
 // A page's social heading as the image may show it: a plain sentence with no
 // number and no other company's name, short enough for two lines.

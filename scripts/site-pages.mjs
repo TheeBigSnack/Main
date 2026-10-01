@@ -115,7 +115,7 @@ export const PAGES = Object.freeze([
   page({
     slug: 'for-managers', path: '/for-managers/', file: 'site/for-managers/index.html', kind: 'page', source: 'site-src/pages/for-managers.html',
     title: 'For managers',
-    description: 'The manager view shows who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.',
+    description: 'The manager view will show who posted what, sold cars still listed and for how long, and price changes not yet updated, with a CSV of the same numbers.',
     h1: 'What managers see',
     nav: 'For managers', crumb: 'For managers', social: { heading: 'What managers see.' },
     script: false, sitemap: true, jsonld: ['BreadcrumbList'],
@@ -389,7 +389,7 @@ export function rootFor(page) {
   return depth ? '../'.repeat(depth) : './';
 }
 
-export const socialAlt = (page) => (page.social ? `Lot Current's green check mark with the words "${page.social.heading}" and "${LINE}"` : '');
+export const socialAlt = (page) => (page.social ? `The Lot Current check mark and name, with the words "${page.social.heading}" and "${LINE}"` : '');
 
 /** The pages above this one in the address, home first (the breadcrumb trail without the page itself). */
 export function ancestorsOf(page) {

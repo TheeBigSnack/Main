@@ -177,7 +177,7 @@ test('every page of the site map has a share image of 1200 x 630 under 300 KB, a
     assert.equal(entry.path, `/social/${slug}.png`, `${pagePath}: the image's path`);
     assert.equal(entry.width, SIZE.width);
     assert.equal(entry.height, SIZE.height);
-    const m = String(entry.alt).match(/^Lot Current's green check mark with the words "(.+)" and "You click Publish\. Lot Current never does\."$/);
+    const m = String(entry.alt).match(/^The Lot Current check mark and name, with the words "(.+)" and "You click Publish\. Lot Current never does\."$/);
     assert.ok(m, `${pagePath}: the alt sentence has the agreed shape: ${entry.alt}`);
     assert.equal(entry.alt, altFor(m[1]));
     assert.doesNotThrow(() => checkHeading({ slug, social: { heading: m[1] } }), `${pagePath}: the heading in the alt`);
@@ -196,7 +196,7 @@ test('the share-image helpers: the size and limit, the alt sentence, images.json
   assert.equal(SIZE_LIMIT, 300 * 1024);
   assert.equal(MARGIN, 40);
   assert.equal(LINE, 'You click Publish. Lot Current never does.');
-  assert.equal(altFor('Pricing.'), 'Lot Current\'s green check mark with the words "Pricing." and "You click Publish. Lot Current never does."');
+  assert.equal(altFor('Pricing.'), 'The Lot Current check mark and name, with the words "Pricing." and "You click Publish. Lot Current never does."');
   const pages = [
     { slug: 'home', path: '/', social: { heading: 'One.' } },
     { slug: 'not-found', path: '/404.html', social: null },

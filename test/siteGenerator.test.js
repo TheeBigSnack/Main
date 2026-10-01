@@ -90,7 +90,7 @@ test('the page map: every address, file and kind as planned, titles unique and s
     ['Home', 'Legal', 'Terms of service'], ['Home', 'Legal', 'Privacy policy'], ['Home', 'Legal', 'Posting rules'], [],
   ]);
   assert.deepEqual(PAGES.map(rootFor), ['./', '../', '../', '../', '../', '../', '../', '../../', '../../', '../../', '/']);
-  assert.equal(socialAlt(page('home')), `Lot Current's green check mark with the words "Your used cars listed from your website, in seconds." and "${LINE}"`);
+  assert.equal(socialAlt(page('home')), `The Lot Current check mark and name, with the words "Your used cars listed from your website, in seconds." and "${LINE}"`);
   assert.equal(socialAlt(page('not-found')), '');
   assert.equal(LINE, 'You click Publish. Lot Current never does.');
   assert.equal(SITE_NAME, 'Lot Current');
