@@ -66,7 +66,7 @@ const state = {
   supabase: null,
   session: null,
   dealerships: [],
-  dealershipId: null,
+  dealershipId: null, // the dealership on screen, whose rows state.data holds: every button acts on it (loadLive sets it with the rows, never before)
   data: null, // { dealership, memberships, listings, todoItems, postAttempts, scans }
   billing: null, // { status, error }: GET .../billing/status's answer for the chosen dealership (the sample data carries its own)
   billingNote: '', // one line in the Billing card: back from Stripe, the pilot just started, or what a sample button would do
@@ -424,7 +424,8 @@ function viewData() {
 
   $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>` + unwatched;
   const sel = $('pickDealer');
-  if (sel) sel.addEventListener('change', () => { state.dealershipId = sel.value; state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; state.teamNote = ''; state.teamError = ''; state.teamConfirm = ''; loadLive().catch((e) => viewError(e.message)); });
+  // the page and its buttons stay on the shown dealership until the chosen one's rows are in (loadLive)
+  if (sel) sel.addEventListener('change', () => { state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; state.teamNote = ''; state.teamError = ''; state.teamConfirm = ''; loadLive(sel.value).catch((e) => viewError(e.message)); });
 }
 
 // ---------- actions ----------
@@ -450,6 +451,7 @@ document.addEventListener('click', (ev) => {
 });
 
 function showMock() {
+  loads += 1; // a live load still running draws nothing over the sample
   state.mock = true;
   state.data = mockData(new Date().toISOString());
   state.dealerships = [state.data.dealership];
@@ -465,6 +467,7 @@ function showMock() {
 // Start your dealership form whatever config.js says. mockClient answers
 // create_dealership, and the form lands in a new, empty sample dealership.
 function showMockSignup() {
+  loads += 1;
   state.mock = true;
   state.data = null;
   state.dealerships = [];
@@ -543,9 +546,8 @@ async function onSignup(ev) {
     state.invites = [];
     viewData();
   } else {
-    state.dealershipId = made.dealership_id || null;
     try {
-      await loadLive();
+      await loadLive(made.dealership_id || null);
     } catch (e) {
       return viewError(`The dealership is started, but the page couldn't read it: ${(e && e.message) || e}`);
     }
@@ -587,6 +589,7 @@ async function signOut() {
     const { error } = await state.supabase.auth.signOut({ scope: 'local' });
     if (error) return setStatus(`Couldn't sign out: ${error.message}`, true);
   }
+  loads += 1; // a load still running for the signed-out person draws nothing
   state.session = null;
   state.data = null;
   state.billing = null;
@@ -608,13 +611,14 @@ async function onInvite(role, btn) {
     return renderInvites();
   }
   btn.disabled = true;
+  const dealershipId = state.dealershipId;
   try {
-    const { data, error } = await state.supabase.rpc('create_invite', { dealership_id: state.dealershipId, role });
+    const { data, error } = await state.supabase.rpc('create_invite', { dealership_id: dealershipId, role });
     if (error) throw new Error(error.message);
     const answer = data && typeof data === 'object' ? data : {};
     if (!answer.code) throw new Error('the server answered without a code');
     const made = new Date();
-    state.invites.unshift({ code: answer.code, role: answer.role || role, dealership_id: answer.dealership_id || state.dealershipId, created_at: made.toISOString(), expires_at: answer.expires_at || new Date(made.getTime() + INVITE_DAYS * DAY_MS).toISOString() });
+    state.invites.unshift({ code: answer.code, role: answer.role || role, dealership_id: answer.dealership_id || dealershipId, created_at: made.toISOString(), expires_at: answer.expires_at || new Date(made.getTime() + INVITE_DAYS * DAY_MS).toISOString() });
     state.inviteNote = '';
   } catch (e) {
     state.inviteError = `Couldn't ${label.toLowerCase()}: ${(e && e.message) || e}`;
@@ -645,15 +649,13 @@ async function onRevoke(code, btn) {
 }
 
 // The dealership's open codes, for a manager; anyone else gets an empty list
-// without asking (the function would answer 42501).
+// without asking (the function would answer 42501). A failed read is the
+// card's error line.
 async function loadInvites(dealershipId, role) {
-  if (role !== 'manager') return [];
+  if (role !== 'manager') return { invites: [], error: '' };
   const { data, error } = await state.supabase.rpc('list_invites', { dealership_id: dealershipId });
-  if (error) {
-    state.inviteError = `Couldn't read the open codes: ${error.message}`;
-    return [];
-  }
-  return (Array.isArray(data) ? data : []).map((i) => ({ ...i, dealership_id: dealershipId }));
+  if (error) return { invites: [], error: `Couldn't read the open codes: ${error.message}` };
+  return { invites: (Array.isArray(data) ? data : []).map((i) => ({ ...i, dealership_id: dealershipId })), error: '' };
 }
 
 // Copy puts the code alone on the clipboard (the install email has a
@@ -740,7 +742,10 @@ async function loadBilling(dealershipId) {
 }
 
 async function reloadBilling() {
-  state.billing = await loadBilling(state.dealershipId);
+  const dealershipId = state.dealershipId;
+  const billing = await loadBilling(dealershipId);
+  if (state.dealershipId !== dealershipId) return; // another dealership is on screen now: its own plan is there
+  state.billing = billing;
   renderBilling();
 }
 
@@ -777,6 +782,7 @@ async function connect() {
       state.session = session;
       if (!state.mock) loadLive().catch((e) => viewError(e.message));
     } else if (event === 'SIGNED_OUT' && state.session) {
+      loads += 1;
       state.session = null;
       state.data = null;
       if (!state.mock) viewSignIn('Signed out.');
@@ -792,7 +798,25 @@ async function connect() {
 // at most its row cap per request and drops the rest silently), in an order
 // that ends on a unique column so the pages neither overlap nor skip; only
 // the scans stop at the latest 50, which is all the page shows of them.
-async function loadLive() {
+//
+// `wanted` is the dealership to open (the picker's choice, a new sign-up's);
+// by default the one on screen, else the first by name. Loads can overlap (a
+// manager picks one store and then another, a cold function answers late),
+// so each load is numbered, and only the latest writes anything: it sets
+// the rows, the plan, the codes and state.dealershipId together and draws
+// them, and an older one's answer, or its error, is dropped. Until then the
+// page and its buttons stay on the dealership already shown.
+let loads = 0;
+async function loadLive(wanted = state.dealershipId) {
+  const seq = ++loads;
+  try {
+    return await loadDealership(wanted, () => seq === loads);
+  } catch (e) {
+    if (seq === loads) throw e;
+  }
+}
+
+async function loadDealership(wanted, current) {
   const supabase = state.supabase;
   setStatus('Loading…');
   const read = async (table, build = (q) => q) => {
@@ -808,9 +832,11 @@ async function loadLive() {
     return data || [];
   };
   const dealerships = await read('dealerships', (q) => q.order('name').order('id'));
+  if (!current()) return;
   if (!dealerships.length) {
     setStatus('');
     state.dealerships = [];
+    state.dealershipId = null;
     state.data = null;
     // the flag only shows the form; create_dealership refuses while the owner's switch in the database is off
     if (CONFIG.selfServeSignup) return viewSignup();
@@ -819,9 +845,7 @@ async function loadLive() {
     state.mode = 'view';
     return;
   }
-  state.dealerships = dealerships;
-  const dealership = dealerships.find((d) => d.id === state.dealershipId) || dealerships[0];
-  state.dealershipId = dealership.id;
+  const dealership = dealerships.find((d) => d.id === wanted) || dealerships[0];
   const own = (q) => q.eq('dealership_id', dealership.id);
   const [memberships, listings, todoItems, postAttempts, scans, billing] = await Promise.all([
     read('memberships', (q) => own(q).order('user_id')),
@@ -831,10 +855,17 @@ async function loadLive() {
     latest('scan_summaries', (q) => own(q).order('taken_at', { ascending: false }).limit(50)),
     loadBilling(dealership.id),
   ]);
+  if (!current()) return;
+  // the signed-in person's role there, as myRole() reads it once these rows are the page's
+  const role = memberRole(memberships, state.session?.user?.id) || billing.status?.role || '';
+  const invites = await loadInvites(dealership.id, role);
+  if (!current()) return;
+  state.dealerships = dealerships;
+  state.dealershipId = dealership.id;
   state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };
   state.billing = billing;
-  state.inviteError = '';
-  state.invites = await loadInvites(dealership.id, myRole());
+  state.invites = invites.invites;
+  state.inviteError = invites.error;
   viewData();
 }
 

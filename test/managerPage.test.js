@@ -89,7 +89,7 @@ const answer = (status, body) => ({ ok: status >= 200 && status < 300, status, j
 // supabase-js as far as the page uses it: auth, rpc, and from(table) with
 // select / eq / order / limit / range, answering from `tables` and, like the
 // hosted API, at most `maxRows` rows per request whatever the range asks for.
-function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {} } = {}) {
+function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rpcs = {} } = {}) {
   const requests = [];
   const client = {
     requests,
@@ -99,7 +99,10 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {} } =
       signOut: async (opts) => { requests.push({ signOut: opts }); return { error: null }; },
       signInWithOtp: async () => ({ error: null }),
     },
-    rpc: async (fn) => ({ data: fn === 'list_invites' ? [] : null, error: null }),
+    rpc: async (fn, args) => {
+      requests.push({ rpc: fn, args });
+      return rpcs[fn] ? rpcs[fn](args) : { data: fn === 'list_invites' ? [] : null, error: null };
+    },
     from(table) {
       const q = { table, eq: [], order: [], range: null, limit: null, count: null };
       const builder = {
@@ -361,4 +364,78 @@ test('Sign out ends this browser\'s session only, so the person\'s extension and
   assert.deepEqual(signOuts[0].signOut, { scope: 'local' }, 'supabase-js\'s default scope is global: it would end every session the person has');
   assert.match(main(page), /<h2>Sign in<\/h2>/);
   assert.equal(status(page), 'Signed out.');
+});
+
+// ---------- two dealerships ----------
+
+const ALPHA = 'aaaaaaaa-0000-4000-8000-000000000001';
+const BRAVO = 'bbbbbbbb-0000-4000-8000-000000000002';
+const ME = { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } };
+const twoDealerships = () => ({
+  dealerships: [
+    { id: ALPHA, name: 'Alpha Motors', website_origin: 'https://www.alpha-motors.test' },
+    { id: BRAVO, name: 'Bravo Auto', website_origin: 'https://www.bravo-auto.test' },
+  ],
+  memberships: [
+    { user_id: 'u-manager', dealership_id: ALPHA, role: 'manager', name: 'Jamie' },
+    { user_id: 'u-sam', dealership_id: ALPHA, role: 'salesperson', name: 'Sam' },
+    { user_id: 'u-manager', dealership_id: BRAVO, role: 'manager', name: 'Jamie' },
+    { user_id: 'u-riley', dealership_id: BRAVO, role: 'salesperson', name: 'Riley' },
+  ],
+});
+const PILOT = { ok: true, role: 'manager', state: 'pilot', canManageBilling: false, subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } };
+const madeCode = (args) => ({ data: { code: 'NEWCODE00001', dealership_id: args.dealership_id, role: args.role }, error: null });
+
+test('picking one dealership and then another before the first has loaded: the page settles on the last pick, and every button acts on the dealership shown', async () => {
+  const client = fakeClient({ session: ME, tables: twoDealerships(), rpcs: { create_invite: madeCode } });
+  let bravoAnswers = null;
+  const fetchImpl = (url) => (url.includes(`dealershipId=${BRAVO}`)
+    ? new Promise((resolve) => { bravoAnswers = () => resolve(answer(200, { ok: true, role: 'manager', state: 'none', canStartPilot: true, subscription: null })); }) // a cold function, answering last
+    : answer(200, PILOT));
+  const page = await openPage(PAGE, { client, fetchImpl });
+  const dealer = () => page.elements.get('dealer').textContent;
+  assert.equal(dealer(), 'Alpha Motors', 'the first by name opens');
+  const sel = page.elements.get('pickDealer');
+
+  sel.value = BRAVO;
+  sel.listeners.change();
+  await settle();
+  assert.ok(bravoAnswers, 'Bravo\'s rows are read; its plan has not answered yet');
+  assert.equal(dealer(), 'Alpha Motors', 'Alpha stays on screen until Bravo is loaded');
+  page.click({ action: 'invite', role: 'salesperson' }, 'Invite a salesperson');
+  await settle();
+  assert.equal(client.requests.filter((r) => r.rpc === 'create_invite').at(-1).args.dealership_id, ALPHA, 'a click on Alpha\'s card while Bravo loads acts on Alpha');
+
+  sel.value = ALPHA;
+  sel.listeners.change();
+  await settle();
+  bravoAnswers();
+  await settle();
+  assert.equal(dealer(), 'Alpha Motors', 'Bravo\'s late answer is dropped: the last pick wins');
+  assert.match(page.elements.get('actions').innerHTML, new RegExp(`<option value="${ALPHA}" selected>Alpha Motors</option>`), 'the picker and the header agree');
+  assert.match(main(page), /Billing <span class="pill good">Free pilot<\/span>/, 'Alpha\'s own plan, not Bravo\'s "No plan yet"');
+  assert.doesNotMatch(main(page), /data-billing="pilot"/, 'no Start the free pilot button from Bravo\'s answer');
+  assert.match(main(page), /Sam/, 'Alpha\'s team');
+  assert.doesNotMatch(main(page), /Riley/);
+  page.click({ action: 'invite', role: 'salesperson' }, 'Invite a salesperson');
+  await settle();
+  assert.equal(client.requests.filter((r) => r.rpc === 'create_invite').at(-1).args.dealership_id, ALPHA, 'the invite is for the dealership on screen');
+});
+
+test('a dealership picked and loaded: the header, the picker, the plan, the team and the buttons all move to it together', async () => {
+  const client = fakeClient({ session: ME, tables: twoDealerships(), rpcs: { create_invite: madeCode } });
+  const fetchImpl = (url) => answer(200, url.includes(`dealershipId=${BRAVO}`) ? { ok: true, role: 'manager', state: 'none', canStartPilot: true, subscription: null } : PILOT);
+  const page = await openPage(PAGE, { client, fetchImpl });
+  const sel = page.elements.get('pickDealer');
+  sel.value = BRAVO;
+  sel.listeners.change();
+  await settle();
+  assert.equal(page.elements.get('dealer').textContent, 'Bravo Auto');
+  assert.match(page.elements.get('actions').innerHTML, new RegExp(`<option value="${BRAVO}" selected>Bravo Auto</option>`));
+  assert.match(main(page), /Riley/);
+  page.click({ action: 'billing', billing: 'pilot' }, 'Start the free pilot');
+  page.click({ action: 'invite', role: 'salesperson' }, 'Invite a salesperson');
+  await settle();
+  assert.equal(client.requests.find((r) => r.rpc === 'start_pilot').args.dealership_id, BRAVO);
+  assert.equal(client.requests.find((r) => r.rpc === 'create_invite').args.dealership_id, BRAVO);
 });

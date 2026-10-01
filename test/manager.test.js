@@ -690,7 +690,7 @@ test('the page makes invite codes through the client, for managers only, and nev
   assert.match(read('manager/manager.css'), /\.codes \{/);
   // the open codes and Revoke, through the two manager-only functions
   assert.match(js, /rpc\('list_invites', \{ dealership_id: dealershipId \}\)/);
-  assert.match(js, /if \(role !== 'manager'\) return \[\];/, 'a salesperson never calls list_invites');
+  assert.match(js, /if \(role !== 'manager'\) return \{ invites: \[\], error: '' \};/, 'a salesperson never calls list_invites');
   assert.match(js, /rpc\('revoke_invite', \{ code \}\)/);
   assert.match(js, />Revoke</);
   assert.match(js, /state\.inviteNote = `Sample data: "Revoke" would cancel/);
@@ -1039,7 +1039,7 @@ test('the page: the Start your dealership form behind the flag, the rpc with the
   assert.ok(submit.length > 500, 'onSignup moved: update this test');
   assert.doesNotMatch(submit, /viewSignup\(\)|\.reset\(\)/, 'nothing clears the boxes');
   assert.match(submit, /return signupSay\(signupRefusal\(answer && answer\.error\)\);/);
-  assert.match(submit, /state\.dealershipId = made\.dealership_id \|\| null;\s+try \{\s+await loadLive\(\);/, 'success reads the page again into the new dealership');
+  assert.match(submit, /try \{\s+await loadLive\(made\.dealership_id \|\| null\);/, 'success reads the page again into the new dealership');
   assert.match(read('manager/manager.css'), /\.signup \.banner\.error:empty \{ padding: 0; margin: 0; \}/, 'the empty live region stays in the page');
 });
 
