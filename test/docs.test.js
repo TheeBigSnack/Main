@@ -483,6 +483,32 @@ test('every text that describes the background rescan says it also syncs with th
   }
 });
 
+// While signed in, the popup's Scan, Mark posted, unmarking, Taken down and
+// Updated, and a take-down or price update the side panel saw done, each ask
+// the worker to sync (popup.js syncInBackground, upkeep.js finish). So the
+// texts that list when Lot Current syncs count them, and none says a change
+// made in the popup waits for the next sync.
+test('every text that lists when the extension syncs counts the scans, take-downs and price updates recorded in the popup and the side panel', () => {
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /resolveFlag\(p, vin, null, \{ how: 'manual' \}\)\)\.then\(syncInBackground\)/, 'Taken down no longer asks for a sync: these texts can say it waits for the next one');
+  assert.match(popup, /resolveFlag\(p, vin, 'price', \{ how: 'manual' \}\)\)\.then\(syncInBackground\)/, 'Updated no longer asks for a sync');
+  assert.match(popup, /recordFlags\(state\.origin, r\.diff, r\.diff\.takenAt\)[^\n]*\n\s*syncInBackground\(\);/, 'the popup\'s Scan no longer asks for a sync');
+  assert.match(read('../extension/upkeep.js'), /type: 'syncNow', origin: up\.origin/, 'the side panel\'s take-downs and price updates no longer ask for a sync');
+  assert.match(popup, /Lot Current also syncs after every rescan and after each post, take-down or price update you record\./, 'Settings says when it syncs');
+  const lineWith = (rel, marker) => {
+    const line = read(rel).split('\n').find((l) => l.includes(marker));
+    assert.ok(line, `${rel} has no line with "${marker}"`);
+    return line;
+  };
+  for (const [rel, marker] of [['../docs/data-inventory.md', '| Sync ('], ['../docs/help.md', '**What leaves the browser'], ['../legal/chrome-web-store-privacy.md', '| While signed in:']]) {
+    const line = lineWith(rel, marker);
+    assert.match(line, /take-down/, `${rel}: the sync triggers leave out take-downs`);
+    assert.match(line, /price update/, `${rel}: the sync triggers leave out price updates`);
+    assert.match(line, /each scan/, `${rel}: the sync triggers leave out the popup's scan`);
+    assert.doesNotMatch(line, /next of these|do not sync on their own/, `${rel} says a change made in the popup waits for the next sync`);
+  }
+});
+
 // Only Save settings (the popup's onSettingsSubmit) and finishing set-up
 // (wizard.js) write the synced profile; a scan, the rescan permission or a
 // sign-in never puts back a profile the person forgot. Every text that says

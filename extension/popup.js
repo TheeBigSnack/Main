@@ -252,6 +252,7 @@ async function scan() {
     state.siteName = r.site.name;
     if (!(await save('snapshot', 'diff', 'settings', 'boilerplate'))) return; // the status says why (the quota); the read stays on screen
     state.pilot = await recordFlags(state.origin, r.diff, r.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
+    syncInBackground(); // the scan's counts and the to-do items it flagged
     // the scan registered the website for background rescans; show its state
     state.site = ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {})[state.origin] || null;
     await checkRescanPermission();
@@ -833,7 +834,7 @@ function accountFieldset() {
   const refused = notSharedCount(); // the same count as To do's banner
   const notSharedNote = refused ? ` · ${refused} of your posts ${refused === 1 ? 'is' : 'are'} not shared with your dealership (My listings says why)` : '';
   const syncHint = state.origin
-    ? `<p class="hint" id="syncStatus">${last}${failed}${notSharedNote}. Lot Current also syncs after every rescan and after each post you record.</p>`
+    ? `<p class="hint" id="syncStatus">${last}${failed}${notSharedNote}. Lot Current also syncs after every rescan and after each post, take-down or price update you record.</p>`
     : `<p class="hint" id="syncStatus">Open your dealership's website to sync its listings.</p>`;
   return `<fieldset><legend>Account</legend>
     <p id="accountStatus">Signed in as <b>${esc(email)}</b>${dealership}${planLine}</p>
@@ -1091,6 +1092,16 @@ async function keepTakenDown(vin) {
 // Pilot numbers: an item the person ticked off by hand, or a car unmarked.
 const notePilot = (change) => updatePilot(state.origin, change).then((p) => { state.pilot = p; }).catch(() => null);
 
+// After a change recorded here (a scan, a car marked or unmarked, taken
+// down or updated), the worker syncs this website with the dealership's
+// account while the person is signed in, so the manager view and colleagues
+// see it now rather than at the next rescan. Fire and forget: the popup may
+// close first, and Settings shows how the sync went.
+function syncInBackground() {
+  if (!signedIn() || !state.origin) return;
+  chrome.runtime.sendMessage({ type: 'syncNow', origin: state.origin }).catch(() => {});
+}
+
 async function onPanelClick(ev) {
   const btn = ev.target.closest('button[data-action]');
   if (!btn) return;
@@ -1099,7 +1110,7 @@ async function onPanelClick(ev) {
     case 'post': {
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry) return;
-      await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis));
+      if (await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis))) syncInBackground(); // colleagues see the car is taken
       break;
     }
     case 'openPost': {
@@ -1229,23 +1240,25 @@ async function onPanelClick(ev) {
       }
       break;
     }
-    case 'unpost':
+    case 'unpost': {
       if (!(await keepTakenDown(vin))) break;
-      await update('posted', (p) => markTakenDown(p || {}, vin));
-      notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
+      const unmarked = await update('posted', (p) => markTakenDown(p || {}, vin));
+      // fire-and-forget: the redraw must not wait for the pilot bookkeeping; the sync goes after it, so it carries both
+      notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })).then(() => { if (unmarked) syncInBackground(); });
       break;
+    }
     // Two keys, two writes: stop at the first that fails (the status says
     // why) so the item stays open and can be ticked again once there is room.
     case 'takenDown':
       if (!(await keepTakenDown(vin))) break;
       if (!(await update('posted', (p) => markTakenDown(p || {}, vin)))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook'])))) break;
-      notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
+      notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' })).then(syncInBackground);
       break;
     case 'priceUpdated':
       if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price), undefined, buttonBasis(btn))))) break; // recorded with the basis the price was taken at
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
-      notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
+      notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })).then(syncInBackground);
       break;
     case 'pilotCsv': {
       // A file for the manager, saved by the browser like any download.

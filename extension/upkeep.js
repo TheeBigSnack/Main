@@ -19,6 +19,8 @@ import { resolveFlag, updatePilot } from './src/pilot.js';
 import { siteKeys } from './src/storageKeys.js';
 import { noteTakenDown } from './src/takenDown.js';
 import { updateKey, storageErrorText } from './src/storage.js';
+import { accountsConfigured } from './src/accountConfig.js';
+import { loadSession } from './src/account.js';
 
 export const up = {
   active: false,
@@ -172,6 +174,8 @@ async function finish(ctx, how) {
   // pilot numbers: how long the item stayed open, and whether Lot Current saw the change itself
   await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, up.kind === 'price' ? 'price' : 'takeDown', { how })).catch(() => null);
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
+  // signed in: the worker syncs the change, so the manager view and colleagues see it now (fire and forget; Settings shows how it went)
+  if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin: up.origin }).catch(() => {});
   up.status = 'done';
   up.note = how === 'detected' ? (up.kind === 'price' ? `The listing now shows ${money(up.price)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
   ctx.render();

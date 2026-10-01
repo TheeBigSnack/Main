@@ -537,3 +537,45 @@ test('Sign out from a Facebook tab forgets every website\'s sync state and keeps
   assert.deepEqual(p.local[k.posted], posted, 'the posted lists stay on this computer');
   assert.deepEqual(p.local[other.posted], posted);
 });
+
+// Settings says Lot Current syncs after every rescan and after each post,
+// take-down or price update recorded: the popup's own Rescan, Mark posted,
+// unmarking Posted ✓, Taken down and Updated each ask the worker to sync
+// while the person is signed in (the worker runs one more sync when one is
+// already out, test/syncAfterChange.test.js), and none does while signed out.
+test('signed in, the popup\'s Rescan, Mark posted, unmarking, Taken down and Updated each ask the worker to sync; signed out, none does', async () => {
+  const ram = vehicle('usedNormal');
+  const session = { accessToken: 'a.e30.c', refreshToken: 'r', expiresAt: Date.now() + 3600e3, user: { id: 'u1', email: 'sam@example.test' } };
+  const until = async (check) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 5)); };
+  const run = async (local, { expect = true } = {}) => {
+    const p = await loadPopup({ local });
+    const sent = [];
+    globalThis.chrome.runtime.sendMessage = async (msg) => { sent.push(msg); return {}; };
+    const syncs = () => sent.filter((m) => m.type === 'syncNow');
+    const steps = [];
+    const step = async (name, act, n) => {
+      await act();
+      await until(() => syncs().length >= (expect ? n : 0)); // the pilot note is written first, without holding up the redraw
+      steps.push([name, syncs().length]);
+    };
+    await step('rescan', () => p.scan(), 1);
+    assert.equal(p.status(), '', 'the scan went through');
+    await step('mark posted', () => p.click('post', { vin: ram.vin }), 2);
+    assert.ok(p.local[k.posted][ram.vin], 'marked posted');
+    await step('updated', () => p.click('priceUpdated', { vin: ram.vin, price: String(ram.price - 500) }), 3);
+    assert.equal(p.local[k.posted][ram.vin].price, ram.price - 500);
+    await step('taken down', () => p.click('takenDown', { vin: ram.vin }), 4);
+    assert.equal(p.local[k.posted][ram.vin], undefined, 'taken down');
+    await p.click('post', { vin: ram.vin });
+    await step('unmarked', () => p.click('unpost', { vin: ram.vin }), 6);
+    await new Promise((r) => setTimeout(r, 30)); // nothing more comes later
+    return { steps, syncs: syncs() };
+  };
+
+  const signedIn = await run({ [k.settings]: { ...MY_STORE }, account: session });
+  assert.deepEqual(signedIn.steps, [['rescan', 1], ['mark posted', 2], ['updated', 3], ['taken down', 4], ['unmarked', 6]]);
+  assert.ok(signedIn.syncs.every((m) => m.origin === POPUP_ORIGIN), 'each for the website open');
+
+  const signedOut = await run({ [k.settings]: { ...MY_STORE } }, { expect: false });
+  assert.deepEqual(signedOut.syncs, [], 'signed out: nothing to sync with');
+});

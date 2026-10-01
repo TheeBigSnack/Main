@@ -147,18 +147,35 @@ const updateSites = (change) => updateKey(SITES_KEY, (sites) => change(sites || 
 // One round of sync for one website (src/accountFlow.js syncOnce): the
 // registry and the pilot changes go up, the dealership's registry comes down
 // and is merged under the keys' locks. It runs here, in one place, whether
-// a rescan, the popup's Sync now or the panel's confirmed post asked for
-// it; one sync per website at a time, a second request while one runs gets
-// the same result. The outcome is recorded on the website's registry entry
-// (lastSyncAttempt, lastSync, lastSyncError) so Settings can show it. Never
-// throws: a failed sync is a result, not an exception.
-const syncing = new Map(); // origin -> the promise of the sync under way
+// a rescan, the popup (a scan, a post marked, taken down or updated, Sync
+// now), the panel (a confirmed post, a take-down or price update it saw
+// done) or set-up asked for it; one sync per website at a time. A request
+// made while one runs may carry a change that sync read too early (a
+// take-down clicked a second after a post), so one more sync follows it,
+// shared by every request made meanwhile, and they all get its result. The
+// outcome is recorded on the website's registry entry (lastSyncAttempt,
+// lastSync, lastSyncError) so Settings can show it. Never throws: a failed
+// sync is a result, not an exception.
+const syncing = new Map(); // origin -> { run, again, scan }: the sync under way, the one to follow it, and the scan it sends
 
 export function syncSite(origin, { scan = null } = {}) {
   if (!accountsConfigured()) return Promise.resolve({ ok: false, notConfigured: true, error: NOT_CONFIGURED });
   const key = String(origin || '');
-  if (syncing.has(key)) return syncing.get(key);
-  const run = (async () => {
+  const current = syncing.get(key);
+  if (!current) return startSync(key, scan);
+  if (scan) current.scan = scan; // the newest scan asked for; none means the stored one
+  if (!current.again) {
+    current.again = current.run.then(() => {
+      if (syncing.get(key) === current) syncing.delete(key);
+      return syncSite(key, { scan: current.scan });
+    });
+  }
+  return current.again;
+}
+
+function startSync(key, scan) {
+  const entry = { run: null, again: null, scan: null };
+  entry.run = (async () => {
     let r;
     try {
       r = await syncOnce({ origin: key, scan, deps: { config: ACCOUNT, fetchImpl: fetch, storage: chrome.storage.local } });
@@ -173,9 +190,9 @@ export function syncSite(origin, { scan = null } = {}) {
     } catch (e) { /* the registry could not be written; the result still says what happened */ }
     return r;
   })();
-  syncing.set(key, run);
-  run.finally(() => { if (syncing.get(key) === run) syncing.delete(key); });
-  return run;
+  syncing.set(key, entry);
+  entry.run.finally(() => { if (syncing.get(key) === entry) syncing.delete(key); });
+  return entry.run;
 }
 
 export async function updateBadge() {
