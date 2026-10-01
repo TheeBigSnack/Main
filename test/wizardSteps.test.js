@@ -7,7 +7,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
+import { syncPayload } from '../extension/src/sync.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
 import { redeemInvite } from '../extension/src/account.js';
@@ -159,4 +160,35 @@ test('HANDOFF.md 5.7 lists the wizard steps with the Account step in its place',
   const heading = read('../HANDOFF.md').match(/^### 5\.7 .*steps `([^`]+)`/m);
   assert.ok(heading, 'HANDOFF.md 5.7 lists the steps');
   assert.deepEqual(heading[1].split(',').map((s) => s.trim()), wizardSteps(true));
+});
+
+// What the Terms step says Lot Current keeps. With accounts configured the
+// person can be signed in, and then sync sends their posted list, post
+// timings, to-do items and scan counts to the dealership's account; the
+// summary must say so instead of "keeps its data in your browser" alone.
+const unescape = (html) => html.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+test('the Terms step\'s summary says what syncs to the dealership\'s account whenever accounts are configured', async () => {
+  const off = termsSummary(false);
+  const on = termsSummary(true);
+  for (const s of [off, on]) {
+    assert.match(s, /keeps its data in your browser/);
+    assert.match(s, /never your Facebook login/);
+    assert.match(s, /You publish every post yourself\. Lot Current is not affiliated with Meta Platforms, Inc\.$/);
+  }
+  assert.doesNotMatch(off, /sync|database|account/i, 'without accounts nothing leaves the browser, and the summary says nothing of an account');
+  assert.match(on, /While you are signed in, your posted list \([^)]*\), your post timings, your to-do items \(with the old and new price of a price change\) and each scan's counts also sync to your dealership's account in Lot Current's database\./);
+  // every field of a posted-list entry that sync sends is named in the parentheses
+  const sent = syncPayload({ origin: ORIGIN, posted: { TESTVIN00000000A1: { name: 'A', price: 1, postedAt: '2026-11-16T09:00:00.000Z', updatedAt: '2026-11-16T10:00:00.000Z', listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Sam' } } }).posted.TESTVIN00000000A1;
+  const words = { name: 'name', price: 'price', postedAt: 'when you posted', updatedAt: 'and updated it', listingUrl: 'the listing link', salesperson: 'your name' };
+  const listed = on.match(/your posted list \(([^)]*)\)/)[1];
+  assert.match(listed, /\bVIN\b/);
+  for (const field of Object.keys(sent)) assert.ok(words[field] && listed.includes(words[field]), `the summary does not name the posted-list field ${field} that sync sends`);
+  // the step shows the summary for this build's config
+  const { wiz, wizardHtml } = await import('../extension/wizard.js');
+  wiz.step = 'terms';
+  const html = wizardHtml();
+  const shown = html.match(/<p id="termsSummary">([^<]*)<\/p>/);
+  assert.ok(shown, 'the Terms step has no summary paragraph');
+  assert.equal(unescape(shown[1]), termsSummary(accountsConfigured()));
 });
