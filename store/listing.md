@@ -81,7 +81,7 @@ Lot Current helps a car dealership salesperson prepare Facebook Marketplace list
 
 ## Permission justifications
 
-From `extension/manifest.json`; this file follows the manifest, never the other way round. The longer answers are in `legal/chrome-web-store-privacy.md`; `test/manifest.test.js` checks every pattern is named in both.
+From `extension/manifest.json`; this file follows the manifest, never the other way round. The longer answers are in `legal/chrome-web-store-privacy.md`; `test/manifest.test.js` checks that every pattern has one row of its own, with its reason, in the table below and in that file's, and that neither table has a row the manifest does not ask for. The bullet list is a summary and counts for nothing.
 
 - Permissions: `activeTab`, `scripting`, `storage`, `sidePanel`, `alarms`, `notifications`
 - Host permissions: `https://www.facebook.com/marketplace/*`, `https://vehicle-images.carscommerce.inc/*`
