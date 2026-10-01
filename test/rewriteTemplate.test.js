@@ -209,3 +209,56 @@ test('a closing line the salesperson wrapped in the description is still recogni
   assert.deepEqual(runGuardrails(wrapped, { ...args, closingLine: line }).problems, []);
   assert.equal(ensureClosingLine(wrapped, line), wrapped, 'not added twice');
 });
+
+// ---------- prices and mileage the text states ----------
+import { dollarAmounts, mileageClaims } from '../extension/src/rewriteTemplate.js';
+import { generateDescription } from '../extension/src/rewriter.js';
+
+const EXAMPLE = { name: 'Example Motors', city: 'Springfield' };
+const SAM = { name: 'Sam', title: 'sales consultant' };
+const STALE = 'Was $31,995, now just $28,995 with 38,000 miles! Rides on 20-inch wheels with the 8.4-inch touchscreen.';
+
+test('a stale price, price drop or mileage in a draft fails the checks, though the write-up has those numbers', () => {
+  const v = { ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: STALE }; // 20,986 miles; posted at 26,673
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 26673 };
+  const base = buildTemplateDescription(c);
+  assert.deepEqual(runGuardrails(base, c).problems, [], 'the template passes');
+  const g = runGuardrails(`${base}\nWas $31,995, now just $28,995 with 38,000 miles!`, c);
+  const codes = g.problems.map((p) => p.code);
+  assert.ok(!codes.includes('unknown-number'), 'every number is in the write-up');
+  assert.deepEqual(codes.filter((x) => x !== 'too-long').sort(), ['mileage-mismatch', 'price-change', 'price-mismatch', 'price-mismatch']);
+  assert.ok(g.problems.some((p) => p.text === "Says $31,995, but this listing's price is $26,673"));
+  assert.ok(g.problems.some((p) => p.text === 'Says 38,000 miles, but the website shows 20,986 miles'));
+  // the posted price, the price note's amount and the website's own mileage are fine
+  assert.deepEqual(runGuardrails(`${base}\nAsking $26,673 with 20,986 miles.`.replace('Message me to set up a test drive or ask a question.\n', ''), c).problems.filter((p) => /price|mileage/.test(p.code)), []);
+  // a short form of the same claim is caught too
+  assert.ok(runGuardrails(`${base}\nOnly 38K miles.`, c).problems.some((p) => p.code === 'mileage-mismatch'));
+  // with no price to compare (the rewrite service's own check), any amount outside the price note is flagged
+  assert.ok(runGuardrails(`${base}\n$26,673.`, { ...c, price: null }).problems.some((p) => p.code === 'price-mismatch'));
+});
+
+test('distances, ranges and warranty terms are not read as the mileage', () => {
+  assert.deepEqual(mileageClaims('A 3-year/36,000-mile powertrain warranty, 300 miles of range, 30 miles away, within 50 miles, every 5,000 miles, 60 mph.'), []);
+  assert.deepEqual(mileageClaims('Only 38,000 miles! Has 38K miles, 41.2k mi and 45 thousand miles.').map((m) => m.value), [38000, 38000, 41200, 45000]);
+  assert.deepEqual(dollarAmounts('$28,995, $ 490 and $28.5k').map((a) => a.value), [28995, 490, 28500]);
+});
+
+test('the template leaves out write-up sentences with a price or another mileage, and still passes its own checks', async () => {
+  const v = { ...vehicle('usedNormal'), descriptionRaw: STALE };
+  const r = await generateDescription({ vehicle: v, dealer: EXAMPLE, salesperson: SAM, price: 26673 });
+  assert.doesNotMatch(r.text, /\$|38,000|now just/);
+  assert.match(r.text, /Rides on 20-inch wheels with the 8\.4-inch touchscreen\./, 'the next sentence is used instead');
+  assert.deepEqual(r.guardrails.problems, []);
+  assert.match(r.text, /with 20,986 miles\./);
+});
+
+test('the template passes its own word count whatever the features and write-up (the VIN line is not counted)', () => {
+  const picks = ['Navigation System', 'Heated Seats', 'Backup Camera', 'Bluetooth', 'Apple CarPlay', 'Remote Start'];
+  for (let n = 0; n <= picks.length; n += 1) {
+    for (const narrative of [[], ['A clean truck.'], ['A clean truck that drives well.'], ['A clean truck that drives well and has been kept up nicely.']]) {
+      const v = vehicle('usedNoCarfax', { features: picks.slice(0, n) });
+      const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price, narrative };
+      assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], `${n} features, ${JSON.stringify(narrative)}`);
+    }
+  }
+});

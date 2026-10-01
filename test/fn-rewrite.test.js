@@ -233,7 +233,7 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const r = await rewrite(handler, TOKEN.u1);
   assert.equal(r.status, 200);
   assert.deepEqual([r.body.ok, r.body.text, r.body.error], [false, BAD, 'the draft failed the checks twice']);
-  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'no-dealer', 'too-short', 'unknown-number']);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'mileage-mismatch', 'no-dealer', 'too-short', 'unknown-number']);
   assert.equal(r.body.costUsd, 0.037, '$0.02 and $0.017');
   const [first, second] = requests();
   assert.doesNotMatch(first.json.messages[0].content, /previous draft failed/);
@@ -244,6 +244,21 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const d = await generateDescription({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, settings: { rewrite: { enabled: true, endpoint: ENDPOINT, key: TOKEN.u1 } }, origin: ORIGIN, fetchImpl: functionsFetch({ rewrite: handler }) });
   assert.equal(d.source, 'template');
   assert.match(d.note, /the draft failed the checks twice/);
+});
+
+test('rewrite: a draft repeating a stale price, price drop or mileage from the write-up is refused, though the write-up holds those numbers', async () => {
+  world();
+  const narrative = ['Was $24,995, now just $21,995 with 29,000 miles.'];
+  const stale = GOOD.replace('It shows 34,567 miles', 'It was $24,995, now just $21,995 with 29,000 miles');
+  anthropic(says(stale));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1, { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative }), origin: ORIGIN });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  const codes = r.body.guardrails.problems.map((p) => p.code);
+  assert.ok(!codes.includes('unknown-number'), 'every number is in the write-up');
+  assert.deepEqual([...new Set(codes)].sort(), ['mileage-mismatch', 'price-change', 'price-mismatch']);
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says 29,000 miles, but the website shows 34,567 miles'));
 });
 
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {

@@ -96,6 +96,68 @@ export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price
   return numbersIn(bits.filter((b) => b !== null && b !== undefined).join(' '));
 }
 
+// ---------- prices and mileage the text states ----------
+// A dollar amount or a mileage in a description is a claim about this car's
+// price or odometer, so it must be the one the listing carries: the price
+// being posted (or an amount in the dealer's price note) and the website's
+// mileage. The write-up's own numbers count as "in the website's data", so
+// without these checks a write-up still saying last month's "now just
+// $28,995 with 38,000 miles" would pass. Distances, ranges and warranty
+// terms ("30 miles away", "300 miles of range", "a 3-year/36,000-mile
+// warranty") are not the odometer.
+
+const DOLLARS = /\$\s?(\d[\d,]*(?:\.\d+)?)(\s?k\b)?/gi;
+export function dollarAmounts(text) {
+  return [...String(text ?? '').matchAll(DOLLARS)].map((m) => ({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) }));
+}
+
+const MILES = /(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?[\s-]*(?:miles?\b|mi\b\.?)/gi;
+const NOT_ODOMETER_BEFORE = /(?:\/|\b(?:within|up to|every|range of|per))\s*$/i;
+const NOT_ODOMETER_AFTER = /^[\s-]*(?:\/|(?:from|per|an? hour)\b|(?:[\w'-]+\s+){0,2}(?:warranty|powertrain|bumper|coverage|range|radius|away|charge|tank)\b)/i;
+export function mileageClaims(text) {
+  const t = String(text ?? '');
+  const out = [];
+  for (const m of t.matchAll(MILES)) {
+    if (NOT_ODOMETER_BEFORE.test(t.slice(Math.max(0, m.index - 12), m.index))) continue;
+    if (NOT_ODOMETER_AFTER.test(t.slice(m.index + m[0].length, m.index + m[0].length + 40))) continue;
+    out.push({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) });
+  }
+  return out;
+}
+
+// Wording that claims a price change. Prices only ever mirror the website,
+// and a listing's price drop reaches buyers through the listing itself.
+export const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|was \$|now (?:just |only )?\$)/i;
+
+// The problems a text's prices and mileage give, for runGuardrails.
+function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = null }) {
+  const problems = [];
+  const posted = typeof price === 'number' && price > 0 ? Math.round(price) : null;
+  const allowed = new Set([posted, ...dollarAmounts(priceNote).map((a) => a.value)].filter((n) => n !== null));
+  const said = new Set();
+  for (const a of dollarAmounts(text)) {
+    if (allowed.has(a.value) || said.has(a.value)) continue;
+    said.add(a.value);
+    const money = `$${a.value.toLocaleString('en-US')}`;
+    problems.push({ code: 'price-mismatch', text: posted ? `Says ${money}, but this listing's price is $${posted.toLocaleString('en-US')}` : `Says ${money}; the price belongs in the listing's price field` });
+  }
+  const miles = typeof vehicle.mileage === 'number' && vehicle.mileage >= 0 ? Math.round(vehicle.mileage) : null;
+  const claimed = new Set();
+  for (const m of mileageClaims(text)) {
+    if (m.value === miles || claimed.has(m.value)) continue;
+    claimed.add(m.value);
+    problems.push({ code: 'mileage-mismatch', text: `Says ${m.value.toLocaleString('en-US')} miles, but the website shows ${miles === null ? 'no mileage for this car' : `${miles.toLocaleString('en-US')} miles`}` });
+  }
+  const change = PRICE_CHANGE.exec(text);
+  if (change) problems.push({ code: 'price-change', text: `Says "${change[0].trim()}"; a description never claims a price change` });
+  return problems;
+}
+
+// A write-up sentence the template may copy: no dollar amount at all (the
+// price is the listing's own field), no price change, and no mileage other
+// than the website's.
+const narrativeSentenceOk = (sentence, vehicle) => !priceAndMileageProblems(sentence, { vehicle }).length;
+
 // The website's features a description can name as highlights: each once,
 // short enough to read in a list (40 characters or less), ranked by
 // FEATURE_PRIORITY and then the website's own order. The side panel offers
@@ -200,8 +262,8 @@ function stripClosing(text, line) {
   return String(text || '').replace(closingPattern(c), ' ');
 }
 
-function firstSentences(text, maxSentences, maxWords) {
-  const sentences = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean);
+function firstSentences(text, maxSentences, maxWords, keep = () => true) {
+  const sentences = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean).filter(keep);
   const out = [];
   for (const s of sentences.slice(0, maxSentences)) {
     if (wordCount([...out, s].join(' ')) > maxWords) break;
@@ -233,7 +295,8 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45) : '';
+  // the write-up's first sentences, leaving out any that state a price, a price change or another mileage
+  const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45, (sentence) => narrativeSentenceOk(sentence, v)) : '';
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
@@ -260,8 +323,8 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
 
   const on = new Set(blocks.filter((b) => b.keep !== 'filler').map((b) => b.id));
   const render = () => blocks.filter((b) => on.has(b.id)).map((b) => b.text).join('\n');
-  // the closing line is not counted, as in runGuardrails
-  const words = () => wordCount(stripClosing(render(), closing));
+  // the closing line and the VIN line are not counted, as in runGuardrails
+  const words = () => wordCount(stripVin(stripClosing(render(), closing)));
 
   for (const id of ['narrative', 'mech', 'colors', 'cta']) {
     if (words() <= WORD_LIMITS.max) break;
@@ -313,6 +376,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '',
   for (const n of numbersIn(prose)) {
     if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
   }
+  problems.push(...priceAndMileageProblems(prose, { vehicle, priceNote, price }));
   // The price note is the dealer's wording. When it quotes a dollar amount and
   // the website shows two prices for this car, the amount must be their
   // difference; a note written for one fee must not ride on a car with another.

@@ -8,6 +8,8 @@
 //   - 60-120 words (the VIN line does not count)
 //   - every number in the text must be in the website's data for the car
 //   - a price note quoting a dollar amount must match the car's two-price gap
+//   - a dollar amount must be the price posted or one in the price note, a
+//     mileage must be the website's, and no price change is claimed
 //   - the VIN and the dealership's name must be present
 //   - banned phrases (claims the data can't support, posing as a private
 //     seller, protected characteristics), "one owner" only with the flag,
@@ -115,6 +117,63 @@ export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price
   return numbersIn(bits.filter((b) => b !== null && b !== undefined).join(' '));
 }
 
+// ---------- prices and mileage the text states ----------
+// A dollar amount or a mileage in a description is a claim about this car's
+// price or odometer, so it must be the one the listing carries: the price
+// being posted (or an amount in the dealer's price note) and the website's
+// mileage. Distances, ranges and warranty terms are not the odometer.
+
+interface Amount {
+  text: string;
+  value: number;
+}
+
+const DOLLARS = /\$\s?(\d[\d,]*(?:\.\d+)?)(\s?k\b)?/gi;
+export function dollarAmounts(text: unknown): Amount[] {
+  return [...String(text ?? '').matchAll(DOLLARS)].map((m) => ({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) }));
+}
+
+const MILES = /(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?[\s-]*(?:miles?\b|mi\b\.?)/gi;
+const NOT_ODOMETER_BEFORE = /(?:\/|\b(?:within|up to|every|range of|per))\s*$/i;
+const NOT_ODOMETER_AFTER = /^[\s-]*(?:\/|(?:from|per|an? hour)\b|(?:[\w'-]+\s+){0,2}(?:warranty|powertrain|bumper|coverage|range|radius|away|charge|tank)\b)/i;
+export function mileageClaims(text: unknown): Amount[] {
+  const t = String(text ?? '');
+  const out: Amount[] = [];
+  for (const m of t.matchAll(MILES)) {
+    const at = m.index as number;
+    if (NOT_ODOMETER_BEFORE.test(t.slice(Math.max(0, at - 12), at))) continue;
+    if (NOT_ODOMETER_AFTER.test(t.slice(at + m[0].length, at + m[0].length + 40))) continue;
+    out.push({ text: m[0].trim(), value: Math.round(Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1)) });
+  }
+  return out;
+}
+
+// Wording that claims a price change. Prices only ever mirror the website.
+export const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|was \$|now (?:just |only )?\$)/i;
+
+function priceAndMileageProblems(text: string, { vehicle = {}, priceNote = '', price = null }: GuardrailContext): GuardrailProblem[] {
+  const problems: GuardrailProblem[] = [];
+  const posted = typeof price === 'number' && price > 0 ? Math.round(price) : null;
+  const allowed = new Set([posted, ...dollarAmounts(priceNote).map((a) => a.value)].filter((n) => n !== null));
+  const said = new Set<number>();
+  for (const a of dollarAmounts(text)) {
+    if (allowed.has(a.value) || said.has(a.value)) continue;
+    said.add(a.value);
+    const money = `$${a.value.toLocaleString('en-US')}`;
+    problems.push({ code: 'price-mismatch', text: posted ? `Says ${money}, but this listing's price is $${posted.toLocaleString('en-US')}` : `Says ${money}; the price belongs in the listing's price field` });
+  }
+  const miles = typeof vehicle.mileage === 'number' && vehicle.mileage >= 0 ? Math.round(vehicle.mileage) : null;
+  const claimed = new Set<number>();
+  for (const m of mileageClaims(text)) {
+    if (m.value === miles || claimed.has(m.value)) continue;
+    claimed.add(m.value);
+    problems.push({ code: 'mileage-mismatch', text: `Says ${m.value.toLocaleString('en-US')} miles, but the website shows ${miles === null ? 'no mileage for this car' : `${miles.toLocaleString('en-US')} miles`}` });
+  }
+  const change = PRICE_CHANGE.exec(text);
+  if (change) problems.push({ code: 'price-change', text: `Says "${change[0].trim()}"; a description never claims a price change` });
+  return problems;
+}
+
 function shouting(text: unknown): boolean {
   const tokens = String(text || '').split(/\s+/);
   let run = 0;
@@ -151,6 +210,7 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, priceN
   for (const n of numbersIn(prose)) {
     if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
   }
+  problems.push(...priceAndMileageProblems(prose, { vehicle, priceNote, price }));
   // The price note is the dealer's wording. When it quotes a dollar amount and
   // the website shows two prices for this car, the amount must be their
   // difference; a note written for one fee must not ride on a car with another.
