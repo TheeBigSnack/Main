@@ -44,6 +44,7 @@ Current model names and prices: https://docs.claude.com/en/docs/about-claude/mod
 - Each description is roughly 1,500 input tokens and 200 output tokens. On Haiku 4.5 that is about $0.0025, so around $2.50 per 1,000 descriptions; a failed check that triggers a second draft doubles it for that car.
 - `MONTHLY_COST_CAP_USD` (default 25) stops the service for the rest of the month once the running total in `usage.json` reaches it. The extension then falls back to the template.
 - `RATE_LIMIT_PER_MINUTE` (default 20) is per caller.
+- `REWRITE_DEADLINE_MS` (default 20000, 20 seconds) is how long one request may spend on Claude. The extension waits 25 seconds and then shows its template, so a call still running at the deadline is stopped (the answer is 504), a second draft starts only while 40% of that time is left, and a call whose caller has gone away is stopped too. A stopped call adds nothing to `usage.json`.
 
 ## Running it for a whole store
 
@@ -53,4 +54,4 @@ To share it, run it on any small Node host (Railway, Fly.io, Render, a VPS) with
 
 ## What it stores
 
-`usage.json` (a running cost total for the month) and nothing else. It logs one line per request with the car's year, make and model. No VIN, no Facebook data and no salesperson data reach this service beyond the sign-off name and title that go into the description.
+`usage.json` (a running cost total for the month; `USAGE_FILE` names another file) and nothing else. It logs one line per request with the car's year, make and model. No VIN, no Facebook data and no salesperson data reach this service beyond the sign-off name and title that go into the description.

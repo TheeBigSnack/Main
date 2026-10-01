@@ -139,7 +139,7 @@ test('rewrite/index.ts: the dealership comes from the origin sent with the facts
   assert.match(rewrite, /if \(!membership\) return json\(req, 403, \{ ok: false, error: `your account is not a member of the dealership for \$\{wantedOrigin\}` \}\);/);
   assert.doesNotMatch(rewrite, /\|\| memberships\[0\]/, 'no silent fallback after a miss');
   const strip = rewrite.indexOf('delete facts.origin;');
-  assert.ok(strip > 0 && strip < rewrite.indexOf('await rewrite(facts, who, service)'), 'origin is removed from the facts before the prompt');
+  assert.ok(strip > 0 && strip < rewrite.indexOf('await rewrite(facts, who, service, clock)'), 'origin is removed from the facts before the prompt');
 });
 
 // ---------- the plan gate and the daily cap's count (Milestone 5) ----------
@@ -167,7 +167,7 @@ test('sync/index.ts and rewrite/index.ts refuse a lapsed dealership with 402 and
   assert.ok(rewriteGate > rewrite.indexOf('const who: Who = '), 'after the membership is picked');
   assert.ok(rewriteGate < rewrite.indexOf('spent = await monthSpend('), 'before the cost cap is read');
   assert.ok(rewriteGate < rewrite.indexOf('if (isHealth) {'), 'every route, health included');
-  assert.ok(rewriteGate < rewrite.indexOf('await rewrite(facts, who, service)'), 'before the model call');
+  assert.ok(rewriteGate < rewrite.indexOf('await rewrite(facts, who, service, clock)'), 'before the model call');
   assert.ok(rewriteGate < rewrite.indexOf('await guessColors('), 'before the color call');
   // the shared pieces: one query by dealership id under RLS; the answer's code and sentence
   assert.match(auth, /export async function subscriptionRowOf\(client: SupabaseClient, dealershipId: string\): Promise<SubscriptionRow \| null>/);

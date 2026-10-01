@@ -9,7 +9,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadFunction, invoke, fake, net, logs, hermetic, functionsFetch, uuid, keysOf, NETWORK_ERROR, SUPABASE_URL, ANON_KEY, SERVICE_KEY, EXTENSION_ORIGIN } from './functions/harness.mjs';
 import { LAPSED_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
-import { generateDescription, rewriteWithBackend, guessColorsWithBackend, rewriteFacts } from '../extension/src/rewriter.js';
+import { generateDescription, rewriteWithBackend, guessColorsWithBackend, rewriteFacts, REWRITE_TIMEOUT_MS } from '../extension/src/rewriter.js';
+import { readFileSync } from 'node:fs';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -466,4 +467,53 @@ test('rewrite: a draft that adds a part to the one the facts name is refused; ea
   anthropic(says(GOOD.replace('It is a comfortable, easy car', 'It has new tires and is a comfortable, easy car')));
   const ok = await rewrite(await load(), TOKEN.u1, facts);
   assert.deepEqual([ok.body.ok, ok.body.guardrails.problems], [true, []]);
+});
+
+// An Anthropic answer that comes back after `ms`.
+const slowly = (ms, answer) => () => new Promise((resolve) => setTimeout(() => resolve(answer), ms));
+
+test('rewrite: one deadline under the extension\'s wait: a call still running then is stopped (504, nothing logged), a second draft starts only with time left, and a caller who leaves stops the call', async () => {
+  // the deadline is under the extension's own wait, so nothing is spent on an answer nobody will see
+  const source = readFileSync(new URL('../supabase/functions/rewrite/index.ts', import.meta.url), 'utf8');
+  const deadline = Number(/deadlineMs: Number\(env\('REWRITE_DEADLINE_MS'\)\) \|\| ([\d_]+)/.exec(source)[1].replace(/_/g, ''));
+  assert.ok(deadline > 0 && deadline < REWRITE_TIMEOUT_MS, `${deadline} ms against the extension's ${REWRITE_TIMEOUT_MS}`);
+
+  // a slow call is stopped at the deadline, not retried, and costs nothing
+  world();
+  net.route(ANTHROPIC, slowly(1500, says(GOOD)));
+  let started = Date.now();
+  const slow = await rewrite(await load({ REWRITE_DEADLINE_MS: '200' }), TOKEN.u1);
+  assert.ok(Date.now() - started < 1200, 'answered at the deadline, not when the call came back');
+  assert.deepEqual([slow.status, slow.body], [504, { ok: false, error: 'Claude took too long to answer, so it was stopped; the template is used instead' }]);
+  assert.deepEqual(net.to(ANTHROPIC).map((c) => c.aborted), [true]);
+  assert.equal(fake.rows('rewrite_usage').length, 0);
+
+  // a draft the checks refuse, with too little time left: no second draft
+  world();
+  net.calls = [];
+  net.route(ANTHROPIC, slowly(700, says(BAD)));
+  const late = await rewrite(await load({ REWRITE_DEADLINE_MS: '1000' }), TOKEN.u1);
+  assert.deepEqual([late.status, late.body.ok, late.body.error], [200, false, 'the draft failed the checks, and there was no time for a second one']);
+  assert.equal(requests().length, 1);
+  assert.equal(fake.rows('rewrite_usage').length, 1, 'the one call made is paid for');
+
+  // the caller goes away: the call is stopped, and nothing is logged
+  world();
+  net.calls = [];
+  net.route(ANTHROPIC, slowly(1500, says(GOOD)));
+  const gone = new AbortController();
+  setTimeout(() => gone.abort(), 150);
+  started = Date.now();
+  await rewrite(await load(), TOKEN.u1, undefined, { signal: gone.signal });
+  assert.ok(Date.now() - started < 1200, 'stopped when the caller left');
+  assert.deepEqual(net.to(ANTHROPIC).map((c) => c.aborted), [true]);
+  assert.equal(fake.rows('rewrite_usage').length, 0);
+
+  // /color keeps the same deadline
+  world();
+  net.calls = [];
+  net.route(ANTHROPIC, slowly(1500, says('{"exterior":"Gray","interior":"Black","confidence":"high"}')));
+  const color = await invoke(await load({ REWRITE_DEADLINE_MS: '200' }), { path: 'rewrite/color', token: TOKEN.u1, body: { photos: ['https://images.example-motors.test/1.jpg'], options: ['Gray', 'Black'], origin: ORIGIN } });
+  assert.equal(color.status, 504);
+  assert.equal(fake.rows('rewrite_usage').length, 0);
 });

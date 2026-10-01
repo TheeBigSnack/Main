@@ -303,7 +303,7 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   // the self-hosted backend/ takes the same body, so it must drop origin too
   const server = stripComments(read('backend/server.js'));
   const strip = server.indexOf('delete facts.origin;');
-  assert.ok(strip > 0 && strip < server.indexOf('await rewrite(facts)'), 'backend/server.js no longer removes origin before the facts reach Anthropic: update the inventory and the privacy policy');
+  assert.ok(strip > 0 && strip < server.indexOf('await rewrite(facts, clock)'), 'backend/server.js no longer removes origin before the facts reach Anthropic: update the inventory and the privacy policy');
   const t = tables(section(inventory, '## What leaves the browser'))[0];
   const row = t.rows.find((r) => r[0].startsWith('Description writer'));
   assert.ok(row && row[column(t, 'What is sent')].includes('`origin`'), 'the Description writer row does not name origin');

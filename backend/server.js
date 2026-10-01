@@ -9,6 +9,13 @@
 // address requires REWRITE_KEY), an optional shared key the extension must
 // send, a per-minute rate limit per caller, and a monthly cost cap (tracked
 // in usage.json).
+//
+// Time: the extension waits 25 seconds (extension/src/rewriter.js
+// REWRITE_TIMEOUT_MS) and then shows its template. Each request has one
+// deadline under that (REWRITE_DEADLINE_MS, 20 seconds) for every Claude
+// call it makes: a call still running then is stopped (504), a second draft
+// starts only while at least 40% of it is left, and a caller that goes away
+// stops the call the same way. A stopped call books no cost.
 
 import http from 'node:http';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -36,7 +43,8 @@ const config = {
   key: process.env.REWRITE_KEY || '', // shared secret the extension must send; empty = open (local use only)
   perMinute: Number(process.env.RATE_LIMIT_PER_MINUTE) || 20,
   monthlyCapUsd: Number(process.env.MONTHLY_COST_CAP_USD) || 25,
-  usageFile: join(here, 'usage.json'),
+  deadlineMs: Number(process.env.REWRITE_DEADLINE_MS) || 20_000,
+  usageFile: process.env.USAGE_FILE || join(here, 'usage.json'),
 };
 
 if (!process.env.ANTHROPIC_API_KEY) {
@@ -98,30 +106,52 @@ function guardrailContext(facts) {
   };
 }
 
-async function draft(facts, fixes) {
+// The request's time: one signal that stops every Claude call it makes, at
+// the deadline or when the caller goes away, and whether enough of it is
+// left to start another call.
+const MIN_LEFT = 0.4;
+function clockFor(res) {
+  const started = Date.now();
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(new Error('deadline')), config.deadlineMs);
+  res.on('close', () => {
+    clearTimeout(timer);
+    if (!res.writableEnded) stop.abort(new Error('the caller went away'));
+  });
+  return {
+    signal: stop.signal,
+    roomFor: () => !stop.signal.aborted && config.deadlineMs - (Date.now() - started) >= config.deadlineMs * MIN_LEFT,
+  };
+}
+
+// A draft cut off at max_tokens (600, several times the 120-word limit)
+// always fails the too-long check, so it needs no flag of its own.
+async function draft(facts, fixes, clock) {
   const { system, user } = buildRewritePrompt(facts, fixes);
   const response = await client.messages.create({
     model: config.model,
     max_tokens: 600,
     system,
     messages: [{ role: 'user', content: user }],
-  });
+  }, { signal: clock.signal });
   const cost = addUsage(response.model || config.model, response.usage || {});
   if (response.stop_reason === 'refusal') return { text: '', refused: true, cost, model: response.model };
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-  return { text, cost, model: response.model, truncated: response.stop_reason === 'max_tokens' };
+  return { text, cost, model: response.model };
 }
 
-async function rewrite(facts) {
+async function rewrite(facts, clock) {
   const ctx = guardrailContext(facts);
-  let d = await draft(facts, []);
+  let d = await draft(facts, [], clock);
   let g = runGuardrails(d.text, ctx);
   let cost = d.cost;
-  if (!g.ok && !d.refused) {
+  let tries = 1;
+  if (!g.ok && !d.refused && clock.roomFor()) {
     // regenerate once with the problems spelled out, then give up (the extension falls back to its template)
-    d = await draft(facts, g.problems.map((p) => p.text));
+    d = await draft(facts, g.problems.map((p) => p.text), clock);
     g = runGuardrails(d.text, ctx);
     cost += d.cost;
+    tries = 2;
   }
   return {
     ok: g.ok,
@@ -129,7 +159,7 @@ async function rewrite(facts) {
     model: d.model,
     guardrails: g,
     costUsd: Number(cost.toFixed(5)),
-    error: g.ok ? '' : d.refused ? 'the model declined this request' : 'the draft failed the checks twice',
+    error: g.ok ? '' : d.refused ? 'the model declined this request' : tries === 2 ? 'the draft failed the checks twice' : 'the draft failed the checks, and there was no time for a second one',
   };
 }
 
@@ -138,7 +168,7 @@ async function rewrite(facts) {
 const COLOR_MAX_PHOTOS = 4;
 const DEFAULT_COLORS = ['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Gray', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white'];
 
-async function guessColors(photos, options) {
+async function guessColors(photos, options, clock) {
   const content = photos.slice(0, COLOR_MAX_PHOTOS).map((url) => ({ type: 'image', source: { type: 'url', url } }));
   content.push({
     type: 'text',
@@ -146,7 +176,7 @@ async function guessColors(photos, options) {
       'If no photo shows the interior, answer "unknown" for interior; if the exterior is not clearly visible, answer "unknown". ' +
       'Reply with JSON only, like {"exterior":"Gray","interior":"Black","confidence":"high"} where confidence is high, medium or low.',
   });
-  const response = await client.messages.create({ model: config.model, max_tokens: 120, messages: [{ role: 'user', content }] });
+  const response = await client.messages.create({ model: config.model, max_tokens: 120, messages: [{ role: 'user', content }] }, { signal: clock.signal });
   const cost = addUsage(response.model || config.model, response.usage || {});
   if (response.stop_reason === 'refusal') return { ok: false, error: 'the model declined to look at these photos', costUsd: cost };
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
@@ -171,8 +201,15 @@ function readBody(req, limit) {
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS' };
 
+const OUT_OF_TIME = 'Claude took too long to answer, so it was stopped; the template is used instead';
+
 const server = http.createServer(async (req, res) => {
-  const send = (status, body) => { res.writeHead(status, { ...CORS, 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
+  const clock = clockFor(res);
+  const send = (status, body) => {
+    if (res.writableEnded || res.destroyed) return; // the caller went away: nobody to answer
+    res.writeHead(status, { ...CORS, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+  };
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
   if (req.method === 'GET' && req.url === '/health') {
     return send(200, { ok: true, model: config.model, month: usage.month, usd: Number(usage.usd.toFixed(4)), capUsd: config.monthlyCapUsd, requests: usage.requests });
@@ -194,7 +231,7 @@ const server = http.createServer(async (req, res) => {
       const photos = Array.isArray(body && body.photos) ? body.photos.filter((u) => typeof u === 'string' && /^https:\/\//i.test(u)).slice(0, COLOR_MAX_PHOTOS) : [];
       if (!photos.length) return send(400, { ok: false, error: 'photos are missing (1 to 4 https addresses)' });
       const options = Array.isArray(body.options) && body.options.length ? body.options.map(String).slice(0, 40) : DEFAULT_COLORS;
-      const out = await guessColors(photos, options);
+      const out = await guessColors(photos, options, clock);
       console.log(`${new Date().toISOString()} color ${photos.length} photo(s) -> ${out.ok ? `${out.exterior || '?'} / ${out.interior || '?'} (${out.confidence})` : out.error} $${out.costUsd} (month $${usage.usd.toFixed(2)})`);
       return send(200, out);
     }
@@ -205,10 +242,11 @@ const server = http.createServer(async (req, res) => {
     const facts = body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : null;
     if (facts) delete facts.origin;
     if (!facts || !facts.make || !facts.model) return send(400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
-    const out = await rewrite(facts);
+    const out = await rewrite(facts, clock);
     console.log(`${new Date().toISOString()} rewrite ${facts.year} ${facts.make} ${facts.model} -> ${out.ok ? 'ok' : 'failed checks'} $${out.costUsd} (month $${usage.usd.toFixed(2)})`);
     return send(200, out);
   } catch (e) {
+    if (clock.signal.aborted) return send(504, { ok: false, error: OUT_OF_TIME });
     if (e instanceof Anthropic.AuthenticationError) return send(502, { ok: false, error: 'the Anthropic API key was rejected' });
     if (e instanceof Anthropic.RateLimitError) return send(503, { ok: false, error: 'the Anthropic API is rate limiting; try again shortly' });
     if (e instanceof Anthropic.APIConnectionError) return send(502, { ok: false, error: 'could not reach the Anthropic API' });
