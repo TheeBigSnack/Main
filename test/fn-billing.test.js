@@ -532,6 +532,30 @@ test('billing: which row an event lands on: the customer\'s, the subscription\'s
   assert.deepEqual([fake.queries('subscriptions').length, fake.rows('billing_events').length], [0, 1]);
 });
 
+test('billing: when Stripe cannot answer the customer lookup, the event is not recorded and answers 500, so Stripe delivers it again; a customer Stripe does not know is recorded, not applied', async () => {
+  const handler = await load();
+  const event = JSON.stringify(subscriptionEvent({ id: 'evt_flaky' }, { customer: 'cus_7' }));
+  for (const [status, body] of [[503, { error: { message: 'Stripe is busy' } }], [429, { error: { message: 'Too many requests', code: 'rate_limit' } }], [500, null]]) {
+    world();
+    stripe({ fail: () => ({ status, body }) });
+    const r = await deliver(handler, event);
+    assert.equal(r.status, 500, `a ${status} from Stripe is not taken as "not a Lot Current customer"`);
+    assert.equal(r.body.ok, false);
+    assert.deepEqual([fake.rows('billing_events'), fake.rows('subscriptions')], [[], []], 'nothing recorded, so the redelivery is not skipped as a duplicate');
+  }
+  // Stripe recovers and redelivers the same event: it lands on the customer's dealership
+  stripe({ customers: { cus_7: { metadata: { dealership_id: D2 } } } });
+  const again = await deliver(handler, event);
+  assert.deepEqual([again.status, again.body], [200, { ok: true, applied: true, attached: true }]);
+  assert.equal(fake.rows('subscriptions')[0].dealership_id, D2);
+  // a customer Stripe answers 404 for is no Lot Current customer: recorded once, not applied
+  world();
+  stripe({ customers: {} });
+  const unknown = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_unknown' }, { customer: 'cus_gone' })));
+  assert.deepEqual([unknown.status, unknown.body], [200, { ok: true, applied: false, attached: false }]);
+  assert.deepEqual(fake.rows('billing_events').map((e) => e.stripe_event_id), ['evt_unknown']);
+});
+
 test('billing: an event older than the row\'s last change is stored and not applied; an invoice about another subscription is ignored', async () => {
   const handler = await load();
   const recent = Math.floor(Date.now() / 1000);

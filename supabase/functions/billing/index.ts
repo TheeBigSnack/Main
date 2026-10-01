@@ -241,6 +241,9 @@ async function salespeopleOf(client: SupabaseClient, dealershipId: string, role:
 // its customer or subscription id, else the dealership id Checkout put in
 // the subscription's metadata, else the customer's metadata, fetched. Null
 // when Stripe is talking about something that is not a Lot Current dealership.
+// Only a customer Stripe answers 404 for counts as not ours: any other
+// failure of that lookup (a timeout, a 429, a 5xx) throws, so the webhook
+// answers 500 without recording the event and Stripe delivers it again.
 async function dealershipFor(service: SupabaseClient, obj: Row): Promise<{ id: string; row: Row | null } | null> {
   const customer = typeof obj.customer === 'string' ? obj.customer : isRecord(obj.customer) && typeof obj.customer.id === 'string' ? obj.customer.id : '';
   const byCustomer = await findRow(service, 'stripe_customer_id', customer);
@@ -255,7 +258,8 @@ async function dealershipFor(service: SupabaseClient, obj: Row): Promise<{ id: s
       const c = await stripe('GET', `/v1/customers/${encodeURIComponent(customer)}`);
       dealershipId = isRecord(c.metadata) ? str(c.metadata.dealership_id) : '';
     } catch (e) {
-      console.error('could not read the Stripe customer: ' + errorMessage(e));
+      if (!(e instanceof StripeError && e.status === 404)) throw new Error('could not read the Stripe customer: ' + errorMessage(e));
+      console.error('no such Stripe customer: ' + errorMessage(e));
     }
   }
   if (!/^[0-9a-f-]{36}$/i.test(dealershipId)) return null;
