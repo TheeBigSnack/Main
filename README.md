@@ -2,7 +2,7 @@
 
 A Chrome extension for dealership salespeople. It reads your dealership website's used inventory, checks every car is really pre-owned, pre-fills a Facebook Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
-**You click Publish. Lot Current never does.** It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. The one thing it does on its own, and only if you allow it, is re-read your dealership's website every 3 hours while Chrome is open to keep your to-do count current; it never touches Facebook then. Lot Current is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used here only as the names of the places you post.
+**You click Publish. Lot Current never does.** It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. The one thing it does on its own, and only if you allow it, is a rescan every 3 hours while Chrome is open: it re-reads your dealership's website to keep your to-do count current and, while you are signed in, syncs your posted list, post timings and to-do items with your dealership's Lot Current account. It never touches Facebook then. Lot Current is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketplace" are used here only as the names of the places you post.
 
 ## Install (each tester, about 2 minutes)
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 945 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 946 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

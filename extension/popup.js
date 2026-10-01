@@ -869,7 +869,7 @@ function viewSettings() {
       ${!state.site
         ? '<p class="hint">Scan this website once first. Then the permission to read it in the background can be granted here.</p>'
         : state.rescanPermission
-          ? '<p class="hint">Permission to read this website in the background: granted. Lot Current only reads the website then; it never touches Facebook on its own.</p>'
+          ? `<p class="hint">Permission to read this website in the background: granted. Lot Current re-reads the website then${accountsConfigured() ? " and, while you are signed in, syncs your posted list, post timings and to-do items with your dealership's account" : ''}; it never touches Facebook on its own.</p>`
           : '<p class="hint">Needs permission to read this website in the background (Chrome will ask). <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></p>'}
     </fieldset>
     ${accountFieldset()}

@@ -279,7 +279,7 @@ export function wizardHtml() {
     case 'permission': {
       const origins = originsFor(wiz.site, wiz.service);
       return `${progress}<h3>Automatic rescans</h3>
-        <p>Every 3 hours while Chrome is open, Lot Current can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update. For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background. Chrome will ask.</p>
+        <p>Every 3 hours while Chrome is open, Lot Current can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update.${accountsConfigured() ? " While you are signed in, each rescan also syncs your posted list, post timings and to-do items with your dealership's account." : ''} For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background. Chrome will ask. It never touches Facebook.</p>
         ${wiz.granted ? '<div class="banner good">Permission granted. Automatic rescans are on.</div>' : `<div class="actions"><button type="button" class="primary" id="wizGrant">Allow automatic rescans</button></div><p class="hint">Or skip: the Scan button in the popup still works by hand.</p>`}
         <label class="block"><input type="checkbox" id="wizNotify" ${s.notify !== false ? 'checked' : ''} /> Show a desktop notification when listings need attention</label>
         ${nav(true, wiz.granted ? 'Next' : 'Skip for now')}`;

@@ -442,3 +442,31 @@ test('every text that says what Clear the numbers deletes says the to-do items s
     assert.ok(sentences.some((t) => /Clear the numbers/.test(t) && /still open/.test(t)), `${rel} does not say Clear the numbers keeps the to-do items still open`);
   }
 });
+
+// A background rescan ends with a sync of the posted list, the post timings
+// and the to-do items while the person is signed in (background.js
+// runRescan), so no text that describes the background job may say it only
+// re-reads the website.
+test('every text that describes the background rescan says it also syncs with the dealership\'s account while signed in', () => {
+  assert.match(read('../extension/background.js'), /if \(accountsConfigured\(\)\) await syncSite\(origin/, 'the rescan no longer syncs: these texts can say it only reads the website again');
+  const lineWith = (rel, marker) => {
+    const line = read(rel).split('\n').find((l) => l.includes(marker));
+    assert.ok(line, `${rel} has no line with "${marker}"`);
+    return line;
+  };
+  for (const [rel, marker] of [
+    ['../README.md', 'does on its own'],
+    ['../store/listing.md', 'does on its own'],
+    ['../store/listing.md', '| `alarms` |'],
+    ['../store/listing.md', 'Background rescans happen only'],
+    ['../legal/chrome-web-store-privacy.md', '| `alarms` |'],
+    ['../docs/help.md', 'With automatic rescans on'],
+    ['../extension/popup.js', 'Permission to read this website in the background: granted'],
+  ]) assert.match(lineWith(rel, marker), /signed in[^.|]*sync/, `${rel}: "${marker}" does not say the rescan syncs while signed in`);
+  const wizard = read('../extension/wizard.js');
+  const step = wizard.slice(wizard.indexOf("case 'permission':"), wizard.indexOf("case 'rules':"));
+  assert.match(step, /signed in[^.]*sync/, 'the set-up permission step does not say the rescan syncs while signed in');
+  for (const rel of ['../README.md', '../store/listing.md', '../docs/help.md', '../legal/chrome-web-store-privacy.md', '../extension/popup.js', '../extension/wizard.js']) {
+    assert.doesNotMatch(read(rel), /only reads the website/, `${rel} says the background job only reads the website`);
+  }
+});
