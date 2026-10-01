@@ -9,13 +9,14 @@ import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP } from './facebook/formMap.js';
-import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData, clearNumbers } from './src/pilot.js';
+import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
+import { clearNumbersKeepingUnsynced } from './src/sync.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from './src/readyList.js';
 
@@ -739,7 +740,7 @@ function viewPilot() {
     ${t.cleared ? stat('Cleared by the website (the car came back, or the price went back)', t.cleared) : ''}
   </table>`;
   const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear the numbers</button></div>
-    <p class="hint" id="pilotClearNote">Clear the numbers keeps the to-do items still open, so they close as usual once done.${accountsConfigured() ? ' It does not remove what has already synced to your dealership\'s account.' : ''}</p>`;
+    <p class="hint" id="pilotClearNote">Clear the numbers keeps the to-do items still open, so they close as usual once done.${accountsConfigured() ? ' While you are signed in, it also keeps the items closed since the last sync until the next sync sends them, and it does not remove what has already synced to your dealership\'s account.' : ''}</p>`;
   return lead + toolbar + posts + fields + flagTable('Sold cars to take down', s.takeDowns, 'pilotTakeDowns') + flagTable('Price changes', s.priceUpdates, 'pilotPrices');
 }
 
@@ -1199,18 +1200,24 @@ async function onPanelClick(ev) {
       pilotClearArmed = false;
       // The to-do items still open, and a post under way, stay (src/pilot.js
       // clearNumbers): the item stays on To do, and its synced copy on the
-      // manager's list closes only when this computer closes it.
+      // manager's list closes only when this computer sends it closed. So the
+      // items closed since the last sync stay too, until the next sync sends
+      // them (src/sync.js clearNumbersKeepingUnsynced).
       try {
-        const key = siteKeys(state.origin).pilot;
-        const left = await withLock(key, async () => {
-          const kept = clearNumbers((await chrome.storage.local.get(key))[key]);
-          if (hasPilotData(kept)) await ownSet({ [key]: kept });
-          else await ownRemove([key]);
+        const k = siteKeys(state.origin);
+        const left = await withLock(k.pilot, async () => {
+          const got = await chrome.storage.local.get([k.pilot, k.sync]);
+          const kept = clearNumbersKeepingUnsynced(got[k.pilot], got[k.sync]);
+          if (hasPilotData(kept)) await ownSet({ [k.pilot]: kept });
+          else await ownRemove([k.pilot]);
           return kept;
         });
         state.pilot = hasPilotData(left) ? left : null;
-        const open = left.flags.length;
-        setStatus(`The numbers for this website were cleared.${open ? ` ${open === 1 ? 'The to-do item still open stays' : `The ${open} to-do items still open stay`} until ${open === 1 ? 'it is' : 'they are'} done.` : ''}`);
+        const open = left.flags.filter((f) => !f.doneAt).length;
+        const waiting = left.flags.length - open;
+        const openText = open ? ` ${open === 1 ? 'The to-do item still open stays' : `The ${open} to-do items still open stay`} until ${open === 1 ? 'it is' : 'they are'} done.` : '';
+        const waitingText = waiting ? ` ${waiting === 1 ? 'The to-do item closed since the last sync stays' : `The ${waiting} to-do items closed since the last sync stay`} until the next sync sends ${waiting === 1 ? 'it' : 'them'} to your dealership's account.` : '';
+        setStatus(`The numbers for this website were cleared.${openText}${waitingText}`);
       } catch (e) {
         setStatus(storageErrorText(e), 'error');
       }

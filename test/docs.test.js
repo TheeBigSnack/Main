@@ -443,6 +443,17 @@ test('every text that says what Clear the numbers deletes says the to-do items s
   }
 });
 
+// While signed in, Clear the numbers also keeps the to-do items closed since
+// the last sync until the next sync sends them (src/sync.js
+// clearNumbersKeepingUnsynced, the popup's pilotClear): the same texts say so.
+test('every text that says what Clear the numbers deletes says the items closed since the last sync wait for the next sync', () => {
+  assert.match(read('../extension/popup.js'), /clearNumbersKeepingUnsynced\(got\[k\.pilot\], got\[k\.sync\]\)/, 'the popup no longer keeps the closed items the next sync sends: these texts can drop the clause');
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/data-inventory.md', '../docs/help.md']) {
+    const sentences = read(rel).split(/(?<=\.)\s+|\n/);
+    assert.ok(sentences.some((t) => /Clear the numbers/.test(t) && /closed since the last sync/.test(t) && /next sync/.test(t)), `${rel} does not say Clear the numbers keeps the to-do items closed since the last sync until the next sync`);
+  }
+});
+
 // A background rescan ends with a sync of the posted list, the post timings
 // and the to-do items while the person is signed in (background.js
 // runRescan), so no text that describes the background job may say it only

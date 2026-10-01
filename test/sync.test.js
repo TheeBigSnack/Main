@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, PILOT_LOOKBACK_MS } from '../extension/src/sync.js';
+import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, PILOT_LOOKBACK_MS, flagsAwaitingSync, clearNumbersKeepingUnsynced } from '../extension/src/sync.js';
 import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
@@ -291,6 +291,33 @@ test('mergeFlags: an open item on one of the caller\'s own listings that this ma
   // and it closes the dealership's item it came from
   const up = syncPayload({ origin: ORIGIN, posted, pilot: closedHere, since: null, userId: U1, now: new Date(T(10)) });
   assert.deepEqual(up.pilot.flags.filter((f) => f.doneAt).map((f) => [f.vin, f.kind, f.flaggedAt]), [[VIN_A, 'takeDown', T(0)]]);
+});
+
+// "Clear the numbers": a to-do flag closed since the last sync has not gone
+// up yet, and only its upload closes the dealership's copy of the item.
+test('clearNumbersKeepingUnsynced keeps the closed to-do items the next sync still sends, and only while there is a last sync to measure from', () => {
+  const gone = (vin) => ({ vin, name: vin, yours: true, why: 'gone' });
+  let pilot = noteFlags(null, { takeDown: [gone(VIN_A), gone(VIN_B), gone(VIN_C)], priceUpdates: [], warnings: [] }, { at: T(0) });
+  pilot = resolveFlag(pilot, VIN_A, null, { at: T(10), how: 'manual' }); // closed, then the T(30) sync sent it
+  pilot = resolveFlag(pilot, VIN_B, null, { at: T(35), how: 'manual' }); // Taken down after that sync
+  pilot = beginPost(pilot, { vin: VIN_C, at: T(1) });
+  pilot = endPost(pilot, VIN_C, 'posted', { at: T(2) });
+  const state = { version: SYNC_VERSION, since: T(30), known: [] };
+  const sent = syncPayload({ origin: ORIGIN, posted: {}, pilot, since: state.since, userId: U1 }).pilot.flags.filter((f) => f.doneAt);
+  assert.deepEqual(flagsAwaitingSync(pilot, state), sent, 'exactly the closed flags the next sync sends');
+  const kept = clearNumbersKeepingUnsynced(pilot, state);
+  assert.deepEqual(kept.flags.map((f) => [f.vin, f.doneAt || null]), [[VIN_B, T(35)], [VIN_C, null]], 'the closed one not sent yet and the open one stay');
+  assert.deepEqual(kept.posts, [], 'the finished post goes');
+  // the next sync sends it closed, and a clear after that one lets it go
+  assert.deepEqual(syncPayload({ origin: ORIGIN, posted: {}, pilot: kept, since: state.since, userId: U1 }).pilot.flags.filter((f) => f.doneAt).map((f) => f.vin), [VIN_B]);
+  assert.deepEqual(clearNumbersKeepingUnsynced(kept, { ...state, since: T(50) }).flags.map((f) => f.vin), [VIN_C]);
+  // a clock a few minutes slow here: a flag closed just after the sync still waits for it
+  assert.deepEqual(flagsAwaitingSync(resolveFlag(pilot, VIN_C, null, { at: T(25) }), state).map((f) => f.vin), [VIN_B, VIN_C]);
+  // no last sync (never synced here, a first sync still pending, or Sign out forgot the state): nothing waits
+  for (const none of [null, undefined, {}, { version: SYNC_VERSION, since: null, known: [], pending: true }, 'garbage']) {
+    assert.deepEqual(flagsAwaitingSync(pilot, none), []);
+    assert.deepEqual(clearNumbersKeepingUnsynced(pilot, none).flags.map((f) => f.vin), [VIN_C]);
+  }
 });
 
 test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {

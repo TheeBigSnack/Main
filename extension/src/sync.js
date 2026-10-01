@@ -41,7 +41,7 @@
 // writes them, so the mapping is unit-tested in Node; the function's own copy
 // of it (supabase/functions/sync/index.ts) must stay the same.
 
-import { withPilotDefaults, hoursBetween, FLAG_KINDS, FLAG_HOWS } from './pilot.js';
+import { withPilotDefaults, hoursBetween, clearNumbers, FLAG_KINDS, FLAG_HOWS } from './pilot.js';
 
 export const SYNC_VERSION = 1;
 
@@ -93,6 +93,10 @@ const changedAfter = (since, ...stamps) => {
   const l = latest(...stamps);
   return l === null || l > s;
 };
+// A to-do flag that changed after `from` (a time in ms, or null for all):
+// the ones a sync picks to send.
+const flagChangedAfter = (from) => (f) => changedAfter(from, f.flaggedAt, f.doneAt);
+
 // An entry merged in from a colleague carries their userId and `mine: false`; it is theirs to sync.
 const isOwn = (entry, userId) => entry.mine !== false && (!entry.userId || !userId || entry.userId === userId);
 // A server row of somebody else than the caller (with both known).
@@ -258,8 +262,31 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
   const s = ms(since);
   const from = s === null ? null : s - PILOT_LOOKBACK_MS;
   const posts = p.posts.filter((a) => changedAfter(from, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
-  const flags = p.flags.filter((f) => changedAfter(from, f.flaggedAt, f.doneAt));
+  const flags = p.flags.filter(flagChangedAfter(from));
   return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, known: keyList(known), pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
+}
+
+/**
+ * The closed to-do flags the next sync still has to send: closed after the
+ * last sync (the state's `since`, less PILOT_LOOKBACK_MS), as syncPayload
+ * picks them. Once synced, the dealership's copy of an item closes only when
+ * an upload carries this flag closed, so a flag closed here (Taken down,
+ * Updated, or seen on the listing) and dropped before that upload would
+ * leave the item open on the manager's list for good. With no sync state
+ * (this website never synced, or Sign out forgot it) there is no last sync
+ * to measure from, and none is held for one.
+ */
+export function flagsAwaitingSync(pilot, syncState) {
+  const since = isObject(syncState) ? ms(syncState.since) : null;
+  if (since === null) return [];
+  return withPilotDefaults(pilot).flags.filter((f) => f.doneAt).filter(flagChangedAfter(since - PILOT_LOOKBACK_MS));
+}
+
+// "Clear the numbers" for a website with this sync state: clearNumbers
+// (src/pilot.js), which keeps the open to-do items and a post under way, also
+// keeping the closed items the next sync still has to send.
+export function clearNumbersKeepingUnsynced(pilot, syncState) {
+  return clearNumbers(pilot, { keep: flagsAwaitingSync(pilot, syncState) });
 }
 
 // ---------- what comes down ----------

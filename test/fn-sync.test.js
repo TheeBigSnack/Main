@@ -19,7 +19,9 @@ import { LAPSED_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
 import { syncOnce, LAPSED_MESSAGE as EXTENSION_LAPSED_MESSAGE } from '../extension/src/accountFlow.js';
 import { sessionFromTokenResponse, storeSession, ACCOUNT_KEY } from '../extension/src/account.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
-import { noteFlags, resolveFlag, clearNumbers } from '../extension/src/pilot.js';
+import { noteFlags, resolveFlag } from '../extension/src/pilot.js';
+import { clearNumbersKeepingUnsynced } from '../extension/src/sync.js';
+import { markPriceUpdated } from '../extension/src/rescan.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -575,7 +577,7 @@ test('sync: an open to-do item outlives Clear the numbers and Clear everything f
     assert.equal(fake.rows('todo_items').filter((t) => !t.done_at).length, 1, `${clear}: the manager's list has the item`);
 
     if (clear === 'Clear the numbers') {
-      storage.data[K.pilot] = clearNumbers(storage.data[K.pilot]); // what the Numbers tab's button writes
+      storage.data[K.pilot] = clearNumbersKeepingUnsynced(storage.data[K.pilot], storage.data[K.sync]); // what the Numbers tab's button writes
     } else {
       for (const key of Object.values(K)) delete storage.data[key];
       storage.data[K.pilot] = noteFlags(storage.data[K.pilot], nothing, { at: at(-60) }); // the next scan, with no posted list, flags nothing
@@ -591,6 +593,49 @@ test('sync: an open to-do item outlives Clear the numbers and Clear everything f
     const items = fake.rows('todo_items');
     assert.deepEqual(items.map((t) => [t.vin, t.kind, Date.parse(t.flagged_at), Boolean(t.done_at), t.how]), [[VIN(1), 'takeDown', Date.parse(first), true, 'manual']], `${clear}: one item, the first one, closed by the Taken down`);
     assert.equal(storage.data[K.pilot].flags.filter((f) => !f.doneAt).length, 0, `${clear}: nothing open here either`);
+  }
+});
+
+// A Taken down or Updated clicked in the popup closes the flag on this
+// machine only; the dealership's item closes when a sync sends it. Clear the
+// numbers in between (the storage-full message sends people there) must not
+// drop the closed flag before it goes up.
+test('sync: Taken down or Updated, then Clear the numbers before any sync: the next sync still closes the dealership\'s item, as done by the salesperson', async () => {
+  const config = { url: SUPABASE_URL, anonKey: ANON_KEY, functionsUrl: '' };
+  const K = siteKeys(ORIGIN);
+  const nothing = { takeDown: [], priceUpdates: [], warnings: [] };
+  for (const fix of ['Taken down', 'Updated']) {
+    world();
+    const fetchImpl = functionsFetch({ sync: await load() });
+    const storage = await signedIn(TOKEN.u1, U1);
+    const round = async () => { const r = await syncOnce({ origin: ORIGIN, deps: { config, fetchImpl, storage, now: Date.now() } }); assert.equal(r.ok, true, r.error); };
+    storage.data[K.posted] = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: at(-600) } };
+    const diff = fix === 'Taken down'
+      ? { takeDown: [{ vin: VIN(1), name: 'My car', yours: true, why: 'gone' }], priceUpdates: [], warnings: [] }
+      : { takeDown: [], priceUpdates: [{ vin: VIN(1), name: 'My car', yours: true, from: 20000, to: 19000 }], warnings: [] };
+    const first = at(-180);
+    storage.data[K.pilot] = noteFlags(null, diff, { at: first }); // a rescan three hours ago flagged it
+    await round();
+    assert.equal(fake.rows('todo_items').filter((t) => !t.done_at).length, 1, `${fix}: the manager's list has the item`);
+
+    // the popup's button, after the sync: the flag closes here only
+    if (fix === 'Taken down') delete storage.data[K.posted][VIN(1)];
+    else storage.data[K.posted] = markPriceUpdated(storage.data[K.posted], VIN(1), 19000);
+    storage.data[K.pilot] = resolveFlag(storage.data[K.pilot], VIN(1), fix === 'Taken down' ? null : 'price', { at: new Date().toISOString(), how: 'manual' });
+    storage.data[K.pilot] = clearNumbersKeepingUnsynced(storage.data[K.pilot], storage.data[K.sync]); // Clear the numbers, before any sync
+    assert.equal(storage.data[K.pilot].flags.length, 1, `${fix}: the closed flag waits for the sync`);
+    await round();
+    await round();
+    const items = fake.rows('todo_items');
+    assert.deepEqual(items.map((t) => [t.vin, Date.parse(t.flagged_at), Boolean(t.done_at), t.how]), [[VIN(1), Date.parse(first), true, 'manual']], `${fix}: the dealership's item is closed, by the salesperson`);
+    // the next complete scan, with nothing left to do, finds nothing open to close as "cleared"
+    storage.data[K.pilot] = noteFlags(storage.data[K.pilot], nothing, { at: new Date().toISOString() });
+    assert.equal(storage.data[K.pilot].flags.filter((f) => !f.doneAt).length, 0, `${fix}: nothing open here`);
+    await round();
+    assert.deepEqual(fake.rows('todo_items').map((t) => t.how), ['manual'], `${fix}: still done by the salesperson, not cleared by the website`);
+    // once that sync is well past, a clear lets the closed flag go
+    storage.data[K.sync] = { ...storage.data[K.sync], since: at(30) };
+    assert.equal(clearNumbersKeepingUnsynced(storage.data[K.pilot], storage.data[K.sync]).flags.length, 0, `${fix}: sent, so cleared`);
   }
 });
 

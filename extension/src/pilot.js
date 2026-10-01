@@ -196,9 +196,14 @@ export function resolveFlag(pilot, vin, kind = null, { at = nowIso(), how = 'man
 // this flag closed (src/sync.js), so dropping it would leave that copy open
 // on the manager's list for good while the next scan opened a second one. A
 // post attempt the side panel is still on stays so its end is recorded.
-export function clearNumbers(pilot) {
+// `keep` lists closed flags that stay too (matched by VIN, kind and flagging
+// time): the ones the next sync still has to send, since that upload is what
+// closes the dealership's copy (src/sync.js clearNumbersKeepingUnsynced).
+export function clearNumbers(pilot, { keep = [] } = {}) {
   const p = withPilotDefaults(pilot);
-  return { ...p, posts: p.posts.filter((a) => !a.endedAt), fills: [], flags: p.flags.filter(flagOpen) };
+  const held = (Array.isArray(keep) ? keep : []).filter((f) => f && typeof f === 'object');
+  const kept = (f) => flagOpen(f) || held.some((k) => k.vin === f.vin && k.kind === f.kind && k.flaggedAt === f.flaggedAt);
+  return { ...p, posts: p.posts.filter((a) => !a.endedAt), fills: [], flags: p.flags.filter(kept) };
 }
 
 // ---------- the numbers ----------

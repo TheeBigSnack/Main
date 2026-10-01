@@ -437,3 +437,14 @@ test('clearNumbers keeps the to-do items still open and a post under way; finish
   assert.equal(hasPilotData(clearNumbers(resolveFlag(p, RAM, null, { at: T(50) }))), true, 'the post under way still');
   assert.equal(hasPilotData(clearNumbers(endPost(resolveFlag(p, RAM, null, { at: T(50) }), RAM, 'posted', { at: T(51) }))), false, 'nothing open: nothing left');
 });
+
+test('clearNumbers keeps the closed flags it is told to keep (matched by VIN, kind and flagging time), and only those', () => {
+  let p = noteFlags(null, { takeDown: [{ vin: RAM, name: 'Ram', yours: true, why: 'gone' }], priceUpdates: [{ vin: WAGONEER, name: 'Wagoneer', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
+  p = resolveFlag(p, RAM, null, { at: T(20), how: 'manual' });
+  p = resolveFlag(p, WAGONEER, null, { at: T(25), how: 'manual' });
+  const ram = structuredClone(p.flags[0]); // as read back from storage: equal, not the same object
+  assert.deepEqual(clearNumbers(p, { keep: [ram] }).flags, [p.flags[0]]);
+  assert.deepEqual(clearNumbers(p, { keep: [{ ...ram, flaggedAt: T(1) }, { ...ram, kind: 'price' }] }).flags, [], 'another flagging time or kind is another item');
+  assert.deepEqual(clearNumbers(p, { keep: 'garbage' }).flags, []);
+  assert.deepEqual(clearNumbers(p, { keep: [null, 7] }).flags, []);
+});

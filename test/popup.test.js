@@ -224,7 +224,7 @@ test('Clear the numbers keeps the to-do items still open, says so, and clears th
   pilot = noteFill(pilot, { vin: other.vin, fill: { filled: [{ key: 'price' }] }, at: '2026-09-30T09:00:30.000Z' });
   const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.pilot]: pilot } });
   await p.tab('pilot');
-  assert.match(p.panel(), /id="pilotClearNote">Clear the numbers keeps the to-do items still open, so they close as usual once done\. It does not remove what has already synced to your dealership's account\./);
+  assert.match(p.panel(), /id="pilotClearNote">Clear the numbers keeps the to-do items still open, so they close as usual once done\. While you are signed in, it also keeps the items closed since the last sync until the next sync sends them, and it does not remove what has already synced to your dealership's account\./);
   await p.click('pilotClear');
   await p.click('pilotClear'); // "Click again to clear the numbers"
   assert.equal(p.status(), 'The numbers for this website were cleared. The to-do item still open stays until it is done.');
@@ -238,4 +238,32 @@ test('Clear the numbers keeps the to-do items still open, says so, and clears th
   await q.click('pilotClear');
   assert.equal(q.status(), 'The numbers for this website were cleared.');
   assert.equal(q.local[k.pilot], undefined);
+});
+
+// The dealership's copy of a to-do item closes only when a sync sends the
+// flag closed: a Taken down or Updated clicked since the last sync, then
+// Clear the numbers, must not drop the closed flag before it goes up.
+test('Clear the numbers keeps a to-do item closed since the last sync until the next sync sends it, and says so', async () => {
+  const sold = vehicle('usedNormal');
+  const other = vehicle('certified');
+  const third = vehicle('usedZeroMiles');
+  const gone = (car) => ({ vin: car.vin, name: car.name, yours: true, why: 'gone' });
+  let pilot = noteFlags(null, { takeDown: [gone(sold), gone(other), gone(third)], priceUpdates: [], warnings: [] }, { at: '2026-10-01T09:00:00.000Z' });
+  pilot = resolveFlag(pilot, other.vin, null, { at: '2026-10-01T09:30:00.000Z', how: 'manual' }); // sent closed by the 10:00 sync
+  pilot = resolveFlag(pilot, sold.vin, null, { at: '2026-10-01T11:00:00.000Z', how: 'manual' }); // Taken down after it
+  const syncState = { version: 1, since: '2026-10-01T10:00:00.000Z', known: [] };
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.pilot]: pilot, [k.sync]: syncState } });
+  await p.tab('pilot');
+  await p.click('pilotClear');
+  await p.click('pilotClear');
+  assert.equal(p.status(), "The numbers for this website were cleared. The to-do item still open stays until it is done. The to-do item closed since the last sync stays until the next sync sends it to your dealership's account.");
+  assert.deepEqual(p.local[k.pilot].flags.map((f) => [f.vin, f.doneAt || null]), [[sold.vin, '2026-10-01T11:00:00.000Z'], [third.vin, null]], 'the Taken down waits for the sync; the item the 10:00 sync sent closed goes');
+  assert.deepEqual(p.local[k.sync], syncState, 'the sync state is only read');
+
+  // no sync state (never synced here, or signed out): closed items go as before
+  const q = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.pilot]: pilot } });
+  await q.click('pilotClear');
+  await q.click('pilotClear');
+  assert.equal(q.status(), 'The numbers for this website were cleared. The to-do item still open stays until it is done.');
+  assert.deepEqual(q.local[k.pilot].flags.map((f) => f.vin), [third.vin]);
 });
