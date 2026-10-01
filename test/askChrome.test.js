@@ -40,7 +40,7 @@ test('askableOrigins: named http and https hosts, each for its whole site, come 
   const lists = [
     [DEALER + ANY, SERVICE + ANY],
     [NHTSA_ORIGIN + ANY],
-    ['https://img.cdn.example' + ANY, 'https://photos.dealer.test:8443' + ANY],
+    ['https://img.cdn.example' + ANY, 'https://photos.dealer.test:8443' + ANY, 'https://img_1.cdn.example' + ANY],
     ['http://127.0.0.1:5173' + ANY], // the mock sites the end-to-end tests read
     ['https://[2001:db8::1]:8443' + ANY],
     // look-alikes are other people's servers, not Facebook's

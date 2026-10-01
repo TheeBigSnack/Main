@@ -16,8 +16,9 @@ import { isFacebookServer } from './photoHosts.js';
 // Written in two parts so no comment stripper mistakes it for a comment opener.
 const ANY_PATH = '/' + '*';
 // <scheme>://<host>[:<port>] in front of ANY_PATH: a name or an IPv4 address
-// (letters, digits, dots and hyphens, so no "*"), or an IPv6 address in brackets.
-const ONE_HOST = /^(https?):\/\/(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(:\d{1,5})?$/i;
+// (letters, digits, dots, hyphens and underscores, so no "*"), or an IPv6
+// address in brackets.
+const ONE_HOST = /^(https?):\/\/(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:\d{1,5})?$/i;
 
 /**
  * The patterns, as given, when every one names a single http or https host
