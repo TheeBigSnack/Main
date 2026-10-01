@@ -198,7 +198,8 @@ Lot Current never asks for your Facebook password, cookies or tokens, in Chrome'
 ## When the website scan fails
 
 - "Can't read this page": the tab is not on your dealership's website. Open the used inventory page and click **Scan website** again.
-- The website is not one Lot Current can read yet. Today it reads Dealer Inspire websites that use the Cars Commerce inventory search. It also tries websites that publish standard vehicle data for search engines on each car's page; that has been tested only on sample websites so far. Tell support which website yours is.
+- The website is not one Lot Current can read yet. Today it reads Dealer Inspire websites that use the Cars Commerce inventory search, and DealerOn and Dealer.com websites from their used inventory page. It also tries websites that publish standard vehicle data for search engines on each car's page. The DealerOn, Dealer.com and standard-data readers have been tested only on sample websites so far. Tell support which website yours is.
+- "Couldn't see the list of cars this page loads" (DealerOn and Dealer.com websites): the page had not loaded its list of cars yet, or the tab is on a single car's page. Open the used inventory page, wait until the cars show, then click **Scan website** again.
 - "Couldn't reach the dealership tab" during set-up: open the used inventory page, click the Lot Current icon and click **Continue set-up**.
 - A warning that many cars vanished at once: if more than half the lot disappears between scans, nothing is marked gone and the last good scan is kept. Scan again later; if it repeats, tell support.
 - "Automatic rescans are on, but Lot Current has no permission to read this website in the background": click **Allow automatic rescans** on the banner.

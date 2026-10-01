@@ -39,7 +39,7 @@ What it won't do
 What it needs
 
 - Chrome 116 or newer.
-- A dealership website Lot Current can read: Dealer Inspire websites that use the Cars Commerce inventory search, and websites that publish standard vehicle data (schema.org) on their used-inventory pages. Other platforms come later.
+- A dealership website Lot Current can read: Dealer Inspire websites that use the Cars Commerce inventory search, DealerOn and Dealer.com websites, and websites that publish standard vehicle data (schema.org) on their used-inventory pages. The DealerOn, Dealer.com and standard-data readers have been tested only on sample websites so far. Other platforms come later.
 - Your own Facebook account, signed in as usual. Lot Current never sees the login.
 - A dealership that has signed up for Lot Current, and your manager's go-ahead. Your dealership stands behind every listing: the price, the fees and the dealer identification are its responsibility under advertising law.
 

@@ -2,9 +2,10 @@
 
 A template to fill in during Milestone 6. `PLAN.md` says the next dealer-website platform is picked from demand among Dealer.com, DealerOn, Dealer eProcess and DealerFire, and that the milestone is only done when **the next platform is chosen with a written reason and a named first dealer**. This file is where that gets written.
 
-Today Lot Current has two adapters:
+Today Lot Current has four adapters:
 
 - **Dealer Inspire** websites that use the Cars Commerce inventory search (`extension/adapters/dealerInspire.js`, detected by `window.SEARCH_SERVICE` on the page, service host `websites-search.api.carscommerce.inc`). Verified on the pilot dealer's live site.
+- **DealerOn** and **Dealer.com** (`extension/adapters/dealerOn.js` and `dealerCom.js`, on the shared `inventoryJson.js`): read the inventory list the website's own used-inventory page loads. Written from public sources and a page-text survey of local dealer websites, tested only on synthetic sites; **no real DealerOn or Dealer.com website has been read yet** (below, both stay "to be verified on a real site" until one has).
 - **Standard vehicle data** (`extension/adapters/schemaOrg.js`): any website that publishes schema.org vehicle markup (JSON-LD or microdata) on its inventory pages, read from the list page, its `rel=next` pages and each car's own page. It was written from the public schema.org definitions and Google's vehicle listing documentation and tested only on synthetic pages. **It is not verified on any real website, and no platform below is claimed to work with it** until a real site on that platform has been scanned. Its limits are listed in `extension/adapters/README.md`: a list drawn by scripts shows few links to a plain read, and a website that turns away reads without cookies can be scanned from the tab but fails the background rescan.
 
 So the first question for each candidate is whether its websites already publish usable standard vehicle data. If they do, the platform may need no adapter of its own, only a verified scan and a line in `extension/adapters/README.md`. If they don't, or the markup is too thin (no VIN, no price the page shows, no car pages the list links to), the platform gets its own adapter. Each new platform is one file under `extension/adapters/` behind the same interface: `probeInPage()` and `searchInPage(service, request)` in the tab, then `detect(probe)`, `scan(search, options)`, `normalize(record)`, `getDetails(search, vin, options)`, `makeDirectSearch(service)`, plus `origins(service)` and `photoOrigins(records)` for the permissions. It goes before `schemaOrg` in `ADAPTERS`, so its own probe wins on its sites.
@@ -19,6 +20,7 @@ Only what the repository already says is written here. Everything else is marked
 
 ### Dealer.com
 
+- **Reader**: built (`extension/adapters/dealerCom.js`), not yet run on a real site; one survey run (`npm run survey`) confirms or corrects each line below (`extension/adapters/README.md` lists what it must confirm).
 - **Detection**: to be verified on a real site.
 - **Inventory**: `extension/adapters/README.md` says inventory comes from its own JSON endpoints behind the search results page, and each page embeds a vehicle data object. It needs a probe for the page's inventory API and a normaliser for its record shape. Which endpoint, what the record looks like, and whether it can be called from the dealer's own tab without a permission: to be verified on a real site.
 - **Pre-owned signal (inventory type, URL word, title word)**: to be verified on a real site.
@@ -29,6 +31,7 @@ Only what the repository already says is written here. Everything else is marked
 
 ### DealerOn
 
+- **Reader**: built (`extension/adapters/dealerOn.js`), not yet run on a real site; one survey run (`npm run survey`) confirms or corrects each line below (`extension/adapters/README.md` lists what it must confirm).
 - **Detection**: to be verified on a real site.
 - **Inventory**: `extension/adapters/README.md` says the listings are server-rendered with a search API used by the search results page's filters, and that VIN, price and status are present in the page's data layer. The API's shape and whether the data layer alone is enough for a scan: to be verified on a real site.
 - **Pre-owned signal**: to be verified on a real site.
