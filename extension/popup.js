@@ -5,6 +5,7 @@ import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
+import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
@@ -775,6 +776,8 @@ function viewSettings() {
       ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name"')}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
       <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
+      ${field('Your closing line (optional)', 'closingLine', s.salesperson.closingLine, `type="text" maxlength="300" aria-describedby="closingLineHint" placeholder="e.g. Ask for me by name when you come in."`)}
+      <p class="hint" id="closingLineHint">Added after that sign-off on every description, in place of "Message me to set up a test drive or ask a question." About you, not the car: no prices or numbers (a phone number is fine), up to ${CLOSING_LINE_MAX_WORDS} words. Follows you to any computer you sign in to Chrome on.</p>
     </fieldset>
     <fieldset><legend>Your store</legend>
       <p class="hint">Only cars at these stores count as ready to post. Leave all unticked to include every store.</p>
@@ -1300,6 +1303,14 @@ async function onSettingsSubmit(ev) {
     return;
   }
   const form = new FormData(ev.target);
+  // the closing line goes into every description: a line that fails its checks is not saved, and the form keeps what was typed
+  const closing = checkClosingLine(form.get('closingLine'));
+  if (!closing.ok) {
+    setStatus(closing.problems.map((p) => p.text).join('. ') + '. Nothing was saved.', 'error');
+    const box = ev.target.querySelector('[name="closingLine"]');
+    if (box) box.focus();
+    return;
+  }
   const prev = withDefaults(state.settings || {}, { name: state.siteName });
   const str = (k) => String(form.get(k) ?? '').trim();
   state.settings = withDefaults(
@@ -1307,7 +1318,7 @@ async function onSettingsSubmit(ev) {
       ...prev,
       myStores: form.getAll('store').map(String),
       basis: chooseBasis(form.get('basis'), prev.basis, state.snapshot ? Object.values(state.snapshot.vehicles || {}) : null), // the lower price only when this website shows one; without a scan the previous choice stands
-      salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || DEFAULT_SALESPERSON_TITLE },
+      salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || DEFAULT_SALESPERSON_TITLE, closingLine: cleanClosingLine(form.get('closingLine')) },
       dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },
       priceNote: str('priceNote'),
       dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),

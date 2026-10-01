@@ -279,8 +279,9 @@ async function sentToRewrite() {
     return { ok: true, status: 200, json: async () => ({ ok: true, text: '' }) };
   };
   await generateDescription({
-    vehicle: CAR, dealer: { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' }, salesperson: { name: 'Pat', title: 'sales consultant' },
+    vehicle: CAR, dealer: { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' }, salesperson: { name: 'Pat', title: 'sales consultant', closingLine: 'Ask for Pat by name.' },
     priceNote: 'Tax and tags extra.', price: 25990, settings: { rewrite: { enabled: true, endpoint: 'https://rewrite.test', key: 'k' } }, origin: 'https://www.example-motors.test', fetchImpl,
+    highlights: [], // a pick made, so every field that can be sent is
   });
   assert.ok(body, 'generateDescription did not call the rewrite service');
   return body;
