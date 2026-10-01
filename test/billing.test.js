@@ -20,10 +20,11 @@ import {
   planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
   automaticTaxOn, portalSessionParams,
-  formEncode, applyStripeEvent, normalizeStatus,
+  formEncode, applyStripeEvent, normalizeStatus, PRICE_TAG,
   parseStripeSignature, hmacSha256Hex, timingSafeEqualHex, verifyStripeSignature,
 } from '../supabase/functions/_shared/billing.mjs';
 import * as page from '../manager/data.js';
+import { TAG as SETUP_TAG, wantedObjects } from '../scripts/stripe-setup-lib.mjs';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
@@ -440,6 +441,33 @@ test('applyStripeEvent: subscription created and updated copy the status, ids, p
   assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub({ status: 'brand_new_status' })), opts).status, 'unpaid');
   assert.equal(normalizeStatus('pilot'), 'unpaid', 'Stripe cannot put a row into the pilot');
   assert.equal(normalizeStatus(undefined), 'unpaid');
+});
+
+// A reprice (npm run stripe-setup -- --apply --reprice) makes a new price and
+// sets its id, while subscribers already paying keep the old one: the seat
+// count must not depend on which id is configured now.
+test('applyStripeEvent: seats come from the price tag stripe-setup writes, so a reprice keeps existing subscribers\' seats', () => {
+  assert.equal(PRICE_TAG, SETUP_TAG, 'billing reads the tag stripe-setup writes');
+  assert.deepEqual(wantedObjects(pricing).prices.map((p) => p.key).sort(), ['rooftop', 'seat'], 'the two tag values billing knows');
+  const tagged = (id, key, quantity) => ({ price: { id, object: 'price', metadata: { [PRICE_TAG]: key } }, quantity });
+  const old = { items: { data: [tagged('price_rooftop_old', 'rooftop', 1), tagged('price_seat_old', 'seat', 3)] } };
+  // the seat price was repriced: STRIPE_PRICE_SEAT names the new id, the subscriber pays the old one
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(old)), { included: 5, priceRooftop: 'price_rooftop_old', priceSeat: 'price_seat_new' }).seats, 8);
+  // the rooftop was repriced and no seat price is set: the old rooftop item is never a seat
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(old)), { included: 5, priceRooftop: 'price_rooftop_new', priceSeat: '' }).seats, 8);
+  // both repriced; and with nothing configured the tags alone still say it
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(old)), opts).seats, 8);
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(old)), { included: 5 }).seats, 8);
+  // a subscription moved onto the new seat price beside the old one counts both
+  const mixed = { items: { data: [tagged('price_rooftop_new', 'rooftop', 1), tagged('price_seat_old', 'seat', 2), tagged('price_seat_new', 'seat', 1)] } };
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(mixed)), opts).seats, 8);
+  // the legacy plan object carries the same metadata
+  const legacy = { items: { data: [{ plan: { id: 'price_rooftop_old', metadata: { [PRICE_TAG]: 'rooftop' } }, quantity: 1 }, { plan: { id: 'price_seat_old', metadata: { [PRICE_TAG]: 'seat' } }, quantity: 4 }] } };
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(legacy)), opts).seats, 9);
+  // an untagged price made by hand still falls back to the configured ids, and with none configured the column is left alone
+  const byHand = { items: { data: [{ price: { id: 'price_rooftop' }, quantity: 1 }, { price: { id: 'price_seat' }, quantity: 2 }] } };
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(byHand)), opts).seats, 7);
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', sub(byHand)), { included: 5 }).seats, undefined);
 });
 
 test('applyStripeEvent: deleted is canceled; a stale event never wins; unrelated events change nothing', () => {

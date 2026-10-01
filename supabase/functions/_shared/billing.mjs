@@ -387,18 +387,35 @@ function invoicePeriodEndOf(inv) {
   return unixToIso(best);
 }
 
+// The tag scripts/stripe-setup.mjs puts on each price it makes (metadata
+// lotcurrent = 'rooftop' or 'seat'). A reprice makes a new price and moves
+// the lookup key to it, but subscribers already paying stay on the old
+// price, which keeps its tag; so the tag, not the configured id, says what
+// an item is.
+export const PRICE_TAG = 'lotcurrent';
+const tagOf = (price) => (isRecord(price) && isRecord(price.metadata) && typeof price.metadata[PRICE_TAG] === 'string' ? price.metadata[PRICE_TAG] : '');
+
 // Seats from the subscription's items: the included count plus the seat
-// price's quantity. With no seat price configured, every item that is not
-// the rooftop counts as seats. null when the items say nothing.
+// items' quantity. An item whose price is tagged 'seat' is seats and one
+// tagged 'rooftop' is not, whatever the configured ids say now. An untagged
+// price (made by hand in the Dashboard) falls back to the configured ids:
+// the seat price's quantity, or, with no seat price configured, every item
+// that is not the rooftop. null when the items say nothing, or when an
+// untagged item cannot be placed because no price is configured.
 function seatsOf(sub, included, priceRooftop, priceSeat) {
   const items = isRecord(sub.items) && Array.isArray(sub.items.data) ? sub.items.data : null;
   if (!items) return null;
-  if (!priceSeat && !priceRooftop) return null;
   let extra = 0;
   for (const it of items) {
     if (!isRecord(it)) continue;
-    const price = idOf(it.price) || idOf(it.plan);
     const qty = Number.isInteger(it.quantity) ? it.quantity : 0;
+    const tag = tagOf(it.price) || tagOf(it.plan);
+    if (tag === 'seat' || tag === 'rooftop') {
+      if (tag === 'seat') extra += qty;
+      continue;
+    }
+    if (!priceSeat && !priceRooftop) return null;
+    const price = idOf(it.price) || idOf(it.plan);
     if (priceSeat ? price === priceSeat : price !== priceRooftop) extra += qty;
   }
   return Math.min(included + extra, MAX_SEATS);

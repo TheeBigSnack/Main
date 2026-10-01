@@ -48,7 +48,7 @@ Once the legal pages are final (not while they say draft), add `--site-url https
 
 It prints a `supabase secrets set ...` line with the ids. Keep it for step 5. Running it again creates nothing new; it reports what exists. Paste the output of a plain `npm run stripe-setup` (no `--apply`) into the thread and Claude will check it: that run never prints a secret.
 
-The prices are a hypothesis until a dealer pays. If `pricing.json` changes, `npm run stripe-setup` reports the difference and changes nothing; `npm run stripe-setup -- --apply --reprice` makes the new price (subscribers already paying keep theirs), and the printed line has the new id to set.
+The prices are a hypothesis until a dealer pays. If `pricing.json` changes, `npm run stripe-setup` reports the difference and changes nothing; `npm run stripe-setup -- --apply --reprice` makes the new price (subscribers already paying keep theirs), and the printed line has the new id to set. Their seat counts stay right: the billing function counts seats by the `lotcurrent` tag every price the script makes carries, and the old price keeps it.
 
 ## 4. Create the webhook [owner runs]
 

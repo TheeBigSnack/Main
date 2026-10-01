@@ -280,7 +280,7 @@ In the Stripe Dashboard, in **test mode** first (the toggle at the top; everythi
    - the rooftop price: `perRooftopMonthly` per month, quantity 1 per dealership (`includedSalespeople` salespeople are included in it);
    - the extra-seat price: `extraSalespersonMonthly` per month, quantity = seats above the included count.
 
-   Note each price's id (`price_...`). The founding-dealer rate (`foundingDealerMonthly` for `foundingDealerMonths` months, the first `foundingDealerCount` stores) is not a third price: Checkout has promotion codes switched on, so the owner creates a coupon with that discount and a code, and hands the code to the dealer. The pilot period is not a Stripe trial either; it lives in the database (below).
+   On each price add the metadata `lotcurrent` = `rooftop` or `seat`, as `npm run stripe-setup` does: the webhook counts seats by that tag, so a subscriber who stays on an older price after a new one is made still has their seats counted. A price without it is placed by the ids in `STRIPE_PRICE_ROOFTOP` and `STRIPE_PRICE_SEAT` only. Note each price's id (`price_...`). The founding-dealer rate (`foundingDealerMonthly` for `foundingDealerMonths` months, the first `foundingDealerCount` stores) is not a third price: Checkout has promotion codes switched on, so the owner creates a coupon with that discount and a code, and hands the code to the dealer. The pilot period is not a Stripe trial either; it lives in the database (below).
 
 2. **The Billing Portal configuration**: Settings, Billing, Customer portal. Turn on updating the payment method, viewing invoices and cancelling; save. Without a saved configuration the `/portal` route gets an error from Stripe saying so.
 
@@ -337,7 +337,7 @@ All three signed-in routes take `Authorization: Bearer <the user's access token>
 | `active` | Stripe says `trialing` (a subscription whose first charge waits for the pilot to end) or `active`. | Everything works; the page shows the paid-through date, seats, and "Manage billing". |
 | `lapsed` | Everything else: the pilot ended unpaid, `past_due`, `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, `paused`. | The page says so and offers "Subscribe" (and "Manage billing" when a customer exists). `/sync` and `/rewrite` answer 402 with `code: "lapsed"` and the plan and do nothing else: syncing and the description writer stop until a manager renews. The billing routes are never gated, so renewing always works. |
 
-The row: `status` (`pilot`, or a Stripe status, or null), `pilot_ends_at`, `current_period_end`, `seats` (the included count plus the seat price's quantity, copied from Stripe by the webhook; the Billing card shows it against the salespeople, and nothing in Lot Current changes it in Stripe), `stripe_customer_id`, `stripe_subscription_id`, `updated_at`.
+The row: `status` (`pilot`, or a Stripe status, or null), `pilot_ends_at`, `current_period_end`, `seats` (the included count plus the quantity of every item whose price is tagged `lotcurrent` = `seat`, or, for an untagged price, is `STRIPE_PRICE_SEAT`, copied from Stripe by the webhook; the Billing card shows it against the salespeople, and nothing in Lot Current changes it in Stripe), `stripe_customer_id`, `stripe_subscription_id`, `updated_at`.
 
 ### How the free pilot starts
 
