@@ -21,8 +21,37 @@ const header = (name) => {
   const m = headers.match(new RegExp(`^  ${name}: (.+)$`, 'm'));
   return m ? m[1] : null;
 };
-// the run: blocks' own text, with each step's env: and with: left out
-const runText = (yml) => [...yml.matchAll(/^\s+run: (?:\|\n((?:\s{10,}.*\n?)+)|(.+))$/gm)].map((m) => m[1] || m[2]).join('\n');
+// The run: scripts' own text, with each step's env: and with: left out, in
+// every style YAML allows: one line, quoted, a plain scalar over several
+// lines, or a block (|, |-, |+, >, >-, >+, with an indent digit or a comment).
+// A block runs to the first line indented less than its first line; any other
+// value to the first line no deeper than the run: key. A run: whose value is
+// a mapping (a job named run, defaults: run:) is not a script. Takes a whole
+// workflow, or steps split off it (a step split from "- run:" starts at
+// column 0, so only its block, if any, is read).
+const runText = (yml) => {
+  const lines = yml.split('\n');
+  const indent = (l) => l.search(/\S/);
+  const out = [];
+  lines.forEach((line, i) => {
+    const m = line.match(/^(\s*(?:- )?)run:(?=\s|$)(.*)$/);
+    if (!m) return;
+    const col = m[1].length;
+    const value = m[2].replace(/(^|\s)#.*$/, '').trim();
+    const rest = lines.slice(i + 1);
+    const first = rest.find((l) => l.trim());
+    if (/^[|>][1-9+-]{0,2}$/.test(value)) {
+      const at = first ? indent(first) : 0;
+      const end = rest.findIndex((l) => l.trim() && indent(l) < at);
+      out.push((end < 0 ? rest : rest.slice(0, end)).join('\n'));
+      return;
+    }
+    if (!value && first && /^\s*[\w-]+:(\s|$)/.test(first)) return;
+    const end = col ? rest.findIndex((l) => l.trim() && indent(l) <= col) : 0;
+    out.push([m[2], ...(end < 0 ? rest : rest.slice(0, end))].join('\n'));
+  });
+  return out.join('\n');
+};
 
 test('manager/_headers: every path, the page\'s own policy plus frame-ancestors none, and the other headers', () => {
   assert.match(headers, /^\/\*$/m, 'one rule for every path');
@@ -68,6 +97,19 @@ test('no workflow input or secret is written straight into a shell script; funct
   for (const [name, yml] of [['supabase', supabase], ['manager', manager]]) {
     assert.doesNotMatch(runText(yml), /\$\{\{/, `${name}: inputs, vars and secrets reach run: blocks through env only`);
   }
+  // whatever style a later step's script is written in, an expression in it is caught, and the env: next to it is not read
+  const injected = '${{ inputs.functions }}';
+  const step = (run) => `jobs:\n  run:\n    runs-on: ubuntu-latest\n    env:\n      SAFE: \${{ inputs.step }}\n    steps:\n      - name: Deploy\n        ${run}\n        env:\n          FUNCTIONS: \${{ inputs.functions }}\n      - run: echo done\n`;
+  const styles = [
+    `run: supabase functions deploy ${injected}`,
+    `run: "supabase functions deploy ${injected}"`,
+    `run: supabase functions deploy\n          ${injected}`,
+    ...['|', '|-', '|+', '>', '>-', '>+', '|2', '|-2', '| # the deploy'].map((ind) => `run: ${ind}\n          set -e\n\n          supabase functions deploy ${injected}`),
+  ];
+  for (const run of styles) assert.match(runText(step(run)), /\$\{\{ inputs\.functions \}\}/, `missed: ${run.split('\n')[0]}`);
+  for (const run of styles) assert.doesNotMatch(runText(step(run.replace(injected, '"$FUNCTIONS"'))), /\$\{\{/, `the env: beside it, or the job named run, read as script: ${run.split('\n')[0]}`);
+  assert.equal(runText(step('run: |-\n          a\n          b')).split('\n').filter((l) => l.trim()).map((l) => l.trim()).join(' '), 'a b echo done');
+  assert.equal(runText('run: |\n          x\n        env:\n          A: ${{ secrets.A }}').trim(), 'x', 'a step split off "- run:" reads its block only');
   assert.match(supabase, /case "\$f" in\n\s+rewrite\|sync\|billing\|lead\) ;;\n\s+\*\) echo "::error::/);
   assert.match(supabase, /FUNCTIONS: \$\{\{ inputs\.functions \}\}/);
 });
