@@ -176,13 +176,28 @@ test('a to-do item joins to the listing that is up, and the ages sort longest fi
   const todoItems = [
     { vin: 'V1', kind: 'takeDown', flagged_at: ago(4) },
     { vin: 'V1', kind: 'price', flagged_at: ago(25), from_price: 100, to_price: 90 },
-    { vin: 'V1', kind: 'price', flagged_at: ago(1), from_price: 100, to_price: 95 },
+    { vin: 'V2', kind: 'price', flagged_at: ago(1), from_price: 100, to_price: 95 },
   ];
   const s = summarize({ listings, todoItems, now: NOW });
   assert.equal(s.soldStillListed[0].salesperson, 'Sam');
   assert.equal(s.soldStillListed[0].listingUrl, 'https://example.test/new');
   assert.equal(s.soldStillListed[0].name, 'New', 'no name on the item: the listing\'s');
   assert.deepEqual(s.priceMismatches.map((o) => [o.hoursOpen, o.overdue, o.toPrice]), [[25, true, 90], [1, false, 95]]);
+});
+
+test('a car with two open items of one kind (two machines of one salesperson that each filed the same sighting) is listed and counted once, from the first sighting', () => {
+  const listings = [{ user_id: 'u1', vin: 'V1', name: 'Car', posted_at: ago(100), salesperson: 'Sam', status: 'listed' }];
+  const todoItems = [
+    { vin: 'V1', kind: 'price', flagged_at: ago(3), from_price: 100, to_price: 90 },
+    { vin: 'v1', kind: 'price', flagged_at: ago(30), from_price: 100, to_price: 90 },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(2) },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(26) },
+  ];
+  const s = summarize({ listings, todoItems, now: NOW });
+  assert.deepEqual(s.priceMismatches.map((o) => [o.vin, o.hoursOpen, o.overdue]), [['V1', 30, true]]);
+  assert.deepEqual(s.soldStillListed.map((o) => [o.vin, o.hoursOpen, o.overdue]), [['V1', 26, true]]);
+  assert.equal(s.priceUpdates.open, 1);
+  assert.equal(s.takeDowns.open, 1);
 });
 
 test('a car still listed by someone no longer on the team is listed for the manager, since no rescan looks after it; the empty to-do cards claim only what the items show', () => {

@@ -137,3 +137,53 @@ test('a post confirmed while a sync is out goes up with the next sync', async ()
   await sync();
   assert.deepEqual(fake.rows('post_attempts').map((a) => a.vin).sort(), [VIN(1), VIN(2)]);
 });
+
+test('one salesperson\'s two machines that both flag a price change leave one to-do item, closed when it is fixed on either', async () => {
+  const { storage: desktop, sync: syncDesktop } = await setUp();
+  // the laptop: the same account, its own storage, the same server
+  const handler = functionsFetch({ sync: await loadFunction('sync') });
+  const laptop = { data: {} };
+  Object.assign(laptop, {
+    async get(keys) {
+      const list = Array.isArray(keys) ? keys : [keys];
+      return Object.fromEntries(list.filter((k) => k in laptop.data).map((k) => [k, structuredClone(laptop.data[k])]));
+    },
+    async set(obj) {
+      Object.assign(laptop.data, structuredClone(obj));
+    },
+    async remove(keys) {
+      for (const k of Array.isArray(keys) ? keys : [keys]) delete laptop.data[k];
+    },
+  });
+  assert.equal(await storeSession(sessionFromTokenResponse({ access_token: TOKEN, expires_in: 3600, refresh_token: 'refresh', user: USER }, Date.now()), laptop), true);
+  const syncLaptop = async () => {
+    const r = await syncOnce({ origin: ORIGIN, deps: { config, fetchImpl: handler, storage: laptop, now: Date.now() } });
+    assert.equal(r.ok, true, r.error);
+    return r;
+  };
+  const posted = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: ago(3 * 24 * 60) } };
+  desktop.data[K.posted] = structuredClone(posted);
+  laptop.data[K.posted] = structuredClone(posted);
+  await syncDesktop();
+  await syncLaptop();
+
+  // each machine's scheduled rescan sees the website price drop, at its own time
+  desktop.data[K.pilot] = noteFlags(null, priceDiff(VIN(1), 20000, 19000, ago(30)));
+  laptop.data[K.pilot] = noteFlags(null, priceDiff(VIN(1), 20000, 19000, ago(10)));
+  await syncDesktop();
+  await syncLaptop();
+  const items = () => fake.rows('todo_items').filter((t) => t.vin === VIN(1));
+  assert.equal(items().length, 1, 'one item for the manager view, not one per machine');
+  assert.equal(items()[0].done_at, null);
+  assert.equal(laptop.data[K.pilot].flags[0].flaggedAt, desktop.data[K.pilot].flags[0].flaggedAt, 'both machines carry the item under the first sighting');
+
+  // the salesperson updates the listing and ticks it off on the desktop
+  desktop.data[K.pilot] = resolveFlag(desktop.data[K.pilot], VIN(1), 'price', { at: ago(0), how: 'manual' });
+  await syncDesktop();
+  assert.deepEqual(items().map((t) => [Boolean(t.done_at), t.how]), [[true, 'manual']], 'nothing left open for the manager view');
+  // the laptop's next sync closes its flag the same way, and adds no row
+  await syncLaptop();
+  assert.deepEqual([Boolean(laptop.data[K.pilot].flags[0].doneAt), laptop.data[K.pilot].flags[0].how], [true, 'manual']);
+  await syncLaptop();
+  assert.equal(items().length, 1);
+});

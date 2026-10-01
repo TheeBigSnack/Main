@@ -240,8 +240,21 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     };
   };
   const longestFirst = (a, b) => (b.hoursOpen ?? -1) - (a.hoursOpen ?? -1) || a.name.localeCompare(b.name);
-  const soldStillListed = T.filter((f) => f.kind === 'takeDown' && isOpen(f)).map(item).sort(longestFirst);
-  const priceMismatches = T.filter((f) => f.kind === 'price' && isOpen(f)).map((f) => ({ ...item(f), fromPrice: num(f.from_price), toPrice: num(f.to_price) })).sort(longestFirst);
+  // One open item per car and kind, the first flagged: the sync function
+  // keeps one, but two machines of one salesperson that synced the same
+  // sighting at the same moment (or before it kept one) can each have left
+  // a row, and the car is still one car to fix.
+  const openOf = (kind) => {
+    const first = new Map();
+    for (const f of T) {
+      if (f.kind !== kind || !isOpen(f)) continue;
+      const have = first.get(vinOf(f));
+      if (!have || (ms(f.flagged_at) ?? Infinity) < (ms(have.flagged_at) ?? Infinity)) first.set(vinOf(f), f);
+    }
+    return [...first.values()];
+  };
+  const soldStillListed = openOf('takeDown').map(item).sort(longestFirst);
+  const priceMismatches = openOf('price').map((f) => ({ ...item(f), fromPrice: num(f.from_price), toPrice: num(f.to_price) })).sort(longestFirst);
 
   // ----- listings no rescan looks after -----
   // A to-do item comes only from the poster's own extension (its rescan
@@ -277,7 +290,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
       done: done.length,
       detected: done.filter((f) => f.how === 'detected').length,
       cleared: flags.filter((f) => f.how === 'cleared').length,
-      open: flags.filter(isOpen).length,
+      open: new Set(flags.filter(isOpen).map(vinOf)).size, // one per car, as the lists above
       medianHours: median(hours),
       longestHours: hours.length ? Math.max(...hours) : null,
     };

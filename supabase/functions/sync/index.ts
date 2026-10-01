@@ -41,7 +41,9 @@
 //     sync) and missing from `posted` are marked taken down. No time decides
 //     it: a row that machine never received is never in `known`. A request
 //     without `known` (a machine that never synced) takes nothing down;
-//   - a to-do item is closed by an upload but never reopened;
+//   - a to-do item is closed by an upload but never reopened, and a car
+//     has one item per kind at a time: the same sold car or price change
+//     flagged on two of the salesperson's machines is one row (step 4);
 //   - take-downs and closed to-do items come back from CUTOFF_MARGIN_MS
 //     before `since`, not from `since` itself (below, step 6).
 // The rows are built the way extension/src/sync.js toServerRows() builds
@@ -471,14 +473,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // 4. to-do items: new ones go in; an open one is closed by an upload
     //    that closed it (or gets the price the website moved to); a closed
-    //    one is never reopened
+    //    one is never reopened. One item per car and kind: each of a
+    //    salesperson's machines flags the same sold car or price change at
+    //    its own scan time, so an upload with no row of its own (the same
+    //    VIN, kind and flagging time) is the same item as a row of that VIN
+    //    and kind whose time overlaps it (flagged before the upload closed,
+    //    and closed, if it is, after the upload was flagged). That row takes
+    //    the upload instead of a second row going in, and an open one keeps
+    //    the earlier flagging time, so its hours count from the first
+    //    sighting; mergeFlags in extension/src/sync.js moves the other
+    //    machine's flag onto it.
     if (todos.length) {
       const have = await selectByVin(client, 'todo_items', 'id, vin, kind, flagged_at, done_at, from_price, to_price', dealershipId, todos.map((t) => t.vin));
       const byFlag = new Map<string, Row>(); // vin@kind@ms(flagged_at) -> the row
-      for (const r of have) byFlag.set(`${vinOf(r.vin)}@${String(r.kind)}@${ms(r.flagged_at)}`, r);
+      const byItem = new Map<string, Row[]>(); // vin@kind -> its rows
+      for (const r of have) {
+        byFlag.set(`${vinOf(r.vin)}@${String(r.kind)}@${ms(r.flagged_at)}`, r);
+        const item = `${vinOf(r.vin)}@${String(r.kind)}`;
+        byItem.set(item, [...(byItem.get(item) || []), r]);
+      }
+      const overlaps = (r: Row, t: TodoRow): boolean => {
+        const rDone = ms(r.done_at);
+        const tDone = ms(t.done_at);
+        return (tDone === null || (ms(r.flagged_at) ?? 0) <= tDone) && (rDone === null || (ms(t.flagged_at) ?? 0) <= rDone);
+      };
       const fresh: TodoRow[] = [];
       for (const t of todos) {
-        const h = byFlag.get(`${t.vin}@${t.kind}@${ms(t.flagged_at)}`);
+        let h = byFlag.get(`${t.vin}@${t.kind}@${ms(t.flagged_at)}`);
+        const own = Boolean(h);
+        if (!h) {
+          const same = (byItem.get(`${t.vin}@${t.kind}`) || []).filter((r) => overlaps(r, t));
+          h = same.find((r) => !r.done_at) || same[0];
+        }
         if (!h) {
           fresh.push(t);
           continue;
@@ -491,8 +517,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
           patch.from_price = t.from_price;
           patch.to_price = t.to_price;
         }
+        if (!own && !h.done_at && (ms(t.flagged_at) ?? 0) < (ms(h.flagged_at) ?? 0)) patch.flagged_at = t.flagged_at;
         if (Object.keys(patch).length) {
           must(await client.from('todo_items').update(patch).eq('id', String(h.id)), 'could not update a to-do item');
+          Object.assign(h, patch);
           counts.todoItems += 1;
         }
       }

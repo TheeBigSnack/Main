@@ -279,6 +279,31 @@ test('mergeFlags: a flag closed on another machine closes here; nothing is added
   assert.deepEqual(mergeFlags(pilot, null), pilot, 'no answer: the same record back');
 });
 
+test('mergeFlags: the same sold car or price change flagged on the salesperson\'s other machine is one item: its time is taken, and its close closes the flag here', () => {
+  // this machine (the laptop) flagged three items at its own scan, T(20)
+  const pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [{ vin: VIN_B, name: 'B', yours: true, from: 2, to: 1 }, { vin: VIN_C, name: 'C', yours: true, from: 3, to: 2 }], warnings: [] }, { at: T(20) });
+  const remote = {
+    todoItems: [
+      // the desktop flagged A at T(10) and ticked it off at T(40)
+      { vin: VIN_A, kind: 'takeDown', flagged_at: T(10), done_at: T(40), how: 'manual' },
+      // the desktop flagged B at T(5); still open
+      { vin: VIN_B, kind: 'price', flagged_at: T(5), done_at: null },
+      // C: an older item of the same car, closed before this flag was raised, is another item
+      { vin: VIN_C, kind: 'price', flagged_at: T(1), done_at: T(15), how: 'detected' },
+    ],
+  };
+  const merged = mergeFlags(pilot, remote);
+  const flag = (vin) => merged.flags.find((f) => f.vin === vin);
+  assert.equal(merged.flags.length, 3, 'nothing added');
+  assert.deepEqual([flag(VIN_A).doneAt, flag(VIN_A).how, flag(VIN_A).flaggedAt], [T(40), 'manual', T(20)], 'closed here as it was closed there');
+  assert.deepEqual([flag(VIN_B).flaggedAt, flag(VIN_B).doneAt], [T(5), undefined], 'still open, under the first sighting\'s time');
+  assert.deepEqual([flag(VIN_C).flaggedAt, flag(VIN_C).doneAt], [T(20), undefined], 'left as it is');
+  assert.deepEqual(mergeFlags(merged, remote), merged, 'a second answer changes nothing');
+  // a flag raised after the other machine's item closed is a new item
+  const later = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [], warnings: [] }, { at: T(45) });
+  assert.deepEqual(mergeFlags(later, remote), later);
+});
+
 test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {
   const today = { from: T(0), to: new Date(Date.UTC(2026, 10, 17, 9, 0)).toISOString() };
   const s = nextSyncState(null, { serverTime: T(1), dealership: { id: D, name: 'Example Motors' }, role: 'salesperson' });

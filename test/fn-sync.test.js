@@ -438,6 +438,60 @@ test('sync: to-do items: a new flag goes in, an upload closes an open one, a clo
   assert.deepEqual(r.body.todoItems.map((t) => t.vin).sort(), [VIN(1), VIN(2), VIN(3), VIN(4)]);
 });
 
+test('sync: to-do items: the same sold car or price change flagged on another machine at its own scan time is one item, never a second row', async () => {
+  const T = Object.fromEntries([1, 5, 10, 20, 30, 60, 90, 100, 120, 200, 300].map((m) => [m, at(-m)])); // minutes ago, stamped once
+  const rowsOf = (vin) => fake.rows('todo_items').filter((t) => t.vin === vin);
+  world({
+    rows: {
+      todo_items: [
+        // open, flagged by the salesperson's desktop
+        { dealership_id: D1, vin: VIN(1), kind: 'price', flagged_at: T[120], from_price: 20000, to_price: 19000 },
+        { dealership_id: D1, vin: VIN(2), kind: 'takeDown', flagged_at: T[120] },
+        { dealership_id: D1, vin: VIN(3), kind: 'price', flagged_at: T[60], from_price: 20000, to_price: 19000 },
+        // closed on the desktop 30 minutes ago
+        { dealership_id: D1, vin: VIN(4), kind: 'takeDown', flagged_at: T[120], done_at: T[30], how: 'manual' },
+        { dealership_id: D1, vin: VIN(5), kind: 'price', flagged_at: T[120], done_at: T[30], how: 'detected', from_price: 20000, to_price: 19000 },
+      ],
+    },
+  });
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1, {
+    pilot: {
+      posts: [],
+      flags: [
+        // the laptop's flags of the same items, stamped with its own scans
+        { vin: VIN(1), kind: 'price', flaggedAt: T[90], from: 20000, to: 18500 }, // still open: takes the new price, keeps the earlier time
+        { vin: VIN(2), kind: 'takeDown', flaggedAt: T[90], doneAt: T[10], how: 'manual' }, // ticked off on the laptop: closes it
+        { vin: VIN(3), kind: 'price', flaggedAt: T[100], from: 20000, to: 19000 }, // seen there first: the item counts from then
+        { vin: VIN(4), kind: 'takeDown', flaggedAt: T[90] }, // raised before the desktop closed it: stays closed
+        { vin: VIN(5), kind: 'price', flaggedAt: T[90], doneAt: T[5], how: 'cleared' }, // closed on both: stays as the desktop closed it
+        { vin: VIN(4), kind: 'price', flaggedAt: T[20], from: 20000, to: 18000 }, // another kind: its own item
+      ],
+    },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(rowsOf(VIN(1)).map((t) => [t.done_at, t.flagged_at, t.to_price]), [[null, pgTime(T[120]), 18500]], 'one open price item, with the newer price');
+  assert.deepEqual(rowsOf(VIN(2)).map((t) => [Boolean(t.done_at), t.how]), [[true, 'manual']], 'the laptop\'s close closes the desktop\'s item');
+  assert.deepEqual(rowsOf(VIN(3)).map((t) => [t.done_at, t.flagged_at]), [[null, pgTime(T[100])]], 'the hours count from the first sighting');
+  assert.deepEqual(rowsOf(VIN(4)).map((t) => [t.kind, Boolean(t.done_at)]).sort(), [['price', false], ['takeDown', true]], 'a closed item is not opened again as a new row');
+  assert.deepEqual(rowsOf(VIN(5)).map((t) => [t.how, t.to_price]), [['detected', 19000]], 'closed on both machines: one row, as it was closed first');
+  assert.equal(r.body.todoItems.filter((t) => !t.done_at).length, 3, 'VIN 1 and 3 open once each, and the new price item');
+
+  // a flag raised after the item closed is a new item; one wholly before it is its own old item
+  const r2 = await sync(handler, TOKEN.u1, {
+    pilot: {
+      posts: [],
+      flags: [
+        { vin: VIN(4), kind: 'takeDown', flaggedAt: T[1] },
+        { vin: VIN(5), kind: 'price', flaggedAt: T[300], doneAt: T[200], how: 'manual', from: 21000, to: 20000 },
+      ],
+    },
+  });
+  assert.equal(r2.status, 200);
+  assert.deepEqual(rowsOf(VIN(4)).filter((t) => t.kind === 'takeDown').map((t) => Boolean(t.done_at)).sort(), [false, true]);
+  assert.equal(rowsOf(VIN(5)).length, 2);
+});
+
 // The API answers at most 1,000 rows a request (the fake too: fake.maxRows),
 // so a read that does not page loses rows without an error.
 const ranges = (table, match) => fake.queries(table, 'select').filter((c) => c.columns === '*' && c.filters.some(match)).map((c) => c.range);

@@ -432,24 +432,42 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
 }
 
 /**
- * Closes local to-do flags that were closed on another machine (the same
- * VIN, kind and flagging time, done on the server). Nothing is added or
- * reopened: a flag belongs to the salesperson's own listing and only their
- * machines carry it. Returns the pilot record (unchanged when nothing matched).
- * `remote` is the sync answer ({ todoItems: [...] }) or a plain array.
+ * Follows the server's to-do items for the local open flags. Each of a
+ * salesperson's machines flags the same sold car or price change at its own
+ * scan time, and the server keeps one item per car and kind (the sync
+ * function's step 4), so a local open flag is the same item as a server row
+ * of its VIN and kind that is open, or that closed after the flag was
+ * raised:
+ *   - closed there (its own row, the same VIN, kind and flagging time, or
+ *     that later-closed row): closed here too, with the server's time and
+ *     how, so a fix ticked off on one machine is off the other's list;
+ *   - open there with another flagging time (the other machine's sighting):
+ *     the flag takes that row's time (the earliest, if there are several),
+ *     so both machines carry one key and the hours count from it.
+ * Nothing is added or reopened: a flag belongs to the salesperson's own
+ * listing and only their machines carry it. Returns the pilot record
+ * (unchanged when nothing matched). `remote` is the sync answer
+ * ({ todoItems: [...] }) or a plain array.
  */
 export function mergeFlags(pilot, remote) {
   const p = withPilotDefaults(pilot);
-  const done = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && t.done_at);
-  if (!done.length || !p.flags.length) return p;
+  const rows = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && ms(t.flagged_at) !== null);
+  if (!rows.length || !p.flags.length) return p;
   let touched = false;
   const flags = p.flags.map((f) => {
     if (f.doneAt) return f;
-    const t = done.find((d) => vinOf(d.vin) === vinOf(f.vin) && d.kind === f.kind && sameMoment(d.flagged_at, f.flaggedAt));
-    if (!t) return f;
+    const item = rows.filter((t) => vinOf(t.vin) === vinOf(f.vin) && t.kind === f.kind);
+    const t = item.find((d) => d.done_at && (sameMoment(d.flagged_at, f.flaggedAt) || (ms(d.done_at) ?? -Infinity) >= (ms(f.flaggedAt) ?? Infinity)));
+    if (t) {
+      touched = true;
+      const at = isoOrNull(t.done_at);
+      return { ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) };
+    }
+    const open = item.filter((d) => !d.done_at);
+    if (!open.length || open.some((d) => sameMoment(d.flagged_at, f.flaggedAt))) return f;
+    const first = open.reduce((a, b) => (ms(b.flagged_at) < ms(a.flagged_at) ? b : a));
     touched = true;
-    const at = isoOrNull(t.done_at);
-    return { ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) };
+    return { ...f, flaggedAt: isoOrNull(first.flagged_at) };
   });
   return touched ? { ...p, flags } : p;
 }
