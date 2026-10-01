@@ -35,6 +35,11 @@
 //                                              when everything is granted already, and otherwise answers
 //                                              hub.permissionAnswer (true unless a test sets it) without showing
 //                                              Chrome's prompt (STUB); hub.permissionRequests lists what was asked
+//   fetch to the account server                answered in the frame, never sent (STUB): the extension's
+//                                              src/accountConfig.js names the production Supabase project, and
+//                                              a sign-in or a sync from the sandbox would create a real account
+//                                              or write real rows there; the answer says the test drive does not
+//                                              sign in, and the Account section shows that sentence
 //   chrome.alarms                              remembered, never fired (STUB: the sandbox has a button that
 //                                              sends the rescan message the alarm would)
 //   chrome.notifications.create                shown as a toast on the sandbox page
@@ -448,7 +453,30 @@
     return chrome;
   }
 
-  root.LotSyncShim = { createHub, createChrome, AREAS };
+  // The account server is never reached from the sandbox (see the list
+  // above): any request to a Supabase project, sign-in, sync or rewrite, is
+  // answered here with a 503 whose message src/account.js errorText shows.
+  const SANDBOX_NO_ACCOUNTS = 'The test drive does not sign in or sync: accounts work in the installed extension only';
+  function isAccountServer(address) {
+    try {
+      return /(^|\.)supabase\.(co|in)$/i.test(new URL(String(address)).hostname);
+    } catch (e) {
+      return false;
+    }
+  }
+  function guardFetch(win) {
+    if (!win || typeof win.fetch !== 'function') return;
+    const real = win.fetch.bind(win);
+    win.fetch = function (input, init) {
+      const address = typeof input === 'string' ? input : (input && (input.url || input.href)) || '';
+      if (isAccountServer(address)) {
+        return Promise.resolve(new win.Response(JSON.stringify({ msg: SANDBOX_NO_ACCOUNTS }), { status: 503, headers: { 'content-type': 'application/json' } }));
+      }
+      return real(input, init);
+    };
+  }
+
+  root.LotSyncShim = { createHub, createChrome, AREAS, isAccountServer, SANDBOX_NO_ACCOUNTS };
 
   // Inside a sandbox frame: the hub is on the sandbox page; install chrome now,
   // before the extension's module script runs.
@@ -457,5 +485,8 @@
     if (root.__lotSyncHub) hub = root.__lotSyncHub;
     else if (root.parent && root.parent !== root && root.parent.__lotSyncHub) hub = root.parent.__lotSyncHub;
   } catch (e) { hub = null; }
-  if (hub) root.chrome = createChrome(hub, root);
+  if (hub) {
+    root.chrome = createChrome(hub, root);
+    guardFetch(root);
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

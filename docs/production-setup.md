@@ -40,6 +40,8 @@ Why not the alternatives:
 
 **[Claude] then:** runs `npm run set-project -- <project URL> <publishable key>`, which writes both values into `extension/src/accountConfig.js` and `manager/config.js` (it refuses a secret key and never prints it), runs the tests and commits.
 
+**From then on every build offers sign-in.** With the project named in `extension/src/accountConfig.js`, set-up has its account step and Settings its sign-in, and both reach this project. Until steps 3 to 5 are done and `npm run check-deploy` shows no `FAIL`, a sign-in cannot complete: the email that arrives is Supabase's stock one, not the six-digit code the extension asks for, and the built-in sender mails only the project's own team. So no build goes to a pilot tester before then (the launch checklist's "No tester build before sign-in works"), unless the owner decides otherwise and the tester is told to click **Skip for now**. The test drive (`demo/`) never reaches the project: its `chrome-shim.js` answers every request to it.
+
 ## Step 2. Let GitHub deploy to it [Owner]
 
 1. In Supabase: your avatar, **Account preferences, Access Tokens**, **Generate new token**, name it `github-deploy`. Copy it.

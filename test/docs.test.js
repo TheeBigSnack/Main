@@ -18,6 +18,7 @@ import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
+import { accountsConfigured } from '../extension/src/accountConfig.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -496,4 +497,17 @@ test('every text that says what re-creates the forgotten profile names only Save
     assert.ok(sentences.length, `${rel} no longer says what re-creates the profile`);
     for (const t of sentences) assert.match(t, /only saving Settings or finishing set-up re-creates/i, `${rel}: "${t.trim().slice(0, 120)}" does not say only Save settings and finishing set-up re-create the profile`);
   }
+});
+
+// The committed extension/src/accountConfig.js names the production project
+// (docs/production-setup.md step 1), so every build offers sign-in: no text
+// may still say the shipped config is empty, and the setup docs say that no
+// build goes to a tester before sign-in works there.
+test('while the committed account config names a project, no text says the shipped build has accounts off', () => {
+  if (!accountsConfigured()) return;
+  for (const rel of ['../extension/src/accountConfig.js', '../extension/src/wizardSteps.js', '../docs/data-inventory.md', '../README.md']) {
+    assert.doesNotMatch(read(rel), /shipped empty config|as shipped\*\* \(`extension\/src\/accountConfig\.js` empty\)|until then every value is empty|Until the owner has set the account service up/i, `${rel} still says the shipped build has no account config`);
+  }
+  assert.match(read('../docs/production-setup.md'), /\*\*From then on every build offers sign-in\.\*\*[^\n]*no build goes to a pilot tester before then/);
+  assert.match(doc('launch-checklist.md'), /\*\*No tester build before sign-in works\.\*\*/);
 });

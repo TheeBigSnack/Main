@@ -25,6 +25,8 @@ import { trimRecord } from '../extension/adapters/dealerInspire.js';
 import { parseVehiclePage } from '../extension/adapters/schemaOrgParse.js';
 import { normalizeVehicle as normalizeStandard } from '../extension/adapters/schemaOrgNormalize.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
+import { ACCOUNT, accountsConfigured } from '../extension/src/accountConfig.js';
+import { errorText } from '../extension/src/account.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const demo = join(root, 'demo');
@@ -346,6 +348,34 @@ test('the shim\'s permissions behave like Chrome\'s: granted hosts only, a reque
   await assert.rejects(idle.permissions.request({ origins: [photoHost] }), /user gesture/);
   const clicked = Shim.createChrome(hub, { navigator: { userActivation: { isActive: true } }, addEventListener: () => {} });
   assert.equal(await clicked.permissions.request({ origins: [photoHost] }), true);
+});
+
+// src/accountConfig.js names the production project, so the extension's
+// pages in the sandbox would sign in and sync there for real: a visitor of
+// the test drive could create an account in production. Inside a sandbox
+// frame every request to the account server is answered by the shim.
+test('inside a sandbox frame a request to the account server is answered by the shim, never sent', async () => {
+  const sent = [];
+  const realFetch = async (input) => { sent.push(String(input)); return new Response('{}', { status: 200 }); };
+  const ctx = vm.createContext({ window: {}, setTimeout, clearTimeout, console, structuredClone, URL, Response });
+  vm.runInContext(read('demo/chrome-shim.js'), ctx, { filename: 'chrome-shim.js' });
+  const hub = ctx.window.LotSyncShim.createHub({ manifest: JSON.parse(read('extension/manifest.json')) });
+  const frame = vm.createContext({ window: { parent: { __lotSyncHub: hub }, fetch: realFetch, Response, addEventListener() {} }, setTimeout, clearTimeout, console, structuredClone, URL, Response });
+  vm.runInContext(read('demo/chrome-shim.js'), frame, { filename: 'chrome-shim.js' });
+  const fetch = frame.window.fetch;
+  const servers = ['https://abcdefghijklmnopqrst.supabase.co/auth/v1/otp', 'https://abcdefghijklmnopqrst.supabase.co/functions/v1/sync'];
+  if (accountsConfigured()) servers.push(ACCOUNT.url + '/auth/v1/otp', (ACCOUNT.functionsUrl || ACCOUNT.url + '/functions/v1') + '/sync');
+  for (const url of servers) {
+    const res = await fetch(url, { method: 'POST', body: '{}' });
+    assert.equal(res.status, 503, url);
+    const body = await res.json();
+    assert.equal(errorText(body, res.status), 'The test drive does not sign in or sync: accounts work in the installed extension only', 'the Account section shows why');
+  }
+  assert.deepEqual(sent, [], 'nothing reached an account server');
+  await fetch('https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/X?format=json');
+  await fetch(new URL('https://sample-motors.test/used-vehicles/'));
+  assert.deepEqual(sent, ['https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/X?format=json', 'https://sample-motors.test/used-vehicles/'], 'everything else goes through as before');
+  assert.equal(ctx.window.LotSyncShim.isAccountServer('https://supabase.co.example.test/x'), false);
 });
 
 test('index.html carries the sandbox banner and loads nothing from another site', () => {
