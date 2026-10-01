@@ -19,6 +19,7 @@ import { checkPreOwned } from '../extension/src/classify.js';
 import { listingStatus, MASS_DISAPPEARANCE_MIN_LOT, diffScans } from '../extension/src/rescan.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
+import { ADAPTERS, platformNames } from '../extension/adapters/index.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -90,6 +91,15 @@ test('help.md and README give the "vanished at once" rule with the lot size it s
   const floor = String(MASS_DISAPPEARANCE_MIN_LOT);
   assert.match(doc('help.md'), new RegExp(`on a lot of ${floor} cars or more, if more than half of it disappears between scans, nothing is marked gone`));
   assert.match(read('../README.md'), new RegExp(`If more than half the cars of a lot of ${floor} or more vanish between scans, nothing is marked gone`));
+});
+
+test('the adapter contract\'s PLATFORM row names every adapter and quotes no stale unsupported-page message', () => {
+  const row = read('../extension/adapters/README.md').split('\n').find((l) => l.startsWith('| `PLATFORM` |')) || '';
+  assert.ok(row, 'the PLATFORM row is there');
+  for (const a of ADAPTERS) assert.ok(row.includes('`' + a.PLATFORM.id + '`'), `the PLATFORM row names the ${a.PLATFORM.id} adapter`);
+  // a quoted message must be the one the extension shows (index.js builds it from every adapter's name)
+  const quoted = /What it reads today: ([^"]*?)\.?"/.exec(row);
+  if (quoted) assert.equal(quoted[1], platformNames().join('; '));
 });
 
 test('the adapter contract and help.md say a car whose own page could not be checked is left unchecked, not that it stops every verdict', () => {
