@@ -188,3 +188,8 @@ test('the Marketplace form is not opened while no dealership name is set: no des
   // the review step shows why and keeps the button off
   assert.match(fnText('viewReview'), /id="openForm" \$\{cap\.reached \|\| !dealerNamed\(\) \? 'disabled' : ''\}/);
 });
+
+test('the panel checks every description against the salesperson\'s own role', () => {
+  // the checks' context carries the salesperson, so their title from Settings is the role looked for
+  assert.match(src, /^const ctx = \(\) => \(\{[^\n]*\bsalesperson: state\.settings\.salesperson\b/m);
+});

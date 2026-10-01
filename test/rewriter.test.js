@@ -138,3 +138,22 @@ test('the salesperson\'s highlights are the features the service sees', async ()
   assert.deepEqual(all.features, ['Backup Camera', 'Bluetooth'], 'no pick: the whole list, as before');
   assert.ok(!('highlightsPicked' in all));
 });
+
+test('a Claude draft that drops the salesperson\'s role falls back to the template, which states it', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const specialist = { name: 'Sam', title: 'product specialist' };
+  const base = args({ dealer: example, salesperson: specialist, priceNote: '' });
+  const template = (await generateDescription(base)).text;
+  assert.match(template, /I'm Sam, product specialist at Example Motors\./);
+  const roleless = template.replace("I'm Sam, product specialist at Example Motors.", "I'm Sam at Example Motors.");
+  const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: roleless }) });
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Doesn't give your role \("product specialist"\)/);
+  // the role the salesperson set in Settings is the one looked for, not the default
+  const other = template.replace('product specialist', 'sales consultant');
+  const o = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: other }) });
+  assert.equal(o.source, 'template');
+  // with the role, the draft is used
+  const fine = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: template.replace('Highlights:', 'What I like:') }) });
+  assert.equal(fine.source, 'claude', fine.note);
+});

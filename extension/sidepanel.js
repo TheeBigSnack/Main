@@ -189,7 +189,7 @@ function setStatus(text, kind = '') {
 // second price and this car has none (the main price is used), the note
 // would be untrue for it, so it is left out and the car card says so.
 const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
-const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
+const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
 
 // Pilot numbers (src/pilot.js): when each post started and ended, and what
 // each fill could not do. Bookkeeping only; a failure here never stops a post.
@@ -809,7 +809,7 @@ async function downloadPhotos() {
 
 function checksHtml(g) {
   if (!g) return '';
-  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words, every number matches the website, no banned phrases, dealership named.</div>`;
+  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words, every number matches the website, no banned phrases, dealership and your role named.</div>`;
   return `<div class="checks bad" id="checks">Fix before posting:<ul>${g.problems.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul></div>`;
 }
 

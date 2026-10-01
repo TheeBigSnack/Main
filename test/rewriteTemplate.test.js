@@ -280,3 +280,26 @@ test('with no dealership name set, the description never passes and never signs 
   assert.deepEqual(named.guardrails.problems, []);
   assert.match(named.text, /Sales consultant at Example Motors\./);
 });
+
+// ---------- the salesperson's role is always stated ----------
+
+test('a description that never gives the salesperson\'s role, or reads as a private sale, fails the checks', () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price };
+  const text = buildTemplateDescription(c);
+  assert.deepEqual(runGuardrails(text, c).problems, []);
+  const codes = (t, ctx = c) => runGuardrails(t, ctx).problems.map((p) => p.code);
+  // a sign-off without the role, even with the dealership named
+  assert.deepEqual(codes(text.replace("I'm Sam, sales consultant at Example Motors.", "I'm Sam at Example Motors.")), ['no-role']);
+  assert.equal(runGuardrails(text.replace('sales consultant', 'neighbor'), c).problems[0].text, 'Doesn\'t give your role ("sales consultant"); the sign-off says it');
+  // the role set in Settings, any case or spacing; the default when none is set
+  const manager = { ...c, salesperson: { name: 'Sam', title: 'Sales  Manager' } };
+  assert.deepEqual(codes(buildTemplateDescription(manager), manager), []);
+  assert.deepEqual(codes(text, manager), ['no-role'], 'another title is not this salesperson\'s role');
+  assert.deepEqual(codes(text, { ...c, salesperson: {} }), [], 'no title set: the default title is the role');
+  assert.deepEqual(codes(text, { ...c, salesperson: undefined }), []);
+  assert.deepEqual(codes(text, { ...c, salesperson: null }), []);
+  // private-sale wording
+  assert.ok(codes(`${text}\nPrivate sale.`).includes('banned-phrase'));
+  assert.ok(codes(`${text}\nFor sale by owner.`).includes('banned-phrase'));
+});

@@ -89,7 +89,7 @@ export async function rewriteWithBackend({ endpoint, key = '', facts, fetchImpl 
 export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, fetchImpl }) {
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
   const closingLine = usableClosingLine(salesperson.closingLine);
-  const ctx = { vehicle, dealer, priceNote, price, closingLine };
+  const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine };
   const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative, highlights });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };
   const rw = settings.rewrite || {};

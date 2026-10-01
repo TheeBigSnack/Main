@@ -11,6 +11,7 @@
 //   - a dollar amount must be the price posted or one in the price note, a
 //     mileage must be the website's, and no price change is claimed
 //   - the VIN and the dealership's name must be present (and a name must be set)
+//   - the salesperson's role (their title, or the default one) must be present
 //   - banned phrases (claims the data can't support, posing as a private
 //     seller, protected characteristics), "one owner" only with the flag,
 //     no ALL CAPS shouting, no walls of emoji
@@ -48,9 +49,14 @@ export interface GuardrailDealer {
   zip?: unknown;
 }
 
+export interface GuardrailSalesperson {
+  title?: unknown;
+}
+
 export interface GuardrailContext {
   vehicle?: GuardrailVehicle;
   dealer?: GuardrailDealer;
+  salesperson?: GuardrailSalesperson;
   priceNote?: string;
   price?: number | null;
 }
@@ -67,6 +73,8 @@ export interface GuardrailResult {
 }
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
+// extension/src/settings.js DEFAULT_SALESPERSON_TITLE
+export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 
 // Phrases that never belong in a listing. Matched on word boundaries,
 // case-insensitively. A false positive only means the template is used.
@@ -78,7 +86,7 @@ export const BANNED_PHRASES: readonly string[] = Object.freeze([
   'guaranteed financing', 'bad credit ok', 'no credit check', 'must sell', 'priced to sell', "won't last", 'wont last',
   'act fast', 'no reasonable offer refused',
   // posing as a private seller
-  'private seller', 'selling my', 'my personal', 'my truck', 'my car', 'my suv', 'my daily driver',
+  'private seller', 'private sale', 'for sale by owner', 'selling my', 'my personal', 'my truck', 'my car', 'my suv', 'my daily driver',
   // protected characteristics have no place in a car ad
   'christian', 'muslim', 'jewish', 'hindu', 'catholic', 'religious', 'hispanic', 'latino', 'immigrant', 'citizens only',
   'disabled', 'handicapped', 'elderly', 'seniors only', 'for men', 'for women', 'for ladies', 'family only', 'no kids',
@@ -198,7 +206,7 @@ const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, new Reg
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
  */
-export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, priceNote = '', price = null }: GuardrailContext = {}): GuardrailResult {
+export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null }: GuardrailContext = {}): GuardrailResult {
   const t = String(text || '');
   const prose = stripVin(t);
   const problems: GuardrailProblem[] = [];
@@ -241,6 +249,11 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, priceN
   if (!dealerName) problems.push({ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' });
   else if (!t.toLowerCase().includes(dealerName.toLowerCase())) {
     problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
+  }
+  // the salesperson's role is always stated (the sign-off says it), so the listing never reads as a private sale
+  const role = String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
+  if (role && !t.replace(/\s+/g, ' ').toLowerCase().includes(role.toLowerCase())) {
+    problems.push({ code: 'no-role', text: `Doesn't give your role ("${role}"); the sign-off says it` });
   }
   if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
   if (emojiCount(t) > 3) problems.push({ code: 'emoji', text: 'Too many emoji' });

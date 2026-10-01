@@ -233,7 +233,7 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const r = await rewrite(handler, TOKEN.u1);
   assert.equal(r.status, 200);
   assert.deepEqual([r.body.ok, r.body.text, r.body.error], [false, BAD, 'the draft failed the checks twice']);
-  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'mileage-mismatch', 'no-dealer', 'too-short', 'unknown-number']);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'mileage-mismatch', 'no-dealer', 'no-role', 'too-short', 'unknown-number']);
   assert.equal(r.body.costUsd, 0.037, '$0.02 and $0.017');
   const [first, second] = requests();
   assert.doesNotMatch(first.json.messages[0].content, /previous draft failed/);
@@ -269,6 +269,22 @@ test('rewrite: with no dealership name in the facts, no draft passes: the descri
   assert.equal(r.status, 200);
   assert.equal(r.body.ok, false);
   assert.deepEqual(r.body.guardrails.problems, [{ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' }]);
+});
+
+test('rewrite: a draft that leaves out the salesperson\'s role is refused, whatever else it gets right', async () => {
+  world();
+  anthropic(says(GOOD.replace("I'm Sam, sales consultant at Example Motors.", "I'm Sam at Example Motors.")));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems, [{ code: 'no-role', text: 'Doesn\'t give your role ("sales consultant"); the sign-off says it' }]);
+  // the title in the facts is the role looked for
+  world();
+  anthropic(says(GOOD));
+  const handler2 = await load();
+  const other = await rewrite(handler2, TOKEN.u1, { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: { name: 'Sam', title: 'product specialist' }, narrative: [] }), origin: ORIGIN });
+  assert.deepEqual(other.body.guardrails.problems.map((p) => p.code), ['no-role']);
 });
 
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {

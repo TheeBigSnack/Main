@@ -189,6 +189,7 @@ function guardrailContext(facts: RewriteFacts): GuardrailContext {
       carfaxUrl: facts.carfax ? 'yes' : null,
     },
     dealer: isRecord(facts.dealer) ? facts.dealer : {},
+    salesperson: isRecord(facts.salesperson) ? facts.salesperson : {}, // the role the sign-off must state
     priceNote: typeof facts.priceNote === 'string' ? facts.priceNote : '',
   };
 }
