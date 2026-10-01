@@ -385,10 +385,19 @@ test('a post the last sync could not share is named on To do, on the car in My l
   await p.tab('settings');
   assert.match(p.panel(), /id="syncStatus">Last sync [^<]* · 2 of your posts are not shared with your dealership \(My listings says why\)\. /);
 
+  // taken down here since the last sync: no longer counted, in Settings as on To do
+  await p.click('takenDown', { vin: ram.vin });
+  assert.match(p.panel(), /id="syncStatus">Last sync [^<]* · 1 of your posts is not shared with your dealership \(My listings says why\)\. /);
+  await p.tab('todo');
+  assert.match(p.panel(), /id="notSharedBanner">One of your posts is not on your dealership's list/);
+
   // nothing refused: no banner
   const q = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted, [k.sync]: { ...syncState, notShared: [] }, account: session } });
   await q.scan();
   assert.doesNotMatch(q.panel(), /notSharedBanner/);
+  // a sync run elsewhere (the service worker, the side panel) that could not share a post: the open popup says so at once
+  q.storageChanged({ [k.sync]: { newValue: { ...syncState } } });
+  assert.match(q.panel(), /id="notSharedBanner">2 of your posts are not on your dealership's list/);
 });
 
 // Changing "Price to post" moves the person's listings to the new basis:

@@ -16,7 +16,8 @@ export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, 
   const page = fakeDealerPage({ records, origin, name });
   const chrome = fakeChrome(page, local);
   chrome.storage.local.remove = async (keys) => { for (const key of [].concat(keys)) delete local[key]; };
-  chrome.storage.onChanged = { addListener() {} };
+  const storageListeners = [];
+  chrome.storage.onChanged = { addListener(fn) { storageListeners.push(fn); } };
   chrome.storage.sync = {
     get: async (key) => (key in sync ? { [key]: structuredClone(sync[key]) } : {}),
     set: async (obj) => { Object.assign(sync, structuredClone(obj)); },
@@ -58,5 +59,7 @@ export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, 
     panel: () => el('panel').innerHTML,
     tabs: () => el('tabs').innerHTML,
     status: () => el('status').textContent,
+    // another page (the side panel, the service worker) wrote these keys: { key: { newValue } }
+    storageChanged: (changes, area = 'local') => { for (const fn of storageListeners) fn(changes, area); },
   };
 }

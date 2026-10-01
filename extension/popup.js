@@ -688,11 +688,14 @@ const notSharedText = (n) => (n.reason === 'clock'
   ? "Not shared with your dealership: this post's time is ahead of the server's clock. Check this computer's date and time, then sync again."
   : `Not shared with your dealership: ${n.by ? esc(n.by) : 'a colleague'} already has this car listed, so your dealership's list and the manager view show theirs, not yours.`);
 
+// How many of the person's own posts on this computer the dealership's list
+// does not hold: a post taken down here since the last sync is not counted.
+const notSharedCount = () => Object.entries(state.posted || {}).filter(([vin, p]) => p && p.mine !== false && notShared({ vin, ...p })).length;
+
 // On To do, where the person looks first: how many of their posts the
 // dealership's list does not hold. My listings says which and why.
 function notSharedBanner() {
-  const mine = Object.entries(state.posted || {}).filter(([, p]) => p && p.mine !== false).map(([vin, p]) => ({ vin, ...p }));
-  const n = mine.filter((p) => notShared(p)).length;
+  const n = notSharedCount();
   if (!n) return '';
   return `<div class="banner warn" id="notSharedBanner">${n === 1 ? 'One of your posts is' : `${n} of your posts are`} not on your dealership's list: the last sync could not share ${n === 1 ? 'it' : 'them'}. <b>My listings</b> says why.</div>`;
 }
@@ -827,7 +830,7 @@ function accountFieldset() {
   const planLine = plan ? ` · <span id="planStatus"${ss.plan.state === 'lapsed' ? ' style="color: var(--bad)"' : ''}>${esc(plan)}</span>` : '';
   const last = ss.lastSyncAt ? `Last sync ${esc(when(ss.lastSyncAt))}` : 'Not synced yet';
   const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}` : '';
-  const refused = Array.isArray(ss.notShared) ? ss.notShared.length : 0;
+  const refused = notSharedCount(); // the same count as To do's banner
   const notSharedNote = refused ? ` · ${refused} of your posts ${refused === 1 ? 'is' : 'are'} not shared with your dealership (My listings says why)` : '';
   const syncHint = state.origin
     ? `<p class="hint" id="syncStatus">${last}${failed}${notSharedNote}. Lot Current also syncs after every rescan and after each post you record.</p>`
@@ -1614,8 +1617,10 @@ async function init() {
     take(k.takenDown, 'takenDown', null); // a take-down from the side panel's To do upkeep: the cap counts it
     if (changes[k.sync]) {
       const next = changes[k.sync].newValue ?? null;
-      // the server's count of today's posts feeds the cap, so the lists are redrawn when it moves; the rest is shown in Settings only
+      // the server's count of today's posts feeds the cap, and the posts it would not share are named on To do and My listings,
+      // so the lists are redrawn when either moves; the rest is shown in Settings only
       if (!same(next && next.postsToday, state.syncState && state.syncState.postsToday)) touched = true;
+      if (!same(next && next.notShared, state.syncState && state.syncState.notShared)) touched = true;
       state.syncState = next;
     }
     if (accountsConfigured() && changes[GLOBAL_KEYS.account]) state.account.session = changes[GLOBAL_KEYS.account].newValue || null; // the worker refreshed the session, or a rejected token signed the person out
