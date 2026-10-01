@@ -190,7 +190,12 @@ export function fuelFromDecode(decoded = {}) {
   return primary;
 }
 
-const titleWords = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+// A model's words in letters and digits only: punctuation inside a word is
+// dropped, so "F-150" is "f150" and "CR-V" is "crv", as the website often
+// writes them; a slash, comma, ampersand or plus still parts two words.
+const titleWords = (s) => String(s || '').toLowerCase().replace(/[/,&+]/g, ' ').replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+// Every run of consecutive words written together: "Rav 4" gives rav, rav4 and 4.
+const wordRuns = (words) => words.flatMap((_, i) => words.slice(i).map((__, j) => words.slice(i, i + j + 1).join('')));
 
 // Website record vs the NHTSA decode, field by field. verdict: 'agree' |
 // 'differ' | 'unknown' (one side is blank). Model and body are compared
@@ -203,7 +208,11 @@ export function compareVin(vehicle = {}, decoded = {}) {
   add('Year', vehicle.year, decoded.year, v(vehicle.year, decoded.year, vehicle.year === decoded.year));
   add('Make', vehicle.make, decoded.make, v(vehicle.make, decoded.make, same(vehicle.make, decoded.make)));
   const model = String(vehicle.model || '');
-  const modelAgree = titleWords(decoded.model).length > 0 && titleWords(decoded.model).every((w) => titleWords(model + ' ' + (vehicle.trim || '')).includes(w) || titleWords(model).some((x) => x.startsWith(w)));
+  const decodedWords = titleWords(decoded.model);
+  const siteWords = titleWords(model + ' ' + (vehicle.trim || ''));
+  // each decoded word is one of the website's (or starts one of its model's words), or
+  // the decoded model is the website's words run together ("RAV4" and "Rav 4", "F-150" and "F 150")
+  const modelAgree = decodedWords.length > 0 && (decodedWords.every((w) => siteWords.includes(w) || titleWords(model).some((x) => x.startsWith(w))) || wordRuns(siteWords).includes(decodedWords.join('')));
   add('Model', model, decoded.model, v(model, decoded.model, modelAgree));
   const bodyW = normalizeBodyStyle(vehicle.bodyType);
   const bodyV = normalizeBodyStyle(decoded.bodyClass) || (/pickup|truck/i.test(decoded.bodyClass) ? 'Truck' : /sport utility|suv|crossover/i.test(decoded.bodyClass) ? 'SUV' : '');

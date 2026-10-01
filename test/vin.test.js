@@ -128,3 +128,13 @@ test('website vs VIN comparison: agreement, a difference, and blanks', async () 
   assert.equal(blank.rows.find((r) => r.field === 'Transmission').verdict, 'unknown');
   assert.equal(blank.rows.find((r) => r.field === 'Model').verdict, 'unknown');
 });
+
+test('the model is compared without its punctuation: "F150" and "F-150", "CRV" and "CR-V", "Rav 4" and "RAV4" agree; another model still differs', () => {
+  const verdict = (model, decodedModel, trim = '') => compareVin({ model, trim }, { model: decodedModel }).rows.find((r) => r.field === 'Model').verdict;
+  const agree = [['F150', 'F-150'], ['F-150', 'F150'], ['CRV', 'CR-V'], ['CX5', 'CX-5'], ['HRV', 'HR-V'], ['Rav 4', 'RAV4'], ['RAV4', 'RAV 4'], ['F 150', 'F-150'], ['Ram 1500', '1500'], ['Silverado 1500', 'Silverado'], ['1500 Classic', '1500 Classic']];
+  for (const [website, decodedModel] of agree) assert.equal(verdict(website, decodedModel), 'agree', `${website} / ${decodedModel}`);
+  assert.equal(verdict('F150', 'F-150', 'XLT'), 'agree', 'the trim beside the model');
+  for (const [website, decodedModel] of [['F-150', 'F-250'], ['F150', 'F-250'], ['Grand Cherokee', 'Wrangler'], ['Sierra 2500HD', 'Sierra 1500'], ['CX-5', 'CX-9']]) {
+    assert.equal(verdict(website, decodedModel), 'differ', `${website} / ${decodedModel}`);
+  }
+});
