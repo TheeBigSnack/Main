@@ -138,15 +138,52 @@ function stripStrings(src) {
 const KEYWORDS = new Set('async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield true false null undefined'.split(' '));
 
 // Every name declared at the top level of a module file: what an injected
-// function must not reach for.
+// function must not reach for. The import lines give the imported names
+// (default, { named }, * as namespace). Every other top-level name is left to
+// the JavaScript parser itself, so a declaration of several names, a
+// destructured one, a function or a class is never missed: the file with its
+// import and export words taken out compiles as a strict script, and adding
+// `let NAME;` to it is a syntax error exactly when NAME is already declared
+// at the top. Nothing in the file runs.
 function moduleScopeNames(src) {
-  const names = new Set();
-  for (const m of stripComments(src).matchAll(/^(?:export\s+)?(?:async\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]);
-  for (const m of src.matchAll(/^import\s+(?:([A-Za-z_$][\w$]*)\s*,?\s*)?(?:\{([^}]*)\})?/gm)) {
-    if (m[1]) names.add(m[1]);
-    if (m[2]) for (const part of m[2].split(',')) { const n = part.trim().split(/\s+as\s+/).pop(); if (n) names.add(n); }
+  const imported = new Set();
+  for (const m of src.matchAll(/^import\s+([^'"]*?)\s*from\s*['"]/gm)) {
+    const clause = m[1];
+    const named = clause.match(/\{([^}]*)\}/);
+    if (named) for (const part of named[1].split(',')) { const n = part.trim().split(/\s+as\s+/).pop(); if (n) imported.add(n); }
+    const rest = clause.replace(/\{[^}]*\}/, '');
+    const namespace = rest.match(/\*\s*as\s+([A-Za-z_$][\w$]*)/);
+    if (namespace) imported.add(namespace[1]);
+    const byDefault = rest.match(/^\s*([A-Za-z_$][\w$]*)/);
+    if (byDefault) imported.add(byDefault[1]);
   }
-  return names;
+  const script = "'use strict';\n" + src
+    .replace(/^import\s[^'"]*['"][^'"\n]*['"]\s*;?/gm, '')
+    .replace(/^export\s*\{[^}]*\}(?:\s*from\s*['"][^'"\n]*['"])?\s*;?/gm, '')
+    .replace(/^export\s*\*[^'"\n]*['"][^'"\n]*['"]\s*;?/gm, '')
+    .replace(/^export\s+default\s+(?=(?:async\s+)?function\b\s*\*?\s*[A-Za-z_$]|class\s+(?!extends\b)[A-Za-z_$])/gm, '')
+    .replace(/^export\s+default\s+/gm, 'void ')
+    .replace(/^export\s+/gm, '');
+  try {
+    new vm.Script(script);
+  } catch (e) {
+    throw new Error(`the self-containment check cannot read this file's top-level names: ${e.message}`);
+  }
+  const seen = new Map();
+  const declared = (name) => {
+    if (!/^[A-Za-z_$][\w$]*$/.test(name)) return false;
+    if (!seen.has(name)) {
+      let clash = false;
+      try {
+        new vm.Script(`${script}\nlet ${name};`);
+      } catch (e) {
+        clash = e.name === 'SyntaxError' && /already been declared/.test(e.message);
+      }
+      seen.set(name, clash);
+    }
+    return seen.get(name);
+  };
+  return { has: (name) => imported.has(name) || declared(name) };
 }
 
 // Identifiers a function body uses that are not property names.
@@ -180,6 +217,40 @@ test('the self-containment check sees a module name used in code and inside ${..
   assert.deepEqual(reached('function g(r) { r.cancel(`a ${`nested ${LIMIT}`} b`); }'), ['LIMIT']);
   assert.deepEqual(reached('function g(r) { const o = { a: 1 }; return `${o.a} ${({ b: 2 }).b}`; }'), []);
   assert.deepEqual(reached("function g() { return 'LIMIT' + \"ADDRESS_RE\" + `f`; }"), []);
+});
+
+// Every way a module can put a name at its top level is seen: a namespace
+// import, several names in one declaration, destructuring, a default export,
+// a multi-line import. Names that live only inside a function, and property
+// names, are not.
+test('the self-containment check sees every kind of top-level name: * as imports, several or destructured declarations, default exports', () => {
+  const outside = moduleScopeNames([
+    "import * as ns from './a.js';",
+    "import d, * as ns2 from './b.js';",
+    'import {',
+    '  alpha,',
+    '  beta as gamma,',
+    "} from './c.js';",
+    "import { plain } from './d.js'",
+    "const SEARCH_PATH = '/x', SECOND = 2;",
+    'const { DESTR, inner: [DEEP, ...REST] = [] } = globalThis.thing || {};',
+    'let L1, L2 = `${SEARCH_PATH}`;',
+    'var V1 = 1, V2;',
+    'export const E1 = 1, E2 = /[,{(]/;',
+    'export default function DEF() {}',
+    'export class K {}',
+    'async function* GEN() {}',
+    'function outer() { const ONLY_INSIDE = 1; return ONLY_INSIDE; }',
+    'export { outer as renamed };',
+    "export * from './e.js';",
+  ].join('\n'));
+  const reached = (fnSrc) => [...freeIdentifiers(fnSrc, 'g')].filter((id) => outside.has(id));
+  const all = ['ns', 'ns2', 'd', 'alpha', 'gamma', 'plain', 'SEARCH_PATH', 'SECOND', 'DESTR', 'DEEP', 'REST', 'L1', 'L2', 'V1', 'V2', 'E1', 'E2', 'DEF', 'K', 'GEN', 'outer'];
+  assert.deepEqual(reached(`function g() { return [${all.map((n, i) => (i % 2 ? '`${' + n + '}`' : n)).join(', ')}]; }`), all);
+  assert.deepEqual(reached('function g(x) { const beta = 1; return [ONLY_INSIDE, renamed, x.ns, x.SECOND, beta, Math.max(1, 2)]; }'), []);
+  // a default export of a plain value names nothing, and the rest of the file is still read
+  const plainDefault = moduleScopeNames('export default { a: 1, b: [2, 3] };\nconst Z = 1, Y = 2;');
+  assert.deepEqual(['Z', 'Y', 'a', 'b'].map((n) => plainDefault.has(n)), [true, true, false, false]);
 });
 
 // Every function chrome.scripting.executeScript copies into a page: each
