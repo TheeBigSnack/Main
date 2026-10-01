@@ -29,6 +29,7 @@ import {
 import { pngSize, parseIco } from '../scripts/favicons.mjs';
 import { MIME, ROOT_FILES, MISSING_PATHS, resolvePath, startPagesServer } from '../scripts/site-check.mjs';
 import { SITE } from '../site/config.js';
+import { LEGAL, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 import { honestyProblems, offPricing } from './honesty.js';
 const LEGAL_DRAFT = JSON.parse(readFileSync(new URL('../legal/legal-status.json', import.meta.url), 'utf8')).draft === true;
 
@@ -516,8 +517,53 @@ test('the legal pages\' old addresses redirect: a stub per entry, sending the br
     assert.equal((html.match(/<link rel="canonical"/g) || []).length, SITE.siteUrl ? 1 : 0, `${r.file}: a canonical exactly when siteUrl is set`);
     assert.doesNotMatch(html, FORBIDDEN);
   }
-  // the extension's legal links expect those directory addresses once the host exists
-  assert.match(read('extension/src/legalLinks.js'), /\/legal\/terms\/[\s\S]*\/legal\/privacy\/[\s\S]*\/legal\/posting-rules\//, 'legalLinks.js names the new addresses');
+  // the comment in the extension's legal links names those directory addresses for when the host exists
+  // (its values are checked in the next test)
+  assert.match(read('extension/src/legalLinks.js'), /\/legal\/terms\/[\s\S]*\/legal\/privacy\/[\s\S]*\/legal\/posting-rules\//, 'legalLinks.js\'s comment names the new addresses');
+});
+
+// What extension/src/legalLinks.js may hold: three placeholders nobody can host (the wizard and Settings then
+// record no acceptance), or the three legal pages' addresses on siteUrl's host, with a new edition, once
+// legal/legal-status.json says the texts are final. Anything else links salespeople to a page that is not
+// there, or records an acceptance of a draft marked "not in effect".
+const LEGAL_SOURCES = { termsUrl: 'legal/terms-of-service.md', privacyUrl: 'legal/privacy-policy.md', rulesUrl: 'legal/posting-rules.md' };
+function legalLinkProblems(legal, siteUrl, status) {
+  const keys = Object.keys(LEGAL_SOURCES);
+  const placeholders = keys.filter((k) => isPlaceholderUrl(legal[k]));
+  if (placeholders.length === keys.length) return [];
+  const problems = [];
+  if (placeholders.length) problems.push(`${placeholders.join(', ')} still a placeholder: switch all three addresses together`);
+  if (!siteUrl) problems.push('siteUrl in site/config.js is not set, so no address can be checked');
+  for (const k of keys) {
+    const page = PAGES.find((p) => p.source === LEGAL_SOURCES[k]);
+    const want = siteUrl + page.path;
+    if (!isPlaceholderUrl(legal[k]) && legal[k] !== want) problems.push(`${k} is ${legal[k]}, not the page's address ${want}`);
+  }
+  if (!status || status.draft !== false) problems.push('legal/legal-status.json does not say "draft": false');
+  if (/draft/i.test(String(legal.version))) problems.push(`version ${legal.version} is the draft edition: bump it with the addresses`);
+  return problems;
+}
+
+test('the extension\'s legal links are placeholders, or the legal pages\' real addresses with a final edition', () => {
+  const status = JSON.parse(read('legal/legal-status.json'));
+  assert.deepEqual(legalLinkProblems(LEGAL, SITE.siteUrl, status), [], 'extension/src/legalLinks.js');
+  // the Web Store listing names the same addresses (store/listing.md: "change both together")
+  const listing = read('store/listing.md');
+  for (const k of Object.keys(LEGAL_SOURCES)) assert.ok(listing.includes('`' + LEGAL[k] + '`'), `store/listing.md does not name ${k} ${LEGAL[k]}`);
+  // the checker, on the edits it is there for
+  const site = 'https://lot.test';
+  const final = { draft: false };
+  assert.deepEqual(legalLinkProblems({ version: 'x-draft', termsUrl: 'https://a.example/t', privacyUrl: 'https://a.example/p', rulesUrl: 'https://a.example/r' }, site, { draft: true }), [], 'placeholders are fine at any time');
+  const good = { version: '2027-01-01', termsUrl: site + '/legal/terms/', privacyUrl: site + '/legal/privacy/', rulesUrl: site + '/legal/posting-rules/' };
+  assert.deepEqual(legalLinkProblems(good, site, final), []);
+  // the host swapped without the pages' paths: every link a 404
+  const p1 = legalLinkProblems({ ...good, termsUrl: site + '/terms', privacyUrl: site + '/privacy', rulesUrl: site + '/posting-rules' }, site, final);
+  assert.equal(p1.length, 3, p1.join('; '));
+  assert.ok(legalLinkProblems({ ...good, termsUrl: 'https://www.lot.test/legal/terms/' }, site, final).some((p) => /termsUrl/.test(p)), 'another host than siteUrl');
+  assert.ok(legalLinkProblems({ ...good, version: '2026-09-28-draft' }, site, final).some((p) => /draft edition/.test(p)), 'the version not bumped');
+  assert.ok(legalLinkProblems(good, site, { draft: true }).some((p) => /legal-status/.test(p)), 'the texts still drafts');
+  assert.ok(legalLinkProblems({ ...good, rulesUrl: 'https://a.example/r' }, site, final).some((p) => /rulesUrl still a placeholder/.test(p)), 'only some switched');
+  assert.ok(legalLinkProblems(good, '', final).some((p) => /siteUrl/.test(p)), 'no siteUrl to check against');
 });
 
 // ---------- config.js, the form and the inboxes ----------
