@@ -11,7 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import {
   PRICING, STATUSES, STATES, HANDLED_EVENTS, MAX_SEATS, MIN_TRIAL_SECONDS,
@@ -91,7 +91,10 @@ test('pilotAvailable and statusAnswer: what the manager page may offer', () => {
   assert.equal(pilotAvailable(row({ status: null, pilot_ends_at: iso(NOW - DAY) })), false, 'a pilot never restarts');
 
   const none = statusAnswer(null, { role: 'manager', now: NOW });
-  assert.deepEqual(none, { state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: pricing.pilotDays, includedSalespeople: pricing.includedSalespeople, salespeople: null });
+  assert.deepEqual(none, { state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: pricing.pilotDays, includedSalespeople: pricing.includedSalespeople, salespeople: null, testMode: false });
+  // the key's mode, as the function passes it in: true only when it says so
+  assert.equal(statusAnswer(null, { role: 'manager', now: NOW, testMode: true }).testMode, true);
+  for (const bad of ['true', 1, undefined, null]) assert.equal(statusAnswer(null, { role: 'manager', now: NOW, testMode: bad }).testMode, false, String(bad));
   // the seat count the function passes in, as a whole number or not at all
   assert.equal(statusAnswer(null, { role: 'manager', now: NOW, salespeople: 7 }).salespeople, 7);
   assert.equal(statusAnswer(null, { role: 'manager', now: NOW, salespeople: 0 }).salespeople, 0, 'no salesperson yet is a count');
@@ -131,6 +134,21 @@ test('the manager page\'s copies of MAX_SEATS and the open-subscription rule are
     }
   }
   assert.equal(page.subscribeSeats({ role: 'manager', salespeople: 250, includedSalespeople: 5 }), MAX_SEATS, 'the card asks for no more seats than Checkout bills');
+});
+
+// Before billing opens the page offers Start the free pilot from the row it
+// reads itself (manager/data.js closedBillingStatus); it must offer it exactly
+// when the function would, and start_pilot() would start one.
+test('before billing opens the manager page offers the free pilot on the billing function\'s own rule', async () => {
+  const page = await import('../manager/data.js');
+  const rows = [null, undefined, row(), row({ stripe_customer_id: 'cus_1' }), row({ status: 'pilot', pilot_ends_at: iso(NOW + DAY) }), row({ status: null, pilot_ends_at: iso(NOW - DAY) }), row({ status: 'canceled' }), row({ status: 'active', stripe_subscription_id: 'sub_1' }), { status: undefined }];
+  for (const r of rows) {
+    assert.equal(page.pilotAvailable(r), pilotAvailable(r), JSON.stringify(r));
+    for (const role of ['manager', 'salesperson', '']) {
+      const word = subscriptionState(r, NOW);
+      assert.equal(page.closedBillingStatus(word, r, { role }).canStartPilot, statusAnswer(r, { role, now: NOW }).canStartPilot, `${role} ${JSON.stringify(r)}`);
+    }
+  }
 });
 
 // ---------- seats ----------
@@ -255,13 +273,13 @@ test('planOf: the state word plus the dates and the seats the extension shows, i
 
 test('lapsedAnswer: what /sync and /rewrite answer with 402, with the plan for the extension', () => {
   assert.equal(LAPSED_CODE, 'lapsed');
-  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view");
+  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how");
   const plan = planOf(row({ status: 'canceled', stripe_customer_id: 'cus_1' }), NOW);
   assert.deepEqual(lapsedAnswer(plan), { ok: false, error: LAPSED_MESSAGE, code: 'lapsed', plan });
   assert.equal(lapsedAnswer(plan).plan, plan, 'the plan itself');
   assert.equal(lapsedAnswer(plan).plan.state, 'lapsed');
   // the sentence says who can fix it and where, and promises nothing else
-  assert.match(LAPSED_MESSAGE, /a manager can renew it in the manager view$/);
+  assert.match(LAPSED_MESSAGE, /a manager can renew it, and the manager view's Billing card says how$/);
   assert.doesNotMatch(LAPSED_MESSAGE, /\$|guarantee|Facebook|Meta/);
 });
 
@@ -409,6 +427,41 @@ const sub = (over = {}) => ({
 });
 const event = (type, object, created = T) => ({ id: 'evt_' + type.replace(/\W/g, '_'), object: 'event', type, created, data: { object } });
 const opts = { included: 5, priceRooftop: 'price_rooftop', priceSeat: 'price_seat' };
+
+// The row keeps one column for a cancellation, cancel_at (0009_cancel_at.sql;
+// 0001 to 0008 are applied in production and never change): when Stripe will
+// end the subscription. Every patch the webhook writes names only columns the
+// migrations create, or the upsert fails and Stripe's event is answered 500.
+test('applyStripeEvent: a cancellation in the portal records the date it ends while Stripe keeps the status, and a renewal clears it', () => {
+  const paying = row({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: iso(NOW + 30 * DAY), updated_at: iso(NOW - DAY) });
+  // as the portal sends it (cancel_at_period_end, and cancel_at in API versions that set it), and cancel_at alone: the date it ends
+  for (const [shape, extra] of [['both', { cancel_at_period_end: true, cancel_at: T + 30 * 86400, canceled_at: T }], ['period end only', { cancel_at_period_end: true }], ['cancel_at only', { cancel_at_period_end: false, cancel_at: T + 30 * 86400 }]]) {
+    for (const status of ['trialing', 'active']) {
+      const p = applyStripeEvent(paying, event('customer.subscription.updated', sub({ status, ...extra })), opts);
+      assert.equal(p.status, status, `${shape}: Stripe keeps it ${status} until the end`);
+      assert.equal(p.cancel_at, iso(NOW + 30 * DAY), `${shape}, ${status}`);
+      assert.equal(subscriptionState({ ...paying, ...p }, NOW), 'active', 'still served until the end');
+    }
+  }
+  // a cancel_at date of its own wins over the period end
+  assert.equal(applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: false, cancel_at: T + 9 * 86400 })), opts).cancel_at, iso(NOW + 9 * DAY));
+  // renewed in the portal: written as null, not left out, so the stored date goes and the card says renews again
+  const atEnd = applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: true })), opts);
+  const renewed = applyStripeEvent({ ...paying, ...atEnd }, event('customer.subscription.updated', sub({ cancel_at_period_end: false, cancel_at: null }), T + 60), opts);
+  assert.ok(Object.hasOwn(renewed, 'cancel_at') && renewed.cancel_at === null);
+  // invoices never touch it
+  const paid = applyStripeEvent({ ...paying, ...atEnd }, event('invoice.paid', { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [] } }, T + 60), opts);
+  assert.ok(paid && !('cancel_at' in paid));
+  // no patch names a column the migrations do not create
+  const dir = new URL('../supabase/migrations/', import.meta.url);
+  const migrations = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort().map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+  const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migrations)[1];
+  const columns = [...table.matchAll(/^\s+([a-z_]+) /gm)].map((m) => m[1]);
+  for (const m of migrations.matchAll(/^alter table public\.subscriptions add column (?:if not exists )?([a-z_]+)/gm)) columns.push(m[1]);
+  for (const p of [...[true, false].map((c) => applyStripeEvent(paying, event('customer.subscription.updated', sub({ cancel_at_period_end: c, cancel_at: c ? T + 30 * 86400 : null })), opts)), atEnd, renewed, paid]) {
+    for (const key of Object.keys(p)) assert.ok(columns.includes(key), `the webhook writes ${key}, a column no migration creates`);
+  }
+});
 
 test('applyStripeEvent: subscription created and updated copy the status, ids, period end and seats', () => {
   assert.deepEqual(HANDLED_EVENTS, ['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed']);
@@ -706,6 +759,8 @@ test('billing/index.ts: the four routes, fetch not an SDK, the secret key only i
   assert.match(lines[0], /secretKey: env\('STRIPE_SECRET_KEY'\)/);
   assert.match(lines[1], /if \(!config\.secretKey\)/);
   assert.match(lines[2], /Authorization: `Bearer \$\{config\.secretKey\}`/);
+  // its mode alone (test or live) is kept for the status answer, never the key
+  assert.match(src, /testMode: keyMode\(env\('STRIPE_SECRET_KEY'\)\) === 'test',/);
   assert.doesNotMatch(src, /console\.(log|error)\([^)]*(secretKey|webhookSecret)/, 'never logged');
   // the pure module is the one under test here
   assert.match(src, /from '\.\.\/_shared\/billing\.mjs'/);
@@ -721,15 +776,15 @@ test('billing/index.ts: the four routes, fetch not an SDK, the secret key only i
   assert.match(src, /if \(route === 'webhook'\) \{\s*if \(req\.method !== 'POST'\)[^]*?return webhook\(req\);/);
 });
 
-// docs/stripe-setup.md, live step 6: one real charge, then a refund and an
+// docs/stripe-setup.md, live step 7: one real charge, then a refund and an
 // immediate cancel. A pilot makes Checkout a trial with nothing charged, so
 // the live check uses a dealership with no pilot; and the founding coupon's
 // few redemptions are the stores the pricing page promises them to.
 test('docs/stripe-setup.md: the live check charges a dealership with no pilot at once, refunds it, cancels it now, and keeps the founding code', () => {
   const doc = read('../docs/stripe-setup.md');
   const live = doc.slice(doc.indexOf('## Later: switching to live mode'), doc.indexOf('## What never happens'));
-  const step = live.slice(live.indexOf('\n6. '));
-  assert.ok(step.length > 1, 'live step 6 is there');
+  const step = live.slice(live.indexOf('\n7. '));
+  assert.ok(step.length > 1 && step.startsWith('\n7. Check one real charge'), 'live step 7 is there');
   assert.doesNotMatch(live, /Run step 6 once with a real card/, 'a pilot would charge nothing to refund');
   // no pilot: the card offers Subscribe, and Checkout gets no trial (the function passes a trial end only in the pilot state)
   const fresh = { ...statusAnswer(row(), { role: 'manager', now: NOW }), role: 'manager' };

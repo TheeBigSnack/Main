@@ -13,7 +13,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const schema = read('../supabase/migrations/0001_schema.sql');
@@ -28,6 +29,65 @@ const billing = read('../supabase/functions/billing/index.ts');
 const readme = read('../supabase/README.md');
 
 // ---------- the schema ----------
+
+// The production project has applied 0001 to 0008. Supabase records a
+// migration by its number and never reads an applied file again, so a change
+// made inside one reaches a fresh build but never production, where the code
+// that relies on it then fails. Those files stay exactly as deployed, comments
+// included, and every change is a new numbered file (0009_cancel_at.sql was
+// the first). Line endings are folded so a Windows checkout reads the same.
+const APPLIED_MIGRATIONS = Object.freeze({
+  '0001_schema.sql': 'a781dc0771958bacbe86448c3fe5ea1cd258583fe11a677a76955ff5bc3877d8',
+  '0002_rls.sql': '25c73dc346820f882563b2ccc91ca58f3cff46d97bffbdbc678bc72de67e47c7',
+  '0003_views.sql': 'e651faa63f595e94059b4b624c407570fc7c7c418fed11d7e139c8b5aa2d0ab2',
+  '0004_billing.sql': '6e7f0637e6d74dd4bfab20f7d8cca26279d1d9e1683427820512f219ec58dc36',
+  '0005_leads.sql': '3eed948aa5eebf1fa2746ff4c034d64132f017c1c42d45cbbc41fe5a5e93922f',
+  '0006_privacy.sql': '11e44419ea8da5127325f6a49813bf823f2f313779d76dbbf466afd6a39c37e4',
+  '0007_signup.sql': 'af23fca0fa04d4f292cfa9b86750d5515f48fb406b1e72203b7069ce4a58953e',
+  '0008_usage.sql': 'd71bfb982b354490f58603559ce5e7f3a13bb08d6dc8fce64fece757ae46e022',
+});
+
+test('the migrations production applied (0001 to 0008) are the deployed files unchanged; every later change is a new numbered file', () => {
+  const files = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
+  for (const [file, sha] of Object.entries(APPLIED_MIGRATIONS)) {
+    assert.ok(files.includes(file), `${file} is applied in production and must stay`);
+    const text = read(`../supabase/migrations/${file}`).replace(/\r\n/g, '\n');
+    assert.equal(createHash('sha256').update(text).digest('hex'), sha, `${file} is applied in production and must not change, not even a comment: put the change in a new numbered migration`);
+  }
+  const last = Object.keys(APPLIED_MIGRATIONS).sort().pop();
+  for (const f of files.filter((x) => !Object.hasOwn(APPLIED_MIGRATIONS, x))) assert.ok(f.slice(0, 4) > last.slice(0, 4), `${f} sorts after ${last}, so it applies on top of what production has`);
+  assert.match(readme, /The production project has applied `0001_schema\.sql` to `0008_usage\.sql`/, 'the README says the applied files are fixed');
+  assert.doesNotMatch(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/, 'the README no longer says to change a migration in place');
+});
+
+// The billing function writes a column only a migration after the applied
+// ones adds (subscriptions.cancel_at, 0009_cancel_at.sql). Deployed by hand
+// onto production without that push, every subscription event's upsert is
+// refused and the webhook answers 500. So every command block in the docs
+// that deploys billing pushes the migrations first, in the same block: the
+// Stripe walk-through's step 5 is also where its live switch sends the owner.
+test('every by-hand billing deploy in the docs applies the migrations first, in the same command block', () => {
+  const later = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter((f) => /^\d{4}_.+\.sql$/.test(f) && !Object.hasOwn(APPLIED_MIGRATIONS, f));
+  const added = later.flatMap((f) => [...read(`../supabase/migrations/${f}`).matchAll(/alter table public\.(\w+) add column (?:if not exists )?(\w+)/gi)].map((m) => m[2]));
+  assert.ok(added.includes('cancel_at'), 'a migration after the applied ones adds subscriptions.cancel_at');
+  assert.match(billingShared, /patch\.cancel_at = /, 'and the billing function writes it');
+  const docs = ['README.md', 'supabase/README.md', ...readdirSync(new URL('../docs/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
+  let deploys = 0;
+  for (const doc of docs) {
+    for (const [, block] of read(`../${doc}`).matchAll(/```[a-z]*\n([^]*?)```/g)) {
+      const lines = block.split('\n');
+      const at = lines.findIndex((l) => /^\s*supabase functions deploy billing\b/.test(l));
+      if (at < 0) continue;
+      deploys++;
+      assert.ok(lines.slice(0, at).some((l) => /^\s*supabase db push(\s|$)/.test(l)), `${doc}: a block deploys billing without supabase db push before it, so a project without ${later.join(', ')} gets a function that writes ${added.join(', ')}`);
+    }
+  }
+  // the production walk-through (docs/stripe-setup.md step 5) deploys through the Supabase workflow, whose
+  // functions step refuses while a migration is pending (test/productionSetup.test.js); only the README's
+  // by-hand lines for a project of one's own deploy from a terminal
+  assert.ok(deploys >= 1, 'supabase/README.md deploys billing by hand');
+  assert.match(read('../docs/stripe-setup.md'), /\*\*database\*\* comes before \*\*functions\*\* every time: the billing function writes `subscriptions\.cancel_at`/);
+});
 
 test('0001_schema.sql: every table gets RLS in 0002_rls.sql; listings carry the server\'s created_at next to the client\'s posted_at', () => {
   const tables = [...schema.matchAll(/^create table public\.(\w+) \(/gm)].map((m) => m[1]);
@@ -173,7 +233,7 @@ test('sync/index.ts and rewrite/index.ts refuse a lapsed dealership with 402 and
   assert.match(auth, /export async function subscriptionRowOf\(client: SupabaseClient, dealershipId: string\): Promise<SubscriptionRow \| null>/);
   assert.match(auth, /client\.from\('subscriptions'\)\.select\('\*'\)\.eq\('dealership_id', dealershipId\)\.maybeSingle\(\)/);
   assert.match(billingShared, /export const LAPSED_CODE = 'lapsed';/);
-  assert.match(billingShared, /export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";/);
+  assert.match(billingShared, /export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how";/);
   assert.match(billingShared, /return \{ ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan \};/);
   // the billing function is never gated: a lapsed dealership must be able to renew
   assert.doesNotMatch(billing, /lapsedAnswer|402/);
@@ -214,13 +274,35 @@ test('supabase/README.md names today, postsToday, plan, the 402 rule and the Bil
   assert.doesNotMatch(readme, /not wired in this step/, 'the card is wired now');
 });
 
-test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule, in-place migrations', () => {
+// The billing function lets a browser page call it only from an origin in
+// ALLOWED_ORIGINS, and the hosted manager view's Billing card calls it from
+// its own: a setup that sets ALLOWED_RETURN_ORIGINS and not ALLOWED_ORIGINS
+// leaves the card at "Couldn't read the plan" while check-deploy's extension
+// lines read ok.
+test('every command block that sets ALLOWED_RETURN_ORIGINS sets ALLOWED_ORIGINS to the manager view too, and no doc calls it optional', () => {
+  for (const doc of ['supabase/README.md', 'docs/stripe-setup.md', 'docs/production-setup.md']) {
+    const text = read(`../${doc}`);
+    const blocks = [...text.matchAll(/```[a-z]*\n([^]*?)```/g)].map((m) => m[1]).filter((b) => /secrets set ALLOWED_RETURN_ORIGINS=/.test(b));
+    // or in the Supabase Dashboard's secrets, as a table of names and values (docs/stripe-setup.md step 5)
+    const table = /^\| `ALLOWED_RETURN_ORIGINS` \| ([^|\n]+) \|$/m.exec(text);
+    if (table) assert.ok(text.includes(`| \`ALLOWED_ORIGINS\` | ${table[1].trim()} |`), `${doc}: the secrets table sets ALLOWED_RETURN_ORIGINS without ALLOWED_ORIGINS to the same address`);
+    if (doc !== 'docs/production-setup.md') assert.ok(blocks.length >= 1 || table, `${doc} sets the billing secrets in a command block or a secrets table`);
+    for (const b of blocks) {
+      const back = /secrets set ALLOWED_RETURN_ORIGINS=(\S+)/.exec(b)[1];
+      assert.ok(b.includes(`secrets set ALLOWED_ORIGINS=${back}`), `${doc}: a block sets ALLOWED_RETURN_ORIGINS=${back} without ALLOWED_ORIGINS=${back}`);
+    }
+    assert.doesNotMatch(text, /`ALLOWED_ORIGINS` \| function secret, optional/, `${doc} calls ALLOWED_ORIGINS optional`);
+  }
+  assert.match(readme, /\| `ALLOWED_ORIGINS` \| function secret \| [^\n]*The hosted manager view's origin must be in it/);
+  assert.doesNotMatch(http, /\(the manager\s*\n?\/\/ page during development, say\)/, 'http.ts says the hosted manager view needs it');
+});
+
+test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule', () => {
   assert.match(readme, /a code works once and for 7 days/);
   assert.match(readme, /marks as taken down the caller's listed rows whose key is in `known` and missing from `posted` \(no time decides it/);
   assert.match(readme, /a request without `known` takes nothing down/);
   assert.match(readme, /the answer looks back 10 minutes before `since`/);
   assert.match(readme, /matches none of their dealerships gets 403/);
-  assert.match(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/);
   assert.match(readme, /The pilot lists are the one place a client clock still meets `since`/);
 });
 
@@ -288,4 +370,28 @@ test('the deployment steps leave no guessable first code, no localhost sign-in a
   assert.match(sync, /const MAX_ROWS = 2000;/);
   assert.match(readme, /`counts\.conflicts`/);
   assert.match(readme, /code: "open-subscription"/);
+});
+
+// ---------- a pilot of the length the agreement names ----------
+
+// start_pilot gives pricing.json's pilotDays and takes no length from the
+// caller; a signed pilot agreement may name another length, so the owner
+// records it (or extends a pilot) with one statement in SQL. billing.sql runs
+// that statement exactly as the README writes it, with values in its two
+// brackets.
+test('the owner\'s pilot of an agreed length: the README\'s statement is the one billing.sql runs, and start_pilot still takes no length', () => {
+  const block = readme.match(/```sql\n\s*(-- owner only: a free pilot[\s\S]*?returning dealership_id, status, pilot_ends_at;)\n\s*```/);
+  assert.ok(block, 'supabase/README.md step 5 carries the owner\'s pilot statement');
+  const norm = (x) => x.replace(/\s+/g, ' ').trim();
+  const stmt = norm(block[1]);
+  assert.match(stmt, /^-- owner only: .* insert into public\.subscriptions as s \(dealership_id, status, pilot_ends_at\) values \('<the id returned above>', 'pilot', '<[^>]+>'\) on conflict \(dealership_id\) do update set status = 'pilot', pilot_ends_at = excluded\.pilot_ends_at, updated_at = now\(\) where s\.stripe_subscription_id is null returning /, 'a pilot row, never over a Stripe subscription');
+  const escape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(stmt.split(/'<[^>]*>'/).map(escape).join("'[^']*'"), 'g');
+  assert.equal((norm(read('../supabase/tests/billing.sql')).match(pattern) || []).length, 3, 'billing.sql runs the README\'s statement as written: the agreed pilot, its extension, and a dealership with a Stripe subscription');
+  const billingSql = read('../supabase/migrations/0004_billing.sql');
+  assert.match(billingSql, /create or replace function public\.start_pilot\(dealership_id uuid\)\n/, 'start_pilot takes the dealership only: no manager sets their own pilot length');
+  assert.match(readme, /When the signed agreement names another length, record the pilot yourself before the manager signs in/);
+  const pilot = read('../PILOT.md');
+  assert.match(pilot, /A pilot on the accounts is extended by the owner's statement in `supabase\/README\.md` step 5/, 'PILOT.md says how "extend the pilot" is done');
+  assert.match(pilot, /If the signed pilot agreement names a pilot length other than the standard `pilotDays`, also run the README's pilot statement/);
 });

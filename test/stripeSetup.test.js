@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
@@ -387,4 +387,40 @@ test('stripe setup: no guide has the owner type a secret key or signing secret i
   assert.match(doc, /ConsoleHost_history\.txt/, 'the guide names the file a typed key would stay in');
   const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
   assert.match(live, /live secret key \(`sk_live_`\) set at the prompt as in step 3/);
+});
+
+// docs/stripe-setup.md runs test mode on the production project, so the
+// rows the test-mode webhook writes stay in public.subscriptions; the live
+// switch resets them. The statement in the doc must clear every column the
+// webhook copies from Stripe (all of them but the dealership, the free pilot's
+// end, which stays, and updated_at), so a column a later migration adds is
+// caught here, and the doc must not claim test mode leaves no trace.
+test('stripe setup doc: the live switch resets every Stripe column test mode wrote, keeps the free pilots, and the intro does not say nothing leaks', () => {
+  const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
+  const sql = /```sql\n([^]*?)```/.exec(live)?.[1] || '';
+  assert.match(sql, /update public\.subscriptions/, 'the live switch has the reset statement');
+  // the columns as every migration leaves them: 0004's table and what later files add
+  const dir = new URL('../supabase/migrations/', import.meta.url);
+  const migrations = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort().map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+  const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migrations)[1];
+  const columns = [...table.matchAll(/^\s+([a-z_]+) /gm)].map((m) => m[1]);
+  for (const m of migrations.matchAll(/^alter table public\.subscriptions add column (?:if not exists )?([a-z_]+)/gm)) columns.push(m[1]);
+  assert.ok(columns.includes('stripe_customer_id') && columns.includes('cancel_at'), columns.join(','));
+  const sets = [...sql.matchAll(/^\s+(?:set\s+)?([a-z_]+) = /gm)].map((m) => m[1]);
+  assert.ok(sets.length >= 5, sets.join(','));
+  for (const c of sets) assert.ok(columns.includes(c), `the reset sets ${c}, which no migration creates: the statement would fail`);
+  for (const c of columns.filter((c) => !['dealership_id', 'pilot_ends_at', 'updated_at'].includes(c))) assert.match(sql, new RegExp(`\\b${c} = `), `the reset sets ${c}`);
+  assert.match(sql, /status = case when pilot_ends_at is not null then 'pilot' end/, 'a free pilot stays a pilot');
+  assert.doesNotMatch(sql, /pilot_ends_at = /, 'the free pilots keep their end dates');
+  assert.ok(live.indexOf('```sql') > live.indexOf('the new webhook secret and the live key'), 'after the live key and webhook secret, so no test event lands after it');
+  // The reset sets columns later migrations add (cancel_at, 0009_cancel_at.sql):
+  // on a project that has not applied them the statement fails, so the live
+  // switch applies the migrations itself before it (the Supabase workflow's
+  // database step, as every production change), rather than relying on step 5
+  // having been run since the column was added.
+  const push = live.search(/the Supabase workflow's \*\*plan\*\* and, if it lists a migration, \*\*database\*\*/);
+  assert.ok(push >= 0 && push < live.indexOf('```sql'), 'the live switch applies the migrations (the workflow\'s database step) before the reset');
+  assert.doesNotMatch(doc, /nothing made here leaks into live mode/);
+  assert.match(doc.slice(0, doc.indexOf('## What you need first')), /stay there until the live switch resets them/);
 });

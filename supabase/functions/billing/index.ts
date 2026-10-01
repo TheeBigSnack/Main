@@ -9,8 +9,10 @@
 //                            -> 409 { ok: false, error, code: 'open-subscription' } while Stripe still holds the
 //                               dealership's subscription open (checkoutRefusal): the card is changed in the portal
 //   POST …/billing/portal    { returnUrl, dealershipId? | origin? }         -> { ok, url }   (managers)
-//   GET  …/billing/status    ?dealershipId= | ?origin=                       -> { ok, dealership, role, state, subscription, canStartPilot, canSubscribe, canManageBilling, pilotDays, includedSalespeople, salespeople }   (members)
-//                            salespeople is the seat count now (seatCount), for a manager's call; null for anyone else's
+//                            -> 404 while the row has no customer, or Stripe no longer has it (NO_BILLING_ACCOUNT_MESSAGE)
+//   GET  …/billing/status    ?dealershipId= | ?origin=                       -> { ok, dealership, role, state, subscription, canStartPilot, canSubscribe, canManageBilling, pilotDays, includedSalespeople, salespeople, testMode }   (members)
+//                            salespeople is the seat count now (seatCount), for a manager's call; null for anyone else's;
+//                            testMode is true while STRIPE_SECRET_KEY is a test-mode key (keyMode)
 //   POST …/billing/webhook   Stripe's event with its Stripe-Signature header -> { ok }        (Stripe)
 //
 // Stripe is called with fetch against its REST API (form-encoded, bearer
@@ -34,11 +36,13 @@ import {
   PRICING, HANDLED_EVENTS,
   subscriptionState, statusAnswer, seatCount, checkoutRefusal, normalizeSeats, checkoutLineItems, checkoutSessionParams, trialEndFor,
   automaticTaxOn, portalSessionParams, allowedReturnUrl, parseAllowedOrigins, formEncode, applyStripeEvent, verifyStripeSignature,
+  keyMode, NO_BILLING_ACCOUNT_MESSAGE,
 } from '../_shared/billing.mjs';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 const config = {
   secretKey: env('STRIPE_SECRET_KEY'),
+  testMode: keyMode(env('STRIPE_SECRET_KEY')) === 'test', // the key's mode only (sk_test_/rk_test_), for the status answer
   webhookSecret: env('STRIPE_WEBHOOK_SECRET'),
   priceRooftop: env('STRIPE_PRICE_ROOFTOP'),
   priceSeat: env('STRIPE_PRICE_SEAT'),
@@ -138,20 +142,26 @@ async function writeRow(service: SupabaseClient, dealershipId: string, patch: Ro
   if (error) throw new Error('could not write subscriptions: ' + error.message);
 }
 
+// Whether Stripe still has this customer: false when it answers 404 (a
+// customer made with a test-mode key is unknown to the live one) or marks it
+// deleted; any other failure is the caller's error.
+async function customerExists(id: string): Promise<boolean> {
+  try {
+    const c = await stripe('GET', `/v1/customers/${encodeURIComponent(id)}`);
+    return c.deleted !== true;
+  } catch (e) {
+    if (e instanceof StripeError && e.status === 404) return false;
+    throw e;
+  }
+}
+
 // The Stripe customer for a dealership: the one on the row when it still
 // exists, else a new one carrying the dealership id in its metadata (how a
 // webhook finds the row when nothing else does). The idempotency key makes
 // two clicks in the same moment one customer.
 async function ensureCustomer(service: SupabaseClient, dealership: Dealership, row: Row | null, email: string | null): Promise<string> {
   const have = row && typeof row.stripe_customer_id === 'string' ? row.stripe_customer_id : '';
-  if (have) {
-    try {
-      const c = await stripe('GET', `/v1/customers/${encodeURIComponent(have)}`);
-      if (c.deleted !== true) return have;
-    } catch (e) {
-      if (!(e instanceof StripeError && e.status === 404)) throw e;
-    }
-  }
+  if (have && (await customerExists(have))) return have;
   const created = await stripe('POST', '/v1/customers', {
     name: dealership.name,
     email: email || undefined,
@@ -350,7 +360,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         ok: true,
         dealership: { id: dealership.id, name: dealership.name, websiteOrigin: dealership.website_origin },
         role: membership.role,
-        ...statusAnswer(row, { role: membership.role, salespeople }),
+        ...statusAnswer(row, { role: membership.role, salespeople, testMode: config.testMode }),
       });
     }
 
@@ -361,6 +371,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (route === 'portal') {
       const customer = row && typeof row.stripe_customer_id === 'string' ? row.stripe_customer_id : '';
       if (!customer) return json(req, 404, { ok: false, error: 'this dealership has no billing account yet: subscribe first' });
+      // a customer Stripe no longer has (deleted, or left from test mode after the switch to live) gets a sentence, not Stripe's error
+      if (!(await customerExists(customer))) return json(req, 404, { ok: false, error: NO_BILLING_ACCOUNT_MESSAGE });
       const session = await stripe('POST', '/v1/billing_portal/sessions', portalSessionParams({ customerId: customer, returnUrl, configuration: config.portalConfiguration }), crypto.randomUUID());
       return json(req, 200, { ok: true, url: String(session.url || '') });
     }

@@ -325,7 +325,7 @@ export const DEFINITIONS = Object.freeze([
   'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
   'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
-  'Hours run from the flagging scan, and rescans happen every 3 hours while Chrome is open.',
+  'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.',
 ]);
 
 // A plain-text summary for the clipboard (the weekly check-in).

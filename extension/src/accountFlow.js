@@ -44,7 +44,7 @@ export const NOT_SIGNED_IN = 'not signed in';
 // repeated here so the side panel can tell that answer from any other
 // failure of the rewrite service, and so Settings can say it after a sync.
 export const LAPSED_CODE = 'lapsed';
-export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how";
 export const LAPSED_SENTENCE = LAPSED_MESSAGE[0].toUpperCase() + LAPSED_MESSAGE.slice(1);
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
@@ -93,7 +93,9 @@ const unreachable = (e) => `couldn't reach the account server (${(e && e.message
 /**
  * Asks the auth server to email a sign-in code to this address. No
  * redirect is asked for, so the email's code is the way in (the template
- * carries {{ .Token }}, supabase/README.md step 3).
+ * carries {{ .Token }}, supabase/README.md step 3), and the request carries
+ * a PKCE challenge nobody can answer, so the email's link brings no token
+ * to the manager view it lands on (account.js unanswerableChallenge).
  * @returns {{ ok: true, email, message } | { ok: false, error, notConfigured? }}
  */
 export async function signInStart(email, deps = {}) {

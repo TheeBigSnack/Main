@@ -14,8 +14,8 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { loadFunction, invoke, fake, net, logs, hermetic, functionsFetch, uuid, keysOf, NETWORK_ERROR, SUPABASE_URL, ANON_KEY, SERVICE_KEY, EXTENSION_ORIGIN } from './functions/harness.mjs';
 import { pgTime } from './functions/fake-supabase.mjs';
-import { PRICING, OPEN_SUBSCRIPTION_MESSAGE, OPEN_SUBSCRIPTION_CODE } from '../supabase/functions/_shared/billing.mjs';
-import { billingCard, billingBody, SEATS_NOT_ADDED } from '../manager/data.js';
+import { PRICING, OPEN_SUBSCRIPTION_MESSAGE, OPEN_SUBSCRIPTION_CODE, NO_BILLING_ACCOUNT_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
+import { billingCard, billingBody, SEATS_NOT_ADDED, BILLING_TEST_MODE_NOTE } from '../manager/data.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -157,8 +157,8 @@ test('billing: status answers the documented shape for the dealership asked for,
   const handler = await load();
   const none = await status(handler, TOKEN.u2);
   assert.equal(none.status, 200);
-  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'salespeople', 'state', 'subscription']);
-  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople, salespeople: 1 });
+  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'salespeople', 'state', 'subscription', 'testMode']);
+  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople, salespeople: 1, testMode: false });
   const card = billingCard(none.body);
   assert.deepEqual([card.label, card.buttons.map((b) => b.action)], ['No plan yet', ['pilot', 'subscribe']]);
 
@@ -380,11 +380,40 @@ test('billing: the portal is 404 until a customer exists, then a portal session 
   const early = await post(handler, 'portal', TOKEN.u2);
   assert.deepEqual([early.status, early.body], [404, { ok: false, error: 'this dealership has no billing account yet: subscribe first' }]);
   world({ subscriptions: [{ dealership_id: D1, status: 'past_due', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
+  stripe({ customers: { cus_1: {} } });
   const r = await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 });
   assert.deepEqual([r.status, r.body], [200, { ok: true, url: 'https://billing.stripe.com/p/session/bps_1' }]);
-  const [call] = stripeCalls();
+  const call = stripeCalls().find((c) => c.path === '/v1/billing_portal/sessions');
   assert.deepEqual([call.path, call.form], ['/v1/billing_portal/sessions', { customer: 'cus_1', return_url: RETURN_URL }]);
   assert.match(call.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
+});
+
+test('billing: a customer Stripe no longer has (left from test mode after the switch to live, or deleted) gets a sentence saying whom to ask, not Stripe\'s error, and no portal session', async () => {
+  for (const customers of [{}, { cus_1: { deleted: true } }]) {
+    world({ subscriptions: [{ dealership_id: D1, status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
+    stripe({ customers });
+    net.calls = [];
+    const handler = await load();
+    const r = await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 });
+    assert.deepEqual([r.status, r.body], [404, { ok: false, error: NO_BILLING_ACCOUNT_MESSAGE }], JSON.stringify(customers));
+    assert.deepEqual(stripeCalls().map((c) => `${c.method} ${c.path}`), ['GET /v1/customers/cus_1'], 'no portal session for a customer that is gone');
+    assert.equal(fake.writes('subscriptions').length, 0, 'the row is left as it is: the live switch in docs/stripe-setup.md resets it');
+  }
+  assert.match(NO_BILLING_ACCOUNT_MESSAGE, /test mode/);
+  assert.match(NO_BILLING_ACCOUNT_MESSAGE, /ask your Lot Current contact$/);
+});
+
+test('billing: the status says test mode while the function\'s Stripe key is a test-mode one, and the manager page\'s Billing card says so', async () => {
+  world();
+  for (const [key, testMode] of [['sk_test_abc123', true], ['rk_test_abc123', true], ['sk_live_abc123', false], ['rk_live_abc123', false], [SECRET_KEY, false]]) {
+    const handler = await load({ STRIPE_SECRET_KEY: key });
+    const r = await status(handler, TOKEN.u2);
+    assert.deepEqual([r.status, r.body.testMode], [200, testMode], key.slice(0, 8));
+    const c = billingCard(r.body);
+    assert.equal(c.modeNote, testMode ? BILLING_TEST_MODE_NOTE : '', key.slice(0, 8));
+    // a salesperson's answer carries it too: nothing to press, but the plan is not a real one
+    assert.equal((await status(handler, TOKEN.u1)).body.testMode, testMode);
+  }
 });
 
 test('billing: with STRIPE_PORTAL_CONFIGURATION the portal session names that configuration; with STRIPE_AUTOMATIC_TAX=true Checkout adds tax and asks for the address, and anything else leaves tax off', async () => {
@@ -392,7 +421,7 @@ test('billing: with STRIPE_PORTAL_CONFIGURATION the portal session names that co
   stripe({ customers: { cus_1: {} } });
   const handler = await load({ STRIPE_PORTAL_CONFIGURATION: 'bpc_test_1', STRIPE_AUTOMATIC_TAX: 'TRUE' });
   assert.equal((await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 })).status, 200);
-  assert.deepEqual(stripeCalls()[0].form, { customer: 'cus_1', return_url: RETURN_URL, configuration: 'bpc_test_1' });
+  assert.deepEqual(stripeCalls().find((c) => c.path === '/v1/billing_portal/sessions').form, { customer: 'cus_1', return_url: RETURN_URL, configuration: 'bpc_test_1' });
 
   world();
   stripe();
@@ -455,12 +484,15 @@ test('billing: an event signed over its raw body is applied to the dealership\'s
 // The portal cancels at the period's end, so Stripe keeps the subscription
 // active until then: the row keeps the date it ends, and the manager card
 // says that date instead of a renewal.
-test('billing: a cancellation in the portal reaches the row and the card says when it ends; undoing it brings the renewal back', async () => {
-  const periodEnd = 1790000000;
+test('billing: a cancellation Stripe sends with its cancel_at date reaches the row and the card says when it ends; undoing it brings the renewal back', async () => {
+  // a period that ends 30 days from now (a passed end reads "ended")
+  const periodEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', status: 'active', current_period_end: iso(periodEnd * 1000), seats: 7, updated_at: iso(Date.now() - DAY) }] });
   const handler = await load();
   const now = Math.floor(Date.now() / 1000);
-  const cancel = subscriptionEvent({ id: 'evt_cancel', type: 'customer.subscription.updated', created: now }, { status: 'active', cancel_at_period_end: true, cancel_at: periodEnd });
+  // the items carry the same period end as the row
+  const items = { data: [{ price: { id: 'price_rooftop_test' }, quantity: 1, current_period_end: periodEnd }, { price: { id: 'price_seat_test' }, quantity: 2, current_period_end: periodEnd }] };
+  const cancel = subscriptionEvent({ id: 'evt_cancel', type: 'customer.subscription.updated', created: now }, { status: 'active', items, cancel_at_period_end: true, cancel_at: periodEnd });
   const r = await deliver(handler, JSON.stringify(cancel));
   assert.deepEqual([r.status, r.body.applied], [200, true]);
   const [row] = fake.rows('subscriptions');
@@ -468,14 +500,48 @@ test('billing: a cancellation in the portal reaches the row and the card says wh
   const answer = (await status(handler, TOKEN.u2)).body;
   assert.equal(answer.state, 'active', 'still paid up until the date it ends');
   const card = billingCard(answer, { timeZone: 'UTC' });
-  assert.equal(card.line, `Subscribed: 7 seats, cancelled: it ends ${iso(periodEnd * 1000).slice(0, 10)}.`);
+  assert.equal(card.line, `Cancelled: 7 seats, ends ${iso(periodEnd * 1000).slice(0, 10)} and does not renew.`);
+  assert.equal(card.label, 'Cancelled');
   assert.equal(card.tone, 'warn');
   assert.doesNotMatch(card.line, /renews|first charge/);
 
-  const undo = subscriptionEvent({ id: 'evt_undo', type: 'customer.subscription.updated', created: now + 1 }, { status: 'active', cancel_at_period_end: false, cancel_at: null });
+  const undo = subscriptionEvent({ id: 'evt_undo', type: 'customer.subscription.updated', created: now + 1 }, { status: 'active', items, cancel_at_period_end: false, cancel_at: null });
   assert.equal((await deliver(handler, JSON.stringify(undo))).status, 200);
   assert.equal(fake.rows('subscriptions')[0].cancel_at, null);
   assert.equal(billingCard((await status(handler, TOKEN.u2)).body, { timeZone: 'UTC' }).line, `Subscribed: 7 seats, renews ${iso(periodEnd * 1000).slice(0, 10)}.`);
+});
+
+test('billing: a cancellation in the portal reaches the row and the card says when it ends, not that it renews; renewing puts it back', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const t0 = Math.floor(Date.now() / 1000);
+  const send = async (id, type, created, object) => {
+    const r = await deliver(handler, JSON.stringify(subscriptionEvent({ id, type, created }, object)));
+    assert.deepEqual([r.status, r.body.ok, r.body.applied], [200, true, true], id);
+  };
+  const cardNow = async () => billingCard((await status(handler, TOKEN.u2)).body, { now: iso(Date.now()) });
+  // the trial ends 20 days from now, as it would when the portal is opened (the card words a passed end as "ended")
+  const end = t0 + 20 * 86400;
+  const items = { data: [{ price: { id: 'price_rooftop_test' }, quantity: 1, current_period_end: end }, { price: { id: 'price_seat_test' }, quantity: 2, current_period_end: end }] };
+  await send('evt_a', 'customer.subscription.created', t0 - 120, { items, cancel_at_period_end: false, cancel_at: null });
+  assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
+
+  // the portal cancels at the end of the period: Stripe keeps the trial running and says only cancel_at_period_end;
+  // the row records the period's end (from the items, as newer API versions carry it) as the date it ends
+  await send('evt_b', 'customer.subscription.updated', t0 - 60, { items, cancel_at_period_end: true, cancel_at: null, canceled_at: t0 - 60 });
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.status, row.cancel_at], ['trialing', pgTime(iso(end * 1000))]);
+  assert.ok(!('cancel_at_period_end' in row), 'the row has one cancellation column, cancel_at (0009_cancel_at.sql)');
+  const cancelled = await cardNow();
+  assert.equal(cancelled.label, 'Cancelled');
+  assert.match(cancelled.line, /^Cancelled: 7 seats, ends \d{4}-\d{2}-\d{2} before the first charge\.$/);
+  assert.doesNotMatch(cancelled.line, /renews|first charge \d/);
+
+  // renewed in the portal before the end
+  await send('evt_c', 'customer.subscription.updated', t0, { items, cancel_at_period_end: false, cancel_at: null });
+  const [renewedRow] = fake.rows('subscriptions');
+  assert.equal(renewedRow.cancel_at, null);
+  assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
 });
 
 test('billing: a missing, malformed, altered, stale or wrongly keyed signature is 400 and nothing is read; a rolled secret\'s second v1 is accepted', async () => {
@@ -601,4 +667,9 @@ test('billing: scripts/check-deploy.mjs reads its billing lines as ok against th
   findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY })).filter((f) => f.check === 'billing: the webhook refuses an unsigned event');
   assert.deepEqual(findings.map((f) => [f.ok, f.warnOnly]), [[false, true]]);
   assert.match(findings[0].detail, /STRIPE_WEBHOOK_SECRET is not set yet/);
+  // the manager view's own origin: ok while ALLOWED_ORIGINS names it, a failure when it does not
+  const fromPage = async (vars) => (await runChecks({ fetchImpl: functionsFetch({ billing: await load(vars) }), url: SUPABASE_URL, anonKey: ANON_KEY, managerOrigin: MANAGER_PAGE })).find((f) => f.check === 'billing: answers the manager view\'s CORS preflight');
+  assert.equal((await fromPage({})).ok, true);
+  const refused = await fromPage({ ALLOWED_ORIGINS: undefined });
+  assert.deepEqual([refused.ok, refused.warnOnly], [false, undefined], refused.detail);
 });

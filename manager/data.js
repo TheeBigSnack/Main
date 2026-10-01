@@ -44,7 +44,11 @@
 //   - "Sold cars still listed" are the open take-down items (todo_items, kind
 //     takeDown, no done_at). A scan summary carries counts, not VINs, so
 //     "listings the latest scan no longer has" cannot be derived here; the
-//     extension's rescan decides that and writes the to-do item.
+//     extension's rescan decides that and writes the to-do item, and only
+//     for the salesperson's own listings. So an empty list says only that
+//     nothing is flagged, never that every sold car is off Marketplace:
+//     clearLine() words it, with what it rests on (no scan yet, an old
+//     scan, listings nobody's extension watches).
 //   - A to-do item names no salesperson; the listing with the same VIN does,
 //     so each item is joined to its listing for the name and the link.
 //   - Posts are counted from listings (the posted registry: one row per
@@ -57,14 +61,16 @@
 
 export const WEEK_MS = 7 * 24 * 3600 * 1000; // "this week" is the last 7 days
 export const OVERDUE_HOURS = 24; // an open item past this is shown in red
-export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is open; twice that and something is off
+export const SCAN_STALE_HOURS = 6; // with automatic rescans allowed they run every 3 hours while Chrome is open; twice that and something is off
+// What the stale pill says after the hours: why a scan can be that old.
+export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed';
 
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
   'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
   'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
-  'Hours run from the flagging scan, and rescans happen every 3 hours while Chrome is open.',
+  'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.',
 ]);
 
 // ---------- time ----------
@@ -154,10 +160,14 @@ function peopleOf(memberships, listings, attempts) {
 /**
  * @param {object} input
  *   listings, todoItems, postAttempts, scans, memberships: rows as above
+ *   wholeTeam: true when `memberships` is every member of the dealership (a
+ *              manager reads them all; a salesperson reads only their own
+ *              row), so a listing whose user is not among them belongs to
+ *              someone no longer in the dealership
  *   now:      ISO time the ages count from (default: the clock)
  *   timeZone: IANA zone for the last-scan line (default: this computer's)
  */
-export function summarize({ listings, todoItems, postAttempts, scans, memberships, now = nowIso(), timeZone } = {}) {
+export function summarize({ listings, todoItems, postAttempts, scans, memberships, wholeTeam = false, now = nowIso(), timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
@@ -246,6 +256,16 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
   for (const s of S) if (ms(s.taken_at) !== null && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
   const lastScan = last ? scanLine(last, nowAt, zone) : null;
 
+  // ----- listings nobody's extension watches -----
+  // up, and posted by someone who is no longer a member: their extension
+  // stopped syncing when they were removed, and a rescan only flags its own
+  // salesperson's listings, so nothing flags a sale or a price change on them
+  const members = new Set(M.map((m) => m.user_id).filter(Boolean));
+  const unwatched = !wholeTeam ? [] : L
+    .filter((l) => isListed(l) && !(l.user_id && members.has(l.user_id)))
+    .map((l) => ({ vin: vinOf(l), name: text(l.name, 80) || vinOf(l), salesperson: text(l.salesperson, 60), listingUrl: l.listing_url ? String(l.listing_url) : '', postedAt: l.posted_at || null, hoursUp: hoursBetween(l.posted_at, nowAt) }))
+    .sort((a, b) => (b.hoursUp ?? -1) - (a.hoursUp ?? -1) || a.name.localeCompare(b.name));
+
   return {
     now: nowAt,
     timeZone: zone,
@@ -256,9 +276,41 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     totals,
     soldStillListed,
     priceMismatches,
+    unwatched,
+    clear: { sold: clearLine('sold', lastScan, unwatched.length), price: clearLine('price', lastScan, unwatched.length) },
     takeDowns: flagStats(T.filter((f) => f.kind === 'takeDown')),
     priceUpdates: flagStats(T.filter((f) => f.kind === 'price')),
   };
+}
+
+// What an empty "Sold cars still listed" or "Price changes not yet updated"
+// says, and its pill's tone. Only what the rows support: nothing is flagged
+// on a synced listing, each salesperson's extension checks only their own
+// listings, and why that is worth less when there is no scan yet, the last
+// one is old, or some listings are up with nobody watching them. 'good' only
+// when none of those holds; 'warn' for an old scan or unwatched listings; ''
+// when nothing has been scanned yet.
+const CLEAR_WORDS = Object.freeze({
+  sold: { none: 'No sold car is flagged on a synced listing.', since: 'a car sold since then' },
+  price: { none: 'No price change is flagged on a synced listing.', since: 'a price that changed since then' },
+});
+export function clearLine(kind, lastScan, unwatchedCount = 0) {
+  const w = CLEAR_WORDS[kind] || CLEAR_WORDS.sold;
+  const parts = [w.none, 'Each salesperson\'s extension checks their own listings when it rescans.'];
+  let tone = 'good';
+  if (!lastScan) {
+    parts.push('No scan is recorded yet, so nothing has been checked.');
+    tone = '';
+  } else if (lastScan.stale) {
+    parts.push(`The last scan is ${typeof lastScan.hoursAgo === 'number' ? `${lastScan.hoursAgo} h` : 'hours'} old, so ${w.since} is not flagged yet.`);
+    tone = 'warn';
+  }
+  const n = count(unwatchedCount) || 0;
+  if (n) {
+    parts.push(`${n === 1 ? 'One listing is' : `${n} listings are`} up from people no longer in the dealership, and nobody's extension watches ${n === 1 ? 'it' : 'them'} (below).`);
+    tone = 'warn';
+  }
+  return { tone, line: parts.join(' ') };
 }
 
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
@@ -277,6 +329,99 @@ function scanLine(s, nowAt, zone) {
     stale: typeof hoursAgo === 'number' && hoursAgo > SCAN_STALE_HOURS,
     line: `Last scan ${fmtLocal(s.taken_at, zone)}: ${plural(cars, 'car')} on the website, ${ready} ready to post, ${takeDown} to take down, ${plural(price, 'price change')}`,
   };
+}
+
+// ---------- reading every row ----------
+
+// The hosted API answers at most its "Max rows" per request (1,000 unless
+// the owner changed it) and drops the rest without an error, and a
+// dealership's listings, to-do items and post attempts are kept until the
+// dealership is deleted, so a table read in one request would lose its
+// oldest rows, and the numbers and the CSV with them. readAll() asks page
+// after page: `page(from, to)` is one request for that range of rows,
+// answering as supabase-js does ({ data, error, count }). It stops once it
+// holds `count` rows (the first page asks for it) or a page comes back
+// empty, so a server cap below PAGE_ROWS loses nothing either. A row with an
+// id is kept once (a row added between two requests shifts the order by
+// one). A failed page is an error, never a short list.
+export const PAGE_ROWS = 1000;
+export const MAX_PAGES = 1000;
+export async function readAll(page, { pageRows = PAGE_ROWS, maxPages = MAX_PAGES } = {}) {
+  const out = [];
+  const seen = new Set();
+  let total = null;
+  let offset = 0;
+  for (let n = 0; ; n += 1) {
+    if (n >= maxPages) throw new Error(`more than ${maxPages} pages of rows; the page stops reading rather than show part of them`);
+    const { data, error, count } = (await page(offset, offset + pageRows - 1)) || {};
+    if (error) throw new Error((error && error.message) || String(error));
+    const got = Array.isArray(data) ? data : [];
+    if (typeof count === 'number' && count >= 0) total = count;
+    for (const r of got) {
+      const id = r && typeof r === 'object' && r.id !== null && r.id !== undefined ? String(r.id) : null;
+      if (id !== null) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      out.push(r);
+    }
+    offset += got.length;
+    if (!got.length || (total !== null && offset >= total)) return out;
+  }
+}
+
+// ---------- a sign-in answer this page did not ask for ----------
+
+// The page signs in with the PKCE flow: its own link comes back with a
+// one-time ?code= that supabase-js exchanges with the verifier this browser
+// kept. Two other answers can land here, because the project's Site URL is
+// this page: #access_token=...&refresh_token=... from an implicit-flow link
+// (an email asked for elsewhere without a PKCE challenge: an extension from
+// before it sent one, or a call made by hand), and #error=... when the auth
+// server refused a link. supabase-js would refuse either and, doing so,
+// remove a session this browser already has, while the fragment stays in
+// the address bar. authFragment() reads the fragment so the page can take
+// it out of the address before supabase-js starts, end the session those
+// tokens opened, and say one sentence. The sentences never quote the
+// address: anyone can write words into a link.
+export const STRAY_LINK_NOTE = 'That link was not asked for on this page, so it does not sign you in here. Asked from the Lot Current extension? Ask it for a new code: opening the link used this one up. To sign in here, send yourself a link below.';
+export const FAILED_LINK_NOTE = 'That sign-in link did not work: it may have expired, been used already, or been replaced by a newer email. Send yourself a new one below.';
+export const UNUSED_CODE_NOTE = 'That sign-in link did not sign you in here. A link asked for on this page works once, in the browser that asked for it. One asked for in the Lot Current extension never signs in here, and opening it used up its code: ask the extension for a new one. To sign in here, send yourself a link below.';
+
+/**
+ * @param {string} hash  location.hash, with or without the leading #
+ * @returns {null | { accessToken: string, note: string }}  null when the
+ *   fragment carries neither a token nor an auth error
+ */
+export function authFragment(hash) {
+  const raw = String(hash ?? '').replace(/^#/, '');
+  if (!raw) return null;
+  const p = new URLSearchParams(raw);
+  const accessToken = p.get('access_token') || '';
+  const tokens = Boolean(accessToken || p.get('refresh_token') || p.get('provider_token'));
+  const failed = Boolean(p.get('error') || p.get('error_code') || p.get('error_description'));
+  if (!tokens && !failed) return null;
+  return { accessToken, note: tokens ? STRAY_LINK_NOTE : FAILED_LINK_NOTE };
+}
+
+// A link the auth server refused (expired, used, replaced by a newer email)
+// on this page's own PKCE flow comes back with the error in the query as
+// well as in the fragment: ?error=...&error_code=...&error_description=...
+// supabase-js reads the query too, takes an error_description there for a
+// failed sign-in and removes a session this browser already has; and the
+// words would stay in the address bar. authQueryError() names the error
+// parameters the query carries, so the page takes them out before
+// supabase-js starts, and says FAILED_LINK_NOTE.
+export const AUTH_ERROR_PARAMS = Object.freeze(['error', 'error_code', 'error_description']);
+/**
+ * @param {string} search  location.search, with or without the leading ?
+ * @returns {null | { params: string[], note: string }}  null when the query
+ *   carries no auth error
+ */
+export function authQueryError(search) {
+  const p = new URLSearchParams(String(search ?? '').replace(/^\?/, ''));
+  const params = AUTH_ERROR_PARAMS.filter((k) => p.has(k));
+  return params.length ? { params, note: FAILED_LINK_NOTE } : null;
 }
 
 // ---------- billing ----------
@@ -367,6 +512,48 @@ export function billingBody(route, status, { returnUrl = '', dealershipId = '' }
   return body;
 }
 
+// Before billing opens (manager/config.js billing false: the billing
+// function comes with Stripe, docs/stripe-setup.md step 5) the page does not
+// call it. It reads the plan as row-level security lets a member, the row and
+// subscription_state() (the word /sync serves by), and closedBillingStatus()
+// shapes them like the function's answer with `open: false`. The free pilot
+// needs no billing function (start_pilot() is the database's), so a manager
+// of a dealership with no plan yet still gets Start the free pilot, on the
+// function's own rule (pilotAvailable); Subscribe and Manage billing wait for
+// billing. The card says paying by card is not open yet, a pilot the owner
+// recorded by agreement shows with its end date, and a lapsed plan says whom
+// to ask, since nothing on the page can renew it yet.
+export const BILLING_CLOSED_NOTE = 'Paying by card is not open yet, so nothing is charged; to carry on after the free pilot, ask your Lot Current contact.';
+export const BILLING_CLOSED_ASK = 'Billing is not open yet: ask your Lot Current contact.';
+// While the billing function runs on a Stripe test-mode key (the status
+// answer's testMode, docs/stripe-setup.md before the live switch), the card
+// says so to everyone who reads it: Checkout takes only Stripe's test cards,
+// and what test mode writes is reset when billing goes live.
+export const BILLING_TEST_MODE_NOTE = 'Billing is in Stripe test mode: only Stripe\'s test cards work, nothing is charged, and a subscription started now does not carry over when real billing starts.';
+// A pilot can start when there is no row, or only the shell of one (a Stripe
+// customer from a checkout that never finished: no status, no pilot): the
+// billing function's pilotAvailable(), word for word (test/billing.test.js
+// holds the two equal), which start_pilot() applies in SQL too.
+export function pilotAvailable(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return true;
+  return (row.status === null || row.status === undefined) && (row.pilot_ends_at === null || row.pilot_ends_at === undefined);
+}
+export function closedBillingStatus(word, row, { role = '' } = {}) {
+  const subscription = row && typeof row === 'object' && !Array.isArray(row) ? row : null;
+  return {
+    state: PLAN_STATES.includes(word) ? word : 'unknown',
+    open: false,
+    role: typeof role === 'string' ? role : '',
+    subscription,
+    canStartPilot: role === 'manager' && pilotAvailable(subscription),
+    canSubscribe: false,
+    canManageBilling: false,
+    pilotDays: null,
+    includedSalespeople: null,
+    salespeople: null,
+  };
+}
+
 // Why a plan has lapsed, from the Stripe status on the row; a pilot that
 // ran out is worded from its end date instead.
 const LAPSED_WHY = Object.freeze({
@@ -377,6 +564,28 @@ const LAPSED_WHY = Object.freeze({
   canceled: 'The subscription was cancelled.',
   paused: 'The subscription is paused.',
 });
+
+// What renews a lapsed plan that Stripe still holds open (hasOpenSubscription:
+// a payment that did not go through, a first payment not finished, a pause).
+// Subscribe is not it: the billing function refuses a second Checkout next to
+// an open subscription and offers no Subscribe button. A failed renewal is
+// fixed by the card in Manage billing; a pause or an unfinished first payment
+// promises no retry. `card` follows the Billing card's why-line, `step` is the
+// Getting started line; with no Manage billing to offer, both say whom to ask.
+const LAPSED_OPEN = Object.freeze({
+  past_due: Object.freeze({ card: 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.', step: 'The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.' }),
+  unpaid: Object.freeze({ card: 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.', step: 'The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.' }),
+  incomplete: Object.freeze({ card: 'Open Manage billing to check the card, or ask your Lot Current contact.', step: 'The first payment did not go through: open Manage billing in the Billing card, or ask your Lot Current contact.' }),
+  paused: Object.freeze({ card: 'Ask your Lot Current contact, or open Manage billing.', step: 'The subscription is paused: ask your Lot Current contact, or open Manage billing in the Billing card.' }),
+});
+const LAPSED_ASK = Object.freeze({ card: 'Ask your Lot Current contact.', step: 'The plan has lapsed: ask your Lot Current contact.' });
+// The renewal words for a lapsed status answer, or null when Subscribe is
+// the way (the plan is not held open and the answer offers Subscribe).
+function lapsedRenewal(s) {
+  const sub = s.subscription && typeof s.subscription === 'object' ? s.subscription : {};
+  if (hasOpenSubscription(sub)) return (s.canManageBilling && LAPSED_OPEN[sub.status]) || LAPSED_ASK;
+  return s.canSubscribe ? null : LAPSED_ASK;
+}
 
 // The local calendar date alone (2026-12-05), for a plan line.
 export function fmtLocalDate(iso, timeZone) {
@@ -404,7 +613,9 @@ export function fmtLocalDate(iso, timeZone) {
  *   now:      ISO time the days left count from (default: the clock)
  *   timeZone: IANA zone for the dates (default: this computer's)
  *   pricing:  { pilotDays, includedSalespeople } fallback
- * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, salespeople, seatsPaid, seatLine, seatNote, seatTone, subscribeSeats, buttons: { action, label, does }[] }}
+ * modeNote is BILLING_TEST_MODE_NOTE while the answer says the billing
+ * function runs on a Stripe test-mode key, else empty.
+ * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, salespeople, seatsPaid, seatLine, seatNote, seatTone, subscribeSeats, modeNote, buttons: { action, label, does }[] }}
  */
 export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) {
   const s = status && typeof status === 'object' ? status : {};
@@ -415,17 +626,19 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
   const date = (iso) => fmtLocalDate(iso, zone);
   const manager = s.role === 'manager';
   const state = PLAN_STATES.includes(s.state) ? s.state : 'unknown';
+  const billingOpen = s.open !== false; // closedBillingStatus: billing not open yet
   const pilotDays = num(s.pilotDays) ?? num(p.pilotDays);
   const includedSalespeople = num(s.includedSalespeople) ?? num(p.includedSalespeople);
   const salespeople = salespeopleIn(s);
 
   // buttons only for a manager and a state this page knows: a word the page
   // cannot read is a page and a function that disagree, and nothing to press
+  // (before billing opens only the pilot, which is the database's own call)
   const buttons = [];
   if (manager && state !== 'unknown') {
     if (s.canStartPilot) buttons.push({ ...BILLING_BUTTONS.pilot });
-    if (s.canSubscribe) buttons.push({ ...BILLING_BUTTONS.subscribe });
-    if (s.canManageBilling) buttons.push({ ...BILLING_BUTTONS.portal });
+    if (billingOpen && s.canSubscribe) buttons.push({ ...BILLING_BUTTONS.subscribe });
+    if (billingOpen && s.canManageBilling) buttons.push({ ...BILLING_BUTTONS.portal });
   }
 
   let label = 'Unknown';
@@ -443,6 +656,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
       'no card',
     ].filter(Boolean).join(', ');
     line = `No plan yet. ${manager ? 'Start' : 'A manager can start'} the free pilot: ${terms}.`;
+    if (manager && !billingOpen) detail = BILLING_CLOSED_NOTE;
   } else if (state === 'pilot') {
     label = 'Free pilot';
     const end = ms(sub.pilot_ends_at);
@@ -450,32 +664,51 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     tone = daysLeft !== null && daysLeft <= PILOT_WARN_DAYS ? 'warn' : 'good';
     line = daysLeft === null ? 'Free pilot running.' : `Free pilot: ${plural(daysLeft, 'day')} left (ends ${date(sub.pilot_ends_at)}).`;
     // Checkout during a pilot with more than two days left starts the subscription as a trial to the pilot's end (the billing function)
-    if (manager && s.canSubscribe) detail = 'Subscribe any time: with more than two days of pilot left, the card is first charged when the pilot ends.';
+    if (manager && !billingOpen) detail = BILLING_CLOSED_NOTE;
+    else if (manager && s.canSubscribe) detail = 'Subscribe any time: with more than two days of pilot left, the card is first charged when the pilot ends.';
   } else if (state === 'active') {
     label = 'Subscribed';
     tone = 'good';
     const seats = seatsPaid(sub);
     const who = seats !== null ? `: ${plural(seats, 'seat')}` : '';
-    let when = sub.current_period_end ? `, ${sub.status === 'trialing' ? 'first charge' : 'renews'} ${date(sub.current_period_end)}` : '';
-    // Cancelled in Manage billing: Stripe keeps the subscription trialing or
-    // active until it ends, so the status alone would still read as a renewal
-    if (ms(sub.cancel_at) !== null) {
-      when = `, cancelled: it ends ${date(sub.cancel_at)}`;
+    const verb = sub.status === 'trialing' ? 'first charge' : 'renews';
+    // cancelled in the portal: the date Stripe ends it (0009_cancel_at.sql), null while it renews
+    const ends = ms(sub.cancel_at) !== null ? sub.cancel_at : null;
+    const periodEnd = ms(sub.current_period_end);
+    if (ends === null) {
+      const when = sub.current_period_end ? `, ${verb} ${date(sub.current_period_end)}` : '';
+      line = `Subscribed${who}${when}.`;
+    } else if (periodEnd !== null && ms(ends) > periodEnd) {
+      // cancelled from a date after this period: the period still renews (or the trial still ends in a charge) first
+      label = 'Cancelled';
       tone = 'warn';
-      if (manager) detail = 'Stripe ends the subscription on that date. To keep it, undo the cancellation in Manage billing before then.';
+      line = `Subscribed${who}, ${verb} ${date(sub.current_period_end)}; cancelled from ${date(ends)}.`;
+    } else {
+      // cancelled in the portal: Stripe keeps the status until the end, and nothing renews or charges after it
+      label = 'Cancelled';
+      tone = 'warn';
+      // the end can be past while Stripe's last event is still on its way (the row then still says active): it ended, and nothing runs until then
+      const over = ms(ends) <= t;
+      const until = `${over ? 'ended' : 'ends'} ${date(ends)}`;
+      line = sub.status === 'trialing'
+        ? `Cancelled${who}, ${until} before the first charge.`
+        : `Cancelled${who}, ${until}${over ? '' : ' and does not renew'}.`;
+      if (manager && s.canManageBilling && !over) detail = 'Everything works as it does now until then; Manage billing can renew it.';
     }
-    line = `Subscribed${who}${when}.`;
   } else if (state === 'lapsed') {
     label = 'Lapsed';
     tone = 'bad';
     line = 'The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed.';
     const pilotEnd = ms(sub.pilot_ends_at);
     detail = LAPSED_WHY[sub.status] || (pilotEnd !== null && pilotEnd <= t ? `The free pilot ended ${date(sub.pilot_ends_at)}.` : '');
+    if (!billingOpen) detail = [detail, BILLING_CLOSED_ASK].filter(Boolean).join(' '); // nothing here can renew it yet
+    else if (manager && hasOpenSubscription(sub)) detail = [detail, lapsedRenewal(s).card].filter(Boolean).join(' '); // held open: Manage billing, never Subscribe
   }
 
   const open = hasOpenSubscription(sub);
   const seatInfo = seatLines({ state, salespeople, includedSalespeople, paid: state === 'active' || open ? seatsPaid(sub) : null, subscribing: !open && buttons.some((b) => b.action === 'subscribe'), toBuy: subscribeSeats(s, { pricing: p }) });
-  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, buttons };
+  const modeNote = billingOpen && s.testMode === true ? BILLING_TEST_MODE_NOTE : '';
+  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, modeNote, buttons };
 }
 
 // What the card says when there are more salespeople than paid seats, in
@@ -742,14 +975,22 @@ const PLAN_STEP_LINES = Object.freeze({
   lapsed: 'The plan has lapsed: subscribe in the Billing card and syncing starts again.',
   unknown: 'The plan could not be read just now; the Billing card says more.',
 });
+// Before billing opens the first step is the free pilot alone (start_pilot()
+// needs no billing function), and a lapsed plan is renewed by asking.
+export const PLAN_STEP_CLOSED_TITLE = 'Start the free pilot';
+const PLAN_STEP_CLOSED_LINES = Object.freeze({
+  none: 'No plan yet: start the free pilot in the Billing card.',
+  lapsed: 'The plan has lapsed, and billing is not open yet: ask your Lot Current contact.',
+});
 
 /**
  * The Getting started card's four steps.
  *   1. a plan: the billing state is pilot or active;
  *   2. someone invited: an open invite code, or more than one member;
  *   3. a car posted and synced: any listing;
- *   4. two salespeople posting: at least two different people, not managers
- *      of the dealership, with a listing posted in the past 7 days.
+ *   4. two salespeople posting: at least two different people who hold the
+ *      salesperson role in the dealership now, with a listing posted in the
+ *      past 7 days (a manager, or someone who has left, does not count).
  * @param {object} input
  *   billing:      GET .../billing/status's answer (or the sample's); null when it could not be read
  *   invites:      the open codes the page holds (list_invites plus the ones made since)
@@ -757,9 +998,12 @@ const PLAN_STEP_LINES = Object.freeze({
  *   listings:     the dealership's listings
  *   dealershipId: the chosen dealership; rows of another one are left out
  *   now:          ISO time "the past 7 days" counts back from (default: the clock)
+ *   billingOpen:  false before billing opens (manager/config.js billing):
+ *                 step 1 is the free pilot alone, and a lapsed plan says
+ *                 whom to ask
  * @returns {{ steps: { key, title, done, line, action: { target, label } | null }[], done, total, allDone, line }}
  */
-export function gettingStarted({ billing, invites, memberships, listings, dealershipId = '', now = nowIso() } = {}) {
+export function gettingStarted({ billing, invites, memberships, listings, dealershipId = '', now = nowIso(), billingOpen = true } = {}) {
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
   const ours = (r) => !dealershipId || !r.dealership_id || r.dealership_id === dealershipId;
@@ -778,13 +1022,15 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
     : open > 1 ? `${open} invite codes are open, waiting to be used.`
     : 'Nobody else is in the dealership yet: make an invite code for each salesperson in the Invite codes card.';
 
-  // who posted in the past 7 days, by account, else by the name the extension recorded; a manager's own posts do not count
-  const managers = new Set(M.filter((m) => m.role === 'manager').map((m) => m.user_id));
+  // who posted in the past 7 days, by account, else by the name the extension recorded. An account counts only
+  // while it holds the salesperson role here, as usage_report's active_salespeople (0008_usage.sql): a manager's
+  // own posts do not count, nor do those of someone no longer in the dealership (their cars stay on the page)
+  const salespeople = new Set(M.filter((m) => m.role === 'salesperson').map((m) => m.user_id));
   const posting = new Set();
   for (const l of L) {
     const at = ms(l.posted_at);
     if (at === null || at < t - WEEK_MS || at > t) continue;
-    if (l.user_id && managers.has(l.user_id)) continue;
+    if (l.user_id && !salespeople.has(l.user_id)) continue;
     posting.add(l.user_id ? `id:${l.user_id}` : `name:${text(l.salesperson, 60).toLowerCase() || NO_NAME}`);
   }
   const n = posting.size;
@@ -792,8 +1038,14 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
     : n === 1 ? `One salesperson posted in the past 7 days; this step needs ${ACTIVE_SALESPEOPLE}.`
     : 'No salesperson has posted in the past 7 days.';
 
+  const closed = billingOpen === false;
+  // a lapsed plan says "subscribe" only when the Billing card offers Subscribe; one Stripe holds open is renewed in Manage billing
+  const renewal = !closed && plan === 'lapsed' ? lapsedRenewal(billing) : null;
+  const planStep = step('plan', plan === 'pilot' || plan === 'active', (closed && PLAN_STEP_CLOSED_LINES[plan]) || renewal?.step || PLAN_STEP_LINES[plan]);
+  if (closed) planStep.title = PLAN_STEP_CLOSED_TITLE;
+
   const steps = [
-    step('plan', plan === 'pilot' || plan === 'active', PLAN_STEP_LINES[plan]),
+    planStep,
     step('invite', M.length > 1 || open > 0, inviteLine),
     step('firstCar', L.length > 0, L.length ? `${plural(L.length, 'car')} posted and synced so far.` : 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs.'),
     step('twoPosting', n >= ACTIVE_SALESPEOPLE, postingLine),

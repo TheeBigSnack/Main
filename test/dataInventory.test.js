@@ -55,9 +55,17 @@ function walk(dir, out = []) {
 
 // The code that ships: the extension, the manager view, the website and the
 // Edge Functions (backend/ talks to Anthropic through its SDK and names no host).
+// manager/vendor/ is left out: it is supabase-js's own build, served next to
+// the page instead of from a CDN, unchanged and pinned by its hash
+// (test/manager.test.js). Its text names hosts in error messages it never
+// contacts and storage of features the page does not use; what it does for
+// the page (the session in localStorage, the calls to the project) is in the
+// manager view's rows, as it was when a CDN served it.
+const VENDORED = /^manager\/vendor\//;
 const SHIPPED = [...walk('extension'), ...walk('manager'), ...walk('site'), ...walk('supabase/functions'), ...walk('backend')]
   .filter((f) => /\.(js|mjs|ts|html)$/.test(f) || f === 'extension/manifest.json')
-  .filter((f) => !/package(-lock)?\.json$/.test(f));
+  .filter((f) => !/package(-lock)?\.json$/.test(f))
+  .filter((f) => !VENDORED.test(f));
 const source = (f) => (/\.html$/.test(f) ? stripHtmlComments(read(f)) : /\.json$/.test(f) ? read(f) : stripComments(read(f)));
 
 // The text from a heading to the next heading of the same or a higher level.
@@ -492,7 +500,8 @@ test('every recipient is named in the texts the inventory says, and the privacy 
 });
 
 // docs/production-setup.md chooses the services that see sign-in email and manager traffic; the website's host is
-// the Pages workflow. Each chosen one is a processor of its own, row and Processors line, never a shared bracket.
+// the Pages workflow. Each chosen one is a processor of its own, row and Processors line, never a shared bracket:
+// one name for two jobs ("sends the sign-in emails ... and holds our inbox") would leave the other company unlisted.
 test('the services production setup chooses, and the website\'s host, are each a processor in the inventory and the privacy policy', () => {
   const setup = read('docs/production-setup.md');
   const choices = section(setup, '## The choices, and why');
@@ -508,6 +517,20 @@ test('the services production setup chooses, and the website\'s host, are each a
   }
   for (const text of [inventory, policy]) assert.doesNotMatch(text, /\[(hosting|email) provider\]/, 'a bracket standing for services already chosen');
   assert.doesNotMatch(inventory, /not decided yet/, 'the manager view\'s host is decided (docs/production-setup.md)');
+  // one company per job, as production-setup.md chose them
+  assert.match(setup, /\| Sign-in email sender \| \*\*Resend\*\*/, 'production-setup.md changed the sign-in sender: update the inventory and this test');
+  assert.match(setup, /\| Manager view host \| \*\*Cloudflare Pages\*\*/, 'production-setup.md changed the manager view host: update the inventory and this test');
+  assert.match(setup, /Keep the mailbox for people writing to you/, 'production-setup.md no longer keeps a separate inbox: update the inventory and this test');
+  for (const [n, says] of [...section(policy, '## Processors').matchAll(/^- \*\*([^*]+)\*\*: (.*)$/gm)].map((m) => [m[1], m[2]])) {
+    assert.ok(!(/sends the sign-in emails/.test(says) && /inbox/.test(says)), `${n} both sends the sign-in emails and holds the inbox`);
+    assert.ok(!(/our website/.test(says) && /manager view/.test(says)), `${n} serves both the website and the manager view`);
+  }
+  const list = onlyTable(section(inventory, '## Who receives data'), 'the recipients section');
+  const cells = (name) => (list.rows.find((r) => r[0] === name) || []).join(' | ');
+  assert.match(cells('GitHub'), /website/);
+  assert.match(cells('Cloudflare'), /manager view/);
+  assert.match(cells('Resend'), /Sign-in emails/);
+  assert.match(cells('GoDaddy'), /inbox/);
 });
 
 test('every Recipient cell names a recipient of the list, and every recipient receives something', () => {

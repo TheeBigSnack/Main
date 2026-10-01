@@ -122,14 +122,16 @@ test('with an empty config every flow answers notConfigured and nothing leaves t
 
 // ---------- signing in ----------
 
-test('signInStart asks for a code by email (no redirect: the code is the way in) and tells the person where it went', async () => {
+test('signInStart asks for a code by email (no redirect and a challenge nobody can answer: the code is the way in) and tells the person where it went', async () => {
   const { fetchImpl, calls } = fakeFetch({ otp: { status: 200, body: {} } });
   const r = await signInStart('  Alex@Example.test ', deps({ fetchImpl }));
   assert.deepEqual(r, { ok: true, email: 'alex@example.test', message: 'A six-digit sign-in code is on its way to alex@example.test. Enter it below.' });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/otp', 'no redirect_to: the email carries the code');
   assert.equal(calls[0].headers.apikey, CONFIG.anonKey);
-  assert.deepEqual(calls[0].body, { email: 'alex@example.test', create_user: true });
+  const { code_challenge: challenge, ...rest } = calls[0].body;
+  assert.deepEqual(rest, { email: 'alex@example.test', create_user: true, code_challenge_method: 's256' });
+  assert.match(challenge, /^[A-Za-z0-9_-]{43}$/, 'a PKCE challenge nobody can answer: the email\'s link brings no token to the manager view');
 
   const none = fakeFetch({});
   const bad = await signInStart('not an email', deps({ fetchImpl: none.fetchImpl }));
@@ -210,7 +212,7 @@ test('signOutAll tells the auth server, forgets the session and the named websit
   const session = freshSession();
   const storage = fakeStorage({ [ACCOUNT_KEY]: session, [K.sync]: { since: T(1), role: 'salesperson' }, [K.posted]: { [VIN_A]: { postedAt: T(0) } } });
   assert.deepEqual(await signOutAll(deps({ fetchImpl, storage, origins: [ORIGIN, ''] })), { ok: true });
-  assert.equal(calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/logout');
+  assert.equal(calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/logout?scope=local', 'this machine\'s session only, never the person\'s others');
   assert.equal(calls[0].headers.Authorization, `Bearer ${session.accessToken}`);
   assert.equal(ACCOUNT_KEY in storage.data, false);
   assert.equal(K.sync in storage.data, false, 'the next sign-in starts with a first sync');
@@ -276,7 +278,7 @@ function fakeSyncServer({ users = { [jwt({ sub: U1, email: USER.email, exp: Math
     if (!userId) return { status: 401, body: { ok: false, error: 'sign in again (the token was rejected or has expired)' } };
     const body = call.body;
     if (body.origin !== ORIGIN) return { status: 403, body: { ok: false, error: `your account is not a member of the dealership for ${body.origin}` } };
-    if (thePlan.state === 'lapsed') return { status: 402, body: { ok: false, error: "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view", code: 'lapsed', plan: { ...thePlan } } };
+    if (thePlan.state === 'lapsed') return { status: 402, body: { ok: false, error: "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how", code: 'lapsed', plan: { ...thePlan } } };
     const now = tick();
     const rows = toServerRows({ origin: body.origin, posted: body.posted, pilot: body.pilot, dealershipId: D, userId });
     // a listing stamped more than five minutes ahead of the server's clock is rejected, not written
@@ -629,8 +631,8 @@ test('planText: one line per plan state for the Account section', () => {
   assert.equal(planText({ state: 'pilot', pilotEndsAt: null }, NOW), 'Free pilot');
   assert.equal(planText({ state: 'active', pilotEndsAt: null, currentPeriodEnd: new Date(NOW + 20 * day).toISOString(), seats: 5 }, NOW), 'Subscribed');
   assert.equal(planText({ state: 'lapsed' }), LAPSED_SENTENCE);
-  assert.equal(LAPSED_SENTENCE, "The dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view");
-  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view", 'the sentence the functions answer with (supabase/functions/_shared/billing.mjs)');
+  assert.equal(LAPSED_SENTENCE, "The dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how");
+  assert.equal(LAPSED_MESSAGE, "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how", 'the sentence the functions answer with (supabase/functions/_shared/billing.mjs)');
   assert.equal(LAPSED_CODE, 'lapsed');
 });
 

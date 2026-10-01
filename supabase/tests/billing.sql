@@ -16,7 +16,11 @@
 -- members, written by no signed-in user, and leaves the state active until
 -- it ends; subscription_state() says none, pilot, active or lapsed the same
 -- way functions/_shared/billing.mjs does; a customer shell does not block the
--- pilot; the anon key gets nothing.
+-- pilot; the owner's pilot of an agreed length (supabase/README.md step 5,
+-- the statement as the README writes it) puts a dealership on its pilot
+-- with that end date, start_pilot then changes nothing, the same statement
+-- extends it, and it leaves a dealership with a Stripe subscription alone;
+-- the anon key gets nothing.
 
 \set ON_ERROR_STOP on
 \set a_sales   '00000000-0000-4000-8000-0000000000a1'
@@ -276,6 +280,11 @@ begin
   update public.subscriptions set pilot_ends_at = now() - interval '1 minute' where dealership_id = a;
   if public.subscription_state(a) <> 'lapsed' then raise exception 'past_due after the pilot should be lapsed, got %', public.subscription_state(a); end if;
 
+  -- cancelled in the portal: Stripe keeps it trialing or active until the end, so it stays active (served) with the end recorded
+  update public.subscriptions set status = 'active', pilot_ends_at = null, cancel_at = now() + interval '20 days' where dealership_id = a;
+  if public.subscription_state(a) <> 'active' then raise exception 'a subscription cancelled to end later should stay active until then, reads %', public.subscription_state(a); end if;
+  update public.subscriptions set cancel_at = null where dealership_id = a;
+
   -- every Stripe status the row accepts, without a pilot, is active or lapsed and never none
   foreach s in array array['trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused'] loop
     update public.subscriptions set status = s, pilot_ends_at = null where dealership_id = a;
@@ -336,6 +345,92 @@ begin
     raise exception 'the customer id should survive the pilot start';
   end if;
   raise notice 'ok: a customer shell does not block the pilot';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- the owner's pilot of an agreed length (supabase/README.md step 5, "A pilot
+-- of the length a signed pilot agreement names"), written exactly as the
+-- README has it (test/supabase.test.js holds the two equal), on a new
+-- dealership D whose manager is a_mgr
+-- ---------------------------------------------------------------------------
+reset role;
+insert into public.dealerships (id, name, website_origin) values ('00000000-0000-4000-8000-0000000000d4', 'Dealership D', 'https://www.dealership-d.test');
+insert into public.memberships (user_id, dealership_id, role, name) values (:'a_mgr', '00000000-0000-4000-8000-0000000000d4', 'manager', 'Jamie');
+
+-- owner only: a free pilot that ends when the signed pilot agreement says, or a pilot extended by agreement
+insert into public.subscriptions as s (dealership_id, status, pilot_ends_at)
+values ('00000000-0000-4000-8000-0000000000d4', 'pilot', '2099-01-31 23:59:59+00')
+on conflict (dealership_id) do update
+  set status = 'pilot', pilot_ends_at = excluded.pilot_ends_at, updated_at = now()
+  where s.stripe_subscription_id is null
+returning dealership_id, status, pilot_ends_at;
+
+do $$
+declare
+  d uuid := '00000000-0000-4000-8000-0000000000d4';
+  r public.subscriptions%rowtype;
+begin
+  select * into r from public.subscriptions where dealership_id = d;
+  if public.subscription_state(d) <> 'pilot' then raise exception 'the owner''s pilot should read pilot, reads %', public.subscription_state(d); end if;
+  if r.pilot_ends_at <> '2099-01-31 23:59:59+00'::timestamptz then raise exception 'the pilot should end when the agreement says, ends %', r.pilot_ends_at; end if;
+  if r.seats <> 5 then raise exception 'the owner''s pilot should include the seats start_pilot gives, has %', r.seats; end if;
+  raise notice 'ok: the owner''s statement puts a dealership on its pilot with the agreed end date';
+end;
+$$;
+
+-- its manager: Start the free pilot changes nothing (the button is not offered: pilotAvailable is false for this row)
+select set_config('request.jwt.claims', '{"sub":"' || :'a_mgr' || '","role":"authenticated"}', true) as claims \gset
+set local role authenticated;
+
+do $$
+declare
+  d uuid := '00000000-0000-4000-8000-0000000000d4';
+  got jsonb;
+begin
+  got := public.start_pilot(d);
+  if (got ->> 'started')::boolean is not false or (got ->> 'pilot_ends_at')::timestamptz <> '2099-01-31 23:59:59+00'::timestamptz or got ->> 'state' <> 'pilot' then
+    raise exception 'start_pilot after the owner''s pilot should change nothing, returned %', got;
+  end if;
+  raise notice 'ok: start_pilot leaves the agreed pilot as it is';
+end;
+$$;
+
+reset role;
+
+-- extended by agreement: the same statement with a later date
+-- owner only: a free pilot that ends when the signed pilot agreement says, or a pilot extended by agreement
+insert into public.subscriptions as s (dealership_id, status, pilot_ends_at)
+values ('00000000-0000-4000-8000-0000000000d4', 'pilot', '2099-03-31 23:59:59+00')
+on conflict (dealership_id) do update
+  set status = 'pilot', pilot_ends_at = excluded.pilot_ends_at, updated_at = now()
+  where s.stripe_subscription_id is null
+returning dealership_id, status, pilot_ends_at;
+
+-- and on A, which by now has a Stripe subscription (sub_a, the state machine above): nothing changes
+-- owner only: a free pilot that ends when the signed pilot agreement says, or a pilot extended by agreement
+insert into public.subscriptions as s (dealership_id, status, pilot_ends_at)
+values ('00000000-0000-4000-8000-0000000000d1', 'pilot', '2099-01-31 23:59:59+00')
+on conflict (dealership_id) do update
+  set status = 'pilot', pilot_ends_at = excluded.pilot_ends_at, updated_at = now()
+  where s.stripe_subscription_id is null
+returning dealership_id, status, pilot_ends_at;
+
+do $$
+declare
+  a uuid := '00000000-0000-4000-8000-0000000000d1';
+  d uuid := '00000000-0000-4000-8000-0000000000d4';
+  r public.subscriptions%rowtype;
+begin
+  if (select pilot_ends_at from public.subscriptions where dealership_id = d) <> '2099-03-31 23:59:59+00'::timestamptz then
+    raise exception 'the same statement should extend the pilot';
+  end if;
+  if public.subscription_state(d) <> 'pilot' then raise exception 'an extended pilot should read pilot'; end if;
+  select * into r from public.subscriptions where dealership_id = a;
+  if r.stripe_subscription_id <> 'sub_a' or r.status = 'pilot' or r.pilot_ends_at is not null then
+    raise exception 'the owner''s statement changed a dealership with a Stripe subscription: %', row_to_json(r);
+  end if;
+  raise notice 'ok: the statement extends a pilot and leaves a Stripe subscription alone';
 end;
 $$;
 

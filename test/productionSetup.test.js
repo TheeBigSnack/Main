@@ -186,7 +186,7 @@ test('every verify comparison reports, once the project is linked, even after an
 // A function from the repository may write a column only its migration adds
 // (0009_cancel_at.sql and billing): deployed before that migration, its
 // webhook answers 500 until database runs. The docs say database first; the
-// functions step enforces it.
+// functions step enforces it, and asking db push needs the database password.
 test('the functions step deploys nothing while production has a migration to apply', () => {
   const steps = supabase.split(/\n      - /);
   const deploy = runText(steps.find((st) => /^name: Deploy the functions\n/.test(st)));
@@ -194,6 +194,7 @@ test('the functions step deploys nothing while production has a migration to app
   assert.ok(check > 0, 'the deploy step asks db push what it would apply');
   assert.ok(check < deploy.indexOf('supabase functions deploy'), 'before deploying anything');
   assert.match(deploy.slice(check), /if ! grep -q 'Remote database is up to date' "\$RUNNER_TEMP\/push-plan\.txt"; then\n[^\n]*::error::[^\n]*\n\s+exit 1\n\s+fi\n\s+for f in \$FUNCTIONS; do supabase functions deploy/);
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \]( \|\| \[ "\$STEP" = verify \])?; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'every step that reads the database needs its password');
   assert.match(read('docs/production-setup.md'), /\*\*functions\*\* checks: it deploys nothing while a migration is still to be applied\./);
 });
 
@@ -246,6 +247,42 @@ test('the manager view deploys from the default branch only, configured, tested,
   assert.match(read('docs/production-setup.md'), /that deploy waits for no one: the environment has no required reviewer, and the workflow does not wait for CI, so its own `npm test` is what stops a page that breaks a rule\./);
 });
 
+// The deploy fires on its own push, separately from CI, so its test step is
+// the only gate before the upload. Every test that loads the page's code
+// (manager/data.js's copies of the billing function's rules are held equal
+// by test/billing.test.js and test/fn-billing.test.js; the onboarding copy's
+// labels by test/marketing.test.js; the page itself runs in
+// test/managerPage.test.js) must be in it: the whole unit suite, as CI's
+// unit job runs it, or each such file by name.
+test('the manager view deploy runs every unit test that loads the page\'s code before it uploads', () => {
+  const step = manager.split(/\n      - /).find((x) => /^name: [^\n]*tests?\n/.test(x) && /node --test|npm test/.test(x));
+  assert.ok(step, 'a test step');
+  const run = runText(`      - ${step}`);
+  const pkg = JSON.parse(read('package.json'));
+  const whole = /^\s*npm test$/m.test(run) && pkg.scripts.test === 'node --test test/*.test.js';
+  const loaders = readdirSync(new URL('./', import.meta.url))
+    .filter((f) => f.endsWith('.test.js'))
+    .filter((f) => /from '\.\.\/manager\/|join\(root, 'manager\/(?:manager|data)\.js'\)/.test(read(`test/${f}`)));
+  for (const f of ['billing.test.js', 'fn-billing.test.js', 'marketing.test.js', 'manager.test.js', 'managerPage.test.js']) assert.ok(loaders.includes(f), `${f} no longer loads the page's code: update this test`);
+  for (const f of loaders) assert.ok(whole || run.includes(`test/${f}`), `the deploy uploads the page without running test/${f}`);
+  assert.match(ci, /^ {6}- run: npm test$/m, 'CI\'s unit job runs the same suite');
+});
+
+// set-project --check alone checks the URL's shape and that the two files
+// agree; only the production ref says which project. The workflow and the
+// doc promise a refusal of any other project, so the ref is compared.
+test('the manager view deploy refuses a page set to any project but the one in SUPABASE_PROJECT_REF', () => {
+  assert.match(manager, /PROJECT_REF: \$\{\{ vars\.SUPABASE_PROJECT_REF \}\}/);
+  const step = manager.split(/\n      - /).find((x) => x.startsWith('name: The page names the production project'));
+  assert.ok(step);
+  assert.match(step, /if ! printf '%s' "\$PROJECT_REF" \| grep -Eq '\^\[a-z0-9\]\{20\}\$'; then echo "::error::[^"]*"; exit 1; fi\n\s+node scripts\/set-project\.mjs --check --project-ref "\$PROJECT_REF"/, 'a missing ref stops the deploy; a present one is compared');
+  assert.match(manager, /variable SUPABASE_PROJECT_REF/);
+  const doc = read('docs/production-setup.md');
+  assert.match(doc, /`manager-view`, deployment branches: the default branch only; its environment secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and the \*\*Environment variable\*\* `SUPABASE_PROJECT_REF`/);
+  assert.match(doc, /names any project but the one in `SUPABASE_PROJECT_REF`/);
+  assert.doesNotMatch(doc + manager, /refuses to (deploy|upload) a page (that is not configured for|that isn't set to) the production project/);
+});
+
 test('every manager view run ends with the hosting check; "check only" skips everything that deploys', () => {
   const steps = manager.split(/\n      - /);
   const last = steps.at(-1);
@@ -254,11 +291,35 @@ test('every manager view run ends with the hosting check; "check only" skips eve
   assert.match(last, /node scripts\/check-hosting\.mjs "\$\{pages\[@\]\}"/);
   assert.match(last, /--sender "\$SENDER_DOMAIN"/);
   assert.match(last, /exit "\$status"/, 'a failed check fails the run');
-  for (const s of steps.slice(1).filter((x) => /set-project\.mjs --check|run: npm test|rsync|pages deploy/.test(x))) {
+  for (const s of steps.slice(1).filter((x) => /set-project\.mjs --check|node --test|run: npm test|rsync|pages deploy/.test(x))) {
     assert.match(s, /if: steps\.ready\.outputs\.go == 'true' && env\.CHECK_ONLY != 'true'\n/, s.split('\n')[0]);
   }
   assert.match(manager, /CHECK_ONLY: \$\{\{ inputs\.check_only == true \}\}/);
   assert.match(manager, /test\/checkHosting\.test\.js/);
+});
+
+// Cloudflare gives a Pages project a suffixed pages.dev address when its
+// name is taken there, so the workflow reads the address from the project
+// itself and holds the page check and the app CNAME to it, never to
+// <project>.pages.dev guessed from the name (someone else may hold that one).
+test('the manager view workflow reads the project\'s pages.dev address from Cloudflare and checks that one, never a guess from the name', () => {
+  const steps = manager.split(/\n      - /);
+  const lookup = steps.find((x) => x.startsWith('name: Which pages.dev address the project has'));
+  assert.ok(lookup, 'a step reads the address');
+  assert.match(lookup, /^name: Which pages\.dev address the project has\n\s+id: pages\n\s+if: steps\.ready\.outputs\.go == 'true'\n/, 'only with the Cloudflare secrets');
+  assert.match(lookup, /curl -fsS --max-time 30 -H "Authorization: Bearer \$CLOUDFLARE_API_TOKEN" "https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/\$CLOUDFLARE_ACCOUNT_ID\/pages\/projects\/\$PAGES_PROJECT" \| jq -r '\.result\.subdomain \/\/ empty'/);
+  assert.match(lookup, /\*\[!a-z0-9\.-\]\*\) [^\n]*host='' ;;\n\s+\*\.pages\.dev\) [^\n]*\n\s+\*\) [^\n]*host='' ;;/, 'anything but a plain pages.dev address is dropped');
+  assert.match(lookup, /echo "host=\$host" >> "\$GITHUB_OUTPUT"/);
+  const check = steps.at(-1);
+  assert.ok(steps.indexOf(lookup) < steps.indexOf(check));
+  assert.match(check, /PAGES_HOST: \$\{\{ steps\.pages\.outputs\.host \}\}/);
+  assert.match(check, /if \[ "\$DEPLOYED" = true \] && \[ -z "\$PAGES_HOST" \]; then\n\s+echo "::error::[^\n]*"\n\s+status=1/, 'an address that could not be read fails the run, it is not guessed');
+  assert.match(check, /pages=\(--app "https:\/\/\$PAGES_HOST\/" --pages-host "\$PAGES_HOST"\)/);
+  assert.match(check, /more\+=\(--app "\$MANAGER_URL" --pages-host "\$PAGES_HOST"\)/);
+  assert.doesNotMatch(runText(manager), /\$PAGES_PROJECT\.pages\.dev/, 'no address made from the project\'s name');
+  const doc = read('docs/production-setup.md');
+  assert.doesNotMatch(doc, /CNAME points at `lotcurrent-app\.pages\.dev`/);
+  assert.match(doc, /Cloudflare gives a suffixed one/);
 });
 
 test('docs/production-setup.md names every piece it relies on, and says the secret values never go in chat or git', () => {
@@ -335,26 +396,8 @@ test('the deploy secrets reach only the steps that use them, never an action or 
   assert.doesNotMatch(steps.at(-1), /secrets\./, 'check-deploy runs without the token');
   const mine = manager.split(/\n      - /).slice(1);
   const holders = mine.filter((st) => value.test(st));
-  assert.deepEqual(holders.map((st) => st.split('\n')[0]), ['name: Deploy to Cloudflare Pages'], 'only the deploy holds the Cloudflare token');
+  assert.deepEqual(holders.map((st) => st.split('\n')[0]), ['name: Deploy to Cloudflare Pages', 'name: Which pages.dev address the project has'], 'only the deploy and the step that asks Cloudflare for the project\'s address hold the Cloudflare token');
   assert.match(mine.find((st) => st.startsWith('name: Is Cloudflare set up?')), /HAS_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN != '' \}\}/, 'the first step learns only whether it is set');
-});
-
-// The doc says an access token never goes into a chat, so the check that
-// needs one is the owner's to run: the token is set at a prompt in the
-// owner's own terminal and only the printed checklist reaches the thread.
-test('the signed-in deploy check is run by the owner with the token set at a prompt; only its output reaches Claude', () => {
-  const doc = read('docs/production-setup.md');
-  const step = doc.split('\n').find((l) => /^2\. \*\*\[Owner\]\*\* Signs in once in the manager view/.test(l));
-  assert.ok(step, 'step 7.2 moved: update this test');
-  assert.doesNotMatch(step, /Claude[^.]*runs `check-deploy`|Claude[^.]*with it \(`LOTSYNC_TEST_TOKEN`\)/, 'Claude would need the token');
-  assert.ok(step.includes("$env:LOTSYNC_TEST_TOKEN = Read-Host 'access token'"), 'PowerShell reads the token at a prompt');
-  assert.match(step, /keeps it out of the terminal's history file but shows it on screen/, 'Read-Host keeps the token out of history, not off the screen');
-  assert.ok(step.includes('read -rs LOTSYNC_TEST_TOKEN && export LOTSYNC_TEST_TOKEN'), 'macOS and Linux read it at a prompt');
-  assert.match(step, /`npm run check-deploy`/);
-  assert.match(step, /Reads the printed checklist[^.]*: it carries no token or key/);
-  // and check-deploy reads the token from its own environment only
-  const src = read('scripts/check-deploy.mjs');
-  assert.match(src, /testToken: process\.env\.LOTSYNC_TEST_TOKEN \|\| ''/);
 });
 
 // Step 5 tests the sign-in email, but the manager view only gets an address in
@@ -367,4 +410,61 @@ test('step 5\'s sign-in email test does not need the manager view that step 6 ho
   assert.doesNotMatch(t, /^8\. Test: sign in from the manager view/, 'the manager view has no address yet');
   assert.match(t, /The manager view has no address until step 6, so either come back to this after step 6 and sign in there, or test now from the extension[^:]*: \*\*Settings\*\*, \*\*Account\*\*, \*\*Send me a sign-in code\*\*\./);
   assert.ok(read('extension/popup.js').includes('Send me a sign-in code'), 'the extension\'s Settings, Account has that button');
+});
+
+// Supabase's CAPTCHA protection refuses /auth/v1/otp without a captcha token,
+// and neither the extension's code request nor the manager view's link
+// request sends one: a doc that tells the owner to turn it on would stop
+// every new sign-in. Once client code sends a token this check fails, so the
+// docs' advice changes with it.
+// Lot Current's own code only: the manager view's vendored supabase-js
+// (manager/vendor/) can send a token, which says nothing about whether the
+// page passes one, and reading it would switch the check off for good.
+test('no doc tells the owner to turn CAPTCHA on while neither sign-in request sends a captcha token', () => {
+  const own = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url), { recursive: true }).filter((f) => /\.(m?js|html)$/.test(f) && !/(^|[\\/])vendor[\\/]/.test(f));
+  assert.ok(readdirSync(new URL('../manager/vendor/', import.meta.url)).some((f) => /^supabase-js-.+\.js$/.test(f)) && !own('manager').some((f) => f.includes('supabase-js')), 'the vendored library is left out');
+  const code = ['extension', 'manager'].flatMap((dir) => own(dir).map((f) => read(`${dir}/${f}`))).join('\n');
+  assert.ok(code.includes('signInWithOtp') && code.includes('/auth/v1/otp'), 'both sign-in requests are in the code read');
+  const sendsToken = /captcha_?token|gotrue_meta_security/i.test(code);
+  assert.equal(sendsToken, false, 'a sign-in request now sends a captcha token: update the CAPTCHA advice in docs/production-setup.md and supabase/README.md, then this check');
+  const docs = ['docs/production-setup.md', 'supabase/README.md', 'docs/stack-test.md', 'docs/launch-checklist.md', 'docs/release.md', 'README.md', 'PILOT.md'];
+  const turnOn = /\b(?:turn|switch)\s+on\b|\b(?:turn|switch)\s+(?:\*\*)?captcha\b[^.]*?\bon\b|\benabl/i;
+  for (const doc of docs) {
+    for (const sentence of read(doc).split(/(?<=[.!?])\s+|\n/).filter((x) => /captcha/i.test(x))) {
+      assert.doesNotMatch(sentence, turnOn, `${doc} tells the owner to turn CAPTCHA on, and no client sends a captcha token: "${sentence.trim()}"`);
+    }
+  }
+  assert.match(read('docs/production-setup.md'), /leave CAPTCHA off\. Neither the extension nor the manager view sends a captcha token/);
+  assert.match(read('supabase/README.md'), /Leave \*\*CAPTCHA protection\*\* \(Authentication, Attack protection\) off: neither/);
+  // the old instruction, in either doc's words, as a failing example
+  assert.match('5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.', turnOn);
+  assert.match('and turn on **CAPTCHA protection** (Authentication, Attack protection) once the manager page is public.', turnOn);
+});
+
+// The page forbids pasting an access token into a chat, so the step that
+// needs one (check-deploy's signed-in checks) is the owner's to run in their
+// own terminal, with only the access_token field: the stored entry also
+// holds the refresh token.
+test('the signed-in deploy check is run by the owner in their own terminal, with the access token alone, never through the chat', () => {
+  const doc = read('docs/production-setup.md');
+  const readme = read('supabase/README.md');
+  const step = doc.slice(doc.indexOf('## Step 7.'), doc.indexOf('\n---', doc.indexOf('## Step 7.')));
+  const item = step.split(/\n(?=\d+\. )/).find((x) => x.includes('LOTSYNC_TEST_TOKEN'));
+  assert.ok(item, 'step 7 runs check-deploy with LOTSYNC_TEST_TOKEN');
+  assert.match(item, /^2\. \*\*\[Owner\]\*\*/, 'an owner step');
+  assert.doesNotMatch(item, /Claude (?:says|runs|takes|uses)[^.]*(?:token|check-deploy)/, 'Claude would need the token pasted into the chat to run it');
+  assert.doesNotMatch(item, /\[Claude\]/);
+  assert.match(item, /never goes into the chat/);
+  assert.match(item, /copy only the value of its `access_token` field[^.]*never the whole entry/);
+  assert.match(item, /\$env:LOTSYNC_TEST_TOKEN = Read-Host '[^']+'\n\s+npm run check-deploy\n\s+Remove-Item Env:LOTSYNC_TEST_TOKEN/, 'the PowerShell form, and the variable removed afterwards');
+  // the token is pasted at a prompt, never typed into a command, so no shell history keeps it
+  assert.doesNotMatch(item, /LOTSYNC_TEST_TOKEN\s*=\s*'?</, 'no command carries the token itself');
+  assert.match(item, /read -rs LOTSYNC_TEST_TOKEN[^.]*unset LOTSYNC_TEST_TOKEN/, 'the macOS and Linux form reads it without showing it, and removes it afterwards');
+  assert.match(item, /\*\*Sign out\*\*/, 'the test session is ended afterwards');
+  assert.match(item, /keeps it out of the terminal's history file but shows it on screen/, 'Read-Host keeps the token out of history, not off the screen');
+  assert.match(item, /Paste only the printed `ok`, `FAIL` and `note` lines[^.]*never prints the token or a key/, 'only the output reaches Claude');
+  // and check-deploy reads the token from its own environment only
+  assert.match(read('scripts/check-deploy.mjs'), /testToken: process\.env\.LOTSYNC_TEST_TOKEN \|\| ''/);
+  assert.match(readme, /copy only the `access_token` field[^.]*never the whole entry/);
+  assert.doesNotMatch(readme, /copy `access_token` from the browser's local storage/);
 });

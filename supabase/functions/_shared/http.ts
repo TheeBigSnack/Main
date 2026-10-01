@@ -3,9 +3,10 @@
 // comparison that picks a caller's dealership by its website origin.
 
 // Chrome sends Origin: chrome-extension://<id> for the extension's own
-// requests. Those are always allowed; any other page origin (the manager
-// page during development, say) is listed in the ALLOWED_ORIGINS secret,
-// comma separated. A request from anywhere else gets no CORS header and the
+// requests. Those are always allowed; any other page origin is listed in the
+// ALLOWED_ORIGINS secret, comma separated: the hosted manager view's, whose
+// Billing card calls the billing function from the browser (without it the
+// card cannot load), and a local page during development. A request from anywhere else gets no CORS header and the
 // browser refuses to show it the answer. The token check is the real
 // protection; this only keeps random pages from probing the functions.
 const EXTENSION_ORIGIN = /^(chrome|moz)-extension:\/\/[a-z0-9-]+$/i;

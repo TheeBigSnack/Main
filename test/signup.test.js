@@ -255,3 +255,27 @@ test('docs/support.md: a taken website is settled by the store\'s own phone numb
   assert.match(s, /select public\.delete_dealership\('<dealership id>', /, 'a squatted row is deleted, the owner\'s tool with its confirm');
   assert.match(s, /step 5 of `supabase\/README\.md`/);
 });
+
+// Self-serve sign-up starts a dealership, its free pilot and, through
+// Subscribe, a subscription with no agreement signed, and nothing records a
+// manager's acceptance of the Terms, the Privacy Policy or the Dealer
+// Subscription Agreement yet. Until the attorney says how (questions-for-
+// attorney.md question 9) and the manager view records it, the docs say not
+// to open it and both page switches stay off.
+test('self-serve sign-up stays closed until a manager\'s acceptance of the agreements is recorded', async () => {
+  const open = section(readme, '### Open it, close it, change the limits');
+  assert.match(open, /\*\*Before you open it:\*\* a dealership started here has signed nothing\./);
+  assert.ok(open.indexOf('Before you open it') < open.indexOf('set open = true'), 'the warning comes before the switch');
+  assert.match(open, /Keep sign-up closed until the attorney has answered `legal\/questions-for-attorney\.md` question 9 and the manager view records each manager's acceptance/);
+  assert.match(read('../docs/launch-checklist.md'), /^- \[ \] \*\*Self-serve sign-up stays closed until a manager's acceptance is recorded\.\*\* [^\n]*Done when: the attorney has answered `legal\/questions-for-attorney\.md` question 9/m);
+  const questions = read('../legal/questions-for-attorney.md');
+  const q9 = section(questions, '## 9. How a dealership accepts the agreements');
+  for (const words of ['neither the manager page nor Checkout shows or records acceptance', 'Dealer Subscription Agreement section 2', 'self-serve sign-up stays closed']) assert.ok(q9.includes(words), `question 9 does not say: ${words}`);
+  assert.doesNotMatch(questions, /the first-run wizard will require acceptance of both \(Milestone 5 in PLAN\.md\)\.\s*$/, 'acceptance is not only the salespeople\'s wizard');
+  // the page switches stay off meanwhile (the database switch defaults to off: open boolean not null default false)
+  assert.match(sql, /open boolean not null default false/);
+  const { CONFIG } = await import('../manager/config.js');
+  const { SITE } = await import('../site/config.js');
+  assert.equal(CONFIG.selfServeSignup, false, 'manager/config.js shows the sign-up form before acceptance is recorded');
+  assert.equal(SITE.signupUrl, '', 'site/config.js links to sign-up before acceptance is recorded');
+});

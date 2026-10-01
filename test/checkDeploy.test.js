@@ -305,3 +305,31 @@ test('the manager view\'s origin: checked when given, a note when not, a failure
   assert.doesNotMatch(env, /optional/);
   assert.match(env, /manager view/);
 });
+
+// The manager view calls billing from its own origin: the extension's
+// preflight passing says nothing about it, and a missing ALLOWED_ORIGINS
+// shows up only there.
+test('with the manager view\'s origin, billing\'s preflight from it is checked: ok when ALLOWED_ORIGINS names it, a failure when not, a note before billing is deployed', async () => {
+  const name = 'billing: answers the manager view\'s CORS preflight';
+  const good = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, managerOrigin: MANAGER, configs });
+  assert.equal(good.find((f) => f.check === name).ok, true);
+  assert.equal(report(good).failed, 0);
+  const refused = await runChecks({ fetchImpl: fakeProject({ noManagerOrigin: true }), url: URL_, anonKey: KEY, managerOrigin: MANAGER, configs });
+  const f = refused.find((x) => x.check === name);
+  assert.deepEqual([f.ok, f.warnOnly], [false, undefined], 'a failure, not a note');
+  assert.equal(f.detail, `204, allow-origin none (is ${MANAGER} in ALLOWED_ORIGINS?)`);
+  assert.ok(refused.find((x) => x.check === "billing: answers the extension's CORS preflight").ok, 'the extension\'s line alone would read ok');
+  const later = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing'] }), url: URL_, anonKey: KEY, managerOrigin: MANAGER, configs });
+  assert.equal(later.find((x) => x.check === name).warnOnly, true);
+  // without the origin nothing is sent from it, and the line is a note, so the run never says every check passed
+  const sent = [];
+  const project = fakeProject();
+  const unset = await runChecks({ fetchImpl: (u, init = {}) => { sent.push((init.headers || {}).Origin || ''); return project(u, init); }, url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, configs });
+  assert.ok(!sent.includes(MANAGER));
+  const u = unset.find((x) => x.check === name);
+  assert.deepEqual([u.ok, u.warnOnly], [false, true]);
+  assert.match(u.detail, /^not checked: set LOTSYNC_MANAGER_ORIGIN to the manager view's address; its Billing card works only once that origin is in ALLOWED_ORIGINS$/);
+  assert.equal(report(unset).failed, 0, 'a note, not a failure');
+  assert.doesNotMatch(report(unset).text, /Every check passed/);
+  assert.match(report(good).text, /Every check passed/);
+});

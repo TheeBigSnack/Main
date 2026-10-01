@@ -15,8 +15,11 @@
 //     their lines read ok;
 //   - with LOTSYNC_MANAGER_ORIGIN (the hosted manager view's address),
 //     billing answers that page's CORS preflight, which only ALLOWED_ORIGINS
-//     lets through: without it the Billing card cannot call the function at
-//     all. Unset, that line is a note saying it was not checked;
+//     lets through: the page calls billing from a browser, so without it the
+//     Billing card cannot call the function at all while the extension's
+//     lines read ok (a note until billing is deployed). Unset, that line is a
+//     note saying it was not checked, so a run that never tried the page's
+//     call does not end in "Every check passed.";
 //   - with LOTSYNC_TEST_TOKEN (the access token of a signed-in test account
 //     that belongs to no dealership), /sync answers 403, and eleven wrong
 //     invite codes end in the throttle's P0005, which proves the misses are
