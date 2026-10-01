@@ -11,6 +11,13 @@ import { runChecks, report, nothingRead, notDeployedYet, configFindings, keyKind
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const URL_ = 'https://abcd.supabase.co';
 const KEY = 'sb_publishable_check-deploy-tests';
+// the signed-in test account's access token (LOTSYNC_TEST_TOKEN)
+const TOKEN = 'user-token-check-deploy-tests';
+// what the printed checklist must never contain, by value, so a renamed constant cannot make the check vacuous
+const printsNoKeyOrToken = (text, why = '') => {
+  assert.equal(text.includes(KEY), false, `the key is printed${why}`);
+  assert.equal(text.includes(TOKEN), false, `the token is printed${why}`);
+};
 const SITE = 'https://lotsync.example';
 // the hosted manager view: ALLOWED_ORIGINS in the fake below, unless broken.noManagerOrigin
 const MANAGER = 'https://app.lotsync.example';
@@ -72,7 +79,7 @@ const configs = {
 };
 
 test('a correct deploy passes every check, the signed-in ones included', async () => {
-  const findings = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
+  const findings = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const failed = findings.filter((f) => !f.ok);
   assert.deepEqual(failed, []);
   for (const t of TABLES) assert.ok(findings.some((f) => f.check === `anon reads nothing from ${t}` && f.ok), t);
@@ -80,7 +87,7 @@ test('a correct deploy passes every check, the signed-in ones included', async (
   const { text, failed: n } = report(findings);
   assert.equal(n, 0);
   assert.match(text, /Every check passed\./);
-  assert.doesNotMatch(text, /anon-key|user-token/, 'no key or token is printed');
+  printsNoKeyOrToken(text);
 });
 
 test('each broken deploy is caught and named', async () => {
@@ -103,12 +110,13 @@ test('each broken deploy is caught and named', async () => {
     [{ noManagerOrigin: true }, MANAGER_CORS_CHECK],
   ];
   for (const [broken, name] of cases) {
-    const findings = await runChecks({ fetchImpl: fakeProject(broken), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
+    const findings = await runChecks({ fetchImpl: fakeProject(broken), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, managerOrigin: MANAGER, configs });
     const f = findings.find((x) => x.check === name);
     assert.ok(f, name);
     assert.equal(f.ok, false, `${JSON.stringify(broken)} is caught by "${name}"`);
     assert.notEqual(f.warnOnly, true, `${JSON.stringify(broken)} is a failure, not a note`);
     assert.ok(report(findings).failed >= 1);
+    printsNoKeyOrToken(report(findings).text, ` when ${JSON.stringify(broken)}`);
   }
   const missing = (await runChecks({ fetchImpl: fakeProject({ missingTable: 'demo_requests' }), url: URL_, anonKey: KEY })).find((f) => f.check === 'anon reads nothing from demo_requests');
   assert.match(missing.detail, /^404, table missing: is every migration pushed\?/);
@@ -117,7 +125,7 @@ test('each broken deploy is caught and named', async () => {
 // review 5 (G12): the README deploys billing and lead after step 6, so a correct
 // deploy at step 6 must pass, with each of their lines a note saying where
 test('at README step 6, before billing and lead are deployed, nothing fails and their lines are notes', async () => {
-  const findings = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing', 'lead'] }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
+  const findings = await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing', 'lead'] }), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const { text, failed, notes } = report(findings);
   assert.equal(failed, 0, text);
   const later = findings.filter((f) => /^(billing|lead): /.test(f.check));
@@ -136,7 +144,7 @@ test('at README step 6, before billing and lead are deployed, nothing fails and 
   for (const name of ['sync', 'rewrite']) assert.ok(findings.filter((f) => f.check.startsWith(`${name}: `)).every((f) => f.ok), name);
 
   // billing deployed, Stripe not set up yet: the webhook says so in a note
-  const noSecret = await runChecks({ fetchImpl: fakeProject({ noWebhookSecret: true }), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER, configs });
+  const noSecret = await runChecks({ fetchImpl: fakeProject({ noWebhookSecret: true }), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const webhook = noSecret.find((f) => f.check === 'billing: the webhook refuses an unsigned event');
   assert.equal(webhook.warnOnly, true);
   assert.match(webhook.detail, /^500, STRIPE_WEBHOOK_SECRET is not set yet: supabase\/README\.md, Billing$/);
@@ -241,7 +249,7 @@ test('a legacy anon key still gets every line ok against a correct project', asy
     if (h.apikey === LEGACY) h.apikey = KEY;
     return project(url, { ...init, headers: h });
   };
-  const findings = await runChecks({ fetchImpl, url: URL_, anonKey: LEGACY, testToken: 'user-token', siteOrigin: SITE, managerOrigin: MANAGER });
+  const findings = await runChecks({ fetchImpl, url: URL_, anonKey: LEGACY, testToken: TOKEN, siteOrigin: SITE, managerOrigin: MANAGER });
   assert.deepEqual(findings.filter((f) => !f.ok), []);
 });
 
@@ -249,7 +257,7 @@ test('with a publishable key no request carries it after Bearer, so a 401 is a r
   const sent = [];
   const project = fakeProject();
   const fetchImpl = (url, init = {}) => { sent.push((init.headers || {}).Authorization || ''); return project(url, init); };
-  await runChecks({ fetchImpl, url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE });
+  await runChecks({ fetchImpl, url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE });
   assert.ok(sent.length > TABLES.length);
   assert.deepEqual(sent.filter((a) => a.includes(KEY)), []);
 });
@@ -277,7 +285,7 @@ test('the manager view\'s origin: checked when given, a note when not, a failure
   assert.notEqual(left.warnOnly, true, 'a failure');
   assert.match(left.detail, /allow-origin none \(is https:\/\/app\.lotsync\.example in ALLOWED_ORIGINS\?\)/);
 
-  const unset = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: 'user-token', siteOrigin: SITE, configs });
+  const unset = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, configs });
   const note = unset.find((f) => f.check === MANAGER_CORS_CHECK);
   assert.equal(note.warnOnly, true);
   assert.match(note.detail, /LOTSYNC_MANAGER_ORIGIN/);
