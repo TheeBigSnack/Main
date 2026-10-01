@@ -2,7 +2,7 @@
 
 The text and the answers for the Developer Dashboard, kept here so they are reviewed like code. `test/manifest.test.js` checks that the summary below is the manifest's description word for word, that every permission in `extension/manifest.json` is justified here, and that nothing here promises what Lot Current cannot promise. The submission itself is Milestone 5 (PLAN.md): unlisted first.
 
-Placeholders in [brackets] and the `lotcurrent.example` addresses are filled in when the website and the support inbox exist. The addresses are the same as in `extension/src/legalLinks.js`, which the set-up wizard and Settings link to; change both together.
+The homepage, the support page and the support address are filled in: the website is `https://lotcurrent.com/` (it answers there once the Pages workflow has deployed it: `docs/launch-checklist.md`, "The site live on lotcurrent.com") and the support inbox is `blawrence@lotcurrent.com` until a role address exists (`docs/support.md`). The three legal addresses are still the `lotcurrent.example` placeholders that `extension/src/legalLinks.js` holds, which the set-up wizard and Settings link to: the texts are attorney drafts, and the addresses become `https://lotcurrent.com/legal/terms/`, `https://lotcurrent.com/legal/privacy/` and `https://lotcurrent.com/legal/posting-rules/` only once they are final (`docs/website.md`, step 9); change this file and `legalLinks.js` together then. The [brackets] left are filled in at that point.
 
 ## Item name
 
@@ -45,7 +45,7 @@ What it needs
 
 Meta's Terms prohibit accessing its products "using automated means" without permission. Having a person click Publish is the most careful design available, but it is not a guarantee: we make no promise about how Meta treats any account or listing, and if Facebook ever warns you about your listings, stop and tell your manager. Lot Current is not affiliated with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only as the names of the places you post.
 
-Support: [support email]. Terms of Service and Privacy Policy: [links, same as below].
+Support: blawrence@lotcurrent.com. Terms of Service and Privacy Policy: [links, same as below].
 
 ## Category
 
@@ -102,17 +102,17 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 
 ## Privacy practices
 
-The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, what the extension sends and to whom, the data-use ticks, the Limited Use certifications and "no remote code"; all of it follows `docs/data-inventory.md`. In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off, and, once Lot Current accounts are set up, the email address they sign in with); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); personal communications, health and financial, no. Authentication information [Pending attorney answer: questions-for-attorney.md 8.1], location [Pending attorney answer: questions-for-attorney.md 8.2], web history [Pending attorney answer: questions-for-attorney.md 8.3] and user activity [Pending attorney answer: questions-for-attorney.md 8.4] wait for the attorney's answers, and so does the submission. What leaves the browser: reads of the dealership's website, requests for the car's photos to the servers the website names for them when the person fills a form or downloads the photos, the VIN to NHTSA when the person asks, the car's facts to Anthropic through our rewrite service only with the description writer on, and, when the person signs in, their posted list, post timings, to-do items and scan counts to their dealership's records. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotcurrent.example/privacy` (a placeholder until the website exists; the text is `legal/privacy-policy.md`, an attorney draft).
+The answers are in `legal/chrome-web-store-privacy.md`: the single purpose, what the extension sends and to whom, the data-use ticks, the Limited Use certifications and "no remote code"; all of it follows `docs/data-inventory.md`. In short: personally identifiable information, yes (the person's name and role, typed into Settings for the listing sign-off, and, once Lot Current accounts are set up, the email address they sign in with); website content, yes (the dealership's inventory and the Marketplace form the person is filling in); personal communications, health and financial, no. Authentication information [Pending attorney answer: questions-for-attorney.md 8.1], location [Pending attorney answer: questions-for-attorney.md 8.2], web history [Pending attorney answer: questions-for-attorney.md 8.3] and user activity [Pending attorney answer: questions-for-attorney.md 8.4] wait for the attorney's answers, and so does the submission. What leaves the browser: reads of the dealership's website, requests for the car's photos to the servers the website names for them when the person fills a form or downloads the photos, the VIN to NHTSA when the person asks, the car's facts to Anthropic through our rewrite service only with the description writer on, and, when the person signs in, their posted list, post timings, to-do items and scan counts to their dealership's records. Data is not sold, not used for anything unrelated to the single purpose, and not used for creditworthiness. Privacy policy URL: `https://lotcurrent.example/privacy` (the placeholder `extension/src/legalLinks.js` holds until the text is final; the text is `legal/privacy-policy.md`, an attorney draft, and its final address will be `https://lotcurrent.com/legal/privacy/`).
 
 ## Support and homepage
 
-- Homepage: `https://lotcurrent.example/` [the landing page, Milestone 5]
-- Support: [support email], [support page URL]
+- Homepage: `https://lotcurrent.com/`
+- Support: `blawrence@lotcurrent.com`, `https://lotcurrent.com/support/`
 - Privacy Policy: `https://lotcurrent.example/privacy`
 - Terms of Service: `https://lotcurrent.example/terms`
 - Posting rules: `https://lotcurrent.example/posting-rules`
 
-The three document addresses must equal `LEGAL` in `extension/src/legalLinks.js`.
+The three document addresses must equal `LEGAL` in `extension/src/legalLinks.js`: placeholders while the texts are drafts, the `https://lotcurrent.com/legal/...` pages once they are final.
 
 ## Before submitting
 
