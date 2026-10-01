@@ -29,7 +29,7 @@ $env:STRIPE_SECRET_KEY = Read-Host 'Stripe secret key'
 npm run stripe-setup
 ```
 
-The first line asks for the key: paste it at the prompt and press Enter. Pasted there, it is an answer, not part of a command, so the history file does not keep it. It stays set in that window only; `Remove-Item Env:STRIPE_SECRET_KEY` or closing the window clears it.
+The first line asks for the key: paste it at the prompt and press Enter. Pasted there, it is an answer, not part of a command, so the history file does not keep it. PowerShell does show the key on screen as you paste it, so do this where nobody can see your screen, and close the window when you are done. It stays set in that window only; `Remove-Item Env:STRIPE_SECRET_KEY` or closing the window clears it.
 
 (On macOS or Linux: `read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY`, paste the key (nothing shows) and press Enter, then `npm run stripe-setup`; `unset STRIPE_SECRET_KEY` clears it.)
 

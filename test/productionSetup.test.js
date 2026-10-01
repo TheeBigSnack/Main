@@ -336,6 +336,7 @@ test('the signed-in deploy check is run by the owner with the token set at a pro
   assert.ok(step, 'step 7.2 moved: update this test');
   assert.doesNotMatch(step, /Claude[^.]*runs `check-deploy`|Claude[^.]*with it \(`LOTSYNC_TEST_TOKEN`\)/, 'Claude would need the token');
   assert.ok(step.includes("$env:LOTSYNC_TEST_TOKEN = Read-Host 'access token'"), 'PowerShell reads the token at a prompt');
+  assert.match(step, /keeps it out of the terminal's history file but shows it on screen/, 'Read-Host keeps the token out of history, not off the screen');
   assert.ok(step.includes('read -rs LOTSYNC_TEST_TOKEN && export LOTSYNC_TEST_TOKEN'), 'macOS and Linux read it at a prompt');
   assert.match(step, /`npm run check-deploy`/);
   assert.match(step, /Reads the printed checklist[^.]*: it carries no token or key/);

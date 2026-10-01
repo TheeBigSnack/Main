@@ -382,6 +382,7 @@ test('stripe setup: no guide has the owner type a secret key or signing secret i
   }
   const doc = read('docs/stripe-setup.md');
   assert.ok(doc.includes("$env:STRIPE_SECRET_KEY = Read-Host 'Stripe secret key'"), 'PowerShell reads the key at a prompt');
+  assert.match(doc, /PowerShell does show the key on screen as you paste it, so do this where nobody can see your screen/, 'Read-Host keeps the key out of history, not off the screen');
   assert.ok(doc.includes('read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY'), 'macOS and Linux read it at a prompt');
   assert.match(doc, /ConsoleHost_history\.txt/, 'the guide names the file a typed key would stay in');
   const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
