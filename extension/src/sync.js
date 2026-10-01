@@ -64,6 +64,12 @@ export const UPLOAD_MARGIN_MS = 10 * 60 * 1000;
 // key left out only means its take-down is missed and can be repeated.
 export const MAX_KNOWN = 2000;
 
+// How far ahead of the server's clock a stamp may be: the sync function's
+// FUTURE_SKEW_MS. A price change stamped further ahead than this comes from a
+// clock that runs ahead; the function writes it as made at its own time, and
+// mergeRegistry takes the server's stamp for it (below).
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
+
 const ms = (x) => {
   if (x === null || x === undefined || x === '') return null;
   const t = typeof x === 'number' ? x : Date.parse(x);
@@ -311,7 +317,12 @@ const rowsOf = (remote, key) => (Array.isArray(remote) ? remote : isObject(remot
  *   - the same post on both sides: the newest change (updatedAt, else
  *     postedAt) wins for the price; a change made here after `since` is
  *     therefore kept unless the server's is newer still; a listing link or a
- *     name that is missing on one side is filled from the other.
+ *     name that is missing on one side is filled from the other. A stamp
+ *     more than FUTURE_SKEW_MS ahead of the answer's serverTime comes from a
+ *     clock that runs ahead: the server's row wins over a local change that
+ *     the request carried as it stands (the function wrote it as made at its
+ *     own time, so the row holds it with a true stamp), and a server stamp
+ *     that far ahead counts as no change time (the posting time stands in).
  * Before all of that, with the caller's `userId` given: a colleague's newer
  * post is never the row an entry the caller owns is judged by. The caller's
  * own latest row for the VIN stands in for it (so their own take-down
@@ -340,6 +351,10 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
   void since; // the newest-change rule covers it; kept in the signature so callers can say when they last synced
   const base = isObject(local) ? local : {};
   const removedHere = sentKeys(sent);
+  // the server's clock, and each sent entry's change stamp as the request carried it (VIN@postedAt -> ISO or null)
+  const serverNow = isObject(remote) ? ms(remote.serverTime) : null;
+  const tooLate = (t) => serverNow !== null && t !== null && t > serverNow + FUTURE_SKEW_MS;
+  const sentChange = new Map(Object.entries(isObject(sent) ? sent : {}).filter(([, e]) => isObject(e)).map(([key, e]) => [postKey(e.vin || key, e.postedAt), isoOrNull(e.updatedAt)]));
   const current = new Map(); // vin -> the latest post the server knows for it
   const own = new Map(); // vin -> the caller's own latest post there
   const later = (r, have) => !have || ms(r.posted_at) > ms(have.posted_at) || (ms(r.posted_at) === ms(have.posted_at) && r.status !== 'listed');
@@ -388,12 +403,15 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
     }
     if (r.status !== 'listed') continue; // taken down elsewhere
     const lStamp = ms(e.updatedAt) ?? localPosted;
-    const rStamp = ms(r.updated_at) ?? remotePosted;
-    const remoteNewer = rStamp > lStamp;
+    const rStamp = (tooLate(ms(r.updated_at)) ? null : ms(r.updated_at)) ?? remotePosted;
+    // a change made here on a clock that runs ahead, which this request carried as it stands: the server took it as made at its own time
+    const aheadHere = tooLate(ms(e.updatedAt)) && sentChange.get(postKey(e.vin || key, e.postedAt)) === isoOrNull(e.updatedAt);
+    const remoteNewer = aheadHere || rStamp > lStamp;
     const merged = { ...e };
     if (remoteNewer) {
       merged.price = intOrNull(r.price);
       if (r.updated_at) merged.updatedAt = isoOrNull(r.updated_at);
+      else if (aheadHere) delete merged.updatedAt;
       if (httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
     }
     if (!merged.listingUrl && httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);

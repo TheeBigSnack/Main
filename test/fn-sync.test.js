@@ -19,6 +19,7 @@ import { LAPSED_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
 import { syncOnce, LAPSED_MESSAGE as EXTENSION_LAPSED_MESSAGE } from '../extension/src/accountFlow.js';
 import { sessionFromTokenResponse, storeSession, ACCOUNT_KEY } from '../extension/src/account.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
+import { markPriceUpdated } from '../extension/src/rescan.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -530,6 +531,43 @@ async function signedIn(token, userId) {
   assert.equal(await storeSession(session, storage), true);
   return storage;
 }
+
+test('sync: a price update stamped on a clock 6 hours ahead does not outrank a later one made on a machine with a right clock', async () => {
+  world();
+  const handler = await load();
+  const config = { url: SUPABASE_URL, anonKey: ANON_KEY, functionsUrl: '' };
+  const fetchImpl = functionsFetch({ sync: handler });
+  const K = siteKeys(ORIGIN);
+  const once = async (storage) => {
+    const r = await syncOnce({ origin: ORIGIN, deps: { config, fetchImpl, storage, now: Date.now() } });
+    assert.equal(r.ok, true, r.error);
+    return r;
+  };
+  const row = () => fake.rows('listings').find((l) => l.vin === VIN(1));
+  const price = (storage) => storage.data[K.posted][VIN(1)].price;
+  const desktop = await signedIn(TOKEN.u1, U1);
+  const laptop = await signedIn(TOKEN.u1, U1); // the same salesperson's second machine
+  desktop.data[K.posted] = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: at(-24 * 60) } };
+  await once(desktop);
+  await once(laptop);
+  // the laptop's clock runs 6 hours ahead (the wall time typed in by hand) when the salesperson updates the price there
+  laptop.data[K.posted] = markPriceUpdated(laptop.data[K.posted], VIN(1), 19000, at(6 * 60));
+  await once(laptop);
+  assert.equal(row().price, 19000, 'the laptop\'s price change is written');
+  assert.ok(Date.parse(row().updated_at) <= Date.now(), 'as made at the server\'s time, not 6 hours from now');
+  assert.equal(laptop.data[K.posted][VIN(1)].updatedAt, new Date(Date.parse(row().updated_at)).toISOString(), 'and the laptop takes the server\'s stamp for it');
+  await once(desktop);
+  assert.equal(price(desktop), 19000);
+  await new Promise((resolve) => setTimeout(resolve, 5)); // a later moment on any clock
+  // the website drops the price again, and the salesperson updates the listing on the desktop
+  desktop.data[K.posted] = markPriceUpdated(desktop.data[K.posted], VIN(1), 18000);
+  const r = await once(desktop);
+  assert.equal(r.counts.listingsUpdated, 1);
+  assert.deepEqual([row().price, price(desktop)], [18000, 18000], 'the later change wins on the server and stays on the desktop');
+  await once(laptop);
+  await once(desktop);
+  assert.deepEqual([row().price, price(laptop), price(desktop)], [18000, 18000, 18000], 'the laptop\'s next sync puts nothing back');
+});
 
 test('sync: the extension\'s syncOnce against the real handler: the registry goes up, a colleague\'s listing comes down marked theirs, and the state is kept', async () => {
   const now = Date.now();

@@ -22,7 +22,11 @@
 //     lapsed dealership is refused with 402 before anything is written;
 //   - a listing whose posted_at is more than FUTURE_SKEW_MS ahead of the
 //     server's clock is rejected (counts.rejected): a stamp from the future
-//     would win every merge for ever;
+//     would win every merge for ever. A price change (updated_at) stamped
+//     that far ahead is written as made at the server's time, and a stored
+//     one that far ahead counts as no change time at all (the posting time
+//     stands in), so a machine whose clock runs ahead cannot outrank a
+//     later change made on a machine with a right clock;
 //   - a VIN that another member currently has listed is theirs: an upload of
 //     it by anyone else is skipped (counts.conflicts), so a car is re-posted
 //     only by the person who has it up, or after their row is taken down;
@@ -53,7 +57,7 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 const BODY_LIMIT = 512 * 1024; // a registry of a whole lot is a few tens of KiB
 const PER_MINUTE = 12; // syncs per user per minute (the extension syncs after a scan, a post, a price update or a take-down)
 const MAX_ROWS = 2000; // listings, known keys, post attempts or to-do flags in one request
-const FUTURE_SKEW_MS = 5 * 60 * 1000; // how far ahead of the server's clock a posted_at may be
+const FUTURE_SKEW_MS = 5 * 60 * 1000; // how far ahead of the server's clock a posted_at or updated_at may be (extension/src/sync.js keeps the same)
 const TAKEN_DOWN_WINDOW_DAYS = 90; // how far back taken-down rows go to a machine that never synced
 const CUTOFF_MARGIN_MS = 10 * 60 * 1000; // take-downs and closed to-do items this long before `since` come back again (step 6)
 const KEY_MAX = 80; // a known key is a VIN, an @ and a time; anything longer is not one
@@ -376,8 +380,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (sentListings.length > MAX_ROWS || known.count > MAX_ROWS || attempts.length > MAX_ROWS || todos.length > MAX_ROWS) {
     return json(req, 400, { ok: false, error: `too many entries in one request (at most ${MAX_ROWS} listings, post attempts or to-do flags)` });
   }
-  const latest = Date.now() + FUTURE_SKEW_MS;
+  const now = Date.now();
+  const latest = now + FUTURE_SKEW_MS;
   const incoming = sentListings.filter((r) => (ms(r.posted_at) ?? 0) <= latest);
+  // a price change from a clock that runs ahead is taken as made now: its
+  // price goes in, and a later change from any other machine still wins
+  for (const r of incoming) if ((ms(r.updated_at) ?? 0) > latest) r.updated_at = new Date(now).toISOString();
+  // when a row last changed: its updated_at, unless that is from the future, else its posting time
+  const changedAt = (r: Row | ListingRow): number => {
+    const u = ms(r.updated_at);
+    return (u !== null && u <= latest ? u : ms(r.posted_at)) ?? 0;
+  };
   const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: sentListings.length - incoming.length, conflicts: 0, attempts: 0, todoItems: 0, scans: 0 };
 
   try {
@@ -404,7 +417,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
       if (String(have.user_id) !== me || have.status !== 'listed') continue;
       const patch: Row = {};
-      const newer = (ms(row.updated_at) ?? ms(row.posted_at) ?? 0) > (ms(have.updated_at) ?? ms(have.posted_at) ?? 0);
+      const newer = changedAt(row) > changedAt(have);
       if (newer) {
         patch.price = row.price;
         patch.updated_at = row.updated_at;

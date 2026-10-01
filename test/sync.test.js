@@ -4,7 +4,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, UPLOAD_MARGIN_MS } from '../extension/src/sync.js';
+import { readFileSync } from 'node:fs';
+import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, UPLOAD_MARGIN_MS, FUTURE_SKEW_MS } from '../extension/src/sync.js';
 import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
@@ -191,6 +192,34 @@ test('mergeRegistry: the newest change wins for the price, both ways; a local ch
   // an entry never updated on either side: the post time decides, so nothing moves
   const plain = mergeRegistry({ [VIN_A]: { name: 'A', price: 19000, postedAt: T(0) } }, [row(VIN_A, { price: 18500 })]);
   assert.equal(plain[VIN_A].price, 19000);
+});
+
+test('mergeRegistry: a change stamped more than FUTURE_SKEW_MS ahead of the server\'s clock never outranks a later one', () => {
+  const fn = readFileSync(new URL('../supabase/functions/sync/index.ts', import.meta.url), 'utf8');
+  const skew = fn.match(/const FUTURE_SKEW_MS = ([\d *]+);/)[1].split('*').reduce((a, b) => a * Number(b), 1);
+  assert.equal(FUTURE_SKEW_MS, skew, 'the sync function\'s FUTURE_SKEW_MS');
+  const ahead = T(10 + 6 * 60); // a clock 6 hours ahead
+  const local = { [VIN_A]: { name: 'A', price: 19000, postedAt: T(0), updatedAt: ahead, userId: U1 } };
+  const sent = { [VIN_A]: { name: 'A', price: 19000, postedAt: T(0), updatedAt: ahead } };
+  // the request carried the change: the server wrote it as made at its own time, and that stamp replaces the one from the future
+  const taken = mergeRegistry(local, { serverTime: T(11), listings: [row(VIN_A, { user_id: U1, price: 19000, updated_at: T(10) })] }, { userId: U1, sent });
+  assert.deepEqual([taken[VIN_A].price, taken[VIN_A].updatedAt], [19000, T(10)]);
+  // a later change made elsewhere since then wins as well
+  const later = mergeRegistry(local, { serverTime: T(31), listings: [row(VIN_A, { user_id: U1, price: 18000, updated_at: T(30) })] }, { userId: U1, sent });
+  assert.deepEqual([later[VIN_A].price, later[VIN_A].updatedAt], [18000, T(30)]);
+  // a change made here while the request was out has not reached the server yet: it is kept and goes up next time
+  const meanwhile = mergeRegistry(local, { serverTime: T(11), listings: [row(VIN_A, { user_id: U1, price: 20000, updated_at: null })] }, { userId: U1, sent: { [VIN_A]: { ...sent[VIN_A], updatedAt: undefined } } });
+  assert.deepEqual([meanwhile[VIN_A].price, meanwhile[VIN_A].updatedAt], [19000, ahead]);
+  // without the server's clock nothing is known to be ahead: the newest stamp wins, as before
+  assert.equal(mergeRegistry(local, [row(VIN_A, { user_id: U1, price: 18000, updated_at: T(30) })], { userId: U1, sent })[VIN_A].price, 19000);
+  // a server stamp that far ahead counts as no change time: a real change made here wins and goes up
+  const mine = { [VIN_A]: { name: 'A', price: 17500, postedAt: T(0), updatedAt: T(20), userId: U1 } };
+  const theirs = mergeRegistry(mine, { serverTime: T(21), listings: [row(VIN_A, { user_id: U1, price: 30000, updated_at: ahead })] }, { userId: U1 });
+  assert.deepEqual([theirs[VIN_A].price, theirs[VIN_A].updatedAt], [17500, T(20)]);
+  // a stamp just inside the margin is a clock a little fast, and still counts
+  const near = T(11 + 4); // 4 minutes ahead of the server
+  const fine = mergeRegistry({ [VIN_A]: { ...local[VIN_A], updatedAt: near } }, { serverTime: T(11), listings: [row(VIN_A, { user_id: U1, price: 18000, updated_at: T(10) })] }, { userId: U1, sent: { [VIN_A]: { ...sent[VIN_A], updatedAt: near } } });
+  assert.deepEqual([fine[VIN_A].price, fine[VIN_A].updatedAt], [19000, near]);
 });
 
 test('mergeRegistry: a missing link, name or salesperson is filled from the server; the newer post of a car re-posted elsewhere replaces the old one', () => {
