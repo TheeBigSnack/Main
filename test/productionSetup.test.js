@@ -62,7 +62,7 @@ test('the Supabase CLI in the deploy is the one the CI stack job tests with', ()
 test('the manager view deploys from the default branch only, configured, tested, without serve.mjs, with an exact wrangler', () => {
   assert.match(manager, /if: github\.ref_name == github\.event\.repository\.default_branch/);
   assert.match(manager, /^permissions:\n  contents: read$/m);
-  const order = ['node scripts/set-project.mjs --check', 'node --test test/manager.test.js', '--exclude serve.mjs', 'pages deploy'];
+  const order = ['node scripts/set-project.mjs --check', 'run: npm test', '--exclude serve.mjs', 'pages deploy'];
   const at = order.map((s) => manager.indexOf(s));
   assert.ok(at.every((i) => i > 0), JSON.stringify(at));
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'checked, then tested, then staged, then uploaded');
@@ -70,6 +70,27 @@ test('the manager view deploys from the default branch only, configured, tested,
   assert.ok(wranglers.length >= 2 && wranglers.every((v) => /^\d+\.\d+\.\d+$/.test(v)), 'an exact version every time');
   assert.match(manager, /go=false[\s\S]*::notice::|::notice::[\s\S]*go=false/, 'without the Cloudflare secrets it stops green with a notice');
   assert.match(manager, /pages deploy "\$RUNNER_TEMP\/manager"/, 'only the staged folder is uploaded');
+});
+
+// The deploy fires on its own push, separately from CI, so its test step is
+// the only gate before the upload. Every test that loads the page's code
+// (manager/data.js's copies of the billing function's rules are held equal
+// by test/billing.test.js and test/fn-billing.test.js; the onboarding copy's
+// labels by test/marketing.test.js; the page itself runs in
+// test/managerPage.test.js) must be in it: the whole unit suite, as CI's
+// unit job runs it, or each such file by name.
+test('the manager view deploy runs every unit test that loads the page\'s code before it uploads', () => {
+  const step = manager.split(/\n      - /).find((x) => /^name: [^\n]*tests?\n/.test(x) && /node --test|npm test/.test(x));
+  assert.ok(step, 'a test step');
+  const run = runText(`      - ${step}`);
+  const pkg = JSON.parse(read('package.json'));
+  const whole = /^npm test$/m.test(run) && pkg.scripts.test === 'node --test test/*.test.js';
+  const loaders = readdirSync(new URL('./', import.meta.url))
+    .filter((f) => f.endsWith('.test.js'))
+    .filter((f) => /from '\.\.\/manager\/|join\(root, 'manager\/(?:manager|data)\.js'\)/.test(read(`test/${f}`)));
+  for (const f of ['billing.test.js', 'fn-billing.test.js', 'marketing.test.js', 'manager.test.js', 'managerPage.test.js']) assert.ok(loaders.includes(f), `${f} no longer loads the page's code: update this test`);
+  for (const f of loaders) assert.ok(whole || run.includes(`test/${f}`), `the deploy uploads the page without running test/${f}`);
+  assert.match(ci, /^ {6}- run: npm test$/m, 'CI\'s unit job runs the same suite');
 });
 
 // set-project --check alone checks the URL's shape and that the two files
@@ -95,7 +116,7 @@ test('every manager view run ends with the hosting check; "check only" skips eve
   assert.match(last, /node scripts\/check-hosting\.mjs "\$\{pages\[@\]\}"/);
   assert.match(last, /--sender "\$SENDER_DOMAIN"/);
   assert.match(last, /exit "\$status"/, 'a failed check fails the run');
-  for (const s of steps.filter((x) => /set-project\.mjs --check|node --test|rsync|pages deploy/.test(x))) {
+  for (const s of steps.filter((x) => /set-project\.mjs --check|node --test|run: npm test|rsync|pages deploy/.test(x))) {
     assert.match(s, /if: steps\.ready\.outputs\.go == 'true' && env\.CHECK_ONLY != 'true'\n/, s.split('\n')[0]);
   }
   assert.match(manager, /CHECK_ONLY: \$\{\{ inputs\.check_only == true \}\}/);

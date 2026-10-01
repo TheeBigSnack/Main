@@ -8,8 +8,8 @@
 # stops green, so pushes before the account exists stay quiet. With them it
 # refuses to deploy a page that names any project but the one in
 # SUPABASE_PROJECT_REF, or that is not ready (npm run set-project -- --check
-# --project-ref), runs the page's tests, and uploads the folder without the
-# local demo server.
+# --project-ref), runs every unit test (npm test, as CI's unit job does), and
+# uploads the folder without the local demo server.
 #
 # Settings it reads, on the "manager-view" environment (Settings,
 # Environments, manager-view, deployment branches: the default branch only),
@@ -93,9 +93,13 @@ jobs:
         run: |
           if ! printf '%s' "$PROJECT_REF" | grep -Eq '^[a-z0-9]{20}$'; then echo "::error::the variable SUPABASE_PROJECT_REF is missing on the manager-view environment or is not a 20-character project ref (docs/production-setup.md, step 6)"; exit 1; fi
           node scripts/set-project.mjs --check --project-ref "$PROJECT_REF"
-      - name: The page's tests
+      # Every unit test, as CI's unit job runs them: this deploy does not wait
+      # for CI, and the tests that hold the page's copies of the billing
+      # function's rules equal to the function's (test/billing.test.js,
+      # test/fn-billing.test.js) are not in the page's own test file.
+      - name: The unit tests
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
-        run: node --test test/manager.test.js test/setProject.test.js test/productionSetup.test.js test/checkHosting.test.js
+        run: npm test
       - name: Stage the folder without the local demo server
         if: steps.ready.outputs.go == 'true' && env.CHECK_ONLY != 'true'
         run: |
