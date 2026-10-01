@@ -11,8 +11,8 @@ export const POPUP_ORIGIN = 'https://example-dealer.test';
 const RECORDS = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => r);
 let copies = 0;
 
-export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, records = RECORDS, granted = true } = {}) {
-  const page = fakeDealerPage({ records, origin, name: 'Example Motors' });
+export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, records = RECORDS, granted = true, name = 'Example Motors' } = {}) {
+  const page = fakeDealerPage({ records, origin, name });
   const chrome = fakeChrome(page, local);
   chrome.storage.local.remove = async (keys) => { for (const key of [].concat(keys)) delete local[key]; };
   chrome.storage.onChanged = { addListener() {} };

@@ -149,3 +149,64 @@ test('Not now says where the posting rules are; Settings shows them, and its tic
   assert.match(p.panel(), /id="rulesStatus">You ticked that you will follow them on /);
   assert.doesNotMatch(p.panel(), /name="rulesAccept"/);
 });
+
+// Before a website's first scan the popup knows only its address. A Settings
+// save or a sign-in then must not store the address as the dealership's name
+// with no store ticked: the first scan fills in the name the website gives
+// and ticks the store named after the website, as it does with no settings.
+test('saving Settings or signing in before the website\'s first scan leaves the dealership name and the store for that scan to fill in', async () => {
+  const STORE = MY_STORE.myStores[0]; // the site is named after one of the fixture lot's stores
+  const host = new URL(POPUP_ORIGIN).hostname;
+  const valueIn = (html, name) => (new RegExp(`name="${name}" value="([^"]*)"`).exec(html) || [])[1] ?? null;
+  const submitSettings = async (p) => {
+    await p.tab('settings');
+    // the form posts what its boxes hold: the person types only their name
+    const values = { salespersonName: 'Sam', dealerName: valueIn(p.panel(), 'dealerName'), dailyCap: '10' };
+    const before = globalThis.FormData;
+    globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll() { return []; } has(name) { return name in values; } };
+    try {
+      await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: () => null }, preventDefault() {} });
+    } finally {
+      globalThis.FormData = before;
+    }
+  };
+  const signIn = async (p) => {
+    const boxes = { accountEmail: 'sam@example.test', accountCode: '123456' };
+    const query = globalThis.document.querySelector;
+    const fetchBefore = globalThis.fetch;
+    globalThis.document.querySelector = (sel) => { const m = /\[name="(\w+)"\]/.exec(sel); return m && m[1] in boxes ? { value: boxes[m[1]] } : null; };
+    globalThis.fetch = async (url) => (String(url).endsWith('/auth/v1/verify')
+      ? { ok: true, status: 200, json: async () => ({ access_token: 'a.e30.c', refresh_token: 'r', expires_in: 3600, user: { id: 'u1', email: boxes.accountEmail } }) }
+      : { ok: false, status: 404, json: async () => ({}) });
+    try {
+      await p.click('accountSignIn');
+    } finally {
+      globalThis.document.querySelector = query;
+      globalThis.fetch = fetchBefore;
+    }
+    assert.match(p.status(), /Synced|Sync failed|Signed in/, 'the sign-in went through');
+  };
+  for (const [how, before] of [['Save settings', submitSettings], ['Sign in', signIn]]) {
+    const p = await loadPopup({ name: STORE });
+    await before(p);
+    const saved = p.local[k.settings];
+    assert.ok(saved, `${how}: settings were saved`);
+    assert.notEqual(saved.dealer.name, host, `${how}: the website's address is not stored as the dealership's name`);
+    assert.notEqual(p.sync[PROFILE_KEY].dealer.name, host, `${how}: nor carried in the synced profile`);
+    await p.scan();
+    assert.equal(p.status(), '', `${how}: the scan went through`);
+    const s = p.local[k.settings];
+    assert.equal(s.dealer.name, STORE, `${how}: the first scan names the dealership as the website does`);
+    assert.deepEqual(s.myStores, [STORE], `${how}: and ticks the website's own store`);
+    const ready = Object.values(p.local[k.snapshot].vehicles).filter((v) => v.decision === 'ready');
+    assert.ok(ready.length && ready.every((v) => v.location === STORE), `${how}: only this store's cars are ready to post`);
+    assert.equal(p.sync[PROFILE_KEY].dealer.name, STORE, `${how}: the profile is saved again with the name`);
+  }
+  // Settings an earlier build saved that way (the address as the name, no
+  // store) are put right by the website's first scan too.
+  const p = await loadPopup({ name: STORE, local: { [k.settings]: { dealer: { name: host }, myStores: [], salesperson: { name: 'Sam' } } } });
+  await p.scan();
+  assert.equal(p.local[k.settings].dealer.name, STORE);
+  assert.deepEqual(p.local[k.settings].myStores, [STORE]);
+  assert.equal(p.local[k.settings].salesperson.name, 'Sam', 'what the person typed stays');
+});

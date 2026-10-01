@@ -61,6 +61,12 @@ const state = {
 
 const rescanOrigins = () => (state.site ? originsFor(state.site.site || { origin: state.origin }, state.site.service) : []);
 
+// What the last scan read about the website, for the blanks in the settings
+// (withDefaults): nothing before the website's first scan, so a Settings
+// save or a sign-in then never stores the website's address as the
+// dealership's name; the first scan fills in the name the website gives.
+const knownSite = () => state.snapshot?.site || {};
+
 async function checkRescanPermission() {
   const origins = rescanOrigins();
   if (!origins.length) { state.rescanPermission = null; return; }
@@ -579,7 +585,7 @@ function renderReadyBody() {
 // every other change to a shared key.
 async function changeReadySort(value) {
   const order = sortOrder(value);
-  const site = state.snapshot?.site || { name: state.siteName };
+  const site = knownSite();
   state.settings = withDefaults({ ...(state.settings || {}), readySort: order }, site);
   renderReadyBody();
   if (!state.origin) return;
@@ -793,7 +799,7 @@ function accountFieldset() {
 function viewSettings() {
   const entries = Object.values(state.snapshot?.vehicles || {});
   const locations = [...new Set(entries.map((e) => e.location).filter(Boolean))].sort();
-  const s = withDefaults(state.settings || {}, { name: state.siteName });
+  const s = withDefaults(state.settings || {}, knownSite());
   const fee = feeGap(entries);
   const example = fee.example;
   const suggested = suggestedPriceNote(fee.gap, s.basis);
@@ -824,7 +830,7 @@ function viewSettings() {
       <p class="hint">Counted from the in-stock date the website gives for the car, or else from the scan that first saw it. A car you have posted is never marked new. ${MIN_NEW_DAYS} to ${MAX_NEW_DAYS} days; kept for this website only, so it does not follow your profile to another website. The order of the Ready to post list is remembered the same way.</p>
     </fieldset>
     <fieldset><legend>Dealership, named on every listing</legend>
-      ${field('Dealership name', 'dealerName', s.dealer.name)}
+      ${field('Dealership name', 'dealerName', s.dealer.name, state.snapshot ? undefined : 'type="text" placeholder="Filled in from the website at the first scan"')}
       ${field('City', 'dealerCity', s.dealer.city)}
       ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="e.g. OH" maxlength="2"')}
       ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="e.g. 43215" inputmode="numeric"')}
@@ -1118,7 +1124,7 @@ async function onPanelClick(ev) {
       }
       state.rescanPermission = granted;
       if (granted) {
-        state.settings = withDefaults({ ...(state.settings || {}), autoRescan: true }, state.snapshot?.site || { name: state.siteName });
+        state.settings = withDefaults({ ...(state.settings || {}), autoRescan: true }, knownSite());
         if (!(await save('settings'))) break; // the status says why; the registry the worker reads is left as it was
         if (await setSiteAuto(true)) setStatus('Automatic rescans are on: every 3 hours while Chrome is open.');
       } else {
@@ -1271,7 +1277,7 @@ async function syncNow() {
 // a key typed for a self-hosted backend is kept in case they switch back.
 async function pointRewriteAtAccount() {
   if (!state.origin) return;
-  const site = state.snapshot?.site || { name: state.siteName };
+  const site = knownSite();
   const prev = withDefaults(state.settings || {}, site);
   const endpoint = rewriteEndpointFor(ACCOUNT);
   if (!endpoint || sameAddress(prev.rewrite.endpoint, endpoint)) return;
@@ -1373,7 +1379,7 @@ async function onSettingsSubmit(ev) {
     if (box) box.focus();
     return;
   }
-  const prev = withDefaults(state.settings || {}, { name: state.siteName });
+  const prev = withDefaults(state.settings || {}, knownSite());
   const str = (k) => String(form.get(k) ?? '').trim();
   state.settings = withDefaults(
     {
@@ -1392,7 +1398,7 @@ async function onSettingsSubmit(ev) {
       legal: form.get('legalAccept') === 'on' && legalHosted() ? acceptLegal() : prev.legal, // the tick is the same acceptance the wizard's Terms step records; nothing while the documents are placeholders
       rulesReadAt: form.get('rulesAccept') === 'on' ? new Date().toISOString() : prev.rulesReadAt, // the same tick as set-up's rules step and the side panel's
     },
-    { name: state.siteName }
+    knownSite()
   );
   let message = 'Saved. Click Rescan website to apply.';
   if (state.settings.autoRescan && state.site && !state.rescanPermission) {

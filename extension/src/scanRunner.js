@@ -171,10 +171,11 @@ const defaultStores = (site, stores) => { const mine = matchStore(site, stores);
 
 /**
  * A full scan from a dealer tab: probe, detect the adapter, read the lot,
- * settle the settings (first scan: defaults from the site; from the synced
- * profile: keep only store names this website has), assess, diff, remember
- * the site for background rescans. Used by the popup's Scan button and the
- * set-up wizard.
+ * settle the settings (the website's first scan: defaults from the site, the
+ * store named after it ticked even over settings saved before the scan; from
+ * the synced profile: keep only store names this website has), assess,
+ * diff, remember the site for background rescans. Used by the popup's Scan
+ * button and the set-up wizard.
  */
 export async function performScan({ tabId, origin, settings = null, settingsFromProfile = false, snapshot = null, posted = {}, boilerplate = [] }) {
   const probe = await probeTab(tabId);
@@ -187,13 +188,21 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   const out = await scanWithSearch({ adapter, search, site, settings: s || withDefaults({}, site), prevSnapshot: snapshot, posted, options: adapter.scanOptions(service), boilerplate });
   if (!out.ok) return { ok: false, message: out.message || "Couldn't read this page." };
   let result = out;
-  if (!s || settingsFromProfile) {
+  // The website's first scan (no snapshot yet) settles the stores, whatever
+  // settings came before it: Settings lists no store until a scan, so
+  // settings saved before one (a Save, a sign-in) never chose any.
+  if (!s || settingsFromProfile || !snapshot) {
     const stores = storeNames(out.vehicles);
-    if (s && settingsFromProfile) {
-      // (whether the profile's dealership part applies here was decided by
-      // settingsFromProfile from the website it was saved on)
+    if (s) {
+      // From the synced profile (whether its dealership part applies here was
+      // decided by settingsFromProfile from the website it was saved on), or
+      // saved before this first scan: only store names this website has.
       const kept = s.myStores.filter((st) => stores.includes(st));
-      s = withDefaults({ ...s, myStores: kept.length ? kept : defaultStores(site, stores) }, site);
+      // An earlier build stored the website's address as the dealership's
+      // name when Settings was saved before the first scan; the name the
+      // website gives replaces it.
+      const dealer = !snapshot && site.host && s.dealer.name === site.host ? { ...s.dealer, name: '' } : s.dealer;
+      s = withDefaults({ ...s, dealer, myStores: kept.length ? kept : defaultStores(site, stores) }, site);
     } else {
       s = withDefaults({ myStores: defaultStores(site, stores) }, site);
     }
