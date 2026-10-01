@@ -316,6 +316,30 @@ test('mergeFlags: the same sold car or price change flagged on the salesperson\'
   assert.deepEqual(mergeFlags(later, remote), later);
 });
 
+test('mergeFlags: a flag the merged registry shows already handled, with no item open on the server, was raised from a registry that had not heard of the fix, and is dropped', () => {
+  // this machine's rescan ran on its registry from before a fix made on the
+  // salesperson's other machine: A's sale, B's price drop to 19000, C's to 18000
+  const pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [{ vin: VIN_B, name: 'B', yours: true, from: 20000, to: 19000 }, { vin: VIN_C, name: 'C', yours: true, from: 20000, to: 18000 }], warnings: [] }, { at: T(50) });
+  // the registry this sync merged: A is down, B is at the website price, C is not yet
+  const registry = { [VIN_B]: { name: 'B', price: 19000, postedAt: T(0), updatedAt: T(30) }, [VIN_C]: { name: 'C', price: 19500, postedAt: T(0), updatedAt: T(30) } };
+  // the other machine's items, closed before this flag was raised (or long ago, and not in the answer at all)
+  const closedThere = { todoItems: [{ vin: VIN_A, kind: 'takeDown', flagged_at: T(10), done_at: T(30), how: 'manual' }, { vin: VIN_B, kind: 'price', flagged_at: T(10), done_at: T(30), how: 'manual', from_price: 20000, to_price: 19000 }] };
+  for (const remote of [closedThere, { todoItems: [] }]) {
+    const merged = mergeFlags(pilot, remote, registry);
+    assert.deepEqual(merged.flags.map((f) => [f.vin, f.kind, f.doneAt]), [[VIN_C, 'price', undefined]], 'A and B dropped; C, which the listing does not show, kept open');
+  }
+  // an item open on the server (this flag's own, or the other machine's) is followed as before, whatever the registry says
+  const open = { todoItems: [{ vin: VIN_A, kind: 'takeDown', flagged_at: T(50), done_at: null }, { vin: VIN_B, kind: 'price', flagged_at: T(20), done_at: null }] };
+  const followed = mergeFlags(pilot, open, registry);
+  assert.deepEqual(followed.flags.map((f) => [f.vin, f.flaggedAt, f.doneAt]), [[VIN_A, T(50), undefined], [VIN_B, T(20), undefined], [VIN_C, T(50), undefined]]);
+  // a colleague's entry of the car is not the salesperson's own: B's flag stands
+  assert.equal(mergeFlags(pilot, { todoItems: [] }, { ...registry, [VIN_B]: { ...registry[VIN_B], mine: false } }).flags.length, 2);
+  // without the registry nothing is dropped, and a closed flag is never touched
+  assert.deepEqual(mergeFlags(pilot, closedThere), pilot);
+  const ticked = resolveFlag(pilot, VIN_B, 'price', { at: T(55), how: 'manual' });
+  assert.deepEqual(mergeFlags(ticked, { todoItems: [] }, registry).flags.map((f) => [f.vin, Boolean(f.doneAt)]), [[VIN_B, true], [VIN_C, false]]);
+});
+
 test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {
   const today = { from: T(0), to: new Date(Date.UTC(2026, 10, 17, 9, 0)).toISOString() };
   const s = nextSyncState(null, { serverTime: T(1), dealership: { id: D, name: 'Example Motors' }, role: 'salesperson' });

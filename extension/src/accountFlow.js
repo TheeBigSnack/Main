@@ -19,11 +19,11 @@
 //
 // What a sync writes, all under the key's lock (src/storage.js): the merged
 // registry to posted:<origin> (colleagues' entries marked `mine: false`, so
-// the cap and the rescan flags stay the salesperson's own), closed flags to
-// pilot:<origin>, and the state for the next call (since, this machine's
-// clock when the sync began, the keys of the salesperson's own posts it
-// sent or received, dealership, role, the plan,
-// the server's count of today's posts) to sync:<origin>. The access token is
+// the cap and the rescan flags stay the salesperson's own), the flags
+// closed (or dropped, mergeFlags) to pilot:<origin>, and the state for the
+// next call (since, this machine's clock when the sync began, the keys of
+// the salesperson's own posts it sent or received, dealership, role, the
+// plan, the server's count of today's posts) to sync:<origin>. The access token is
 // only ever read from the session in chrome.storage.local; it is never
 // copied into the settings or the synced profile.
 
@@ -228,8 +228,9 @@ async function postJson(fetchImpl, url, body, headers, timeoutMs) {
 /**
  * One round of sync for one dealer website: the salesperson's registry and
  * the pilot's changes go up, the dealership's registry comes down and is
- * merged into posted:<origin>, closed flags into pilot:<origin>, and the
- * state for the next call into sync:<origin>.
+ * merged into posted:<origin>, the flags in pilot:<origin> follow the
+ * server's to-do items (mergeFlags), and the state for the next call goes
+ * into sync:<origin>.
  * @param {object} args
  *   origin: the dealer website's origin
  *   scan:   this scan's counts ({ takenAt, cars, ready, takeDownCount, priceUpdateCount }),
@@ -345,7 +346,7 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
     }, storage);
     await updateKey(k.pilot, (current) => {
       const before = withPilotDefaults(current);
-      const merged = mergeFlags(before, answer);
+      const merged = mergeFlags(before, answer, held); // with the registry just merged: a flag raised before this machine heard of a fix made elsewhere goes
       return same(merged, before) ? undefined : merged;
     }, storage);
     // A state gone by now means a clear landed after the merge: nothing is

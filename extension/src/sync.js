@@ -7,7 +7,7 @@
 //   const body = syncPayload({ origin, posted, pilot, scan, since, localSince: state.localSince, known: state.known, userId });
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
 //   posted = mergeRegistry(posted, response, { since, userId, sent: body.posted });
-//   pilot  = mergeFlags(pilot, response);
+//   pilot  = mergeFlags(pilot, response, posted); // the merged registry: a flag of a fix made elsewhere goes
 //   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId, localSince })
 //            // since, localSince, known, dealership id and role, the plan, the server's count of today's posts
 //
@@ -450,32 +450,71 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
  *   - open there with another flagging time (the other machine's sighting):
  *     the flag takes that row's time (the earliest, if there are several),
  *     so both machines carry one key and the hours count from it.
- * Nothing is added or reopened: a flag belongs to the salesperson's own
- * listing and only their machines carry it. Returns the pilot record
- * (unchanged when nothing matched). `remote` is the sync answer
+ * With neither, and with `registry` (the registry this sync merged) showing
+ * the change already (the salesperson's own entry for the car is at the
+ * flag's new price, or, for a take-down, there is no own entry for it any
+ * more), the flag was raised from a registry that had not yet heard of a
+ * fix made on another machine (a rescan that ran before this sync), and the
+ * sync function filed no item for it: it is dropped, so it is never closed
+ * later as cleared by the website, and the item stays as the machine that
+ * fixed it closed it. Nothing is added or reopened: a flag belongs to the
+ * salesperson's own listing and only their machines carry it. Returns the
+ * pilot record (unchanged when nothing matched). `remote` is the sync answer
  * ({ todoItems: [...] }) or a plain array.
  */
-export function mergeFlags(pilot, remote) {
+export function mergeFlags(pilot, remote, registry = null) {
   const p = withPilotDefaults(pilot);
   const rows = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && ms(t.flagged_at) !== null);
-  if (!rows.length || !p.flags.length) return p;
+  const shown = isObject(registry) ? showsChange(registry) : null;
+  if ((!rows.length && !shown) || !p.flags.length) return p;
   let touched = false;
-  const flags = p.flags.map((f) => {
-    if (f.doneAt) return f;
+  const flags = [];
+  for (const f of p.flags) {
+    if (f.doneAt) {
+      flags.push(f);
+      continue;
+    }
     const item = rows.filter((t) => vinOf(t.vin) === vinOf(f.vin) && t.kind === f.kind);
     const t = item.find((d) => d.done_at && (sameMoment(d.flagged_at, f.flaggedAt) || (ms(d.done_at) ?? -Infinity) >= (ms(f.flaggedAt) ?? Infinity)));
     if (t) {
       touched = true;
       const at = isoOrNull(t.done_at);
-      return { ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) };
+      flags.push({ ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) });
+      continue;
     }
     const open = item.filter((d) => !d.done_at);
-    if (!open.length || open.some((d) => sameMoment(d.flagged_at, f.flaggedAt))) return f;
-    const first = open.reduce((a, b) => (ms(b.flagged_at) < ms(a.flagged_at) ? b : a));
-    touched = true;
-    return { ...f, flaggedAt: isoOrNull(first.flagged_at) };
-  });
+    if (open.length) {
+      if (open.some((d) => sameMoment(d.flagged_at, f.flaggedAt))) {
+        flags.push(f);
+        continue;
+      }
+      const first = open.reduce((a, b) => (ms(b.flagged_at) < ms(a.flagged_at) ? b : a));
+      touched = true;
+      flags.push({ ...f, flaggedAt: isoOrNull(first.flagged_at) });
+      continue;
+    }
+    if (shown && shown(f)) {
+      touched = true; // a late sighting of a change already made: dropped
+      continue;
+    }
+    flags.push(f);
+  }
   return touched ? { ...p, flags } : p;
+}
+
+// Whether a registry already shows a flag's change, as the sync function
+// judges it from the listing rows (step 4): the salesperson's own entry for
+// the car is at the flag's new price, or, for a take-down, there is no own
+// entry for the car.
+function showsChange(registry) {
+  const own = new Map();
+  for (const [key, e] of Object.entries(registry)) if (isObject(e) && e.mine !== false) own.set(vinOf(e.vin || key), e);
+  return (f) => {
+    const e = own.get(vinOf(f.vin));
+    if (f.kind === 'takeDown') return !e;
+    const to = intOrNull(f.to);
+    return Boolean(e) && to !== null && intOrNull(e.price) === to;
+  };
 }
 
 // The plan words the sync function answers (subscription_state() on the server).

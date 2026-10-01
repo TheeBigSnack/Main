@@ -518,6 +518,50 @@ test('sync: to-do items: the same sold car or price change flagged on another ma
   assert.equal(rowsOf(VIN(5)).length, 2);
 });
 
+test('sync: to-do items: an open flag of a change the caller\'s own listing already shows adds no row; anything else still goes in', async () => {
+  const rowsOf = (vin) => fake.rows('todo_items').filter((t) => t.vin === vin).map((t) => [t.kind, Boolean(t.done_at), t.to_price]);
+  world({
+    rows: {
+      listings: [
+        listing({ vin: VIN(1), price: 19000, updated_at: at(-700) }), // the price another machine of the caller's set
+        listing({ vin: VIN(2), status: 'taken_down', taken_down_at: at(-700) }), // taken down on another machine
+        listing({ vin: VIN(3), price: 20000 }), // not updated yet
+        listing({ vin: VIN(4), user_id: U2, price: 19000 }), // a colleague's row is not the caller's listing
+        listing({ vin: VIN(5), price: 19000, updated_at: at(-700) }),
+        listing({ vin: VIN(6), status: 'taken_down', taken_down_at: at(-700) }),
+        listing({ vin: VIN(6), price: 20000, posted_at: at(-600), created_at: at(-600) }), // posted again: up
+      ],
+      todo_items: [{ dealership_id: D1, vin: VIN(1), kind: 'price', flagged_at: at(-800), done_at: at(-700), how: 'manual', from_price: 20000, to_price: 19000 }],
+    },
+  });
+  const handler = await load();
+  const open = (vin, kind, to = null) => ({ vin, kind, flaggedAt: at(-200), ...(kind === 'price' ? { from: 20000, to } : {}) });
+  const r = await sync(handler, TOKEN.u1, {
+    pilot: {
+      posts: [],
+      flags: [
+        open(VIN(1), 'price', 19000), // seen again after the fix: the listing shows it
+        open(VIN(2), 'takeDown'), // the listing is down
+        open(VIN(3), 'price', 19000), // the listing is still at 20000
+        open(VIN(4), 'price', 19000), // the caller has no listing of it
+        open(VIN(4), 'takeDown'),
+        open(VIN(5), 'price', 18000), // the website moved on past the listing's price
+        open(VIN(6), 'takeDown'), // the later post is up
+        { vin: VIN(5), kind: 'takeDown', flaggedAt: at(-300), doneAt: at(-250), how: 'manual' }, // raised and fixed between two syncs: an item
+        { vin: VIN(2), kind: 'price', flaggedAt: at(-300), doneAt: at(-250), how: 'manual', from: 20000, to: 19000 },
+      ],
+    },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(rowsOf(VIN(1)), [['price', true, 19000]], 'one item, as the other machine closed it');
+  assert.deepEqual(rowsOf(VIN(2)), [['price', true, 19000]], 'no take-down item; the closed price item goes in');
+  assert.deepEqual(rowsOf(VIN(3)), [['price', false, 19000]]);
+  assert.deepEqual(rowsOf(VIN(4)).sort(), [['price', false, 19000], ['takeDown', false, null]]);
+  assert.deepEqual(rowsOf(VIN(5)).sort(), [['price', false, 18000], ['takeDown', true, null]]);
+  assert.deepEqual(rowsOf(VIN(6)), [['takeDown', false, null]]);
+  assert.equal(r.body.counts.todoItems, 7);
+});
+
 // The API answers at most 1,000 rows a request (the fake too: fake.maxRows),
 // so a read that does not page loses rows without an error.
 const ranges = (table, match) => fake.queries(table, 'select').filter((c) => c.columns === '*' && c.filters.some(match)).map((c) => c.range);

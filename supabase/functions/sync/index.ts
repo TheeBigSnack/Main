@@ -43,7 +43,9 @@
 //     without `known` (a machine that never synced) takes nothing down;
 //   - a to-do item is closed by an upload but never reopened, and a car
 //     has one item per kind at a time: the same sold car or price change
-//     flagged on two of the salesperson's machines is one row (step 4);
+//     flagged on two of the salesperson's machines is one row, and an open
+//     flag of a change the caller's listing already shows (a machine that
+//     rescanned before it heard of the fix) adds none (step 4);
 //   - take-downs and closed to-do items come back from CUTOFF_MARGIN_MS
 //     before `since`, not from `since` itself (below, step 6).
 // The rows are built the way extension/src/sync.js toServerRows() builds
@@ -490,6 +492,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     //    the earlier flagging time, so its hours count from the first
     //    sighting; mergeFlags in extension/src/sync.js moves the other
     //    machine's flag onto it.
+    //    A machine that rescans before it has heard of a fix made on
+    //    another (the laptop shut while the desktop updated the price or
+    //    took the car down) flags the change again, after that item closed.
+    //    Such an open upload, with no row of its own and none it overlaps,
+    //    is a late sighting, not a new item, when the caller's own listing
+    //    already shows the change: every listed row of theirs for the VIN is
+    //    at the flag's new price, or they have rows for it and none is up.
+    //    No row goes in for it, and mergeFlags drops that machine's flag
+    //    once its registry has the fix. A closed upload always goes in: a
+    //    flag raised and fixed on one machine between two syncs is an item.
     if (todos.length) {
       const have = await selectByVin(client, 'todo_items', 'id, vin, kind, flagged_at, done_at, from_price, to_price', dealershipId, todos.map((t) => t.vin));
       const byFlag = new Map<string, Row>(); // vin@kind@ms(flagged_at) -> the row
@@ -531,9 +543,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
           counts.todoItems += 1;
         }
       }
-      if (fresh.length) {
-        must(await client.from('todo_items').insert(fresh), 'could not add to-do items');
-        counts.todoItems += fresh.length;
+      const openNew = fresh.filter((t) => !t.done_at);
+      let adding = fresh;
+      if (openNew.length) {
+        const mine = (await selectByVin(client, 'listings', 'vin, user_id, price, status', dealershipId, openNew.map((t) => t.vin))).filter((r) => String(r.user_id) === me);
+        const shown = (t: TodoRow): boolean => {
+          const rows = mine.filter((r) => vinOf(r.vin) === t.vin);
+          const up = rows.filter((r) => r.status === 'listed');
+          if (t.kind === 'takeDown') return rows.length > 0 && up.length === 0;
+          return t.to_price !== null && up.length > 0 && up.every((r) => intOrNull(r.price) === t.to_price);
+        };
+        adding = fresh.filter((t) => t.done_at || !shown(t));
+      }
+      if (adding.length) {
+        must(await client.from('todo_items').insert(adding), 'could not add to-do items');
+        counts.todoItems += adding.length;
       }
     }
 
