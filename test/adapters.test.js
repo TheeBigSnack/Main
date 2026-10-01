@@ -259,11 +259,13 @@ test('scan, getDetails, normalize, origins, scanOptions and photoOrigins return 
     const res = await a.scan(fx.search(), { ...options, ...fx.missing.options });
     // the optional keys, each only when there are some: unread (cars still
     // listed whose details this scan did not read), pagesRead (cars whose own
-    // page this scan read) and leftForLater (pages the page limit left)
-    const { unread, pagesRead, leftForLater, ...shape } = res;
+    // page this scan read), descriptionsUnread (this scan's cars whose
+    // description it did not read) and leftForLater (pages the page limit left)
+    const { unread, pagesRead, descriptionsUnread, leftForLater, ...shape } = res;
     assert.deepEqual(Object.keys(shape).sort(), ['complete', 'confirm', 'fetchedAt', 'ok', 'records', 'requests', 'total'], `${a.PLATFORM.id}.scan return shape`);
     assert.ok(unread === undefined || (Array.isArray(unread) && unread.length > 0), `${a.PLATFORM.id}.scan unread, when given, lists VINs`);
     assert.ok(pagesRead === undefined || (Array.isArray(pagesRead) && pagesRead.length > 0 && pagesRead.every((v) => res.records.some((r) => a.normalize(r).vin === v))), `${a.PLATFORM.id}.scan pagesRead, when given, lists VINs of this scan's cars`);
+    assert.ok(descriptionsUnread === undefined || (Array.isArray(descriptionsUnread) && descriptionsUnread.length > 0 && descriptionsUnread.every((v) => res.records.some((r) => a.normalize(r).vin === v && a.normalize(r).descriptionRaw === null))), `${a.PLATFORM.id}.scan descriptionsUnread, when given, lists VINs of this scan's cars with no description read`);
     assert.ok(leftForLater === undefined || (Number.isInteger(leftForLater) && leftForLater > 0), `${a.PLATFORM.id}.scan leftForLater, when given, counts pages`);
     assert.deepEqual(Object.keys(res.confirm).sort(), ['checked', 'error', 'notFound']);
     assert.equal(res.ok, true);
@@ -1232,8 +1234,13 @@ test('scanWithSearch keeps the saved lot-wide lines when a scan did not read eve
   // every description read (Dealer Inspire's search always gives them): this scan's lines replace the saved ones
   const all = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(records), site, settings: withDefaults({}), boilerplate: saved });
   assert.ok(!all.boilerplate.includes(saved[0]));
-  // most descriptions not read this time (null): the saved lines stay
-  const skim = { ...dealerInspire, normalize: (r) => ({ ...dealerInspire.normalize(r), descriptionRaw: r.vin === records[0].vin ? 'One car.' : null }) };
+  // most descriptions not read this time (the scan lists them in descriptionsUnread): the saved lines stay
+  const skipped = records.slice(1).map((r) => r.vin.toUpperCase());
+  const skim = {
+    ...dealerInspire,
+    scan: async (...args) => ({ ...(await dealerInspire.scan(...args)), descriptionsUnread: skipped }),
+    normalize: (r) => ({ ...dealerInspire.normalize(r), descriptionRaw: skipped.includes(r.vin.toUpperCase()) ? null : 'One car.' }),
+  };
   const some = await scanWithSearch({ adapter: skim, search: fakeSearch(records), site, settings: withDefaults({}), boilerplate: saved });
   assert.deepEqual(some.boilerplate, saved);
 });
@@ -1256,6 +1263,7 @@ test('a rescan that read only the new arrivals\' pages makes no lot-wide line of
   }
   const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(today), site, settings, prevSnapshot: first.snapshot, options, boilerplate: first.boilerplate });
   assert.equal(out.vehicles.filter((v) => v.descriptionRaw !== null).length, 3, 'only the new arrivals were read');
+  assert.equal(out.res.descriptionsUnread.length, 30, 'and the scan says which descriptions it did not read');
   assert.deepEqual(out.boilerplate, first.boilerplate, 'the saved line stays; the arrivals\' sentence is not lot-wide');
   const arrival = out.vehicles.find((v) => v.vin === arrivals[0].vin);
   assert.ok(cleanDescription(arrival.descriptionRaw, new Set(out.boilerplate)).includes(SHARED), 'and it stays in the car\'s description');
@@ -1282,6 +1290,40 @@ test('a scan judged a website hiccup, or one that read too few descriptions, kee
   const plain = lot.map((r, i) => ({ ...r, description: `A clean car, number ${i}.` }));
   const again = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(plain), site, settings, prevSnapshot: day1.snapshot, boilerplate: day1.boilerplate });
   assert.deepEqual(again.boilerplate, []);
+});
+
+// DealerOn and Dealer.com give every car's comments with the list, every
+// scan; a car with none has no description (null), which is not a car whose
+// description went unread. A disclaimer on the few cars that carry comments
+// is still a lot-wide line, so it never becomes a car's story line.
+test('on a lot where few cars carry comments, a line those comments share is lot-wide, and goes when the dealer drops it', async () => {
+  const LINE = 'All prices plus tax, title and a dealer fee.';
+  const cars = platformCars(12);
+  const withComments = (site, comment) => {
+    for (const [u, a] of site) {
+      if (!a.json) continue;
+      const body = structuredClone(a.json);
+      for (const card of body.DisplayCards || []) { const i = cars.findIndex((c) => c.vin === card.VehicleCard.VehicleVin); if (i < 3) card.VehicleCard.DealerComments = comment(i); }
+      for (const rec of body.inventory || []) { const i = cars.findIndex((c) => c.vin === rec.vin); if (i < 3) rec.description = comment(i); }
+      site.set(u, { ...a, text: JSON.stringify(body), json: body });
+    }
+    return site;
+  };
+  for (const [adapter, makeSite, origin] of [[adapterById('dealerOn'), dealerOnSite, DEALERON_ORIGIN], [adapterById('dealerCom'), dealerComSite, DEALERCOM_ORIGIN]]) {
+    const id = adapter.PLATFORM.id;
+    const fx = PLATFORM_FIXTURES[id];
+    const site = { origin, host: new URL(origin).host, name: 'Sample Motors', title: 'Used', adapter: id };
+    const settings = withDefaults({}, site);
+    const options = adapter.scanOptions(fx.service);
+    const day1 = await scanWithSearch({ adapter, search: platformSearch(withComments(makeSite({ cars }), (i) => `${LINE}<br>A clean car, number ${i}.`)), site, settings, options });
+    assert.equal(day1.vehicles.filter((v) => v.descriptionRaw !== null).length, 3, `${id}: three of the twelve cars carry comments`);
+    assert.deepEqual(day1.boilerplate, [LINE], `${id}: the line on every car with comments is lot-wide`);
+    const car = day1.vehicles.find((v) => v.descriptionRaw);
+    assert.deepEqual(cleanDescription(car.descriptionRaw, new Set(day1.boilerplate)), [`A clean car, number ${cars.findIndex((c) => c.vin === car.vin)}.`], `${id}: the writer gets the car's own sentence, not the disclaimer`);
+    // the next scan reads every car's comments again: the dealer dropped the line, so it goes
+    const day2 = await scanWithSearch({ adapter, search: platformSearch(withComments(makeSite({ cars }), (i) => `A clean car, number ${i}.`)), site, settings, options, prevSnapshot: day1.snapshot, boilerplate: day1.boilerplate });
+    assert.deepEqual(day2.boilerplate, [], `${id}: a line no longer on the lot is not kept`);
+  }
 });
 
 // ---------- schemaOrg: refusals, look-alike pages, the page limit and the hostile-site limits ----------

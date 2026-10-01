@@ -1023,7 +1023,9 @@ async function firstListPage(site, startHref, origin, maxPages) {
  *   complete means the list ended cleanly and every page to read was read.
  *   records are { node, url, facts, carried? }. Only when there are some:
  *   pagesRead lists the VINs of the cars whose own page this scan read
- *   (scanRunner stamps their snapshot entries with pageReadAt); unread the
+ *   (scanRunner stamps their snapshot entries with pageReadAt);
+ *   descriptionsUnread the VINs of the carried records, whose description
+ *   this scan did not read (scanRunner keeps the lot-wide lines); unread the
  *   VINs of cars still on the list whose page was read before but not this
  *   time; leftForLater the number of car pages the page limit left for the
  *   next scan.
@@ -1328,14 +1330,16 @@ export async function scan(search, options = {}) {
   if (unread.size) out.unread = [...unread];
   const readCars = [...pagesRead].filter((vin) => records.has(vin));
   if (readCars.length) out.pagesRead = readCars;
+  const notDescribed = [...records].filter(([, r]) => r.carried).map(([vin]) => vin);
+  if (notDescribed.length) out.descriptionsUnread = notDescribed;
   if (leftForLater) out.leftForLater = leftForLater;
   return out;
 }
 
 // A record -> the flat vehicle (schemaOrgNormalize.js). A car this scan took
 // from the list's data without reading its page has no description this
-// time: descriptionRaw is null, and scanRunner.js keeps the lot's
-// boilerplate from the pages read before.
+// time: descriptionRaw is null, the scan lists it in descriptionsUnread, and
+// scanRunner.js keeps the lot's boilerplate from the pages read before.
 export function normalize(record) {
   if (!record || typeof record !== 'object' || !record.node || typeof record.node !== 'object') return null;
   const v = normalizeVehicle(record.node, { url: record.url, facts: record.facts });
