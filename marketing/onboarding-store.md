@@ -59,7 +59,7 @@ Three sentences that matter:
 - **Keep prices honest.** The price is the website price, and it changes only when the website changes. No made-up drops, no deleting and relisting to bump a car.
 - **Clear the To do tab the day items appear.** When a car sells, click **Open listing** and mark it sold on Facebook yourself. When a price changes, click **Open & update price** and click Update yourself.
 
-If the panel ever shows **Couldn't fill**, copy the report with the button and send it to [support email]. Meta's Terms prohibit automated access without permission; having you click Publish is the safest way to do this, not a guarantee, and if Facebook ever warns you about your listings, stop and tell [manager]. Lot Current is not affiliated with Meta.
+If the panel ever shows **Couldn't fill**, copy the report with the button and send it to blawrence@lotcurrent.com. Meta's Terms prohibit automated access without permission; having you click Publish is the safest way to do this, not a guarantee, and if Facebook ever warns you about your listings, stop and tell [manager]. Lot Current is not affiliated with Meta.
 
 [your name]
 [phone]

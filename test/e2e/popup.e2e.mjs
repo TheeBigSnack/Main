@@ -150,6 +150,11 @@ try {
   await popup.selectOption('#readySort', 'price');
   await popup.waitForFunction(() => document.querySelector('.rows .name')?.textContent.startsWith('2021'));
   assert.deepEqual(await names(), [SILVERADO, HELLCAT], 'price, low to high: $36,603 before $53,485');
+  // the list already showed this order, so the redraw proves nothing: wait for the save before closing
+  await popup.waitForFunction(async () => {
+    const all = await chrome.storage.local.get(null);
+    return Object.keys(all).some((k) => k.startsWith('settings:') && all[k]?.readySort === 'price');
+  });
   await popup.close();
   popup = await openPopup();
   await tab(popup, 'ready').click();

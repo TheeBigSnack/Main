@@ -8,6 +8,8 @@ import { sortOrder, newDaysOf } from './readyList.js';
 
 export const SETTINGS_VERSION = 2;
 export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
+// A closing line is checked by words (src/rewriteTemplate.js); this only stops a pasted page being kept.
+export const CLOSING_LINE_MAX_CHARS = 300;
 
 // The usual gap between the main price and the lower second price a website
 // shows (on some sites that is the doc fee), taken from what most cars agree
@@ -42,7 +44,8 @@ export function withDefaults(settings, site = {}) {
     version: SETTINGS_VERSION,
     myStores,
     basis: s.basis === 'beforeFees' ? 'beforeFees' : 'website',
-    salesperson: { name: String(sp.name || ''), title: String(sp.title || DEFAULT_SALESPERSON_TITLE) },
+    // closingLine: the salesperson's own line after the sign-off (src/rewriteTemplate.js checkClosingLine); '' for none
+    salesperson: { name: String(sp.name || ''), title: String(sp.title || DEFAULT_SALESPERSON_TITLE), closingLine: String(sp.closingLine || '').replace(/\s+/g, ' ').trim().slice(0, CLOSING_LINE_MAX_CHARS) },
     // blanks are filled from the website's own address (site.address, read by the scan)
     dealer: {
       name: String(d.name || site.name || ''),

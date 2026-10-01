@@ -60,4 +60,4 @@ The Customer will defend and indemnify us against claims arising from its listin
 
 We may update these Terms with notice; continued use is acceptance. We may terminate for breach. These Terms are governed by the laws of the Commonwealth of Pennsylvania; disputes go to the state or federal courts in [county], Pennsylvania [attorney: consider arbitration and class-waiver language]. If a provision is unenforceable the rest stands. These Terms plus the Dealer Subscription Agreement and any Pilot Agreement are the whole agreement.
 
-Contact: [support email], [postal address].
+Contact: blawrence@lotcurrent.com, [postal address].

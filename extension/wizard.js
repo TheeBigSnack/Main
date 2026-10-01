@@ -284,7 +284,7 @@ function readInputs() {
   }
   const next = { ...s };
   if (wiz.step === 'store') next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
-  if (wiz.step === 'you') next.salesperson = { name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE };
+  if (wiz.step === 'you') next.salesperson = { ...s.salesperson, name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE }; // the closing line is Settings', kept as it is
   if (wiz.step === 'address') next.dealer = { name: val('wizDealer') || s.dealer.name, city: val('wizCity') ?? s.dealer.city, state: (val('wizState') ?? s.dealer.state).toUpperCase(), zip: val('wizZip') ?? s.dealer.zip };
   if (wiz.step === 'price') {
     const picked = document.querySelector('input[name="wizBasis"]:checked');

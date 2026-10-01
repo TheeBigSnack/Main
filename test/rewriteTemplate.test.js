@@ -134,3 +134,78 @@ test('a plain-English problem list comes back for the side panel', () => {
   assert.equal(g.ok, false);
   assert.ok(g.problems.every((p) => typeof p.text === 'string' && p.text.length));
 });
+
+// ---------- the salesperson's highlights and closing line ----------
+import { featureChoices, settleHighlights, checkClosingLine, ensureClosingLine, usableClosingLine, MAX_HIGHLIGHTS, CLOSING_LINE_MAX_WORDS } from '../extension/src/rewriteTemplate.js';
+
+const SAMPLE_DEALER = { name: 'Example Auto Outlet', city: 'Springfield' };
+
+test('feature choices: each once, short ones only, the useful ones first', () => {
+  const list = ['Power Windows', 'power  windows', 'Heated Seats', 'A very long equipment line that runs past forty characters', 'Navigation System', 7];
+  assert.deepEqual(featureChoices(list), ['Navigation System', 'Heated Seats', 'Power Windows']);
+  assert.deepEqual(pickFeatures(FEATURES), featureChoices(FEATURES).slice(0, 6), 'the usual pick is the first choices');
+});
+
+test('the salesperson\'s highlights: only the website\'s features, as the website writes them, in the order picked, at most six', () => {
+  assert.deepEqual(settleHighlights(null, FEATURES), pickFeatures(FEATURES));
+  assert.deepEqual(settleHighlights(['cruise control', 'Heated Seats', 'Heated seats', 'Leather everything', 'Free gas for a year'], FEATURES), ['Cruise Control', 'Heated Seats']);
+  assert.deepEqual(settleHighlights([], FEATURES), []);
+  assert.equal(settleHighlights(FEATURES, FEATURES).length, MAX_HIGHLIGHTS);
+});
+
+test('the template names the picked highlights, and none when all are unticked', () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const picked = buildTemplateDescription(ctx(v, { dealer: SAMPLE_DEALER, highlights: ['Cruise Control', 'Power Windows'] }));
+  assert.match(picked, /Highlights: Cruise Control, Power Windows\./);
+  const none = buildTemplateDescription(ctx(v, { dealer: SAMPLE_DEALER, highlights: [] }));
+  assert.doesNotMatch(none, /Highlights:/);
+  for (const text of [picked, none]) assert.deepEqual(runGuardrails(text, ctx(v, { dealer: SAMPLE_DEALER })).problems, []);
+});
+
+test('a closing line: the salesperson\'s own words about themselves, no prices or numbers but a phone number', () => {
+  assert.deepEqual(checkClosingLine(''), { ok: true, problems: [] });
+  assert.ok(checkClosingLine('Ask for me by name when you come in.').ok);
+  assert.ok(checkClosingLine('Call or text me at (555) 010-4477.').ok);
+  const code = (line) => checkClosingLine(line).problems.map((p) => p.code);
+  assert.deepEqual(code('Only 9,000 miles on it!'), ['closing-number']);
+  assert.deepEqual(code('I can take $500 off today.'), ['closing-price']);
+  assert.deepEqual(code('Best deal around, priced to sell.'), ['closing-banned', 'closing-banned']);
+  assert.deepEqual(code('Selling my truck myself.'), ['closing-banned', 'closing-banned']);
+  assert.deepEqual(code('A one-owner gem.'), ['closing-one-owner']);
+  assert.deepEqual(code('CALL TODAY NOW'), ['closing-caps']);
+  assert.deepEqual(code('Come see me 🚗🚗'), ['closing-emoji']);
+  assert.deepEqual(code(Array(CLOSING_LINE_MAX_WORDS + 1).fill('word').join(' ')), ['closing-too-long']);
+  assert.equal(usableClosingLine('  Ask   for me.  '), 'Ask for me.');
+  assert.equal(usableClosingLine('Only 9,000 miles!'), '');
+});
+
+test('the template ends with the closing line in place of the stock invitation, and still passes every check', () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const line = 'Call or text me at (555) 010-4477, and ask for me by name when you come by the lot this week.';
+  const args = ctx(v, { dealer: SAMPLE_DEALER, salesperson: { ...ME, closingLine: line } });
+  const text = buildTemplateDescription(args);
+  assert.ok(text.includes(`I'm Roger, sales consultant at Example Auto Outlet.\n${line}`), text);
+  assert.doesNotMatch(text, /Message me to set up a test drive/);
+  // the phone number is the salesperson's, not a fact about the car; the line is not counted
+  const g = runGuardrails(text, { ...args, closingLine: line });
+  assert.deepEqual(g.problems, []);
+  // checked on its own wherever it appears; outside it, every number still comes from the website
+  assert.ok(runGuardrails(text, args).problems.some((p) => p.code === 'unknown-number'), 'without the closing line, the phone number is an unknown number');
+  const bad = 'Only 9,000 miles!';
+  assert.equal(buildTemplateDescription(ctx(v, { dealer: SAMPLE_DEALER, salesperson: { ...ME, closingLine: bad } })), buildTemplateDescription(ctx(v, { dealer: SAMPLE_DEALER })), 'a line that fails its checks is left out');
+});
+
+test('ensureClosingLine adds the line once', () => {
+  assert.equal(ensureClosingLine('Text.', 'Ask for me.'), 'Text.\nAsk for me.');
+  assert.equal(ensureClosingLine('Text.\nAsk for me.', 'Ask for me.'), 'Text.\nAsk for me.');
+  assert.equal(ensureClosingLine('Text.  ', ''), 'Text.');
+});
+
+test('a closing line the salesperson wrapped in the description is still recognised as theirs', () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const line = 'Call or text me at (555) 010-4477 any time.';
+  const args = ctx(v, { dealer: SAMPLE_DEALER, salesperson: { ...ME, closingLine: line } });
+  const wrapped = buildTemplateDescription(args).replace('(555) 010-4477 any', '(555) 010-4477\nany');
+  assert.deepEqual(runGuardrails(wrapped, { ...args, closingLine: line }).problems, []);
+  assert.equal(ensureClosingLine(wrapped, line), wrapped, 'not added twice');
+});

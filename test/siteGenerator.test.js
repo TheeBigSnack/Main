@@ -17,7 +17,7 @@ import {
   PAGES, REDIRECTS, NAV, LEGAL_PAGES, FRAGMENT_PAGES, SITE_NAME, TITLE_SUFFIX, FOOTER_LINE, BRAND_TAGLINE, LINE, THEME_COLOR, NO_SCRIPT_CSP, FORBIDDEN, PILOT,
   TITLE_MAX, DESCRIPTION_MAX, CONFIG_FILE, PRICING_FILE, STATUS_FILE, USAGE,
   fullTitle, rootFor, cspFor, render, renderPage, jsonLdFor, socialAlt, faqItems, ancestorsOf, textOf, escapeHtml,
-  robotsTxt, sitemapXml, llmsTxt, cnameTxt, isPlaceholderHost, validateSite, validatePages, siteUrlReport, templateVars, renderFragmentPage,
+  robotsTxt, sitemapXml, llmsTxt, listedPages, cnameTxt, isPlaceholderHost, validateSite, validatePages, siteUrlReport, templateVars, renderFragmentPage,
   readContext, buildSite, staleFiles, writeSite, assertClean, main,
 } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
@@ -362,16 +362,25 @@ test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (Local
 test('the files next to the pages: robots.txt, sitemap.xml, CNAME and llms.txt in the llmstxt.org shape', () => {
   assert.equal(robotsTxt(base), 'User-agent: *\nAllow: /\n');
   assert.equal(robotsTxt({ siteUrl: FIXTURE_URL }), `User-agent: *\nAllow: /\nSitemap: ${FIXTURE_URL}/sitemap.xml\n`);
-  const sitemap = sitemapXml({ siteUrl: FIXTURE_URL });
+  // a legal text still marked draft is readable but not listed; once approved it is
+  assert.deepEqual(listedPages(false), PAGES.filter((p) => p.sitemap));
+  assert.deepEqual(listedPages(true), PAGES.filter((p) => p.sitemap && p.kind !== 'legal'));
+  assert.ok(listedPages(true).some((p) => p.path === '/legal/'), 'the legal index stays listed while the texts are drafts');
+  for (const draft of [true, false]) {
+    const locs = [...sitemapXml({ siteUrl: FIXTURE_URL }, draft).matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+    assert.deepEqual(locs, listedPages(draft).map((p) => FIXTURE_URL + p.path), `sitemap with draft ${draft}`);
+    const llmsLinks = [...llmsTxt({ siteUrl: FIXTURE_URL }, draft).matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1]);
+    assert.deepEqual(llmsLinks, locs, `llms.txt lists the same pages as the sitemap with draft ${draft}`);
+  }
+  const sitemap = sitemapXml({ siteUrl: FIXTURE_URL }, false);
   assert.ok(sitemap.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'));
-  assert.deepEqual([...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]), PAGES.filter((p) => p.sitemap).map((p) => FIXTURE_URL + p.path));
   assert.doesNotMatch(sitemap, /lastmod|changefreq|priority/, 'nothing faked');
   assert.doesNotMatch(sitemap, /404/);
   assert.throws(() => sitemapXml(base), /needs siteUrl/);
   assert.equal(cnameTxt({ siteUrl: 'https://www.fixture.lotcurrent.com' }), 'www.fixture.lotcurrent.com\n');
   assert.throws(() => cnameTxt(base), /needs siteUrl/);
   for (const site of [base, { siteUrl: FIXTURE_URL }]) {
-    const llms = llmsTxt(site);
+    const llms = llmsTxt(site, false);
     const lines = llms.split('\n');
     assert.equal(lines[0], '# Lot Current');
     assert.equal(lines[1], '');
@@ -380,7 +389,7 @@ test('the files next to the pages: robots.txt, sitemap.xml, CNAME and llms.txt i
     assert.match(lines[4], /^Lot Current is not affiliated with Meta Platforms, Inc\.;.*planned prices/);
     assert.deepEqual(lines.filter((l) => l.startsWith('## ')), ['## Pages', '## Legal']);
     const items = lines.filter((l) => l.startsWith('- '));
-    assert.equal(items.length, PAGES.filter((p) => p.sitemap).length);
+    assert.equal(items.length, listedPages(false).length);
     for (const item of items) {
       const m = item.match(/^- \[([^\]]+)\]\(([^)]+)\): (.+)$/);
       assert.ok(m, `the llms.txt line shape: ${item}`);

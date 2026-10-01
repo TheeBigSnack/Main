@@ -22,11 +22,12 @@ import { dirname, join, normalize, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   PAGES, REDIRECTS, NAV, LINE, FOOTER_LINE, FORBIDDEN, PILOT, THEME_COLOR, TITLE_SUFFIX, TITLE_MAX, DESCRIPTION_MAX,
-  fullTitle, rootFor, cspFor, socialAlt, ancestorsOf, textOf, isPlaceholderHost, validateSite, siteUrlReport,
+  fullTitle, rootFor, cspFor, socialAlt, ancestorsOf, textOf, isPlaceholderHost, validateSite, siteUrlReport, listedPages,
 } from '../scripts/site-pages.mjs';
 import { pngSize, parseIco } from '../scripts/favicons.mjs';
 import { MIME, ROOT_FILES, MISSING_PATHS, resolvePath, startPagesServer } from '../scripts/site-check.mjs';
 import { SITE } from '../site/config.js';
+const LEGAL_DRAFT = JSON.parse(readFileSync(new URL('../legal/legal-status.json', import.meta.url), 'utf8')).draft === true;
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const SITE_DIR = join(root, 'site');
@@ -143,7 +144,8 @@ test('canonical, share and favicon tags follow the siteUrl state on every page; 
     const notFound = p.kind === 'notFound';
     const canonical = links(html).filter((l) => l.rel === 'canonical').map((l) => l.href);
     assert.deepEqual(canonical, set && !notFound ? [SITE.siteUrl + p.path] : [], `${p.file}: canonical ${set ? 'is siteUrl + path' : 'is left out while siteUrl is not set'}`);
-    assert.deepEqual(meta(html, 'robots'), notFound ? ['noindex'] : [], `${p.file}: robots noindex on the 404 page only`);
+    const draftLegal = p.kind === 'legal' && LEGAL_DRAFT;
+    assert.deepEqual(meta(html, 'robots'), notFound || draftLegal ? ['noindex'] : [], `${p.file}: robots noindex on the 404 page and on a legal text still marked draft, nowhere else`);
     const og = Object.fromEntries(metas(html).filter((m) => m.property && m.property.startsWith('og:')).map((m) => [m.property, m.content]));
     const tw = Object.fromEntries(metas(html).filter((m) => m.name && m.name.startsWith('twitter:')).map((m) => [m.name, m.content]));
     if (notFound) {
@@ -310,7 +312,7 @@ test('robots.txt allows everything and names the sitemap once there is one; llms
     assert.equal(m[3], page.description, `${m[2]}: described with its description`);
     listed.push(page.path);
   }
-  assert.deepEqual(listed, PAGES.filter((p) => p.sitemap).map((p) => p.path), 'exactly the public pages, in map order, and not the 404 page');
+  assert.deepEqual(listed, listedPages(LEGAL_DRAFT).map((p) => p.path), 'exactly the public pages, in map order, not the 404 page and not a legal text still marked draft');
   assert.ok(lines.findIndex((l) => l.startsWith(`- [Legal documents](${SITE.siteUrl}/legal/): `)) > lines.indexOf('## Legal'), 'the legal pages sit under ## Legal');
   assert.ok(lines.findIndex((l) => l.startsWith(`- [Support](${SITE.siteUrl}/support/): `)) < lines.indexOf('## Legal'), 'the other pages sit under ## Pages');
   for (const f of ['site/robots.txt', 'site/llms.txt']) assert.ok(read(f).endsWith('\n') && !read(f).includes('\r'), `${f} ends with a newline`);
@@ -333,7 +335,7 @@ test('siteUrl is not set: the site is not ready to publish', (t) => {
   if (set) {
     const xml = read('site/sitemap.xml');
     assert.match(xml, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
-    assert.deepEqual([...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]), PAGES.filter((p) => p.sitemap).map((p) => SITE.siteUrl + p.path), 'the sitemap lists exactly the public pages');
+    assert.deepEqual([...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]), listedPages(LEGAL_DRAFT).map((p) => SITE.siteUrl + p.path), 'the sitemap lists exactly the public pages, without draft legal texts');
     assert.doesNotMatch(xml, /<lastmod>|<changefreq>|<priority>/, 'no invented dates or priorities');
     assert.equal(read('site/CNAME'), new URL(SITE.siteUrl).hostname + '\n', 'CNAME is the host');
     for (const r of REDIRECTS) assert.ok(read(r.file).includes(`<link rel="canonical" href="${SITE.siteUrl}${r.target}">`), `${r.file} carries the new address as canonical`);

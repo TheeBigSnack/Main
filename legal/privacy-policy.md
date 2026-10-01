@@ -33,7 +33,7 @@ We do **not** collect Facebook passwords, cookies, session tokens, messages, buy
 - **[hosting provider]**: serves our website and the manager view; its access logs see visitors' IP addresses and browsers.
 - **[email provider]**: sends the sign-in emails (our database host's own sender does until we set this up) and holds our inbox.
 
-Lot Current also reaches services that are not our processors: the dealership's website (with the inventory search it uses, if any), which Lot Current reads as the User's browser would; the photo servers the dealership's website names for its cars' photos, which may belong to another company, and from which Lot Current downloads a car's photos, without cookies, only when the User fills in a listing form or clicks Download photos (an https server Lot Current may not read yet is first asked for in Chrome's own prompt, from the User's click, and after a no its photos are not requested); and NHTSA, when the User checks a VIN.
+Lot Current also reaches services that are not our processors: the dealership's website (with the inventory search it uses, if any), which Lot Current reads as the User's browser would; the photo servers the dealership's website names for its cars' photos, which may belong to another company, and from which Lot Current downloads a car's photos, without cookies, only when the User fills in a listing form or clicks Download photos, and whose photos the side panel shows as pictures, the way any web page shows a picture, while the User picks which ones to post (an https server Lot Current may not read yet is first asked for in Chrome's own prompt, from the User's click, and after a no its photos are not requested); and NHTSA, when the User checks a VIN.
 
 We do not sell personal data and do not use it for advertising. [Pending attorney answer: questions-for-attorney.md 8.7]
 
@@ -61,6 +61,6 @@ We will post changes here and update the date; material changes will be notified
 
 ## Contact
 
-[Lot Current entity name], [postal address], [privacy email].
+[Lot Current entity name], [postal address], blawrence@lotcurrent.com.
 
 Lot Current is not affiliated with Meta Platforms, Inc.

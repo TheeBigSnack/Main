@@ -36,6 +36,10 @@ On the extension side, `extension/src/account.js` (sign-in, the session, invite 
 
 You need the Supabase CLI (`npm install -g supabase` or the installer from supabase.com) and an Anthropic API key if you want the rewrite service.
 
+`docs/production-setup.md` is the owner's order of work for the production project (which steps need the owner, the email sender and the manager view's host, the deploy workflows). This section stays the reference for what each setting means.
+
+**API keys.** Supabase is retiring the legacy `anon` and `service_role` keys by the end of 2026. Where this README says anon key, use the project's **publishable** key (`sb_publishable_...`, Project settings, API Keys) when it has one; the legacy anon key keeps working until Supabase turns it off. The functions read the new publishable and secret keys when the runtime provides them and fall back to the legacy ones (`functions/_shared/auth.ts`), and `npm run check-deploy` tells the kinds apart and fails on a secret key in a file a browser reads.
+
 1. **A project.** At supabase.com create a project (any region near the dealers; the free plan is enough to start, and paid features stay off until you switch them on). Note from Project settings, API: the **Project URL** and the **anon (public) key**. The anon key is meant to be shipped to browsers; the database policies are what keep a person inside their own dealership. The **service_role key** on the same page is secret: it goes into the functions only (step 4), never into the extension, the manager page or git.
 
 2. **The database.** From the repository root:
@@ -51,7 +55,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
 3. **Sign-in settings** (Dashboard, Authentication):
    - Providers, Email: keep it on; passwords are never used, so "Confirm email" can be off (the magic link is the confirmation). A new hosted project starts with it on; either way works, because both sign-in templates carry the code and the link (below, "Sign-in emails").
    - Email templates: paste Lot Current's two sign-in templates into **Magic link or OTP** and **Confirm sign up** (below, "Sign-in emails"). Each carries the link (`{{ .ConfirmationURL }}`, which the manager page uses) and the six-digit code (`{{ .Token }}`), which is how the extension signs in: the salesperson types it into Settings (`verifyOtp` in `account.js`). The extension needs no redirect address.
-   - URL configuration: set **Site URL** to the manager page's own address (for example `https://manage.<your domain>/`) and add the same address under **Redirect URLs**. The manager page asks Supabase to send its magic link back to itself (PKCE flow: the link carries a one-time code, never the tokens), and Supabase only honours a redirect it has on this list; anything else falls back to the Site URL. Never leave the Site URL at the `http://localhost:3000` default on a hosted project: a manager's link would then go to whatever listens on that port of their computer. `config.toml` carries the same setting for a local stack.
+   - URL configuration: set **Site URL** to the manager page's own address (for example `https://app.<your domain>/`, where `docs/production-setup.md` hosts it) and add the same address under **Redirect URLs**. The manager page asks Supabase to send its magic link back to itself (PKCE flow: the link carries a one-time code, never the tokens), and Supabase only honours a redirect it has on this list; anything else falls back to the Site URL. Never leave the Site URL at the `http://localhost:3000` default on a hosted project: a manager's link would then go to whatever listens on that port of their computer. `config.toml` carries the same setting for a local stack.
    - Rate limits: lower them. With the public anon key anyone can ask for sign-in emails to any address, and one cheap loop would use up the project's email budget and lock every salesperson out of signing in. Set **Rate limit for sending emails** to about 30 an hour and **sign-ups and sign-ins** to about 30 per 5 minutes per IP address (`config.toml`'s `[auth.rate_limit]` block has the same numbers for a local stack), set up **custom SMTP** (Authentication, Emails) before the first dealership so the budget is yours rather than the shared test sender's, and turn on **CAPTCHA protection** (Authentication, Attack protection) once the manager page is public.
 
 4. **Secrets and the two functions.** The functions get `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` from Supabase automatically. Set the rest:
@@ -85,7 +89,7 @@ You need the Supabase CLI (`npm install -g supabase` or the installer from supab
 
    Managers may rename their dealership but not change its `website_origin` (a column-level grant): the origin is the key `/sync` matches on and it is unique, so changing it is the owner's job in SQL, as creating the row is.
 
-6. **Check the deploy.** Fill `extension/src/accountConfig.js` and `manager/config.js` with the project URL and anon key, then from the repository root:
+6. **Check the deploy.** Fill `extension/src/accountConfig.js` and `manager/config.js` with the project URL and publishable (or anon) key, both at once with `npm run set-project -- <project URL> <key>`, then from the repository root:
 
    ```
    npm run check-deploy

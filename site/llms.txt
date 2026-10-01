@@ -16,6 +16,3 @@ Lot Current is not affiliated with Meta Platforms, Inc.; "Facebook" and "Marketp
 ## Legal
 
 - [Legal documents](https://lotcurrent.com/legal/): The Lot Current Terms of Service, the Privacy Policy and the posting rules for salespeople, each on its own page.
-- [Terms of service](https://lotcurrent.com/legal/terms/): The Terms of Service for the Lot Current browser extension and its related services, for the dealership that subscribes and the people it authorises.
-- [Privacy policy](https://lotcurrent.com/legal/privacy/): The Lot Current Privacy Policy: what we collect, why, who processes it, how long we keep it and how to reach us.
-- [Posting rules](https://lotcurrent.com/legal/posting-rules/): The posting rules every salesperson reads before using Lot Current: you publish every post, pre-owned cars only, the website price, facts only.

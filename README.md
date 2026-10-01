@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 800 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 848 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # six e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data
@@ -115,6 +115,8 @@ npm run test:site     # every page of site/ in headless Chromium: no console err
 npm run test:a11y     # accessibility: labels, names, contrast, a focus ring on every control the Tab key reaches (every page of the website, manager view, popup, side panel, the sandbox page)
 npm run test:sql      # the Supabase SQL checks on a local Postgres (PGHOST etc.; CI runs them on Postgres 16)
 npm run check-deploy  # after the Supabase deploy: a checklist of what the live project lets a stranger do (supabase/README.md step 6)
+npm run set-project -- https://<ref>.supabase.co sb_publishable_...  # point the extension and manager view at the production project (docs/production-setup.md)
+npm run check-hosting -- --app https://app.<domain>/ --sender mail.<domain>  # the hosted manager view and the sign-in sender's DNS, from the outside
 npm run store-check   # the Chrome Web Store preflight: manifest limits, no code from another host, every module present, the packed zip equals extension/, listing text and image sizes; lists what is still open before a submission (-- --strict: exit 1 while anything is; store/submission.md)
 npm run store-screenshots  # fits the owner's captures in store/screenshots/raw/ onto 1280x800 (store/screenshots.md; both folders stay out of git)
 npm run extension-icon  # redraws extension/icons/icon128.png from site/favicon.svg with the store's 16-pixel transparent margin

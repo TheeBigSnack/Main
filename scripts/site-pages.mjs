@@ -525,7 +525,9 @@ export function renderPage(page, bodyHtml, ctx) {
     `  <title>${attr(title)}${TITLE_SUFFIX}</title>`,
     `  <meta name="description" content="${attr(page.description)}">`,
   ];
-  if (notFound) head.push('  <meta name="robots" content="noindex">');
+  // A legal text still marked draft (legal/legal-status.json) carries blanks
+  // in brackets and notes for the attorney: readable, never indexed.
+  if (notFound || (page.kind === 'legal' && legalDraft)) head.push('  <meta name="robots" content="noindex">');
   if (site.siteUrl && !notFound) head.push(`  <link rel="canonical" href="${attr(site.siteUrl + page.path)}">`);
   head.push(
     `  <link rel="icon" href="${root}favicon.svg" type="image/svg+xml">`,
@@ -653,9 +655,13 @@ export function robotsTxt(site) {
   return lines.join('\n') + '\n';
 }
 
-export function sitemapXml(site) {
+// The pages search engines and llms.txt are pointed at: the map's sitemap
+// pages, less the legal texts while they are drafts (they say noindex then).
+export const listedPages = (legalDraft = defaultLegalDraft()) => PAGES.filter((p) => p.sitemap && !(p.kind === 'legal' && legalDraft));
+
+export function sitemapXml(site, legalDraft = defaultLegalDraft()) {
   if (!site.siteUrl) throw new Error('sitemap.xml needs siteUrl');
-  const urls = PAGES.filter((p) => p.sitemap).map((p) => `  <url><loc>${attr(site.siteUrl + p.path)}</loc></url>`);
+  const urls = listedPages(legalDraft).map((p) => `  <url><loc>${attr(site.siteUrl + p.path)}</loc></url>`);
   return ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">', ...urls, '</urlset>', ''].join('\n');
 }
 
@@ -670,9 +676,9 @@ export const LLMS_NOTE = 'Lot Current is not affiliated with Meta Platforms, Inc
 // The llmstxt.org shape: an H1, a blockquote summary, a paragraph, then H2
 // sections of "- [name](url): description" lines. url is the absolute
 // address once siteUrl is set, the path until then.
-export function llmsTxt(site) {
+export function llmsTxt(site, legalDraft = defaultLegalDraft()) {
   const line = (p) => `- [${p.nav || p.title}](${site.siteUrl ? site.siteUrl + p.path : p.path}): ${p.description}`;
-  const listed = PAGES.filter((p) => p.sitemap);
+  const listed = listedPages(legalDraft);
   return [
     `# ${SITE_NAME}`,
     '',
@@ -781,10 +787,10 @@ export function buildSite(ctx) {
     files.push({ file: p.file, content: renderFragmentPage(p, fragment, ctx) });
   }
   files.push({ file: 'site/robots.txt', content: robotsTxt(ctx.site) });
-  files.push({ file: 'site/llms.txt', content: llmsTxt(ctx.site) });
+  files.push({ file: 'site/llms.txt', content: llmsTxt(ctx.site, ctx.legalDraft) });
   const remove = [];
   if (ctx.site.siteUrl) {
-    files.push({ file: 'site/sitemap.xml', content: sitemapXml(ctx.site) });
+    files.push({ file: 'site/sitemap.xml', content: sitemapXml(ctx.site, ctx.legalDraft) });
     files.push({ file: 'site/CNAME', content: cnameTxt(ctx.site) });
   } else {
     remove.push('site/sitemap.xml', 'site/CNAME');
