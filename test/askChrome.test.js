@@ -5,13 +5,16 @@
 //   - Chrome is asked before anything is awaited, so the click still counts;
 //   - a caller's list that gains a Facebook host, the way a change to the
 //     wizard's or the popup's list would add one, is refused at the ask;
-//   - the wizard's Allow click, run as written, asks for the website and
-//     puts nothing to Chrome for a site or service on Facebook's servers.
+//   - the popup's list (rescanOrigins) and the wizard's Allow click, run as
+//     written, name the website and its service, and put nothing to Chrome
+//     for a site or service on Facebook's servers.
 // That every ask in the extension goes through it is checked in
 // marketing.test.js (the prompt inventory) and photoHosts.test.js.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { stripComments } from './helpers.js';
 import { askableOrigins, askChrome } from '../extension/src/askChrome.js';
 import { originsFor } from '../extension/src/rescanSchedule.js';
 import { NHTSA_ORIGIN } from '../extension/src/vin.js';
@@ -110,6 +113,31 @@ test('a website list that gains a Facebook host on its way to Chrome is refused 
     assert.equal(await askChrome(own), true, 'the website itself is');
     assert.deepEqual(asked, [{ origins: own }], 'only the website was ever put to Chrome');
   });
+});
+
+// The popup asks for rescanOrigins() from its Allow automatic rescans button
+// and its Save (the prompt inventory in marketing.test.js holds it to those
+// two calls). Run as written: a dealer website's list is the website and its
+// service, which the gate lets through; a site on Facebook's servers, or no
+// site yet, is an empty list, which the gate refuses without a prompt.
+test('the popup asks Chrome for what originsFor names for the website, and a Facebook site\'s list is empty', () => {
+  const src = stripComments(readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8'));
+  const m = src.match(/^const rescanOrigins = \(\) => ([^\n]+);$/m);
+  assert.ok(m, 'popup.js defines rescanOrigins on one line: fix this test');
+  const rescanOrigins = (state) => new Function('state', 'originsFor', `return ${m[1]};`)(state, originsFor);
+  const dealer = rescanOrigins({ origin: DEALER, site: { site: { origin: DEALER }, service: [SERVICE + '/inventory/search'] } });
+  assert.deepEqual(dealer, [DEALER + ANY, SERVICE + ANY], 'the website and its inventory service, nothing else');
+  assert.deepEqual(askableOrigins(dealer), dealer, 'which the gate lets through');
+  assert.deepEqual(rescanOrigins({ origin: DEALER, site: { service: null } }), [DEALER + ANY], 'a registry entry without its site record falls back to the tab\'s website');
+  for (const state of [
+    { origin: 'https://www.facebook.com', site: { site: { origin: 'https://www.facebook.com' }, service: null } },
+    { origin: DEALER, site: { site: { origin: DEALER }, service: ['https://www.facebook.com/marketplace/api'] } },
+    { origin: DEALER, site: null },
+  ]) {
+    const list = rescanOrigins(state);
+    assert.deepEqual(list, [], JSON.stringify(state));
+    assert.equal(askableOrigins(list), null, 'and the gate asks Chrome nothing for it');
+  }
 });
 
 // The wizard's "Allow automatic rescans" click, run as written (wizard.js
