@@ -4,11 +4,11 @@ Every version ships the same way. A person writes the release notes, `npm run re
 
 ## The checklist, in order
 
-1. **The CHANGELOG entry.** At the top of `CHANGELOG.md`, above the last version, a heading in the usual format, `## 0.6.0 (2026-10-12, <what the release is>)`, then its Added, Changed and Fixed lines. For a new major or minor version, also change the README's first line to `# Lot Current (v0.6)`. These two files may stay uncommitted until step 4; everything else must be committed before step 2.
+1. **The CHANGELOG entry.** The changes since the last version wait under `## Unreleased` at the top of `CHANGELOG.md`. Rename that heading to the usual format, `## 0.6.0 (2026-10-12, <what the release is>)`, check its Added, Changed and Fixed lines, then put a new, empty `## Unreleased` above it for the changes that come after. For a new major or minor version, also change the README's first line to `# Lot Current (v0.6)`. These two files may stay uncommitted until step 4; everything else must be committed before step 2.
 2. **`npm run release -- 0.6.0`** (or `-- patch`, `-- minor`, `-- major`). Run it with `--dry-run` first: it prints each line it would change and writes nothing. Keep the `--`: without it npm takes `--dry-run` as its own option, and the script then treats that as a dry run too. The script refuses, and writes nothing, when:
    - git shows an uncommitted change outside `CHANGELOG.md` and `README.md`;
    - the version is not greater than the current one, or `extension/manifest.json`, `package.json` and `package-lock.json` disagree about the current one;
-   - `CHANGELOG.md` has no `## 0.6.0 (` heading, or it is not the top one;
+   - `CHANGELOG.md` has no `## 0.6.0 (` heading, or a newer version sits above it, or `## Unreleased` is missing, below it or still holds entries (they ship in 0.6.0, so they belong under its heading);
    - the README's first line does not carry the new major and minor number.
 
    Then it writes the version into `extension/manifest.json`, `package.json` and both places in `package-lock.json`, runs `npm test` and `npm run pack`, and prints the next steps. If the tests or the pack fail, it puts the three files back as they were.

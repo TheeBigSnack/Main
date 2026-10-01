@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  COMMANDS, VERSION_FILES, parseVersion, compareVersions, bump, setVersionText, changelogHasVersion, newestChangelogVersion,
+  COMMANDS, VERSION_FILES, parseVersion, compareVersions, bump, setVersionText, changelogHasVersion, newestChangelogVersion, changelogProblems,
   readmeTitle, readmeTitleFits, dirtyPaths, submitSteps, zipPath, changedLines, nextSteps, parseArgs, release, runCommand,
   accountUrlIn, ACCOUNT_GATE,
 } from '../scripts/release.mjs';
@@ -153,7 +153,8 @@ test('parseArgs: one version, --dry-run, nothing unknown', () => {
 // A repository in memory: the real texts, a git status, and npm answers.
 function world({ status = '', changelogEntry = null, readme = REAL['README.md'], testCode = 0, packCode = 0, packWrites = true } = {}) {
   const files = { ...REAL, 'README.md': readme };
-  if (changelogEntry) files['CHANGELOG.md'] = REAL['CHANGELOG.md'].replace('# Changelog\n\n', `# Changelog\n\n## ${changelogEntry} (2026-10-01, a test entry)\n\nChanged\n- Nothing.\n\n`);
+  // the release step: "## Unreleased" becomes the version's heading, a new empty one goes above it
+  if (changelogEntry) files['CHANGELOG.md'] = REAL['CHANGELOG.md'].replace(/^## Unreleased\n/m, '').replace('# Changelog\n\n', `# Changelog\n\n## Unreleased\n\n## ${changelogEntry} (2026-10-01, a test entry)\n\nChanged\n- Nothing.\n\n`);
   const runs = [];
   const writes = [];
   const out = [];
@@ -210,6 +211,47 @@ test('a version without its CHANGELOG entry is refused, and so is one that is no
   assert.match(same.err(), /not greater than the current version/);
   assert.deepEqual(same.writes, []);
   assert.deepEqual(same.runs, [], 'refused before git status');
+});
+
+// The changes since the last version wait under "## Unreleased". A release
+// files them under its own heading and leaves an empty "## Unreleased" on top;
+// a short new heading above or below a full Unreleased section would ship
+// those changes while the CHANGELOG still calls them unreleased.
+test('a release refuses a CHANGELOG whose Unreleased section still holds entries, is below the new heading or is gone', () => {
+  const next = bump(CURRENT, 'patch');
+  const entry = `## ${next} (2026-10-01, a test entry)\n\nChanged\n- One line.\n\n`;
+  const base = '# Changelog\n\n## Unreleased\n\nAdded\n- Billing.\n- Accounts.\n\n## 0.5.0 (2026-09-28, the last one)\n\n- Shipped.\n';
+  const ready = `# Changelog\n\n## Unreleased\n\n## ${next} (2026-10-01, a test entry)\n\nAdded\n- Billing.\n- Accounts.\n\n## 0.5.0 (2026-09-28, the last one)\n\n- Shipped.\n`;
+  assert.deepEqual(changelogProblems(ready, next), []);
+  assert.deepEqual(changelogProblems(ready.replace('## Unreleased\n', '## Unreleased   \n'), next), [], 'trailing spaces on the heading');
+  // the new heading above a full Unreleased section, as the old message said ("above 0.5.0")
+  const above = base.replace('## Unreleased', `${entry}## Unreleased`);
+  assert.match(changelogProblems(above, next).join('\n'), /"## Unreleased" still holds entries, which ship in/);
+  // a short new heading below a full Unreleased section
+  const below = base.replace('## 0.5.0', `${entry}## 0.5.0`);
+  assert.match(changelogProblems(below, next).join('\n'), /"## Unreleased" still holds entries/);
+  // an empty Unreleased left below the new heading
+  const emptyBelow = `# Changelog\n\n${entry}## Unreleased\n\n## 0.5.0 (2026-09-28, the last one)\n`;
+  assert.match(changelogProblems(emptyBelow, next).join('\n'), /sits below "## /);
+  // Unreleased renamed with no new one above it (test/brandName.test.js reads it)
+  assert.match(changelogProblems(ready.replace('## Unreleased\n\n', ''), next).join('\n'), /no "## Unreleased" heading/);
+  // no heading for the version: the message says to rename Unreleased, not to write above the last version
+  const none = changelogProblems(base, next).join('\n');
+  assert.match(none, /Rename "## Unreleased" to "## [\d.]+ \(<date>, <what it is>\)", then put a new, empty "## Unreleased" above it/);
+  assert.doesNotMatch(none, /above 0\.5\.0/);
+  // the run refuses before writing or running anything
+  for (const log of [above, below, emptyBelow]) {
+    const w = world();
+    w.files['CHANGELOG.md'] = log;
+    assert.equal(release(['patch'], w.io), 1);
+    assert.deepEqual(w.writes, []);
+    assert.deepEqual(w.runs, [COMMANDS.status]);
+  }
+  // the checklist says the same
+  const doc = read('docs/release.md');
+  assert.match(doc, /Rename that heading to the usual format, `## 0\.6\.0 \(/);
+  assert.match(doc, /put a new, empty `## Unreleased` above it/);
+  assert.match(doc, /`## Unreleased` is missing, below it or still holds entries/);
 });
 
 test('a new minor without the README title is refused; with it, the release goes through', () => {
