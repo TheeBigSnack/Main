@@ -103,3 +103,16 @@ test('docs/production-setup.md names every piece it relies on, and says the secr
   assert.match(read('package.json'), /"check-hosting": "node scripts\/check-hosting\.mjs"/);
   for (const s of ['npm run check-hosting', 'MANAGER_URL', 'SENDER_DOMAIN', 'scripts/check-hosting.mjs']) assert.ok(doc.includes(s), s);
 });
+
+test('the setup steps keep CAPTCHA off while a sign-in screen sends no captcha token, and say the email limit can be used up by anyone', () => {
+  // Supabase refuses a request for a sign-in code without a token once CAPTCHA protection is on
+  const sendsToken = { extension: /captcha_token/.test(read('extension/src/account.js')), manager: /captchaToken/.test(read('manager/manager.js')) };
+  for (const p of ['supabase/README.md', 'docs/production-setup.md']) {
+    const doc = read(p);
+    if (!sendsToken.extension || !sendsToken.manager) {
+      assert.doesNotMatch(doc, /(?<!not )turn on (?:\*\*)?CAPTCHA/i, `${p} asks for CAPTCHA, which would refuse every sign-in code while ${Object.keys(sendsToken).filter((k) => !sendsToken[k]).join(' and ')} send no token`);
+      assert.match(doc, /\*\*Do not turn on CAPTCHA protection\*\* \(Authentication, Attack protection\) yet|leave CAPTCHA off/, `${p} says to keep it off`);
+    }
+    assert.match(doc, /do not stop a lockout/, `${p} says plainly what the rate limits leave open`);
+  }
+});
