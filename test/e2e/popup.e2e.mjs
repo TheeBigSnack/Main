@@ -225,9 +225,10 @@ try {
 
   // "Select the next N" ticks the first N in the CURRENT order: with 2 posts
   // left today and three cars, "longest" ticks the Tradesman and the Hellcat,
-  // "newest" the Silverado and the Hellcat.
+  // "newest" the Silverado and the Hellcat. The cap is 3: the Ram marked
+  // posted today and taken down since is still one of today's posts.
   await popup.click('#settingsBtn');
-  await popup.fill('input[name="dailyCap"]', '2');
+  await popup.fill('input[name="dailyCap"]', '3');
   await popup.click('#panel button[type="submit"]');
   await popup.waitForFunction(() => (document.querySelector('#saved')?.textContent || '').length > 0);
   await tab(popup, 'ready').click();
