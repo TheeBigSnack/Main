@@ -428,6 +428,16 @@ The owner's request (2026-10-01, verbatim intent): turn the landing page into a 
 
 ---
 
+## 16. Production backend setup (2026-10-01, project thread; branch `claude/project-thread-05ku6b`, draft PR into `claude/fervent-fermi-exkhz9`)
+
+The owner (called Brandon in the Claude project; this file's "Roger" came from the commit email) set a target: live in two to three months (launch plan: `/mnt/project-files/launch/launch-plan.md` in the project, live by 2026-12-18). This round prepared the production accounts without creating any:
+
+- **`docs/production-setup.md`** is the owner's order of work: Supabase project (Free to start; free projects pause after about a week of low activity, so the paid plan from the pilot's first week), Resend as the sign-in sender from `mail.lotcurrent.com` (free: 3,000 a month, 100 a day), the manager view on Cloudflare Pages at `app.lotcurrent.com` (free). Each step says owner or Claude. The owner sends only the project URL and the publishable key; every secret goes into the Dashboard or GitHub secrets.
+- **Supabase is retiring the legacy anon and service_role keys by the end of 2026.** The functions prefer `SUPABASE_PUBLISHABLE_KEYS` / `SUPABASE_SECRET_KEYS` (JSON keyed by name) and fall back; `check-deploy` sends a publishable key on `apikey` only (Bearer with a non-JWT is "Invalid JWT", which used to count as a pass), and fails on a secret key in a config file. Not yet proven against a real hosted project: the first `check-deploy` run is that proof.
+- **`npm run set-project -- <url> <key>`** fills both config files; **`--check`** gates the manager deploy. supabase-js in the manager view is pinned to 2.117.2.
+- **Workflows:** `supabase.yml` (by hand: plan, database, functions, check; refuses a project the committed config does not name; secrets `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, variable `SUPABASE_PROJECT_REF`; environment `production`) and `manager.yml` (Cloudflare Pages via wrangler 4.145.0 from the default branch; secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`; quiet until they exist). Neither has run.
+- **Next:** the owner does steps 1, 2, 5 and 6's account parts; Claude runs set-project, the workflows and check-deploy. The email templates are pasted after the rename round changes their wording. The website thread owns `site/` and should link the manager view at `app.lotcurrent.com` once it is live.
+
 ## 11. Quick reference
 ```
 # tests
