@@ -63,7 +63,7 @@ Registered at GoDaddy, with GoDaddy's DNS. The records that point it at GitHub P
 
 - `siteUrl: 'https://lotcurrent.com'`: every page carries its canonical, `og:url` and `og:image` on that domain, and `sitemap.xml` and `CNAME` are written.
 - `demoMailto: 'mailto:blawrence@lotcurrent.com'` and `supportEmail: 'blawrence@lotcurrent.com'`: the home page's demo form is open and, with no `demoEndpoint`, sends through the visitor's email app; the support page shows the address. A role address (such as a support inbox) can replace it later: change both values, rerun the generators, commit.
-- `demoEndpoint: ''` (no Supabase project yet), `signupUrl: ''` (no hosted manager view), `business` empty (Organization structured data only, the owner's decision).
+- `demoEndpoint: ''` (the Supabase project exists, but its `lead` function is not deployed yet: `supabase/README.md`, Demo requests; once it is, set this to the function's address and its `LEAD_ORIGINS` secret to `siteUrl`), `signupUrl: ''` (no hosted manager view), `business` empty (Organization structured data only, the owner's decision).
 
 After any change there: `npm run site-pages`, `npm run legal-pages`, `npm test`, commit the outputs with the config. The site's own host is exempt from `test/dataInventory.test.js`'s outside-host scan (it is this site, not an outside host); the tests pass with `siteUrl` set or empty.
 

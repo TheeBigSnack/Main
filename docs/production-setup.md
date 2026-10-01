@@ -71,7 +71,7 @@ The description writer needs an Anthropic API key only if you turn Claude-writte
 In the Supabase Dashboard, **Authentication**:
 
 1. **URL Configuration**: Site URL `https://app.lotcurrent.com/`; under Redirect URLs add `https://app.lotcurrent.com/`. (Never leave the Site URL on `localhost`.)
-2. **Email Templates**: paste `supabase/templates/magic_link.html` into **Magic link or OTP** and `supabase/templates/confirmation.html` into **Confirm sign up**, each with the subject in `supabase/config.toml`. Claude will give you the exact text to paste; the rename to Lot Current changes the wording, so paste after it lands.
+2. **Email Templates**: paste `supabase/templates/magic_link.html` into **Magic link or OTP** and `supabase/templates/confirmation.html` into **Confirm sign up**, each with the subject in `supabase/config.toml` ("Your Lot Current sign-in code"). Both templates already carry the Lot Current name, so they can be pasted now; Claude will give you the exact text.
 3. **Sign In / Providers, Email**: leave it on; check the email OTP length is **6** and the expiry **3600** seconds.
 4. **Rate limits**: emails sent about **30 an hour**; sign-ups and sign-ins about **30 per 5 minutes**.
 5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.

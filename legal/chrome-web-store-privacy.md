@@ -16,7 +16,7 @@ One row per pattern in `extension/manifest.json`.
 |---|---|
 | `activeTab` | To read the inventory search on the dealership website tab the user is looking at when they click Scan |
 | `scripting` | To run the scan code in that tab, and to fill in the Marketplace create-listing form when the user clicks Post |
-| `storage` | Scans, settings, the user's posted list and the usage numbers below, kept locally per website, and the Lot Current sign-in session, kept on this computer only. The user's profile (name, role, dealership name and address, the stores ticked, price basis, note, cap, listing defaults, the rewrite-service address and whether it is on, Terms acceptance) is kept in Chrome's sync storage under the user's own Google account and is removed by "Forget my synced profile" in Settings |
+| `storage` | Scans, settings, the user's posted list and the usage numbers below, kept locally per website, and the Lot Current sign-in session, kept on this computer only. The user's profile (name, role, closing line, dealership name and address, the stores ticked, price basis, note, cap, listing defaults, the rewrite-service address and whether it is on, Terms acceptance) is kept in Chrome's sync storage under the user's own Google account and is removed by "Forget my synced profile" in Settings |
 | `sidePanel` | The guided post flow runs in the side panel so it stays open while the user moves between the dealership tab and the Marketplace tab |
 | `alarms` | Re-reads the dealership website every 3 hours while Chrome is open, only for a website the user allowed in the set-up wizard, to keep the to-do count on the toolbar icon current. Never touches Facebook |
 | `notifications` | A desktop notification when a background rescan adds to the user's to-do list (a sold car or a price change on the user's own listings). The user can turn it off in Settings |
@@ -35,7 +35,7 @@ One row per pattern in `extension/manifest.json`.
 
 | When | What | To |
 |---|---|---|
-| Each scan, the background rescans the user allowed, and the start of each post | Reads of the inventory: the website's own inventory search, or, on a website read through its standard vehicle data, its used-inventory pages, each car's page and, when the list holds more cars than it links, its robots.txt and sitemaps; at post time, the car's full record | The dealership's website and the inventory search it uses |
+| Each scan, the background rescans the user allowed, and the start of each post | Reads of the inventory: the website's own inventory search, or, on a website read through its standard vehicle data, its used-inventory pages, each car's page and, when the list holds more cars than it links, its robots.txt and sitemaps, or, on a DealerOn or Dealer.com website, the inventory list its own pages load, page by page, and the page of a car that left the list; at post time, the car's full record | The dealership's website and the inventory search it uses |
 | The user fills in a listing form or clicks Download photos; the side panel's review screen for a car | A request for each of the car's photos, without cookies; on the review screen, the photos shown as pictures, the way any web page shows a picture, so the user can pick which ones to post (no permission is needed for that, and nothing is downloaded or kept) | The photo servers the dealership's website names for the car's photos, which may belong to another company. An https server the extension may not read yet is asked for in Chrome's own prompt, from the user's click; after a no, its photos are not requested |
 | The user clicks "Check with NHTSA" | The VIN | NHTSA's free VIN decoder |
 | The user signs in and joins a dealership (only once Lot Current accounts are set up) | The email address, the emailed code, the invite code and the name from Settings | Our database host, Supabase |
@@ -46,7 +46,7 @@ Nothing goes to Facebook: the extension fills in the form in the user's own tab,
 
 ## Data use disclosures (tick as applicable)
 
-- Personally identifiable information: **Yes**, the user's name and role (typed into Settings, used in the listing sign-off) and, once Lot Current accounts are set up, the email address used to sign in and the name given when joining a dealership.
+- Personally identifiable information: **Yes**, the user's name and role and any closing line they write (typed into Settings, used in the listing sign-off; a closing line can hold a phone number) and, once Lot Current accounts are set up, the email address used to sign in and the name given when joining a dealership.
 - Health, financial and payment information: **No** in the extension. (Billing runs in the manager view through Stripe, not in the extension.)
 - Authentication information: pending. Lot Current never collects Facebook passwords, cookies or tokens. For Lot Current's own account the user types an emailed sign-in code, and the extension keeps the session's access and refresh tokens on this computer; for a self-hosted description writer it keeps the key typed in Settings. [Pending attorney answer: questions-for-attorney.md 8.1]
 - Personal communications: **No**.
