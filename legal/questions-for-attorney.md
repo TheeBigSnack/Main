@@ -62,6 +62,10 @@ Context: Lot Current is a Chrome extension that reads a car dealership's own web
 - **8.8** Who counts as a processor. The synced profile lives in Chrome's sync storage under the person's own Google account, under Google's terms and the person's own Chrome settings. (The manager view's database library is served from the manager view's own host, so no separate service sees the manager download it.) Should the policy list Google as a processor, as another recipient, or not at all?
 - **8.9** A salesperson's name sent to an AI provider. With the description writer on, each request carries the salesperson's name and role (for the sign-off) with the car's facts to Anthropic. Is the policy's disclosure enough, or must the dealership, as employer, or Lot Current tell salespeople, or get their agreement, first?
 
+## 9. How a dealership accepts the agreements
+
+- Dealers we sign up ourselves sign the Pilot Agreement or the Dealer Subscription Agreement, and once you approve the Terms and Privacy Policy every salesperson will accept both in the extension's first-run setup. A third way in is built but switched off: self-serve sign-up, where a manager creates a dealership on the manager page (its free pilot starts at once) and can then subscribe through Stripe Checkout, with nobody from Lot Current involved. Today neither the manager page nor Checkout shows or records acceptance of the Terms, the Privacy Policy or the Dealer Subscription Agreement, and a dealership started that way has given no written authorisation to read its website (Dealer Subscription Agreement section 2). How should the agreements be accepted on that path: a click-through on the manager page that records the edition, the account and the time; Stripe Checkout's own terms checkbox; a signed order form; or something else? Until you answer, self-serve sign-up stays closed, so every dealership on the accounts is one that signed first.
+
 ## After review
 
-Once the attorney approves the Terms and Privacy Policy, the first-run wizard will require acceptance of both (Milestone 5 in PLAN.md).
+Once the attorney approves the Terms and Privacy Policy, the first-run wizard will require every salesperson to accept both (Milestone 5 in PLAN.md). A manager who starts a dealership on their own accepts the way question 9's answer says, and self-serve sign-up opens only after that is built.

@@ -408,6 +408,8 @@ Until you open it, a dealership exists because you created it (step 5). `migrati
 
 ### Open it, close it, change the limits
 
+**Before you open it:** a dealership started here has signed nothing. Neither the manager view nor Stripe Checkout shows or records acceptance of the Terms, the Privacy Policy or the Dealer Subscription Agreement yet, and that agreement's section 2 is the dealer's written authorisation to read its website. Keep sign-up closed until the attorney has answered `legal/questions-for-attorney.md` question 9 and the manager view records each manager's acceptance the way that answer says (`docs/launch-checklist.md`, "Self-serve sign-up stays closed until a manager's acceptance is recorded"). Until then create each dealership yourself (step 5) once it has signed the Pilot Agreement or the Dealer Subscription Agreement.
+
 In the Dashboard's SQL editor. No API role can read or change `signup_settings`, the service role included; only you, in SQL:
 
 ```sql
