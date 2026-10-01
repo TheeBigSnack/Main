@@ -361,6 +361,8 @@ function canAutoOpen() {
   const blockers = listing.missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
   if (blockers.length) return false;
   if ((listing.assumed || []).some((a) => !['condition', 'titleStatus'].includes(a.key))) return false;
+  // the website's own text mentions a branded title: a person picks the title on the form
+  if (listing.branded) return false;
   // Chrome asks for a new photo server only from a click: the car waits for Open the Marketplace form
   if (photoPatterns().some((p) => !refusedPhotoServers.has(p))) return false;
   return !dailyCap().reached;

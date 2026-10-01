@@ -84,6 +84,52 @@ test('a branded title in the website text switches the clean-title default off',
   assert.match(d.leftBlank.find((b) => b.key === 'titleStatus').why, /mentions "rebuilt"/);
 });
 
+test('a branded title is caught in the usual ways a website writes it, and ordinary words are not', () => {
+  const branded = {
+    'Salvaged title - sold as is': 'Salvaged',
+    'Flood-damaged, sold as is': 'Flood-damaged',
+    'Prior flood damage': 'flood damage',
+    'TMU - true mileage unknown title': 'TMU',
+    'True mileage unknown.': 'True mileage unknown',
+    'Odometer reading is NOT ACTUAL MILEAGE.': 'NOT ACTUAL MILEAGE',
+    'Mileage is not actual.': 'Mileage is not actual',
+    'Odometer discrepancy on file': 'Odometer discrepancy',
+    'Title is branded: odometer exempt': 'Title is branded',
+    'Branded Title': 'Branded Title',
+    'Previous total loss, insurance claim': 'total loss',
+    'Totaled and repaired': 'Totaled',
+    'Hail-damaged': 'Hail-damaged',
+    'Hail damage on the roof': 'Hail damage',
+    'Water damage history': 'Water damage',
+    'Fire damage repaired': 'Fire damage',
+    'Non-repairable certificate': 'Non-repairable',
+    'Rebuildable': 'Rebuildable',
+    'Lemon': 'Lemon',
+    'Lemon law buyback': 'Lemon law buyback',
+    'Manufacturer buyback': 'buyback',
+    'R title': 'R title',
+    'Theft recovered': 'Theft recovered',
+    'Junk title': 'Junk title',
+    'Reconstructed vehicle': 'Reconstructed',
+  };
+  for (const [words, signal] of Object.entries(branded)) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), signal, words);
+    const d = buildListingData({ descriptionRaw: words });
+    assert.equal(d.fields.titleStatus, '', `${words}: no title default`);
+    assert.equal(d.fields.cleanTitle, 'no', `${words}: the clean-title box is unticked`);
+  }
+  // in the title or a feature too
+  assert.equal(brandedTitleSignal({ siteTitle: 'Used 2018 Ford F-150 XLT - Salvaged Title' }), 'Salvaged');
+  assert.equal(brandedTitleSignal({ features: ['Flood-Damaged'] }), 'Flood-Damaged');
+  // ordinary dealer wording is not a brand: the dealership's default stands
+  for (const words of ['Tax, title and license extra.', 'Fog lights, flood lights on the rack.', 'No liens.', 'Odometer exempt.', 'No frame damage reported.', 'Total price shown includes the doc fee.', 'Lemonade stand not included.', 'Our title clerk handles the paperwork.', 'Water-resistant seats, fire extinguisher mount.']) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words });
+    assert.equal(d.fields.titleStatus, 'Clean', words);
+    assert.equal(d.fields.cleanTitle, 'yes', words);
+  }
+});
+
 test('blank values are reported, never guessed', () => {
   const v = vehicle('usedNoCarfax', { styles: { interior_color: 'Titanium' }, mechanical: { fuel_type: 'Unknown' } });
   const d = buildListingData(v, { dealer: {}, price: null });

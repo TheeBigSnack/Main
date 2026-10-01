@@ -225,4 +225,10 @@ test('the queue holds a car at review when anything besides the dealership defau
   const guessed = buildListingData(vehicle('usedNormal', { styles: { exterior_color: '' } }), { ...options, guesses: { exterior: 'Blue', confidence: 'high' } });
   assert.deepEqual(guessed.missing, []);
   assert.equal(opens(guessed), false, 'a photo guess waits at review');
+  // a branded title in the website's own words: the title is left for the person, so the car waits at review
+  const branded = buildListingData(vehicle('usedNormal', { description: 'Salvaged title, sold as is.' }), options);
+  assert.equal(branded.branded, 'Salvaged');
+  assert.deepEqual(branded.missing, ['titleStatus'], 'only the title is blank');
+  assert.equal(branded.fields.cleanTitle, 'no');
+  assert.equal(opens(branded), false, 'a branded title waits at review');
 });
