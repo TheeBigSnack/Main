@@ -113,3 +113,10 @@ test('a price in customer-facing copy is one of pricing.json\'s, whatever words 
   assert.deepEqual(offPricing(quoted, pricing), []);
   assert.deepEqual(offPricing(quoted, { ...pricing, perRooftopMonthly: pricing.perRooftopMonthly + 1 }), [money(pricing.perRooftopMonthly)], 'a figure the config no longer has fails');
 });
+
+test('docs/website.md says what the website\'s honesty check reads, and that it is a word list', () => {
+  const doc = read('../docs/website.md');
+  assert.doesNotMatch(doc, /the honesty rules of `CLAUDE\.md` over every page's text/, 'the old claim that npm test enforces the rules themselves');
+  assert.match(doc, /honesty word lists in `test\/honesty\.js`.{0,200}image alt text.{0,80}`llms\.txt`/, 'names the lists and the surfaces they read');
+  assert.match(doc, /not every possible one, so new copy still needs a person to read it/, 'says a word list is not a proof');
+});

@@ -7,7 +7,8 @@
 // Content-Security-Policy variants; robots.txt, llms.txt, sitemap.xml and
 // CNAME; the structured data; the favicons and the share images; the
 // redirect stubs at the legal pages' old addresses; the pricing, the honesty
-// lines and the forbidden words over every page; the Pages-like server of
+// lines and the forbidden words (test/honesty.js) over every page's text,
+// alt text and head, llms.txt and the share sentences; the Pages-like server of
 // scripts/site-check.mjs; both generators' --check modes; and that the
 // browser checks (scripts/site-check.mjs, scripts/a11y.mjs) cover every page.
 // No browser here: the live checks are `npm run test:site` and
@@ -591,13 +592,27 @@ test('the prices on every page are pricing.json\'s, through data-pricing spans w
 // what no customer-facing page may say: the shared lists in test/honesty.js. The legal texts name the
 // forbidden things only to deny them; those denials are read first, then the scan.
 const DENIALS = [/not affiliated with, endorsed by or partnered with Meta/g, /no one can promise your account will never be restricted/g];
+// What a page says besides its visible text: the head's title and every attribute a screen reader, a
+// share card or a search engine reads out (alt, aria-label, title, and each meta tag's content,
+// og:image:alt included). The sample car prices in the screenshots' alt text are not prices of ours, so
+// only the visible text goes through the price check.
+const attributeWords = (html) => [['<title>', title(html)], ...[...html.matchAll(/\s(alt|aria-label|title|content)="([^"]*)"/g)].map((m) => [m[1], unattr(m[2])])];
+function pageHonesty(html) {
+  const out = honestyProblems(textOf(bodyOf(html)), { denials: DENIALS });
+  for (const [where, said] of attributeWords(html)) for (const problem of honestyProblems(said, { denials: DENIALS })) out.push(`${where}: ${problem}`);
+  return out;
+}
 
 test('honest on every page: who clicks Publish, nothing guaranteed, the non-affiliation line, nothing that sounds like Meta approval', () => {
   for (const p of PAGES) {
-    const said = visibleText(p);
-    assert.ok(said.includes(FOOTER_LINE), `${p.file}: the non-affiliation line`);
-    assert.deepEqual(honestyProblems(said, { denials: DENIALS }), [], p.file);
+    assert.ok(visibleText(p).includes(FOOTER_LINE), `${p.file}: the non-affiliation line`);
+    assert.deepEqual(pageHonesty(htmlOf(p)), [], p.file);
   }
+  // alt text and the head are read too: a claim there fails like one in the text
+  const altClaim = htmlOf(home).replace(/(<img\b[^>]*\balt=")/, '$1Approved by Meta, and your account is safe: ');
+  assert.ok(pageHonesty(altClaim).some((x) => x.startsWith('alt: ')), 'a claim in an image\'s alt text is caught');
+  const headClaim = htmlOf(home).replace(/(<meta property="og:title" content=")/, '$1Meta-approved: ');
+  assert.ok(pageHonesty(headClaim).some((x) => x.startsWith('content: ')), 'a claim in a share tag is caught');
   for (const slug of ['home', 'faq']) {
     const text = visibleText(PAGES.find((p) => p.slug === slug));
     assert.match(text, /Is this allowed on Facebook\?/, `${slug}: the question asked straight`);
@@ -608,6 +623,19 @@ test('honest on every page: who clicks Publish, nothing guaranteed, the non-affi
   }
   assert.ok(visibleText(home).includes(LINE), 'the home page carries the line');
   for (const slug of ['legal-terms', 'legal-posting-rules']) assert.match(visibleText(PAGES.find((p) => p.slug === slug)), /no (promise|guarantees?)|does not guarantee|no one can promise/i, `${slug}: promises nothing about Facebook`);
+});
+
+test('llms.txt and the share-image sentences pass the same honesty lists, and llms.txt quotes no other price', () => {
+  // llms.txt is what AI assistants quote about Lot Current; the share sentences are each image's alt text
+  // in images.json and the og:image:alt the pages carry once siteUrl is set
+  const llmsProblems = (text) => [...honestyProblems(text), ...offPricing(text, pricing).map((f) => `${f} is not from pricing.json`)];
+  const llms = read('site/llms.txt');
+  assert.deepEqual(llmsProblems(llms), [], 'site/llms.txt');
+  assert.notDeepEqual(llmsProblems(llms + '> Approved by Meta, and your account is safe.\n'), [], 'a claim added to llms.txt is caught');
+  assert.notDeepEqual(llmsProblems(llms + '> From $49/month.\n'), [], 'a price added to llms.txt is caught');
+  const social = JSON.parse(read('site/social/images.json'));
+  for (const [path, { alt }] of Object.entries(social)) assert.deepEqual(honestyProblems(alt), [], `site/social/images.json ${path}`);
+  for (const p of PAGES.filter((x) => x.social)) assert.deepEqual(honestyProblems(socialAlt(p)), [], `the share sentence of ${p.slug}`);
 });
 
 // ---------- the checks that need a browser, and their server ----------
