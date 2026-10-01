@@ -348,3 +348,83 @@ test('an old read of the car is read and checked again before the form opens or 
   assert.deepEqual(opened(same.calls), [`runFill: ${description}`]);
   assert.equal(same.state.step, 'probe', 'back on the dry run, which the fill then moves on');
 });
+
+// A post request (the popup's Post, its Continue in the side panel, the queue
+// bar's Post next car) while car A's Marketplace form is open: A is never
+// dropped. The request for A itself leaves the panel on A; one for another
+// car is refused until the person says whether A posted.
+function requestPanel({ step, vin = 'AAA', queueMode = false, queue = null }) {
+  const calls = [];
+  const FORM_STEPS = new Function(`return ${/const FORM_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)();
+  const state = { origin: 'https://www.example-motors.test', vin, step, queueMode, queue, vehicle: vin ? { name: '2020 Make Model A' } : null, fbTabId: 55, snapshotVehicles: { BBB: { name: 'Car B' } } };
+  const fns = compileMany(['formOpen', 'postRequested', 'resumeOpenForm', 'queueBar'], {
+    state, FORM_STEPS, GLOBAL_KEYS: { postRequest: 'postRequest' },
+    siteKeys: (o) => ({ flow: 'postFlow:' + o }),
+    finishFirstText: new Function('state', 'nameOf', `return ${/const finishFirstText = ([^\n]+);\n/.exec(src)[1]}`)(state, (v) => v),
+    chrome: { storage: { local: { remove: async (k) => calls.push('remove ' + k), get: async (k) => ({ [k]: state.saved }) } } },
+    startFlow: async (req) => calls.push('startFlow ' + req.vin),
+    resumeFlow: async (origin, flow) => {
+      calls.push('resumeFlow ' + flow.vin);
+      Object.assign(state, flow, { origin });
+    },
+    setStatus: (text, kind) => calls.push(`status${kind ? '(' + kind + ')' : ''}: ${text}`),
+    render: () => calls.push('render'),
+    currentVin: (q) => q.vins[q.index], describeQueue: () => 'Queue', esc: (s) => String(s), nameOf: (v) => v,
+  });
+  return { state, calls, fns };
+}
+
+test('a Post for another car never drops a Marketplace form that is open; the same car stays where it is', async () => {
+  for (const step of ['filling', 'probe', 'publish']) {
+    const other = requestPanel({ step });
+    await other.fns.postRequested({ origin: other.state.origin, vin: 'BBB', dealerTabId: 9 });
+    assert.ok(!other.calls.some((c) => c.startsWith('startFlow')), `${step}: car A is not dropped`);
+    assert.ok(other.calls.includes('remove postRequest'), `${step}: the request is used up`);
+    assert.ok(other.calls.includes('status(error): Finish or stop the current post (2020 Make Model A) first: its Marketplace form is open. Then click Post again.'), other.calls.join(' | '));
+    assert.equal(other.state.vin, 'AAA');
+
+    const same = requestPanel({ step, queueMode: true });
+    await same.fns.postRequested({ origin: same.state.origin, vin: 'aaa', queue: true });
+    assert.deepEqual(same.calls, ['remove postRequest', 'status: ', 'render'], `${step}: the same car's request leaves the panel on it`);
+    // the same VIN on another website is another car
+    const elsewhere = requestPanel({ step });
+    await elsewhere.fns.postRequested({ origin: 'https://www.other-motors.test', vin: 'AAA' });
+    assert.ok(elsewhere.calls.some((c) => c.startsWith('status(error): Finish or stop')));
+  }
+  // nothing on Facebook yet (nothing under way, a review, a stop): the new post starts, as before
+  for (const step of ['idle', 'checking', 'review', 'blocked', 'done', 'queueDone']) {
+    const p = requestPanel({ step });
+    await p.fns.postRequested({ origin: p.state.origin, vin: 'BBB' });
+    assert.deepEqual(p.calls, ['startFlow BBB'], step);
+  }
+  const none = requestPanel({ step: 'idle', vin: null });
+  await none.fns.postRequested({ origin: none.state.origin, vin: 'BBB' });
+  assert.deepEqual(none.calls, ['startFlow BBB']);
+});
+
+test('a form left open when the panel closed comes back before a post request is handled, and the queue bar offers no Post next car over it', async () => {
+  // the panel opens with car A waiting for Publish (saved) and a request for car B (Continue in the side panel)
+  const p = requestPanel({ step: 'idle', vin: null });
+  p.state.saved = { vin: 'AAA', step: 'publish', vehicle: { name: '2020 Make Model A' }, fbTabId: 55 };
+  await p.fns.resumeOpenForm(p.state.origin);
+  await p.fns.postRequested({ origin: p.state.origin, vin: 'BBB', queue: true });
+  assert.equal(p.calls[0], 'resumeFlow AAA');
+  assert.ok(!p.calls.some((c) => c.startsWith('startFlow')), 'A comes back and B waits');
+  // a review saved with nothing on Facebook is not brought back: the request starts over it
+  for (const step of ['review', 'checking', 'blocked', 'done', 'idle']) {
+    const r = requestPanel({ step: 'idle', vin: null });
+    r.state.saved = { vin: 'AAA', step };
+    await r.fns.resumeOpenForm(r.state.origin);
+    await r.fns.postRequested({ origin: r.state.origin, vin: 'BBB' });
+    assert.deepEqual(r.calls, ['startFlow BBB'], step);
+  }
+  const nothing = requestPanel({ step: 'idle', vin: null });
+  await nothing.fns.resumeOpenForm(undefined);
+  assert.deepEqual(nothing.calls, []);
+
+  // the queue bar: a single post's form open, so no Post next car
+  const queue = { vins: ['BBB', 'CCC'], index: 0, status: 'running' };
+  for (const step of ['filling', 'probe', 'publish']) assert.doesNotMatch(requestPanel({ step, queue }).fns.queueBar(), /queueNext/, step);
+  assert.match(requestPanel({ step: 'review', queue }).fns.queueBar(), /id="queueNext"/);
+  assert.match(requestPanel({ step: 'idle', vin: null, queue }).fns.queueBar(), /id="queueNext"/);
+});

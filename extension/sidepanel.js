@@ -565,7 +565,7 @@ function queueBar() {
   if (q.status === 'done') {
     buttons = `<button type="button" class="plain" id="queueClear">Clear queue</button>`;
   } else {
-    if (!active && next && q.status === 'running') buttons += `<button type="button" class="primary" id="queueNext">Post next car</button>`;
+    if (!active && !formOpen() && next && q.status === 'running') buttons += `<button type="button" class="primary" id="queueNext">Post next car</button>`;
     buttons += q.status === 'running' ? `<button type="button" class="plain" id="queuePause">Pause</button>` : `<button type="button" class="plain" id="queueResume">Resume</button>`;
     if (next) buttons += `<button type="button" class="plain" id="queueSkip">Skip this car</button>`;
     buttons += `<button type="button" class="plain" id="queueStop">Stop queue</button>`;
@@ -1444,6 +1444,42 @@ const upkeepCtx = {
 const LIVE_STEPS = ['checking', 'review', 'filling', 'probe', 'publish'];
 const postUnderWay = () => Boolean(state.vin) && LIVE_STEPS.includes(state.step);
 
+// A Marketplace form open for the post under way: being opened and filled,
+// the dry run's, or waiting for Publish. Dropping it for another car would
+// leave a listing published from it unrecorded: never flagged when the car
+// sells, never checked for price changes, never counted against the cap.
+const FORM_STEPS = ['filling', 'probe', 'publish'];
+function formOpen() {
+  return Boolean(state.vin) && FORM_STEPS.includes(state.step);
+}
+const finishFirstText = (button) => `Finish or stop the current post (${state.vehicle ? state.vehicle.name : nameOf(state.vin)}) first: its Marketplace form is open. Then click ${button} again.`;
+
+// A post request from the popup (Post, or Continue in the side panel). While
+// a form is open, a request for the same car leaves the panel on it, and one
+// for another car is refused until the person says whether that form
+// posted. Otherwise the new post starts; a review with nothing on Facebook
+// yet gives way to it, as before.
+async function postRequested(req) {
+  if (!formOpen()) return startFlow(req);
+  await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
+  if (req.origin === state.origin && String(req.vin || '').toUpperCase() === state.vin) {
+    setStatus('');
+    return render();
+  }
+  setStatus(finishFirstText('Post'), 'error');
+  return undefined;
+}
+
+// A form left open on Facebook when the panel closed comes back before a
+// post request is handled, so the request meets it (postRequested) instead
+// of starting over it.
+async function resumeOpenForm(origin) {
+  if (!origin) return;
+  const k = siteKeys(origin).flow;
+  const flow = (await chrome.storage.local.get(k))[k];
+  if (flow && flow.vin && FORM_STEPS.includes(flow.step)) await resumeFlow(origin, flow);
+}
+
 let lastUpkeepAt = 0;
 async function openUpkeep(req) {
   // the request can arrive twice (storage change + start-up read): act once
@@ -1774,7 +1810,7 @@ async function onClick(ev) {
     case 'savedDraft': return savedDraft();
     case 'skipCar':
     case 'skipBlocked': return afterQueueStep(btn.id === 'skipBlocked' ? 'blocked' : 'skipped');
-    case 'queueNext': return startNextInQueue();
+    case 'queueNext': return formOpen() ? setStatus(finishFirstText('Post next car'), 'error') : startNextInQueue();
     case 'queuePause':
       state.queue = pauseQueue(state.queue);
       await saveQueue();
@@ -1815,7 +1851,7 @@ let panelWindowId = null;
 const forThisWindow = (req) => Boolean(req) && (!req.windowId || panelWindowId === null || req.windowId === panelWindowId);
 const isFresh = (req) => Boolean(req) && (!req.at || Date.now() - req.at <= REQUEST_MAX_AGE_MS);
 
-const handlers = { [GLOBAL_KEYS.postRequest]: startFlow, [GLOBAL_KEYS.setupRequest]: openWizard, [GLOBAL_KEYS.upkeepRequest]: openUpkeep };
+const handlers = { [GLOBAL_KEYS.postRequest]: postRequested, [GLOBAL_KEYS.setupRequest]: openWizard, [GLOBAL_KEYS.upkeepRequest]: openUpkeep };
 
 // Changes to this website's posted list, drafts, queue and settings made by
 // the popup or the service worker are adopted here, so the cap, the queue
@@ -1946,11 +1982,12 @@ async function init() {
   const pending = REQUEST_KEYS.map((name) => ({ name, req: stored[name] })).filter(({ req }) => forThisWindow(req) && isFresh(req)).sort((a, b) => (b.req.at || 0) - (a.req.at || 0));
   const stale = REQUEST_KEYS.filter((name) => stored[name] && !isFresh(stored[name]));
   if (stale.length) await chrome.storage.local.remove(stale);
+  const lastPostOrigin = stored[GLOBAL_KEYS.lastPostOrigin];
   if (pending.length) {
     await chrome.storage.local.remove(REQUEST_KEYS);
+    if (pending[0].name === GLOBAL_KEYS.postRequest) await resumeOpenForm(lastPostOrigin);
     return handlers[pending[0].name](pending[0].req);
   }
-  const lastPostOrigin = stored[GLOBAL_KEYS.lastPostOrigin];
   if (lastPostOrigin) {
     // a post under way comes back first; an unfinished set-up only when nothing else is going on
     const k = siteKeys(lastPostOrigin).flow;

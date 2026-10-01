@@ -117,7 +117,7 @@ try {
   await popup.close();
 
   // ---- 2. The side panel picks up the request (opened as a page here; Chrome docks it beside the tab in real use) ----
-  const panel = watch(await context.newPage());
+  let panel = watch(await context.newPage());
   await panel.goto(extUrl('sidepanel.html'));
   await panel.waitForSelector('#openForm', { timeout: 20000 });
   const car = await panel.textContent('#vehicle');
@@ -234,6 +234,26 @@ try {
   });
   assert.deepEqual(flowPhotos, ['2.png', '1.png']);
   assert.equal(await publishCount(dealer), '0', 'the extension must not publish');
+
+  // ---- 4c. A Post for another car while this form waits for Publish never drops it ----
+  // (the popup's Post writes this request; another car's VIN, as written there)
+  const otherCar = { origin, vin: 'TESTVIN00000000B2', dealerTabId: null, at: Date.now() };
+  const refused = /Finish or stop the current post \(2019 Ram 1500 Classic Express\) first: its Marketplace form is open\. Then click Post again\./;
+  await panel.evaluate((req) => chrome.storage.local.set({ postRequest: req }), otherCar);
+  await panel.waitForFunction((re) => new RegExp(re).test(document.getElementById('status').textContent), refused.source);
+  assert.ok(await panel.$('#confirmPosted'), 'still on the Ram, waiting for Publish');
+  // and when the panel was closed meanwhile: it comes back on the Ram's form, not on the other car
+  await panel.close();
+  const writer = await context.newPage();
+  await writer.goto(extUrl('popup.html'));
+  await writer.evaluate((req) => chrome.storage.local.set({ postRequest: { ...req, at: Date.now() } }), otherCar);
+  await writer.close();
+  panel = watch(await context.newPage());
+  await panel.goto(extUrl('sidepanel.html'));
+  await panel.waitForSelector('#confirmPosted', { timeout: 20000 });
+  await panel.waitForFunction((re) => new RegExp(re).test(document.getElementById('status').textContent), refused.source);
+  assert.match(await panel.textContent('#vehicle'), /2019 Ram 1500 Classic Express/);
+  assert.equal(await panel.evaluate(async () => (await chrome.storage.local.get('postRequest')).postRequest || null), null, 'the request is used up');
 
   // ---- 5. The person clicks Publish (the test stands in for the salesperson) ----
   await fb.click('#publish');
