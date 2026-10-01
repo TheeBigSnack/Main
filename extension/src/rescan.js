@@ -147,7 +147,10 @@ function whatGotReady(before, now) {
  *   posted:  { [vin]: { price, postedAt, name, mine? } } cars the salesperson posted;
  *            an entry with `mine: false` is a colleague's (merged in by sync):
  *            its car shows in the lists but is never "yours"
- *   confirm: { checked: [vin], notFound: [vin], error?: string } direct VIN lookups
+ *   confirm: { checked: [vin], notFound: [vin], error?: string, unchecked?: { [vin]: reason } }
+ *            direct VIN lookups. error: the check as a whole failed, so no
+ *            car is called gone; unchecked: cars whose own check failed
+ *            while the others' verdicts still stand
  *   basis:   'website' | 'beforeFees' which price goes on Marketplace
  */
 export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'website' } = {}) {
@@ -171,6 +174,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   const missing = [...candidates].filter((vin) => !currVehicles[vin]);
   const notFound = new Set(confirm && !confirm.error ? confirm.notFound || [] : []);
   const checked = new Set(confirm && !confirm.error ? confirm.checked || [] : []);
+  const unchecked = confirm && !confirm.error && confirm.unchecked && typeof confirm.unchecked === 'object' ? confirm.unchecked : {};
   const missingFromLastScan = missing.filter((vin) => prevVehicles[vin]).length;
   const massDisappearance = out.counts.previous >= MASS_DISAPPEARANCE_MIN_LOT && missingFromLastScan > out.counts.previous * MASS_DISAPPEARANCE_SHARE;
 
@@ -189,6 +193,10 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     const item = { vin, name: last.name, stock: last.stock, url: last.url, yours: yours(vin), lastPrice: yours(vin) ? posted[vin].price : basisPrice(last, basis) };
     if (!massDisappearance && notFound.has(vin) && checked.has(vin)) {
       out.takeDown.push({ ...item, why: 'gone', text: 'Gone from the website (sold or removed)' });
+    } else if (Object.prototype.hasOwnProperty.call(unchecked, vin) && typeof unchecked[vin] === 'string') {
+      // its own check failed (the others still counted): say why, and what settles it
+      const next = item.yours ? 'Check the car on the website; if it sold, take your listing down and click Taken down on My listings.' : 'Check the car on the website.';
+      out.needsALook.push({ ...item, text: `Missing from this scan, and ${unchecked[vin].slice(0, 160)}, so it was not marked gone. ${next}` });
     } else {
       out.needsALook.push({ ...item, text: 'Missing from this scan but not confirmed gone. Rescan later.' });
     }

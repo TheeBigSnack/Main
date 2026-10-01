@@ -152,7 +152,9 @@ const flagOpen = (f) => !f.doneAt;
 // An open flag whose item is no longer in the diff is closed as "cleared"
 // (the website changed its mind: the car came back, the price went back), but
 // only when the scan was complete and confirmed; a scan with warnings keeps
-// every open flag as it is.
+// every open flag as it is, and so does a take-down whose car is still under
+// Needs a look as the salesperson's (still missing, only not confirmed gone
+// this time: its page could not be checked).
 export function noteFlags(pilot, diff, { at } = {}) {
   const p = withPilotDefaults(pilot);
   if (!diff || typeof diff !== 'object') return p;
@@ -161,9 +163,11 @@ export function noteFlags(pilot, diff, { at } = {}) {
   for (const t of Array.isArray(diff.takeDown) ? diff.takeDown : []) if (t && t.yours && t.vin) wanted.push({ vin: t.vin, kind: 'takeDown', name: clean(t.name, 80), why: clean(t.why, 40) });
   for (const u of Array.isArray(diff.priceUpdates) ? diff.priceUpdates : []) if (u && u.yours && u.vin) wanted.push({ vin: u.vin, kind: 'price', name: clean(u.name, 80), from: u.from, to: u.to });
   const reliable = !diff.unreliable && !(Array.isArray(diff.warnings) && diff.warnings.length);
+  const unsettled = new Set((Array.isArray(diff.needsALook) ? diff.needsALook : []).filter((n) => n && n.yours && n.vin).map((n) => n.vin));
   const flags = p.flags.map((f) => {
     if (!flagOpen(f)) return f;
     const still = wanted.find((w) => w.vin === f.vin && w.kind === f.kind);
+    if (!still && f.kind === 'takeDown' && unsettled.has(f.vin)) return f;
     if (!still) return reliable ? { ...f, doneAt: when, how: 'cleared', hours: hoursBetween(f.flaggedAt, when) } : f;
     if (f.kind === 'price' && still.to !== f.to) return { ...f, from: still.from, to: still.to }; // the website price moved again while the item was open
     return f;

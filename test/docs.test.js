@@ -91,6 +91,15 @@ test('help.md and README give the "vanished at once" rule with the lot size it s
   assert.match(read('../README.md'), new RegExp(`If more than half the cars of a lot of ${floor} or more vanish between scans, nothing is marked gone`));
 });
 
+test('the adapter contract and help.md say a car whose own page could not be checked is left unchecked, not that it stops every verdict', () => {
+  const contract = read('../extension/adapters/README.md');
+  assert.match(contract, /`confirm\.unchecked`, `\{ vin: reason \}`/);
+  assert.match(contract, /A refusal \(403, 429, 503, a bot check\) sets `confirm\.error`/);
+  assert.doesNotMatch(contract, /Anything else \(403, 429, 5xx/, 'the old whole-check rule for a 5xx is gone');
+  assert.match(doc('help.md'), /whose own page could not be checked .* stays under \*\*Needs a look\*\* with the reason/);
+  assert.match(read('../PILOT.md'), /neither does a scan that keeps the sold car under Needs a look because its page could not be checked/);
+});
+
 test('help.md is organised by what people are trying to do', () => {
   const help = doc('help.md');
   const sections = [

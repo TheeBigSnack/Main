@@ -707,7 +707,7 @@ test('schemaOrg scan: the sitemap adds only addresses shaped like this lot\'s ow
 });
 
 // A car from the last scan is gone from the list; its own page decides.
-test('schemaOrg confirm: gone only on 404, 410, a redirect away, SoldOut or the website\'s data without it; anything else is an error and nothing is gone', async () => {
+test('schemaOrg confirm: gone only on 404, 410, a redirect away, SoldOut or the website\'s data without it; a refusal stops the check, any other failure leaves only that car unchecked', async () => {
   const cars = standardCars(5);
   const gone = standardCars(1, { from: 40 })[0];
   const at = O + gone.path;
@@ -719,21 +719,22 @@ test('schemaOrg confirm: gone only on 404, 410, a redirect away, SoldOut or the 
     ['200 SoldOut', html(standardCarPage(gone, { availability: 'SoldOut' })), 'gone'],
     ['200 with the website\'s data but not the car', html(noLongerAvailable), 'gone'],
     ['200 with the car still for sale', html(standardCarPage(gone)), 'found'],
-    ['200 with no structured data at all', html('<html><body><h1>Oops</h1></body></html>'), 'error'],
+    ['200 with no structured data at all', html('<html><body><h1>Oops</h1></body></html>'), 'unchecked', /its page has no vehicle data/],
     ['200 bot check', html('<html><head><title>Just a moment...</title></head><body>Checking your browser before accessing the site.</body></html>'), 'error'],
-    ['200 not a web page', { ok: true, status: 200, contentType: 'application/json', text: '{}' }, 'error'],
+    ['200 not a web page', { ok: true, status: 200, contentType: 'application/json', text: '{}' }, 'unchecked', /its page is not a web page \(application\/json\)/],
     ['403', httpError(403), 'error'],
     ['429', httpError(429), 'error'],
-    ['500', httpError(500), 'error'],
-    ['redirect to another website', html(standardCarPage(gone), { redirected: true, finalUrl: 'https://other.example/x' }), 'error'],
+    ['503', httpError(503), 'error'],
+    ['500', httpError(500), 'unchecked', /its page gave HTTP 500/],
+    ['redirect to another website', html(standardCarPage(gone), { redirected: true, finalUrl: 'https://other.example/x' }), 'unchecked', /its page sent Lot Current to another website/],
   ];
-  for (const [label, answer, want] of cases) {
+  for (const [label, answer, want, why] of cases) {
     const site = standardSite({ cars });
     site.set(at, answer);
     const res = await scanSite(site, { confirmVins: [gone.vin, cars[0].vin, 'NOPE'], confirmUrls: { [gone.vin]: at, [cars[0].vin]: O + cars[0].path } });
     assert.equal(res.ok, true, label);
     const c = res.confirm;
-    if (want === 'gone') assert.deepEqual([c.checked, c.notFound, c.error], [[gone.vin], [gone.vin], null], label);
+    if (want === 'gone') assert.deepEqual([c.checked, c.notFound, c.error, c.unchecked], [[gone.vin], [gone.vin], null, undefined], label);
     if (want === 'found') {
       assert.deepEqual([c.checked, c.notFound, c.error], [[gone.vin], [], null], label);
       assert.ok(res.records.some((r) => r.node.vehicleIdentificationNumber === gone.vin), 'a car found at its page is back in the records');
@@ -741,6 +742,11 @@ test('schemaOrg confirm: gone only on 404, 410, a redirect away, SoldOut or the 
     if (want === 'error') {
       assert.ok(c.error, `${label}: an error`);
       assert.deepEqual(c.notFound, [], `${label}: nothing gone`);
+    }
+    if (want === 'unchecked') {
+      // only this car is left unchecked, with the reason; the check as a whole stands
+      assert.deepEqual([c.checked, c.notFound, c.error, Object.keys(c.unchecked || {})], [[], [], null, [gone.vin]], label);
+      assert.match(c.unchecked[gone.vin], why, label);
     }
   }
   // the scan never asks for a page it has no address for (NOPE), and a car still on the list isn't checked
@@ -758,9 +764,13 @@ test('schemaOrg confirm: a page without the car counts only once this website\'s
   const bare = standardSite({ cars });
   for (const c of cars) bare.set(O + c.path, html(`<html><head><title>${c.model}</title></head><body>$${c.price}</body></html>`));
   bare.set(O + gone.path, html(noLongerAvailable));
-  const res = await scanSite(bare, { confirmVins: [gone.vin], confirmUrls: { [gone.vin]: O + gone.path } });
-  assert.deepEqual(res.confirm.notFound, []);
-  assert.match(res.confirm.error, /don't mark up their own car/);
+  // a second missing car whose page answers 404 is gone all the same: only the page that proves nothing is held back
+  const sold = standardCars(1, { from: 41 })[0];
+  bare.set(O + sold.path, httpError(404));
+  const res = await scanSite(bare, { confirmVins: [gone.vin, sold.vin], confirmUrls: { [gone.vin]: O + gone.path, [sold.vin]: O + sold.path } });
+  assert.deepEqual([res.confirm.checked, res.confirm.notFound, res.confirm.error], [[sold.vin], [sold.vin], null]);
+  assert.deepEqual(Object.keys(res.confirm.unchecked), [gone.vin]);
+  assert.match(res.confirm.unchecked[gone.vin], /don't mark up their own car/);
   assert.ok(res.records.every((r) => r.carried), 'the cars themselves come from the list\'s data');
 });
 
@@ -898,19 +908,27 @@ test('a scan that did not read everything says which way: cars missing, pages th
   assert.equal(out.snapshot.complete, false);
   assert.equal(out.diff.warnings[0], "Some of the website's pages could not be read this time.", 'every car is known from the list; one page failed; nothing was missing, so nothing was double-checked');
 
-  // a bad server day: page 2 of the list fails, and a missing posted car's page fails too
+  // a bad server day: page 2 of the list fails, and the website refuses a missing posted car's page
   const six = standardCars(6);
   const settings = withDefaults({}, site);
   const posted = { [six[4].vin]: { name: 'x', price: six[4].price, postedAt: '2026-09-29T12:00:00Z' } };
   const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars: six })), site, settings, posted, options: schemaOrg.scanOptions(SERVICE) });
   const bad = standardSite({ cars: six });
   bad.set(LIST + '?page=2', httpError(500));
-  bad.set(O + six[4].path, httpError(500));
+  bad.set(O + six[4].path, httpError(429));
   const day2 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(bad), site, settings, posted, prevSnapshot: day1.snapshot, options: schemaOrg.scanOptions(SERVICE) });
   assert.ok(day2.res.confirm.error);
   assert.equal(day2.diff.warnings[0], "Some of the website's pages could not be read this time.", 'never "double-checked" when the check failed');
   assert.match(day2.diff.warnings[1], /^Couldn't double-check missing cars .*Nothing was marked as gone\.$/);
   assert.deepEqual(day2.diff.takeDown, []);
+  // the same car's page answering 500 leaves only that car unchecked, named with the reason
+  bad.set(O + six[4].path, httpError(500));
+  const day2a = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(bad), site, settings, posted, prevSnapshot: day1.snapshot, options: schemaOrg.scanOptions(SERVICE) });
+  assert.equal(day2a.res.confirm.error, null);
+  assert.match(day2a.res.confirm.unchecked[six[4].vin], /HTTP 500/);
+  assert.ok(!day2a.diff.warnings.some((w) => /Couldn't double-check/.test(w)));
+  assert.deepEqual(day2a.diff.takeDown, []);
+  assert.match(day2a.diff.needsALook.find((n) => n.vin === six[4].vin).text, /its page gave HTTP 500, so it was not marked gone/);
   // the same day with the missing cars' pages answering 404: they were double-checked, and are gone
   const sold = standardSite({ cars: six });
   sold.set(LIST + '?page=2', httpError(500));
@@ -1015,8 +1033,9 @@ test('schemaOrg confirm: a live car whose page marks up only other cars, or redi
     }
     const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(day2), site, settings, posted, prevSnapshot: first.snapshot, options: schemaOrg.scanOptions(SERVICE) });
     const label = redirect ? 'redirected' : 'at its page';
-    assert.deepEqual(out.res.confirm.notFound, [], label);
-    assert.match(out.res.confirm.error, /don't mark up their own car/, label);
+    assert.deepEqual([out.res.confirm.notFound, out.res.confirm.error], [[], null], label);
+    assert.deepEqual(Object.keys(out.res.confirm.unchecked).sort(), cars.slice(8).map((c) => c.vin).sort(), label);
+    for (const c of cars.slice(8)) assert.match(out.res.confirm.unchecked[c.vin], /don't mark up their own car/, label);
     assert.deepEqual(out.diff.takeDown, [], `${label}: nothing taken down, the posted car included`);
     assert.deepEqual(out.diff.needsALook.map((n) => n.vin).sort(), cars.slice(8).map((c) => c.vin).sort(), label);
   }
@@ -1114,8 +1133,9 @@ test('schemaOrg: a redirect to another website is followed as a browser would, a
     const res = await schemaOrg.scan(search, { ...schemaOrg.scanOptions(service), confirmVins: [sold.vin], confirmUrls: { [sold.vin]: dealer.origin + sold.path } });
     assert.ok(hits.length >= 1, 'the redirect was followed (the request went out, as it would from a browser)');
     assert.equal(res.ok, true);
-    assert.match(res.confirm.error, /another website/, 'the other website\'s answer proves nothing about the missing car');
-    assert.deepEqual(res.confirm.notFound, []);
+    assert.equal(res.confirm.error, null);
+    assert.match(res.confirm.unchecked[sold.vin], /another website/, 'the other website\'s answer proves nothing about the missing car');
+    assert.deepEqual([res.confirm.checked, res.confirm.notFound], [[], []]);
     assert.ok(!res.records.some((r) => r.node.vehicleIdentificationNumber === sold.vin), 'the missing car is not brought back from the other website');
     const listed = res.records.find((r) => r.node.vehicleIdentificationNumber === cars[1].vin);
     assert.ok(listed && listed.carried && listed.url.startsWith(dealer.origin), 'the listed car comes from the dealer\'s own list, not the other website');

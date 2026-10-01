@@ -274,12 +274,51 @@ test('a website read from its pages: half the lot gone, each page confirming it,
 
 test('a website read from its pages: a missing car whose page could not be checked is never marked gone', async () => {
   const cars = standardCars(12);
-  for (const status of [403, 429, 500]) {
+  // a refusal stops the whole check: nothing is marked gone, and the scan says so
+  for (const status of [403, 429, 503]) {
     const { out } = await standardRescan(cars, cars.slice(1), (site) => site.set(STANDARD_ORIGIN + cars[0].path, httpError(status)));
     assert.match(out.res.confirm.error, new RegExp(String(status)));
     assert.deepEqual(out.diff.takeDown, [], `HTTP ${status}`);
     assert.deepEqual(out.diff.needsALook.map((n) => n.vin), [cars[0].vin]);
     assert.match(out.diff.warnings.join(' '), /Couldn't double-check missing cars .*Nothing was marked as gone/);
+  }
+  // any other failure leaves that one car unchecked, under Needs a look with the reason
+  const { out } = await standardRescan(cars, cars.slice(1), (site) => site.set(STANDARD_ORIGIN + cars[0].path, httpError(500)));
+  assert.equal(out.res.confirm.error, null);
+  assert.deepEqual(out.diff.takeDown, [], 'HTTP 500');
+  assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Missing from this scan, and its page gave HTTP 500, so it was not marked gone. Check the car on the website.']]);
+});
+
+test('a website read from its pages: one posted car whose page keeps failing never holds back another sold car, scan after scan', async () => {
+  const cars = standardCars(8);
+  const [broken, sold] = cars;
+  const page = (text, extra = {}) => ({ ok: true, status: 200, contentType: 'text/html', text, ...extra });
+  for (const failure of [httpError(500), page('<html><body>This vehicle is no longer available</body></html>'), page(standardCarPage(broken), { redirected: true, finalUrl: 'https://other.example/x' })]) {
+    // one car is the salesperson's own listing, the other a colleague's (merged in by sync): either one's page used to block every verdict
+    for (const [mineBroken, mineSold] of [[true, true], [false, true]]) {
+      let posted = markPosted({}, { vin: sold.vin, name: 'sold car', price: sold.price });
+      posted = markPosted(posted, { vin: broken.vin, name: 'broken car', price: broken.price });
+      posted[broken.vin].mine = mineBroken;
+      posted[sold.vin].mine = mineSold;
+      const first = await rescanOf(standardSite({ cars }), null, posted);
+      let prev = first.snapshot;
+      for (const day of [2, 3, 4]) {
+        const site = standardSite({ cars: cars.slice(2) });
+        site.set(STANDARD_ORIGIN + broken.path, failure);
+        site.set(STANDARD_ORIGIN + sold.path, httpError(404));
+        const out = await rescanOf(site, prev, posted);
+        const label = `day ${day}, ${failure.finalUrl || (failure.ok ? 'no data' : failure.status)}, broken car ${mineBroken ? 'mine' : 'a colleague\'s'}`;
+        assert.equal(out.res.confirm.error, null, label);
+        assert.deepEqual(out.diff.takeDown.map((t) => [t.vin, t.why]), [[sold.vin, 'gone']], `${label}: the 404 car is on Take down`);
+        const held = out.diff.needsALook.find((n) => n.vin === broken.vin);
+        assert.ok(held, `${label}: the car that could not be checked stays under Needs a look`);
+        assert.doesNotMatch(held.text, /Rescan later/, label);
+        assert.match(held.text, /^Missing from this scan, and its page (gave HTTP 500|has no vehicle data to check against|sent Lot Current to another website), so it was not marked gone\./, label);
+        if (mineBroken) assert.match(held.text, /click Taken down on My listings/, label);
+        assert.ok(!out.diff.warnings.some((w) => /Couldn't double-check/.test(w)), label);
+        prev = out.snapshot;
+      }
+    }
   }
 });
 

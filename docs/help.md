@@ -123,6 +123,7 @@ Notes:
 - A post that is under way blocks a to-do item: finish or stop it first, then click the To do button again.
 - **My listings** shows each car as "Matches the website", "Website price changed" (with **Updated**), "Not on the website at the last scan", "Marked sold on the website", "Sale pending on the website", "Not pre-owned on the website" or "Needs a look (see To do)", with **Taken down** and, when a link was saved, **Open listing**.
 - A car you posted that the website now calls new, demo or loaner, or whose details need a look, stays under **Needs a look** on every rescan until the website is fixed or you take the listing down and click **Taken down**.
+- A car that left the website but whose own page could not be checked (it gave an error, had no vehicle details, or sent Lot Current to another website) is not marked gone: it stays under **Needs a look** with the reason. Check the car on the website; if it sold, take your listing down and click **Taken down** on **My listings**. Other sold cars are still put under **Take down** as usual.
 - The posting rules ask for sold cars to come down the same day.
 
 ## The Numbers tab

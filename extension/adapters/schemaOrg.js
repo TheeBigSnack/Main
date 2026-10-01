@@ -643,27 +643,38 @@ async function sitemapAddresses(site, origin, shape) {
 
 // A car from the last scan that this scan did not find, checked at the page
 // it was last seen on. Gone when that page says so: 404 or 410, or the car's
-// node marked SoldOut. Anything else that isn't the car's page (403, 429,
-// 5xx, a timeout, a bot check, a file that isn't a web page, a page with no
-// structured data at all) is an error, and the rescan then marks nothing
-// gone. A redirect to a page without a node for this VIN, or the page itself
-// with the website's own structured data and no node for this VIN (a "no
-// longer available" page, or one that shows only other cars) is "unsure":
-// it counts as gone only once this website's car pages are known to carry
-// their own car's VIN (confirmMissing). Until then it proves nothing, since
-// a car page that marks up only a "similar vehicles" carousel looks the same
-// while its car is still for sale.
+// node marked SoldOut. A refusal (403, 429, 503, a bot check) stops the
+// whole check, and the rescan then marks nothing gone (refused). Anything
+// else that isn't the car's page (5xx, a timeout, a file that isn't a web
+// page, a page with no structured data at all, an answer from another
+// website) leaves this car unchecked, with the reason, and the other
+// missing cars are still checked: one car's broken page must not hold back
+// every other car's verdict, scan after scan. A redirect to a page without a
+// node for this VIN, or the page itself with the website's own structured
+// data and no node for this VIN (a "no longer available" page, or one that
+// shows only other cars) is "unsure": it counts as gone only once this
+// website's car pages are known to carry their own car's VIN
+// (confirmMissing). Until then it proves nothing, since a car page that
+// marks up only a "similar vehicles" carousel looks the same while its car
+// is still for sale.
+function pageProblem(message) {
+  const m = String(message || 'no answer');
+  if (/^HTTP\b/.test(m)) return `its page gave ${m}`;
+  if (/^it sent Lot Current to another website/.test(m)) return 'its page sent Lot Current to another website';
+  if (/^not a web page/.test(m)) return `its page is ${m}`;
+  return `its page could not be read (${m})`;
+}
 async function confirmOne(site, vin, href) {
   const got = await site.read(href);
   const page = pageOf(got);
   if (page.kind === 'gone') return { gone: true };
-  if (page.kind === 'blocked') return { error: page.message.replace(/, so the scan stopped.*$/, '') };
-  if (page.kind === 'error') return { error: `one car's page gave ${page.message}` };
+  if (page.kind === 'blocked') return { refused: page.message.replace(/, so the scan stopped.*$/, '') };
+  if (page.kind === 'error') return { unchecked: pageProblem(page.message) };
   const node = page.parsed.vehicles.find((n) => nodeVin(n) === vin);
   if (node) return soldOut(node) ? { gone: true } : { found: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts, { urls: [got.finalUrl, href], vin }) } };
   if (got.redirected && pathKey(got.finalUrl) !== pathKey(href)) return { unsure: true };
   if (page.parsed.vehicles.length || hasStructuredData(got.text)) return { unsure: true };
-  return { error: "one car's page had no structured data to check against" };
+  return { unchecked: 'its page has no vehicle data to check against' };
 }
 
 // Does a page carry any schema.org data of the website's own (a JSON-LD
@@ -672,8 +683,16 @@ function hasStructuredData(html) {
   return extractJsonLd(html).length > 0 || /\bitemtype\s*=\s*["']?https?:\/\/schema\.org\//i.test(html);
 }
 
-async function confirmMissing(site, { vins, urls, records, origin, evidence, samples }) {
+// confirm: { checked, notFound, error }, plus unchecked ({ vin: reason })
+// when a missing car's own check failed without stopping the others
+// (confirmOne). error is set only when the website refused (a 403, 429,
+// 503 or bot check, on a car's page or on the sample page): then nothing is
+// recorded and the rescan marks nothing gone. The cars the last snapshot
+// still listed are checked first, then those missing for longer (a posted
+// car kept in missingPages), so a long-broken page does not go first.
+async function confirmMissing(site, { vins, urls, records, origin, evidence, samples, lastSeen = {} }) {
   const confirm = { checked: [], notFound: [], error: null };
+  const unchecked = {};
   const wanted = [...new Set((Array.isArray(vins) ? vins : []).map((v) => String(v || '').toUpperCase()).filter(Boolean))].filter((v) => !records.has(v));
   // a car with no known page on this website can't be checked: it stays "missing, not confirmed gone"
   const items = [];
@@ -681,13 +700,21 @@ async function confirmMissing(site, { vins, urls, records, origin, evidence, sam
     const at = urls && typeof urls[vin] === 'string' ? onSite(urls[vin], null, origin) : null;
     if (at) items.push({ vin, href: at.href, verdict: null });
   }
+  items.sort((a, b) => Number(Boolean(lastSeen[b.vin])) - Number(Boolean(lastSeen[a.vin])));
+  let failedInARow = 0;
   await twoAtATime(items, async (item) => {
     if (confirm.error) return false;
+    if (failedInARow >= MAX_FAILED_IN_A_ROW) {
+      // a failing website is not asked for page after page: the rest wait for the next scan
+      item.verdict = { unchecked: `not checked this time: the website's car pages failed ${failedInARow} times in a row` };
+      return true;
+    }
     item.verdict = await confirmOne(site, item.vin, item.href);
-    if (item.verdict.error) {
-      confirm.error = item.verdict.error;
+    if (item.verdict.refused) {
+      confirm.error = item.verdict.refused;
       return false;
     }
+    failedInARow = item.verdict.unchecked ? failedInARow + 1 : 0;
     return true;
   });
   if (!confirm.error && items.some((i) => i.verdict && i.verdict.unsure) && !evidence.ownNode) {
@@ -695,15 +722,25 @@ async function confirmMissing(site, { vins, urls, records, origin, evidence, sam
     const sample = samples.find(Boolean);
     const got = sample ? pageOf(await site.read(sample.href)) : null;
     if (got && got.kind === 'html' && got.parsed.vehicles.some((n) => nodeVin(n) === sample.vin)) evidence.ownNode = true;
-    else confirm.error = got && got.kind !== 'html' ? `a car's page gave ${got.message || 'no answer'}` : "this website's car pages don't mark up their own car, so there is nothing to check against";
+    else if (got && got.kind === 'blocked') confirm.error = got.message.replace(/, so the scan stopped.*$/, '');
+    else {
+      // without that, a page that doesn't show the car proves nothing: only those cars stay unchecked
+      const why = got && got.kind !== 'html' ? `a car page used for comparison gave ${got.message || 'no answer'}` : "this website's car pages don't mark up their own car, which leaves nothing to check against";
+      for (const item of items) if (item.verdict && item.verdict.unsure) item.verdict = { unchecked: why };
+    }
   }
   if (confirm.error) return confirm;
   for (const item of items) {
     if (!item.verdict) continue;
+    if (item.verdict.unchecked) {
+      unchecked[item.vin] = item.verdict.unchecked;
+      continue;
+    }
     if (item.verdict.found) records.set(item.vin, item.verdict.found);
     confirm.checked.push(item.vin);
     if (item.verdict.gone || item.verdict.unsure) confirm.notFound.push(item.vin);
   }
+  if (Object.keys(unchecked).length) confirm.unchecked = unchecked;
   return confirm;
 }
 
@@ -907,7 +944,7 @@ export async function scan(search, options = {}) {
   // 5. cars from the last scan that did not come back
   const samples = plan.filter((i) => i.record && i.record.carried).map((i) => ({ href: i.href, vin: nodeVin(i.record.node) }));
   for (const vin of records.keys()) unread.delete(vin);
-  const confirm = await confirmMissing(site, { vins: (Array.isArray(opts.confirmVins) ? opts.confirmVins : []).filter((v) => !unread.has(String(v || '').toUpperCase())), urls: opts.confirmUrls, records, origin, evidence, samples });
+  const confirm = await confirmMissing(site, { vins: (Array.isArray(opts.confirmVins) ? opts.confirmVins : []).filter((v) => !unread.has(String(v || '').toUpperCase())), urls: opts.confirmUrls, records, origin, evidence, samples, lastSeen });
 
   // a missing car found at its last page was read from that page too
   for (const vin of confirm.checked) if (!confirm.notFound.includes(vin)) pagesRead.add(vin);

@@ -150,6 +150,30 @@ test('a posted car the website keeps showing as sale-pending keeps its take-down
   assert.deepEqual(p.flags.map((f) => [f.how, f.hours]), [['manual', 7]]);
 });
 
+test('a sold car\'s take-down flag stays open while a later scan could not check its page, and is never "cleared" by that', () => {
+  const posted = { [RAM]: { name: '2019 Ram 1500 Classic Express', price: 27163 } };
+  const gone = (at) => snapshot([['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, at);
+  const day2 = gone(T(0));
+  const flagged = diffScans(snapshot(LOT), day2, { posted, confirm: confirmed(RAM) });
+  flagged.takenAt = T(0);
+  let p = noteFlags(null, flagged);
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.why]), [[RAM, 'takeDown', 'gone']]);
+  // the next scans: its page answers 500, so this car alone is unchecked; the scan is otherwise complete
+  let prev = day2;
+  for (const at of [T(180), T(360)]) {
+    const now = gone(at);
+    const diff = diffScans(prev, now, { posted, confirm: { checked: [], notFound: [], error: null, unchecked: { [RAM]: 'its page gave HTTP 500' } } });
+    diff.takenAt = at;
+    assert.deepEqual([diff.warnings, diff.takeDown, diff.needsALook.map((n) => [n.vin, n.yours])], [[], [], [[RAM, true]]]);
+    p = noteFlags(p, diff);
+    prev = now;
+  }
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.flaggedAt, f.doneAt]), [[RAM, 'takeDown', T(0), undefined]]);
+  // Taken down closes it with the hours from the scan that flagged it
+  p = resolveFlag(p, RAM, null, { at: T(420) });
+  assert.deepEqual(p.flags.map((f) => [f.how, f.hours]), [['manual', 7]]);
+});
+
 test('resolving a flag: seen on the listing, ticked off by hand, or the car unmarked; kind null closes both kinds', () => {
   const diff = { warnings: [], takeDown: [{ vin: RAM, yours: true, name: 'Ram', why: 'gone' }], priceUpdates: [{ vin: RAM, yours: true, name: 'Ram', from: 2, to: 1 }, { vin: WAGONEER, yours: true, name: 'Wagoneer', from: 38383, to: 36883 }], takenAt: T(0) };
   let p = noteFlags(null, diff);
