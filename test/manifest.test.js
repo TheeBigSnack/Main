@@ -30,18 +30,57 @@ test('every permission the manifest asks for is explained in the Web Store priva
   const wanted = [...manifest.permissions, ...manifest.host_permissions, ...manifest.optional_host_permissions];
   for (const p of wanted) assert.ok(doc.includes(p), `chrome-web-store-privacy.md does not mention "${p}"`);
   // and nothing beyond what was approved. activeTab, scripting and storage
-  // are the first build's (0.1.0); each widening since is recorded where it
-  // was decided and in the CHANGELOG entry that shipped it:
-  //   sidePanel, the Marketplace and image-host host permissions: Milestone 1 (CLAUDE.md's ledger, CHANGELOG 0.2.0)
-  //   alarms, notifications, optional https://*/* for the dealer's website: Milestone 2 (PLAN.md, CHANGELOG 0.3.0)
-  //   optional https://vpic.nhtsa.dot.gov/*: the VIN check (CHANGELOG 0.4.0)
-  //   https://*/* also for a car's photo servers, asked at post time: the owner, 2026-09-29 (CLAUDE.md's ledger, PLAN.md)
-  // Changing these lists is a widening: ask the owner first (CLAUDE.md).
+  // are the first build's (0.1.0). Changing these lists is a widening: ask
+  // the owner first (CLAUDE.md).
   assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage', 'sidePanel', 'alarms', 'notifications']);
   assert.deepEqual(manifest.host_permissions, ['https://www.facebook.com/marketplace/*', 'https://vehicle-images.carscommerce.inc/*']);
   assert.deepEqual(manifest.optional_host_permissions, ['https://vpic.nhtsa.dot.gov/*', 'https://*/*']);
+});
+
+// Each widening since the first build, where it was decided, and the
+// CHANGELOG section that recorded it. The test reads that section, so a
+// pointer here that names the wrong release fails instead of sending the
+// next reader to a section that says nothing about the permission.
+const WIDENINGS = [
+  { permission: 'sidePanel', decided: 'Milestone 1 (CLAUDE.md\'s ledger)', changelog: ['0.2.0'] },
+  { permission: 'https://www.facebook.com/marketplace/*', decided: 'Milestone 1 (CLAUDE.md\'s ledger)', changelog: ['0.2.0'] },
+  { permission: 'https://vehicle-images.carscommerce.inc/*', decided: 'Milestone 1 (CLAUDE.md\'s ledger)', changelog: ['0.2.0'] },
+  { permission: 'https://vpic.nhtsa.dot.gov/*', decided: 'the owner\'s VIN double-check request (HANDOFF section 1), shipped in Milestone 1', changelog: ['0.2.0'] },
+  { permission: 'alarms', decided: 'Milestone 2 (PLAN.md)', changelog: ['0.3.0'] },
+  { permission: 'notifications', decided: 'Milestone 2 (PLAN.md)', changelog: ['0.3.0'] },
+  // the dealer's website (Milestone 2), then a car's photo servers asked at post time (the owner, 2026-09-29)
+  { permission: 'https://*/*', decided: 'Milestone 2 (PLAN.md); the owner, 2026-09-29 (CLAUDE.md\'s ledger)', changelog: ['0.3.0', 'Unreleased'] },
+];
+
+// The text of one CHANGELOG section: from its "## <release>" heading to the next "## ".
+function changelogSection(changelog, release) {
+  const lines = changelog.split('\n');
+  const start = lines.findIndex((l) => l.startsWith('## ') && l.slice(3).split(' ')[0] === release);
+  if (start === -1) return null;
+  const end = lines.findIndex((l, i) => i > start && l.startsWith('## '));
+  return lines.slice(start, end === -1 ? undefined : end).join('\n');
+}
+
+test('every permission beyond the first build\'s is recorded in the CHANGELOG release this test names for it', () => {
+  const firstBuild = ['activeTab', 'scripting', 'storage'];
+  const asked = [...manifest.permissions, ...manifest.host_permissions, ...manifest.optional_host_permissions].filter((p) => !firstBuild.includes(p));
+  assert.deepEqual([...new Set(asked)].sort(), WIDENINGS.map((w) => w.permission).sort(), 'every widening needs its line in WIDENINGS');
   const changelog = read('../CHANGELOG.md');
-  for (const p of wanted.filter((x) => !['activeTab', 'scripting', 'storage'].includes(x))) assert.ok(changelog.includes('`' + p + '`'), `CHANGELOG.md does not record the widening "${p}"`);
+  for (const w of WIDENINGS) {
+    for (const release of w.changelog) {
+      const section = changelogSection(changelog, release);
+      assert.ok(section, `CHANGELOG.md has no "## ${release}" section`);
+      assert.ok(section.includes('`' + w.permission + '`'), `CHANGELOG.md's "## ${release}" section does not record "${w.permission}"`);
+    }
+  }
+});
+
+test('the CHANGELOG section reader finds a release and stops at the next heading', () => {
+  const text = '# Changelog\n\n## Unreleased\n- a\n\n## 0.2.0 (date)\n- `x`\n\n## 0.1.0\n- `y`\n';
+  assert.equal(changelogSection(text, '0.2.0'), '## 0.2.0 (date)\n- `x`\n');
+  assert.equal(changelogSection(text, '0.1.0'), '## 0.1.0\n- `y`\n');
+  assert.equal(changelogSection(text, '0.4.0'), null);
+  assert.ok(!changelogSection(text, '0.2.0').includes('`y`'));
 });
 
 test('the package script exists and the packed zip is ignored by git', () => {
