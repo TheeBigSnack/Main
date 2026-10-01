@@ -52,7 +52,7 @@ The prices are a hypothesis until a dealer pays. If `pricing.json` changes, `npm
 
 ## 4. Create the webhook [owner runs]
 
-Once the Supabase project exists, with its project ref (the 20 letters in `https://<ref>.supabase.co`):
+With the Supabase project's ref (the 20 letters in `https://<ref>.supabase.co`; the project exists, and its address is the `url` in `extension/src/accountConfig.js`):
 
 ```
 npm run stripe-setup -- --apply --webhook-url <ref>

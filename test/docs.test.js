@@ -17,6 +17,7 @@ import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { readdirSync } from 'node:fs';
+import { SITE } from '../site/config.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -269,13 +270,19 @@ test('help.md describes the Terms step and the Settings section in both states t
   }
 });
 
-test('the synced-profile lists name the Terms acceptance the profile carries', () => {
+// The salesperson part of the profile, in the words the lists use.
+const SALESPERSON_WORDS = { name: 'name', title: 'role', closingLine: 'closing line' };
+
+test('the synced-profile lists name the Terms acceptance and every salesperson field the profile carries', () => {
   assert.ok(Object.keys(profileFrom({})).includes('legal'), 'the profile no longer carries the acceptance: update the lists');
-  assert.ok(read('../extension/popup.js').includes('Terms acceptance'), 'the popup\'s own hint names it');
-  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/help.md']) {
-    const lists = read(rel).match(/\(name, role, dealership[^)]*\)/g) || [];
+  assert.deepEqual(Object.keys(profileFrom({}).salesperson).sort(), Object.keys(SALESPERSON_WORDS).sort(), 'the salesperson part of the profile changed: update the lists and SALESPERSON_WORDS');
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/help.md', '../store/listing.md', '../extension/popup.js']) {
+    const lists = read(rel).match(/\(name, role, [^)]*\)/g) || [];
     assert.ok(lists.length, `${rel} has no profile list`);
-    for (const l of lists) assert.match(l, /Terms acceptance/, `${rel} profile list lacks the Terms acceptance: ${l}`);
+    for (const l of lists) {
+      assert.match(l, /Terms acceptance/, `${rel} profile list lacks the Terms acceptance: ${l}`);
+      for (const word of Object.values(SALESPERSON_WORDS)) assert.ok(l.includes(word), `${rel} profile list lacks "${word}": ${l}`);
+    }
   }
 });
 
@@ -315,6 +322,27 @@ test('the files support.md and the launch checklist say hold the support address
       }
     }
   }
+});
+
+// Every Markdown or script file outside the docs and the history that holds
+// the website's support address is named on support.md's inbox line, so a
+// change of address reaches all of them (the Terms and the onboarding email
+// once kept the old one).
+test('support.md names every file that carries the support address', () => {
+  if (!SITE.supportEmail) return; // no address yet: nothing carries it
+  const line = doc('support.md').split('\n').find((l) => l.startsWith('- Address:'));
+  assert.ok(line, 'support.md has no inbox line');
+  const named = new Set([...line.matchAll(/`([\w./-]+\.(?:md|js))`/g)].map((m) => m[1]));
+  const SKIP = new Set(['node_modules', '.git', 'docs', 'test', 'CHANGELOG.md', 'HANDOFF.md']);
+  const walk = (dir) => readdirSync(new URL('../' + dir, import.meta.url), { withFileTypes: true }).flatMap((e) => {
+    const rel = dir + e.name;
+    if (SKIP.has(rel)) return [];
+    if (e.isDirectory()) return walk(rel + '/');
+    return /\.(md|js)$/.test(e.name) ? [rel] : [];
+  });
+  const carriers = walk('').filter((rel) => read('../' + rel).includes(SITE.supportEmail));
+  assert.ok(carriers.length, 'no file carries the support address');
+  for (const rel of carriers) assert.ok(named.has(rel), `${rel} carries ${SITE.supportEmail} but support.md's inbox line does not name it`);
 });
 
 test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 lists the wizard steps in order', () => {
