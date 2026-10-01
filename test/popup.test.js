@@ -390,3 +390,47 @@ test('a post the last sync could not share is named on To do, on the car in My l
   await q.scan();
   assert.doesNotMatch(q.panel(), /notSharedBanner/);
 });
+
+// Changing "Price to post" moves the person's listings to the new basis:
+// each must be edited by hand, but the website did not change, so they are
+// warned before saving, and To do and My listings say "Price to post changed
+// in Settings", never "Website price changed", and the numbers do not count
+// them as price changes.
+test('a change of Price to post is warned about, then listed apart from website price changes and kept out of the numbers', async () => {
+  const ram = vehicle('usedNormal'); // $27,163, or $26,673 before the fee
+  const posted = { [ram.vin]: { name: ram.name, price: ram.price, postedAt: new Date().toISOString() } }; // recorded before entries carried a basis
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted } });
+  await p.scan();
+  assert.doesNotMatch(p.panel(), /Update price|Price to post changed/, 'posted at the website price: nothing to do');
+
+  await p.tab('settings');
+  assert.match(p.panel(), /id="basisWarning">You have one posted listing on this website\. Changing the price to post changes its price too: after the next rescan each one is listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook\. Facebook may tell people who saved a car that its price changed\./);
+  const values = { salespersonName: 'Sam', dailyCap: '10', basis: 'beforeFees' };
+  const before = globalThis.FormData;
+  globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll(name) { return name === 'store' ? MY_STORE.myStores : []; } has(name) { return name in values; } };
+  try {
+    await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: () => null }, preventDefault() {} });
+  } finally {
+    globalThis.FormData = before;
+  }
+  assert.equal(p.local[k.settings].basis, 'beforeFees');
+  assert.equal(p.local[k.posted][ram.vin].basis, 'website', 'the listing is recorded as posted under the basis in force until now');
+  assert.equal(p.el('saved').textContent, 'Saved. Click Rescan website to apply. After the next rescan, your posted listing is listed under To do to edit to the new price to post.');
+
+  await p.scan();
+  const todo = p.panel();
+  assert.match(todo, /<h3>Price to post changed in Settings <span class="pill warn">1<\/span><\/h3>/);
+  assert.match(todo, /posted under the earlier "Price to post" choice\. Edit its price, and the price note in its description if it has one\./);
+  assert.match(todo, new RegExp(`data-action="upkeep" data-kind="price" data-vin="${ram.vin}" data-price="26673"`), 'the listing still has to follow the chosen basis');
+  assert.doesNotMatch(todo, /<h3>Update price/, 'not a website price change');
+  assert.deepEqual((p.local[k.pilot]?.flags || []).filter((f) => f.kind === 'price'), [], 'and not counted as one');
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill warn">Price to post changed in Settings<\/span>/);
+  assert.doesNotMatch(p.panel(), /Website price changed/);
+
+  // Updated: the listing now shows the new basis's price, recorded with it
+  await p.click('priceUpdated', { vin: ram.vin, price: '26673' });
+  assert.deepEqual([p.local[k.posted][ram.vin].price, p.local[k.posted][ram.vin].basis], [26673, 'beforeFees']);
+  await p.scan();
+  assert.doesNotMatch(p.panel(), /Update price|Price to post changed/, 'nothing left to do');
+});

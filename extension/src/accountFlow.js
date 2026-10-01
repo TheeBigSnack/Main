@@ -198,7 +198,7 @@ export function scanFromStored({ snapshot = null, diff = null } = {}) {
     cars: vehicles.length,
     ready: vehicles.filter((v) => v && v.decision === DECISION.READY).length,
     takeDownCount: count(diff && diff.takeDown),
-    priceUpdateCount: count(diff && diff.priceUpdates),
+    priceUpdateCount: count(diff && Array.isArray(diff.priceUpdates) ? diff.priceUpdates.filter((u) => !(u && u.why === 'basis')) : null), // website price changes only, never a basis changed in Settings
   });
 }
 

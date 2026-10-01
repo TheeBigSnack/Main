@@ -19,6 +19,8 @@ import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
+import { stampBasis } from './src/rescan.js';
+import { updateKey } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
@@ -143,6 +145,7 @@ async function runScan(ctx) {
   ctx.render();
   const k = siteKeys(wiz.origin);
   const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate, k.settings]);
+  wiz.ownListings = Object.values(data[k.posted] || {}).filter((e) => e && typeof e === 'object' && e.mine !== false).length; // the Price step warns before a basis change moves them
   if (!wiz.settings) await seedSettings(data[k.settings]);
   let r;
   try {
@@ -266,7 +269,8 @@ export function wizardHtml() {
       const choice = pm.showsLower
         ? `<label class="block"><input type="radio" name="wizBasis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> The website's main price${ex ? ` (e.g. ${money(ex.price)} "${esc(ex.priceLabel)}")` : ''}</label>
         <label class="block"><input type="radio" name="wizBasis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> The lower second price the website shows${ex ? ` (e.g. ${money(ex.priceBeforeFees)}; usually the price before the doc fee)` : ''}</label>
-        <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>`
+        <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>${wiz.ownListings ? `
+        <p class="hint" id="wizBasisWarning">You have ${wiz.ownListings === 1 ? 'one posted listing' : `${wiz.ownListings} posted listings`} on this website. Changing the price to post changes ${wiz.ownListings === 1 ? 'its' : 'their'} price too: each one is then listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.</p>` : ''}`
         : `<p>Cars are posted at the website's main price; this website shows no lower second price to choose instead.</p>`;
       const gapNote = ex ? `<p class="hint">On this website the main price is usually ${money(pm.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>` : '';
       return `${progress}<h3>The price to post</h3>
@@ -347,6 +351,12 @@ async function finish(ctx) {
   const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: now, legal: legalHosted() && wiz.termsAccepted ? acceptLegal(now) : (wiz.settings && wiz.settings.legal) || undefined }, wiz.site || {});
   wiz.settings = settings;
   const k = siteKeys(wiz.origin);
+  // A price basis changed here from the one this website had: listings that
+  // record no basis were posted under the old one (src/rescan.js stampBasis),
+  // so the rescan below tells the change apart from a website price change.
+  const before = (await chrome.storage.local.get(k.settings))[k.settings];
+  const was = before ? withDefaults(before).basis : null;
+  if (was && was !== settings.basis) await updateKey(k.posted, (p) => stampBasis(p, was));
   await chrome.storage.local.set({ [k.settings]: settings });
   await saveProfile(settings, undefined, wiz.origin);
   // the site registry must agree with the settings even if the final read below fails

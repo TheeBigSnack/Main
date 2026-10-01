@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, basisOnlyChange, stampBasis } from '../extension/src/rescan.js';
+import { noteFlags } from '../extension/src/pilot.js';
+import { scanFromStored } from '../extension/src/accountFlow.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
@@ -116,6 +118,51 @@ test('"before fees" price basis compares the price without the doc fee', () => {
   assert.equal(beforeFees.priceUpdates[0].change, -1000);
 });
 
+// Changing "Price to post" in Settings moves every listing posted under the
+// old basis to the new one: the listings must follow the chosen basis, so
+// each still comes up to edit, but nothing changed on the website. Those
+// items carry why 'basis', and they are never counted as price changes.
+test('a price basis changed in Settings is told apart from a website price change, and never counted as one', () => {
+  const s = snapshot(LOT);
+  const ram = s.vehicles[VIN.ram]; // $27,163, or $26,673 before the fee
+  const posted = markPosted(markPosted({}, ram, 'website', '2026-09-26T21:00:00.000Z'), s.vehicles[VIN.tradesman], 'website', '2026-09-26T21:05:00.000Z');
+  // the same website, scanned with the other basis
+  const d = diffScans(s, s, { posted, confirm: confirmed(), basis: 'beforeFees' });
+  const item = d.priceUpdates.find((u) => u.vin === VIN.ram);
+  assert.deepEqual({ from: item.from, to: item.to, change: item.change, yours: item.yours, why: item.why }, { from: 27163, to: 26673, change: -490, yours: true, why: 'basis' }, 'the listing still has to follow the chosen basis, as a basis change');
+  assert.ok(d.priceUpdates.every((u) => u.why === 'basis'), 'nothing here is a website change');
+  assert.equal(diffScans(s, s, { posted, confirm: confirmed(), basis: 'website' }).priceUpdates.length, 0, 'under the basis it was posted at, nothing to do');
+  // never a price change in the numbers, the manager's list or the scan counts
+  assert.equal(noteFlags(null, d, { at: '2026-09-27T09:00:00.000Z' }).flags.filter((f) => f.kind === 'price').length, 0);
+  assert.equal(scanFromStored({ snapshot: s, diff: { ...d, takenAt: '2026-09-27T09:00:00.000Z' } }).priceUpdateCount, 0);
+
+  // updated under the new basis, then switched back: a raise, still told apart
+  const updated = markPriceUpdated(posted, VIN.ram, 26673, '2026-09-27T10:00:00.000Z', 'beforeFees');
+  const back = diffScans(s, s, { posted: updated, confirm: confirmed(), basis: 'website' }).priceUpdates.find((u) => u.vin === VIN.ram);
+  assert.deepEqual([back.change, back.why], [490, 'basis']);
+
+  // the website's price the listing was posted at moved too: a website price change, as before
+  const cheaper = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { value: '26163' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.equal(cheaper.vehicles[VIN.ram].price, 26163, 'the main price dropped $1,000');
+  const both = diffScans(s, cheaper, { posted, confirm: confirmed(), basis: 'beforeFees' });
+  assert.deepEqual(both.priceUpdates.filter((u) => u.vin === VIN.ram).map((u) => [u.to, u.why]), [[26163, undefined]], 'the website moved: a real price change');
+  assert.equal(noteFlags(null, both).flags.filter((f) => f.kind === 'price' && f.vin === VIN.ram).length, 1);
+
+  // an entry that records no basis (posted before entries did) is judged as before, until the basis change stamps it
+  const legacy = { [VIN.ram]: { name: ram.name, price: 27163, postedAt: '2026-09-20T09:00:00.000Z' } };
+  assert.equal(diffScans(s, s, { posted: legacy, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates[0].why, undefined);
+  const stamped = stampBasis(legacy, 'website');
+  assert.equal(stamped[VIN.ram].basis, 'website');
+  assert.equal(diffScans(s, s, { posted: stamped, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates[0].why, 'basis');
+  // stamping leaves a recorded basis and a colleague's entry alone, and says when nothing changed
+  assert.equal(stampBasis(stamped, 'beforeFees'), undefined);
+  assert.equal(stampBasis({ [VIN.ram]: { price: 1, mine: false } }, 'website'), undefined);
+  assert.equal(stampBasis(legacy, 'nonsense'), undefined);
+  assert.equal(basisOnlyChange(posted[VIN.ram], ram, 'website'), false);
+  assert.equal(basisOnlyChange(posted[VIN.ram], ram, 'beforeFees'), true);
+  assert.equal(basisOnlyChange(posted[VIN.ram], null, 'beforeFees'), false);
+});
+
 test('website switches to "call for price": needs a look', () => {
   const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
   const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: false, high: { label: 'Price', value: 'Please call for price' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
@@ -184,9 +231,12 @@ test('a colleague\'s entry (mine: false, merged in by sync) is never yours: no t
 test('posted-listing bookkeeping', () => {
   const s = snapshot(LOT);
   let posted = markPosted({}, s.vehicles[VIN.ram], 'website', '2026-09-26T21:00:00.000Z');
-  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' });
+  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z', basis: 'website' }, 'the entry records the basis its price was taken at');
   posted = markPriceUpdated(posted, VIN.ram, 26163, '2026-09-27T21:00:00.000Z');
   assert.equal(posted[VIN.ram].price, 26163);
+  assert.equal(posted[VIN.ram].basis, 'website', 'no basis given: the recorded one stays');
+  posted = markPriceUpdated(posted, VIN.ram, 25673, '2026-09-28T21:00:00.000Z', 'beforeFees');
+  assert.deepEqual([posted[VIN.ram].price, posted[VIN.ram].basis], [25673, 'beforeFees'], 'updated under another basis: that basis is recorded');
   posted = markTakenDown(posted, VIN.ram);
   assert.deepEqual(posted, {});
 });

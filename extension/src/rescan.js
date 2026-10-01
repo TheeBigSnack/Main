@@ -28,6 +28,24 @@ export function basisPrice(v, basis = 'website') {
   return main;
 }
 
+const BASES = ['website', 'beforeFees'];
+const basisOf = (b) => (BASES.includes(b) ? b : null);
+const normBasis = (b) => (b === 'beforeFees' ? 'beforeFees' : 'website');
+
+// A posted listing whose price differs from the price to post only because
+// the price basis changed in Settings since it was posted (or last updated):
+// it was posted under another basis (entry.basis), and the website's price
+// under that basis is still the listed one. The listing still has to follow
+// the chosen basis, so it still needs editing, but the website did not
+// change: it is told apart, never counted as a price change (src/pilot.js
+// noteFlags). An entry without a recorded basis is judged as before.
+export function basisOnlyChange(entry, now, basis = 'website') {
+  const own = basisOf(entry && entry.basis);
+  const was = entry && entry.price;
+  if (!own || own === normBasis(basis) || !was || !now) return false;
+  return basisPrice(now, own) === was && basisPrice(now, basis) !== was;
+}
+
 // The compact per-car record kept between scans.
 export function snapshotEntry(v, assessment) {
   return {
@@ -178,7 +196,9 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
       if (was && !nowPrice) {
         out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, text: `Website no longer shows a price (${now.priceLabel || 'call for price'})` });
       } else if (was && nowPrice && was !== nowPrice) {
-        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was });
+        // why 'basis': the price to post changed in Settings, not on the website (basisOnlyChange)
+        const why = mine && basisOnlyChange(posted[vin], now, basis) ? { why: 'basis' } : {};
+        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was, ...why });
       }
     }
 
@@ -208,13 +228,35 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
 
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
 // `extra` can carry the listing link and who posted (listingUrl, salesperson).
+// Each entry records the basis its price was taken at (basisOnlyChange).
 export function markPosted(posted, entry, basis = 'website', now = new Date().toISOString(), extra = {}) {
-  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), postedAt: now, ...extra } };
+  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), postedAt: now, basis: normBasis(basis), ...extra } };
 }
 
-export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {
+// The listing now shows `price`, taken at `basis` (the basis in force when it
+// was updated) when given.
+export function markPriceUpdated(posted, vin, price, now = new Date().toISOString(), basis = null) {
   if (!posted[vin]) return posted;
-  return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now } };
+  const b = basisOf(basis);
+  return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now, ...(b ? { basis: b } : {}) } };
+}
+
+// When the price basis changes, the person's own listings that do not
+// record theirs (posted before entries did, or brought by sync) were posted
+// under the basis in force until then: they get it, so the next scan tells
+// the change apart from a website price change. Undefined when nothing
+// changes (src/storage.js updateKey then leaves the key alone).
+export function stampBasis(posted, basis) {
+  const b = basisOf(basis);
+  if (!b || !posted || typeof posted !== 'object') return undefined;
+  let touched = false;
+  const next = { ...posted };
+  for (const [vin, e] of Object.entries(posted)) {
+    if (!e || typeof e !== 'object' || e.mine === false || basisOf(e.basis)) continue;
+    next[vin] = { ...e, basis: b };
+    touched = true;
+  }
+  return touched ? next : undefined;
 }
 
 export function markTakenDown(posted, vin) {

@@ -29,7 +29,7 @@ test('daily cap counts only today, in local time', () => {
 test('the posted registry can carry the listing link and who posted, without breaking old callers', () => {
   const s = snapshot([['usedNormal']]);
   const plain = markPosted({}, s.vehicles[VIN], 'website', '2026-09-26T21:00:00.000Z');
-  assert.deepEqual(plain[VIN], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' });
+  assert.deepEqual(plain[VIN], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z', basis: 'website' });
   const full = markPosted({}, s.vehicles[VIN], 'beforeFees', '2026-09-26T21:00:00.000Z', {
     listingUrl: 'https://www.facebook.com/marketplace/item/424242/',
     salesperson: 'Roger',
@@ -38,6 +38,7 @@ test('the posted registry can carry the listing link and who posted, without bre
     name: '2019 Ram 1500 Classic Express',
     price: 26673,
     postedAt: '2026-09-26T21:00:00.000Z',
+    basis: 'beforeFees',
     listingUrl: 'https://www.facebook.com/marketplace/item/424242/',
     salesperson: 'Roger',
   });
