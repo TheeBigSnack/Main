@@ -63,11 +63,15 @@ export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is 
 // only on the poster's own computer, when their extension's rescan finds the
 // car gone from the website or its price changed. So no open item does not
 // mean every sold car is down: the poster's Chrome may be closed, or they
-// may have left the team (summarize's notOnTeam lists those cars).
+// may have left the team (summarize's notOnTeam lists those cars for a
+// manager).
 export const EMPTY_TAKE_DOWNS = 'No open take-down items. One opens when a rescan on the poster\'s own computer finds their car gone from the website.';
 export const EMPTY_PRICE_ITEMS = 'No open price items. One opens when a rescan on the poster\'s own computer finds the website price changed.';
 export const NOT_ON_TEAM_TITLE = 'Listed by people no longer on the team';
 export const NOT_ON_TEAM_HINT = 'Their extension no longer syncs, and sold-car and price items come only from the poster\'s own extension, so nobody is told when these cars sell or change price. Check each one against the website, and have the person who posted it take it down or update the price on Facebook: the listing is on their own profile.';
+// The CSV's line in place of that list when the viewer is not a manager:
+// only a manager reads the whole team, so nobody else can be told apart.
+export const NOT_ON_TEAM_UNKNOWN = 'Left out: only a manager reads the whole team, so only a manager\'s download lists these cars.';
 
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
@@ -164,10 +168,12 @@ function peopleOf(memberships, listings, attempts) {
 /**
  * @param {object} input
  *   listings, todoItems, postAttempts, scans, memberships: rows as above
+ *   role:     the signed-in viewer's role in the dealership; only for
+ *             'manager' is notOnTeam a list (else null: not known)
  *   now:      ISO time the ages count from (default: the clock)
  *   timeZone: IANA zone for the last-scan line (default: this computer's)
  */
-export function summarize({ listings, todoItems, postAttempts, scans, memberships, now = nowIso(), timeZone } = {}) {
+export function summarize({ listings, todoItems, postAttempts, scans, memberships, role = '', now = nowIso(), timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
@@ -242,10 +248,14 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
   // flags the salesperson's own listings, extension/src/pilot.js noteFlags),
   // so a car still listed by someone who is no longer a member is checked by
   // nobody: no item ever opens for it, whatever the website does. They are
-  // listed here, oldest first, for the manager to chase. Without the
-  // memberships nobody can be told apart, so none are listed.
+  // listed here, oldest first, for the manager to chase. Only a manager
+  // reads every membership of the dealership; row-level security shows a
+  // salesperson their own row alone (0002_rls.sql) while they read every
+  // listing, so for anyone else each colleague's car would look left
+  // behind. For a viewer who is not a manager, or without the memberships,
+  // notOnTeam is null: not known, never a list.
   const memberIds = new Set(M.map((m) => String(m.user_id || '')).filter(Boolean));
-  const notOnTeam = memberIds.size
+  const notOnTeam = role === 'manager' && memberIds.size
     ? L.filter((l) => isListed(l) && l.user_id && !memberIds.has(String(l.user_id)))
       .map((l) => ({
         vin: vinOf(l),
@@ -257,7 +267,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
         hoursListed: hoursBetween(l.posted_at, nowAt),
       }))
       .sort((a, b) => (b.hoursListed ?? -1) - (a.hoursListed ?? -1) || a.name.localeCompare(b.name))
-    : [];
+    : null;
 
   const flagStats = (flags) => {
     const done = flags.filter((f) => f.done_at && f.how !== 'cleared');
@@ -846,15 +856,16 @@ const kindLabel = (k) => (k === 'price' ? 'price change' : 'sold / take down');
 /**
  * @param {object} input   listings, todoItems, postAttempts, scans, memberships
  * @param {object} options
+ *   role:     the signed-in viewer's role, as summarize takes it
  *   now:      ISO time of the export
  *   dealer:   the dealership's name
  *   origin:   the dealership's website origin
  *   timeZone: IANA zone for every time in the file; default: this computer's
  */
-export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '', timeZone } = {}) {
+export function managerCsv(input = {}, { role = '', now = nowIso(), dealer = '', origin = '', timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const local = (iso) => fmtLocal(iso, zone);
-  const s = summarize({ ...input, now, timeZone: zone });
+  const s = summarize({ ...input, role, now, timeZone: zone });
   const L = rows(input.listings);
   const T = rows(input.todoItems);
   const A = rows(input.postAttempts);
@@ -883,7 +894,7 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Price changes still open', s.priceUpdates.open]));
   out.push(csvRow(['Price changes cleared by the website', s.priceUpdates.cleared]));
   out.push(csvRow(['Median hours from the flagging scan until updated', s.priceUpdates.medianHours]));
-  out.push(csvRow([NOT_ON_TEAM_TITLE, s.notOnTeam.length]));
+  out.push(csvRow([NOT_ON_TEAM_TITLE, s.notOnTeam ? s.notOnTeam.length : null])); // blank when not known
   out.push(csvRow(['Last scan', s.lastScan ? s.lastScan.line : 'none yet']));
   out.push('');
   out.push(csvRow(['Definitions']));
@@ -902,8 +913,12 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   for (const o of s.priceMismatches) out.push(csvRow([local(o.flaggedAt), o.name, o.vin, o.salesperson, o.hoursOpen, o.fromPrice, o.toPrice, o.listingUrl]));
   out.push('');
   out.push(csvRow([NOT_ON_TEAM_TITLE]));
-  out.push(csvRow(['Posted', 'Car', 'VIN', 'Salesperson', 'Hours listed', 'Price', 'Listing link']));
-  for (const o of s.notOnTeam) out.push(csvRow([local(o.postedAt), o.name, o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]));
+  if (s.notOnTeam) {
+    out.push(csvRow(['Posted', 'Car', 'VIN', 'Salesperson', 'Hours listed', 'Price', 'Listing link']));
+    for (const o of s.notOnTeam) out.push(csvRow([local(o.postedAt), o.name, o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]));
+  } else {
+    out.push(csvRow([NOT_ON_TEAM_UNKNOWN]));
+  }
   out.push('');
   out.push(csvRow(['Listings']));
   out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link']));

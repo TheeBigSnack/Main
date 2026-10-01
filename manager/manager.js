@@ -358,7 +358,7 @@ function renderInvites() {
 function viewData() {
   state.mode = 'view';
   const d = state.data;
-  const s = summarize({ ...d, now: new Date().toISOString() });
+  const s = summarize({ ...d, role: myRole(), now: new Date().toISOString() }); // the viewer's role: only a manager reads the whole team
   const dealer = d.dealership?.name || 'Your dealership';
   setDealer(dealer);
   const who = state.mock ? 'Sample data' : esc(state.session?.user?.email || '');
@@ -385,7 +385,7 @@ function viewData() {
 
   const car = (o) => `<td class="name">${o.listingUrl ? `<a href="${esc(o.listingUrl)}" target="_blank" rel="noopener">${esc(o.name)}</a>` : esc(o.name)}<div class="sub">${esc(o.salesperson || 'no salesperson on record')} · ${esc(o.vin)}</div></td>`;
   const age = (o) => `<td class="n">${pill(o.overdue ? 'bad' : '', hrs(o.hoursOpen))}</td>`;
-  const sold = `<section><h2>Sold cars still listed ${pill(s.soldStillListed.length ? (s.soldStillListed.some((o) => o.overdue) ? 'bad' : 'warn') : 'good', String(s.soldStillListed.length))}</h2>
+  const sold = `<section><h2>Sold cars still listed ${pill(s.soldStillListed.length ? (s.soldStillListed.some((o) => o.overdue) ? 'bad' : 'warn') : '', String(s.soldStillListed.length))}</h2>
     ${s.soldStillListed.length
       ? `<div class="scroll"><table class="stats" id="soldStillListed"><thead><tr><th>Car</th><th class="n">Open for</th></tr></thead><tbody>${s.soldStillListed.map((o) => `<tr>${car(o)}${age(o)}</tr>`).join('')}</tbody></table></div>
          <p class="hint">Longest first. Red past ${OVERDUE_HOURS} hours. Hours run from the scan that flagged the car; the salesperson sees the same item on their To do tab.</p>`
@@ -398,7 +398,7 @@ function viewData() {
     const dir = both ? (o.toPrice < o.fromPrice ? 'down' : 'up') : '';
     return `<td class="n">${money(o.fromPrice)} <span class="arrow">→</span> <span class="${dir}">${money(o.toPrice)}</span></td>`;
   };
-  const prices = `<section><h2>Price changes not yet updated ${pill(s.priceMismatches.length ? (s.priceMismatches.some((o) => o.overdue) ? 'bad' : 'warn') : 'good', String(s.priceMismatches.length))}</h2>
+  const prices = `<section><h2>Price changes not yet updated ${pill(s.priceMismatches.length ? (s.priceMismatches.some((o) => o.overdue) ? 'bad' : 'warn') : '', String(s.priceMismatches.length))}</h2>
     ${s.priceMismatches.length
       ? `<div class="scroll"><table class="stats" id="priceMismatches"><thead><tr><th>Car</th><th class="n">Listing → website</th><th class="n">Open for</th></tr></thead><tbody>${s.priceMismatches.map((o) => `<tr>${car(o)}${priceCell(o)}${age(o)}</tr>`).join('')}</tbody></table></div>
          <p class="hint">The listing price must match the website; the salesperson updates it from their To do tab. Red past ${OVERDUE_HOURS} hours.</p>`
@@ -406,7 +406,7 @@ function viewData() {
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  const gone = s.notOnTeam.length
+  const gone = s.notOnTeam && s.notOnTeam.length // null for a viewer who is not a manager: no card
     ? `<section><h2>${esc(NOT_ON_TEAM_TITLE)} ${pill('warn', String(s.notOnTeam.length))}</h2>
     <div class="scroll"><table class="stats" id="notOnTeam"><thead><tr><th>Car</th><th class="n">Listed for</th></tr></thead><tbody>${s.notOnTeam.map((o) => `<tr>${car(o)}<td class="n">${hrs(o.hoursListed)}</td></tr>`).join('')}</tbody></table></div>
     <p class="hint">${esc(NOT_ON_TEAM_HINT)}</p>
@@ -548,7 +548,7 @@ function downloadCsv() {
   if (!state.data) return;
   const now = new Date().toISOString();
   const dealer = state.data.dealership?.name || '';
-  const csv = managerCsv(state.data, { now, dealer, origin: state.data.dealership?.website_origin || '' });
+  const csv = managerCsv(state.data, { role: myRole(), now, dealer, origin: state.data.dealership?.website_origin || '' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = csvFileName(now, { dealer });

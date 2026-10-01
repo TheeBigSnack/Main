@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 
@@ -193,13 +193,13 @@ test('a car still listed by someone no longer on the team is listed for the mana
     { user_id: 'u9', vin: 'V8', name: 'Taken down', posted_at: ago(90), salesperson: 'Pat', status: 'taken_down', taken_down_at: ago(80) },
     { user_id: 'u9', vin: 'V7', name: 'Newer', posted_at: ago(10), salesperson: 'Pat', status: 'listed' },
   ];
-  const s = summarize({ memberships, listings, todoItems: [], now: NOW });
+  const s = summarize({ memberships, listings, todoItems: [], role: 'manager', now: NOW });
   assert.deepEqual(s.notOnTeam.map((o) => [o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]), [['V9', 'Pat', 72, 18995, 'https://example.test/v9'], ['V7', 'Pat', 10, null, '']], 'listed ones only, longest listed first');
   assert.deepEqual(s.soldStillListed, [], 'no item ever opens for them');
-  assert.deepEqual(summarize({ listings, now: NOW }).notOnTeam, [], 'without the memberships nobody can be told apart');
-  assert.deepEqual(summarize({ memberships, listings: listings.slice(0, 1), now: NOW }).notOnTeam, []);
+  assert.equal(summarize({ listings, role: 'manager', now: NOW }).notOnTeam, null, 'without the memberships nobody can be told apart');
+  assert.deepEqual(summarize({ memberships, listings: listings.slice(0, 1), role: 'manager', now: NOW }).notOnTeam, []);
   // the CSV carries them too
-  const lines = managerCsv({ memberships, listings }, { now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const lines = managerCsv({ memberships, listings }, { role: 'manager', now: NOW, timeZone: 'UTC' }).split('\r\n');
   assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},2`));
   const at = lines.indexOf(NOT_ON_TEAM_TITLE);
   assert.equal(lines[at + 1], 'Posted,Car,VIN,Salesperson,Hours listed,Price,Listing link');
@@ -210,12 +210,48 @@ test('a car still listed by someone no longer on the team is listed for the mana
   assert.match(page, /esc\(EMPTY_TAKE_DOWNS\)/);
   assert.match(page, /esc\(EMPTY_PRICE_ITEMS\)/);
   assert.match(page, /id="notOnTeam"/);
+  // a 0 there is no all-clear, so its pill is the plain one, never the green one
+  for (const list of ['soldStillListed', 'priceMismatches']) {
+    assert.match(page, new RegExp(`pill\\(s\\.${list}\\.length \\? \\(.*?\\) : '', String\\(s\\.${list}\\.length\\)\\)`), list);
+  }
   for (const line of [EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS]) {
     assert.doesNotMatch(line, /\bevery\b|\ball\b/i, line);
     assert.match(line, /poster's own computer/);
   }
   assert.match(NOT_ON_TEAM_HINT, /nobody is told when these cars sell or change price/);
   assert.match(TEAM_HINT, /show under "Listed by people no longer on the team"/);
+});
+
+// a CSV cell as managerCsv writes it
+const csvQuote = (s) => (/[",\n\r']/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+
+test('a salesperson who opens the manager view reads only their own membership, so no colleague\'s car is put under "no longer on the team", on the page or in the CSV', () => {
+  // what row-level security gives a salesperson (0002_rls.sql): their own membership row, and every listing of the dealership
+  const memberships = [{ user_id: 'u1', dealership_id: 'd1', role: 'salesperson', name: 'Alex' }];
+  const listings = [
+    { user_id: 'u1', vin: 'V1', name: 'Own car', posted_at: ago(5), salesperson: 'Alex', status: 'listed' },
+    { user_id: 'u2', vin: 'V2', name: 'Colleague car', posted_at: ago(30), salesperson: 'Pat', status: 'listed', price: 18995 },
+  ];
+  for (const role of ['salesperson', '', undefined]) {
+    assert.equal(summarize({ memberships, listings, role, now: NOW }).notOnTeam, null, `not known for a viewer whose role is ${JSON.stringify(role)}`);
+  }
+  assert.equal(summarize({ memberships, listings, now: NOW }).notOnTeam, null, 'no role given: not known');
+  // the CSV claims no count and lists no car under that heading
+  const lines = managerCsv({ memberships, listings }, { role: 'salesperson', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},`), 'the summary row is blank, not 0 or 1');
+  const at = lines.indexOf(NOT_ON_TEAM_TITLE);
+  assert.ok(at > 0);
+  assert.equal(lines[at + 1], csvQuote(NOT_ON_TEAM_UNKNOWN));
+  assert.equal(lines[at + 2], '', 'and nothing else in the section');
+  assert.match(NOT_ON_TEAM_UNKNOWN, /manager/);
+  // the same data seen by a manager, who reads every membership, lists nobody either: Pat is on the team
+  const team = [...memberships, { user_id: 'u2', dealership_id: 'd1', role: 'salesperson', name: 'Pat' }];
+  assert.deepEqual(summarize({ memberships: team, listings, role: 'manager', now: NOW }).notOnTeam, []);
+  // the page hands the viewer's role to both, and draws the card only for a list
+  const page = read('manager/manager.js');
+  assert.match(page, /summarize\(\{ \.\.\.d, role: myRole\(\),/);
+  assert.match(page, /managerCsv\(state\.data, \{ role: myRole\(\),/);
+  assert.match(page, /const gone = s\.notOnTeam && s\.notOnTeam\.length/);
 });
 
 test('empty or broken input gives zeros, not an exception', () => {
