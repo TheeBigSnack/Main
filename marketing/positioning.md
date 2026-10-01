@@ -1,4 +1,4 @@
-# Lot Sync: positioning (internal, draft)
+# Lot Current: positioning (internal, draft)
 
 Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here is a hypothesis to test at Waynesburg. No invented testimonials, logos, reviews or statistics: every number below is either from our own live runs or is labelled as a guess.
 
@@ -15,15 +15,15 @@ Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here i
 - Managers can't see who has what listed.
 - The tools that "post for you" make people nervous: auto-posting is the kind of automated access Meta's Terms prohibit, and it is the salesperson's own account on the line.
 
-## What Lot Sync is
+## What Lot Current is
 
 A Chrome extension. It reads the dealership's own website inventory, lets only pre-owned cars through, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and re-reads the website every 3 hours to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
 
-**One line:** Lot Sync fills in the Marketplace listing from your website in about ten seconds. You click Publish, and it tells you the same day when a car sells or its price changes.
+**One line:** Lot Current fills in the Marketplace listing from your website in about ten seconds. You click Publish, and it tells you the same day when a car sells or its price changes.
 
 ## Why it is different (the angle: careful and accurate)
 
-| | Auto-posting tools | Lot Sync |
+| | Auto-posting tools | Lot Current |
 |---|---|---|
 | Who publishes | The tool, on a schedule | The salesperson, every time |
 | What gets listed | Whatever is in the feed | Only cars the website says are pre-owned, at your store, with photos and a price |
@@ -38,7 +38,7 @@ Other tools in this space list at roughly $39 to $1,299 a month as of September 
 ## What we can say, and what we can't
 
 Say:
-- "You click Publish. Lot Sync never does." (True by construction: there is no code for it and a test that fails if any appears.)
+- "You click Publish. Lot Current never does." (True by construction: there is no code for it and a test that fails if any appears.)
 - "Only pre-owned cars, only at your store, only at the website price."
 - "Sold cars flagged the same day." (While Chrome is open, with rescans on; say that when asked.)
 - "On the live form at Waynesburg, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always".)

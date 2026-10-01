@@ -31,7 +31,10 @@ export { fake };
 // ---------- the project the functions believe they run in ----------
 
 export const SUPABASE_URL = 'https://abcdefghijklmnop.supabase.co';
-export const ANON_KEY = 'anon-key-for-the-function-tests';
+// Shaped like the publishable key a new project hands out (sb_publishable_...), so
+// scripts/check-deploy.mjs takes it for a browser-safe key; it is the
+// SUPABASE_ANON_KEY the functions read when SUPABASE_PUBLISHABLE_KEYS is unset.
+export const ANON_KEY = 'sb_publishable_anon-key-for-the-function-tests';
 export const SERVICE_KEY = 'service-role-key-for-the-function-tests';
 export const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 export const BASE_ENV = Object.freeze({ SUPABASE_URL, SUPABASE_ANON_KEY: ANON_KEY, SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY });

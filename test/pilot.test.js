@@ -192,7 +192,7 @@ test('the summary: median time per post, per salesperson, per-field failure rate
 test('the text summary and the CSV say the same numbers; the CSV quotes what needs quoting and holds no descriptions', () => {
   const p = samplePilot();
   const text = pilotText(summarizePilot(p, { now: T(310), labels }), { site: 'Ron Lewis CDJR Waynesburg' });
-  assert.match(text, /^Lot Sync pilot numbers: Ron Lewis CDJR Waynesburg\n/);
+  assert.match(text, /^Lot Current pilot numbers: Ron Lewis CDJR Waynesburg\n/);
   assert.match(text, /3 posted \(1 in a queue\), 1 saved as drafts, 1 not posted/);
   assert.match(text, /median 50 s, fastest 40 s, slowest 90 s, 67% within 60 s/);
   assert.match(text, /Roger: 2 posted, median 45 s/);
@@ -210,12 +210,12 @@ test('the text summary and the CSV say the same numbers; the CSV quotes what nee
   const withComma = endPost(beginPost(p, { vin: 'VIN00007', name: 'Car "7", the odd one', salesperson: 'Lee, Jr.', at: T(20) }), 'VIN00007', 'blocked', { at: T(21), reason: 'no price' });
   const csv = pilotCsv(withComma, { now: T(310), labels, site: 'Test', origin: 'https://example-dealer.test', dealer: 'Ron Lewis CDJR Waynesburg', salesperson: 'Roger', timeZone: 'America/New_York', version: '0.4.0' });
   const lines = csv.split('\r\n');
-  assert.equal(lines[0], 'Lot Sync pilot numbers,Test,exported 2026-10-26 10:10');
+  assert.equal(lines[0], 'Lot Current pilot numbers,Test,exported 2026-10-26 10:10');
   assert.equal(lines[1], 'Dealership,Ron Lewis CDJR Waynesburg');
   assert.equal(lines[2], 'Website,https://example-dealer.test');
   assert.equal(lines[3], 'Salesperson (from Settings),Roger');
   assert.equal(lines[4], 'Time zone,America/New_York');
-  assert.equal(lines[5], 'Lot Sync version,0.4.0');
+  assert.equal(lines[5], 'Lot Current version,0.4.0');
   assert.equal(lines[6], '');
   assert.ok(lines.includes('Posted,3'));
   assert.ok(lines.includes('Median seconds per post,50'));
@@ -239,7 +239,7 @@ test('the text summary and the CSV say the same numbers; the CSV quotes what nee
   assert.ok(csv.endsWith('\r\n'));
   assert.equal(withComma.posts[0].startedAt, T(0), 'storage keeps ISO');
   // the same export in another zone, and the local zone when none is given
-  assert.equal(pilotCsv(withComma, { now: T(310), labels, timeZone: 'Asia/Tokyo' }).split('\r\n')[0], 'Lot Sync pilot numbers,,exported 2026-10-26 23:10');
+  assert.equal(pilotCsv(withComma, { now: T(310), labels, timeZone: 'Asia/Tokyo' }).split('\r\n')[0], 'Lot Current pilot numbers,,exported 2026-10-26 23:10');
   const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
   assert.equal(pilotCsv(withComma, { now: T(310), labels }).split('\r\n')[4], `Time zone,${here}`);
   assert.equal(pilotCsv(withComma, { now: T(310), labels, timeZone: 'Not/AZone' }).split('\r\n')[4], `Time zone,${here}`, 'a zone Intl does not know falls back to this computer\'s instead of failing the download');
@@ -280,14 +280,14 @@ test('the CSV summary adds up (flagged = done + still open + cleared by the webs
 });
 
 test('the file name says whose numbers they are: site, salesperson and the local day', () => {
-  assert.equal(pilotFileName(T(0), { site: 'Ron Lewis CDJR Waynesburg', salesperson: 'Lee, Jr.', timeZone: 'America/New_York' }), 'lot-sync-pilot-ron-lewis-cdjr-waynesburg-lee-jr-2026-10-26.csv');
-  assert.equal(pilotFileName(T(0), { site: '  --Dealer #1!  ', salesperson: 'José Álvarez', timeZone: 'UTC' }), 'lot-sync-pilot-dealer-1-jose-alvarez-2026-10-26.csv');
-  assert.equal(pilotFileName(T(0), { timeZone: 'UTC' }), 'lot-sync-pilot-unnamed-unnamed-2026-10-26.csv');
+  assert.equal(pilotFileName(T(0), { site: 'Ron Lewis CDJR Waynesburg', salesperson: 'Lee, Jr.', timeZone: 'America/New_York' }), 'lot-current-pilot-ron-lewis-cdjr-waynesburg-lee-jr-2026-10-26.csv');
+  assert.equal(pilotFileName(T(0), { site: '  --Dealer #1!  ', salesperson: 'José Álvarez', timeZone: 'UTC' }), 'lot-current-pilot-dealer-1-jose-alvarez-2026-10-26.csv');
+  assert.equal(pilotFileName(T(0), { timeZone: 'UTC' }), 'lot-current-pilot-unnamed-unnamed-2026-10-26.csv');
   // the day is the local one, not UTC's: 02:30 UTC is still the evening before in New York and already the next morning in Tokyo
   const smallHours = new Date(Date.UTC(2026, 9, 26, 2, 30)).toISOString();
-  assert.equal(pilotFileName(smallHours, { site: 'Test', salesperson: 'Roger', timeZone: 'America/New_York' }), 'lot-sync-pilot-test-roger-2026-10-25.csv');
-  assert.equal(pilotFileName(smallHours, { site: 'Test', salesperson: 'Roger', timeZone: 'Asia/Tokyo' }), 'lot-sync-pilot-test-roger-2026-10-26.csv');
-  assert.match(pilotFileName(), /^lot-sync-pilot-unnamed-unnamed-\d{4}-\d{2}-\d{2}\.csv$/, 'no arguments: today, this computer\'s zone');
+  assert.equal(pilotFileName(smallHours, { site: 'Test', salesperson: 'Roger', timeZone: 'America/New_York' }), 'lot-current-pilot-test-roger-2026-10-25.csv');
+  assert.equal(pilotFileName(smallHours, { site: 'Test', salesperson: 'Roger', timeZone: 'Asia/Tokyo' }), 'lot-current-pilot-test-roger-2026-10-26.csv');
+  assert.match(pilotFileName(), /^lot-current-pilot-unnamed-unnamed-\d{4}-\d{2}-\d{2}\.csv$/, 'no arguments: today, this computer\'s zone');
 });
 
 test('the storage helper reads, changes and writes one key; a failure is the caller\'s to catch', async () => {

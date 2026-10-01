@@ -106,7 +106,7 @@ test('new: by the first sighting when the website gives no date, to the millisec
   assert.equal(isNew(car('A', { firstSeenAt: null }), { now: NOW }), false, 'already there at the first scan');
   assert.equal(isNew(car('A'), { now: NOW }), false, 'no dates at all');
   // the website's date wins over the sighting, both ways
-  assert.equal(isNew(car('A', { dateInStock: '2026-08-01T00:00:00.000Z', firstSeenAt: seen(DAY_MS) }), { now: NOW }), false, 'the website says it has been there two months, however recently Lot Sync first saw it');
+  assert.equal(isNew(car('A', { dateInStock: '2026-08-01T00:00:00.000Z', firstSeenAt: seen(DAY_MS) }), { now: NOW }), false, 'the website says it has been there two months, however recently Lot Current first saw it');
   assert.equal(isNew(car('A', { dateInStock: '2026-09-30T00:00:00.000Z', firstSeenAt: seen(20 * DAY_MS) }), { now: NOW }), true);
   assert.equal(isNew(null, { now: NOW }), false);
   assert.equal(isNew(undefined), false);
@@ -150,11 +150,11 @@ test('the line under a car names where its date came from, and counts days on th
   assert.equal(dateLine(car('A', { dateInStock: '2025-11-20T00:00:00.000Z' }), at), 'on the website since Nov 20, 2025 · 315 days on the lot');
   assert.equal(dateLine(car('A', { dateInStock: SITE_DATE, firstSeenAt: SEEN }), at), 'on the website since Sep 28 · 3 days on the lot', 'the website first');
   const seen = new Date(2026, 8, 29, 15, 30).toISOString();
-  assert.equal(dateLine(car('A', { firstSeenAt: seen }), at), 'Lot Sync first saw it Sep 29');
+  assert.equal(dateLine(car('A', { firstSeenAt: seen }), at), 'Lot Current first saw it Sep 29');
   assert.doesNotMatch(dateLine(car('A', { firstSeenAt: seen }), at), /on the lot/, 'a first sighting never counts days on the lot');
-  assert.equal(dateLine(car('A', { dateInStock: 'garbage', firstSeenAt: seen }), at), 'Lot Sync first saw it Sep 29');
-  assert.equal(dateLine(car('A', { firstSeenAt: null }), at), 'no date on the website, and Lot Sync did not see it arrive');
-  assert.equal(dateLine(car('A'), at), 'no date on the website, and Lot Sync did not see it arrive');
+  assert.equal(dateLine(car('A', { dateInStock: 'garbage', firstSeenAt: seen }), at), 'Lot Current first saw it Sep 29');
+  assert.equal(dateLine(car('A', { firstSeenAt: null }), at), 'no date on the website, and Lot Current did not see it arrive');
+  assert.equal(dateLine(car('A'), at), 'no date on the website, and Lot Current did not see it arrive');
   assert.equal(dateLine(null, at), '');
   assert.equal(dateLine(undefined), '');
 });
@@ -293,7 +293,7 @@ test("the two date orders agree with the lines shown in every time zone: the web
     for (const tz of ['UTC', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', 'Pacific/Auckland']) {
       process.env.TZ = tz; // Node reads a change of TZ on the next date it makes
       const site30 = car('A', { name: 'A car', dateInStock: '2026-09-30T00:00:00.000Z' }); // shown "on the website since Sep 30"
-      const eve29 = car('B', { name: 'B car', firstSeenAt: new Date(2026, 8, 29, 22, 0).toISOString() }); // "Lot Sync first saw it Sep 29"
+      const eve29 = car('B', { name: 'B car', firstSeenAt: new Date(2026, 8, 29, 22, 0).toISOString() }); // "Lot Current first saw it Sep 29"
       const site29 = car('D', { name: 'D car', dateInStock: '2026-09-29' });
       const early30 = car('C', { name: 'C car', firstSeenAt: new Date(2026, 8, 30, 0, 30).toISOString() }); // half past midnight on the 30th
       assert.deepEqual(sortEntries([eve29, site30, site29], 'newest').map((e) => e.vin), ['A', 'B', 'D'], `${tz}: newest`);

@@ -1,4 +1,4 @@
-// Lot Sync billing (Milestone 5): the pure parts of the billing function,
+// Lot Current billing (Milestone 5): the pure parts of the billing function,
 // as plain JavaScript so the Deno function (functions/billing/index.ts)
 // imports it and test/billing.test.js runs the same code in Node. Nothing in
 // here touches the network or a database: the state machine, the Checkout
@@ -30,7 +30,7 @@
 // baked into migrations/0004_billing.sql (seats default, start_pilot).
 export const PRICING = Object.freeze({ includedSalespeople: 5, pilotDays: 30 });
 
-// 'pilot' is Lot Sync's own (no Stripe object behind it); the rest are every
+// 'pilot' is Lot Current's own (no Stripe object behind it); the rest are every
 // status Stripe can put on a subscription, so a webhook never fails the
 // row's check constraint.
 export const STATUSES = Object.freeze(['pilot', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused']);
@@ -90,7 +90,7 @@ export function hasOpenSubscription(row) {
 // second subscription on the same customer, and the old one's dunning
 // events would then keep flipping the row back to lapsed).
 export function checkoutRefusal(row, now = Date.now()) {
-  if (subscriptionState(row, now) === 'active') return { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Sync contact' };
+  if (subscriptionState(row, now) === 'active') return { status: 409, error: 'this dealership already has a subscription: Manage billing updates the card or cancels it; to change seats, ask your Lot Current contact' };
   if (hasOpenSubscription(row)) return { status: 409, error: OPEN_SUBSCRIPTION_MESSAGE, code: OPEN_SUBSCRIPTION_CODE };
   return null;
 }
@@ -174,7 +174,7 @@ export function planOf(row, now = Date.now()) {
 // on; `plan` lets it say since when. The billing function is never gated:
 // a lapsed dealership must be able to renew.
 export const LAPSED_CODE = 'lapsed';
-export const LAPSED_MESSAGE = "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";
 export function lapsedAnswer(plan) {
   return { ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan };
 }

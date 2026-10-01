@@ -1,6 +1,6 @@
--- Lot Sync, Milestone 5: billing on Stripe.
+-- Lot Current, Milestone 5: billing on Stripe.
 --
--- One row per dealership says where it stands: a free pilot period Lot Sync
+-- One row per dealership says where it stands: a free pilot period Lot Current
 -- grants itself (no card, no Stripe object), or a Stripe subscription whose
 -- status the billing function copies in from webhooks. A second table keeps
 -- every webhook event once, so a redelivered event is never applied twice.
@@ -18,7 +18,7 @@
 
 -- ---------------------------------------------------------------------------
 -- subscriptions: the dealership's billing standing.
---   status  'pilot' is Lot Sync's own; the rest are every status Stripe can
+--   status  'pilot' is Lot Current's own; the rest are every status Stripe can
 --           put on a subscription, so a webhook never fails this check. Null
 --           until the pilot starts or Stripe says something (a row with only
 --           a customer id is a checkout that was opened and not finished).
@@ -38,7 +38,7 @@ create table public.subscriptions (
   updated_at timestamptz not null default now()
 );
 comment on table public.subscriptions is 'One row per dealership: the free pilot period or the Stripe subscription''s status, as the billing function copies it in.';
-comment on column public.subscriptions.status is 'pilot (Lot Sync''s own free period) or a Stripe subscription status; null until either exists.';
+comment on column public.subscriptions.status is 'pilot (Lot Current''s own free period) or a Stripe subscription status; null until either exists.';
 comment on column public.subscriptions.seats is 'Salespeople the subscription covers: the included count (5, marketing/pricing.json) plus the seat price''s quantity.';
 
 -- ---------------------------------------------------------------------------

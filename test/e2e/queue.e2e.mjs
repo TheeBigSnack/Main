@@ -61,7 +61,7 @@ const WAGONEER = '1C4SJVDT7NS142834';
 try {
   const ext = await context.newPage();
   await ext.goto('chrome://extensions');
-  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Sync').id);
+  const extensionId = await ext.evaluate(async () => (await chrome.management.getAll()).find((e) => e.name === 'Lot Current').id);
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
 
@@ -170,7 +170,7 @@ try {
   // and the panel says Facebook changed fields after the fill, and that they were set again and held
   assert.equal(await panel.$('#preexisting'), null, 'the form was empty when filling started');
   const changed = await panel.textContent('#changedAfterFill');
-  assert.match(changed, /Facebook changed[\s\S]*after Lot Sync filled it/);
+  assert.match(changed, /Facebook changed[\s\S]*after Lot Current filled it/);
   assert.match(changed, /"1HGCV1F30LA000000"|"2020"|"Honda"|"Accord EX-L"/);
   assert.match(changed, /set them again and they held/);
   assert.match(changed, /delete that draft on Facebook/);

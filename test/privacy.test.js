@@ -212,7 +212,7 @@ test('docs/support.md: the three request types, who may ask for each and how it 
   assert.match(byType['Forget a person'], /\| The person themself \|/);
   assert.match(byType['Export a dealership\'s records'], /manager membership of that dealership/, 'verified against the membership');
   assert.match(byType['Delete a dealership'], /phone call/, 'a delete is confirmed by phone');
-  assert.match(byType['Forget a person'], /email of their own Lot Sync account/);
+  assert.match(byType['Forget a person'], /email of their own Lot Current account/);
   for (const fn of ['export_dealership', 'delete_dealership', 'forget_person']) {
     assert.match(byType[{ export_dealership: 'Export a dealership\'s records', delete_dealership: 'Delete a dealership', forget_person: 'Forget a person' }[fn]], new RegExp('`' + escapeRe(fn) + '`'), `the row does not name ${fn}`);
   }

@@ -1,4 +1,4 @@
-// Which servers a car's photos sit on, and which of them Lot Sync still has
+// Which servers a car's photos sit on, and which of them Lot Current still has
 // to ask Chrome for. The service worker downloads every photo (background.js
 // downloadPhoto: the Facebook page can't read another site's images), and
 // Chrome lets it read a server only when a host permission covers it: one the
@@ -8,7 +8,7 @@
 // Pure: the manifest's list and the granted list come in as arguments.
 // Only https servers are ever asked for (the manifest's optional host
 // permissions offer https://<any host>/ and nothing wider), and never one of
-// Facebook's: Lot Sync fills Facebook's form, it doesn't read from Facebook.
+// Facebook's: Lot Current fills Facebook's form, it doesn't read from Facebook.
 // That rule holds for downloads too, not only for the asking: the manifest
 // covers www.facebook.com/marketplace/ for the form, so the side panel and
 // the worker both check isFacebookServer before a photo is fetched.
@@ -38,7 +38,7 @@ function httpsUrl(value) {
 }
 
 /**
- * Is this address on one of Facebook's servers, whatever its scheme? Lot Sync
+ * Is this address on one of Facebook's servers, whatever its scheme? Lot Current
  * never downloads from those, even where a manifest permission would let it.
  */
 export function isFacebookServer(address) {
@@ -53,7 +53,7 @@ export function isFacebookServer(address) {
  * The https origins the photos are on, each once, in the order the photos
  * come (a host with a trailing dot is the same server without it). Anything
  * else (http, a relative or broken address, Facebook's own servers) is left
- * out: Lot Sync never asks for it.
+ * out: Lot Current never asks for it.
  */
 export function photoOriginsOf(urls) {
   const out = [];
@@ -70,7 +70,7 @@ export function photoOriginsOf(urls) {
 /**
  * The host permission to ask for so the worker can download from an origin:
  * https://<host>/ with any path. No port is written, and a pattern without
- * one covers every port on that host. null for anything Lot Sync never asks for.
+ * one covers every port on that host. null for anything Lot Current never asks for.
  */
 export function permissionPattern(origin) {
   const url = httpsUrl(origin);

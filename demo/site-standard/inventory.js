@@ -444,7 +444,7 @@
     const footer = dealerMicrodata
       ? `<footer itemscope itemtype="${SCHEMA}AutoDealer"><span itemprop="name">${esc(DEALER.name)}</span> · <span itemprop="address" itemscope itemtype="${SCHEMA}PostalAddress"><span itemprop="streetAddress">${esc(DEALER.street)}</span>, <span itemprop="addressLocality">${esc(DEALER.city)}</span>, <span itemprop="addressRegion">${esc(DEALER.state)}</span> <span itemprop="postalCode">${esc(DEALER.zip)}</span></span> · Sample data only.</footer>`
       : `<footer>${esc(DEALER.name)} · ${address} · Sample data only.</footer>`;
-    const body = `<div class="sample">Sample website for Lot Sync's tests and sandbox. ${esc(DEALER.name)} is not a real dealership, and these are not real cars.</div>
+    const body = `<div class="sample">Sample website for Lot Current's tests and sandbox. ${esc(DEALER.name)} is not a real dealership, and these are not real cars.</div>
 <header class="site">
   <div class="logo">${esc(DEALER.name)} <small>${address}</small></div>
   <nav><a href="${esc(site.address('/'))}">Home</a><a href="${esc(site.address('/new-vehicles/'))}">New</a><a href="${esc(listAddress(site, 1))}">Used</a></nav>

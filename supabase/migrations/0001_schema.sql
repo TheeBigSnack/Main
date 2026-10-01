@@ -1,4 +1,4 @@
--- Lot Sync, Milestone 4: the tables.
+-- Lot Current, Milestone 4: the tables.
 --
 -- One row per dealership (a rooftop), its members, and only what the
 -- extension already keeps per browser: the posted registry (listings), the
@@ -89,7 +89,7 @@ comment on table public.listings is 'The posted registry: one row per post (VIN,
 -- ---------------------------------------------------------------------------
 -- todo_items: a sold car to take down or a price to update on one of the
 -- dealership's listings, from the extension's rescan (pilot.js flags).
--- Open while done_at is null. how says how it was closed: detected (Lot Sync
+-- Open while done_at is null. how says how it was closed: detected (Lot Current
 -- saw the listing change), manual (the person ticked it off), cleared (a
 -- clean rescan no longer listed it).
 -- ---------------------------------------------------------------------------

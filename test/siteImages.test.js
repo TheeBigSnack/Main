@@ -135,7 +135,7 @@ test('icoFromPngs and parseIco round-trip, and refuse what is not theirs', () =>
 
 test('the share-image template says the name, a heading and the one line, in the site\'s colours, and loads nothing from elsewhere', () => {
   const heading = restingHeading(template);
-  assert.equal(templateText(template), `Lot Sync ${heading} ${LINE}`, 'the template says something besides the name, the heading and the line');
+  assert.equal(templateText(template), `Lot Current ${heading} ${LINE}`, 'the template says something besides the name, the heading and the line');
   assert.doesNotMatch(templateText(template), /\d/, 'no numbers on the image');
   assert.doesNotThrow(() => checkHeading({ slug: 'template', social: { heading } }));
   assert.match(template, /<html lang="en">/);
@@ -177,7 +177,7 @@ test('every page of the site map has a share image of 1200 x 630 under 300 KB, a
     assert.equal(entry.path, `/social/${slug}.png`, `${pagePath}: the image's path`);
     assert.equal(entry.width, SIZE.width);
     assert.equal(entry.height, SIZE.height);
-    const m = String(entry.alt).match(/^Lot Sync's green check mark with the words "(.+)" and "You click Publish\. Lot Sync never does\."$/);
+    const m = String(entry.alt).match(/^The Lot Current check mark and name, with the words "(.+)" and "You click Publish\. Lot Current never does\."$/);
     assert.ok(m, `${pagePath}: the alt sentence has the agreed shape: ${entry.alt}`);
     assert.equal(entry.alt, altFor(m[1]));
     assert.doesNotThrow(() => checkHeading({ slug, social: { heading: m[1] } }), `${pagePath}: the heading in the alt`);
@@ -195,8 +195,8 @@ test('the share-image helpers: the size and limit, the alt sentence, images.json
   assert.deepEqual(SIZE, { width: 1200, height: 630 });
   assert.equal(SIZE_LIMIT, 300 * 1024);
   assert.equal(MARGIN, 40);
-  assert.equal(LINE, 'You click Publish. Lot Sync never does.');
-  assert.equal(altFor('Pricing.'), 'Lot Sync\'s green check mark with the words "Pricing." and "You click Publish. Lot Sync never does."');
+  assert.equal(LINE, 'You click Publish. Lot Current never does.');
+  assert.equal(altFor('Pricing.'), 'The Lot Current check mark and name, with the words "Pricing." and "You click Publish. Lot Current never does."');
   const pages = [
     { slug: 'home', path: '/', social: { heading: 'One.' } },
     { slug: 'not-found', path: '/404.html', social: null },
@@ -216,6 +216,6 @@ test('the share-image helpers: the size and limit, the alt sentence, images.json
   assert.throws(() => checkHeading({ slug: 'x', social: { heading: 'Meta approved.' } }), /names another company/);
   assert.throws(() => checkHeading({ slug: 'x', social: { heading: 'x'.repeat(71) } }), /at most 70/);
   assert.throws(() => socialPngSize(Buffer.from('GIF89a' + ' '.repeat(40))), /not a PNG/);
-  assert.equal(templateText('<html><body><!-- no --><h1>Lot Sync</h1> <p>A &amp; B</p></body></html>'), 'Lot Sync A & B');
+  assert.equal(templateText('<html><body><!-- no --><h1>Lot Current</h1> <p>A &amp; B</p></body></html>'), 'Lot Current A & B');
   assert.throws(() => restingHeading('<html><body><h2>no id</h2></body></html>'), /no <h2 id="heading">/);
 });

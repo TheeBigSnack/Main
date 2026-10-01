@@ -1,4 +1,4 @@
--- Lot Sync: the owner's privacy tools (0006_privacy.sql) against a running
+-- Lot Current: the owner's privacy tools (0006_privacy.sql) against a running
 -- database with the migrations applied, in the shape of rls.sql: people
 -- straight in auth.users, DO blocks that raise on anything wrong,
 -- everything in one transaction rolled back at the end. psql exits non-zero

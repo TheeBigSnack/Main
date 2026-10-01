@@ -17,11 +17,12 @@
 //
 // supabaseJs is the supabase-js client, loaded on demand from a CDN only when
 // the page is configured; the sample-data mode never touches the network.
-// The client runs with the manager's session, so pin it before going live:
-// either an exact version (`@supabase/supabase-js@2.x.y/+esm`, the version
-// checked in the npm registry) or, better, the built file copied next to
-// this page and named relatively (`./vendor/supabase-js-2.x.y.js`; the same
-// import() loads it). index.html's Content-Security-Policy allows scripts
+// The client runs with the manager's session, so it is pinned to an exact
+// version (`npm run set-project -- --check` and the deploy workflow refuse a
+// bare @2): the one checked in the npm registry when it was set, which reads
+// Supabase's publishable keys. Move it on purpose, after reading that
+// release's notes; a copy served next to this page and named relatively
+// (`./vendor/supabase-js-2.x.y.js`; the same import() loads it) also counts. index.html's Content-Security-Policy allows scripts
 // from this folder and cdn.jsdelivr.net only; change it with this line.
 //
 // selfServeSignup shows the "Start your dealership" form to a signed-in
@@ -29,11 +30,11 @@
 // is the switch in the database (signup_settings.open, supabase/README.md
 // "Self-serve sign-up"), and create_dealership refuses everyone while that
 // is off, whatever this says. Turn both on together; with this false the
-// page keeps saying "ask whoever set Lot Sync up for your store".
+// page keeps saying "ask whoever set Lot Current up for your store".
 export const CONFIG = {
-  supabaseUrl: '',
-  supabaseAnonKey: '',
+  supabaseUrl: 'https://dblbfgfkmzlfdwzbcvpj.supabase.co',
+  supabaseAnonKey: 'sb_publishable_dFXfRnfVqhUqZKxM2r_ylw_6uU4d2bt',
   functionsUrl: '',
-  supabaseJs: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+  supabaseJs: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm',
   selfServeSignup: false,
 };

@@ -27,7 +27,7 @@
 //
 // Self-serve sign-up: a signed-in person in no dealership sees the Start your
 // dealership form when config.js's selfServeSignup is on (otherwise the old
-// "ask whoever set Lot Sync up" line). It calls create_dealership() in the
+// "ask whoever set Lot Current up" line). It calls create_dealership() in the
 // database, which is the real gate: it refuses while the owner has sign-up
 // switched off, and its refusal is a sentence the form shows as it comes.
 // ?mock=signup shows the form with create_dealership answered in this page.
@@ -117,7 +117,7 @@ function viewUnconfigured() {
       <p>You can still see what the page will show:</p>
       <div class="toolbar"><button type="button" class="primary" data-action="mock">Try with sample data</button></div>
     </div>
-    <p class="lead">The manager view shows who posted what, which sold cars are still listed and for how long, and which price changes have not reached the listing yet. It reads what the salespeople's Lot Sync extensions record: VINs, listing links, prices and times. Nothing from Facebook beyond the listing links they saved, and never a description or a buyer.</p>`;
+    <p class="lead">The manager view shows who posted what, which sold cars are still listed and for how long, and which price changes have not reached the listing yet. It reads what the salespeople's Lot Current extensions record: VINs, listing links, prices and times. Nothing from Facebook beyond the listing links they saved, and never a description or a buyer.</p>`;
 }
 
 function viewSignIn(note = '') {
@@ -133,7 +133,7 @@ function viewSignIn(note = '') {
         <input type="email" name="email" required autocomplete="email" placeholder="you@yourdealership.com" aria-label="Your email">
         <button type="submit" class="primary">Send me a sign-in link</button>
       </form>
-      <p class="hint">Only people the dealership's Lot Sync account lists can sign in. If the link does not arrive, check the spam folder, then ask whoever set Lot Sync up for your store.</p>
+      <p class="hint">Only people the dealership's Lot Current account lists can sign in. If the link does not arrive, check the spam folder, then ask whoever set Lot Current up for your store.</p>
       <div class="toolbar"><button type="button" class="ghost" data-action="mock">Try with sample data instead</button></div>
     </div>`;
   $('signin').addEventListener('submit', onSendLink);
@@ -156,7 +156,7 @@ function viewError(message) {
 }
 
 // The Start your dealership form, for a signed-in person in no dealership.
-// The line under the address box follows the typing: the origin Lot Sync will
+// The line under the address box follows the typing: the origin Lot Current will
 // keep, or why the address cannot be used. #signupError is the form's live
 // region, on the page from the start so a screen reader announces what lands
 // in it; the boxes keep what was typed whatever the answer.
@@ -786,7 +786,7 @@ async function loadLive() {
     state.data = null;
     // the flag only shows the form; create_dealership refuses while the owner's switch in the database is off
     if (CONFIG.selfServeSignup) return viewSignup();
-    $('main').innerHTML = '<p class="empty">Your account is not a member of any dealership yet. Ask whoever set Lot Sync up for your store to add you.</p><div class="toolbar"><button type="button" class="ghost" data-action="signout">Sign out</button></div>';
+    $('main').innerHTML = '<p class="empty">Your account is not a member of any dealership yet. Ask whoever set Lot Current up for your store to add you.</p><div class="toolbar"><button type="button" class="ghost" data-action="signout">Sign out</button></div>';
     setActions(`<span class="who">${esc(state.session?.user?.email || '')}</span>`);
     state.mode = 'view';
     return;

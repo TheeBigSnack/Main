@@ -44,7 +44,7 @@ export const NOT_SIGNED_IN = 'not signed in';
 // repeated here so the side panel can tell that answer from any other
 // failure of the rewrite service, and so Settings can say it after a sync.
 export const LAPSED_CODE = 'lapsed';
-export const LAPSED_MESSAGE = "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";
 export const LAPSED_SENTENCE = LAPSED_MESSAGE[0].toUpperCase() + LAPSED_MESSAGE.slice(1);
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');

@@ -173,7 +173,7 @@ test('sync/index.ts and rewrite/index.ts refuse a lapsed dealership with 402 and
   assert.match(auth, /export async function subscriptionRowOf\(client: SupabaseClient, dealershipId: string\): Promise<SubscriptionRow \| null>/);
   assert.match(auth, /client\.from\('subscriptions'\)\.select\('\*'\)\.eq\('dealership_id', dealershipId\)\.maybeSingle\(\)/);
   assert.match(billingShared, /export const LAPSED_CODE = 'lapsed';/);
-  assert.match(billingShared, /export const LAPSED_MESSAGE = "the dealership's Lot Sync subscription has lapsed: a manager can renew it in the manager view";/);
+  assert.match(billingShared, /export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";/);
   assert.match(billingShared, /return \{ ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan \};/);
   // the billing function is never gated: a lapsed dealership must be able to renew
   assert.doesNotMatch(billing, /lapsedAnswer|402/);

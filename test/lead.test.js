@@ -278,7 +278,7 @@ test('the landing page tells the visitor a request did not send, unless the func
   const failed = { text: 'That did not send. Please try again, or email demo@lotsync.example.', kind: 'status error' };
   // the function's own failures and anything in front of it: the visitor is told it did not send
   assert.deepEqual(await page.send(reply(500, { ok: false, error: 'the request could not be saved; please email us instead' })), failed, '500');
-  assert.deepEqual(await page.send(reply(403, { ok: false, error: 'demo requests come from the Lot Sync website only' })), failed, '403');
+  assert.deepEqual(await page.send(reply(403, { ok: false, error: 'demo requests come from the Lot Current website only' })), failed, '403');
   assert.deepEqual(await page.send(reply(502, 'not json')), failed, 'a gateway error page');
   assert.deepEqual(await page.send(reply(400, {})), failed, 'a 400 with no sentence');
   assert.deepEqual(await page.send(() => { throw new TypeError('Failed to fetch'); }), failed, 'no answer at all');

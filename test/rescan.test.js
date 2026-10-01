@@ -290,7 +290,7 @@ test('a website read from its pages: a posted car sold on a bad server day is ta
 
 // ---------- the dates the snapshot keeps for the Ready and To do tabs ----------
 // (src/readyList.js reads them: the website's own in-stock date, and when
-// Lot Sync first saw the car, carried from one saved snapshot to the next)
+// Lot Current first saw the car, carried from one saved snapshot to the next)
 
 test('the snapshot keeps the website\'s in-stock date as the record gave it, and no date is no date', () => {
   const s = snapshot([['usedNormal'], ['certified'], ['usedNoPrice', { date_in_stock: null }]]);
@@ -301,7 +301,7 @@ test('the snapshot keeps the website\'s in-stock date as the record gave it, and
   assert.equal(snapshotEntry({ vin: 'X', dateInStock: 20260920 }, { decision: 'ready', blockers: [] }).dateInStock, null, 'only the website\'s own text is kept, never a number made into a date');
 });
 
-test('when Lot Sync first saw a car: null on a first scan, this scan\'s time for a newcomer, carried over for the rest', () => {
+test('when Lot Current first saw a car: null on a first scan, this scan\'s time for a newcomer, carried over for the rest', () => {
   const T1 = '2026-09-26T21:00:00.000Z';
   const T2 = '2026-09-27T09:00:00.000Z';
   const T3 = '2026-09-28T09:00:00.000Z';
@@ -321,7 +321,7 @@ test('when Lot Sync first saw a car: null on a first scan, this scan\'s time for
   const without = makeSnapshotFrom(LOT, T3, second);
   const back = withNewcomer('2026-09-29T09:00:00.000Z', without);
   assert.equal(back.vehicles[fixtures.usedZeroMiles.vin].firstSeenAt, '2026-09-29T09:00:00.000Z');
-  // an entry saved before the field existed carries null: Lot Sync did not see that car arrive either
+  // an entry saved before the field existed carries null: Lot Current did not see that car arrive either
   const old = { ...first, vehicles: Object.fromEntries(Object.entries(first.vehicles).map(([vin, e]) => { const { firstSeenAt: _, ...rest } = e; return [vin, rest]; })) };
   assert.ok(!('firstSeenAt' in old.vehicles[VIN.ram]));
   const after = withNewcomer(T2, old);
@@ -403,7 +403,7 @@ test("a new arrival in the diff carries the car's dates, so To do can show them 
   assert.deepEqual(d.newArrivals.map((n) => [n.vin, n.dateInStock, n.firstSeenAt]), [[VIN.hellcat, '2026-09-30T00:00:00.000Z', T2], [VIN.tradesman, null, T2]], 'the website\'s date as it gave it, and this sighting');
   const now = new Date(2026, 9, 1, 12, 0).getTime();
   assert.equal(dateLine(d.newArrivals[0], { now, locale: 'en-US' }), 'on the website since Sep 30 · 1 day on the lot');
-  assert.equal(dateLine(d.newArrivals[1], { now, locale: 'en-US' }), 'Lot Sync first saw it Oct 1');
+  assert.equal(dateLine(d.newArrivals[1], { now, locale: 'en-US' }), 'Lot Current first saw it Oct 1');
   // a reliable rescan says the same of its newcomer
   const ok = diffScans(prev, makeSnapshotFrom([...big, dated], T2, prev));
   assert.equal(ok.unreliable, false);
@@ -429,10 +429,10 @@ test('a car the last snapshot still names among its missing pages is not a first
   const rest = cars.slice(1);
   const bad = await rescanOf(thinListSite(rest, { [cars[0].path]: httpError(429) }), first.snapshot);
   assert.deepEqual(Object.keys(bad.snapshot.missingPages), [cars[0].vin]);
-  assert.equal(bad.snapshot.missingSeen, undefined, 'nothing to keep: Lot Sync did not see this car arrive');
+  assert.equal(bad.snapshot.missingSeen, undefined, 'nothing to keep: Lot Current did not see this car arrive');
   const back = await rescanOf(thinListSite(cars), bad.snapshot);
   assert.deepEqual(back.diff.newArrivals.map((n) => n.vin), [cars[0].vin], 'the VIN diff still lists its return once');
-  assert.equal(back.snapshot.vehicles[cars[0].vin].firstSeenAt, null, 'not a first sighting: Lot Sync had seen it in both scans before');
+  assert.equal(back.snapshot.vehicles[cars[0].vin].firstSeenAt, null, 'not a first sighting: Lot Current had seen it in both scans before');
   // a newcomer that leaves and comes back keeps the sighting it had
   const more = standardCars(13);
   const newcomer = more[12];

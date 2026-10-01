@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { loadFunction, invoke, fake, hermetic, functionsFetch, keysOf, SUPABASE_URL, SERVICE_KEY } from './functions/harness.mjs';
+import { loadFunction, invoke, fake, hermetic, functionsFetch, keysOf, SUPABASE_URL, ANON_KEY, SERVICE_KEY } from './functions/harness.mjs';
 import { runChecks } from '../scripts/check-deploy.mjs';
 import { PER_ADDRESS_PER_HOUR, PER_HOUR_TOTAL, LEAD_LIMITS } from '../supabase/functions/_shared/lead.mjs';
 
@@ -45,7 +45,7 @@ test('lead: another page gets 403 before the brake or the body are looked at; no
   const handler = await loadFunction('lead', ENV);
   for (let i = 0; i < PER_ADDRESS_PER_HOUR + 2; i += 1) {
     const r = await lead(handler, { origin: STRANGER, body: { not: 'a form' } });
-    assert.deepEqual([r.status, r.body], [403, { ok: false, error: 'demo requests come from the Lot Sync website only' }], `request ${i + 1}`);
+    assert.deepEqual([r.status, r.body], [403, { ok: false, error: 'demo requests come from the Lot Current website only' }], `request ${i + 1}`);
     assert.equal(r.headers.get('access-control-allow-origin'), null);
   }
   assert.equal((await lead(handler, { origin: '' })).status, 403, 'no Origin header');
@@ -198,7 +198,7 @@ test('lead: a database failure, or a missing service key, is 500 with a sentence
 
 test('lead: scripts/check-deploy.mjs reads both lead lines as ok against the real handler', async () => {
   const lead = await loadFunction('lead', { LEAD_ORIGINS: SITE });
-  const findings = await runChecks({ fetchImpl: functionsFetch({ lead }), url: SUPABASE_URL, anonKey: 'anon', siteOrigin: SITE });
+  const findings = await runChecks({ fetchImpl: functionsFetch({ lead }), url: SUPABASE_URL, anonKey: ANON_KEY, siteOrigin: SITE });
   const mine = findings.filter((f) => f.check.startsWith('lead:'));
   assert.deepEqual(mine.map((f) => f.check), ['lead: refuses a page that is not the landing page', 'lead: answers the landing page\'s CORS preflight']);
   for (const f of mine) assert.equal(f.ok, true, `${f.check}: ${f.detail}`);
