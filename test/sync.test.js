@@ -84,7 +84,7 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   assert.deepEqual(Object.keys(body.posted), [VIN_A], 'the colleague\'s entry is theirs to sync');
   assert.deepEqual(body.posted[VIN_A], { name: 'A', price: 1, postedAt: T(0), listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex' }, 'postedWith stays local');
   assert.deepEqual(body.pilot.posts.map((a) => a.vin), [VIN_B], 'the attempt from before since is already on the server');
-  assert.deepEqual(body.pilot.flags, [], 'the flag from before since too');
+  assert.deepEqual(body.pilot.flags.map((f) => f.vin), [VIN_A], 'an open flag goes up on every sync, even one flagged before since');
   assert.deepEqual(body.scan, { takenAt: T(30), cars: 10, ready: null, takeDownCount: null, priceUpdateCount: null });
   assert.equal(body.since, T(15));
   assert.deepEqual(body.known, [], 'no known keys given: none go up, so the function takes nothing down');
@@ -98,8 +98,19 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   // a flag closed after since goes up again so the server closes it too
   const closed = resolveFlag(pilot, VIN_A, 'takeDown', { at: T(16), how: 'manual' });
   assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closed, since: T(15), userId: U1 }).pilot.flags.length, 1);
+  // a flag closed before since is already closed on the server
+  const closedBefore = resolveFlag(pilot, VIN_A, 'takeDown', { at: T(14), how: 'manual' });
+  assert.deepEqual(syncPayload({ origin: ORIGIN, posted, pilot: closedBefore, since: T(15), userId: U1 }).pilot.flags, []);
   // fills never leave the browser
   assert.equal('fills' in body.pilot, false);
+});
+
+test('syncPayload: an open price flag whose website price moved again goes up with the new prices, though its stamp is from before since', () => {
+  let pilot = noteFlags(null, { takeDown: [], priceUpdates: [{ vin: VIN_A, name: 'A', yours: true, from: 20000, to: 19000 }], warnings: [] }, { at: T(2) });
+  pilot = noteFlags(pilot, { takeDown: [], priceUpdates: [{ vin: VIN_A, name: 'A', yours: true, from: 20000, to: 18000 }], warnings: [] }, { at: T(20) });
+  assert.equal(pilot.flags[0].flaggedAt, T(2), 'the open item keeps its stamp');
+  const body = syncPayload({ origin: ORIGIN, posted: {}, pilot, since: T(15), userId: U1 });
+  assert.deepEqual(body.pilot.flags.map((f) => [f.vin, f.from, f.to, f.flaggedAt]), [[VIN_A, 20000, 18000, T(2)]]);
 });
 
 test('syncPayload sends the state\'s known keys as the function matches them: VIN@postedAt, each once, well formed, at most MAX_KNOWN', () => {

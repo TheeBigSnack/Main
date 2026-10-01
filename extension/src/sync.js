@@ -222,7 +222,8 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
  *           received at its last sync (the state's `known`, nextSyncState);
  *           the function takes down only those missing from `posted`, so a
  *           machine that never synced takes nothing down
- *   pilot:  posts and flags that changed after `since` (all of them the first time)
+ *   pilot:  posts that changed after `since`, every open flag, and the flags
+ *           closed after `since` (all of them the first time)
  *   scan:   this scan's counts, or null when nothing was scanned
  *   since:  the serverTime of the last answer, or null
  *   today:  the caller's local calendar day ({ from, to }, localDayRange), so
@@ -246,7 +247,11 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
   }
   const p = withPilotDefaults(pilot);
   const posts = p.posts.filter((a) => changedAfter(since, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
-  const flags = p.flags.filter((f) => changedAfter(since, f.flaggedAt, f.doneAt));
+  // An open flag goes up on every sync: its prices change in place when the
+  // website price moves again while it is open (noteFlags), with no new
+  // stamp, and the function's step 4 applies the new prices to the open item
+  // or changes nothing. A closed flag goes up once more after it closed.
+  const flags = p.flags.filter((f) => !f.doneAt || changedAfter(since, f.flaggedAt, f.doneAt));
   return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, known: keyList(known), pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
 }
 

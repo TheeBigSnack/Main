@@ -1,6 +1,7 @@
 // Lot Current sync function (Milestone 4). One POST …/sync carries the
-// salesperson's own posted registry, the pilot's post attempts and to-do
-// flags that changed since the last sync, and this scan's counts; the
+// salesperson's own posted registry, the pilot's post attempts that changed
+// since the last sync and its open or newly closed to-do flags, and this
+// scan's counts; the
 // function writes them for the caller's dealership (matched by the website
 // origin) and answers with the dealership's whole current registry and
 // open to-do items, so every machine of the dealership converges
