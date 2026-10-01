@@ -448,3 +448,10 @@ chrome.runtime.sendMessage({ type: 'rescanNow', origin: 'https://www.ronlewischr
 ```
 
 Live site: https://www.ronlewischryslerdodgejeepramwaynesburg.com/used-vehicles/ (Dealer Inspire; search service `https://websites-search.api.carscommerce.inc/api/v1/listings/153146`, key on the page; 108 used cars on 2026-09-27; sister stores Cranberry and Pleasant Hills appear as other locations).
+
+## 16. Billing prepared for production (2026-10-01, the "Billing setup" thread)
+
+- `npm run stripe-setup` (`scripts/stripe-setup.mjs` on `scripts/stripe-setup-lib.mjs`) checks, and with `--apply` creates, every Stripe object billing needs from `marketing/pricing.json`, and prints the `supabase secrets set` lines. It refuses a live key without `--live` and never changes a mismatched price without `--reprice`. Tested only against an in-memory Stripe: no Stripe account exists, and this cloud environment's proxy answers 403 for api.stripe.com, so the first real run is the owner's.
+- New optional function secrets: `STRIPE_PORTAL_CONFIGURATION` and `STRIPE_AUTOMATIC_TAX` (off until the attorney answers the sales-tax question; Stripe Tax costs a fee per transaction, so it is a money decision).
+- The owner's walk-through is `docs/stripe-setup.md` (test mode, then the live switch). Next: the owner makes the Stripe account and runs steps 2 to 4; once the Supabase project exists (the production backend thread), steps 4 to 6 and the test-card drive.
+- Owner's name: this project knows him as Brandon (GitHub `TheeBigSnack`); section 1's "Roger" came from the commit email.

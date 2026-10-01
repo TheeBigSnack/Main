@@ -266,6 +266,8 @@ Billing runs on Stripe: a subscription per rooftop per month, a free pilot perio
 
 ### What to create in Stripe, once
 
+`npm run stripe-setup` makes steps 1 to 3 from `marketing/pricing.json` and checks them on every later run (`scripts/stripe-setup-lib.mjs`; the owner's walk-through is `docs/stripe-setup.md`): it reads the secret key from the environment, refuses a live key without `--live`, creates only with `--apply`, and prints the `supabase secrets set` lines for the ids, `STRIPE_PORTAL_CONFIGURATION` included. By hand instead:
+
 In the Stripe Dashboard, in **test mode** first (the toggle at the top; everything below exists separately in test and live mode):
 
 1. **A product** called Lot Sync, with two recurring monthly prices, the planned amounts from `marketing/pricing.json`:
@@ -302,6 +304,8 @@ Then `npm run check-deploy` again (step 6): the three billing lines now read `ok
 | `STRIPE_WEBHOOK_SECRET` | function secret | The webhook endpoint's signing secret. Every event's `Stripe-Signature` header is checked against the raw body (HMAC-SHA256, five-minute tolerance) before anything is read from it. |
 | `STRIPE_PRICE_ROOFTOP` | function secret | The rooftop price id. Without it `/checkout` answers 500 naming the variable. |
 | `STRIPE_PRICE_SEAT` | function secret | The extra-seat price id. Needed only when a dealership asks for more seats than the included count; `/checkout` says so if it is missing then. |
+| `STRIPE_PORTAL_CONFIGURATION` | function secret, optional | The Billing Portal configuration (`bpc_...`) `/portal` opens, as `npm run stripe-setup` made it. Unset, Stripe uses the account's default portal settings, which exist only once someone has saved them in the Dashboard (step 2 above). |
+| `STRIPE_AUTOMATIC_TAX` | function secret, optional | The word `true` turns on Stripe Tax for new Checkouts: Checkout asks for the billing address, saves it on the customer and adds the tax. Anything else leaves tax off. Set it only once the attorney has said what to collect and Stripe Tax has the registrations (`docs/stripe-setup.md`, live mode). |
 | `ALLOWED_RETURN_ORIGINS` | function secret | Comma-separated origins (scheme and host) Stripe may send the manager back to after Checkout or the portal. The request's `returnUrl` must sit on one of them or `/checkout` and `/portal` answer 400. Until it is set, neither route works. Add the same origin to `ALLOWED_ORIGINS` so the page may call the functions at all. |
 
 ### The routes

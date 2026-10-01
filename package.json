@@ -18,6 +18,7 @@
     "test:sql": "node scripts/sql-test.mjs",
     "test:stack": "node scripts/stack-test.mjs",
     "check-deploy": "node scripts/check-deploy.mjs",
+    "stripe-setup": "node scripts/stripe-setup.mjs",
     "test:demo": "node demo/drive.mjs",
     "test:a11y": "node scripts/a11y.mjs",
     "test:site": "node scripts/site-check.mjs",
