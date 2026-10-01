@@ -340,6 +340,11 @@ test('the checks line says which problems stop the form and which only warn', ()
   assert.match(warnOnly, /class="checks warn"/);
   assert.doesNotMatch(warnOnly, /Fix before/);
   assert.match(checksHtml({ ok: true, problems: [], words: 80 }), /^<div class="checks ok" id="checks">All checks passed: 80 words/);
+  // passing says what was checked, no more: the claim checks go by set words
+  const passed = checksHtml({ ok: true, problems: [], words: 80 });
+  assert.doesNotMatch(passed, /claim matches the website/);
+  assert.match(passed, /no banned phrases or flagged claims/);
+  assert.match(passed, /read it through before you publish/);
 });
 
 test('Open the Marketplace form, Fill it in now and Fill again all refuse a description with a claim the website does not make', async () => {

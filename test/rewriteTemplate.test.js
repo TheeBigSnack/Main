@@ -458,6 +458,17 @@ test('a claim the website itself makes passes, and the template built from such 
   assert.deepEqual(codesAfter('About twenty thousand miles.', plainCtx({ ...PLAIN(), mileage: 20000 })), []);
 });
 
+test('a denial of accidents is banned in any number, and "first owner" is a one-owner claim', () => {
+  const v = { ...PLAIN(), descriptionRaw: 'Carfax shows one accident reported.' };
+  for (const sentence of ['No accident on record.', 'No reported accidents.', 'It has never had an accident.', 'Never in an accident.']) {
+    assert.deepEqual(codesAfter(sentence, plainCtx(v)), ['banned-phrase'], sentence);
+  }
+  assert.deepEqual(codesAfter('Sold new here to its first owner.'), ['one-owner']);
+  assert.deepEqual(codesAfter('Sold new here to its first owner.', plainCtx({ ...PLAIN(), carfaxOneOwner: true })), []);
+  // the template never copies such a sentence from the write-up
+  assert.deepEqual(runGuardrails(buildTemplateDescription({ ...plainCtx(), narrative: ['No accident on record and its first owner kept it garaged.'] }), plainCtx()).problems, []);
+});
+
 test('a write-up with markup inside a claim still backs the template that copies it', async () => {
   for (const raw of ['Local trade with new <b>tires</b> and brakes. Garage kept.', 'Clean CARFAX.<br>Runs <strong>great</strong> and drives <em>smooth</em>.', 'Runs\n  great, with a <span class="x">new\n battery</span>.']) {
     const v = { ...PLAIN(), descriptionRaw: raw };

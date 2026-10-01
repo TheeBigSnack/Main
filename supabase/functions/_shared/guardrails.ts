@@ -90,8 +90,8 @@ export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 // "clean title"). A false positive only means the template is used.
 export const BANNED_PHRASES: readonly string[] = Object.freeze([
   // claims the website's data can't support
-  'best price in town', 'lowest price', 'best deal', 'no accidents', 'zero accidents', 'no accident history', 'accident free',
-  'never been in an accident', 'clean title', 'no issues', 'runs perfect', 'runs perfectly', 'perfect condition',
+  'best price in town', 'lowest price', 'best deal', 'no accidents', 'zero accidents', 'no accident', 'no reported accidents', 'accident free',
+  'never been in an accident', 'never had an accident', 'never in an accident', 'clean title', 'no issues', 'runs perfect', 'runs perfectly', 'perfect condition',
   'mint condition', 'like new', 'flawless', "everyone's approved", 'everyone approved', 'guaranteed approval',
   'guaranteed financing', 'bad credit ok', 'no credit check', 'must sell', 'priced to sell', "won't last", 'wont last',
   'act fast', 'no reasonable offer refused', 'below market', 'great on gas',
@@ -257,8 +257,8 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const oneLine = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim();
 const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/[\s-]+/g, '[\\s-]+') + '\\b', 'i')]);
 // "one owner", "1-owner", "single-owner", "one careful owner", "only one
-// previous owner", "its sole owner", "owned by one family"
-const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+){0,2}owner|(?:sole|only) owner|owned by (?:one|a single))\b/i;
+// previous owner", "its sole owner", "its first owner", "owned by one family"
+const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+){0,2}owner|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
 
 // ---------- claims only the website can make ----------
 // What a description says about the car's certification, warranty,

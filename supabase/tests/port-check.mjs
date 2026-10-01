@@ -50,6 +50,7 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with only thirty thousand miles, twenty-five mpg, two owners and five grand off; this one is one careful owner, its sole owner.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, a single-owner truck with new rotors and a fresh inspection.').replace('Example Motors in Springfield', 'Certified Credit Motors in Thousand Oaks') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with new tires and new brakes, plus a new battery and new brakes; it runs great.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, no accident on record, never had an accident, sold new to its first owner.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

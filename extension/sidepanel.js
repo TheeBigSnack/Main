@@ -928,7 +928,7 @@ async function downloadPhotos() {
 // ones that only warn (length and tone).
 function checksHtml(g) {
   if (!g) return '';
-  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number, price and claim matches the website; no banned phrases; dealership and your role named${noteFor() ? '; price note included' : ''}.</div>`;
+  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number the checks found is in the website's data, price and mileage included; no banned phrases or flagged claims; dealership and your role named${noteFor() ? '; price note included' : ''}. The checks look for set words and numbers, so read it through before you publish.</div>`;
   const stops = blockingProblems(g);
   const warns = g.problems.filter((p) => !stops.includes(p));
   const list = (ps) => `<ul>${ps.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
