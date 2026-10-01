@@ -519,19 +519,20 @@ test('one click on Open the Marketplace form opens one form: a second click whil
     () => [],
     () => { throw new Error('rendered'); }, // the step after the listing is built: the form opens
     PASSING_CHECKS[0], PASSING_CHECKS[1], PASSING_CHECKS[2],
-    () => { reads.push(1); return new Promise((resolve) => { release = resolve; }); }, // the car read again: a trip to the website
+    // the car read again: the first read is a trip to the website; any later one would pass at once
+    () => { reads.push(1); return reads.length > 1 ? Promise.resolve(true) : new Promise((resolve) => { release = resolve; }); },
   );
   const first = openForm().catch((e) => e.message);
   await new Promise((r) => setImmediate(r));
   assert.equal(reads.length, 1, 'the first click is reading the car again');
-  assert.equal(await openForm(), undefined, 'a second click meanwhile does nothing');
+  assert.equal(await openForm().catch((e) => e.message), undefined, 'a second click meanwhile does nothing');
   assert.equal(reads.length, 1);
   release(true);
   assert.equal(await first, 'rendered');
   assert.deepEqual([built.length, state.step, state.opening], [1, 'filling', false], 'one listing built, one form opening');
-  assert.equal(await openForm(), undefined, 'a click that lands once the form is opening does nothing');
+  assert.equal(await openForm().catch((e) => e.message), undefined, 'a click that lands once the form is opening does nothing');
   state.step = 'publish';
-  assert.equal(await openForm(), undefined, 'nor once it is filled');
+  assert.equal(await openForm().catch((e) => e.message), undefined, 'nor once it is filled');
   assert.deepEqual([reads.length, built.length], [1, 1]);
   // a click whose checks stopped it leaves the button working
   state.step = 'review';
