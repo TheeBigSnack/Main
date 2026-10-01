@@ -236,6 +236,34 @@ test('every file of the extension reaches a page only through the known injected
   for (const [what, [file, src]] of Object.entries(planted)) assert.ok(injectionProblems(file, src).length, `${what} is caught`);
 });
 
+// The other way onto a page needs no code at all: the manifest. A content
+// script (or files a page may load, or a page allowed to message the
+// extension) would run on every Marketplace page the salesperson opens, with
+// no side panel and nobody at the keyboard; the existing Marketplace host
+// permission is enough for Chrome to run one. The manifest declares none.
+const PAGE_KEYS = ['content_scripts', 'web_accessible_resources', 'externally_connectable', 'user_scripts'];
+// and the permissions that run code in a page without chrome.scripting
+const PAGE_PERMISSIONS = ['debugger', 'userScripts', 'declarativeContent'];
+function manifestPageProblems(m) {
+  const problems = PAGE_KEYS.filter((k) => k in m).map((k) => `the manifest declares ${k}`);
+  for (const p of [...(m.permissions || []), ...(m.optional_permissions || [])]) if (PAGE_PERMISSIONS.includes(p)) problems.push(`the manifest asks for ${p}`);
+  return problems;
+}
+
+test('the manifest runs nothing on a page by itself: no content script, no files for pages, no page messaging the extension', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifestPageProblems(manifest), []);
+  // the check itself
+  const planted = {
+    'a Marketplace content script': { content_scripts: [{ matches: ['https://www.facebook.com/marketplace/*'], js: ['facebook/x.js'] }] },
+    'files a page may load': { web_accessible_resources: [{ resources: ['facebook/x.js'], matches: ['https://www.facebook.com/*'] }] },
+    'a page that may message the extension': { externally_connectable: { matches: ['https://www.facebook.com/*'] } },
+    'the debugger': { permissions: [...manifest.permissions, 'debugger'] },
+    'user scripts': { optional_permissions: ['userScripts'] },
+  };
+  for (const [what, patch] of Object.entries(planted)) assert.ok(manifestPageProblems({ ...manifest, ...patch }).length, `${what} is caught`);
+});
+
 // The comment stripper above removes /* ... */ blocks; a "/*" inside a string
 // would swallow real code from the guarded text, so no file of the extension
 // (every one is walked above) may contain one outside a comment. A match
