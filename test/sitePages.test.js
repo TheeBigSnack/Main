@@ -700,6 +700,13 @@ test('the browser checks cover every page: npm run test:site and npm run test:a1
   assert.ok(a11yAt > 0 && siteAt > a11yAt, 'the demo job runs test:site after test:a11y');
   const pages = read('.github/workflows/pages.yml');
   assert.match(pages, /node scripts\/site-pages\.mjs --check[\s\S]*node scripts\/legal-pages\.mjs --check/, 'the Pages workflow refuses to deploy stale pages');
+  // pages.yml does not wait for CI: the unit tests (the honesty rules, site/pricing.json against the marketing pricing) gate the upload themselves
+  const steps = pages.split(/\n      - /);
+  const unit = steps.findIndex((st) => /^run: npm test$/m.test(st));
+  assert.ok(unit > 0, 'the Pages workflow runs npm test');
+  assert.ok(unit < steps.findIndex((st) => /uses: actions\/upload-pages-artifact@/.test(st)), 'before anything is uploaded');
+  assert.doesNotMatch(steps[unit], /continue-on-error|if:/, 'a failure stops the deploy');
+  assert.doesNotMatch(pages, /run: npm (ci|install)/, 'npm test needs no dependencies');
   // it deploys from the repository's default branch, whatever its name, and only from there
   assert.doesNotMatch(pages, /branches:/, 'no branch name is written into the Pages workflow');
   assert.match(pages, /^ {4}if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)$/m, 'the deploy job runs only on the default branch');

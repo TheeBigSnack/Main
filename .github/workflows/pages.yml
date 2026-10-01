@@ -7,7 +7,11 @@
 # job is skipped. Nothing is built: site/ is committed as served, and the two
 # --check runs refuse the deploy when a committed page differs from what its
 # generator would write (someone edited an output by hand, or changed
-# site/config.js, a fragment or a legal text without rerunning it).
+# site/config.js, a fragment or a legal text without rerunning it). Then the
+# unit tests, the same npm test CI's unit job runs, refuse it when any rule
+# fails: the honesty rules over every page, site/pricing.json equal to the
+# pricing Stripe is set up from, and the rest. This workflow does not wait
+# for CI, so without them a push that turns CI red would already be live.
 name: Pages
 
 on:
@@ -41,9 +45,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      # Both checks need only Node: no npm ci, no browser.
+      # All three need only Node: no npm ci, no browser (npm test takes about ten seconds).
       - run: node scripts/site-pages.mjs --check
       - run: node scripts/legal-pages.mjs --check
+      - run: npm test
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
