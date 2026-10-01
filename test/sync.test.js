@@ -230,6 +230,26 @@ test('mergeRegistry: a missing link, name or salesperson is filled from the serv
   assert.deepEqual(reposted[VIN_A], { name: 'Car A1', price: 7, postedAt: T(6), postedWith: '0.4.0', salesperson: 'Sam', userId: U2 });
 });
 
+// forget_person clears a departed salesperson's name on the server (0006_privacy.sql), but a colleague's
+// machine that synced before kept it on every car of theirs still listed: a name was only ever filled in
+test('mergeRegistry: a colleague\'s entry follows the server\'s salesperson name, a cleared one included; the caller\'s own keeps theirs', () => {
+  const local = {
+    [VIN_A]: { name: 'Car A1', price: 20000, postedAt: T(0), salesperson: 'Jane Colleague', userId: U2, mine: false },
+    [VIN_B]: { name: 'Car B2', price: 20000, postedAt: T(0), salesperson: 'Alex', userId: U1 },
+  };
+  // what forget_person leaves: the colleague's row still listed, under their bare account id, with no name
+  for (const updated of [null, T(5)]) {
+    const out = mergeRegistry(local, [row(VIN_A, { salesperson: null, updated_at: updated }), row(VIN_B, { user_id: U1, salesperson: null, updated_at: updated })], { userId: U1 });
+    assert.equal('salesperson' in out[VIN_A], false, `the cleared name leaves the colleague's copy (updated_at ${updated})`);
+    assert.deepEqual([out[VIN_A].userId, out[VIN_A].mine], [U2, false], 'the entry stays the colleague\'s, under the id the server keeps');
+    assert.equal(out[VIN_B].salesperson, 'Alex', 'the caller\'s own entry keeps the name from their Settings');
+  }
+  // a name the owner corrected on the server reaches the colleague's copy too
+  assert.equal(mergeRegistry(local, [row(VIN_A, { salesperson: 'Jane C.' })], { userId: U1 })[VIN_A].salesperson, 'Jane C.');
+  // without the caller's id nobody's row is known to be a colleague's: a missing name is only filled in
+  assert.equal(mergeRegistry(local, [row(VIN_A, { salesperson: null })])[VIN_A].salesperson, 'Jane Colleague');
+});
+
 // Round H review: Taken down clicked while a sync was out came back with that
 // sync's answer, which still listed the car (the request carried it).
 test('mergeRegistry: the caller\'s listed row the request sent and the registry dropped meanwhile is not put back; anything else still is', () => {

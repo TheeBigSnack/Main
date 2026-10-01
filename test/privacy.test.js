@@ -236,3 +236,19 @@ test('docs/support.md: the copy of a person\'s own data reads every table that c
   assert.match(recipe, /from auth\.users where id = '<user id>'/, 'their account');
   assert.match(support, /it leaves out their invite misses, sign-up attempts and demo requests/, 'what export_dealership leaves out');
 });
+
+// review: the attorney was told forget_person keeps "two things", and the README called every colleague's
+// copy out of reach, while the rows kept under the bare id were more and a colleague's sync can drop the name
+test('what forget_person keeps is put to the attorney in full, and a colleague\'s copy loses the name at its next sync', () => {
+  const questions = read('../legal/questions-for-attorney.md');
+  const item = questions.split('\n').find((l) => l.startsWith('- `forget_person`'));
+  assert.ok(item, 'questions-for-attorney.md asks about forget_person');
+  for (const kept of ['listing and post-attempt rows', 'the invite codes they used or made that were used', 'description-writer usage rows', 'the listing link on their listings still marked up', 'the Stripe webhook events']) {
+    assert.ok(item.includes(kept), `the attorney is not told forget_person keeps ${kept}`);
+  }
+  assert.doesNotMatch(item, /keeps two things/);
+  const colleague = "A colleague's extension drops the person's name from a car still listed at its next sync";
+  for (const [name, text] of [['questions-for-attorney.md', item], ['supabase/README.md', readme]]) assert.ok(text.includes(colleague), `${name} says what a colleague's copy does`);
+  assert.match(support, /a colleague's extension drops the name from a car still listed at its next sync/);
+  assert.doesNotMatch(readme, /Copies the dealership already holds \(colleagues' extensions/, 'a colleague\'s synced copy is no longer out of reach');
+});

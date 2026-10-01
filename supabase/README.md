@@ -536,7 +536,7 @@ where dealership_id = '<dealership id>' and user_id = '<user id of the next mana
 
 When nobody is left to take over, or the dealership is leaving too, delete the dealership first (above).
 
-What the database cannot reach: copies in browsers and in files. Tell the person to clear their own browser (Settings, **Clear everything for this website** and **Forget my synced profile**, then remove the extension) and to delete their Marketplace listings on Facebook themselves. Copies the dealership already holds (colleagues' extensions, a CSV a manager downloaded) are the dealership's; say so in the reply rather than promise otherwise.
+What the database cannot reach: copies in browsers and in files. Tell the person to clear their own browser (Settings, **Clear everything for this website** and **Forget my synced profile**, then remove the extension) and to delete their Marketplace listings on Facebook themselves. A colleague's extension drops the person's name from a car still listed at its next sync (it takes a colleague's name as the server has it, an empty one too, `mergeRegistry` in `extension/src/sync.js`) and keeps the bare user id, as the database does. Copies the dealership already holds otherwise (a colleague's browser that has not synced since, a CSV a manager downloaded) are the dealership's; say so in the reply rather than promise otherwise.
 
 A person with no account, who only sent a demo request:
 

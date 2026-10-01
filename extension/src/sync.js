@@ -421,7 +421,13 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
       if (httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
     }
     if (!merged.listingUrl && httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
-    if (!merged.salesperson && text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
+    if (isTheirs(r, userId)) {
+      // a colleague's post: the server's name stands, an empty one too, so a
+      // name the owner cleared there (forget_person, 0006_privacy.sql) or
+      // corrected leaves this copy at its next sync
+      if (text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
+      else delete merged.salesperson;
+    } else if (!merged.salesperson && text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
     if (!merged.name && text(r.name, 80)) merged.name = text(r.name, 80);
     if (r.user_id) {
       delete merged.mine; // the server says whose it is
