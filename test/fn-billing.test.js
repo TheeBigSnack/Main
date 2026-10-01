@@ -588,12 +588,32 @@ test('billing: two deliveries at once do not write over each other: the one deci
   assert.deepEqual([fake.rows('subscriptions')[0].status, late.body.applied], ['active', false], 'the slower delivery read the row again and found itself older');
   // a row that keeps changing is not written over: 500, so Stripe delivers the event again
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
-  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: null, error: null, count: 0 } : undefined);
+  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: [], error: null, status: 200 } : undefined);
   const busy = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_busy' })));
   fake.script = null;
   assert.equal(busy.status, 500);
   assert.match(busy.body.error, /kept changing/);
   assert.deepEqual(fake.rows('billing_events'), [], 'not recorded, so the redelivery applies it');
+});
+
+test('billing: a write counts as landed only when the database hands back the row it changed, never on a missing row count', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  // the conditional write asks for the changed row back, as the manager view's own writes do
+  const ok = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_ok' })));
+  assert.deepEqual(ok.body, { ok: true, applied: true, attached: true });
+  const [write] = fake.queries('subscriptions').filter((c) => c.op === 'update');
+  assert.equal(write.columns, 'dealership_id', 'update(...).select(\'dealership_id\')');
+  // an answer that carries neither rows nor a count (a lost race on an API
+  // that leaves the count out) is not taken as written: no event is recorded as applied
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: null, error: null, count: null } : undefined);
+  const silent = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_silent' })));
+  fake.script = null;
+  assert.equal(silent.status, 500);
+  assert.match(silent.body.error, /kept changing/);
+  assert.deepEqual(fake.rows('billing_events'), [], 'not recorded as applied');
+  assert.equal(fake.rows('subscriptions')[0].status ?? null, null, 'and the row was not written');
 });
 
 test('billing: a database failure answers 500 so Stripe retries, and the event is not recorded, so the retry applies it', async () => {

@@ -145,8 +145,9 @@ const DECIDING = ['updated_at', 'status', 'stripe_subscription_id'] as const;
 // sends a Checkout's events at once, so two deliveries can read the same row
 // and the slower one would otherwise write over the faster. The update
 // matches the row as read (no row: an insert, which meets the one another
-// delivery made first). False when the row changed meanwhile; the caller
-// reads it again and decides again.
+// delivery made first) and asks for the changed row back: it landed only
+// when a row comes back, whatever the answer says about counts. False when
+// the row changed meanwhile; the caller reads it again and decides again.
 async function writeOnto(service: SupabaseClient, dealershipId: string, row: Row | null, patch: Row): Promise<boolean> {
   if (!row) {
     const { error } = await service.from('subscriptions').insert({ ...patch, dealership_id: dealershipId });
@@ -154,14 +155,14 @@ async function writeOnto(service: SupabaseClient, dealershipId: string, row: Row
     if (error.code === '23505') return false;
     throw new Error('could not write subscriptions: ' + error.message);
   }
-  let q = service.from('subscriptions').update(patch, { count: 'exact' }).eq('dealership_id', dealershipId);
+  let q = service.from('subscriptions').update(patch).eq('dealership_id', dealershipId);
   for (const column of DECIDING) {
     const v = row[column];
     q = v === null || v === undefined ? q.is(column, null) : q.eq(column, String(v));
   }
-  const { error, count } = await q;
+  const { data, error } = await q.select('dealership_id');
   if (error) throw new Error('could not write subscriptions: ' + error.message);
-  return count !== 0;
+  return Array.isArray(data) && data.length > 0;
 }
 const WRITE_TRIES = 3;
 

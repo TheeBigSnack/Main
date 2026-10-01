@@ -9,7 +9,8 @@
 //   client.auth.getUser(token)                  the user the test registered for that token
 //   from(t).select(columns, { count, head }?)   then eq, in, lt, lte, gte, is, not(col, 'is', null),
 //                                               order, range, maybeSingle
-//   from(t).update(patch, { count }?)           then eq, in or is (count: 'exact' answers how many rows it changed)
+//   from(t).update(patch, { count }?)           then eq, in or is (count: 'exact' answers how many rows it changed),
+//                                               then select(columns)? (answers the changed rows, projected)
 //   from(t).insert(rows), from(t).upsert(rows, { onConflict, ignoreDuplicates? })
 //
 // The tables live in memory and answer the way PostgREST would. Their
@@ -400,16 +401,20 @@ function runUpdate(q) {
   const filters = q.filters.map((f) => ({ ...f, value: f.op === 'in' ? f.value.map((v) => filterValue(q.table, f.column, v)) : f.op === 'is' ? null : filterValue(q.table, f.column, f.value) }));
   const patch = {};
   for (const [column, value] of Object.entries(q.payload)) patch[columnOf(q.table, column)] = stored(q.table, column, value);
-  let changed = 0;
+  const changed = [];
   const next = rows.map((r) => {
     if (!matches(q.table, r, filters)) return r;
-    changed += 1;
-    return { ...r, ...patch };
+    const row = { ...r, ...patch };
+    changed.push(row);
+    return row;
   });
   next.forEach((r) => checkRow(q.table, r));
   checkKeys(q.table, next);
   tables[q.table] = next;
-  return { data: null, error: null, count: q.options?.count === 'exact' ? changed : null, status: 204 };
+  const count = q.options?.count === 'exact' ? changed.length : null;
+  // select() after an update is PostgREST's return=representation: the changed rows come back
+  if (q.columns) return { data: changed.map((r) => project(q.table, r, q.columns)), error: null, count, status: 200 };
+  return { data: null, error: null, count, status: 204 };
 }
 
 // insert and upsert. An upsert names its conflict columns, which must be
@@ -517,7 +522,13 @@ function builder(client, table, op, init) {
     q.filters.push({ op: 'is', column, value: null });
     return b;
   };
-  if (op === 'update') return b;
+  if (op === 'update') {
+    b.select = (columns = '*') => {
+      q.columns = columns;
+      return b;
+    };
+    return b;
+  }
   b.lt = filter('lt');
   b.lte = filter('lte');
   b.gte = filter('gte');
