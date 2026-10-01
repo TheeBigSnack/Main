@@ -634,6 +634,19 @@ test('the gate: a schema.org car called a demo or loaner after its model year wa
   assert.match(a.reason, /its title says "Demo"/);
   const loaner = flat({}, shown(undefined, carfax), SITE + '/inventory/used-2019-honda-civic-ex-loaner-2hgsampl8kh000101/');
   assert.equal(assessVehicle(loaner, {}).decision, DECISION.REVIEW, 'loaner in the page address after the year');
+  // a demo word after a " - " in the name is read too
+  const dashed = flat({ name: '2019 Honda Civic EX - Demo' }, shown(undefined, carfax));
+  assert.equal(assessVehicle(dashed, {}).decision, DECISION.REVIEW, 'a " - Demo" name');
+  // the car's own name is kept when it says demo or loaner, even when the page title says Used
+  for (const name of ['2019 Honda Civic EX Demo', '2019 Honda Civic EX - Service Loaner', 'Honda Civic EX Demonstrator']) {
+    const v = flat({ name }, shown(undefined, { ...carfax, title: 'Used 2019 Honda Civic EX | Sample Motors' }));
+    assert.equal(v.siteTitle, name, `${name}: the name is the title the gate reads`);
+    const r = assessVehicle(v, {});
+    assert.equal(r.decision, DECISION.REVIEW, name);
+    assert.match(r.reason, /Demos and loaners are usually sold as new/, name);
+  }
+  // a plain name still takes the page title's condition word
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: 'Used 2019 Honda Civic EX | Sample Motors' })).siteTitle, 'Used 2019 Honda Civic EX | Sample Motors');
   // the page title's dealership part is not the car's words: a "Courtesy" store stays ready
   const store = flat({ name: '' }, shown(undefined, { ...carfax, title: 'Used 2019 Honda Civic EX | Courtesy Honda of Springfield' }));
   assert.equal(store.siteTitle, 'Used 2019 Honda Civic EX | Courtesy Honda of Springfield');

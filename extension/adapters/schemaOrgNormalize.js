@@ -18,7 +18,7 @@
 // shows as its label.
 
 import { toNumber, shortLocation, conditionFromSchemaOrg, conditionWordFromPath } from '../src/normalize.js';
-import { readCondition, titleConditionWords } from '../src/classify.js';
+import { readCondition, titleConditionWords, unitWordAfterYear } from '../src/classify.js';
 
 // 17 letters and digits, never I, O or Q: the format every VIN since 1981 has.
 const VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
@@ -115,9 +115,11 @@ const saysCondition = (title) => readCondition(titleConditionWords(title)) !== '
 // page's title when the name is missing or only the page title starts with
 // a condition word, and only when that title is about this car (its model
 // year and model are in it), so a list page's title never lends its words
-// to the cars on it.
+// to the cars on it. A name that calls the car a demo or a loaner after the
+// model year ("2019 Honda Civic EX Demo") is always kept, so the gate reads
+// those words even when the page title says "Used".
 function siteTitleOf(name, pageTitle, year, model) {
-  if (name && saysCondition(name)) return name;
+  if (name && (saysCondition(name) || unitWordAfterYear({ siteTitle: name }))) return name;
   const about = Boolean(pageTitle && year && model) && pageTitle.includes(String(year)) && pageTitle.toLowerCase().includes(model.toLowerCase());
   if (about && (!name || saysCondition(pageTitle))) return pageTitle;
   return name || null;
@@ -401,7 +403,7 @@ export function normalizeVehicle(node, { url = null, facts = null } = {}) {
     readableType: null, // schema.org has no second condition field
     url: carUrl,
     urlConditionWord: conditionWordFromPath(carUrl),
-    isDemo: false, // schema.org has no demo or loaner flag; a "demo" or "loaner" in the address or title, before or after the model year, still counts (classify.js)
+    isDemo: false, // schema.org has no demo or loaner flag; a "demo" or "loaner" in the address or the car's name (kept as siteTitle when it has one), before or after the model year, still counts (classify.js)
     isLoaner: false,
     carfaxUrl: carfax || null, // only a Carfax link that names this car's VIN
     carfaxOneOwner: false, // never read from numberOfPreviousOwners: that is not a Carfax report

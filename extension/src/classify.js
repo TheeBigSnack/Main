@@ -66,23 +66,28 @@ export function titleConditionWords(title) {
 // read only before the year (model names such as "New Beetle" come after
 // it), but a website may name a demo or a loaner after the model: "2024 Jeep
 // Grand Cherokee Limited Demo", ".../2024-jeep-grand-cherokee-demo-<vin>/".
-// Only the car's own words are read: its title up to the first " | " or " - "
-// (a page title's dealership part is left out), its trim, and its page
-// address from the model year on. "Courtesy" counts only as "courtesy car",
-// "courtesy vehicle" or "courtesy loaner": on its own it is a common word in
-// dealership names.
+// The car's words are read: its title from the model year on, its trim, and
+// its page address from the model year on. "Courtesy" counts only as
+// "courtesy car", "courtesy vehicle" or "courtesy loaner", and only in the
+// title's part with the model year: on its own it is a common word in
+// dealership names, and a page title's later parts (after " | " or " - ")
+// often hold the dealership's name ("... Limited | Courtesy Motors"). Those
+// later parts are still read for demo, demonstrator and loaner, which no
+// dealership name uses ("... Limited - Demo", "... | Service Loaner").
 const UNIT_WORD = /\b(demo(?:nstrator)?|(?:service )?loaner|courtesy (?:car|vehicle|loaner))s?\b/i;
+const UNIT_WORD_LATER = /\b(demo(?:nstrator)?|(?:service )?loaner)s?\b/i;
 const YEAR_WORD = /^(?:19|20)\d{2}$/;
 const TITLE_PARTS = /\s+[|–—-]\s+/;
 const wordsOf = (text) => String(text || '').split(/[^a-z0-9]+/i).filter(Boolean);
 
+// { car, later }: the words after the model year in the title's part that
+// has it (or the first part, with no year), and the parts that follow it.
 function titleCarWords(title) {
-  if (typeof title !== 'string' || !title.trim()) return '';
+  if (typeof title !== 'string' || !title.trim()) return { car: '', later: '' };
   const parts = title.split(TITLE_PARTS);
-  const part = parts.find((p) => wordsOf(p).some((w) => YEAR_WORD.test(w)));
-  if (!part) return parts[0];
-  const m = /\b(?:19|20)\d{2}\b/.exec(part);
-  return part.slice(m.index + m[0].length);
+  const at = Math.max(0, parts.findIndex((p) => wordsOf(p).some((w) => YEAR_WORD.test(w))));
+  const m = /\b(?:19|20)\d{2}\b/.exec(parts[at]);
+  return { car: m ? parts[at].slice(m.index + m[0].length) : parts[at], later: parts.slice(at + 1).join(' | ') };
 }
 
 function addressCarWords(url) {
@@ -109,13 +114,15 @@ function addressCarWords(url) {
 
 // { where, word } for the first demo or loaner word after the model year, or null.
 export function unitWordAfterYear(v = {}) {
+  const title = titleCarWords(v.siteTitle);
   const sources = [
-    ['title', titleCarWords(v.siteTitle)],
-    ['trim', typeof v.trim === 'string' ? v.trim : ''],
-    ['web address', addressCarWords(v.url)],
+    ['title', title.car, UNIT_WORD],
+    ['title', title.later, UNIT_WORD_LATER],
+    ['trim', typeof v.trim === 'string' ? v.trim : '', UNIT_WORD],
+    ['web address', addressCarWords(v.url), UNIT_WORD],
   ];
-  for (const [where, text] of sources) {
-    const m = UNIT_WORD.exec(text);
+  for (const [where, text, words] of sources) {
+    const m = words.exec(text);
     if (m) return { where, word: m[1] };
   }
   return null;
