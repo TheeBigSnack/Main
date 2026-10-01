@@ -558,9 +558,11 @@ async function startNextInQueue() {
 // this panel finished (vin): when it has moved on already (a second confirm
 // of the same car, or the side panel in another window), nothing is recorded
 // against the next car and the next car is not started a second time.
+// Resolves false only when the queue could not be saved: it stays on this
+// car, and the button that called it can be clicked again.
 let advancing = false;
 async function afterQueueStep(outcome, vin = state.vin) {
-  if (advancing) return; // the watcher and a click on the same car advance once
+  if (advancing) return undefined; // the watcher and a click on the same car advance once
   advancing = true;
   let startNext = false;
   try {
@@ -576,7 +578,7 @@ async function afterQueueStep(outcome, vin = state.vin) {
       }, panelStorage);
     } catch (e) {
       setStatus(storageErrorText(e), 'error'); // the queue stays where it is; the button can be clicked again
-      return;
+      return false;
     }
     if (stored && !moved) {
       state.queue = stored;
@@ -607,22 +609,33 @@ async function afterQueueStep(outcome, vin = state.vin) {
   } finally {
     advancing = false; // released before the next car's flow, whose own end must be able to advance
   }
-  if (startNext) return startNextInQueue();
+  if (startNext) await startNextInQueue(); // the next car's own outcome is not this car's
+  return undefined;
 }
 
 // The draft keeps the price the form was filled with: the listing published
 // from it later shows that price, so Mark posted records it (src/drafts.js).
+// Like It's posted, once per post (confirmedRun) and only from the publish
+// step, for the car captured here: a second click while the next car comes
+// up records nothing against the next car and starts nothing twice.
 async function savedDraft() {
-  const record = draftRecord({ name: state.vehicle.name, price: state.price, basis: state.settings.basis, savedAt: new Date().toISOString() });
+  const run = flowRun;
+  if (state.step !== 'publish' || !state.vehicle || confirmedRun === run) return undefined;
+  confirmedRun = run;
+  const { vin, vehicle, origin, price } = state;
+  const record = draftRecord({ name: vehicle.name, price, basis: state.settings.basis, savedAt: new Date().toISOString() });
   try {
     // added to the list as it is stored now: the popup may have changed it meanwhile
-    state.drafts = await updateKey(siteKeys(state.origin).drafts, (fresh) => ({ ...(fresh || {}), [state.vin]: record }), panelStorage);
+    state.drafts = await updateKey(siteKeys(origin).drafts, (fresh) => ({ ...(fresh || {}), [vin]: record }), panelStorage);
   } catch (e) {
+    confirmedRun = -1; // not saved: the button can be clicked again
     setStatus(storageErrorText(e), 'error');
-    return;
+    return undefined;
   }
-  await pilotNote((p) => endPost(p, state.vin, 'draft'));
-  return afterQueueStep('draft');
+  await pilotNote((p) => endPost(p, vin, 'draft'));
+  if (run !== flowRun) return undefined; // dropped meanwhile: the draft is kept, and the post now under way is not touched
+  if ((await afterQueueStep('draft', vin)) === false) confirmedRun = -1; // the queue could not be saved: clicking again moves it
+  return undefined;
 }
 
 function queueBar() {
@@ -663,10 +676,11 @@ async function resumeFlow(origin, flow) {
   await loadSaved();
   if (state.step === 'checking' || state.step === 'filling') state.step = state.vehicle ? 'review' : 'idle';
   render();
-  // The listing watcher only in the window the post belongs to: a side panel
-  // opened in a second window shows the same post with its buttons, but two
-  // watchers on one tab would record the post twice and move a queue twice.
-  if (state.step === 'publish' && state.fbTabId && (!state.windowId || panelWindowId === null || state.windowId === panelWindowId)) startWatcher();
+  // A side panel opened in a second window shows the same post with its
+  // buttons and watches the same tab, so its It's posted knows the listing's
+  // link too; only the panel of the post's own window records it by itself
+  // (startWatcher, postsWindow).
+  if (state.step === 'publish' && state.fbTabId) startWatcher();
 }
 
 // Which colors the website gives no usable word for (blank, or a word that is
@@ -988,6 +1002,14 @@ async function attachPhotos(only = null) {
   await saveFlow();
 }
 
+// Whether this side panel is in the window the post under way belongs to
+// (or Chrome could not say which window either is). Chrome runs one side
+// panel per window, and a panel opened in a second window brings back the
+// same post: only the post's own panel records it or saves it by itself.
+function postsWindow() {
+  return !state.windowId || panelWindowId === null || state.windowId === panelWindowId;
+}
+
 function startWatcher() {
   if (watcher) watcher.cancel();
   watcher = watchForListing({ tabId: state.fbTabId, listingUrlPattern: state.map.listingUrlPattern, afterPublishPatterns: state.map.afterPublishPatterns, createUrl: state.map.createUrl });
@@ -995,13 +1017,16 @@ function startWatcher() {
     if (state.step !== 'publish') return;
     if (r.status === 'listing' || r.status === 'probably' || r.status === 'closed') {
       state.detected = r;
+      const own = postsWindow();
       // In a queue, the form's tab moving straight from the form to a new
       // listing means the person clicked Publish: record it and load the next
       // car. Any other listing address in that tab (one browsed to, or one it
       // already showed when the panel came back) waits for the person's click.
-      if (state.queueMode && isNewListingFromForm(r, state.posted, state.map)) return confirmPosted();
+      // A panel in a second window only shows it: two panels that both
+      // recorded the post would record it twice.
+      if (own && state.queueMode && isNewListingFromForm(r, state.posted, state.map)) return confirmPosted();
       render();
-      saveFlow();
+      if (own) saveFlow(); // the saved post is its own panel's: a second window's late write could land over the next car's
     }
   });
 }
@@ -1011,6 +1036,12 @@ function startWatcher() {
 // records it and moves a queue on (confirmedRun holds the post's flowRun).
 // Only from the publish step, for the car captured here; a post dropped
 // while it was recorded stays recorded, and the post that took over is left alone.
+// A car this person already has a stored entry for was recorded while it
+// was on the form (by the side panel in another window, or the popup's Mark
+// posted; the form never opens for a car already marked): that entry stays
+// as it is, gaining only a link it lacks, and the day's log gets nothing, so
+// the post is counted once. A colleague's entry (`mine: false`) is theirs,
+// not this person's post, and is recorded over as before.
 let confirmedRun = -1;
 async function confirmPosted() {
   const run = flowRun;
@@ -1022,28 +1053,46 @@ async function confirmPosted() {
   const now = new Date().toISOString();
   const extra = { postedWith: 'lotsync', salesperson: state.settings.salesperson.name || '' };
   if (listingUrl) extra.listingUrl = listingUrl;
+  let kept = null; // this person's entry for the car, already stored
   try {
     // recorded into the list as it is stored now: the popup may have marked or unmarked cars while this one was on the form
-    state.posted = await updateKey(siteKeys(origin).posted, (fresh) => markPosted(fresh || {}, vehicle, state.settings.basis, now, extra), panelStorage);
+    let list = {};
+    const stored = await updateKey(siteKeys(origin).posted, (fresh) => {
+      list = fresh || {};
+      const had = list[vehicle.vin];
+      kept = had && had.mine !== false ? had : null;
+      if (!kept) return markPosted(list, vehicle, state.settings.basis, now, extra);
+      if (!listingUrl || kept.listingUrl) return undefined; // nothing to add: nothing is written
+      kept = { ...kept, listingUrl };
+      return { ...list, [vehicle.vin]: kept };
+    }, panelStorage);
+    state.posted = stored || list;
   } catch (e) {
     confirmedRun = -1; // not recorded: It's posted can be clicked again
     setStatus(storageErrorText(e), 'error'); // the post is on Facebook; the panel stays here so it can be recorded once there is room
     return undefined;
   }
-  try {
-    // the day's log for the cap, which a take-down later leaves alone
-    state.postLog = await updateKey(siteKeys(origin).postLog, (log) => logPost(log, vehicle.vin, now), panelStorage); // the same key as the posted entry
-  } catch (e) {
-    /* the posted list has the post, and counts it while it stays listed */
+  if (!kept) {
+    try {
+      // the day's log for the cap, which a take-down later leaves alone
+      state.postLog = await updateKey(siteKeys(origin).postLog, (log) => logPost(log, vehicle.vin, now), panelStorage); // the same key as the posted entry
+    } catch (e) {
+      /* the posted list has the post, and counts it while it stays listed */
+    }
   }
-  await pilotNote((p) => endPost(p, vin, 'posted', { at: now }));
+  await pilotNote((p) => endPost(p, vin, 'posted', { at: now })); // a no-op once this post's attempt is ended
   // the dealership's shared registry (accounts only): the worker syncs; nothing here waits for it
   if (accountsConfigured()) chrome.runtime.sendMessage({ type: 'syncNow', origin }).catch(() => {});
   if (run !== flowRun) return undefined; // dropped meanwhile: recorded, and the post now under way is not touched
   if (watcher) watcher.cancel();
-  if (state.queueMode) return afterQueueStep('posted', vin);
+  if (state.queueMode) {
+    // the queue could not be saved: the car is recorded, and clicking again only moves the queue
+    if ((await afterQueueStep('posted', vin)) === false) confirmedRun = -1;
+    return undefined;
+  }
   state.step = 'done';
-  state.doneAt = now;
+  state.doneAt = (kept && kept.postedAt) || now;
+  if (kept) setStatus(`${nameOf(vin)} was already recorded as posted, so it was not recorded or counted again.`);
   render();
   await saveFlow();
 }
@@ -1548,7 +1597,7 @@ function viewPublish() {
   return `${carCard()}
   ${preexisting}${changedBanner}
   ${languageHint(f.language, !f.filled.length && !f.partial.length)}
-  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When it posts, the next car loads by itself.' : ''}</div>
+  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When the Facebook tab goes straight from the form to your new listing, the next car loads by itself; if it does not, click <b>It\'s posted, next car</b>.' : ''}</div>
   <section id="fillResults">
     <h3>Filled in <span class="pill good">${f.filled.length}</span> <span class="why">as the form shows them</span></h3>
     ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}${x.note ? ` <span class="why">${esc(x.note)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}

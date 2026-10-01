@@ -974,20 +974,36 @@ test('recording a post also writes it to the day\'s log the cap reads, and a ful
 // nor starts it a second time. Run with sidepanel.js's own confirmPosted,
 // afterQueueStep and clearFlow on one shared store, the real queue, the real
 // posted list and the real lock.
-function queuePanel(store, { onNext = null } = {}) {
+// queueMode false: a single post. detected: what this panel's watcher saw
+// (null: nothing, a side panel in a second window, say). failQueueWrites:
+// how many writes of the queue fail, as a full storage fails them.
+// onUp: called once the next car is up. scope: stand-ins that replace the
+// harness's own (slower pilot notes, say).
+function queuePanel(store, { onNext = null, onUp = null, queueMode = true, detected = { status: 'listing', url: 'https://www.facebook.com/marketplace/item/1/' }, failQueueWrites = 0, scope = {} } = {}) {
   const O = 'https://www.example-motors.test';
   const calls = [];
   const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
-  const storage = { get: async (k) => { await tick(); return { [k]: store[k] }; }, set: async (o) => { await tick(); Object.assign(store, o); } };
+  let failing = failQueueWrites;
+  const storage = {
+    get: async (k) => { await tick(); return { [k]: store[k] }; },
+    set: async (o) => {
+      await tick();
+      if (failing > 0 && Object.keys(o).some((k) => k.startsWith('postQueue'))) {
+        failing -= 1;
+        throw new Error('QUOTA_BYTES quota exceeded');
+      }
+      Object.assign(store, o);
+    },
+  };
   const state = {
-    origin: O, vin: 'AAA', step: 'publish', queueMode: true, vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } },
-    detected: { status: 'listing', url: 'https://www.facebook.com/marketplace/item/1/' }, queue: null, posted: {}, postLog: [],
+    origin: O, vin: 'AAA', step: 'publish', queueMode, vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, price: 20000, settings: { basis: 'website', salesperson: { name: 'Pat' } },
+    detected, queue: null, posted: {}, postLog: [], drafts: {},
   };
   let fns;
-  fns = compileMany(['confirmPosted', 'afterQueueStep', 'clearFlow'], {
-    state, flowRun: 0, confirmedRun: -1, advancing: false, watcher: null, FORM_MAP,
+  fns = compileMany(['confirmPosted', 'savedDraft', 'afterQueueStep', 'clearFlow'], {
+    state, flowRun: 0, confirmedRun: -1, advancing: false, watcher: null, FORM_MAP, draftRecord,
     $: () => null, updateKey, panelStorage: storage, markPosted, logPost, advance, currentVin,
-    siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o, queue: 'postQueue:' + o, flow: 'postFlow:' + o }),
+    siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o, queue: 'postQueue:' + o, flow: 'postFlow:' + o, drafts: 'drafts:' + o }),
     pilotNote: async () => { await tick(); }, endPost: () => {}, accountsConfigured: () => false,
     chrome: { storage: { local: { remove: async () => { await tick(); } } }, runtime: { sendMessage: async () => {} } },
     storageErrorText: (e) => String(e), setStatus: (text) => calls.push('status: ' + text), render: () => calls.push('render:' + state.step), saveFlow: async () => {},
@@ -999,7 +1015,9 @@ function queuePanel(store, { onNext = null } = {}) {
       await tick();
       await fns.clearFlow();
       Object.assign(state, { vin: currentVin(state.queue), vehicle: null, step: 'checking', queueMode: true });
+      if (onUp) onUp();
     },
+    ...scope,
   });
   return { state, calls, fns };
 }
@@ -1049,16 +1067,131 @@ test('a queued car is recorded once and moves the queue once, whether the watche
   assert.equal(idle.state.posted && Object.keys(idle.state.posted).length, 0);
 });
 
+// A side panel opened in a second Chrome window shows the same post with its
+// buttons. Its It's posted, clicked after the first window's panel recorded
+// the car (or after the popup's Mark posted), finds this person's entry
+// already stored: the entry stays as it is, with the link it was recorded
+// with (a link only this click knows is added), and the day's log and the
+// cap count the post once. A colleague's entry for the car is not this
+// person's post, so it is recorded over as before.
+test('It\'s posted in a second window\'s side panel keeps the link and the count of a post already recorded', async () => {
+  const O = 'https://www.example-motors.test';
+  const ITEM = 'https://www.facebook.com/marketplace/item/555/';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  for (const queueMode of [false, true]) {
+    const what = queueMode ? 'queued car' : 'single post';
+    const store = queueMode ? { ['postQueue:' + O]: { vins: ['AAA', 'BBB'], index: 0, status: 'running', results: {} } } : {};
+    const one = queuePanel(store, { queueMode, detected: { status: 'listing', url: ITEM } });
+    const two = queuePanel(store, { queueMode, detected: null }); // no watcher result in the second window
+    await one.fns.confirmPosted();
+    await settle();
+    const first = { ...store['posted:' + O].AAA };
+    assert.equal(first.listingUrl, ITEM, `${what}: the first window records the link`);
+    await two.fns.confirmPosted();
+    await settle();
+    assert.deepEqual(store['posted:' + O].AAA, first, `${what}: the entry stays as the first window recorded it (${two.calls.join(' | ')})`);
+    assert.equal(store['postLog:' + O].length, 1, `${what}: one post in the day's log`);
+    assert.equal(two.state.posted.AAA.listingUrl, ITEM, `${what}: the second panel shows the recorded link`);
+    if (queueMode) {
+      assert.deepEqual([store['postQueue:' + O].index, store['postQueue:' + O].results], [1, { AAA: 'posted' }], `${what}: one step`);
+      assert.deepEqual([two.state.vin, two.state.step], [null, 'idle']);
+    } else {
+      assert.deepEqual([two.state.step, two.state.doneAt], ['done', first.postedAt], `${what}: done, at the time it was recorded`);
+    }
+  }
+
+  // recorded first without a link (the popup's Mark posted, or a panel that saw none): a later click that has one adds it
+  const store = {};
+  const bare = queuePanel(store, { queueMode: false, detected: null });
+  await bare.fns.confirmPosted();
+  const was = { ...store['posted:' + O].AAA };
+  const withLink = queuePanel(store, { queueMode: false, detected: { status: 'listing', url: ITEM } });
+  await withLink.fns.confirmPosted();
+  assert.deepEqual(store['posted:' + O].AAA, { ...was, listingUrl: ITEM }, 'only the link is added');
+  assert.equal(store['postLog:' + O].length, 1);
+
+  // a colleague's entry for the car (synced in after the form opened): this person's post is recorded
+  const shared = { ['posted:' + O]: { AAA: { name: 'Car A', price: 20000, postedAt: '2026-09-30T09:00:00.000Z', userId: 'u2', mine: false } } };
+  const mine = queuePanel(shared, { queueMode: false, detected: { status: 'listing', url: ITEM } });
+  await mine.fns.confirmPosted();
+  assert.equal(shared['posted:' + O].AAA.mine, undefined, 'recorded as this person\'s');
+  assert.equal(shared['posted:' + O].AAA.listingUrl, ITEM);
+  assert.equal(shared['postLog:' + O].length, 1, 'and counted');
+});
+
+// A post recorded whose queue then could not be saved (a full storage):
+// the panel says so and stays on the car, and It's posted, next car moves
+// the queue when clicked again, without recording or counting the car twice.
+test('It\'s posted, next car moves the queue when clicked again after the queue could not be saved', async () => {
+  const O = 'https://www.example-motors.test';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  const store = { ['postQueue:' + O]: { vins: ['AAA', 'BBB'], index: 0, status: 'running', results: {} } };
+  const p = queuePanel(store, { failQueueWrites: 1 });
+  await p.fns.confirmPosted();
+  await settle();
+  assert.deepEqual([store['postQueue:' + O].index, p.state.step], [0, 'publish'], 'the queue stays, the panel stays on the car');
+  assert.ok(p.calls.some((c) => /quota/i.test(c)), 'and says why');
+  await p.fns.confirmPosted();
+  await settle();
+  assert.deepEqual([store['postQueue:' + O].index, store['postQueue:' + O].results], [1, { AAA: 'posted' }], `the second click moves it (${p.calls.join(' | ')})`);
+  assert.deepEqual(p.calls.filter((c) => c.startsWith('start')), ['start BBB']);
+  assert.deepEqual(Object.keys(store['posted:' + O]), ['AAA']);
+  assert.equal(store['postLog:' + O].length, 1, 'one post in the day\'s log');
+});
+
+// Saved as draft, next car records the car it was clicked for: a second
+// click while the next car comes up records nothing against the next car
+// and starts nothing twice.
+test('Saved as draft, next car records one draft for its own car and moves the queue once', async () => {
+  const O = 'https://www.example-motors.test';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+  for (const when of ['before the next car', 'before the next car, its work done after the next car is up', 'while the next car is checked']) {
+    const store = { ['postQueue:' + O]: { vins: ['AAA', 'BBB', 'CCC'], index: 0, status: 'running', results: {} } };
+    let late = null;
+    let up;
+    const nextUp = new Promise((resolve) => { up = resolve; });
+    let draftNotes = 0;
+    let clicked = false;
+    const p = queuePanel(store, {
+      onNext: async (fns) => {
+        if (clicked) return; // one second click
+        clicked = true;
+        if (when.startsWith('before the next car')) late = fns.savedDraft();
+        else setTimeout(() => { late = fns.savedDraft(); }, 20);
+      },
+      onUp: () => up(),
+      // the second click's pilot note is slow: it ends after the next car is up
+      // (the first click notes the draft twice: as it is saved, and as the queue moves)
+      scope: when.includes('its work done') ? {
+        endPost: (note, vin, outcome) => { note.outcome = outcome; },
+        pilotNote: async (fn) => {
+          const note = {};
+          fn(note);
+          await tick();
+          if (note.outcome === 'draft' && ++draftNotes === 3) await nextUp;
+        },
+      } : {},
+    });
+    await p.fns.savedDraft();
+    await settle();
+    await late;
+    assert.deepEqual([store['postQueue:' + O].index, store['postQueue:' + O].results], [1, { AAA: 'draft' }], `${when}: one step, A a draft (${p.calls.join(' | ')})`);
+    assert.deepEqual(Object.keys(store['drafts:' + O]), ['AAA'], `${when}: no draft for B`);
+    assert.deepEqual(p.calls.filter((c) => c.startsWith('start')), ['start BBB'], `${when}: B is started once`);
+  }
+});
+
 // In a queue the panel records a post without asking only when the form's
 // own tab went straight from the form to a listing not already recorded;
 // any other listing address shows "Looks like it posted" and waits.
 test('in a queue, only a new listing the form\'s tab moved to straight from the form is recorded without asking', async () => {
   const ITEM = 'https://www.facebook.com/marketplace/item/555/';
-  const run = async ({ queueMode, result, posted = {} }) => {
+  const run = async ({ queueMode, result, posted = {}, windowId = null, panelWindowId = null }) => {
     const calls = [];
-    const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, detected: null };
-    const startWatcher = compile('startWatcher', {
-      state, watcher: null, isNewListingFromForm,
+    const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, detected: null, windowId };
+    const { startWatcher } = compileMany(['startWatcher', 'postsWindow'], {
+      state, watcher: null, isNewListingFromForm, panelWindowId,
       watchForListing: (opts) => {
         calls.push('watch ' + opts.createUrl);
         return { promise: Promise.resolve(result), cancel: () => {} };
@@ -1073,6 +1206,14 @@ test('in a queue, only a new listing the form\'s tab moved to straight from the 
   const fromForm = { status: 'listing', url: ITEM, id: '555', afterCreate: true };
   const q = await run({ queueMode: true, result: fromForm });
   assert.deepEqual(q.calls, ['watch ' + FORM_MAP.createUrl, 'confirmPosted'], 'published from the form: recorded, next car');
+  const own = await run({ queueMode: true, result: fromForm, windowId: 5, panelWindowId: 5 });
+  assert.deepEqual(own.calls, ['watch ' + FORM_MAP.createUrl, 'confirmPosted'], 'the side panel of the window the post started in records it');
+  // a side panel in a second window watches the same tab: it shows the
+  // listing (so its It's posted keeps the link) but never records it by
+  // itself, and leaves the saved post to the panel it belongs to
+  const second = await run({ queueMode: true, result: fromForm, windowId: 5, panelWindowId: 9 });
+  assert.deepEqual(second.calls, ['watch ' + FORM_MAP.createUrl, 'render'], `a second window: shown, not recorded, not saved (${second.calls.join(' | ')})`);
+  assert.equal(second.state.detected, fromForm);
   for (const [what, opts] of [
     ['a listing browsed to', { queueMode: true, result: { ...fromForm, url: 'https://www.facebook.com/marketplace/item/987654321/', id: '987654321', afterCreate: false } }],
     ['a listing the tab already showed', { queueMode: true, result: { ...fromForm, afterCreate: false } }],
@@ -1087,16 +1228,21 @@ test('in a queue, only a new listing the form\'s tab moved to straight from the 
 });
 
 // A side panel opened in a second window brings back the same post at
-// Publish; only the panel of the window the post belongs to watches its tab.
-test('a post brought back at Publish is watched only by the side panel of its own window', async () => {
+// Publish. Every panel on it watches its tab, so a click on It's posted in
+// any of them knows the listing's link; only the panel of the window the
+// post belongs to records it by itself (startWatcher, the test above).
+test('a post brought back at Publish is watched by the side panel of every window it shows in', async () => {
   const v = vehicle('usedNormal');
   const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
-  for (const [windowId, panelWindowId, watched] of [[5, 5, true], [5, 9, false], [null, 9, true], [5, null, true]]) {
+  for (const [windowId, panelWindowId] of [[5, 5], [5, 9], [null, 9], [5, null]]) {
     const o = formOpener({ description, step: 'idle', extra: { panelWindowId } });
     await o.fns.resumeFlow(o.state.origin, { vin: v.vin, step: 'publish', vehicle: v, price: v.price, description, fbTabId: 77, windowId });
-    assert.equal(o.calls.includes('startWatcher'), watched, `post from window ${windowId}, panel in window ${panelWindowId}`);
+    assert.ok(o.calls.includes('startWatcher'), `post from window ${windowId}, panel in window ${panelWindowId}`);
     assert.equal(o.state.step, 'publish');
   }
+  const none = formOpener({ description, step: 'idle', extra: { panelWindowId: 5 } });
+  await none.fns.resumeFlow(none.state.origin, { vin: v.vin, step: 'review', vehicle: v, price: v.price, description, windowId: 5 });
+  assert.ok(!none.calls.includes('startWatcher'), 'no form yet: nothing to watch');
 });
 
 // Saved as draft, next car: the draft keeps the price the form was filled
@@ -1108,9 +1254,9 @@ test('a car saved as a Facebook draft is kept with the price its form was filled
     const filled = basisPrice(v, basis);
     const store = { 'drafts:o': { OTHER: { name: 'Other car', savedAt: '2026-09-30T10:00:00Z' } } };
     const calls = [];
-    const state = { origin: 'o', vin: v.vin, vehicle: v, price: filled, settings: { basis }, drafts: {} };
+    const state = { origin: 'o', vin: v.vin, step: 'publish', vehicle: v, price: filled, settings: { basis }, drafts: {} };
     const savedDraft = compile('savedDraft', {
-      state, draftRecord, panelStorage: {},
+      state, draftRecord, panelStorage: {}, flowRun: 0, confirmedRun: -1,
       siteKeys: (o) => ({ drafts: 'drafts:' + o }),
       updateKey: async (key, change) => (store[key] = change(store[key])),
       storageErrorText: (e) => String(e), setStatus: never('setStatus'),
