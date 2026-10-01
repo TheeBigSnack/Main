@@ -78,12 +78,12 @@ The second and third lines are the ones step 3 and step 4 printed. `ALLOWED_RETU
 
 ## 6. Try it as a manager would [owner, about 15 minutes]
 
-Signed in to the manager view as a manager of a test dealership:
+Signed in to the manager view as a manager of a test dealership: one made for this test, never the pilot store or any real dealership. A pilot starts once and never restarts, and a test-mode subscription stays on the dealership's row, where it reads as subscribed. Make it with the first two statements of `supabase/README.md` step 5 (the dealership and its manager's code, no pilot row, so step 1 below can start the pilot), with a made-up name and a made-up website such as `https://billing-test.invalid`, and redeem the code with a test address of your own (the extension's Settings, Account).
 
 1. **Start the free pilot.** The Billing card shows the pilot's end date. No card is asked for.
 2. **Subscribe.** Stripe Checkout opens with the price. Pay with the test card `4242 4242 4242 4242`, any future date, any CVC, any ZIP. Back on the manager view the card says Subscribed, with the first charge at the end of the pilot.
 3. **Manage billing.** Stripe's portal opens with the card, the invoices and Cancel. Cancel, then come back: the card shows the end date. Renew from the portal if you want to keep testing.
-4. **A failed payment.** With a second test dealership, start the pilot and subscribe with `4000 0000 0000 0341`: Checkout accepts it, because nothing is charged during the pilot, and any later charge to it fails. In the Stripe Dashboard open that subscription and end its trial now; the first charge fails. The card says the payment failed, and the extension stops syncing for that dealership until the card is updated in Manage billing (use 4242 there; Stripe retries the invoice).
+4. **A failed payment.** With a second test dealership, made the same way with another made-up website (`https://billing-test-2.invalid`, say), start the pilot and subscribe with `4000 0000 0000 0341`: Checkout accepts it, because nothing is charged during the pilot, and any later charge to it fails. In the Stripe Dashboard open that subscription and end its trial now; the first charge fails. The card says the payment failed, and the extension stops syncing for that dealership until the card is updated in Manage billing (use 4242 there; Stripe retries the invoice).
 5. **The founding rate.** Dashboard, Product catalog, Coupons, `lotcurrent-founding`, add a promotion code (for example FOUNDING). On Checkout, "Add promotion code" takes it and the total drops.
 
 In the Supabase Dashboard, Table editor, `subscriptions` shows each change; Edge Functions, billing, Logs shows each webhook event arriving. Anything that does not match these steps: paste the card's line and the log line into the thread.
@@ -98,7 +98,7 @@ Not before the company exists and the attorney has answered the sales-tax questi
 4. Set the printed ids, the new webhook secret and the live key in the function secrets, as in step 5; `npm run check-deploy`.
 5. In live mode, check the failed-payment setting from step 3: **If all retries for a payment fail** is **Cancel the subscription**.
 6. Optional and safer: instead of the full live secret key, give the function a restricted key that may only write customers, Checkout Sessions and portal sessions (Developers, API keys, Create restricted key; check the permission names on that screen). The setup script itself still needs the full key, so run it from your own terminal only.
-7. Run step 6 once with a real card and a real dealership of your own, then refund it from the Dashboard.
+7. Run step 6 once with a real card and a real dealership of your own, then refund it from the Dashboard. Use one that was never used in test mode, and delete the test dealerships step 6 made (`select public.delete_dealership('<id>', '<its website_origin exactly as stored>');`, `supabase/README.md`, "Delete"): their rows still hold test-mode subscriptions, which read as subscribed.
 
 ## What never happens
 

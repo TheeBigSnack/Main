@@ -116,3 +116,20 @@ test('the setup steps keep CAPTCHA off while a sign-in screen sends no captcha t
     assert.match(doc, /do not stop a lockout/, `${p} says plainly what the rate limits leave open`);
   }
 });
+
+// review: the Stripe test and the two-machine sync check named no dealership, and the only one the owner
+// had made was the pilot store, whose pilot starts once and whose numbers keep a removed member's posts
+test('the Stripe test runs on a test dealership made for it, and the sync check never leaves test rows in the pilot dealership', () => {
+  const stripe = read('docs/stripe-setup.md');
+  const six = stripe.slice(stripe.indexOf('## 6. Try it as a manager would'), stripe.indexOf('## Later: switching to live mode'));
+  assert.match(six, /one made for this test, never the pilot store or any real dealership/);
+  assert.match(six, /the first two statements of `supabase\/README\.md` step 5 \(the dealership and its manager's code, no pilot row/, 'made with the owner\'s SQL, without a pilot row so Start the free pilot can run');
+  assert.match(six, /a made-up website such as `https:\/\/billing-test\.invalid`/);
+  assert.match(six, /With a second test dealership, made the same way with another made-up website/);
+  assert.match(stripe.slice(stripe.indexOf('## Later: switching to live mode')), /Use one that was never used in test mode, and delete the test dealerships step 6 made \(`select public\.delete_dealership\('<id>', '<its website_origin exactly as stored>'\);`/);
+  const setup = read('docs/production-setup.md');
+  const check = setup.split('\n').find((l) => l.startsWith('3. **[Owner]** On two computers'));
+  assert.match(check, /two test addresses of your own and two salesperson codes made for the test/);
+  assert.match(check, /never the code kept for the manager/);
+  assert.match(check, /before the store's manager first signs in, delete the dealership .*make it again with step 5's three statements, and give the manager the new code/);
+});
