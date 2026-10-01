@@ -547,8 +547,11 @@ async function startNextInQueue() {
     render();
     return;
   }
-  // the tab the queue was started from (the popup's), never one an earlier post or to-do item left behind
-  await startFlow({ origin: state.origin, vin, dealerTabId: q.dealerTabId ?? null, windowId: q.windowId || state.windowId, queue: true });
+  // the tab the queue was started from (the popup's), never one an earlier post or to-do item left behind.
+  // The car is this panel's, the one walking the queue: a queue made in
+  // another window (or before Chrome restarted) and continued here records
+  // its posts by itself here (postsWindow), not only in the window it was made in.
+  await startFlow({ origin: state.origin, vin, dealerTabId: q.dealerTabId ?? null, windowId: panelWindowId || q.windowId || state.windowId, queue: true });
 }
 
 // Records how this car ended and moves on: the next car, a pause, or the end.
@@ -1886,7 +1889,7 @@ async function changeSort(value) {
 async function allowSiteAndRetry() {
   const origins = Array.isArray(state.blockedOrigins) && state.blockedOrigins.length ? state.blockedOrigins : siteNeeds();
   if (!(await askForSite(missingOrigins(origins, grantedOrigins).length ? origins : []))) return undefined;
-  return startFlow({ origin: state.origin, vin: state.vin, dealerTabId: null, windowId: state.windowId || panelWindowId, queue: state.queueMode, at: Date.now() });
+  return startFlow({ origin: state.origin, vin: state.vin, dealerTabId: null, windowId: panelWindowId || state.windowId, queue: state.queueMode, at: Date.now() }); // started again from this panel: its post
 }
 
 // ---------- events ----------

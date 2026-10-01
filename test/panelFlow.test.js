@@ -50,11 +50,11 @@ function compileMany(names, scope) {
 }
 
 test('a queue reads its cars through the tab it was started from, or through none', async () => {
-  const run = async (queue, leftover) => {
+  const run = async (queue, leftover, panelWindowId = null) => {
     const started = [];
     const state = { origin: 'https://www.example-dealer.test', queue, dealerTabId: leftover, windowId: 3 };
     const startNextInQueue = compile('startNextInQueue', {
-      state, currentVin, dailyCap: () => ({ reached: false }),
+      state, currentVin, dailyCap: () => ({ reached: false }), panelWindowId,
       pauseQueue: never('pauseQueue'), saveQueue: never('saveQueue'), clearFlow: never('clearFlow'), setStatus: never('setStatus'), render: never('render'),
       startFlow: async (req) => started.push(req),
     });
@@ -65,10 +65,55 @@ test('a queue reads its cars through the tab it was started from, or through non
   const fromPanel = { vins: ['AAA', 'BBB'], index: 0, status: 'running', results: {}, dealerTabId: null, windowId: 9 };
   const req = await run(fromPanel, 41);
   assert.equal(req.dealerTabId, null, 'a queue from the panel\'s list never reads through a tab an earlier post left behind');
-  assert.deepEqual([req.vin, req.queue, req.windowId], ['AAA', true, 9]);
+  assert.deepEqual([req.vin, req.queue, req.windowId], ['AAA', true, 9], 'a panel that cannot tell its window: the queue\'s');
   const fromPopup = { ...fromPanel, dealerTabId: 7 };
   assert.equal((await run(fromPopup, 41)).dealerTabId, 7, 'the popup\'s queue keeps its own dealer tab');
   assert.equal((await run({ ...fromPanel, dealerTabId: undefined }, 41)).dealerTabId, null, 'a queue that names no tab reads without one');
+  // the car belongs to the panel walking the queue, wherever the queue was made
+  assert.equal((await run(fromPopup, 41, 12)).windowId, 12, 'the walking panel\'s window, not the one the queue was made in');
+  assert.equal((await run(fromPanel, 41, 9)).windowId, 9);
+});
+
+// A queue made in one window (the popup's, or before Chrome restarted, when
+// window numbers change) and walked by the side panel of another window: from
+// the second car on, the panel that opened and filled the form still records
+// the post by itself when the tab goes straight to the new listing. Run with
+// sidepanel.js's own startNextInQueue, startWatcher and postsWindow.
+test('a queue walked by the side panel of another window still records each post by itself there', async () => {
+  const ITEM = 'https://www.facebook.com/marketplace/item/556/';
+  for (const [made, panelWindowId] of [[1, 2], [1, 1], [null, 2], [1, null]]) {
+    const calls = [];
+    const state = {
+      origin: 'https://www.example-motors.test', vin: 'AAA', windowId: panelWindowId, queueMode: true, step: 'publish', fbTabId: 77, map: FORM_MAP, posted: {}, detected: null,
+      queue: { vins: ['AAA', 'BBB'], index: 1, status: 'running', results: { AAA: 'posted' }, dealerTabId: 7, windowId: made },
+    };
+    const fns = compileMany(['startNextInQueue', 'startWatcher', 'postsWindow'], {
+      state, currentVin, panelWindowId, isNewListingFromForm, watcher: null,
+      dailyCap: () => ({ reached: false }), pauseQueue: never('pauseQueue'), saveQueue: never('saveQueue'), clearFlow: never('clearFlow'), setStatus: never('setStatus'), capCount: () => '',
+      // startFlow as far as the form: it takes the request's window, then openForm and runFill start the watcher
+      startFlow: async (req) => {
+        calls.push(`start ${req.vin}`);
+        Object.assign(state, { vin: req.vin, windowId: req.windowId || null, queueMode: true, step: 'publish', detected: null });
+      },
+      watchForListing: () => ({ promise: Promise.resolve({ status: 'listing', url: ITEM, id: '556', afterCreate: true }), cancel: () => {} }),
+      confirmPosted: async () => calls.push('confirmPosted'), render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'),
+    });
+    await fns.startNextInQueue();
+    fns.startWatcher();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(calls, ['start BBB', 'confirmPosted'], `queue made in window ${made}, walked in window ${panelWindowId}: B is recorded by itself (${calls.join(' | ')})`);
+  }
+  // Allow and check again on a blocked car starts it again from this panel: it is this panel's post
+  for (const [windowId, panelWindowId, expected] of [[1, 2, 2], [1, null, 1], [null, 2, 2]]) {
+    const started = [];
+    const allowSiteAndRetry = compile('allowSiteAndRetry', {
+      state: { origin: 'https://www.example-motors.test', vin: 'AAA', windowId, queueMode: true, blockedOrigins: null },
+      panelWindowId, askForSite: async () => true, missingOrigins: () => [], grantedOrigins: [], siteNeeds: () => [],
+      startFlow: async (req) => started.push(req),
+    });
+    await allowSiteAndRetry();
+    assert.deepEqual(started.map((r) => [r.vin, r.queue, r.windowId]), [['AAA', true, expected]], `blocked in window ${windowId}, retried in window ${panelWindowId}`);
+  }
 });
 
 test('clearing a finished post forgets the tab and the window it came from', async () => {
