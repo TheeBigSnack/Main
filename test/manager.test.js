@@ -451,7 +451,7 @@ test('billingBody: Subscribe sends a seat per salesperson, never fewer than incl
   assert.equal(subscribeSeats(answer({ salespeople: INC + 4 })), card(answer({ salespeople: INC + 4 })).subscribeSeats);
   // the page posts billingBody's answer to billing/checkout or billing/portal, and draws the seat line and its note
   const js = read('manager/manager.js');
-  assert.match(js, /callFunction\('POST', `billing\/\$\{route\}`, billingBody\(route, state\.billing\?\.status, \{ returnUrl: pageUrl\(\), dealershipId: state\.dealershipId \}\)\)/);
+  assert.match(js, /callFunction\('POST', `billing\/\$\{route\}`, billingBody\(route, state\.billing\?\.status, \{ returnUrl: returnUrl\(state\.dealershipId\), dealershipId: state\.dealershipId \}\)\)/, 'the return address names the dealership (test/managerPage.test.js runs it)');
   assert.match(js, /card\.seatLine \? `<p class="plan">\$\{esc\(card\.seatLine\)\}<\/p>`/);
   assert.match(js, /card\.seatTone === 'warn' \? 'banner warn' : 'hint'/);
   assert.match(js, /`<p class="plan">\$\{esc\(card\.line\)\}<\/p>\$\{seatLine\}\$\{card\.detail \? [^`]*`<p class="hint">\$\{esc\(card\.detail\)\}<\/p>` : ''\}\$\{seatNote\}`/, 'the card draws the seat line under the plan line, and its note after the detail');
@@ -647,7 +647,7 @@ test('the page is relative, mobile-friendly, and offers what the brief names', (
   assert.match(js, /rpc\('start_pilot', \{ dealership_id: /);
   assert.match(js, /Authorization: `Bearer \$\{await freshToken\(\)\}`/);
   assert.match(js, /apikey: CONFIG\.supabaseAnonKey/);
-  assert.match(js, /returnUrl: pageUrl\(\)/);
+  assert.match(js, /returnUrl: returnUrl\(state\.dealershipId\)/);
   assert.match(js, /location\.assign\(answer\.url\)/);
   assert.match(js, /billingReturnNote\(params\.get\('billing'\)\)/);
   assert.match(js, /setParam\('billing', null\)/);

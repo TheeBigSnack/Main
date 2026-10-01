@@ -12,7 +12,9 @@
 // address and the page goes there. Subscribe asks for a seat per salesperson
 // the card shows, never fewer than the plan includes (data.js billingBody).
 // Stripe sends the manager back to this page with ?billing=success or
-// ?billing=canceled, which becomes one note.
+// ?billing=canceled, which becomes one note, and with ?dealership=<id>, so
+// the page opens the dealership that paid (or opened the portal) and puts
+// the note on its card only.
 //
 // The Invite codes card (managers only) lists the dealership's open codes
 // through list_invites(), makes new ones with create_invite() and cancels one
@@ -70,6 +72,7 @@ const state = {
   data: null, // { dealership, memberships, listings, todoItems, postAttempts, scans }
   billing: null, // { status, error }: GET .../billing/status's answer for the chosen dealership (the sample data carries its own)
   billingNote: '', // one line in the Billing card: back from Stripe, the pilot just started, or what a sample button would do
+  billingNoteFor: '', // the dealership a note from Stripe's return is about ('' = the one on screen)
   invites: [], // the dealership's open codes (list_invites) and the ones made since: { code, role, dealership_id?, created_at, expires_at? }
   inviteNote: '', // one line in the Invite codes card: what a sample button would do
   inviteError: '', // the last failed create_invite or copy, shown in the card
@@ -105,11 +108,21 @@ function setParam(name, value) {
 const setUrlMock = (on) => setParam('mock', on ? '1' : null);
 
 // This page's address with no query or fragment: where the sign-in link
-// lands and where Stripe sends the manager back.
+// lands.
 function pageUrl() {
   const url = new URL(location.href);
   url.search = '';
   url.hash = '';
+  return url.toString();
+}
+
+// Where Stripe sends the manager back from Checkout or the portal: this page
+// with the dealership the button was pressed for, so a manager of more than
+// one comes back to that one (the billing function adds ?billing=... and
+// keeps the rest; allowedReturnUrl checks only the origin).
+function returnUrl(dealershipId) {
+  const url = new URL(pageUrl());
+  if (dealershipId) url.searchParams.set('dealership', dealershipId);
   return url.toString();
 }
 
@@ -695,7 +708,7 @@ async function onBilling(kind, btn) {
       return reloadBilling();
     }
     const route = kind === 'portal' ? 'portal' : 'checkout';
-    const answer = await callFunction('POST', `billing/${route}`, billingBody(route, state.billing?.status, { returnUrl: pageUrl(), dealershipId: state.dealershipId }));
+    const answer = await callFunction('POST', `billing/${route}`, billingBody(route, state.billing?.status, { returnUrl: returnUrl(state.dealershipId), dealershipId: state.dealershipId }));
     if (!answer.url) throw new Error('the server returned no address to open');
     setStatus(route === 'portal' ? 'Opening the billing portal…' : 'Opening Checkout…');
     location.assign(answer.url);
@@ -860,6 +873,9 @@ async function loadDealership(wanted, current) {
   const role = memberRole(memberships, state.session?.user?.id) || billing.status?.role || '';
   const invites = await loadInvites(dealership.id, role);
   if (!current()) return;
+  // a note from Stripe's return is about the dealership it names: none on another one's card
+  if (state.billingNoteFor && state.billingNoteFor !== dealership.id) state.billingNote = '';
+  state.billingNoteFor = '';
   state.dealerships = dealerships;
   state.dealershipId = dealership.id;
   state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };
@@ -902,9 +918,14 @@ function dropAuthFragment() {
 async function start() {
   const linkNote = dropAuthFragment();
   const params = new URLSearchParams(location.search);
-  // back from Stripe: one note in the Billing card, and the flag leaves the address so a reload does not repeat it
+  // back from Stripe: the dealership the button was pressed for opens first (nothing is on screen yet, so no button reads it
+  // before its rows are in), the flag becomes one note on its Billing card, and both leave the address so a reload does not repeat them
+  const back = params.get('dealership') || '';
+  if (params.has('dealership')) setParam('dealership', null);
+  if (back) state.dealershipId = back;
   if (params.has('billing')) {
     state.billingNote = billingReturnNote(params.get('billing'));
+    state.billingNoteFor = back;
     setParam('billing', null);
   }
   if (params.get('mock') === '1') return showMock();

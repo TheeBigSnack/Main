@@ -439,3 +439,50 @@ test('a dealership picked and loaded: the header, the picker, the plan, the team
   assert.equal(client.requests.find((r) => r.rpc === 'start_pilot').args.dealership_id, BRAVO);
   assert.equal(client.requests.find((r) => r.rpc === 'create_invite').args.dealership_id, BRAVO);
 });
+
+// ---------- back from Stripe ----------
+
+test('Checkout and the portal are told to come back to the dealership the button was pressed for', async () => {
+  const client = fakeClient({ session: ME, tables: twoDealerships() });
+  const posts = [];
+  const fetchImpl = (url, init) => {
+    if (init.method === 'POST') {
+      posts.push({ url, body: JSON.parse(init.body) });
+      return answer(200, { ok: true, url: 'https://billing.stripe.test/session' });
+    }
+    return answer(200, url.includes(`dealershipId=${BRAVO}`) ? { ok: true, role: 'manager', state: 'active', canManageBilling: true, subscription: { status: 'active', stripe_customer_id: 'cus_b', stripe_subscription_id: 'sub_b', seats: 5 } } : PILOT);
+  };
+  const page = await openPage(PAGE, { client, fetchImpl });
+  const sel = page.elements.get('pickDealer');
+  sel.value = BRAVO;
+  sel.listeners.change();
+  await settle();
+  assert.equal(page.elements.get('dealer').textContent, 'Bravo Auto');
+  page.click({ action: 'billing', billing: 'portal' }, 'Manage billing');
+  await settle();
+  assert.equal(posts.length, 1);
+  assert.ok(posts[0].url.endsWith('/billing/portal'));
+  assert.equal(posts[0].body.dealershipId, BRAVO);
+  assert.equal(posts[0].body.returnUrl, `${PAGE}?dealership=${BRAVO}`, 'the return address names the dealership');
+  assert.equal(page.href, 'https://billing.stripe.test/session');
+});
+
+test('back from Checkout for the second dealership by name: that one opens, the note is on its card, and the address is clean', async () => {
+  const client = fakeClient({ session: ME, tables: twoDealerships() });
+  const fetchImpl = (url) => answer(200, url.includes(`dealershipId=${BRAVO}`) ? { ok: true, role: 'manager', state: 'none', canStartPilot: true, canSubscribe: true, subscription: null } : PILOT);
+  const page = await openPage(`${PAGE}?dealership=${BRAVO}&billing=success`, { client, fetchImpl });
+  assert.equal(page.elements.get('dealer').textContent, 'Bravo Auto', 'not the first dealership by name');
+  assert.match(page.elements.get('actions').innerHTML, new RegExp(`<option value="${BRAVO}" selected>Bravo Auto</option>`));
+  assert.match(main(page), /<section class="card" id="billing"><h2>Billing[^]*?Checkout is done\./, 'the note is on the paid dealership\'s card');
+  const statusCalls = page.fetches.filter((f) => f.url.includes('/billing/status'));
+  assert.ok(statusCalls.length >= 1 && statusCalls.every((f) => f.url.includes(`dealershipId=${BRAVO}`)), 'only Bravo\'s plan is read');
+  assert.equal(page.href, PAGE, 'the dealership and the flag leave the address, so a reload repeats neither');
+});
+
+test('a return that names a dealership the person is not in: the first opens, without the note', async () => {
+  const client = fakeClient({ session: ME, tables: twoDealerships() });
+  const page = await openPage(`${PAGE}?dealership=cccccccc-0000-4000-8000-000000000003&billing=success`, { client, fetchImpl: () => answer(200, PILOT) });
+  assert.equal(page.elements.get('dealer').textContent, 'Alpha Motors');
+  assert.doesNotMatch(main(page), /Checkout is done/, 'the note is not about this dealership');
+  assert.equal(page.href, PAGE);
+});
