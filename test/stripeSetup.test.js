@@ -11,7 +11,7 @@ import {
   LOOKUP_KEYS, FOUNDING_COUPON_ID, TAG,
 } from '../scripts/stripe-setup-lib.mjs';
 import { parseArgs } from '../scripts/stripe-setup.mjs';
-import { HANDLED_EVENTS } from '../supabase/functions/_shared/billing.mjs';
+import { HANDLED_EVENTS, PRICE_TAG } from '../supabase/functions/_shared/billing.mjs';
 
 const pricing = JSON.parse(readFileSync(new URL('../marketing/pricing.json', import.meta.url), 'utf8'));
 const KEY = 'sk_test_abc123';
@@ -224,6 +224,9 @@ test('stripe setup: a price that differs from pricing.json fails and is left alo
   assert.equal(old.lookup_key, null);
   assert.equal(re.secrets.STRIPE_PRICE_ROOFTOP, s.db.prices[2].id);
   assert.ok(s.calls.some((c) => c.path === '/v1/prices' && c.form.transfer_lookup_key === 'true'));
+  // the billing webhook tells seats from the rooftop by this tag, so a subscription still on the old price keeps its seats
+  assert.equal(TAG, PRICE_TAG);
+  assert.deepEqual(s.db.prices.map((p) => [p.id === old.id, p.metadata[PRICE_TAG]]), [[true, 'rooftop'], [false, 'seat'], [false, 'rooftop']], 'the old price keeps its tag, the new one has the same');
 });
 
 test('stripe setup: a portal or webhook changed in the Dashboard is reported on a read and set back by --apply', async () => {

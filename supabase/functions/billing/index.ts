@@ -415,7 +415,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const lineItems = checkoutLineItems({ seats, included: PRICING.includedSalespeople, priceRooftop: config.priceRooftop, priceSeat: config.priceSeat });
     const customerId = await ensureCustomer(service, dealership, row, caller.user.email);
     const trialEnd = state === 'pilot' && row ? trialEndFor(row.pilot_ends_at) : null;
-    const params = checkoutSessionParams({ customerId, dealershipId: dealership.id, lineItems, returnUrl, trialEnd, automaticTax: config.automaticTax });
+    const params = checkoutSessionParams({ customerId, dealershipId: dealership.id, lineItems, returnUrl, trialEnd, automaticTax: config.automaticTax, included: PRICING.includedSalespeople });
     const session = await stripe('POST', '/v1/checkout/sessions', params, crypto.randomUUID());
     console.log(`${new Date().toISOString()} checkout ${dealership.id} seats ${seats}${trialEnd ? ' trial to ' + new Date(trialEnd * 1000).toISOString() : ''}`);
     return json(req, 200, { ok: true, url: String(session.url || '') });

@@ -179,7 +179,7 @@ Logs are Supabase's function logs (Dashboard, Edge Functions, the function, Logs
 
 ## Stripe
 
-- **The customer**, created by the `billing` function when a manager first opens checkout: `name` (the dealership's name), `email` (that manager's sign-in email), and `metadata` with the dealership's id and website address. Checkout also carries the dealership's id as `client_reference_id` and in the subscription's metadata.
+- **The customer**, created by the `billing` function when a manager first opens checkout: `name` (the dealership's name), `email` (that manager's sign-in email), and `metadata` with the dealership's id and website address. Checkout also carries the dealership's id as `client_reference_id` and in the subscription's metadata, with the number of salespeople the rooftop price included when it was sold (`included_salespeople`), so the webhook counts the seats that subscription pays for.
 - **What Stripe collects itself** on its Checkout and billing portal pages: the card and the billing details its form asks for. Lot Current never receives a card number; the invoices in the webhook events carry the billing contact's details Stripe keeps.
 - **Deleting**: nothing in the database reaches Stripe. When a dealership is deleted, the owner deletes the Stripe customer by hand in the Stripe Dashboard (`supabase/README.md`, "Delete"), which cancels any open subscription. Stripe keeps its own records of payments on its own terms [Pending attorney answer: questions-for-attorney.md 8.6].
 

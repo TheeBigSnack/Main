@@ -273,6 +273,7 @@ test('billing: checkout for a store with no plan makes a Stripe customer carryin
     'line_items[0][price]': 'price_rooftop_test', 'line_items[0][quantity]': '1',
     success_url: `${MANAGER_PAGE}/?view=billing&billing=success`, cancel_url: `${MANAGER_PAGE}/?view=billing&billing=canceled`,
     allow_promotion_codes: 'true', 'subscription_data[metadata][dealership_id]': D1,
+    'subscription_data[metadata][included_salespeople]': String(PRICING.includedSalespeople),
   });
   assert.match(session.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
   for (const w of fake.writes()) assert.equal(w.key, SERVICE_KEY);

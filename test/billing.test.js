@@ -20,7 +20,7 @@ import {
   planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
   automaticTaxOn, portalSessionParams,
-  formEncode, applyStripeEvent, normalizeStatus, goesBack,
+  formEncode, applyStripeEvent, normalizeStatus, goesBack, PRICE_TAG, INCLUDED_KEY,
   parseStripeSignature, hmacSha256Hex, timingSafeEqualHex, verifyStripeSignature,
 } from '../supabase/functions/_shared/billing.mjs';
 import * as page from '../manager/data.js';
@@ -356,8 +356,9 @@ test('checkoutSessionParams: subscription mode, the customer, the dealership in 
     success_url: 'https://manager.example.com/?billing=success',
     cancel_url: 'https://manager.example.com/?billing=canceled',
     allow_promotion_codes: true,
-    subscription_data: { metadata: { dealership_id: DEALER } },
+    subscription_data: { metadata: { dealership_id: DEALER, included_salespeople: String(pricing.includedSalespeople) } },
   });
+  assert.equal(checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/', included: 3 }).subscription_data.metadata.included_salespeople, '3', 'the included count the subscription is sold with');
   const t = checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/', trialEnd: 1800000000 });
   assert.equal(t.subscription_data.trial_end, 1800000000);
   assert.throws(() => checkoutSessionParams({ customerId: '', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/' }), /customer/);
@@ -426,6 +427,24 @@ test('applyStripeEvent: subscription created and updated copy the status, ids, p
   // no prices configured at all: the seats column is left alone
   const noPrices = applyStripeEvent(null, event('customer.subscription.updated', sub()), { included: 5 });
   assert.equal(noPrices.seats, undefined);
+  // after `stripe-setup --apply --reprice` the function is set to the new seat price, while a
+  // subscription sold before keeps the old one: its tag (stripe-setup's metadata) still makes it seats
+  const tagged = (id, tag) => ({ id, object: 'price', metadata: { [PRICE_TAG]: tag } });
+  const soldBefore = sub({ items: { data: [{ price: tagged('price_rooftop_old', 'rooftop'), quantity: 1 }, { price: tagged('price_seat_old', 'seat'), quantity: 3 }] } });
+  const repriced = { included: 5, priceRooftop: 'price_rooftop_new', priceSeat: 'price_seat_new' };
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldBefore), opts).seats, 8);
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldBefore), repriced).seats, 8, 'the renewal after a reprice keeps the seats paid for');
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldBefore), { included: 5 }).seats, 8, 'tagged prices need no configured id');
+  // seats added on the new price next to the old one: both count
+  const both = sub({ items: { data: [{ price: tagged('price_rooftop_old', 'rooftop'), quantity: 1 }, { price: tagged('price_seat_old', 'seat'), quantity: 3 }, { price: tagged('price_seat_new', 'seat'), quantity: 2 }] } });
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', both), repriced).seats, 10);
+  // the included count the subscription was sold with, not today's PRICING
+  const soldWithThree = sub({ metadata: { dealership_id: DEALER, [INCLUDED_KEY]: '3' }, items: { data: [{ price: tagged('price_rooftop_old', 'rooftop'), quantity: 1 }, { price: tagged('price_seat_old', 'seat'), quantity: 2 }] } });
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldWithThree), { ...repriced, included: 10 }).seats, 5);
+  for (const bad of ['', 'five', '-1', '9999', 3.5]) {
+    const s = sub({ metadata: { dealership_id: DEALER, [INCLUDED_KEY]: bad }, items: { data: [{ price: { id: 'price_rooftop' }, quantity: 1 }] } });
+    assert.equal(applyStripeEvent(null, event('customer.subscription.updated', s), opts).seats, 5, `an unusable included count (${JSON.stringify(bad)}) falls back to the configured one`);
+  }
   // the period end from the items (API versions from 2025-03-31 carry it there, not on the subscription)
   const basil = applyStripeEvent(null, event('customer.subscription.updated', sub({ current_period_end: undefined, items: { data: [{ price: { id: 'price_rooftop' }, quantity: 1, current_period_end: T + 20 * 86400 }, { price: { id: 'price_seat' }, quantity: 1, current_period_end: T + 25 * 86400 }] } })), opts);
   assert.equal(basil.current_period_end, iso(NOW + 25 * DAY));

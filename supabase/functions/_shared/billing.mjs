@@ -29,6 +29,9 @@
 // test/billing.test.js keeps these equal to that file and to the numbers
 // baked into migrations/0004_billing.sql (seats default, start_pilot).
 export const PRICING = Object.freeze({ includedSalespeople: 5, pilotDays: 30 });
+// The subscription metadata key that keeps the included count a dealership
+// was sold, so its seats are counted from that count after PRICING changes.
+export const INCLUDED_KEY = 'included_salespeople';
 
 // 'pilot' is Lot Current's own (no Stripe object behind it); the rest are every
 // status Stripe can put on a subscription, so a webhook never fails the
@@ -285,12 +288,14 @@ export function trialEndFor(pilotEndsAt, now = Date.now()) {
 
 // The Checkout Session as Stripe's form wants it. subscription_data.metadata
 // carries the dealership id so a webhook can find the row even when the
-// customer id is unknown; allow_promotion_codes lets the owner hand a
+// customer id is unknown, and the included count the rooftop price is sold
+// with (INCLUDED_KEY), so the webhook counts this subscription's seats
+// from it after PRICING changes; allow_promotion_codes lets the owner hand a
 // founding dealer a code instead of a second price. automaticTax (the
 // STRIPE_AUTOMATIC_TAX secret, off until the attorney has said what to
 // collect) has Stripe add sales tax: Checkout then asks for the billing
 // address and saves it on the customer, which Stripe needs to work tax out.
-export function checkoutSessionParams({ customerId, dealershipId, lineItems, returnUrl, trialEnd = null, automaticTax = false }) {
+export function checkoutSessionParams({ customerId, dealershipId, lineItems, returnUrl, trialEnd = null, automaticTax = false, included = PRICING.includedSalespeople }) {
   if (!customerId) throw new Error('a Stripe customer id is required');
   if (!dealershipId) throw new Error('a dealership id is required');
   if (!Array.isArray(lineItems) || !lineItems.length) throw new Error('line items are required');
@@ -301,7 +306,7 @@ export function checkoutSessionParams({ customerId, dealershipId, lineItems, ret
     line_items: lineItems,
     ...returnUrls(returnUrl),
     allow_promotion_codes: true,
-    subscription_data: { metadata: { dealership_id: dealershipId } },
+    subscription_data: { metadata: { dealership_id: dealershipId, [INCLUDED_KEY]: String(Number.isInteger(included) && included >= 0 ? included : PRICING.includedSalespeople) } },
   };
   if (typeof trialEnd === 'number' && trialEnd > 0) params.subscription_data.trial_end = trialEnd;
   if (automaticTax === true) {
@@ -390,19 +395,45 @@ function invoicePeriodEndOf(inv) {
   return unixToIso(best);
 }
 
+// The metadata key scripts/stripe-setup.mjs tags every price it makes with
+// ('rooftop' or 'seat'; TAG in scripts/stripe-setup-lib.mjs). A price keeps
+// its tag when --reprice moves the lookup key to a new one, and a
+// subscription keeps the price it was sold with, so the tag tells a seat
+// item from the rooftop whatever price ids the function is configured with.
+export const PRICE_TAG = 'lotcurrent';
+const priceTagOf = (it) => {
+  for (const p of [it.price, it.plan]) {
+    if (isRecord(p) && isRecord(p.metadata) && typeof p.metadata[PRICE_TAG] === 'string') return p.metadata[PRICE_TAG];
+  }
+  return '';
+};
+
+// The included count a subscription was sold with (Checkout writes it into
+// the subscription's metadata under INCLUDED_KEY), or null when it carries
+// none (one made by hand, or before Checkout wrote it).
+function includedOf(sub) {
+  const v = isRecord(sub.metadata) ? sub.metadata[INCLUDED_KEY] : undefined;
+  const n = typeof v === 'string' && /^\d{1,4}$/.test(v.trim()) ? Number(v) : v;
+  return Number.isInteger(n) && n >= 0 && n <= MAX_SEATS ? n : null;
+}
+
 // Seats from the subscription's items: the included count plus the seat
-// price's quantity. With no seat price configured, every item that is not
-// the rooftop counts as seats. null when the items say nothing.
+// items' quantity. An item is a seat by its price's own tag (PRICE_TAG),
+// so a subscription sold on a seat price that was repriced since still
+// counts its seats; an untagged price is a seat when it is the configured
+// seat price, or, with no seat price configured, when it is not the
+// rooftop. null when the items say nothing.
 function seatsOf(sub, included, priceRooftop, priceSeat) {
-  const items = isRecord(sub.items) && Array.isArray(sub.items.data) ? sub.items.data : null;
+  const items = isRecord(sub.items) && Array.isArray(sub.items.data) ? sub.items.data.filter(isRecord) : null;
   if (!items) return null;
-  if (!priceSeat && !priceRooftop) return null;
+  if (!priceSeat && !priceRooftop && !items.some(priceTagOf)) return null;
   let extra = 0;
   for (const it of items) {
-    if (!isRecord(it)) continue;
+    const tag = priceTagOf(it);
     const price = idOf(it.price) || idOf(it.plan);
     const qty = Number.isInteger(it.quantity) ? it.quantity : 0;
-    if (priceSeat ? price === priceSeat : price !== priceRooftop) extra += qty;
+    const seat = tag ? tag === 'seat' : priceSeat ? price === priceSeat : price !== priceRooftop;
+    if (seat) extra += qty;
   }
   return Math.min(included + extra, MAX_SEATS);
 }
@@ -474,7 +505,7 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
     patch.status = status;
     const end = periodEndOf(obj);
     if (end) patch.current_period_end = end;
-    const seats = seatsOf(obj, Number.isInteger(included) ? included : PRICING.includedSalespeople, priceRooftop, priceSeat);
+    const seats = seatsOf(obj, includedOf(obj) ?? (Number.isInteger(included) ? included : PRICING.includedSalespeople), priceRooftop, priceSeat);
     if (seats !== null) patch.seats = seats;
     return patch;
   }
