@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { currentVin, advance } from '../extension/src/queue.js';
 import { markPosted, diffScans } from '../extension/src/rescan.js';
-import { logPost } from '../extension/src/cap.js';
+import { logPost, capStatus, capCount } from '../extension/src/cap.js';
 import { updateKey } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData } from '../extension/src/listingData.js';
@@ -202,6 +202,67 @@ test('a car marked as posted while it waits at review gets no form: Open the Mar
   assert.deepEqual(free.forms, [`${v.vin} while vin=${v.vin}`]);
 });
 
+// Fill it in now first fills the form the dry run opened. The dry run was
+// opened under the cap, but it may have stayed open (or come back when the
+// panel reopened, the next day too) while posts were counted elsewhere: a
+// sync from the person's other computer, a car marked posted in the popup,
+// a form saved as a draft. Fill it in now reads the day's counts again and
+// fills nothing at the cap, and the probe view draws it off there.
+test('Fill it in now on the dry run\'s form reads the day\'s counts again and fills nothing at the daily cap; the probe view draws it off there', async () => {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const origin = 'https://www.example-motors.test';
+  const now = new Date();
+  const at = now.toISOString();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  // the panel's own dailyCap, run on the state the opener holds
+  const capExpr = /const dailyCap = ([^;]+);/.exec(src)[1];
+  const realCap = (state) => new Function('capStatus', 'state', `return ${capExpr};`)(capStatus, state);
+  const ten = (make) => Array.from({ length: 10 }, (_, i) => make(i));
+  const elsewhere = {
+    'a sync counted 10 posts from another computer': { [`sync:${origin}`]: { postsToday: { count: 10, from: dayStart.toISOString(), to: dayEnd.toISOString() } } },
+    'the day\'s log has 10 posts': { [`postLog:${origin}`]: ten((i) => ({ vin: `LOG${i}`, at })) },
+    '10 forms were saved as drafts today': { [`drafts:${origin}`]: Object.fromEntries(ten((i) => [`DRAFT${i}`, { savedAt: at }])) },
+    'the popup marked 10 cars posted': { [`posted:${origin}`]: Object.fromEntries(ten((i) => [`MARK${i}`, { name: 'a car', price: 1, postedAt: at }])) },
+  };
+  for (const [what, stored] of Object.entries(elsewhere)) {
+    let o = null;
+    o = formOpener({ description, step: 'probe', stored, extra: { dailyCap: () => realCap(o.state)(), capCount, stopPosted: never('stopPosted') } });
+    assert.equal(realCap(o.state)().reached, false, `${what}: the panel itself still counts 0`);
+    await o.fns.fillFromProbe();
+    assert.ok(!o.calls.some((c) => c.startsWith('runFill')), `${what}: nothing filled (${o.calls.join(' | ')})`);
+    assert.ok(o.calls.some((c) => c.startsWith('status(error): Daily post cap reached (10 of 10 today')), `${what}: the cap is said (${o.calls.join(' | ')})`);
+    assert.ok(o.calls.includes('render:probe'), `${what}: the probe view is drawn again, its button off`);
+    assert.deepEqual(o.forms, [], `${what}: no Marketplace tab`);
+  }
+  // under the cap (9 elsewhere), the form is filled as before
+  let under = null;
+  under = formOpener({
+    description, step: 'probe', stored: { [`sync:${origin}`]: { postsToday: { count: 9, from: dayStart.toISOString(), to: dayEnd.toISOString() } } },
+    extra: { dailyCap: () => realCap(under.state)(), capCount, stopPosted: never('stopPosted') },
+  });
+  await under.fns.fillFromProbe();
+  assert.equal(under.calls.filter((c) => c.startsWith('runFill')).length, 1, `under the cap: filled once (${under.calls.join(' | ')})`);
+
+  // the probe view: Fill it in now is drawn off at the cap, with the cap said
+  let cap = { reached: false, used: 9, cap: 10, remaining: 1 };
+  const blank = () => '';
+  const state = { probe: { found: [{ key: 'year', label: 'Year', tag: 'input', name: 'Year' }], missing: [], controls: [] }, map: { version: 'test' } };
+  const viewProbe = compile('viewProbe', {
+    state, dailyCap: () => cap, capCount, VERSION: 'test', esc: (x) => String(x ?? ''),
+    carCard: blank, readAgainHtml: blank, languageHint: blank, photoServersHtml: blank,
+  });
+  assert.match(viewProbe(), /id="fillNow" >/, 'under the cap: on');
+  assert.doesNotMatch(viewProbe(), /Daily post cap reached/);
+  cap = { reached: true, used: 10, cap: 10, remaining: 0 };
+  assert.match(viewProbe(), /id="fillNow" disabled/, 'at the cap: off');
+  assert.match(viewProbe(), /Daily post cap reached \(10 of 10 today\)/, 'at the cap: said');
+  state.probe.found = [];
+  cap = { reached: false, used: 0, cap: 10, remaining: 10 };
+  assert.match(viewProbe(), /id="fillNow" disabled/, 'no field found: off, as before');
+});
+
 // A post saved at the dry run or at Publish comes back when the panel
 // reopens. The form map is built again from formMap.js (with the test hook's
 // addresses only), never taken from the saved post: a map fixed in a newer
@@ -299,7 +360,7 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
   const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, priceNote: '', price: state.price, closingLine: '' });
   // the dry run built the listing when it opened the form
   if (step === 'probe') state.listing = buildListingData(v, { dealer: DEALER, description, price: v.price, photos: [] });
-  const fns = compileMany(['resumeFlow', 'descriptionStopped', 'readIsOld', 'readCarNow', 'takeCar', 'formValues', 'carStillCurrent', 'openForm', 'fillFromProbe', ...also], {
+  const fns = compileMany(['resumeFlow', 'descriptionStopped', 'readIsOld', 'readCarNow', 'takeCar', 'formValues', 'carStillCurrent', 'readStoredCounts', 'openForm', 'fillFromProbe', ...also], {
     state, ctx, runGuardrails, ruleProblems, buildListingData, READ_MAX_AGE_MS, FLOW_FIELDS, flowRun: 0,
     FORM_STEPS: new Function(`return ${/const FORM_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)(),
     watcher: null, endPost: () => {}, beginPost: () => {}, endUpkeep: () => {}, refreshGranted: async () => {}, nameOf: (vin) => vin,
@@ -321,7 +382,7 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
     $: (id) => (id === 'description' && step === 'review' ? box : null),
     checksHtml: () => '', setFormButtons: () => calls.push('buttons'),
     setStatus: (text, kind) => calls.push(`status${kind ? '(' + kind + ')' : ''}: ${text}`),
-    siteKeys: (o) => ({ posted: 'posted:' + o, sync: 'sync:' + o, flow: 'postFlow:' + o }),
+    siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o, sync: 'sync:' + o, drafts: 'drafts:' + o, flow: 'postFlow:' + o }),
     dailyCap: () => ({ reached: false, used: 0, cap: 10 }),
     pickedPhotos: () => [],
     render: () => calls.push('render:' + state.step), saveFlow: async () => {}, pilotNote: async () => {}, notePostStep: () => {},

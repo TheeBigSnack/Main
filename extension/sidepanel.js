@@ -785,18 +785,29 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
   });
 }
 
+// The posted list and the day's counts the cap reads, as they are now: the
+// popup may have marked cars meanwhile, and a sync may have counted more
+// (posts from the person's other computers). Read before a form is opened
+// and before the dry run's form is first filled. False when the post was
+// dropped meanwhile (nothing of it is taken then).
+async function readStoredCounts() {
+  const run = flowRun;
+  const k = siteKeys(state.origin);
+  const fresh = await chrome.storage.local.get([k.posted, k.postLog, k.sync, k.drafts]);
+  if (run !== flowRun) return false;
+  state.posted = fresh[k.posted] || state.posted;
+  state.postLog = fresh[k.postLog] || state.postLog;
+  state.syncState = fresh[k.sync] || state.syncState;
+  state.drafts = fresh[k.drafts] || state.drafts;
+  return true;
+}
+
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
 async function openForm({ probeOnly = false } = {}) {
   const run = flowRun;
   const dropped = () => run !== flowRun; // the post was dropped meanwhile: no tab for it, nothing filled
-  const k = siteKeys(state.origin);
-  const fresh = await chrome.storage.local.get([k.posted, k.postLog, k.sync, k.drafts]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
-  if (dropped()) return;
-  state.posted = fresh[k.posted] || state.posted;
-  state.postLog = fresh[k.postLog] || state.postLog;
-  state.syncState = fresh[k.sync] || state.syncState;
-  state.drafts = fresh[k.drafts] || state.drafts;
+  if (!(await readStoredCounts()) || dropped()) return;
   if (state.posted[state.vin]) return stopPosted();
   const cap = dailyCap();
   if (cap.reached) {
@@ -916,14 +927,18 @@ async function runFill({ opened = false, photos = true } = {}) {
 
 // Fill it in now, on the form the dry run opened: the same checks as Open
 // the Marketplace form before anything is typed, the car's read included,
-// and whether it was marked as posted meanwhile (stopPosted).
+// whether it was marked as posted meanwhile (stopPosted), and the day's cap
+// as it is now. The dry run may have been opened under the cap and left
+// open (or brought back the next day) while posts were recorded elsewhere:
+// a form first filled at the cap is a post over it.
 async function fillFromProbe() {
-  const run = flowRun;
-  const k = siteKeys(state.origin);
-  const fresh = await chrome.storage.local.get(k.posted);
-  if (run !== flowRun) return undefined;
-  state.posted = fresh[k.posted] || state.posted;
+  if (!(await readStoredCounts())) return undefined;
   if (state.posted[state.vin]) return stopPosted();
+  const cap = dailyCap();
+  if (cap.reached) {
+    setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+    return render();
+  }
   if (descriptionStopped()) return undefined;
   if (!(await carStillCurrent())) return undefined;
   return runFill();
@@ -1542,6 +1557,7 @@ function viewReview() {
 
 function viewProbe() {
   const p = state.probe || {};
+  const cap = dailyCap();
   const found = p.found || [];
   const missing = p.missing || [];
   const controls = p.controls || [];
@@ -1558,8 +1574,9 @@ function viewProbe() {
     <details><summary>Controls on the page (${controls.length})</summary><ul class="list">${controls.map((c) => `<li>${esc(c.tag)}${c.type ? '[' + esc(c.type) + ']' : ''}${c.role ? '[' + esc(c.role) + ']' : ''}: "${esc(c.name)}"</li>`).join('')}</ul></details>
   </section>
   ${photoServersHtml()}
+  ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${esc(capCount(cap))}). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
   <div class="actions">
-    <button type="button" class="primary" id="fillNow" ${found.length ? '' : 'disabled'}>Fill it in now</button>
+    <button type="button" class="primary" id="fillNow" ${found.length && !cap.reached ? '' : 'disabled'}>Fill it in now</button>
     <button type="button" class="plain" id="probeAgain">Check again</button>
     <button type="button" class="plain" id="copyReport">Copy report</button>
     <button type="button" class="plain" id="backToReview">Back</button>
