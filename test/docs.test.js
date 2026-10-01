@@ -111,6 +111,16 @@ test('the adapter contract and help.md say a car whose own page could not be che
   assert.match(read('../PILOT.md'), /neither does a scan that keeps the sold car under Needs a look because its page could not be checked/);
 });
 
+// The rescan raises a posted car the website marks sale-pending or sold on
+// every scan (rescan.js), so its pilot flag stays open until Taken down or
+// the website shows it for sale again; the runbook defines "cleared" that way.
+test('PILOT.md says a take-down flag on a car the website still marks sale-pending or sold stays open, and when it counts as cleared', () => {
+  const cleared = /\("cleared": ([^)]*)\)/.exec(read('../PILOT.md'));
+  assert.ok(cleared, 'PILOT.md defines "cleared"');
+  assert.match(cleared[1], /for sale again after a sale-pending or sold mark/);
+  assert.match(cleared[1], /a car the website still marks sale-pending or sold stays open/);
+});
+
 test('the adapter contract says what the standard-data reader does with robots.txt, as the code does it', () => {
   const contract = read('../extension/adapters/README.md');
   const code = read('../extension/adapters/schemaOrg.js').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');

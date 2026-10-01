@@ -150,7 +150,8 @@ const flagOpen = (f) => !f.doneAt;
 // After a scan: a take-down or price item on one of the salesperson's own
 // listings that has no open flag yet gets one, stamped with the scan time.
 // An open flag whose item is no longer in the diff is closed as "cleared"
-// (the website changed its mind: the car came back, the price went back), but
+// (the website changed its mind: the car came back, is for sale again after a
+// sale-pending or sold mark, or the price went back), but
 // only when the scan was complete and confirmed; a scan with warnings keeps
 // every open flag as it is, and so does a take-down whose car is still under
 // Needs a look as the salesperson's (still missing, only not confirmed gone
