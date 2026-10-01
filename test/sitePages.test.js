@@ -701,5 +701,10 @@ test('the browser checks cover every page: npm run test:site and npm run test:a1
   const a11yAt = ci.indexOf('- run: npm run test:a11y');
   const siteAt = ci.indexOf('- run: npm run test:site');
   assert.ok(a11yAt > 0 && siteAt > a11yAt, 'the demo job runs test:site after test:a11y');
-  assert.match(read('.github/workflows/pages.yml'), /node scripts\/site-pages\.mjs --check[\s\S]*node scripts\/legal-pages\.mjs --check/, 'the Pages workflow refuses to deploy stale pages');
+  const pages = read('.github/workflows/pages.yml');
+  assert.match(pages, /node scripts\/site-pages\.mjs --check[\s\S]*node scripts\/legal-pages\.mjs --check/, 'the Pages workflow refuses to deploy stale pages');
+  // it deploys from the repository's default branch, whatever its name, and only from there
+  assert.doesNotMatch(pages, /branches:/, 'no branch name is written into the Pages workflow');
+  assert.match(pages, /^ {4}if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)$/m, 'the deploy job runs only on the default branch');
+  assert.match(pages, /path: site\n/, 'it deploys site/ and nothing else');
 });
