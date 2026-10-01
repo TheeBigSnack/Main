@@ -192,3 +192,22 @@ test('the Terms step\'s summary says what syncs to the dealership\'s account whe
   assert.ok(shown, 'the Terms step has no summary paragraph');
   assert.equal(unescape(shown[1]), termsSummary(accountsConfigured()));
 });
+
+// While the Terms and the Privacy Policy are drafts (legalHosted() false) the
+// step asks for no acceptance and records none, but the usage numbers its
+// summary names are recorded from the first post; the note must not say that
+// nothing is recorded.
+test('the Terms step\'s note while the documents are drafts says only the acceptance waits, and the usage numbers are recorded from the first post', async () => {
+  const { legalHosted } = await import('../extension/src/legalLinks.js');
+  assert.equal(legalHosted(), false, 'the legal texts are drafts, so the step shows the note');
+  const { wiz, wizardHtml } = await import('../extension/wizard.js');
+  wiz.step = 'terms';
+  const shown = wizardHtml().match(/<p class="hint" id="legalPending">([^<]*)<\/p>/);
+  assert.ok(shown, 'the Terms step has no note while the documents are drafts');
+  const note = unescape(shown[1]);
+  assert.doesNotMatch(note, /nothing is recorded|records nothing/i);
+  assert.match(note, /being finalised/);
+  assert.match(note, /accept them in Settings \(Terms and privacy\); your acceptance is recorded then\./);
+  assert.match(note, /The usage numbers above are recorded from your first post\./);
+  assert.match(termsSummary(false), /records the usage numbers for the pilot/, '"above" points at the summary\'s usage numbers');
+});

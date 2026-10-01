@@ -255,7 +255,7 @@ test('PILOT.md runs a second dealership on the accounts and the manager view, wi
 
 test('help.md describes the Terms step and the Settings section in both states the code renders', () => {
   const help = doc('help.md');
-  const wizard = read('../extension/wizard.js');
+  const wizard = read('../extension/wizard.js') + read('../extension/src/wizardSteps.js');
   const popup = read('../extension/popup.js');
   const tick = 'I have read and accept the Terms of Service and the Privacy Policy';
   assert.ok(wizard.includes(tick) && popup.includes(tick), 'the tick label moved: update the help doc and this test together');
@@ -269,6 +269,12 @@ test('help.md describes the Terms step and the Settings section in both states t
     assert.match(terms, /published/, `docs/help.md "${name}" does not say when the links and the tick appear`);
     assert.ok(terms.includes(tick), `docs/help.md "${name}" does not quote the tick`);
   }
+  // while the documents are drafts no acceptance is recorded, but the usage
+  // numbers are recorded from the first post: the help never says the step
+  // "records nothing"
+  const step = setup.slice(setup.indexOf('**Terms and privacy**'));
+  assert.doesNotMatch(step.slice(0, step.indexOf('\n')), /records nothing|nothing is recorded/, 'docs/help.md says the Terms step records nothing while the usage numbers are recorded from the first post');
+  assert.match(step, /records no acceptance/);
 });
 
 // The salesperson part of the profile, in the words the lists use.

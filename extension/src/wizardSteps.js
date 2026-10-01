@@ -50,6 +50,12 @@ export function termsSummary(configured = false) {
     + ' You publish every post yourself. Lot Current is not affiliated with Meta Platforms, Inc.';
 }
 
+// The Terms step while the documents are not published (legalHosted()
+// false): no acceptance is asked for or recorded, but the usage numbers the
+// summary names are recorded from the first post all the same, so the note
+// says which of the two waits.
+export const TERMS_PENDING = 'The Terms of Service and the Privacy Policy are being finalised. Once they are published you can read and accept them in Settings (Terms and privacy); your acceptance is recorded then. The usage numbers above are recorded from your first post.';
+
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
 const sameAddress = (a, b) => trimSlash(a).toLowerCase() === trimSlash(b).toLowerCase();
 const str = (v) => (typeof v === 'string' ? v : '');
