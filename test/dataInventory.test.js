@@ -25,8 +25,12 @@ import { syncPayload } from '../extension/src/sync.js';
 import { noteFlags } from '../extension/src/pilot.js';
 import { neededPatterns } from '../extension/src/photoHosts.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
+import { SITE } from '../site/config.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+// The website's own host once siteUrl is set: the pages name it in their
+// canonical and share addresses, and it is this site, not an outside host.
+const SITE_HOST = SITE.siteUrl ? new URL(SITE.siteUrl).hostname : null;
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
 const inventory = read('docs/data-inventory.md');
 const policy = read('legal/privacy-policy.md');
@@ -131,8 +135,12 @@ test('the extension, the manager view and the website keep nothing in the browse
     assert.equal(hit, null, `${f} uses ${hit && hit[0]}: add it to docs/data-inventory.md and the privacy policy, then change this test`);
   }
   for (const f of SHIPPED.filter((x) => x.startsWith('site/') && x.endsWith('.html'))) {
-    const hit = source(f).match(/<(script|link|img|iframe)\b[^>]*\b(src|href)="(https?:)?\/\/[^"]*"/i);
-    assert.equal(hit, null, `${f} loads ${hit && hit[0]} from another host: the inventory says the website loads nothing from elsewhere`);
+    // A canonical link names the page's own address on the site's own host;
+    // the browser loads nothing from it.
+    const hits = [...source(f).matchAll(/<(script|link|img|iframe)\b[^>]*\b(src|href)="((?:https?:)?\/\/[^"]*)"/gi)]
+      .filter((m) => !(/^<link\s+rel="canonical"/i.test(m[0]) && SITE_HOST && new URL(m[3], 'https://x').hostname === SITE_HOST))
+      .map((m) => m[0]);
+    assert.deepEqual(hits, [], `${f} loads ${hits[0]} from another host: the inventory says the website loads nothing from elsewhere`);
   }
   const css = read('site/site.css');
   assert.doesNotMatch(css, /@import|url\(\s*['"]?(https?:)?\/\//i, 'site/site.css loads something from another host');
@@ -255,6 +263,7 @@ test('every outside host the shipped code names is listed, and every host listed
       const host = m[1].toLowerCase().replace(/^\*\./, '').replace(/\.$/, '');
       if (!host.includes('.') || /^[\d.]+$/.test(host)) continue; // a bare pattern, localhost, an address
       if (/\.(example|test|invalid|localhost)$/.test(host) || /(^|\.)example\.(com|org|net)$/.test(host)) continue; // placeholders
+      if (host === SITE_HOST) continue; // the website's own address, in its canonical and share tags
       hosts.add(host);
     }
   }

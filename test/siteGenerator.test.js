@@ -3,8 +3,9 @@
 // both demo-form states, the structured data, the files next to the pages
 // (robots.txt, llms.txt, sitemap.xml, CNAME), config.js's rules, what it
 // refuses to write, and --check against a temp root. The committed pages are
-// what the sources make now. The site's own address is '' until the owner
-// has the domain; FIXTURE_URL stands in for it here only.
+// what the sources make now, whether site/config.js has the site's address
+// or not; FIXTURE_URL, a subdomain of the business's own domain, stands in for
+// another address here only.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,9 +29,9 @@ const legalDraft = JSON.parse(read(STATUS_FILE)).draft;
 
 // A fixture host for the tests only: not one of the reserved placeholder
 // names (which the generator refuses), and never written anywhere but here.
-const FIXTURE_URL = 'https://lotsync-fixture.org';
+const FIXTURE_URL = 'https://fixture.lotcurrent.com';
 const EMPTY_BUSINESS = { name: '', legalName: '', streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: '', telephone: '', email: '', url: '', openingHours: [], areaServed: '' };
-const BUSINESS = { ...EMPTY_BUSINESS, name: 'Lot Current', legalName: 'Lot Current LLC', streetAddress: '1 Main Street', addressLocality: 'Springfield', addressRegion: 'PA', postalCode: '19064', addressCountry: 'US', telephone: '+1-555-010-0100', email: 'hello@lotsync-fixture.org', openingHours: ['Mo-Fr 09:00-17:00'], areaServed: 'Pennsylvania' };
+const BUSINESS = { ...EMPTY_BUSINESS, name: 'Lot Current', legalName: 'Lot Current LLC', streetAddress: '1 Main Street', addressLocality: 'Springfield', addressRegion: 'PA', postalCode: '19064', addressCountry: 'US', telephone: '+1-555-010-0100', email: 'hello@fixture.lotcurrent.com', openingHours: ['Mo-Fr 09:00-17:00'], areaServed: 'Pennsylvania' };
 const base = { siteUrl: '', demoEndpoint: '', demoMailto: '', supportEmail: '', signupUrl: '', business: { ...EMPTY_BUSINESS } };
 const ctxOf = (site = {}, extra = {}) => ({ dir: root, site: { ...base, ...site }, pricing, legalDraft, ...extra });
 const page = (slug) => PAGES.find((p) => p.slug === slug);
@@ -135,26 +136,26 @@ test('the template syntax: escaped values, truthy and falsy blocks, nesting, and
 test('config.js: validateSite accepts the committed config and every honest shape, and refuses placeholders, paths and a half-filled business', () => {
   assert.doesNotThrow(() => validateSite(SITE), 'the committed config.js');
   assert.doesNotThrow(() => validateSite(base));
-  assert.doesNotThrow(() => validateSite({ ...base, siteUrl: FIXTURE_URL, demoEndpoint: 'https://abcdefgh.supabase.co/functions/v1/lead', demoMailto: 'mailto:demo@lotsync-fixture.org', supportEmail: 'support@lotsync-fixture.org', signupUrl: '../manager/', business: BUSINESS }));
+  assert.doesNotThrow(() => validateSite({ ...base, siteUrl: FIXTURE_URL, demoEndpoint: 'https://abcdefgh.supabase.co/functions/v1/lead', demoMailto: 'mailto:demo@fixture.lotcurrent.com', supportEmail: 'support@fixture.lotcurrent.com', signupUrl: '../manager/', business: BUSINESS }));
   assert.doesNotThrow(() => validateSite({ ...base, business: { ...EMPTY_BUSINESS, ...Object.fromEntries(['name', 'streetAddress', 'addressLocality', 'addressRegion', 'postalCode', 'addressCountry'].map((k) => [k, 'x'])) } }), 'required fields only');
-  assert.doesNotThrow(() => validateSite({ ...base, demoMailto: 'mailto:demo@lotsync-fixture.org?subject=Demo' }), 'a mailto with a query');
+  assert.doesNotThrow(() => validateSite({ ...base, demoMailto: 'mailto:demo@fixture.lotcurrent.com?subject=Demo' }), 'a mailto with a query');
   for (const [bad, why] of [
-    [{ siteUrl: 'https://lotsync-fixture.org/' }, /trailing slash/],
-    [{ siteUrl: 'https://lotsync-fixture.org/site' }, /no path/],
-    [{ siteUrl: 'http://lotsync-fixture.org' }, /https origin/],
-    [{ siteUrl: 'lotsync-fixture.org' }, /https origin/],
+    [{ siteUrl: 'https://fixture.lotcurrent.com/' }, /trailing slash/],
+    [{ siteUrl: 'https://fixture.lotcurrent.com/site' }, /no path/],
+    [{ siteUrl: 'http://fixture.lotcurrent.com' }, /https origin/],
+    [{ siteUrl: 'fixture.lotcurrent.com' }, /https origin/],
     [{ siteUrl: 'https://lotsync.example' }, /reserved placeholder host/],
     [{ siteUrl: 'https://www.example.com' }, /reserved placeholder host/],
     [{ siteUrl: 'https://site.test' }, /reserved placeholder host/],
     [{ siteUrl: 'https://localhost' }, /reserved placeholder host/],
-    [{ siteUrl: ' https://lotsync-fixture.org' }, /spaces/],
+    [{ siteUrl: ' https://fixture.lotcurrent.com' }, /spaces/],
     [{ siteUrl: null }, /must be a string/],
     [{ demoEndpoint: 'https://lead.example/functions/v1/lead' }, /reserved placeholder host/],
     [{ demoEndpoint: 'http://abcdefgh.supabase.co/functions/v1/lead' }, /https address/],
     [{ demoMailto: 'mailto:demo@lotsync.example' }, /reserved placeholder host/],
-    [{ demoMailto: 'demo@lotsync-fixture.org' }, /'mailto:<address>'/],
+    [{ demoMailto: 'demo@fixture.lotcurrent.com' }, /'mailto:<address>'/],
     [{ demoMailto: 'mailto:not an address' }, /'mailto:<address>'/],
-    [{ supportEmail: 'mailto:support@lotsync-fixture.org' }, /plain address/],
+    [{ supportEmail: 'mailto:support@fixture.lotcurrent.com' }, /plain address/],
     [{ supportEmail: 'support@example.org' }, /reserved placeholder host/],
     [{ supportEmail: 'support' }, /plain address/],
     [{ signupUrl: 'https://app.lotsync.example/manager/' }, /reserved placeholder host/],
@@ -162,7 +163,7 @@ test('config.js: validateSite accepts the committed config and every honest shap
     [{ business: { ...BUSINESS, postalCode: '' } }, /partly filled \(missing postalCode\)/],
     [{ business: { ...EMPTY_BUSINESS, telephone: '555' } }, /optional fields but no name or address/],
     [{ business: { ...BUSINESS, url: 'https://lotsync.example' } }, /business\.url/],
-    [{ business: { ...BUSINESS, url: 'lotsync-fixture.org' } }, /business\.url/],
+    [{ business: { ...BUSINESS, url: 'fixture.lotcurrent.com' } }, /business\.url/],
     [{ business: { ...BUSINESS, email: 'x@example.com' } }, /business\.email/],
     [{ business: { ...BUSINESS, openingHours: 'Mo-Fr' } }, /openingHours must be a list/],
     [{ business: { ...BUSINESS, openingHours: [''] } }, /openingHours must be a list/],
@@ -174,13 +175,16 @@ test('config.js: validateSite accepts the committed config and every honest shap
   const { business: _b, ...noBusiness } = base;
   assert.throws(() => validateSite(noBusiness), /business must be an object/);
   for (const host of ['lotsync.example', 'example', 'a.test', 'x.invalid', 'localhost', 'app.localhost', 'example.com', 'www.example.org', 'sub.example.net', '', 'EXAMPLE.COM', 'a.test.']) assert.equal(isPlaceholderHost(host), true, host);
-  for (const host of ['lotsync-fixture.org', 'example.co', 'test.org', 'notexample.com', 'abcdefgh.supabase.co', 'my-test.io']) assert.equal(isPlaceholderHost(host), false, host);
-  // the committed file: every switch empty until the owner has the real thing, and no invented address in it, comments included
+  for (const host of ['fixture.lotcurrent.com', 'example.co', 'test.org', 'notexample.com', 'abcdefgh.supabase.co', 'my-test.io']) assert.equal(isPlaceholderHost(host), false, host);
+  // the committed file: a switch is empty until the owner has the real thing,
+  // and no invented address is in it, comments included. The only addresses
+  // it may hold are on the site's own domain (the owner's inbox there).
   const text = read(CONFIG_FILE);
-  assert.equal(SITE.siteUrl, '', 'siteUrl is set: this test and the launch checklist expected it empty; update both together');
-  assert.equal(SITE.demoMailto, '', 'the placeholder inbox is gone and no real one is configured yet');
   assert.doesNotMatch(text, FORBIDDEN, 'config.js carries no placeholder word or invented address');
-  assert.doesNotMatch(text, /mailto:[A-Za-z0-9._%+-]+@/, 'no address is written into config.js');
+  const domain = SITE.siteUrl ? new URL(SITE.siteUrl).hostname.replace(/^www\./, '') : null;
+  const inboxes = [...text.matchAll(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)].map((m) => m[1].toLowerCase());
+  for (const host of inboxes) assert.equal(host, domain, `config.js names an inbox on ${host}: only the site's own domain (${domain || 'none: siteUrl is empty'}) may appear`);
+  if (!SITE.siteUrl) assert.deepEqual([SITE.demoMailto, SITE.supportEmail], ['', ''], 'no inbox before the site has its domain');
   for (const phrase of ['functions/v1/lead', '"Self-serve sign-up"', 'selfServeSignup in manager/config.js', 'LEAD_ORIGINS', 'LocalBusiness']) assert.ok(text.includes(phrase), `config.js explains ${phrase}`);
   assert.deepEqual(Object.keys(SITE), ['siteUrl', 'demoEndpoint', 'demoMailto', 'supportEmail', 'signupUrl', 'business']);
   assert.deepEqual(Object.keys(SITE.business), Object.keys(EMPTY_BUSINESS));
@@ -222,7 +226,7 @@ test('cspFor: two variants, form-action mailto: only on the home page and only o
   assert.equal(NO_SCRIPT_CSP, noScript);
   for (const p of PAGES) {
     assert.equal(cspFor(p, base), p.script ? script("'none'") : noScript, p.slug);
-    assert.equal(cspFor(p, { ...base, demoMailto: 'mailto:demo@lotsync-fixture.org' }), p.script ? script(p.slug === 'home' ? 'mailto:' : "'none'") : noScript, `${p.slug} with an inbox`);
+    assert.equal(cspFor(p, { ...base, demoMailto: 'mailto:demo@fixture.lotcurrent.com' }), p.script ? script(p.slug === 'home' ? 'mailto:' : "'none'") : noScript, `${p.slug} with an inbox`);
     assert.equal(cspFor(p, { ...base, demoEndpoint: 'https://abcdefgh.supabase.co/functions/v1/lead' }), p.script ? script("'none'") : noScript, `${p.slug} with the function only`);
   }
   assert.deepEqual(PAGES.filter((p) => p.script).map((p) => p.slug), ['home', 'pricing']);
@@ -316,12 +320,12 @@ test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (Local
   assert.deepEqual(local, {
     '@type': 'LocalBusiness', name: 'Lot Current', legalName: 'Lot Current LLC',
     address: { '@type': 'PostalAddress', streetAddress: '1 Main Street', addressLocality: 'Springfield', addressRegion: 'PA', postalCode: '19064', addressCountry: 'US' },
-    telephone: '+1-555-010-0100', email: 'hello@lotsync-fixture.org', openingHours: ['Mo-Fr 09:00-17:00'], areaServed: 'Pennsylvania',
+    telephone: '+1-555-010-0100', email: 'hello@fixture.lotcurrent.com', openingHours: ['Mo-Fr 09:00-17:00'], areaServed: 'Pennsylvania',
   });
   const bare = jsonLdFor(page('home'), ctxOf({ siteUrl: FIXTURE_URL, business: { ...EMPTY_BUSINESS, name: 'N', streetAddress: 'S', addressLocality: 'L', addressRegion: 'R', postalCode: 'P', addressCountry: 'C' } }))['@graph'][0];
   assert.deepEqual(Object.keys(bare), ['@type', 'name', 'url', 'address'], 'optional fields left out; url falls back to siteUrl');
   assert.equal(bare.url, FIXTURE_URL);
-  assert.equal(jsonLdFor(page('home'), ctxOf({ business: { ...BUSINESS, url: 'https://lotsync-fixture.org/store' } }))['@graph'][0].url, 'https://lotsync-fixture.org/store');
+  assert.equal(jsonLdFor(page('home'), ctxOf({ business: { ...BUSINESS, url: 'https://fixture.lotcurrent.com/store' } }))['@graph'][0].url, 'https://fixture.lotcurrent.com/store');
   for (const node of jsonLdFor(page('home'), ctxOf())['@graph']) {
     for (const key of ['aggregateRating', 'review', 'telephone', 'address', 'offers', 'openingHours', 'url', 'logo', 'email']) assert.ok(!(key in node), `${node['@type']}.${key}: nothing that is not in config.js or pricing.json`);
   }
@@ -364,7 +368,7 @@ test('the files next to the pages: robots.txt, sitemap.xml, CNAME and llms.txt i
   assert.doesNotMatch(sitemap, /lastmod|changefreq|priority/, 'nothing faked');
   assert.doesNotMatch(sitemap, /404/);
   assert.throws(() => sitemapXml(base), /needs siteUrl/);
-  assert.equal(cnameTxt({ siteUrl: 'https://www.lotsync-fixture.org' }), 'www.lotsync-fixture.org\n');
+  assert.equal(cnameTxt({ siteUrl: 'https://www.fixture.lotcurrent.com' }), 'www.fixture.lotcurrent.com\n');
   assert.throws(() => cnameTxt(base), /needs siteUrl/);
   for (const site of [base, { siteUrl: FIXTURE_URL }]) {
     const llms = llmsTxt(site);
@@ -399,9 +403,9 @@ test('the fragments: the variables a page may use, both demo-form states on the 
   assert.ok(closed.includes('<button type="submit" class="button" disabled>Send the request</button>'), 'closed: the button waits for site.js');
   assert.ok(closed.includes('<noscript><p class="muted">This form needs JavaScript.</p></noscript>'));
   assert.doesNotMatch(closed, /mailto:|Ten minutes at your desk/);
-  const byMail = render(home, templateVars(page('home'), ctxOf({ demoMailto: 'mailto:demo@lotsync-fixture.org' })));
+  const byMail = render(home, templateVars(page('home'), ctxOf({ demoMailto: 'mailto:demo@fixture.lotcurrent.com' })));
   assert.ok(byMail.includes('<p id="demo-closed" class="notice" hidden>'), 'open: the note is hidden');
-  assert.ok(byMail.includes('<form id="demo-form" class="form-grid" action="mailto:demo@lotsync-fixture.org" method="post" enctype="text/plain">'), 'open by mail: the form posts to the inbox without JavaScript');
+  assert.ok(byMail.includes('<form id="demo-form" class="form-grid" action="mailto:demo@fixture.lotcurrent.com" method="post" enctype="text/plain">'), 'open by mail: the form posts to the inbox without JavaScript');
   assert.ok(byMail.includes('<button type="submit" class="button">Send the request</button>'));
   assert.ok(byMail.includes('Without JavaScript, the button opens your email app'));
   assert.ok(byMail.includes('Ten minutes at your desk'));
@@ -415,8 +419,8 @@ test('the fragments: the variables a page may use, both demo-form states on the 
     assert.match(html, /<div class="hp" aria-hidden="true">[\s\S]*?<input id="f-company-url" name="company_url" type="text" tabindex="-1" autocomplete="off">/);
     assert.deepEqual([...html.matchAll(/\bname="([^"]+)"/g)].map((m) => m[1]), ['name', 'dealership', 'website', 'email', 'phone', 'message', 'company_url']);
   }
-  const vars = templateVars(page('home'), ctxOf({ demoMailto: 'mailto:demo@lotsync-fixture.org?subject=Demo', supportEmail: 's@lotsync-fixture.org' }));
-  assert.deepEqual(vars, { root: './', siteUrl: '', demoOpen: true, demoEndpoint: '', demoMailto: 'mailto:demo@lotsync-fixture.org?subject=Demo', demoMailtoAddress: 'demo@lotsync-fixture.org', supportEmail: 's@lotsync-fixture.org', signupUrl: '', legalDraft });
+  const vars = templateVars(page('home'), ctxOf({ demoMailto: 'mailto:demo@fixture.lotcurrent.com?subject=Demo', supportEmail: 's@fixture.lotcurrent.com' }));
+  assert.deepEqual(vars, { root: './', siteUrl: '', demoOpen: true, demoEndpoint: '', demoMailto: 'mailto:demo@fixture.lotcurrent.com?subject=Demo', demoMailtoAddress: 'demo@fixture.lotcurrent.com', supportEmail: 's@fixture.lotcurrent.com', signupUrl: '', legalDraft });
   assert.equal(templateVars(page('not-found'), ctxOf()).root, '/');
   assert.equal(templateVars(page('legal'), ctxOf()).root, '../');
   // the support page shows an inbox only once one exists
@@ -424,8 +428,8 @@ test('the fragments: the variables a page may use, both demo-form states on the 
   const noInbox = render(support, templateVars(page('support'), ctxOf()));
   assert.ok(noInbox.includes('a public support address will be listed here once it exists'));
   assert.doesNotMatch(noInbox, /mailto:/);
-  const inbox = render(support, templateVars(page('support'), ctxOf({ supportEmail: 'support@lotsync-fixture.org' })));
-  assert.ok(inbox.includes('<a href="mailto:support@lotsync-fixture.org">support@lotsync-fixture.org</a>'));
+  const inbox = render(support, templateVars(page('support'), ctxOf({ supportEmail: 'support@fixture.lotcurrent.com' })));
+  assert.ok(inbox.includes('<a href="mailto:support@fixture.lotcurrent.com">support@fixture.lotcurrent.com</a>'));
   assert.doesNotMatch(inbox, /listed here once it exists/);
   // the legal index says the texts are drafts only while they are
   const legal = read(page('legal').source);
@@ -483,6 +487,11 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
       cpSync(join(root, rel), join(tmp, rel));
     }
     cpSync(join(root, 'site-src'), join(tmp, 'site-src'), { recursive: true });
+    // Start from the committed config with no address and no inbox, whatever
+    // the committed file holds, so every step below means the same thing.
+    const config = read(CONFIG_FILE).replace(/siteUrl: '[^']*',/, "siteUrl: '',").replace(/demoMailto: '[^']*',/, "demoMailto: '',");
+    assert.match(config, /siteUrl: '',/);
+    writeFileSync(join(tmp, CONFIG_FILE), config);
     const run = async (argv) => {
       const said = { log: [], error: [] };
       const code = await main(argv, { log: (s) => said.log.push(s), error: (s) => said.error.push(s) }, tmp);
@@ -518,14 +527,13 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     assert.equal((await run(['--check'])).code, 0);
     assert.equal(readFileSync(faqFile, 'utf8'), written, 'the hand edit is gone');
     // siteUrl set: sitemap.xml and CNAME appear, every page gets its canonical; cleared again: they must go
-    const config = read(CONFIG_FILE);
     writeFileSync(join(tmp, CONFIG_FILE), config.replace("siteUrl: '',", `siteUrl: '${FIXTURE_URL}',`));
     r = await run(['--check']);
     assert.equal(r.log[0], `siteUrl is ${FIXTURE_URL}: canonical, og:url, og:image, sitemap.xml and CNAME are written`);
     assert.ok(r.error.includes('site/sitemap.xml is missing: run npm run site-pages') && r.error.includes('site/CNAME is missing: run npm run site-pages'));
     r = await run([]);
     assert.ok(r.log.includes('wrote site/sitemap.xml') && r.log.includes('wrote site/CNAME'));
-    assert.equal(readFileSync(join(tmp, 'site/CNAME'), 'utf8'), 'lotsync-fixture.org\n');
+    assert.equal(readFileSync(join(tmp, 'site/CNAME'), 'utf8'), 'fixture.lotcurrent.com\n');
     assert.equal(readFileSync(join(tmp, 'site/robots.txt'), 'utf8'), `User-agent: *\nAllow: /\nSitemap: ${FIXTURE_URL}/sitemap.xml\n`);
     for (const p of FRAGMENT_PAGES.filter((x) => x.kind !== 'notFound')) {
       const html = readFileSync(join(tmp, p.file), 'utf8');

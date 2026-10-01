@@ -525,7 +525,9 @@ test('site/config.js validates, holds no placeholder, and the demo form and the 
   }
   const config = read('site/config.js');
   assert.doesNotMatch(config, /\.example\b|example\.(com|org|net)|yourdomain|placeholder/i, 'config.js carries no placeholder, in its values or its comments');
-  assert.doesNotMatch(config, /mailto:[^'\s]+@/, 'config.js carries no inbox until the owner has one');
+  // an inbox only on the site's own domain, and none before the site has one
+  const domain = SITE.siteUrl ? new URL(SITE.siteUrl).hostname.replace(/^www\./, '') : null;
+  for (const m of config.matchAll(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)) assert.equal(m[1].toLowerCase(), domain, `config.js names an inbox on ${m[1]}, not the site's own domain`);
   // the home page's demo form: in the HTML in every state (test/fn-lead.test.js reads its field names); hidden with the note while closed
   const html = htmlOf(home);
   const form = tagsOf(html, 'form')[0];

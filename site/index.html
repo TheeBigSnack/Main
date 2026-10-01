@@ -7,9 +7,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#14532d">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action mailto:">
   <title>Used cars on Marketplace, from your website | Lot Current</title>
   <meta name="description" content="Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.">
+  <link rel="canonical" href="https://lotcurrent.com/">
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
@@ -18,10 +19,15 @@
   <meta property="og:site_name" content="Lot Current">
   <meta property="og:title" content="Used cars on Marketplace, from your website">
   <meta property="og:description" content="Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.">
+  <meta property="og:url" content="https://lotcurrent.com/">
+  <meta property="og:image" content="https://lotcurrent.com/social/home.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Lot Current's green check mark with the words &quot;Your used cars listed from your website, in seconds.&quot; and &quot;You click Publish. Lot Current never does.&quot;">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Used cars on Marketplace, from your website">
   <meta name="twitter:description" content="Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"Lot Current"},{"@type":"WebSite","name":"Lot Current"},{"@type":"SoftwareApplication","name":"Lot Current","applicationCategory":"BusinessApplication","operatingSystem":"Chrome","description":"Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish."}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"Lot Current","url":"https://lotcurrent.com","logo":"https://lotcurrent.com/apple-touch-icon.png"},{"@type":"WebSite","name":"Lot Current","url":"https://lotcurrent.com"},{"@type":"SoftwareApplication","name":"Lot Current","applicationCategory":"BusinessApplication","operatingSystem":"Chrome","description":"Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish.","url":"https://lotcurrent.com"}]}</script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -223,11 +229,11 @@
     <section id="demo" aria-labelledby="demo-h">
       <div class="wrap narrow">
         <h2 id="demo-h">Request a demo</h2>
-        
-        <p id="demo-closed" class="notice">The demo request form is not open yet.</p>
+        <p class="lead">Ten minutes at your desk, on your own website. Tell us who you are and we will get in touch.</p>
+        <p id="demo-closed" class="notice" hidden>The demo request form is not open yet.</p>
         <!-- Each field's maxlength is the lead function's limit for it (LEAD_LIMITS in supabase/functions/_shared/lead.mjs;
              test/lead.test.js keeps them equal), so the page never says it has a request the function then cut short. -->
-        <form id="demo-form" class="form-grid" hidden>
+        <form id="demo-form" class="form-grid" action="mailto:blawrence@lotcurrent.com" method="post" enctype="text/plain">
           <div class="field">
             <label for="f-name">Your name</label>
             <input id="f-name" name="name" type="text" required maxlength="80" autocomplete="name">
@@ -260,10 +266,10 @@
             <input id="f-company-url" name="company_url" type="text" tabindex="-1" autocomplete="off">
           </div>
           <div class="full">
-            <button type="submit" class="button" disabled>Send the request</button>
+            <button type="submit" class="button">Send the request</button>
             <p id="demo-status" class="status" role="status" aria-live="polite"></p>
+            <p class="muted">Your request goes to us and nowhere else. Without JavaScript, the button opens your email app with the request filled in.</p>
             
-            <p class="muted">Your request goes to us and nowhere else.</p><noscript><p class="muted">This form needs JavaScript.</p></noscript>
           </div>
         </form>
       </div>

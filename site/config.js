@@ -38,10 +38,10 @@
 // write. The optional fields are left out when ''. openingHours is a list of
 // schema.org strings such as 'Mo-Fr 09:00-17:00'; areaServed a place name.
 export const SITE = {
-  siteUrl: '',
+  siteUrl: 'https://lotcurrent.com',
   demoEndpoint: '',
-  demoMailto: '',
-  supportEmail: '',
+  demoMailto: 'mailto:blawrence@lotcurrent.com',
+  supportEmail: 'blawrence@lotcurrent.com',
   signupUrl: '',
   business: {
     name: '',

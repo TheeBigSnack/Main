@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { PAGES, cspFor } from '../scripts/site-pages.mjs';
+import { SITE } from '../site/config.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -145,7 +146,12 @@ const CSP_TAG = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/;
 
 test('every link is an anchor on the page or one of the legal pages, and nothing loads from a third party', () => {
   const legal = ['./legal/terms/', './legal/privacy/', './legal/posting-rules/'];
-  const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+  // Once siteUrl is set the page names its own address in the canonical link
+  // and the share tags; that is this site, and nothing is fetched from it.
+  const canonical = SITE.siteUrl ? `<link rel="canonical" href="${SITE.siteUrl}/">` : null;
+  assert.equal(canonical ? html.split(canonical).length - 1 : 0, canonical ? 1 : 0, 'one canonical, on the home page\'s own address, only once siteUrl is set');
+  const own = (text) => (SITE.siteUrl ? text.split(canonical).join('').split(`content="${SITE.siteUrl}/`).join('content="') : text);
+  const hrefs = [...own(html).matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
   assert.ok(hrefs.length > 5);
   for (const href of hrefs) {
     assert.ok(/^#[\w-]+$/.test(href) || href.startsWith('./'), `href ${href}`);
@@ -156,12 +162,12 @@ test('every link is an anchor on the page or one of the legal pages, and nothing
   const footer = html.match(/<footer>[\s\S]*?<\/footer>/)[0];
   assert.deepEqual([...footer.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), legal);
   for (const p of legal) assert.ok(existsSync(new URL('../site/' + p.slice(2) + 'index.html', import.meta.url)), `site/${p.slice(2)}index.html exists (npm run legal-pages)`);
-  assert.doesNotMatch(html.replace(CSP_TAG, '').replace(/<script type="application\/ld\+json">[^<]*<\/script>/, ''), /https?:\/\//i, 'no absolute URLs in the page (the structured data names https://schema.org as its vocabulary; nothing is fetched)');
+  assert.doesNotMatch(own(html).replace(CSP_TAG, '').replace(/<script type="application\/ld\+json">[^<]*<\/script>/, ''), /https?:\/\//i, 'no absolute URLs in the page (the structured data names https://schema.org as its vocabulary; nothing is fetched)');
   assert.doesNotMatch(css, /https?:\/\/|@import|url\(/i, 'no external assets in the stylesheet');
   assert.doesNotMatch(js, /https?:\/\//i, 'site.js names no address of its own');
   const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1]);
   assert.deepEqual(scripts, [' type="application/ld+json"', ' type="module" src="./site.js"'], 'the structured data block and the page module, nothing else');
-  const links = [...html.matchAll(/<link\b([^>]*)>/g)].map((m) => m[1]);
+  const links = [...own(html).matchAll(/<link\b([^>]*)>/g)].map((m) => m[1]);
   assert.deepEqual(links, [' rel="icon" href="./favicon.svg" type="image/svg+xml"', ' rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32"', ' rel="apple-touch-icon" href="./apple-touch-icon.png"', ' rel="stylesheet" href="./site.css"'], 'the favicons and our stylesheet, nothing else (canonical only once config.js has siteUrl)');
   assert.doesNotMatch(html, /<(iframe|embed|object)\b/i);
   assert.doesNotMatch(html, /font-face|fonts\./i);
@@ -275,7 +281,7 @@ async function runSite({ signupUrl, pricing }) {
   assert.ok(js.includes(configImport), 'site.js takes its addresses from config.js');
   runs += 1;
   // a stand-in config.js: a fixture inbox (never a reserved placeholder host, which the generator refuses; it exists only in test/)
-  const config = { demoEndpoint: '', demoMailto: 'mailto:demo@lotsync-fixture.org', supportEmail: '', siteUrl: '', signupUrl };
+  const config = { demoEndpoint: '', demoMailto: 'mailto:demo@fixture.lotcurrent.com', supportEmail: '', siteUrl: '', signupUrl };
   const code = js.replace(configImport, `const SITE = ${JSON.stringify(config)};`) + `\n// run ${runs}\n`;
   const links = [0, 1].map(() => ({ hidden: true, href: '', textContent: 'Start a free pilot' }));
   const stubs = {
@@ -321,7 +327,7 @@ test('Start a free pilot: hidden in the page, shown only once config.js names th
   // signupUrl empty: nothing changes, whatever pricing.json says
   for (const link of await runSite({ signupUrl: '', pricing })) assert.deepEqual(link, { hidden: true, href: '', textContent: 'Start a free pilot' });
   // set: both links shown, to that address, with the pilot's length from pricing.json
-  const url = 'https://app.lotsync-fixture.org/manager/';
+  const url = 'https://app.fixture.lotcurrent.com/manager/';
   for (const link of await runSite({ signupUrl: url, pricing })) {
     assert.deepEqual(link, { hidden: false, href: url, textContent: `Start a free ${pricing.pilotDays}-day pilot` });
   }
@@ -330,7 +336,7 @@ test('Start a free pilot: hidden in the page, shown only once config.js names th
   for (const link of await runSite({ signupUrl: url, pricing: null })) assert.deepEqual(link, { hidden: false, href: url, textContent: 'Start a free pilot' });
   // a path on this site works too; anything that is not https or a path shows nothing
   for (const ok of ['../manager/', '/manager/index.html', './manager/']) assert.equal((await runSite({ signupUrl: ok, pricing }))[0].href, ok, ok);
-  for (const bad of ['javascript:alert(1)', 'http://app.lotsync-fixture.org/', 'app.lotsync-fixture.org/manager/', '//app.lotsync-fixture.org/', 'https://', ' ', 'https://app.lotsync-fixture.org/ x']) {
+  for (const bad of ['javascript:alert(1)', 'http://app.fixture.lotcurrent.com/', 'app.fixture.lotcurrent.com/manager/', '//app.fixture.lotcurrent.com/', 'https://', ' ', 'https://app.fixture.lotcurrent.com/ x']) {
     for (const link of await runSite({ signupUrl: bad, pricing })) assert.equal(link.hidden, true, `${JSON.stringify(bad)} shows nothing`);
   }
 
