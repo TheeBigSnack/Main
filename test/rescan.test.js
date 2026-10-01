@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff, postedBasis, withPostedBasis } from '../extension/src/rescan.js';
+import { noteFlags } from '../extension/src/pilot.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, standardCarPage, standardListPage, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
@@ -115,6 +116,36 @@ test('"before fees" price basis compares the price without the doc fee', () => {
   assert.equal(website.priceUpdates.length, 0);
   assert.equal(beforeFees.priceUpdates.length, 1);
   assert.equal(beforeFees.priceUpdates[0].change, -1000);
+});
+
+test('a change of the price setting is not a website price change: each listing is compared on the basis it was posted at', () => {
+  const s = snapshot(LOT);
+  const ram = s.vehicles[VIN.ram]; // $27,163 main, $26,673 shown below it
+  const at = '2026-09-26T21:00:00.000Z';
+  // posted on the main price; the dealer then switches to the lower second price; the website is unchanged
+  const posted = markPosted({}, ram, 'website', at);
+  const d = diffScans(s, snapshot(LOT), { posted, confirm: confirmed(), basis: 'beforeFees' });
+  assert.deepEqual(d.priceUpdates, []);
+  assert.equal(noteFlags(null, d).flags.length, 0, 'nothing for the pilot numbers either');
+  assert.equal(listingStatus(ram, posted[VIN.ram].price, basisPrice(ram, postedBasis(posted[VIN.ram], 'beforeFees'))).text, 'Matches the website');
+  // a real website change is still mirrored, on the listing's own basis
+  const drop = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '26163' }, high: { label: 'Was', value: '25673' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.deepEqual(diffScans(s, drop, { posted, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates.map((u) => [u.from, u.to]), [[27163, 26163]]);
+  // the other way round: posted on the lower price, the setting back to the main price
+  const lower = markPosted({}, ram, 'beforeFees', at);
+  assert.equal(lower[VIN.ram].price, 26673);
+  assert.deepEqual(diffScans(s, snapshot(LOT), { posted: lower, confirm: confirmed(), basis: 'website' }).priceUpdates, []);
+  // an entry kept before the basis was recorded follows the setting, which is why a change of the setting stamps it first
+  const legacy = { [VIN.ram]: { name: 'Ram', price: 27163, postedAt: at } };
+  assert.equal(diffScans(s, snapshot(LOT), { posted: legacy, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates.length, 1);
+  const stamped = withPostedBasis(legacy, 'website');
+  assert.deepEqual(stamped[VIN.ram], { name: 'Ram', price: 27163, postedAt: at, basis: 'website' });
+  assert.deepEqual(diffScans(s, snapshot(LOT), { posted: stamped, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates, []);
+  assert.equal(withPostedBasis(stamped, 'beforeFees'), undefined, 'an entry that has a basis keeps it: nothing to write');
+  assert.equal(withPostedBasis(null, 'website'), undefined);
+  assert.equal(postedBasis({ basis: 'beforeFees' }, 'website'), 'beforeFees');
+  assert.equal(postedBasis({}, 'beforeFees'), 'beforeFees');
+  assert.equal(postedBasis(null, 'anything else'), 'website');
 });
 
 test('website switches to "call for price": needs a look', () => {
@@ -278,9 +309,10 @@ test('a colleague\'s entry (mine: false, merged in by sync) is never yours: no t
 test('posted-listing bookkeeping', () => {
   const s = snapshot(LOT);
   let posted = markPosted({}, s.vehicles[VIN.ram], 'website', '2026-09-26T21:00:00.000Z');
-  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' });
+  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, basis: 'website', postedAt: '2026-09-26T21:00:00.000Z' });
   posted = markPriceUpdated(posted, VIN.ram, 26163, '2026-09-27T21:00:00.000Z');
   assert.equal(posted[VIN.ram].price, 26163);
+  assert.equal(posted[VIN.ram].basis, 'website', 'an updated price stays on the basis the listing was posted at');
   posted = markTakenDown(posted, VIN.ram);
   assert.deepEqual(posted, {});
 });

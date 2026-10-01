@@ -15,6 +15,8 @@ import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
+import { updateKey } from './src/storage.js';
+import { withPostedBasis } from './src/rescan.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
@@ -104,12 +106,24 @@ async function findDealerTab() {
 
 export const TAB_GONE = "Couldn't reach the dealership tab. Open the used inventory page, click the Lot Current icon and click Continue set-up.";
 
+// Listings posted before the price basis was kept on each one stay on the
+// basis in force until now when the Price step changes it: the new setting
+// is for new posts, never a website price change (src/rescan.js withPostedBasis).
+async function keepPostedBasis(k, stored, nextBasis) {
+  if (!stored) return;
+  const before = stored.basis === 'beforeFees' ? 'beforeFees' : 'website';
+  if (before === (nextBasis === 'beforeFees' ? 'beforeFees' : 'website')) return;
+  await updateKey(k.posted, (p) => withPostedBasis(p, before));
+}
+
 // Reads the website with the settings so far (defaults on the first pass) and saves the result.
 async function runScan(ctx) {
   wiz.busy = true;
   wiz.error = '';
   ctx.render();
   const k = siteKeys(wiz.origin);
+  // the basis this scan uses (the defaults' until the Price step), before the posted list is read for it
+  await keepPostedBasis(k, (await chrome.storage.local.get(k.settings))[k.settings], wiz.settings ? wiz.settings.basis : 'website');
   const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate]);
   let r;
   try {
@@ -305,6 +319,7 @@ async function finish(ctx) {
   const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: now, legal: legalHosted() && wiz.termsAccepted ? acceptLegal(now) : (wiz.settings && wiz.settings.legal) || undefined }, wiz.site || {});
   wiz.settings = settings;
   const k = siteKeys(wiz.origin);
+  await keepPostedBasis(k, (await chrome.storage.local.get(k.settings))[k.settings], settings.basis);
   await chrome.storage.local.set({ [k.settings]: settings });
   await saveProfile(settings, undefined, wiz.origin);
   // the site registry must agree with the settings even if the final read below fails

@@ -37,6 +37,34 @@ export function basisPrice(v, basis = 'website') {
   return main;
 }
 
+// The basis a posted listing's price was taken on: recorded on the entry
+// when it was posted (markPosted), or stamped on an older entry when the
+// setting changed (withPostedBasis); else the current setting. A listing is
+// always compared with the website on its own basis, so changing the setting
+// is never read as a website price change.
+export function postedBasis(entry, basis = 'website') {
+  const own = entry && entry.basis;
+  if (own === 'website' || own === 'beforeFees') return own;
+  return basis === 'beforeFees' ? 'beforeFees' : 'website';
+}
+
+// The posted list with the basis in force until now (the setting being
+// changed) stamped on every entry posted before the basis was recorded per
+// entry; undefined when every entry already has one, so nothing is written.
+export function withPostedBasis(posted, basis) {
+  if (!posted || typeof posted !== 'object') return undefined;
+  const stamp = basis === 'beforeFees' ? 'beforeFees' : 'website';
+  let changed = false;
+  const next = {};
+  for (const [vin, e] of Object.entries(posted)) {
+    if (e && typeof e === 'object' && e.basis !== 'website' && e.basis !== 'beforeFees') {
+      next[vin] = { ...e, basis: stamp };
+      changed = true;
+    } else next[vin] = e;
+  }
+  return changed ? next : undefined;
+}
+
 // The compact per-car record kept between scans.
 export function snapshotEntry(v, assessment) {
   return {
@@ -155,7 +183,9 @@ function whatGotReady(before, now) {
  *            direct VIN lookups. error: the check as a whole failed, so no
  *            car is called gone; unchecked: cars whose own check failed
  *            while the others' verdicts still stand
- *   basis:   'website' | 'beforeFees' which price goes on Marketplace
+ *   basis:   'website' | 'beforeFees' which price goes on Marketplace; a
+ *            posted car is compared on the basis recorded on its entry
+ *            (postedBasis), so a change of the setting is not a price change
  */
 export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'website' } = {}) {
   const out = {
@@ -210,7 +240,8 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   for (const [vin, now] of Object.entries(currVehicles)) {
     const before = prevVehicles[vin];
     const mine = yours(vin);
-    const nowPrice = basisPrice(now, basis);
+    // a posted car on the basis its listing was posted at (postedBasis)
+    const nowPrice = basisPrice(now, mine ? postedBasis(posted[vin], basis) : basis);
 
     // A posted car the website marks sold or sale-pending, or no longer
     // calls pre-owned, is raised on every scan while it is still marked
@@ -282,7 +313,7 @@ export function settleDiff(diff, posted) {
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
 // `extra` can carry the listing link and who posted (listingUrl, salesperson).
 export function markPosted(posted, entry, basis = 'website', now = new Date().toISOString(), extra = {}) {
-  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), postedAt: now, ...extra } };
+  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), basis: postedBasis(null, basis), postedAt: now, ...extra } };
 }
 
 export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {

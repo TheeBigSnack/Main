@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
@@ -644,7 +644,9 @@ function viewMine(l) {
     rows(
       l.mine.map((p) => {
         const now = p.now;
-        const site = now ? price(now) : null;
+        const own = postedBasis(p, state.settings?.basis); // the basis this listing was posted at (src/rescan.js postedBasis)
+        const site = now ? basisPrice(now, own) : null;
+        const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
         // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus)
         const status = listingStatus(now, p.price, site);
         const pill = `<span class="pill ${status.tone}">${esc(status.text)}</span>`;
@@ -652,7 +654,7 @@ function viewMine(l) {
         const entry = { name: p.name, url: now?.url };
         const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
         return row(entry, {
-          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${link}`,
+          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
           right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
@@ -1354,7 +1356,12 @@ async function onSettingsSubmit(ev) {
     state.settings.autoRescan = false;
     message = 'Saved, but automatic rescans need one scan of this website first.';
   }
+  // listings posted before the price basis was kept on each one stay on the
+  // basis they were posted at: the new setting is for new posts, and a
+  // changed setting is never shown as a website price change
+  if (state.settings.basis !== prev.basis && !(await update('posted', (p) => withPostedBasis(p, prev.basis)))) { render(); return; }
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
+  if (state.settings.basis !== prev.basis && Object.values(state.posted || {}).some((p) => p && p.mine !== false)) message += ' Your listings keep the price they were posted at; the new price setting is for new posts.';
   await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');
   if (note) note.textContent = message;
