@@ -163,9 +163,19 @@ try {
   await panel.waitForFunction(() => !document.getElementById('panelSite'));
 
   // ---- 3. The Ram sold since the scan: Post re-checks it on the website, with no tab, and stops ----
+  // Set-up was never run here, so the posting rules come first: nothing is
+  // read or begun until they are ticked, and the tick goes on with the same car.
   await get('/scenario?name=day2');
   await panel.click(`button[data-post-vin="${RAM}"]`);
+  await panel.waitForSelector('#postingRules');
+  assert.match(await panel.textContent('#postingRules'), /Pre-owned cars only\./);
+  assert.equal(await panel.isDisabled('#rulesContinue'), true, 'nothing goes on before the tick');
+  assert.equal(Number(await get('/direct-count')), directBefore, 'the car is not read before the tick');
+  await panel.check('#rulesRead');
+  assert.equal(await panel.isDisabled('#rulesContinue'), false);
+  await panel.click('#rulesContinue');
   await panel.waitForSelector('#blocked', { timeout: 20000 });
+  assert.ok(await panel.evaluate(async (o) => Boolean((await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`].rulesReadAt), origin), 'the tick is saved for this website');
   assert.match(await panel.textContent('#blocked'), /isn't on the website any more/);
   assert.ok(Number(await get('/direct-count')) > directBefore, 'the car was read from the extension, straight from the inventory service');
   await panel.screenshot({ path: join(shots, 'panel-2-sold.png') });

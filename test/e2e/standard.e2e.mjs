@@ -91,6 +91,7 @@ try {
         dealer: { name: DEALER, city: 'Springfield', state: 'OH', zip: '' },
         priceNote: 'Tax, title and registration are extra.',
         dailyCap: 10,
+        rulesReadAt: new Date().toISOString(), // set-up's posting rules, ticked (the side panel asks first otherwise: test/e2e/panel.e2e.mjs)
         rewrite: { enabled: false, endpoint: '', key: '' },
       },
       devOverrides: {

@@ -8,7 +8,8 @@
 //   - one list action at a time, with the action still called inside the click;
 //   - a load for a website the panel has moved away from is dropped;
 //   - a car this person took down while the website still listed it reaches
-//     review with a notice (posting rule 3), and a queue waits there.
+//     review with a notice (posting rule 3), and a queue waits there;
+//   - no post starts before the posting rules are ticked for the website.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -70,9 +71,9 @@ test('clearing a finished post forgets the tab and the window it came from', asy
 
 // startFlow up to the posted check: the stubs after it throw, so a car
 // already posted must leave before the website is read or a post is begun.
-function startFlowWith({ posted, queue }) {
+function startFlowWith({ posted, queue, rulesReadAt = '2026-09-30T12:00:00.000Z' }) {
   const calls = [];
-  const state = { origin: 'https://www.example-dealer.test', posted, snapshotVehicles: { AAA: { name: '2020 Make Model' } } };
+  const state = { origin: 'https://www.example-dealer.test', posted, settings: { rulesReadAt }, snapshotVehicles: { AAA: { name: '2020 Make Model' } } };
   const startFlow = compile('startFlow', {
     state,
     chrome: { storage: { local: { remove: async () => {} } } },
@@ -91,7 +92,7 @@ function startFlowWith({ posted, queue }) {
     pilotNote: never('pilotNote'),
     readCarForPost: never('readCarForPost'),
   });
-  return { calls, run: () => startFlow({ origin: state.origin, vin: 'aaa', dealerTabId: null, queue }) };
+  return { calls, state, run: () => startFlow({ origin: state.origin, vin: 'aaa', dealerTabId: null, queue }) };
 }
 
 test('a car already marked as posted never gets a second form: the queue skips it, a single post stops', async () => {
@@ -169,7 +170,7 @@ async function reviewWith(takenDown, { queue = true } = {}) {
   const state = {
     origin: 'https://www.example-dealer.test', posted: {}, takenDown,
     snapshotVehicles: { AAA: { name: '2020 Make Model' } },
-    settings: { salesperson: { name: 'Sam' }, basis: 'website' },
+    settings: { salesperson: { name: 'Sam' }, basis: 'website', rulesReadAt: '2026-09-30T12:00:00.000Z' },
   };
   const canAutoOpen = compile('canAutoOpen', {
     state, currentListing: () => ({ missing: [], assumed: [] }), dailyCap: () => ({ reached: false }), photoPatterns: () => [], refusedPhotoServers: new Set(),
@@ -221,4 +222,54 @@ test('a car this person took down while the website still listed it reaches revi
   assert.match(html, /Post it again only if the old listing is gone for another reason/);
   assert.equal(compile('relistHtml', { state: { relist: null }, esc: String, when: String })(), '');
   assert.match(fnText('viewReview'), /return `\$\{relistHtml\(\)\}\$\{carCard\(\)\}/, 'the review shows it first');
+});
+
+// The posting rules come before the first post from a website: a person who
+// skipped set-up (Not now on the popup's banner) ticks them in the panel.
+test('no post starts before the posting rules are ticked: the panel shows them, and the tick starts the same post again', async () => {
+  for (const queue of [false, true]) {
+    const r = startFlowWith({ posted: {}, queue, rulesReadAt: '' });
+    await r.run();
+    assert.equal(r.state.step, 'rules', 'stopped at the rules, before the website is read or an attempt is begun');
+    assert.equal(r.state.vin, 'AAA');
+    assert.deepEqual(r.calls, ['clearFlow', 'status:', 'render']);
+  }
+
+  const rules = compile('viewRules', { POSTING_RULES, esc: (x) => String(x) })();
+  for (const rule of POSTING_RULES) assert.ok(rules.includes(rule.title) && rules.includes(rule.text), `the panel shows "${rule.title}"`);
+  assert.match(rules, /<input type="checkbox" id="rulesRead" \/> I have read the posting rules and will follow them/);
+  assert.match(rules, /id="rulesContinue" disabled>Continue to the post/, 'nothing goes on until the tick');
+
+  // the tick: saved in the website's settings, then the same request again
+  const state = { origin: 'https://www.example-dealer.test', vin: 'AAA', dealerTabId: 7, windowId: 3, queueMode: true, settings: { dailyCap: 10, rulesReadAt: '' } };
+  const writes = [];
+  const restarted = [];
+  let ticked = false;
+  const acceptRules = compile('acceptRules', {
+    state, $: () => ({ checked: ticked }), siteKeys: (o) => ({ settings: 'settings:' + o }), panelStorage: {},
+    updateKey: async (key, change) => { const next = change({ dailyCap: 8 }); writes.push([key, next]); return next; },
+    setStatus: never('setStatus'), storageErrorText: String,
+    startFlow: async (req) => restarted.push(req),
+  });
+  await acceptRules();
+  assert.deepEqual([writes, restarted], [[], []], 'without the tick nothing is saved or started');
+  ticked = true;
+  await acceptRules();
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0][0], 'settings:https://www.example-dealer.test');
+  assert.equal(writes[0][1].dailyCap, 8, 'the stored settings are kept, the tick added');
+  assert.ok(Date.parse(writes[0][1].rulesReadAt) > 0);
+  assert.equal(state.settings.rulesReadAt, writes[0][1].rulesReadAt);
+  assert.deepEqual(restarted, [{ origin: state.origin, vin: 'AAA', dealerTabId: 7, windowId: 3, queue: true }]);
+
+  // Not now: nothing posted; a queue is paused, not skipped through
+  const left = { queue: { vins: ['AAA'], index: 0, status: 'running' }, queueMode: true };
+  const said = [];
+  const leaveRules = compile('leaveRules', {
+    state: left, pauseQueue: (q) => ({ ...q, status: 'paused' }), saveQueue: async () => said.push('saved'),
+    clearFlow: async () => said.push('cleared'), setStatus: (t) => said.push(t), render: () => said.push('render'),
+  });
+  await leaveRules();
+  assert.equal(left.queue.status, 'paused');
+  assert.deepEqual(said, ['saved', 'cleared', 'Nothing was posted: the posting rules come first. The queue is paused; Resume shows the rules again.', 'render']);
 });

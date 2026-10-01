@@ -23,7 +23,7 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 ## Use
 
 1. Open the dealership website's used inventory page, e.g. `ronlewischryslerdodgejeepramwaynesburg.com/used-vehicles/`.
-2. Click the Lot Current icon. The first time it offers **Set up Lot Current**: a few steps in the side panel to read the website, pick your store, enter your name, confirm the store's address (read from the website), allow automatic rescans, read the posting rules and, once the Terms of Service and Privacy Policy are published, accept them (the acceptance and its version are kept with your synced profile; Settings shows it and has the same tick). (Or skip it: **Settings** has the same fields.)
+2. Click the Lot Current icon. The first time it offers **Set up Lot Current**: a few steps in the side panel to read the website, pick your store, enter your name, confirm the store's address (read from the website), allow automatic rescans, read the posting rules and, once the Terms of Service and Privacy Policy are published, accept them (the acceptance and its version are kept with your synced profile; Settings shows it and has the same tick). (Or skip it: **Settings** has the same fields, the posting rules included, and the side panel shows the rules before your first post until you tick them.)
 3. Click **Scan website** whenever you like. With automatic rescans on, Lot Current also re-reads the website every 3 hours while Chrome is open and shows your to-do count on its icon.
 4. **Ready to post** lists pre-owned cars at your store that have photos and a price, newest on the lot first (the menu also offers longest on the lot, price low to high, and name; the choice is remembered for the website). A search box narrows the list as you type, by stock number, the last six characters of the VIN, or the year, make or model. A car that came onto the lot within the last 7 days by the website's in-stock date, or that Lot Current first saw within the last 7 days when the website gives no date (the dealer can change the number in Settings), carries a **New** pill, and under each car one line says where its date comes from: "on the website since [date] · N days on the lot" when the website gives an in-stock date, or "Lot Current first saw it [date]" when only a scan can say, which never counts days on the lot. Click **Post** on one. The side panel opens and:
    - re-checks the car on the website (still pre-owned, still on the lot, still priced),
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 936 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 939 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

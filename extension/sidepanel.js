@@ -30,6 +30,7 @@ import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/
 import { watchForListing } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { relistNotice } from './src/takenDown.js';
+import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
@@ -310,6 +311,14 @@ async function startFlow(req) {
     }
     await clearFlow();
     setStatus(`${name} is already marked as posted on this website, so it isn't posted again. Its listing is under My listings in the popup.`);
+    return render();
+  }
+  if (!state.settings.rulesReadAt) {
+    // The posting rules come before the first post from this website. Set-up
+    // shows them; whoever skipped it reads and ticks them here, and the post
+    // (or the queue) goes on from the tick (acceptRules).
+    state.step = 'rules';
+    setStatus('');
     return render();
   }
   await refreshGranted(); // current before canAutoOpen below looks at the photo servers
@@ -1096,6 +1105,47 @@ function highlightsHtml() {
   </fieldset>`;
 }
 
+// The posting rules, before the first post from a website whose settings
+// have no tick for them (set-up skipped, or started from Scan and Settings).
+function viewRules() {
+  return `<section id="postingRules" aria-labelledby="postingRulesLabel">
+    <h3 id="postingRulesLabel">The posting rules</h3>
+    <p class="lead">Before your first post from this website, read the posting rules and tick that you will follow them. Set-up shows the same rules.</p>
+    <ol class="rules">${POSTING_RULES.map((r) => `<li><b>${esc(r.title)}</b> ${esc(r.text)}</li>`).join('')}</ol>
+    <label class="block"><input type="checkbox" id="rulesRead" /> I have read the posting rules and will follow them</label>
+    <div class="actions"><button type="button" class="primary" id="rulesContinue" disabled>Continue to the post</button><button type="button" class="plain" id="rulesCancel">Not now</button></div>
+  </section>`;
+}
+
+// The tick: saved in this website's settings (rulesReadAt, as set-up's
+// finish saves it), then the same post starts again from the top.
+async function acceptRules() {
+  const box = $('rulesRead');
+  if (!box || !box.checked) return undefined;
+  const at = new Date().toISOString();
+  const key = siteKeys(state.origin).settings;
+  try {
+    await updateKey(key, (stored) => ({ ...(stored || state.settings), rulesReadAt: at }), panelStorage);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+    return undefined;
+  }
+  state.settings = { ...state.settings, rulesReadAt: at };
+  return startFlow({ origin: state.origin, vin: state.vin, dealerTabId: state.dealerTabId, windowId: state.windowId, queue: state.queueMode });
+}
+
+// Not now: no post without the tick. A queue waits, paused, for the next try.
+async function leaveRules() {
+  const queued = state.queueMode && state.queue;
+  if (queued) {
+    state.queue = pauseQueue(state.queue);
+    await saveQueue();
+  }
+  await clearFlow();
+  setStatus(`Nothing was posted: the posting rules come first.${queued ? ' The queue is paused; Resume shows the rules again.' : ''}`);
+  render();
+}
+
 // A car this person took off their listings while the website still listed
 // it: re-posting it may be the delete and repost that posting rule 3 forbids.
 // Said, never refused: the old listing may be gone for another reason.
@@ -1291,7 +1341,7 @@ function refocus(kept) {
 
 function render() {
   $('site').textContent = state.siteName || '';
-  const views = { idle: viewIdle, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone, wizard: wizardHtml };
+  const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone, wizard: wizardHtml };
   if (state.step === 'wizard') {
     $('panel').innerHTML = wizardHtml();
     return;
@@ -1589,6 +1639,8 @@ async function onClick(ev) {
   switch (btn.id) {
     case 'panelQueue': return state.step === 'idle' ? oneAtATime(() => queueFromList()) : undefined;
     case 'panelRescan': return state.step === 'idle' ? rescanFromList() : undefined;
+    case 'rulesContinue': return state.step === 'rules' ? acceptRules() : undefined;
+    case 'rulesCancel': return state.step === 'rules' ? leaveRules() : undefined;
     case 'allowSite': return state.step === 'blocked' ? oneAtATime(() => allowSiteAndRetry()) : undefined;
     case 'openForm':
       await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
@@ -1703,12 +1755,13 @@ const handlers = { [GLOBAL_KEYS.postRequest]: startFlow, [GLOBAL_KEYS.setupReque
 // bar and the next car's record are current without reopening the panel.
 // The panel's own writes echo back too: they are marked (ownSet), and a value
 // the panel already holds is not a change. What is redrawn: steps without a
-// text box are redrawn whole; on review and publish only the queue bar and
-// the cap line are replaced, so the description and the listing link the
-// person is typing stay put; the wizard and upkeep draw their own views.
+// text box are redrawn whole; on the posting rules, review and publish only
+// the queue bar and the cap line are replaced, so the rules' tick, the
+// description and the listing link the person is typing stay put; the
+// wizard and upkeep draw their own views.
 // When the popup stops the queue while a car is under way, that car can
 // still be finished; afterQueueStep then finds no queue and stops.
-const INPUT_STEPS = ['review', 'publish'];
+const INPUT_STEPS = ['rules', 'review', 'publish'];
 const OWN_VIEW_STEPS = ['wizard', 'upkeep'];
 function adoptChanges(changes) {
   // the site registry: a website scanned or set up elsewhere, its service and permission state
@@ -1790,6 +1843,7 @@ async function init() {
   $('panel').addEventListener('input', onInput);
   $('panel').addEventListener('change', (ev) => {
     if (state.step === 'wizard') handleWizardChange(ev.target);
+    else if (ev.target.id === 'rulesRead') { const b = $('rulesContinue'); if (b) b.disabled = !ev.target.checked; }
     else if (ev.target.id === 'panelSite') chooseSite(ev.target.value);
     else if (ev.target.id === 'panelSort') changeSort(ev.target.value);
     else onPickChange(ev.target);

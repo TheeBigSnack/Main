@@ -108,6 +108,9 @@ h3 .pill { font-weight: 600; }
 .row button.small.go { border-color: var(--accent); color: var(--accent); }
 
 .settings fieldset { border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px 10px; }
+.settings ol.rules { padding-left: 20px; margin: 6px 0; }
+.settings ol.rules li { margin: 4px 0; }
+.settings details summary { cursor: pointer; }
 .settings legend { font-weight: 600; padding: 0 4px; }
 .settings label { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; }
 .settings .hint { color: var(--muted); font-size: 12px; margin: 2px 0 4px; }

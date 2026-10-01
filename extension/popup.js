@@ -11,6 +11,7 @@ import { createQueue, currentVin, describe as describeQueue } from './src/queue.
 import { FORM_MAP } from './facebook/formMap.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
+import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
@@ -401,7 +402,7 @@ function setupBanner() {
   const text = active
     ? '<b>Set-up is not finished.</b> Pick up where you left off in the side panel.'
     : "<b>First time here?</b> Set-up runs in the side panel: your store, your name, the store's address, the price to post, automatic rescans, the posting rules and the Terms of Service.";
-  const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields">Not now</button>' : '';
+  const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields, the posting rules included">Not now</button>' : '';
   return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Current'}</button>${later}</div></div>`;
 }
 
@@ -848,6 +849,13 @@ function viewSettings() {
       ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="100"')}
       <p class="hint">A safety setting, not a guarantee: Meta doesn't publish its limits.</p>
     </fieldset>
+    <fieldset><legend>Posting rules</legend>
+      <details id="postingRules"><summary>Read the posting rules</summary><ol class="rules">${POSTING_RULES.map((r) => `<li><b>${esc(r.title)}</b> ${esc(r.text)}</li>`).join('')}</ol></details>
+      ${s.rulesReadAt
+        ? `<p class="hint" id="rulesStatus">You ticked that you will follow them on ${esc(dateOnly(s.rulesReadAt))}.</p>`
+        : `<p class="hint" id="rulesStatus">Not ticked yet for this website: the side panel shows them before your first post, or tick here.</p>
+      <label><input type="checkbox" name="rulesAccept" /> <span>I have read the posting rules and will follow them</span></label>`}
+    </fieldset>
     <fieldset><legend>Automatic rescans</legend>
       <label><input type="checkbox" name="autoRescan" ${s.autoRescan ? 'checked' : ''} /> <span>Rescan this website every 3 hours while Chrome is open, and show the to-do count on the icon</span></label>
       <label><input type="checkbox" name="notify" ${s.notify !== false ? 'checked' : ''} /> <span>Desktop notification when listings need attention</span></label>
@@ -1096,7 +1104,7 @@ async function onPanelClick(ev) {
     case 'skipSetup':
       state.wizardDone = true;
       await ownSet({ [siteKeys(state.origin).wizardDone]: { skipped: true, at: new Date().toISOString() } });
-      setStatus('Settings has the same fields. Set-up can be run later after "Clear everything for this website".');
+      setStatus(`Settings has the same fields, the posting rules included.${state.settings && state.settings.rulesReadAt ? '' : ' The side panel shows the rules before your first post until you tick them.'} Set-up can be run later after "Clear everything for this website".`);
       break;
     case 'allowRescans': {
       // Asks Chrome straight from the click (a user gesture) for the host
@@ -1382,6 +1390,7 @@ async function onSettingsSubmit(ev) {
       autoRescan: form.get('autoRescan') === 'on',
       notify: form.get('notify') === 'on',
       legal: form.get('legalAccept') === 'on' && legalHosted() ? acceptLegal() : prev.legal, // the tick is the same acceptance the wizard's Terms step records; nothing while the documents are placeholders
+      rulesReadAt: form.get('rulesAccept') === 'on' ? new Date().toISOString() : prev.rulesReadAt, // the same tick as set-up's rules step and the side panel's
     },
     { name: state.siteName }
   );

@@ -7,6 +7,7 @@ import { loadPopup, POPUP_ORIGIN } from './popupHarness.js';
 import { fixtures, raw, vehicle, sampleVin, MY_STORE } from './helpers.js';
 import { PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
+import { POSTING_RULES } from '../extension/src/postingRules.js';
 
 const k = siteKeys(POPUP_ORIGIN);
 
@@ -112,4 +113,39 @@ test('at the daily cap, Taken down or unmarking Posted ✓ on one of today\'s po
     assert.match(p.status(), /Daily post cap reached \(1 of 1 today\)/);
     assert.equal(p.local.postRequest, undefined, 'nothing is handed to the side panel');
   }
+});
+
+// The posting rules are shown before posting: set-up shows them, and
+// whoever clicks Not now on the set-up banner meets them in the side panel
+// before the first post (test/panelFlow.test.js) or in Settings, which now
+// has them, as the Not now button says.
+test('Not now says where the posting rules are; Settings shows them, and its tick is saved like set-up\'s', async () => {
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE } } });
+  await p.scan();
+  assert.match(p.panel(), /data-action="skipSetup" title="Settings has the same fields, the posting rules included">Not now/);
+  await p.click('skipSetup');
+  assert.equal(p.status(), 'Settings has the same fields, the posting rules included. The side panel shows the rules before your first post until you tick them. Set-up can be run later after "Clear everything for this website".');
+
+  await p.tab('settings');
+  const settings = p.panel();
+  assert.match(settings, /<legend>Posting rules<\/legend>/);
+  const html = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  for (const rule of POSTING_RULES) assert.ok(settings.includes(html(rule.title)) && settings.includes(html(rule.text)), `Settings shows "${rule.title}"`);
+  assert.match(settings, /id="rulesStatus">Not ticked yet for this website: the side panel shows them before your first post, or tick here\./);
+  assert.match(settings, /<input type="checkbox" name="rulesAccept" \/> <span>I have read the posting rules and will follow them<\/span>/);
+
+  // Save settings with the tick
+  const values = { salespersonName: 'Sam', dailyCap: '10', rulesAccept: 'on' };
+  const before = globalThis.FormData;
+  globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll() { return []; } has(name) { return name in values; } };
+  try {
+    await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: () => null }, preventDefault() {} });
+  } finally {
+    globalThis.FormData = before;
+  }
+  const at = p.local[k.settings].rulesReadAt;
+  assert.ok(Date.parse(at) > 0, 'the tick is saved as rulesReadAt, the field set-up and the side panel read');
+  await p.tab('settings');
+  assert.match(p.panel(), /id="rulesStatus">You ticked that you will follow them on /);
+  assert.doesNotMatch(p.panel(), /name="rulesAccept"/);
 });

@@ -76,6 +76,7 @@ try {
         dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: '', state: '', zip: '' }, // filled from the website's own address
         priceNote: 'Price includes the $490 doc fee; tax and tags extra.',
         dailyCap: 10,
+        rulesReadAt: new Date().toISOString(), // set-up's posting rules, ticked (the side panel asks first otherwise: test/e2e/panel.e2e.mjs)
         rewrite: { enabled: false, endpoint: '', key: '' },
       },
       devOverrides: {

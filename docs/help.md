@@ -45,7 +45,7 @@ Click the Lot Current icon, then **Settings**. The first line reads "Lot Current
    - **The posting rules**: read them and tick "I have read the posting rules and will follow them".
    - **Terms and privacy**: a short summary of what Lot Current reads and keeps and, in a copy with accounts, what syncs to your dealership's account while you are signed in. While the Terms of Service and the Privacy Policy are being finalised (they are today) the step says so, shows no links or tick, and records nothing. Once they are published, the step shows links to both documents and the tick "I have read and accept the Terms of Service and the Privacy Policy", which you must tick before you can finish; Settings has the same tick. Click **Finish set-up**. Lot Current reads the website once more with your final settings.
    - **Close**. The popup's **Ready to post** tab is where to go next.
-4. **Quit set-up** stops at any step. The popup then offers **Continue set-up**. **Not now** on the banner skips set-up altogether; **Settings** has the same fields.
+4. **Quit set-up** stops at any step. The popup then offers **Continue set-up**. **Not now** on the banner skips set-up altogether; **Settings** has the same fields, the posting rules included. Until the posting rules are ticked for a website (in set-up, in **Settings** or in the side panel), the side panel shows them before your first post there, with the same tick, and posts nothing until you tick it.
 
 ## Scan
 
@@ -61,7 +61,7 @@ Click the Lot Current icon, then **Settings**. The first line reads "Lot Current
 ## Post one car
 
 1. On **Ready to post**, click **Post** next to the car. The side panel opens. If Chrome did not open it, the popup says so: open it from Chrome's menu (Side panel).
-2. The panel re-checks the car on the website: still pre-owned, still on the lot, still priced. If something fails, a red message says why, with a **Back** button.
+2. The first time you post from a website whose posting rules you have not ticked (set-up skipped), the panel shows them first: tick "I have read the posting rules and will follow them" and click **Continue to the post**; **Not now** posts nothing (and pauses a queue). Then the panel re-checks the car on the website: still pre-owned, still on the lot, still priced. If something fails, a red message says why, with a **Back** button.
 3. The review screen:
    - **Description**: written from the website's facts, signed with your name and role, with the VIN. Edit anything you like. **Reset to template** brings the built-in draft back. **Copy** copies it. **Rewrite with Claude** works only when the description writer is on (see below).
    - The checks line: "All checks passed" or "Fix before posting" with the reasons. Every number must be on the website, no banned phrases, the dealership must be named.
@@ -154,6 +154,7 @@ Click **Settings** at the top of the popup. Click **Save settings** at the botto
 - **Price to post**: the website's main price, or the lower second price the website shows (only offered when the website shows one; ask your manager first). **Price note in every description** explains what the price includes. Lot Current suggests wording from the website's price gap but never fills it in for you.
 - **Listing defaults**: **Title status** and **Vehicle condition**, filled in on every listing. "Leave blank" answers them per car on the form.
 - **Safety**: **Posts per day, per salesperson**. See the daily cap below.
+- **Posting rules**: **Read the posting rules** opens them, and the line under it says when you ticked that you will follow them for this website, or offers the tick until you have.
 - **Automatic rescans**: the rescan tick, the desktop notification tick, and **Allow automatic rescans** when the permission has not been granted yet.
 - **Description writer (optional)**: off by default. See below.
 - **Terms and privacy**: today, a note that the Terms of Service and the Privacy Policy are being finalised and can be read and accepted here once they are published. From then on: links to both documents, the date and edition you accepted, and the tick "I have read and accept the Terms of Service and the Privacy Policy" until you have accepted the current edition.
