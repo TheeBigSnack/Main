@@ -6,7 +6,7 @@
 import { ADAPTERS, detectAdapter, unsupportedSiteMessage } from '../adapters/index.js';
 import { assessVehicle } from './classify.js';
 import { makeSnapshot, diffScans } from './rescan.js';
-import { findBoilerplate } from './description.js';
+import { findBoilerplate, MIN_BOILERPLATE_COUNT } from './description.js';
 import { withDefaults } from './settings.js';
 import { storeNames, shortLocation, matchStore } from './normalize.js';
 import { probeSiteInPage } from './scan.js';
@@ -82,13 +82,23 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   diff.takenAt = res.fetchedAt;
   diff.requests = res.requests;
   // Text that repeats across the lot (disclaimers, legal lines) is kept so the
-  // description writer can strip it. A descriptionRaw of null is a car whose
-  // description this scan did not read (an adapter that re-reads only what
-  // may have changed): the lines found before are kept next to what the
-  // descriptions read this time show.
+  // description writer can strip it. A scan that read every car's
+  // description works the lines out again from scratch. Any other scan keeps
+  // the lines saved from the last one and adds a line only when it is on the
+  // share of the whole lot, not of the pages it happened to read:
+  //  - a descriptionRaw of null is a car whose description this scan did not
+  //    read (an adapter that re-reads only what may have changed), so three
+  //    new arrivals sharing a sentence never make it a lot-wide line;
+  //  - a scan whose snapshot is not saved (diff.unreliable, a website
+  //    hiccup) is measured against the lot as last saved, and an empty or
+  //    near-empty answer never wipes the saved lines;
+  //  - fewer descriptions than MIN_BOILERPLATE_COUNT can show no line at
+  //    all, so the saved ones stay.
   const read = vehicles.map((v) => v.descriptionRaw).filter((d) => d !== null);
-  const found = findBoilerplate(read);
-  const boilerplate = read.length < vehicles.length ? [...new Set([...(Array.isArray(savedBoilerplate) ? savedBoilerplate : []), ...found])] : [...found];
+  const saved = Array.isArray(savedBoilerplate) ? savedBoilerplate : [];
+  const whole = read.length === vehicles.length && read.length >= MIN_BOILERPLATE_COUNT && !diff.unreliable;
+  const lot = diff.unreliable ? Math.max(vehicles.length, (diff.counts && diff.counts.previous) || 0) : vehicles.length;
+  const boilerplate = whole ? [...findBoilerplate(read)] : [...new Set([...saved, ...findBoilerplate(read, undefined, undefined, lot)])];
   // Where this lot's photos are hosted: recorded here; the side panel asks
   // Chrome for a car's photo servers from the salesperson's click (src/photoHosts.js).
   const photoOrigins = typeof adapter.photoOrigins === 'function' ? adapter.photoOrigins(res.records) : [];

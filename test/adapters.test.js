@@ -12,8 +12,9 @@ import { probeSiteInPage } from '../extension/src/scan.js';
 import { withDefaults } from '../extension/src/settings.js';
 import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, ROBOTS_TEXT_LIMIT, MAX_FAILED_IN_A_ROW, MAX_ADDRESSES_PER_CAR, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress, oneAddressPerCar } from '../extension/adapters/schemaOrg.js';
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
+import { cleanDescription } from '../extension/src/description.js';
 import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, dealerOnPath, dealerComPath, platformSearch, fakePlatformPage } from './platformSites.js';
-import { fixtures, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage } from './helpers.js';
+import { fixtures, sampleVin, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage } from './helpers.js';
 
 const records = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => ({ ...r, media: { ...r.media, images: ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'] } }));
 
@@ -1235,6 +1236,52 @@ test('scanWithSearch keeps the saved lot-wide lines when a scan did not read eve
   const skim = { ...dealerInspire, normalize: (r) => ({ ...dealerInspire.normalize(r), descriptionRaw: r.vin === records[0].vin ? 'One car.' : null }) };
   const some = await scanWithSearch({ adapter: skim, search: fakeSearch(records), site, settings: withDefaults({}), boilerplate: saved });
   assert.deepEqual(some.boilerplate, saved);
+});
+
+test('a rescan that read only the new arrivals\' pages makes no lot-wide line of a sentence those few share', async () => {
+  // a schema.org lot of 30: the first scan reads every page; the next reads
+  // only the 3 new arrivals, which share one sentence (9% of the lot)
+  const site = { origin: STANDARD_ORIGIN, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = schemaOrg.scanOptions(SERVICE);
+  const cars = standardCars(30);
+  const first = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars, perPage: 30 })), site, settings, options });
+  assert.deepEqual(first.boilerplate, ['Every car gets a 120-point inspection.'], 'the line on every car');
+  const SHARED = 'Rebuilt title after hail damage, fully repaired and inspected.';
+  const arrivals = standardCars(3, { from: 40 });
+  const today = standardSite({ cars: [...cars, ...arrivals], perPage: 40 });
+  for (const c of arrivals) {
+    const got = today.get(STANDARD_ORIGIN + c.path);
+    today.set(STANDARD_ORIGIN + c.path, { ...got, text: got.text.replace('Every car gets a 120-point inspection.', `Every car gets a 120-point inspection.<br>${SHARED}`) });
+  }
+  const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(today), site, settings, prevSnapshot: first.snapshot, options, boilerplate: first.boilerplate });
+  assert.equal(out.vehicles.filter((v) => v.descriptionRaw !== null).length, 3, 'only the new arrivals were read');
+  assert.deepEqual(out.boilerplate, first.boilerplate, 'the saved line stays; the arrivals\' sentence is not lot-wide');
+  const arrival = out.vehicles.find((v) => v.vin === arrivals[0].vin);
+  assert.ok(cleanDescription(arrival.descriptionRaw, new Set(out.boilerplate)).includes(SHARED), 'and it stays in the car\'s description');
+});
+
+test('a scan judged a website hiccup, or one that read too few descriptions, keeps the saved lot-wide lines', async () => {
+  const site = { origin: 'https://x', host: 'x', name: 'Example Motors', title: 't', adapter: 'dealerInspire' };
+  const settings = withDefaults({});
+  const LINE = 'All prices plus tax, title and a dealer fee.';
+  const lot = Array.from({ length: 12 }, (_, i) => ({ ...records[0], vin: sampleVin(i), stock: `S${i}`, description: `A clean car, number ${i}.<br>${LINE}` }));
+  const day1 = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(lot), site, settings });
+  assert.deepEqual(day1.boilerplate, [LINE]);
+  // the website answers with no cars, then with 2 of the 12: a hiccup, whose snapshot is not saved
+  for (const answer of [[], lot.slice(0, 2)]) {
+    const out = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(answer), site, settings, prevSnapshot: day1.snapshot, boilerplate: day1.boilerplate });
+    assert.equal(out.diff.unreliable, true);
+    assert.deepEqual(out.boilerplate, [LINE], `${answer.length} cars back: the saved line stays`);
+  }
+  // a reliable scan of a 2-car lot reads every description but too few to show any line: the saved line stays
+  const small = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(lot.slice(0, 2)), site, settings, boilerplate: [LINE] });
+  assert.equal(small.diff.unreliable, false);
+  assert.deepEqual(small.boilerplate, [LINE]);
+  // a reliable scan that reads the whole lot still works the lines out again (the dealer dropped the line)
+  const plain = lot.map((r, i) => ({ ...r, description: `A clean car, number ${i}.` }));
+  const again = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(plain), site, settings, prevSnapshot: day1.snapshot, boilerplate: day1.boilerplate });
+  assert.deepEqual(again.boilerplate, []);
 });
 
 // ---------- schemaOrg: refusals, look-alike pages, the page limit and the hostile-site limits ----------

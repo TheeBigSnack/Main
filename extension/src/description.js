@@ -39,11 +39,16 @@ export const MIN_BOILERPLATE_COUNT = 3;
 // A segment that repeats across a large share of the current lot's
 // descriptions is boilerplate (a disclaimer, a legal paragraph), not
 // anything specific to one car. Default threshold matches the brief: ~30%,
-// with MIN_BOILERPLATE_COUNT as the floor. Both are re-derived from each
-// website's own lot on every scan; nothing about one lot is kept.
-export function findBoilerplate(allDescriptions, threshold = 0.3, minCount = MIN_BOILERPLATE_COUNT) {
+// with MIN_BOILERPLATE_COUNT as the floor. Both are worked out from each
+// website's own lot; no number from one lot is baked in. The share is of
+// the whole lot: when a scan read only some of the lot's descriptions,
+// `lotSize` is how many cars the lot has, so three new arrivals sharing a
+// sentence are 3 of 33, not 3 of 3 (scanRunner.js keeps the lines saved
+// from the last scan next to what such a scan finds).
+export function findBoilerplate(allDescriptions, threshold = 0.3, minCount = MIN_BOILERPLATE_COUNT, lotSize = 0) {
   const counts = new Map();
-  const total = Array.isArray(allDescriptions) ? allDescriptions.length : 0;
+  const read = Array.isArray(allDescriptions) ? allDescriptions.length : 0;
+  const total = Math.max(read, Number.isFinite(lotSize) ? lotSize : 0);
   for (const raw of allDescriptions || []) {
     for (const seg of new Set(splitSegments(raw))) {
       counts.set(seg, (counts.get(seg) || 0) + 1);
