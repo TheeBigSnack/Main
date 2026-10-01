@@ -246,7 +246,7 @@ test('createInvite and signOut', async () => {
   await storeSession(session(), local);
   const out = fakeFetch([{ status: 204, body: undefined }]);
   assert.deepEqual(await signOut(session(), { url: URL_, anonKey: ANON, fetchImpl: out.fetchImpl, storage: local }), { ok: true });
-  assert.equal(out.calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/logout');
+  assert.equal(out.calls[0].url, 'https://abcdefgh.supabase.co/auth/v1/logout?scope=local', 'this session only: the person stays signed in on their other machines and in the manager view');
   assert.equal(await loadSession(local), null);
   // offline: the stored session goes anyway
   await storeSession(session(), local);

@@ -32,10 +32,12 @@ function element(id) {
     textContent: '',
     innerHTML: '',
     outerHTML: '',
+    value: '',
     disabled: false,
     dataset: {},
+    listeners: {},
     classList: { toggle() {}, add() {}, remove() {} },
-    addEventListener() {},
+    addEventListener(type, fn) { this.listeners[type] = fn; }, // the latest render's handler
     setAttribute() {},
     focus() {},
     scrollIntoView() {},
@@ -48,6 +50,7 @@ function browser(href) {
   const elements = new Map();
   const fetches = [];
   const history = [];
+  const listeners = [];
   const location = {
     get href() { return url.href; },
     get hash() { return url.hash; },
@@ -63,13 +66,22 @@ function browser(href) {
       if (!elements.has(id)) elements.set(id, element(id));
       return elements.get(id);
     },
-    addEventListener() {},
+    addEventListener(type, fn) { if (type === 'click') listeners.push(fn); },
     createElement: () => element(''),
     body: element('body'),
     activeElement: null,
   };
-  return { elements, fetches, history, location, get href() { return url.href; } };
+  // A click on a button the page drew: <button data-action="..." data-...>label</button>
+  const click = (dataset, label = '') => {
+    const btn = { dataset, textContent: label, disabled: false };
+    for (const fn of listeners) fn({ target: { closest: () => btn } });
+    return btn;
+  };
+  return { elements, fetches, history, location, click, get href() { return url.href; } };
 }
+
+// Lets the page's promises run to their end.
+const settle = async (turns = 50) => { for (let i = 0; i < turns; i += 1) await new Promise((r) => setTimeout(r, 0)); };
 
 // A response the way fetch answers.
 const answer = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -84,7 +96,7 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {} } =
     auth: {
       getSession: async () => ({ data: { session }, error: null }),
       onAuthStateChange() {},
-      signOut: async () => ({ error: null }),
+      signOut: async (opts) => { requests.push({ signOut: opts }); return { error: null }; },
       signInWithOtp: async () => ({ error: null }),
     },
     rpc: async (fn) => ({ data: fn === 'list_invites' ? [] : null, error: null }),
@@ -137,7 +149,7 @@ async function openPage(href, { client, fetchImpl } = {}) {
   if (client === undefined) fakeClient();
   copies += 1;
   await import(`${pathToFileURL(join(dir, 'manager.js')).href}?copy=${copies}`);
-  for (let i = 0; i < 50; i += 1) await new Promise((r) => setTimeout(r, 0)); // start() runs to its end
+  await settle(); // start() runs to its end
   return page;
 }
 
@@ -286,4 +298,25 @@ test('nothing flagged, no scan yet, and a removed salesperson\'s cars still up: 
   assert.match(ok, /<p class="empty">No sold car is flagged on a synced listing\. Each salesperson&#39;s extension checks their own listings when it rescans\.<\/p>/);
   assert.ok(!ok.includes('id="unwatched"'));
   assert.ok(readFileSync(join(root, 'docs/help.md'), 'utf8').includes('**Listings nobody\'s extension watches**'), 'docs/help.md names the list as the page labels it');
+});
+
+// ---------- signing out ----------
+
+test('Sign out ends this browser\'s session only, so the person\'s extension and other browsers stay signed in', async () => {
+  const client = fakeClient({
+    session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } },
+    tables: {
+      dealerships: [{ id: 'd1', name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+      memberships: [{ user_id: 'u-manager', dealership_id: 'd1', role: 'manager', name: 'Jamie' }],
+    },
+  });
+  const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
+  assert.equal(page.elements.get('dealer').textContent, 'Example Motors');
+  page.click({ action: 'signout' }, 'Sign out');
+  await settle();
+  const signOuts = client.requests.filter((r) => 'signOut' in r);
+  assert.equal(signOuts.length, 1);
+  assert.deepEqual(signOuts[0].signOut, { scope: 'local' }, 'supabase-js\'s default scope is global: it would end every session the person has');
+  assert.match(main(page), /<h2>Sign in<\/h2>/);
+  assert.equal(status(page), 'Signed out.');
 });

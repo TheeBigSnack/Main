@@ -582,7 +582,8 @@ async function signOut() {
     return viewUnconfigured();
   }
   if (state.supabase) {
-    const { error } = await state.supabase.auth.signOut();
+    // scope local: this browser's session only; the person's extension and other browsers stay signed in
+    const { error } = await state.supabase.auth.signOut({ scope: 'local' });
     if (error) return setStatus(`Couldn't sign out: ${error.message}`, true);
   }
   state.session = null;
