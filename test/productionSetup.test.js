@@ -46,6 +46,18 @@ test('the Supabase workflow runs by hand only, against the committed project, an
   assert.match(supabase, /run: supabase db push --yes\n/, 'the real push answers its own prompt');
 });
 
+// The workflow's leading comment block as one line of text
+const headerOf = (yml) => yml.split('\n').filter((l) => l.startsWith('#')).map((l) => l.replace(/^#\s?/, '')).join(' ').replace(/\s+/g, ' ');
+
+test('the workflow and the doc say a run waits for the owner only once he is a required reviewer', () => {
+  // A run with no required reviewer on the environment starts at once; saying it "waits for the owner's approval" told him a gate existed that did not
+  const header = headerOf(supabase);
+  assert.doesNotMatch(header, /default branch only and waits for the owner's approval/);
+  assert.match(header, /Only that second setting makes a run wait for his approval: without it nothing pauses, and a run starts the moment anyone who can dispatch it does\./);
+  const doc = read('docs/production-setup.md');
+  assert.match(doc, /\*\*Required reviewers\*\*: tick it and add yourself\.[^\n]*Without it nothing waits[^\n]*it is off until one does\.[^\n]*"Waiting for review"/);
+});
+
 test('no workflow input or secret is written straight into a shell script; function names are checked against the four', () => {
   for (const [name, yml] of [['supabase', supabase], ['manager', manager]]) {
     assert.doesNotMatch(runText(yml), /\$\{\{/, `${name}: inputs, vars and secrets reach run: blocks through env only`);

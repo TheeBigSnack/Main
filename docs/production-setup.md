@@ -45,7 +45,7 @@ Why not the alternatives:
 1. In Supabase: your avatar, **Account preferences, Access Tokens**, **Generate new token**, name it `github-deploy`. Copy it.
 2. In GitHub: the repository, **Settings, Environments, New environment**, name it `production`:
    - **Deployment branches and tags**: choose **Selected branches and tags** and add the default branch only.
-   - **Required reviewers**: tick it and add yourself. Every deploy to the real database then waits for your click.
+   - **Required reviewers**: tick it and add yourself. Every deploy to the real database then waits for your click. Without it nothing waits: a run of the Supabase workflow starts the moment anyone who can start it (you, or a session working with your GitHub access) does. Only an admin of the repository can turn it on, and it is off until one does. To check it, start the workflow's **plan** step: the run should stop at "Waiting for review" until you approve it.
    - **Environment secrets**, Add secret: `SUPABASE_ACCESS_TOKEN` = the token from 1; `SUPABASE_DB_PASSWORD` = the database password from step 1.
    - **Environment variables**, Add variable: `SUPABASE_PROJECT_REF` = the 20 lower-case letters and digits between `https://` and `.supabase.co`.
 

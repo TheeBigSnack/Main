@@ -16,9 +16,12 @@
 # project the extension and the manager view talk to.
 #
 # Settings it reads, all on the "production" environment (Settings,
-# Environments, production), which deploys from the default branch only and
-# waits for the owner's approval, so a workflow on another branch cannot
-# read them:
+# Environments, production). docs/production-setup.md, step 2, limits that
+# environment to the default branch, so a workflow on another branch cannot
+# read them, and has the owner add himself under Required reviewers. Only
+# that second setting makes a run wait for his approval: without it nothing
+# pauses, and a run starts the moment anyone who can dispatch it does.
+# The settings:
 #   secrets  SUPABASE_ACCESS_TOKEN  a personal access token (supabase.com, Account, Access tokens)
 #            SUPABASE_DB_PASSWORD   the database password chosen when the project was created
 #   variable SUPABASE_PROJECT_REF   the 20-character ref in the project URL (not secret)
