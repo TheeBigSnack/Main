@@ -128,6 +128,41 @@ test('guardrails catch banned phrases, fake one-owner claims, a missing dealer n
   assert.ok(!codes(base + '\nHEMI V8 with 4WD and the SRT package.').includes('all-caps'));
 });
 
+test('every description names the salesperson\'s role: the title from Settings (or the default), in any case or spacing', () => {
+  const v = vehicle('usedNoCarfax');
+  const dealer = { name: 'Example Auto Outlet', city: 'Springfield' };
+  const me = { name: 'Alex', title: 'internet sales manager' };
+  const c = { vehicle: v, dealer, salesperson: me, priceNote: '', price: v.price };
+  const text = buildTemplateDescription(c);
+  assert.match(text, /I'm Alex, internet sales manager at Example Auto Outlet\./);
+  assert.deepEqual(runGuardrails(text, c).problems, []);
+  const codes = (t, ctx2 = c) => runGuardrails(t, ctx2).problems.map((p) => p.code);
+  // the dealership is named but the role is gone: refused, with the role named in the reason
+  const noRole = text.replace("I'm Alex, internet sales manager at Example Auto Outlet.", 'Ask for Alex at Example Auto Outlet.');
+  assert.deepEqual(codes(noRole), ['no-role']);
+  assert.equal(runGuardrails(noRole, c).problems[0].text, "Doesn't give your role (internet sales manager)");
+  // another role than the salesperson's is not theirs
+  assert.deepEqual(codes(text, { ...c, salesperson: { name: 'Alex', title: 'finance manager' } }), ['no-role']);
+  // case and spacing do not matter
+  assert.deepEqual(codes(text.replace('internet sales manager', 'Internet  Sales\nManager')), []);
+  // with no title set, the default one is the role the template writes and the check asks for
+  const plain = { ...c, salesperson: { name: 'Alex', title: '' } };
+  assert.deepEqual(codes(buildTemplateDescription(plain), plain), []);
+  assert.deepEqual(codes(noRole, { ...c, salesperson: {} }), ['no-role']);
+});
+
+test('with no dealership name set, the template writes no empty "at" and every description fails until the name is set', () => {
+  const v = vehicle('usedNoCarfax', { features: ['Bluetooth', 'Backup Camera', 'Heated Seats'] });
+  const c = { vehicle: v, dealer: { name: '  ' }, salesperson: { name: 'Alex', title: 'sales consultant' }, priceNote: '', price: v.price };
+  const text = buildTemplateDescription(c);
+  assert.doesNotMatch(text, / at \./);
+  assert.match(text, /I'm Alex, sales consultant\./);
+  const g = runGuardrails(text, c);
+  assert.equal(g.ok, false);
+  assert.deepEqual(g.problems.filter((p) => p.code === 'no-dealer').map((p) => p.text), ["The dealership's name isn't set; add it in Settings"]);
+  assert.ok(runGuardrails(text, { ...c, dealer: {} }).problems.some((p) => p.code === 'no-dealer'), 'no dealer at all is the same');
+});
+
 test('a plain-English problem list comes back for the side panel', () => {
   const v = vehicle('usedNormal');
   const g = runGuardrails('Nice truck for 9,999.', ctx(v));

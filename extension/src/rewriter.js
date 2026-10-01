@@ -89,11 +89,13 @@ export async function rewriteWithBackend({ endpoint, key = '', facts, fetchImpl 
 export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, fetchImpl }) {
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
   const closingLine = usableClosingLine(salesperson.closingLine);
-  const ctx = { vehicle, dealer, priceNote, price, closingLine };
+  const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine };
   const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative, highlights });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };
   const rw = settings.rewrite || {};
   if (!rw.enabled || !rw.endpoint) return fallback;
+  // no draft can name a dealership that has no name: the service is not asked (and not paid)
+  if (!String(dealer.name || '').trim()) return { ...fallback, note: "The dealership's name isn't set in Settings, so the rewrite service wasn't asked." };
   const facts = { ...rewriteFacts({ vehicle, dealer, salesperson, priceNote, narrative, highlights }), ...(origin ? { origin: String(origin) } : {}) };
   try {
     const r = await rewriteWithBackend({ endpoint: rw.endpoint, key: rw.key, facts, fetchImpl });

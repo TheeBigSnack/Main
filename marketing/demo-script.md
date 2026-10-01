@@ -27,7 +27,7 @@ Say: "It only lets through cars your website itself says are pre-owned, at this 
 
 Click **Post** on the chosen car. The side panel opens.
 
-Show, in order: the fresh re-check on the website; the description with the VIN line and the sign-off "I'm [name], [role] at [dealership]"; **All checks passed** (every number is on the website, no banned phrases); the table of what will be filled; the VIN check; the dealership's defaults for condition and title.
+Show, in order: the fresh re-check on the website; the description with the VIN line and the sign-off "I'm [name], [role] at [dealership]"; **All checks passed** (every number is on the website, no banned phrases, the dealership and the role named); the table of what will be filled; the VIN check; the dealership's defaults for condition and title.
 
 Click **Open the Marketplace form**. Watch it fill. Point at the panel's **Filled in** list: "That's what the form shows, read back after filling, not what we sent."
 

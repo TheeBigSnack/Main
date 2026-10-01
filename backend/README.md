@@ -24,7 +24,7 @@ The extension works without it: descriptions then come from the built-in templat
    You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`.
 4. In the extension: click the Lot Current icon, **Settings**, **Description writer**. Tick "Use the Lot Current rewrite service", enter `http://localhost:8787` as the address and your `REWRITE_KEY` as the key. Save.
 
-From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, banned phrases, dealer name, length); a draft that fails is regenerated once, then the template is used.
+From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, banned phrases, the dealership's name and the salesperson's role, length); a draft that fails is regenerated once, then the template is used.
 
 ## Colors from the photos
 

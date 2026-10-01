@@ -93,6 +93,7 @@ function guardrailContext(facts) {
       carfaxUrl: facts.carfax ? 'yes' : null,
     },
     dealer: facts.dealer || {},
+    salesperson: facts.salesperson || {},
     priceNote: facts.priceNote || '',
   };
 }

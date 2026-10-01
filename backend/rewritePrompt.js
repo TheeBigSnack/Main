@@ -28,7 +28,8 @@ function signOff(facts) {
   const name = String(who.name || '').trim();
   const title = String(who.title || 'sales consultant').trim();
   const dealer = String((facts && facts.dealer && facts.dealer.name) || '').trim();
-  return name ? `I'm ${name}, ${title} at ${dealer}.` : `${capitalize(title)} at ${dealer}.`;
+  const at = dealer ? ` at ${dealer}` : '';
+  return name ? `I'm ${name}, ${title}${at}.` : `${capitalize(title)}${at}.`;
 }
 
 export function buildRewritePrompt(facts, fixes = []) {

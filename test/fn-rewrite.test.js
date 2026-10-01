@@ -233,7 +233,7 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const r = await rewrite(handler, TOKEN.u1);
   assert.equal(r.status, 200);
   assert.deepEqual([r.body.ok, r.body.text, r.body.error], [false, BAD, 'the draft failed the checks twice']);
-  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'no-dealer', 'too-short', 'unknown-number']);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'no-dealer', 'no-role', 'too-short', 'unknown-number']);
   assert.equal(r.body.costUsd, 0.037, '$0.02 and $0.017');
   const [first, second] = requests();
   assert.doesNotMatch(first.json.messages[0].content, /previous draft failed/);
@@ -244,6 +244,24 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const d = await generateDescription({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, settings: { rewrite: { enabled: true, endpoint: ENDPOINT, key: TOKEN.u1 } }, origin: ORIGIN, fetchImpl: functionsFetch({ rewrite: handler }) });
   assert.equal(d.source, 'template');
   assert.match(d.note, /the draft failed the checks twice/);
+});
+
+test('rewrite: a draft that names the dealership but not the salesperson\'s role is refused and asked for again; their own title is the role checked', async () => {
+  world();
+  const noRole = GOOD.replace("I'm Sam, sales consultant at Example Motors.", 'Ask for Sam at Example Motors.');
+  assert.doesNotMatch(noRole, /sales consultant/);
+  anthropic(says(noRole), says(noRole));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code), ['no-role']);
+  const fixes = requests()[1].json.messages[0].content.split('Your previous draft failed these checks')[1] || '';
+  assert.match(fixes, /Doesn't give your role \(sales consultant\)/, 'the second prompt asks for the role');
+  // the salesperson's own title is the role checked
+  world();
+  anthropic(says(GOOD));
+  const manager = await rewrite(handler, TOKEN.u1, { ...FACTS, salesperson: { name: 'Sam', title: 'sales manager' } });
+  assert.deepEqual(manager.body.guardrails.problems.map((p) => p.code), ['no-role']);
 });
 
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {
