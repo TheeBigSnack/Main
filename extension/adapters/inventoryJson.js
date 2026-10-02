@@ -604,6 +604,10 @@ export const MAX_INVENTORY_PAGES = 30;
 // many cars at once is more likely a website hiccup than a sales day, and
 // with a fixed gap between page reads the check stays short.
 export const MAX_CONFIRM_PAGES = 12;
+// Missing cars' pages failing in a row (a 500, an answer from another
+// website) before the check stops for this scan: a website having a bad
+// day is not read further, and the rest wait unconfirmed.
+export const MAX_FAILED_IN_A_ROW = 3;
 
 // The longest fixed gap one scan keeps between two car-page reads. A website
 // whose robots.txt asks for more gets one car page per scan instead, so
@@ -744,10 +748,14 @@ export async function scanInventory(search, options, platform) {
   // Any other readable answer, such as a page that still shows the car (a
   // "sold" banner, or a car only hidden from the list), and a car with no
   // known page or past this scan's limit, is left unconfirmed: the rescan
-  // lists it as missing but not confirmed gone. A server error, a refusal
-  // or a failed request sets confirm.error, and the rescan then marks
-  // nothing gone at all.
+  // lists it as missing but not confirmed gone. A page that fails on its own
+  // (a server error, an answer from another website) leaves only that car
+  // unconfirmed, listed in confirm.unchecked with the reason; after
+  // MAX_FAILED_IN_A_ROW such pages in a row the check stops and the rest
+  // wait for the next scan. A refusal (401, 403, 429, 503) or a request that
+  // fails outright sets confirm.error, and the rescan then marks nothing gone.
   const confirm = { checked: [], notFound: [], error: null };
+  const unchecked = [];
   const pageOf = (vin) => {
     const href = confirmUrls && confirmUrls[vin];
     try {
@@ -790,8 +798,9 @@ export async function scanInventory(search, options, platform) {
   }
   if (gap > MAX_PAGE_GAP_MS) pageLimit = Math.min(pageLimit, 1);
   let pagesRead = 0;
+  let failedInARow = 0;
   for (const vin of toCheck) {
-    if (pagesRead >= pageLimit) break;
+    if (pagesRead >= pageLimit || failedInARow >= MAX_FAILED_IN_A_ROW) break;
     const url = pageOf(vin);
     let answer;
     try {
@@ -802,16 +811,21 @@ export async function scanInventory(search, options, platform) {
       confirm.error = String((e && e.message) || e);
       break;
     }
-    confirm.checked.push(vin);
-    const sameOrigin = !answer || !answer.finalUrl || originOf(answer.finalUrl) === origin;
-    if (answer && (answer.status === 404 || answer.status === 410) && sameOrigin && !answer.redirected) {
-      confirm.notFound.push(vin);
-      continue;
+    if (answer && REFUSED[answer.status]) {
+      confirm.error = `the page of ${vin}: ${problemWith(answer, origin)}`;
+      break;
     }
-    if (answer && (answer.ok || answer.status === 404 || answer.status === 410) && sameOrigin) continue; // readable, but not a clear "gone"
-    confirm.error = confirm.error || `the page of ${vin}: ${problemWith(answer, origin) || 'no answer'}`;
-    if (answer && REFUSED[answer.status]) break;
+    const sameOrigin = !answer || !answer.finalUrl || originOf(answer.finalUrl) === origin;
+    if (answer && (answer.ok || answer.status === 404 || answer.status === 410) && sameOrigin) {
+      failedInARow = 0;
+      confirm.checked.push(vin);
+      if ((answer.status === 404 || answer.status === 410) && !answer.redirected) confirm.notFound.push(vin);
+      continue; // anything else readable is not a clear "gone"
+    }
+    failedInARow += 1;
+    unchecked.push({ vin, reason: problemWith(answer, origin) || 'no answer' });
   }
+  if (unchecked.length) confirm.unchecked = unchecked;
 
   return { ok: true, fetchedAt: new Date().toISOString(), total: total ?? byVin.size, complete, requests, records: [...byVin.values()], confirm };
 }
@@ -843,14 +857,18 @@ export function pageExtras(html, pageUrl, vin, platform) {
 /**
  * The adapter's getDetails(): the car from the list (any car the list
  * gives), then its own page for every photo and its description. A car the
- * list doesn't have is gone (record null): the side panel then refuses it.
+ * list doesn't have gets record null, with the list read's `complete`: true
+ * when the whole list was read (the car is gone), false when the read
+ * stopped early (a later page failed or repeated), so it is not proof.
  */
 export async function detailsFor(search, vin, options, platform) {
   const wanted = String(vin || '').toUpperCase();
   const res = await scanInventory(search, { ...options, confirmVins: [] }, platform);
   if (!res.ok) return { ok: false, message: res.message };
   const found = res.records.find((r) => vinIn(r.card) === wanted);
-  if (!found) return { ok: true, record: null, fetchedAt: res.fetchedAt };
+  // complete: false says the list read stopped early, so a car not found may
+  // be on a page that was not read
+  if (!found) return { ok: true, record: null, complete: res.complete, fetchedAt: res.fetchedAt };
   const v = normalizeInventoryRecord(found.card, { origin: found.origin });
   const href = (v && v.url) || options.url;
   let page = null;

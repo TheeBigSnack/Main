@@ -12,7 +12,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import {
   DEFAULTS, parseArgs, hostDir, parseRobots, robotsAllows, robotsVerdict, metaGenerator, assetHosts, findVins,
   jsonLdSummary, jsonLdExcerpt, microdataTypes, carLinks, pickCarPages, paginationShape, pageAnatomy, photoHosts,
-  urlPattern, jsonEndpoint, scrub, botSigns, fingerprint, capScanLimits, surveyHostPermissions, lotSyncReading, verdictFor,
+  urlPattern, jsonEndpoint, scrub, botSigns, fingerprint, capScanLimits, capInventoryLimits, surveyHostPermissions, lotSyncReading, verdictFor,
   renderReportMd, renderSummaryMd, EXCERPT_LIMIT,
 } from '../scripts/survey-lib.mjs';
 import { vinCheckDigit } from '../extension/src/vin.js';
@@ -307,6 +307,33 @@ test('lotSyncReading counts what the scan stored and summarises the service with
   assert.equal(r.service.searchHost, 'search.example.test');
   assert.ok(!JSON.stringify(r).includes('secret-value'), 'never the key itself');
   assert.equal(lotSyncReading({}).carCount, 0);
+});
+
+test("capInventoryLimits lowers the inventory-data reader's limits in the survey's copy, never raises them, and fails loudly if they are renamed", () => {
+  const src = read('../extension/adapters/inventoryJson.js');
+  const out = capInventoryLimits(src, { listPages: 5, carPages: 10 });
+  assert.match(out, /export const MAX_INVENTORY_PAGES = 5;/);
+  assert.match(out, /export const MAX_CONFIRM_PAGES = 10;/);
+  assert.equal(out.length, src.length - 1, 'nothing else changed (30 -> 5 is one digit shorter, 12 -> 10 the same length)');
+  const high = capInventoryLimits(src, { listPages: 50, carPages: 50 });
+  assert.match(high, /export const MAX_INVENTORY_PAGES = 30;/, 'a cap above the shipped limit leaves it');
+  assert.match(high, /export const MAX_CONFIRM_PAGES = 12;/);
+  assert.throws(() => capInventoryLimits('export const MAX_CONFIRM_PAGES = 1;', { listPages: 1, carPages: 1 }), /inventoryJson\.js has no .*MAX_INVENTORY_PAGES/);
+  const survey = read('../scripts/survey.mjs');
+  assert.match(survey, /capInventoryLimits\(readFileSync\(inventoryPath/, "the survey's copy of the extension is capped");
+});
+
+test("verdictFor: a DealerOn or Dealer.com list cut short by the survey's own list-page cap is a note, a list that stopped sooner is a gap", () => {
+  const base = { list: { server: { carLinks: 0 }, rendered: { carLinks: 12 } }, limits: { scan: { listPages: 5, sitemaps: 2, carPages: 10 } } };
+  const ok = { attempted: true, ok: true, adapter: 'dealerOn', adapterName: 'DealerOn', carCount: 60, withPrice: 60, withMileage: 60, withPhotos: 60, requests: 5, warnings: ['The website returned 60 of 124 cars.'] };
+  const capped = verdictFor({ ...base, lotSync: ok });
+  assert.equal(capped.verdict, 'reads it');
+  assert.match(capped.notes.join(), /survey's own cap of 5 list pages/);
+  const stopped = verdictFor({ ...base, lotSync: { ...ok, carCount: 24, withPrice: 24, withMileage: 24, withPhotos: 24, requests: 2, warnings: ['The website returned 24 of 124 cars.'] } });
+  assert.equal(stopped.verdict, 'partly', 'two list pages of five: the reader stopped, not the cap');
+  assert.match(stopped.gaps.join(), /24 of 124/);
+  const standard = verdictFor({ ...base, list: { server: { carLinks: 12 }, rendered: { carLinks: 12 } }, carPagesSummary: { read: 2, withVehicleJsonLd: 2, withVehicleMicrodata: 0 }, lotSync: { ...ok, adapter: 'schemaOrg' } });
+  assert.equal(standard.verdict, 'partly', "the standard-data reader's list is not capped this way");
 });
 
 test('verdictFor: reads it, partly, doesn\'t read it, and not surveyed, each with its reason', () => {

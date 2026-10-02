@@ -683,16 +683,31 @@ export function fingerprint({ url, html = '', hosts = [], globals = [], generato
 // ---------- the survey's copy of the extension ----------
 
 /**
- * The adapter's scan limits, lowered in the survey's own temporary copy of
- * extension/adapters/schemaOrg.js so one survey reads a handful of pages.
- * Throws when a constant is not found, so a rename can't silently turn the cap off.
+ * The standard-data adapter's scan limits, lowered in the survey's own
+ * temporary copy of extension/adapters/schemaOrg.js so one survey reads a
+ * handful of pages. Throws when a constant is not found, so a rename can't
+ * silently turn the cap off.
  */
 export function capScanLimits(source, { carPages, listPages, sitemaps }) {
+  return capConstants(source, 'schemaOrg.js', [['MAX_CAR_PAGES', carPages], ['MAX_LIST_PAGES', listPages], ['MAX_SITEMAPS', sitemaps]]);
+}
+
+/**
+ * The same for the inventory-data reader behind the DealerOn and Dealer.com
+ * adapters (extension/adapters/inventoryJson.js): its list pages and the
+ * missing cars it checks at their own pages. A cap never raises a limit.
+ */
+export function capInventoryLimits(source, { carPages, listPages }) {
+  return capConstants(source, 'inventoryJson.js', [['MAX_INVENTORY_PAGES', listPages], ['MAX_CONFIRM_PAGES', carPages]]);
+}
+
+function capConstants(source, file, pairs) {
   let out = String(source);
-  for (const [name, n] of [['MAX_CAR_PAGES', carPages], ['MAX_LIST_PAGES', listPages], ['MAX_SITEMAPS', sitemaps]]) {
-    const re = new RegExp('export const ' + name + ' = \\d+;');
-    if (!re.test(out)) throw new Error(`schemaOrg.js has no "export const ${name} = <number>;" to cap`);
-    out = out.replace(re, `export const ${name} = ${Number(n)};`);
+  for (const [name, n] of pairs) {
+    const re = new RegExp('export const ' + name + ' = (\\d+);');
+    const m = re.exec(out);
+    if (!m) throw new Error(`${file} has no "export const ${name} = <number>;" to cap`);
+    out = out.replace(re, `export const ${name} = ${Math.min(Number(m[1]), Number(n))};`);
   }
   return out;
 }
@@ -778,8 +793,14 @@ export function verdictFor(report) {
     if (missing > 0 && mostOf(missing, n)) gaps.push(`${missing} of ${n} cars have no ${what} in what Lot Current read`);
     else if (missing > 0) notes.push(`${missing} of ${n} cars have no ${what} in what Lot Current read (the website may show none for them; compare a car page)`);
   }
+  // The inventory-data readers (DealerOn, Dealer.com) read the list page by
+  // page: a scan that used every list page the survey's cap allows and still
+  // fell short was stopped by the cap, not by the reader.
+  const listCap = r.limits && r.limits.scan ? Number(r.limits.scan.listPages) : 0;
+  const cappedList = (ls.adapter === 'dealerOn' || ls.adapter === 'dealerCom') && listCap > 0 && Number(ls.requests) >= listCap;
   for (const w of ls.warnings || []) {
     if (/more car pages than one scan reads/i.test(w)) notes.push("the survey's own cap on car pages left some for a later scan (not a gap in Lot Current)");
+    else if (cappedList && /^The website returned \d+ of \d+ cars\./.test(w)) notes.push(`the survey's own cap of ${listCap} list pages left the rest of the list unread (not a gap in Lot Current)`);
     else gaps.push('warning: ' + w);
   }
   if (ls.adapter === 'schemaOrg' && scriptsOnly) {

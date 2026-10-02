@@ -43,8 +43,9 @@ export const PAGE_PARAM = 'start';
 
 // Answers on a Dealer.com page: one that has asked its website for its
 // inventory data (a getInventory address), carries the page's DDC object,
-// loads files from dealer.com, is on a dealer.com address, or says "Website
-// by Dealer.com". The inventory address is the first such request the page
+// loads files from dealer.com, or is on a dealer.com address. A "Website by
+// Dealer.com" line alone is not enough: any page can say it. The inventory
+// address is the first such request the page
 // made (null on a page that made none, such as a car's page: the scan then
 // says to open the used inventory page).
 export function probeInPage() {
@@ -73,9 +74,7 @@ export function probeInPage() {
   for (const el of document.querySelectorAll('script[src], link[href]')) {
     if (/(^|\.)dealer\.com$/i.test(hostOf(el.src || el.href || (el.getAttribute && (el.getAttribute('src') || el.getAttribute('href')))))) fromDealerCom = true;
   }
-  const text = String((document.body && document.body.innerText) || '');
-  const credit = /(?:website|powered|site)\s+by\s+dealer\.com\b/i.test(text);
-  if (!inventoryUrl && !ddc && !fromDealerCom && !credit) return null;
+  if (!inventoryUrl && !ddc && !fromDealerCom) return null;
   const here = new URL(document.URL || origin);
   here.hash = '';
   return { kind: 'dealerCom', origin, inventoryUrl, listUrl: here.href };

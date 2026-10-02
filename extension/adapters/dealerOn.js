@@ -34,7 +34,10 @@ export const PAGE_PARAM = 'pt';
 
 // Answers on a DealerOn page: one that has asked its website for the
 // Cosmos list data, loads scripts from dealeron.com, is on a dealeron.com
-// address, or says DealerOn in its copyright line. The inventory address
+// address, or says DealerOn in its copyright line and also loads one of
+// DealerOn's own files from the website itself (a /vhcliaa/ path, as the
+// Cosmos list's files and data use, or dealeron-js.aspx). A credit line
+// alone is not enough: any page can name DealerOn. The inventory address
 // is the first list request the page made (null on a page that made none,
 // such as a car's page: the scan then says to open the used inventory page).
 export function probeInPage() {
@@ -44,12 +47,23 @@ export function probeInPage() {
   const hostOf = (href) => {
     try { return new URL(String(href || ''), origin).hostname; } catch (e) { return ''; }
   };
+  const OWN_FILE = /\/vhcliaa\/|\/dealeron-js\.aspx$/i;
+  const ownFile = (href) => {
+    try {
+      const u = new URL(String(href || ''), origin);
+      return u.origin === origin && OWN_FILE.test(u.pathname);
+    } catch (e) {
+      return false;
+    }
+  };
   let inventoryUrl = null;
+  let ownFiles = false;
   try {
     const entries = typeof performance !== 'undefined' && performance && typeof performance.getEntriesByType === 'function' ? performance.getEntriesByType('resource') : [];
     for (const e of entries) {
       let u;
       try { u = new URL(String(e && e.name), origin); } catch (err) { continue; }
+      if (ownFile(u.href)) ownFiles = true;
       if (u.origin === origin && LIST.test(u.pathname)) {
         inventoryUrl = u.href;
         break;
@@ -60,11 +74,13 @@ export function probeInPage() {
   }
   let fromDealerOn = /(^|\.)dealeron\.com$/i.test(String(location.hostname || ''));
   for (const el of document.querySelectorAll('script[src], link[href]')) {
-    if (/(^|\.)dealeron\.com$/i.test(hostOf(el.src || el.href || (el.getAttribute && (el.getAttribute('src') || el.getAttribute('href')))))) fromDealerOn = true;
+    const href = el.src || el.href || (el.getAttribute && (el.getAttribute('src') || el.getAttribute('href')));
+    if (/(^|\.)dealeron\.com$/i.test(hostOf(href))) fromDealerOn = true;
+    if (ownFile(href)) ownFiles = true;
   }
   const text = String((document.body && document.body.innerText) || '');
   const credit = /(?:©|copyright|website|powered|site)[^\n]{0,80}\bdealeron\b/i.test(text);
-  if (!inventoryUrl && !fromDealerOn && !credit) return null;
+  if (!inventoryUrl && !fromDealerOn && !(credit && ownFiles)) return null;
   const here = new URL(document.URL || origin);
   here.hash = '';
   return { kind: 'dealerOn', origin, inventoryUrl, listUrl: here.href };
