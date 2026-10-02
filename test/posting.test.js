@@ -752,3 +752,29 @@ test('the mock Marketplace logs every Mark as sold, Delete and Update, and the f
   assert.match(upkeep, /listingActions\(\), \[\], 'the box is filled and nothing is saved: Update waits for the person'\);\s*assert\.deepEqual\(await listingState\(\), INITIAL_LISTINGS\);\s*await listing\.click\('#update'\); \/\/ the person saves/);
   assert.match(upkeep, /listingActions\(\), \['save 515151', 'sold 434343', 'sold 424242'\], "only the person's clicks, nothing later"\);/);
 });
+
+// Never the real facebook.com in tests: every end-to-end flow's copy of the
+// extension may script only the local mock servers, and the flow's browser
+// refuses any Facebook address, failing the flow if one was asked for (a
+// test override of the form map that did not apply, say).
+test('every end-to-end flow scripts only the local mocks and refuses the real Facebook', async () => {
+  const { FACEBOOK_ADDRESS } = await import('./e2e/noFacebook.mjs');
+  for (const url of ['https://www.facebook.com/marketplace/create/vehicle', 'https://facebook.com/', 'http://m.facebook.com/x', 'https://www.facebook.com:443/marketplace/you/selling', 'https://scontent.xx.fbcdn.net/v/photo.jpg', 'https://fb.com', 'https://www.messenger.com/t/1']) {
+    assert.match(url, FACEBOOK_ADDRESS, url);
+  }
+  for (const url of ['http://127.0.0.1:5555/marketplace/create/vehicle', 'https://www.example-dealer.test/used-vehicles/', 'https://notfacebook.com/', 'https://www.example.test/?next=https://www.facebook.com/', 'https://facebook.com.example.test/']) {
+    assert.doesNotMatch(url, FACEBOOK_ADDRESS, url);
+  }
+  const dir = new URL('./e2e/', import.meta.url);
+  const flows = readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs'));
+  assert.ok(flows.length >= 8, 'the flows are found');
+  for (const name of flows) {
+    const src = readFileSync(new URL(name, dir), 'utf8');
+    if (!/launchPersistentContext\(/.test(src)) continue;
+    const perms = [...src.matchAll(/manifest\.host_permissions = (\[[^\]]*\]);/g)].map((m) => m[1]);
+    assert.deepEqual(perms, ["['http://127.0.0.1/*']"], `${name}: the extension copy may script only the local mocks`);
+    assert.match(src, /import \{ blockFacebook \} from '\.\/noFacebook\.mjs';/, `${name}: imports the Facebook block`);
+    assert.match(src, /launchPersistentContext\([^;]*?\}\);\nconst facebook = await blockFacebook\(context\);/, `${name}: blocks Facebook before anything opens`);
+    assert.match(src, /facebook\.assertNone\(\);\s*console\.log\('[^']*E2E passed/, `${name}: fails if Facebook was asked for`);
+  }
+});

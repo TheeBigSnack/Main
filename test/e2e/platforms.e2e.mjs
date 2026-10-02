@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockPlatformSite, PLATFORM_LOT, DEALER_NAMES } from './mock-platform-sites.mjs';
 import { startMockMarketplace } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -48,6 +49,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const [sold, dropped, ...rest] = PLATFORM_LOT;
 const lowMiles = PLATFORM_LOT[PLATFORM_LOT.length - 1];
@@ -214,6 +216,7 @@ try {
   assert.equal(await publishCount(), '1', "only the person's one click");
   assert.equal(rest.length > 0, true);
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('DealerOn and Dealer.com E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   for (const [name, p] of [['Panel', panelRef], ['Popup', popupRef]]) {

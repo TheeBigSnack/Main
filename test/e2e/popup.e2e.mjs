@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -39,6 +40,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 640 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const errors = [];
 let popup;
@@ -288,6 +290,7 @@ try {
   assert.match(await popup.textContent('#status'), /Open your dealership's website/);
 
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   // Say what the popup was showing, so a failure is diagnosable from the log.

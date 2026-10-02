@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -46,6 +47,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 520, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const errors = [];
 const watch = (p) => {
@@ -285,6 +287,7 @@ try {
 
   assert.equal(await publishCount(), '1', 'still only the person\'s one click, and no listing marked sold, deleted or edited since');
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('Panel E2E passed. Screenshots in test/e2e/screenshots/');
 } finally {
   await context.close();

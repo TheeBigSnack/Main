@@ -20,6 +20,7 @@ import { startMockSite } from './mock-dealer-site.mjs';
 import { LEGAL, legalHosted } from '../../extension/src/legalLinks.js';
 import { wizardSteps } from '../../extension/src/wizardSteps.js';
 import { accountsConfigured } from '../../extension/src/accountConfig.js';
+import { blockFacebook } from './noFacebook.mjs';
 
 // The step numbers come from the wizard's own list, so filling in the
 // account config (supabase/README.md step 6) adds the Account step here too.
@@ -52,6 +53,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const errors = [];
 let panelRef = null;
@@ -235,6 +237,7 @@ try {
   await panel.close();
 
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('Wizard E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   if (panelRef && !panelRef.isClosed()) {
