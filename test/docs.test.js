@@ -634,6 +634,8 @@ test('every text that says what Lot Current does on its own names the upload a s
   assert.ok(step.length > 100, "wizard.js's permission step moved: update this test");
   assert.match(step, SAYS_SYNC, 'the set-up permission step does not say the rescan sends its results while signed in');
   assert.doesNotMatch(wizard, ONLY_READS, 'set-up says the background job only reads the website');
+  // the help doc's list of what leaves the browser includes the unattended rescan and its sync, so it is not "only when you act"
+  for (const rel of TEXTS) assert.doesNotMatch(read(rel), /only when you act/i, `${rel} says data leaves the browser only when the person acts, but an allowed rescan reads the website and syncs on its own`);
 });
 
 // The screenshot captions, README and the help doc once said the numbers were
