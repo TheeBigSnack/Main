@@ -42,7 +42,7 @@ Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
 ### Several cars at once (the queue)
 
-On **Ready to post**, tick the cars (or **Select the next N**, which ticks the first N in the order shown, after the search box; a tick stays while you search for the next car, and **Post N cars** counts every ticked car) and click **Post N cars** (the button reads **Post selected** until you tick); on **To do**, **Queue all ready arrivals** does the same for new arrivals. The side panel then takes them one at a time: it re-checks the car, writes the description and, when every check passes, opens and fills the Marketplace form straight away (a car with a warning stops at the review screen so you see it). You check the form and click **Publish**; the panel notices the listing, records it and loads the next car. Prefer drafts? Click Facebook's **Save draft** instead, then **Saved as draft, next car** in the panel; the car shows as "Draft on Facebook" on the Ready tab until you publish it there and mark it posted. **Skip**, **Pause** and **Stop** are always in the panel's queue bar, the queue survives closing the panel, and it can't be longer than the day's remaining cap (N in **Select the next N** is what is left today); at the cap the tick boxes and Post buttons go away until tomorrow.
+On **Ready to post**, tick the cars (or **Select the next N**, which ticks the first N in the order shown, after the search box; a tick stays while you search for the next car, and **Post N cars** counts every ticked car) and click **Post N cars** (the button reads **Post selected** until you tick); on **To do**, **Queue all N ready arrivals** (there when more than one new arrival is ready) does the same for new arrivals. The side panel then takes them one at a time: it re-checks the car, writes the description and, when every check passes, opens and fills the Marketplace form straight away (a car with a warning stops at the review screen so you see it). You check the form and click **Publish**; the panel notices the listing, records it and loads the next car. Prefer drafts? Click Facebook's **Save draft** instead, then **Saved as draft, next car** in the panel; the car shows as "Draft on Facebook" on the Ready tab until you publish it there and mark it posted. **Skip**, **Pause** and **Stop** are always in the panel's queue bar, the queue survives closing the panel, and it can't be longer than the day's remaining cap (N in **Select the next N** is what is left today); at the cap the tick boxes and Post buttons go away until tomorrow.
 
 Facebook sometimes opens the create-listing page with a saved draft or an unfinished listing already in it (another car). Lot Current notices, replaces every field it manages, reads each one back and reports what the form actually shows, and puts a red warning in the panel so you remove that car's photos or discard the draft before publishing.
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1229 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1230 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

@@ -91,7 +91,7 @@ First run on a new machine: on the review screen, **Open the form and check fiel
 ## Post several (the queue)
 
 - On **Ready to post**, tick the cars you want, or tick **Select the next N** to take the first N in the order shown (after the search box, if you typed in it); the hint next to it says "Ticks the next N in this order". A tick stays while you search for the next car (the hint says how many ticked cars the search box is hiding), **Post N cars** counts every ticked car, and the queue takes them all in the order shown. The button reads **Post selected** until you tick, then **Post N cars**. Click it.
-- On **To do**, **Queue all N ready arrivals** queues the new arrivals that are ready.
+- On **To do**, **Queue all N ready arrivals** queues the new arrivals that are ready. It is there when more than one is ready; a single one has its own **Post** button.
 - In the side panel's own **Ready to post** list, **Post the next N** queues the first N cars in the order shown (after the search box), skipping drafts, never more than the day's remaining cap.
 - A queued car that was marked as posted meanwhile (from the list, the popup or a colleague's computer) is skipped, with a line saying so; it never gets a second form.
 - The side panel takes the cars one at a time. A car that passes every check opens and fills the Marketplace form straight away. A car with a warning (including one you took down while the website still listed it) stops at the review screen so you see it. So does a car whose photos sit on a server Chrome has not been asked about yet: Chrome only asks when you click, so click **Open the Marketplace form**.

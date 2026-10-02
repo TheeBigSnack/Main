@@ -1138,3 +1138,20 @@ test('help.md says which popup tabs show a count, as the popup draws them', () =
   assert.doesNotMatch(line, /Each shows a count\./, `docs/help.md says every tab shows a count; ${without.map((v) => v.label).join(', ')} shows none`);
   for (const v of without) assert.match(line, new RegExp(`except[^.]*\\*\\*${escapeRe(v.label)}\\*\\*[^.]*shows? a count`), `docs/help.md does not say the "${v.label}" tab shows no count`);
 });
+
+// README wrote the To do tab's arrivals button as "Queue all ready
+// arrivals"; the popup puts the count in it and draws it only when more than
+// one arrival is ready. README and help.md write it with its N and say when
+// it is there.
+test('README and help.md write the arrivals queue button as the popup draws it', () => {
+  const popup = read('../extension/popup.js');
+  assert.match(popup, />Queue all \$\{ready\.length\} ready arrivals</, 'the arrivals queue button\'s label moved: these texts must change with it');
+  const shownAbove = popup.match(/const queueAll = ready\.length > (\d+)/);
+  assert.ok(shownAbove, 'the condition for the arrivals queue button moved: these texts must change with it');
+  for (const [rel, text] of [['README.md', read('../README.md')], ['docs/help.md', doc('help.md')]]) {
+    assert.doesNotMatch(text, /\*\*Queue all ready arrivals\*\*/, `${rel} writes the arrivals queue button without its count`);
+    const line = text.split('\n').find((l) => l.includes('**Queue all N ready arrivals**')) || '';
+    assert.ok(line, `${rel} does not name **Queue all N ready arrivals**`);
+    if (shownAbove[1] === '1') assert.match(line, /more than one[^.]*ready/, `${rel} does not say the arrivals queue button is there only when more than one arrival is ready`);
+  }
+});
