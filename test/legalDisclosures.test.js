@@ -320,3 +320,36 @@ test('while the subscription agreement says nothing about seats added during the
   assert.match(item, /a seat is added only when a manager asks and Lot Current changes the subscription by hand in Stripe/);
   assert.match(item, /prorated from the day it is added or only from the next billing period is the owner's commercial choice, not yet made/);
 });
+
+// The dry run (Open the form and check fields only) reads the Marketplace
+// form page: its address, title and language, the names of up to 100 visible
+// controls anywhere on it and 200 characters next to the photo box. The side
+// panel keeps that with the post under way, and Copy report puts all of it on
+// the clipboard for a support message. The privacy texts say so, and the
+// support steps ask the person to read it before sending.
+test('the privacy texts name what the dry-run report holds from the Facebook page, and support asks the person to read it before sending', () => {
+  // the code: what the probe returns, that the panel keeps it, and that Copy report copies it whole
+  const fill = read('extension/facebook/fillForm.js');
+  const probe = fill.slice(fill.indexOf('export function probeFormInPage('), fill.indexOf('\n}\n', fill.indexOf('export function probeFormInPage(')));
+  assert.match(probe, /return \{ url: location\.href, language: [^}]*title: document\.title,[^}]*controls,[^}]*photoText/, 'the dry run no longer returns the page address, title, controls and photo text: update the texts and this test');
+  assert.match(probe, /\.slice\(0, 100\);/, 'the dry run no longer keeps up to 100 controls: update the texts and this test');
+  assert.match(probe, /\.slice\(0, 200\) : ''/, 'the dry run no longer keeps 200 characters next to the photo box: update the texts and this test');
+  const panel = read('extension/sidepanel.js');
+  assert.match(panel, /const FLOW_FIELDS = \[[^\]]*'probe'/, 'the side panel no longer keeps the dry-run report with the post: update the texts and this test');
+  assert.match(panel, /case 'copyReport': return copy\(JSON\.stringify\(state\.probe/, 'Copy report no longer copies the dry-run report: update the texts and this test');
+
+  const what = /address, title and language, the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/;
+  const policy = read('legal/privacy-policy.md');
+  assert.match(rowText(policy, 'Support messages (name, dealership, role, email, phone, what the message says, and any problem report the User pastes in: the versions, the dealership website\'s address and platform, the last scan and its errors, the counts on each tab, which form fields the last fill could not do, the Chrome version and time zone; and the report of the dry run, Open the form and check fields only, if the User pastes that in: the Marketplace form page\'s address, title and language, the names of the fields found and of up to 100 visible controls on that page, which can include Facebook\'s own menus, and up to 200 characters of the text next to its photo box)'), /Our inbox and the support log/);
+  const facebook = policy.split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
+  assert.doesNotMatch(facebook, /From Facebook pages Lot Current keeps only the listing address the User saves or Lot Current detects on the User's own tab\./, 'the policy says only the listing address is kept from Facebook pages while the dry run keeps what it read');
+  assert.match(facebook, /after Open the form and check fields only, what that check read on the form page \(listed under Support messages above\), which stays with the post under way and leaves the browser only if the User copies the report into a message/);
+  const content = read('legal/chrome-web-store-privacy.md').split('\n').find((l) => l.startsWith('- Website content:'));
+  assert.match(content, what, 'the Web Store\'s Website content answer leaves out what the dry run reads');
+  assert.match(content, /sent nowhere unless the user copies the report into a message/);
+  const inventory = read('docs/data-inventory.md');
+  assert.match(rowText(inventory, '`postFlow:<origin>`'), /the dry run's report \(Open the form and check fields only: the form page's address, title and language/, 'the data inventory\'s postFlow row leaves out the dry-run report');
+  assert.match(inventory, /^- \*\*Copy report\*\* \(side panel, after \*\*Open the form and check fields only \(nothing filled\)\*\*, `copyReport` in `extension\/sidepanel\.js`\): [^\n]*up to 100 visible controls on that page[^\n]*the person pastes it into a message to support\./m, 'the data inventory does not list what Copy report puts on the clipboard');
+  assert.match(read('docs/support.md'), /The dry run's report also holds the form page's address and title and the names of up to 100 controls on that page, which can include Facebook's own menus: ask the person to read it before sending and take out anything personal/);
+  assert.match(read('docs/help.md'), /\*\*Copy report\*\* on the result \(read it before you send it: it holds the form page's address and title and the names of the controls on that page/);
+});
