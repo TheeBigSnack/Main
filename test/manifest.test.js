@@ -109,6 +109,8 @@ test('the install steps name exactly the hosts Chrome shows at install, and no t
   }
   for (const rel of ['../README.md', '../docs/help.md', '../marketing/onboarding-store.md', '../legal/chrome-web-store-privacy.md', '../store/listing.md']) {
     assert.doesNotMatch(read(rel), /the dealer(?:ship's)? (?:photo|image) host/, `${rel} calls the manifest's static image host the dealership's own`);
+    // one Dealer Inspire website has been checked (extension/adapters/README.md: "photo host seen so far"), so no text says every one uses it
+    assert.doesNotMatch(read(rel), /(?:that|which) Dealer Inspire (?:dealership )?websites use/, `${rel} says every Dealer Inspire website keeps its photos on the static image host, which only the websites checked so far do`);
   }
 });
 

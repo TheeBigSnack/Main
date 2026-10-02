@@ -206,6 +206,7 @@ test('while the subscription agreement promises a move to an official inventory 
   assert.doesNotMatch(index, /feed/i, 'an adapter for an inventory feed exists: say what it reads in dealer-subscription-agreement.md 2 and this test');
   const q3 = section(read('legal/questions-for-attorney.md'), '## 3. Reading dealer websites\' inventory search');
   assert.match(q3, /Should section 2 bind Lot Current to switch/, 'questions-for-attorney.md 3 does not ask whether the feed promise should bind Lot Current');
+  assert.doesNotMatch(q3, /when we move to (?:an )?official inventory feeds?/i, 'questions-for-attorney.md 3 presumes the move to a feed that no reader is built or planned for');
 });
 
 test('while the published texts say they apply to no one and the pilot agreement says they apply, pilot salespeople stay signed out and the attorney is asked which text binds', async () => {
@@ -220,6 +221,9 @@ test('while the published texts say they apply to no one and the pilot agreement
   const pilot = read('PILOT.md');
   const before = pilot.slice(pilot.indexOf('### Before every pilot'), pilot.indexOf('## During the pilot'));
   assert.match(before, /^- \[ \] \*\*No sign-in while the texts are drafts\.\*\*[^\n]*Until the attorney answers `legal\/questions-for-attorney\.md` 10\.2, each salesperson clicks \*\*Skip for now\*\* at set-up's Account step and does not sign in/m, 'PILOT.md lets pilot salespeople sign in while the texts the pilot agreement applies say they apply to no one');
+  // the day-0 email walks each salesperson through set-up, so it says the same at the Account step
+  const day0 = section(read('marketing/onboarding-emails.md'), '## Day 0: install and set-up (10 minutes)');
+  assert.match(day0, /your account \(click \*\*Skip for now\*\*: this pilot runs without Lot Current accounts, so don't sign in under Settings later either\)/, 'the day-0 email walks the salesperson through set-up without saying to skip the Account step');
   assert.match(pilot, /A second dealership runs on the Milestone 4 accounts[^\n]*once the Terms and Privacy Policy are final or the attorney has answered `legal\/questions-for-attorney\.md` 10\.2/, 'the second dealership\'s pilot runs on accounts before the texts are settled');
   const q10 = section(read('legal/questions-for-attorney.md'), '## 10. The Pilot Agreement\'s list of what is recorded');
   assert.match(q10, /^- \*\*10\.2\*\* Section 1 says the Terms of Service and the Privacy Policy apply during the Pilot, but the website publishes both as drafts marked "Not in effect/m, 'the attorney is not asked which text binds during a pilot signed before the texts are final');

@@ -12,7 +12,7 @@ A Chrome extension for dealership salespeople. It reads your dealership website'
 4. Click **Load unpacked** and choose that folder (the one that contains `manifest.json`).
 5. Click the puzzle-piece icon in Chrome's toolbar and pin **Lot Current**.
 
-Chrome will say the extension can read and change data on `www.facebook.com/marketplace` and on `vehicle-images.carscommerce.inc`, the Cars Commerce photo server that Dealer Inspire websites use. That is what filling the form and attaching the car's photos needs (a website that keeps its photos on another server gets Chrome's own prompt for that server the first time you fill a form or download photos for one of its cars); it does not read your Facebook password, cookies or messages.
+Chrome will say the extension can read and change data on `www.facebook.com/marketplace` and on `vehicle-images.carscommerce.inc`, the Cars Commerce photo server used by the Dealer Inspire websites checked so far. That is what filling the form and attaching the car's photos needs (a website that keeps its photos on another server gets Chrome's own prompt for that server the first time you fill a form or download photos for one of its cars); it does not read your Facebook password, cookies or messages.
 
 ## Update
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1225 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1226 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

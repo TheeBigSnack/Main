@@ -39,7 +39,7 @@ Owner's list, in order. Nothing under "Before every pilot" runs until the one-ti
 3. Fix the top prefill failure that week (one line in `formMap.js` when Facebook changed a name; `listingSigns.js` when a listing page reads differently), re-run `npm test` and the e2e flows, and send the new `lot-current-extension-<version>.zip` (`npm run pack`) and the Update steps in `README.md`.
 4. Ask the manager to confirm sold cars against the store's own records: did every one show up on To do within 3 hours of leaving the website?
 
-**Pilot log** (copy a row per week into this file or a spreadsheet):
+**Pilot log** (copy a row per week into the owner's pilot spreadsheet, not into this file: a row committed to git outlives the 30 days in pilot agreement section 6):
 
 | Week | Salesperson | Posts (posted / drafts / not posted) | Median s per post | Within 60 s | Top field failure (rate) | Sold cars flagged / taken down / median h | Price changes flagged / updated / median h | Fix shipped |
 |---|---|---|---|---|---|---|---|---|
@@ -58,7 +58,7 @@ Recorded by `extension/src/pilot.js`, per website, in the salesperson's browser,
 
 **Pruning:** each list (post attempts, fills, flags) keeps its newest 500 entries and nothing older than 90 days (`MAX_ENTRIES` and `PILOT_RETENTION_DAYS` in `extension/src/pilot.js`), applied each time a number is recorded; an open flag stays until it is closed. A two-week pilot is never affected, but a longer engagement must collect the CSV weekly, since the CSV is the only complete record.
 
-**Clearing:** **Numbers → Clear the numbers** (two clicks; the to-do items still open stay until they close, and one closed since the last sync stays until the next sync sends it), or **Settings → Clear everything for this website**. Neither removes what has synced to the dealership's account. The pilot agreement (section 6) says pilot records Lot Current holds are deleted within 30 days of the end unless the dealer subscribes; those records are the CSVs the owner collected and, for a dealership on accounts, its rows in the database (`supabase/README.md`, "Export or delete a dealership's data": the weekly retention line, a pilot ended early, and the dealerships with no plan) and its weekly usage rows in the pipeline sheet (`docs/data-inventory.md`, "The owner's records").
+**Clearing:** **Numbers → Clear the numbers** (two clicks; the to-do items still open stay until they close, and one closed since the last sync stays until the next sync sends it), or **Settings → Clear everything for this website**. Neither removes what has synced to the dealership's account. The pilot agreement (section 6) says pilot records Lot Current holds are deleted within 30 days of the end unless the dealer subscribes; those records are the CSVs the owner collected and the pilot log filled in from them, and, for a dealership on accounts, its rows in the database (`supabase/README.md`, "Export or delete a dealership's data": the weekly retention line, a pilot ended early, and the dealerships with no plan) and its weekly usage rows in the pipeline sheet (`docs/data-inventory.md`, "The owner's records").
 
 ## Weekly fixes: the loop
 
