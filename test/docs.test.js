@@ -24,6 +24,7 @@ import { honestyProblems } from './honesty.js';
 import { ADAPTERS, platformNames, unsupportedSiteMessage } from '../extension/adapters/index.js';
 import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
+import { FORM_MAP } from '../extension/facebook/formMap.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -244,6 +245,173 @@ test('next-platform.md names the four candidates from adapters/README.md, the cr
   assert.match(n, /chosen with a written reason and a named first dealer/, 'the PLAN.md M6 wording');
   assert.match(n, /\*\*Chosen platform:\*\* \[platform\]/);
   assert.match(n, /\*\*First dealer:\*\* \[dealer name/);
+});
+
+// The memo and the launch checklist once described two adapters, called the
+// DealerOn and Dealer.com readers "an idea the owner has not asked for",
+// quoted adapters/README.md for a server-rendered DealerOn list it no longer
+// describes, and said to write a new adapter "only then" even for a platform
+// that has a reader. They follow ADAPTERS: the memo names every reader's
+// file and says which candidates have one, and the checklist's contract item
+// covers every adapter.
+test('next-platform.md and the launch checklist describe the readers ADAPTERS holds', () => {
+  const n = doc('next-platform.md');
+  const index = read('../extension/adapters/index.js');
+  const files = [...index.matchAll(/^import \w+ from '\.\/(\w+)\.js';$/gm)].map((m) => m[1] + '.js');
+  assert.equal(files.length, ADAPTERS.length, 'extension/adapters/index.js imports its adapters differently: update this test');
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  assert.match(n, new RegExp(`Today Lot Current has ${WORDS[ADAPTERS.length] || ADAPTERS.length} adapters`), `next-platform.md does not count the ${ADAPTERS.length} adapters in ADAPTERS`);
+  for (const f of files) assert.ok(n.includes('`extension/adapters/' + f + '`') || n.includes(f), `next-platform.md does not name ${f}`);
+  const section = (p) => (n.split(new RegExp('^### ' + escapeRe(p) + '$', 'm'))[1] || '').split(/^##+ /m)[0];
+  const built = platformNames();
+  for (const p of ['Dealer.com', 'DealerOn', 'Dealer eProcess', 'DealerFire']) {
+    const reader = section(p).split('\n').find((l) => l.startsWith('- **Reader**:')) || '';
+    if (built.includes(p)) assert.match(reader, /^- \*\*Reader\*\*: built/, `next-platform.md's ${p} section does not say its reader is built`);
+    else assert.match(reader, /^- \*\*Reader\*\*: none yet/, `next-platform.md's ${p} section does not say it has no reader yet`);
+    assert.doesNotMatch(section(p), /has not asked for/, `next-platform.md's ${p} section says the owner has not asked for a reader the owner asked for`);
+  }
+  const adaptersReadme = read('../extension/adapters/README.md');
+  if (!/server-rendered/.test(adaptersReadme)) assert.doesNotMatch(n, /server-rendered/, 'next-platform.md quotes extension/adapters/README.md for a server-rendered list it no longer describes');
+  const steps = (n.split(/^## Verification steps[^\n]*$/m)[1] || '').split(/^## /m)[0];
+  const step5 = steps.split('\n').find((l) => l.startsWith('5. ')) || '';
+  assert.match(step5, /reader already there/, "next-platform.md's step 5 says to write a new adapter even for a platform that has a reader");
+  const contract = doc('launch-checklist.md').split('\n').find((l) => l.includes('**Adapter contract complete**')) || '';
+  assert.match(contract, /every adapter in `ADAPTERS`/, "the launch checklist's adapter contract item does not cover every adapter in ADAPTERS");
+});
+
+// supabase/README.md's header said "sign-in by magic link" and "two small
+// server functions", and "How the extension is configured" said a Settings
+// section takes the project URL and anon key for every salesperson to type.
+// The extension signs in with an emailed code, supabase/functions holds four
+// functions, and npm run set-project builds the address and key into
+// extension/src/accountConfig.js, which the popup reads; Settings has no
+// field for them.
+test('supabase/README.md counts the functions there are and says the project address is built in, not typed', () => {
+  const r = read('../supabase/README.md');
+  const fns = readdirSync(new URL('../supabase/functions/', import.meta.url), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('_')).map((e) => e.name);
+  assert.ok(fns.length >= 2, 'supabase/functions/ holds fewer functions than expected');
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  const header = r.split('\n## ')[0];
+  assert.match(header, new RegExp(`\\b${WORDS[fns.length] || fns.length}\\s+server\\s+functions`), `supabase/README.md's header does not count the ${fns.length} functions in supabase/functions/`);
+  for (const f of fns) assert.ok(header.includes('`' + f + '`'), `supabase/README.md's header does not name the ${f} function`);
+  assert.doesNotMatch(header, /sign-in\s+by\s+magic\s+link/, "supabase/README.md's header says salespeople sign in by link; the extension asks for the emailed code");
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /import \{[^}]*\bACCOUNT\b[^}]*\} from '\.\/src\/accountConfig\.js'/, 'the popup no longer takes the project from accountConfig.js: this README section must change with it');
+  const configured = (r.split('## How the extension is configured')[1] || '').split('\n## ')[0];
+  assert.ok(configured.length > 100, 'supabase/README.md has no "How the extension is configured" section');
+  assert.doesNotMatch(configured, /type into every salesperson|takes the \*\*project URL\*\*|with the UI wiring/, 'supabase/README.md says salespeople type the project address and key into Settings');
+  assert.match(configured, /npm run set-project/, 'supabase/README.md does not say set-project builds the project address and key in');
+  const row = read('../README.md').split('\n').find((l) => l.startsWith('| `supabase/` |')) || '';
+  for (const f of fns) assert.ok(row.includes('`' + f + '`'), `README's supabase/ row does not name the ${f} function`);
+});
+
+// README's Settings section once gave the sign-off "at the pilot store" with a
+// person's first name, one the handoff notes say was guessed from a commit
+// identity. A person's name is a dealer-specific value (CLAUDE.md): the
+// sign-off is shown with brackets, as the template builds it
+// (src/rewriteTemplate.js), and README names no such person anywhere.
+test('README shows the description sign-off with brackets and names no guessed person', () => {
+  const readme = read('../README.md');
+  const you = readme.split('\n').find((l) => l.startsWith('- **You**:'));
+  assert.ok(you, 'README no longer explains the You settings');
+  assert.match(you, /"I'm \[name\], \[role\] at \[dealership\]"/, "README's You line does not show the sign-off with its brackets");
+  assert.doesNotMatch(you, /I'm (?!\[)/, "README's You line signs off with a person's name instead of the bracket");
+  assert.doesNotMatch(readme, /\bRoger\b/, 'README names a person whose name was only guessed from a git email');
+});
+
+// README's dry-run step said the panel reports on "13 fields" while
+// FORM_MAP.fields, which probeFormInPage walks, held 17, so a tester could
+// take a short list for a pass. A count of the form's fields in README, the
+// help doc or PILOT.md is the form map's.
+test('a text that counts the form fields the field check reports gives FORM_MAP\'s number', () => {
+  const n = FORM_MAP.fields.length;
+  assert.ok(n > 5, 'FORM_MAP.fields is shorter than expected');
+  for (const rel of ['../README.md', '../docs/help.md', '../PILOT.md']) {
+    for (const line of read(rel).split('\n').filter((l) => /check fields only|field check|fields it can find/i.test(l))) {
+      for (const m of line.matchAll(/\b(\d+) (?:form )?fields\b/g)) {
+        assert.equal(Number(m[1]), n, `${rel.slice(3)}: "${line.trim().slice(0, 100)}..." counts ${m[1]} fields; FORM_MAP has ${n}`);
+      }
+    }
+  }
+});
+
+// README's website paragraph said siteUrl "stays empty until the owner has
+// the domain" after site/config.js had been given the domain, so the rule it
+// stated was one to put the value back to empty, which would drop the
+// canonical, share and sitemap addresses from the next deploy. The paragraph
+// gives the address config.js holds, or says it is empty.
+test('README\'s website paragraph gives siteUrl as site/config.js holds it', () => {
+  const para = read('../README.md').split('\n').find((l) => l.startsWith('Website: '));
+  assert.ok(para, 'README has no "Website:" paragraph');
+  assert.match(para, /`siteUrl` in `site\/config\.js`/, "README's website paragraph no longer says where the site's address comes from");
+  if (SITE.siteUrl) {
+    assert.ok(para.includes('`' + SITE.siteUrl + '`'), `README's website paragraph does not give siteUrl as site/config.js holds it (${SITE.siteUrl})`);
+    assert.doesNotMatch(para, /stays empty until/, "README says siteUrl stays empty, but site/config.js has it set");
+  } else {
+    assert.match(para, /empty/, "README's website paragraph does not say siteUrl is empty");
+  }
+});
+
+// PILOT.md defined the blocked reason `no-permission` as a post started from
+// the side panel without the dealership tab. The panel's own list asks Chrome
+// before it starts anything and records nothing after a no; the reason is
+// recorded when a post that began from a dealership tab has to read the car
+// straight from the website (the tab was closed or shows another page) and
+// the permission is missing, so the definition names that case.
+test('PILOT.md defines no-permission by the posts that record it', () => {
+  const panel = read('../extension/sidepanel.js');
+  for (const fn of ['postFromList', 'queueFromList']) {
+    assert.match(panel, new RegExp(`async function ${fn}\\([^)]*\\) \\{\\n  if \\(!\\(await askForSite\\(\\)\\)\\) return undefined;`), `${fn} no longer asks Chrome before it starts: PILOT.md's no-permission line changes with it`);
+  }
+  assert.match(panel, /if \(!fresh\.ok && fresh\.needsPermission\) \{[^}]*block\(fresh\.message, 'no-permission'\)/, 'where the panel records no-permission moved: PILOT.md changes with it');
+  assert.match(read('../extension/src/vehicleDetails.js'), /if \(!r\.tabUnusable\) return r;/, 'a post from a tab no longer falls through to the direct read only when the tab cannot be used');
+  const line = read('../PILOT.md').split('\n').find((l) => l.startsWith('- **Reason (blocked posts):**'));
+  assert.ok(line, 'PILOT.md no longer defines the blocked reasons');
+  const def = line.slice(line.indexOf('`no-permission`'));
+  assert.ok(def.length > 20, 'PILOT.md no longer defines no-permission');
+  assert.doesNotMatch(def, /a post started from the side panel without the dealership tab/, 'PILOT.md credits no-permission to side-panel list posts, which ask Chrome first and record nothing after a no');
+  assert.match(def, /started from the popup whose dealership tab was closed/, 'PILOT.md does not name the popup post whose dealership tab went');
+  assert.match(def, /side panel's own list asks Chrome first and records nothing/, "PILOT.md does not say a side-panel list post records nothing after a no");
+});
+
+// The help said the side panel's own list is for "the website you last
+// scanned", and the data inventory said lastPostOrigin only reopens a post.
+// The panel opens its list on lastPostOrigin when that website is still
+// known (src/panelList.js defaultOrigin), which a post, a set-up, a To do
+// item and the Website menu write and the popup's Scan does not; the most
+// recent scan decides only before the panel has worked on any website.
+test('the help and the data inventory say which website the side panel\'s list opens on', () => {
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /defaultOrigin\(stored\[GLOBAL_KEYS\.sites\], lastPostOrigin\)/, 'the panel no longer opens its list on lastPostOrigin: the help and the data inventory change with it');
+  assert.match(panel, /async function chooseSite\(origin\) \{[\s\S]*?\[GLOBAL_KEYS\.lastPostOrigin\]: origin/, 'the Website menu no longer writes lastPostOrigin');
+  assert.doesNotMatch(read('../extension/popup.js'), /lastPostOrigin/, "the popup now writes lastPostOrigin: say that a scan switches the panel's list");
+  const help = doc('help.md');
+  const para = help.split('\n').find((l) => l.startsWith('**Post the next car from the side panel.**'));
+  assert.ok(para, 'help.md no longer explains the side panel\'s own list');
+  assert.doesNotMatch(para, /list for the website you last scanned/, 'help.md says the panel\'s list follows the last scan; it follows the website the panel last worked on');
+  assert.match(para, /list for the website it last worked on/, 'help.md does not say the list opens on the website the panel last worked on');
+  assert.match(para, /scanning another website in the popup does not switch it/, 'help.md does not say a scan in the popup leaves the panel\'s website alone');
+  const row = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `lastPostOrigin` |'));
+  assert.ok(row, 'the data inventory has no lastPostOrigin row');
+  const [, , why, written] = row.split(' | ');
+  assert.match(why, /Ready to post\*\* list the side panel opens on/, 'the lastPostOrigin row does not say it picks the website of the side panel\'s list');
+  assert.match(written, /\*\*Website\*\* menu/, 'the lastPostOrigin row does not say the Website menu writes it');
+});
+
+// help.md's "When the website scan fails" kept naming only Dealer Inspire and
+// the standard-data reader after the DealerOn and Dealer.com readers shipped,
+// so a salesperson at such a store read that their website could not be
+// read. The bullet names every reader adapters/index.js lists, with the
+// sample-websites caveat while any of them is not checked on a real one.
+test('help.md\'s "not one Lot Current can read yet" bullet names every reader the extension has', () => {
+  const bullet = doc('help.md').split('\n').find((l) => l.startsWith('- The website is not one Lot Current can read yet.'));
+  assert.ok(bullet, 'help.md no longer explains a website Lot Current cannot read');
+  for (const a of ADAPTERS) {
+    const name = a.PLATFORM.name;
+    const said = /^Standard vehicle data\b/.test(name) ? /standard vehicle data/i : new RegExp(`\\b${escapeRe(name)}\\b`);
+    assert.match(bullet, said, `help.md's bullet does not name the ${name} reader`);
+  }
+  if (ADAPTERS.some((a) => a.PLATFORM.checkedLive !== true)) assert.match(bullet, /tested only on sample websites/, "help.md's bullet does not say which readers were tested only on sample websites");
 });
 
 // ---------- the other documents against the code ----------
@@ -634,6 +802,8 @@ test('every text that says what Lot Current does on its own names the upload a s
   assert.ok(step.length > 100, "wizard.js's permission step moved: update this test");
   assert.match(step, SAYS_SYNC, 'the set-up permission step does not say the rescan sends its results while signed in');
   assert.doesNotMatch(wizard, ONLY_READS, 'set-up says the background job only reads the website');
+  // the help doc's list of what leaves the browser includes the unattended rescan and its sync, so it is not "only when you act"
+  for (const rel of TEXTS) assert.doesNotMatch(read(rel), /only when you act/i, `${rel} says data leaves the browser only when the person acts, but an allowed rescan reads the website and syncs on its own`);
 });
 
 // The screenshot captions, README and the help doc once said the numbers were
@@ -650,6 +820,77 @@ test('copy that says the numbers are kept in the browser also says they go to th
     }
   }
   assert.ok(seen >= 4, 'README, the help doc, the store listing and the website still describe where the numbers are kept');
+});
+
+// README once said each salesperson's posted list was "kept only in their own
+// browser" after the committed account config began offering sign-in and
+// the sync began sending that list to the dealership's account. While the
+// config names a project, no tester or launch text says so, and a line that
+// says the posted list is kept in the browser names the sync too.
+test('while accounts are configured, no text says the posted list stays only in the browser', () => {
+  if (!accountsConfigured()) return;
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  const ONLY_HERE = /kept only in (?:their|your|this|the) (?:own )?browser|only in (?:their|your) own browser/i;
+  for (const f of ['../README.md', '../PILOT.md', '../store/listing.md', ...md('docs'), ...md('marketing')]) {
+    for (const line of read(f).split('\n')) {
+      assert.doesNotMatch(line, ONLY_HERE, `${f.slice(3)}: "${line.trim().slice(0, 120)}" says the data stays in the browser, but a signed-in salesperson's posted list syncs to the dealership's account`);
+      if (/posted list/.test(line) && /kept in (?:their|your|this|the) (?:own )?browser(?!')/i.test(line)) {
+        assert.ok(/dealership's account/.test(line) && /\bsign(?:ed)? in\b/.test(line), `${f.slice(3)}: "${line.trim().slice(0, 120)}" leaves out the sync to the dealership's account`);
+      }
+    }
+  }
+  // README's synced-profile line also called the account a milestone still to
+  // come, two lines above the Account item that describes the one built
+  const profile = read('../README.md').split('\n').find((l) => l.startsWith('- **Your profile follows you.**'));
+  assert.ok(profile, 'README no longer explains the synced profile');
+  assert.doesNotMatch(profile, /account[^.]*\bis Milestone 4\b/i, "README's profile line calls the Lot Current account a milestone still to come");
+  assert.match(profile, /\*\*Account\*\*/, "README's profile line does not point at the Account item");
+});
+
+// Two rewrite services read an Anthropic API key: the standalone backend/
+// (backend/.env) and the accounts' rewrite function (a function secret).
+// supabase/README.md once called the function secret "the only place it
+// exists" while README called backend/ the place the key lives, so a session
+// could remove one as a rule breach, or a rotation miss the other. The texts
+// that say where the key lives name both, and none calls one the only place.
+test('the texts that say where the Anthropic API key lives name both rewrite services', () => {
+  assert.match(read('../backend/server.js'), /process\.env\.ANTHROPIC_API_KEY/, 'backend/ no longer reads a key: these texts can name one place');
+  assert.match(read('../supabase/functions/rewrite/index.ts'), /env\('ANTHROPIC_API_KEY'\)/, 'the rewrite function no longer reads a key: these texts can name one place');
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  for (const f of ['../README.md', '../supabase/README.md', '../backend/README.md', ...md('docs')]) {
+    for (const line of read(f).split('\n').filter((l) => /ANTHROPIC_API_KEY|Anthropic API key/.test(l))) {
+      assert.doesNotMatch(line, /\bonly place\b|\bkey lives here\b/i, `${f.slice(3)}: "${line.trim().slice(0, 120)}" gives one place for the key, but both backend/ and the rewrite function hold one`);
+    }
+  }
+  const secret = read('../supabase/README.md').split('\n').find((l) => l.startsWith('| `ANTHROPIC_API_KEY` |'));
+  assert.ok(secret, 'supabase/README.md no longer lists ANTHROPIC_API_KEY among the function secrets');
+  assert.match(secret, /backend\/\.env/, "supabase/README.md's ANTHROPIC_API_KEY row does not name backend/.env");
+  const backendRow = read('../README.md').split('\n').find((l) => l.startsWith('| `backend/` |'));
+  assert.ok(backendRow, "README's file table has no backend/ row");
+  assert.match(backendRow, /function secret/, "README's backend/ row does not say the rewrite function keeps its own key");
+});
+
+// PLAN.md's status went stale on three facts the code states: it said no
+// Supabase project existed while extension/src/accountConfig.js named one,
+// that formMap.js was verified only against the mock while the map records
+// its live runs, and that the second platform waited for a dealer while
+// ADAPTERS already carried the DealerOn and Dealer.com readers.
+test('PLAN.md\'s status agrees with the account config, the form map and the adapters', () => {
+  const plan = read('../PLAN.md');
+  if (accountsConfigured()) {
+    assert.doesNotMatch(plan, /No project exists yet/, 'PLAN.md says no Supabase project exists, but extension/src/accountConfig.js names one');
+    const m4 = plan.split('\n').find((l) => l.startsWith('| M4 '));
+    assert.ok(m4, "PLAN.md's status table has no M4 row");
+    assert.match(m4, /accountConfig\.js/, "PLAN.md's M4 row does not say where the project is named");
+  }
+  if (/\blive\b/.test(String(FORM_MAP.verifiedAgainstFacebook || ''))) {
+    assert.doesNotMatch(plan, /verified only against the mock/, `PLAN.md says formMap.js has met only the mock, but the map says "${FORM_MAP.verifiedAgainstFacebook}"`);
+  }
+  const m6 = plan.split('\n').find((l) => l.startsWith('- M6:'));
+  assert.ok(m6, 'PLAN.md\'s "Wider use" list has no M6 line');
+  for (const name of platformNames().filter((n) => n !== 'Dealer Inspire' && !/^Standard/.test(n))) {
+    assert.ok(m6.includes(name), `PLAN.md's M6 line does not say a reader for ${name} exists`);
+  }
 });
 
 // Clear the numbers keeps the to-do items still open (src/pilot.js
@@ -752,4 +993,165 @@ test('while the committed account config names a project, no text says the shipp
   }
   assert.match(read('../docs/production-setup.md'), /\*\*From then on every build offers sign-in\.\*\*[^\n]*no build goes to a pilot tester before then/);
   assert.match(doc('launch-checklist.md'), /\*\*No tester build before sign-in works\.\*\*/);
+  // the shipped build's set-up has the Account step, so README's walk through set-up names it and its way past
+  assert.ok(wizardSteps(accountsConfigured()).includes('account'), 'the shipped set-up has no Account step: README can drop it');
+  const setUp = read('../README.md').split('\n').find((l) => l.includes('**Set up Lot Current**'));
+  assert.ok(setUp, 'README no longer walks through set-up');
+  assert.match(setUp, /sign in to your dealership's Lot Current account[^.]*\*\*Skip for now\*\*/, 'README\'s set-up steps leave out the Account step the shipped build shows');
+});
+
+// "It didn't post" ends the post attempt the click on Post opened, as
+// not-posted (sidepanel.js notPosted): the Numbers tab counts it under
+// "Started but not posted", and while signed in it syncs with the other post
+// attempts. A text that tells a salesperson or a manager about the button
+// says the attempt is recorded, never that nothing is.
+test('every text that explains It didn\'t post says the attempt is recorded as not posted', () => {
+  const panel = read('../extension/sidepanel.js');
+  const notPosted = panel.slice(panel.indexOf('async function notPosted'), panel.indexOf('\n}\n', panel.indexOf('async function notPosted')));
+  assert.match(notPosted, /endPost\(p, state\.vin, 'not-posted'\)/, 'It didn\'t post no longer records the attempt as not posted: these texts must change with it');
+  let seen = 0;
+  for (const rel of ['../README.md', '../docs/help.md', '../marketing/demo-script.md', '../PILOT.md']) {
+    for (const line of read(rel).split('\n').filter((l) => /It didn't post/.test(l))) {
+      seen++;
+      assert.doesNotMatch(line, /nothing (is|was|gets) recorded|posted or recorded|nothing is kept/i, `${rel}: "${line.trim().slice(0, 120)}" says It didn't post records nothing`);
+      assert.match(line, /\bnot posted\b|recorded as such/i, `${rel}: "${line.trim().slice(0, 120)}" does not say the attempt is recorded as not posted`);
+    }
+  }
+  assert.ok(seen >= 4, 'README, the help doc, the demo script and PILOT.md no longer explain It didn\'t post');
+});
+
+// PILOT.md is the runbook, in a public repository; the pilot log's rows name a
+// dealer's salespeople and their results, which the pilot agreement keeps
+// confidential and unpublished (sections 3 and 4) and has deleted within 30
+// days of the end (section 6), which git history cannot do. So the runbook
+// sends the log and the CSVs to the owner's private spreadsheet, its table
+// stays an empty template, and git ignores the CSVs both downloads save.
+test('the pilot log and the pilot CSVs stay out of the repository', async () => {
+  const pilot = read('../PILOT.md');
+  assert.doesNotMatch(pilot, /into this file or a spreadsheet|in the log above/i, 'PILOT.md tells the owner to put the pilot results in this repository');
+  assert.match(pilot, /private pilot spreadsheet, never into this file/, 'PILOT.md no longer says the pilot log is kept outside the repository');
+  const header = pilot.split('\n').findIndex((l) => l.startsWith('| Week | Salesperson |'));
+  assert.ok(header > 0, 'PILOT.md has no pilot log template');
+  for (const row of pilot.split('\n').slice(header + 2).filter((l) => l.startsWith('|'))) {
+    const cells = row.split('|').slice(2, -1);
+    assert.ok(cells.every((c) => c.trim() === ''), `PILOT.md's pilot log template holds results: "${row.trim()}"`);
+  }
+  assert.doesNotMatch(pilot, /\b(?=[A-HJ-NPR-Z0-9]{17}\b)(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{17}\b/, 'PILOT.md holds a VIN');
+  const { pilotFileName } = await import('../extension/src/pilot.js');
+  const { csvFileName } = await import('../manager/data.js');
+  const globs = read('../.gitignore').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const ignored = (name) => globs.some((g) => new RegExp('^' + g.split('*').map(escapeRe).join('[^/]*') + '$').test(name));
+  for (const name of [pilotFileName('2026-10-01T15:00:00Z', { site: 'https://dealer.test', salesperson: 'Pat' }), csvFileName('2026-10-01T15:00:00Z', { dealer: 'Any Motors' })]) {
+    assert.ok(ignored(name), `.gitignore does not keep ${name} out of the repository`);
+  }
+});
+
+// The daily cap's only control is the Settings field in each salesperson's
+// own popup, saved with that website's settings; no table, function or
+// manager-view control holds a cap (the server only counts the day's posts).
+// So a text that says the dealership sets the cap also says where it is
+// entered, the help doc says the manager view does not set it, and the
+// install email for a store's salespeople has each of them enter the
+// manager's number. While the cap's count takes the server's count when it is
+// higher (src/cap.js), the help doc says posts from other computers count.
+test('texts about the daily cap say each salesperson enters the dealership\'s number in their own Settings', () => {
+  assert.match(read('../extension/popup.js'), /field\('Posts per day, per salesperson', 'dailyCap'/, 'the cap\'s Settings field moved: these texts must change with it');
+  const server = ['../supabase/functions/sync/index.ts', '../manager/manager.js', '../manager/data.js', ...readdirSync(new URL('../supabase/migrations/', import.meta.url)).map((f) => `../supabase/migrations/${f}`)];
+  for (const rel of server) assert.doesNotMatch(read(rel), /daily_?cap\b|post_cap\b/i, `${rel} holds a cap: the dealership may now set it centrally, so these texts can say so`);
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  for (const rel of ['../README.md', '../store/listing.md', ...md('docs'), ...md('marketing')]) {
+    for (const line of read(rel).split('\n').filter((l) => /daily (post )?cap|posts a day|posts per day/i.test(l))) {
+      if (/\b(dealership|dealer|manager)( can)? (sets?|changes?|controls?)\b|\byou control\b/i.test(line)) {
+        assert.match(line, /Settings/, `${rel}: "${line.trim().slice(0, 120)}" says the dealership sets the cap without saying each salesperson enters it in Settings`);
+      }
+    }
+  }
+  const help = doc('help.md');
+  const capSection = help.slice(help.indexOf('## The daily cap'), help.indexOf('\n## ', help.indexOf('## The daily cap') + 5));
+  assert.match(capSection, /each salesperson enters it in their own \*\*Settings\*\*/, 'the help doc does not say each salesperson enters the cap in their own Settings');
+  assert.match(capSection, /manager view does not set it/, 'the help doc does not say the manager view does not set the cap');
+  const store = read('../marketing/onboarding-store.md');
+  const toSalesperson = store.slice(store.indexOf('## To each salesperson'));
+  assert.match(toSalesperson.slice(0, toSalesperson.indexOf('\n## ', 5)), /\*\*Posts per day, per salesperson\*\* read \[10\]/, 'the install email does not have each salesperson enter the manager\'s cap');
+  if (/Math\.max\(postsToday\([^)]*\), serverPostsToday\(/.test(read('../extension/src/cap.js'))) {
+    assert.match(capSection, /[Ss]igned in\b[^.]*count[^.]*other computers/, 'the help doc says the cap counts only this browser\'s posts, but a signed-in count also takes the account\'s');
+  }
+});
+
+// The production project got its first eight migrations and all four
+// functions outside the Supabase workflow, before that workflow's first run
+// (supabase/README.md records the migrations): the setup guides say so, and
+// none still writes a done deploy as one to come. The workflow keeps its
+// "FAIL on purpose" rule for a brand-new project, so the guide says those
+// lines are real on production.
+test('the setup guides say production already has its database and all four functions', () => {
+  assert.match(read('../supabase/README.md'), /The production project has applied `0001_schema\.sql` to `0008_usage\.sql`/, 'supabase/README.md no longer records what production applied: change the guides with it');
+  const setup = read('../docs/production-setup.md');
+  const step3 = setup.slice(setup.indexOf('## Step 3.'), setup.indexOf('## Step 4.'));
+  assert.match(step3, /\*\*Where production stands\.\*\*[^\n]*up to `0008_usage\.sql` and all four functions \(`rewrite`, `sync`, `billing` and `lead`\)/, 'production-setup step 3 does not say what production already has');
+  assert.doesNotMatch(step3, /^\s*After plan and database the outside check prints some `FAIL` lines on purpose/m, 'production-setup step 3 calls a FAIL after plan or database expected on production');
+  assert.match(step3, /Production is past that[^.]*read any `FAIL` on a plan or database run there as a real one/, 'production-setup step 3 does not say a FAIL on production is real');
+  const stale = [
+    ['../docs/website.md', /`lead` function is not deployed/],
+    ['../docs/stripe-setup.md', /the webhook and the deploy wait for the project/],
+    ['../docs/launch-checklist.md', /the first deploy happens when the website pull request is merged|what is left is the deploy\b/],
+    ['../supabase/README.md', /arrive with the UI wiring/],
+    ['../.github/workflows/supabase.yml', /billing and lead come later/],
+  ];
+  for (const [rel, re] of stale) assert.doesNotMatch(read(rel), re, `${rel} still writes a deploy that is done as one to come`);
+});
+
+// docs/release.md sent the owner to the manager view for the form fields that
+// could not be filled after a release, but those records never leave the
+// salesperson's browser (src/sync.js sends the pilot's posts and flags only;
+// no table has a field column). While that holds, the release guide sends the
+// owner to each person's Numbers tab, and no guide line that names the
+// manager view and the unfilled fields leaves out that they stay in the browser.
+test('the guides keep the fields that could not be filled in each browser, out of the manager view', () => {
+  assert.match(read('../extension/src/sync.js'), /pilot: \{ posts, flags \}/, 'the sync payload changed: if it now sends the fill records, these texts must change with it');
+  const bullet = doc('release.md').split('\n').find((l) => l.startsWith('- **Fields that could not be filled.**')) || '';
+  assert.match(bullet, /not synced/, 'docs/release.md does not say the fields that could not be filled stay in each browser');
+  assert.match(bullet, /\*\*Copy summary\*\*/, 'docs/release.md does not say how the owner gets the fields that could not be filled from each salesperson');
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  for (const rel of ['../README.md', '../PILOT.md', '../supabase/README.md', ...md('docs')]) {
+    for (const line of read(rel).split('\n').filter((l) => /manager view/i.test(l) && /could not be filled|couldn't fill|could not fill/i.test(l))) {
+      assert.match(line, /\bstays? (in (the|that|this) browser|here)\b|never leaves?\b[^.]*\bbrowsers?\b|not synced|not in the database/i, `${rel}: "${line.trim().slice(0, 120)}" puts the fields that could not be filled in the manager view`);
+    }
+  }
+});
+
+// help.md said every popup tab shows a count, but the popup draws a count
+// only for the tabs in its `counts` (not Numbers). The tab sentence names
+// every tab and the ones drawn without a count.
+test('help.md says which popup tabs show a count, as the popup draws them', () => {
+  const popup = read('../extension/popup.js');
+  const viewList = popup.match(/const VIEWS = \[([\s\S]*?)\];/);
+  const countList = popup.match(/const counts = \{([\s\S]*?)\};/);
+  assert.ok(viewList && countList, 'the popup\'s tab list or tab counts moved: this test must change with it');
+  const views = [...viewList[1].matchAll(/\['(\w+)', '([^']+)'\]/g)].map(([, id, label]) => ({ id, label }));
+  const counted = new Set([...countList[1].matchAll(/^\s*(\w+):/gm)].map((m) => m[1]));
+  assert.ok(views.length > 3 && counted.size > 3, 'the popup\'s tab list or tab counts moved: this test must change with it');
+  const line = doc('help.md').split('\n').find((l) => l.startsWith('- The tabs, left to right:')) || '';
+  for (const v of views) assert.ok(line.includes(`**${v.label}**`), `docs/help.md's tab list does not name the "${v.label}" tab`);
+  const without = views.filter((v) => !counted.has(v.id));
+  if (!without.length) return assert.match(line, /Each shows a count\./, 'every popup tab shows a count, and docs/help.md does not say so');
+  assert.doesNotMatch(line, /Each shows a count\./, `docs/help.md says every tab shows a count; ${without.map((v) => v.label).join(', ')} shows none`);
+  for (const v of without) assert.match(line, new RegExp(`except[^.]*\\*\\*${escapeRe(v.label)}\\*\\*[^.]*shows? a count`), `docs/help.md does not say the "${v.label}" tab shows no count`);
+});
+
+// README wrote the To do tab's arrivals button as "Queue all ready
+// arrivals"; the popup puts the count in it and draws it only when more than
+// one arrival is ready. README and help.md write it with its N and say when
+// it is there.
+test('README and help.md write the arrivals queue button as the popup draws it', () => {
+  const popup = read('../extension/popup.js');
+  assert.match(popup, />Queue all \$\{ready\.length\} ready arrivals</, 'the arrivals queue button\'s label moved: these texts must change with it');
+  const shownAbove = popup.match(/const queueAll = ready\.length > (\d+)/);
+  assert.ok(shownAbove, 'the condition for the arrivals queue button moved: these texts must change with it');
+  for (const [rel, text] of [['README.md', read('../README.md')], ['docs/help.md', doc('help.md')]]) {
+    assert.doesNotMatch(text, /\*\*Queue all ready arrivals\*\*/, `${rel} writes the arrivals queue button without its count`);
+    const line = text.split('\n').find((l) => l.includes('**Queue all N ready arrivals**')) || '';
+    assert.ok(line, `${rel} does not name **Queue all N ready arrivals**`);
+    if (shownAbove[1] === '1') assert.match(line, /more than one[^.]*ready/, `${rel} does not say the arrivals queue button is there only when more than one arrival is ready`);
+  }
 });

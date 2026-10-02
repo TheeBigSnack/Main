@@ -1,8 +1,9 @@
-// Accounts (Milestone 4): sign-in by magic link against the owner's Supabase
-// project, with no UI and without supabase-js. Every function takes the
-// project's address and public anon key (they come from Settings with the UI
-// wiring), the fetch to call and the storage area to keep the session in, so
-// the tests run in Node. The anon key is meant to be public; what the
+// Accounts (Milestone 4): sign-in by an emailed code against the owner's
+// Supabase project, with no UI of its own and without supabase-js. Every
+// function takes the project's address and public key (src/accountConfig.js
+// holds them, written by npm run set-project; nobody types them in), the
+// fetch to call and the storage area to keep the session in, so the tests
+// run in Node. The anon key is meant to be public; what the
 // database lets a signed-in person see is decided by row-level security.
 //
 // The session (access token, refresh token, expiry, the user's id and email)
@@ -26,7 +27,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const isEmail = (s) => EMAIL.test(String(s || '').trim());
 
 function missingConfig({ url, anonKey }) {
-  return trimSlash(url) && String(anonKey || '').trim() ? '' : 'the account server is not set up (the project address and key go in Settings)';
+  return trimSlash(url) && String(anonKey || '').trim() ? '' : 'the account server is not set up in this copy of Lot Current';
 }
 
 const jsonHeaders = (anonKey, extra = {}) => ({ 'Content-Type': 'application/json', apikey: String(anonKey || ''), ...extra });

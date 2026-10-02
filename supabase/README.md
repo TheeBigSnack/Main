@@ -1,10 +1,14 @@
 # Lot Current on Supabase: accounts, sync and the rewrite service (Milestone 4)
 
 This folder is everything the owner deploys to give a dealership shared
-accounts: sign-in by magic link, one database per Lot Current with a row-level
-wall between dealerships, and two small server functions. Nothing in it runs
-until the owner creates a Supabase project and pushes it; the extension works
-without it as before (everything stays in the browser).
+accounts: sign-in with no password, by a six-digit code emailed to the
+salesperson (the manager view uses the link in the same email), one database
+per Lot Current with a row-level wall between dealerships, and four server
+functions: `sync`, `rewrite`, `billing` and `lead`. The production project is
+named in `extension/src/accountConfig.js` and `manager/config.js` (`npm run
+set-project`, step 6 below); it has the first eight migrations and all four
+functions, and `docs/production-setup.md` gives what is left. The extension
+works without signing in as before (everything stays in the browser).
 
 What is here:
 
@@ -33,7 +37,7 @@ What is here:
 | `tests/local-shim.sql` | Lets the migrations and the test run on a plain Postgres with no Supabase. It grants what Supabase grants by default (execute on functions, all on tables and sequences), so a missing revoke fails a test. |
 | `tests/port-check.mjs` | Checks the two `_shared` copies against their originals in Node. |
 
-On the extension side, `extension/src/account.js` (sign-in, the session, invite codes) and `extension/src/sync.js` (what goes up, how the answer is merged) are pure and unit-tested; the Settings fields and the buttons that call them arrive with the UI wiring.
+On the extension side, `extension/src/account.js` (sign-in, the session, invite codes) and `extension/src/sync.js` (what goes up, how the answer is merged) are pure and unit-tested; `extension/src/accountFlow.js` wires them to Settings' **Account** section and set-up's **Your account** step, and the service worker's sync after each scan and recorded change.
 
 ## What to create, once
 
@@ -146,7 +150,7 @@ Then, under Authentication, Sign In / Providers, Email, check that the email OTP
 
 | Name | Where | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | function secret | The Anthropic API key. The only place it exists. Without it `/rewrite` answers 500 and the extension uses its template. |
+| `ANTHROPIC_API_KEY` | function secret | The Anthropic API key, for the `rewrite` function. It lives only on the server side: here as a function secret and, for the standalone `backend/` service when someone runs one, in that folder's own ignored `backend/.env`; never in the extension or in git. If both hold a key, rotate both together. Without it `/rewrite` answers 500 and the extension uses its template. |
 | `REWRITE_MODEL` | function secret | The model for both endpoints. Default `claude-haiku-4-5`; `claude-sonnet-5` for better prose at a higher price. |
 | `MONTHLY_COST_CAP_USD` | function secret | Per dealership per calendar month (UTC), summed from `rewrite_usage`. Default 25. At the cap `/rewrite` and `/color` answer 429 with a plain sentence until the month turns. |
 | `RATE_LIMIT_PER_MINUTE` | function secret | Calls per signed-in user per minute. Default 20. Counted in each function instance's memory, so with several instances a burst can exceed it by that factor; it is a brake, not a ledger. |
@@ -155,12 +159,12 @@ Then, under Authentication, Sign In / Providers, Email, check that the email OTP
 
 ## How the extension is configured
 
-A Settings section for the account (arriving with the UI wiring) takes the **project URL** and the **anon key** from step 1; both are safe to type into every salesperson's extension. Then:
+The project URL and the publishable (or anon) key from step 1 are built into the extension and the manager view, not typed in: `npm run set-project -- <project URL> <key>` writes them into `extension/src/accountConfig.js` and `manager/config.js` (step 6; done for production). So every copy of the extension talks to that one project, and Settings has no field for an address or a key. Then:
 
-1. **Sign in**: the salesperson enters their email and gets a link and a code. The session (a token, its refresh token, expiry, the user's id and email) is kept in `chrome.storage.local` under `account`, never in Chrome's synced storage; it stays on that computer. No password anywhere.
+1. **Sign in**: in set-up's **Your account** step or under **Settings**, **Account**, the salesperson enters their email and types the six-digit code from the email Supabase sends (the same email carries the link the manager view uses). The session (a token, its refresh token, expiry, the user's id and email) is kept in `chrome.storage.local` under `account`, never in Chrome's synced storage; it stays on that computer. No password anywhere.
 2. **Join the dealership**: they enter the invite code once (`redeemInvite`). The answer carries the dealership's name and website origin, which the extension stores next to its per-website settings.
 3. **Sync**: after a scan, a post, a price update or a take-down, the extension POSTs `syncPayload(...)` to `.../functions/v1/sync` with the session's token and merges the answer (`mergeRegistry`, `mergeFlags`). Two salespeople then see the same posted registry, and the manager page sees both.
-4. **Description writer**: in Settings, the rewrite service address becomes `https://<ref>.supabase.co/functions/v1/rewrite` and the key field is the session's token (the UI wiring fills it from the session; the shared `REWRITE_KEY` of `backend/` is gone). `extension/src/rewriter.js` already calls `<address>/rewrite` and `<address>/color` with `Authorization: Bearer <key>`.
+4. **Description writer**: on sign-in, the rewrite service address in Settings becomes the account's own function, `https://<ref>.supabase.co/functions/v1/rewrite` (`rewriteEndpointFor` in `extension/src/accountFlow.js`); whether it is used stays the person's choice. While that is the address, Settings shows no key field: the side panel sends the session's access token as the key (`rewriteKeyFor`) and never stores it in the settings or the synced profile, and a key typed for a self-hosted `backend/` is kept and sent only to that address. `extension/src/rewriter.js` calls `<address>/rewrite` and `<address>/color` with `Authorization: Bearer <key>`.
 
 ## The two functions
 
@@ -659,7 +663,7 @@ The window starts at `since`, a row stamped exactly then included, and has no en
 | `last_synced_scan_at` | When the newest scan to reach the database ran (`scan_summaries.taken_at`, on the clock of the machine that scanned). The database keeps no log of syncs, but every sync carries the counts of that machine's newest scan, so this is the nearest thing it holds to the dealership's last sync. It stops moving when nobody's extension syncs, when the plan lapses (`/sync` then writes nothing), and while that newest scan looked like a website hiccup (most of the lot gone at once): such a scan's counts never go up. A sync with no newer scan to bring leaves it where it was. A scan stamped more than 5 minutes ahead of the database's clock is left out (`/sync` refuses one with the same margin), so a machine whose clock ran ahead cannot pin it. |
 | `rewrite_calls` | Description writer calls in the window: `rewrite_usage` rows of kind `rewrite`. The photo color guesses (kind `color`) are not counted. |
 
-**What it cannot say.** Nothing in the database records a manager opening the manager view, so `managers` counts people with the role, not people using the page: ask the manager at the weekly check-in. The numbers that stay in the salespeople's browsers (the Numbers tab's seconds per post, the fields that could not be filled) are not here either.
+**What it cannot say.** Nothing in the database records a manager opening the manager view, so `managers` counts people with the role, not people using the page: ask the manager at the weekly check-in. Time per post is in the database but not in this report: each post attempt's `seconds` in `post_attempts`, whose median per salesperson the manager view's Salespeople table shows and `v_salesperson_summary.median_seconds` gives in SQL. The fields that could not be filled never leave the salespeople's browsers, so they are in neither.
 
 **While self-serve sign-up is open**, look for rows in the `none` or `pilot` state with no `posts` and an empty `last_synced_scan_at` well after `created_at`: those are dealerships nobody runs (above, "Why per_day, and what it bounds").
 

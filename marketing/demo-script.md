@@ -31,13 +31,13 @@ Show, in order: the fresh re-check on the website; the description with the VIN 
 
 Click **Open the Marketplace form**. Watch it fill. Point at the panel's **Filled in** list: "That's what the form shows, read back after filling, not what we sent."
 
-Then either close the Facebook tab and click **It didn't post** ("nothing was posted or recorded"), or have the salesperson click Publish and show **My listings** with the link.
+Then either close the Facebook tab and click **It didn't post** ("nothing was posted; the Numbers tab records the attempt as not posted"), or have the salesperson click Publish and show **My listings** with the link.
 
 Say: "Lot Current never clicks Publish. There's no code for it, and a test that fails if any appears."
 
 ## 5:00 Several at once
 
-Ready to post: tick three cars. Show **Select the next N** and the daily cap in the toolbar ("a safety setting you control; 10 by default"). Click **Post 3 cars** and show the queue bar in the side panel, then **Stop queue**. Don't run it in the demo unless they want real posts.
+Ready to post: tick three cars. Show **Select the next N** and the daily cap in the toolbar ("a safety setting; your dealership picks the number and each salesperson enters it in Settings; 10 by default"). Click **Post 3 cars** and show the queue bar in the side panel, then **Stop queue**. Don't run it in the demo unless they want real posts.
 
 ## 6:00 When a car sells
 

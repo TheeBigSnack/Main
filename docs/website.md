@@ -63,7 +63,7 @@ Registered at GoDaddy, with GoDaddy's DNS. The records that point it at GitHub P
 
 - `siteUrl: 'https://lotcurrent.com'`: every page carries its canonical, `og:url` and `og:image` on that domain, and `sitemap.xml` and `CNAME` are written.
 - `demoMailto: 'mailto:blawrence@lotcurrent.com'` and `supportEmail: 'blawrence@lotcurrent.com'`: the home page's demo form is open and, with no `demoEndpoint`, sends through the visitor's email app; the support page shows the address. A role address (such as a support inbox) can replace it later: change both values, rerun the generators, commit.
-- `demoEndpoint: ''` (the Supabase project exists, but its `lead` function is not deployed yet: `supabase/README.md`, Demo requests; once it is, set this to the function's address and its `LEAD_ORIGINS` secret to `siteUrl`), `signupUrl: ''` (no hosted manager view), `business` empty (Organization structured data only, the owner's decision).
+- `demoEndpoint: ''` (by choice: the form sends through `demoMailto`. The `lead` function is deployed on the production project (`docs/production-setup.md`, step 3), and it refuses every request until its `LEAD_ORIGINS` secret names `siteUrl`; to send the form through it, set that secret and this value to the function's address, item 1 under "After a deploy" below), `signupUrl: ''` (no hosted manager view), `business` empty (Organization structured data only, the owner's decision).
 
 After any change there: `npm run site-pages`, `npm run legal-pages`, `npm test`, commit the outputs with the config. The site's own host is exempt from `test/dataInventory.test.js`'s outside-host scan (it is this site, not an outside host); the tests pass with `siteUrl` set or empty.
 
@@ -73,7 +73,7 @@ Open `https://lotcurrent.com/` and check: every page's browser tab shows its own
 
 Later, when they exist:
 
-1. The demo form through the `lead` function: set `demoEndpoint` and the function's `LEAD_ORIGINS` secret to `siteUrl` (`supabase/README.md`, "Demo requests"), rerun `npm run site-pages`, commit. `LOTSYNC_SITE_ORIGIN=<siteUrl> npm run check-deploy` then shows both lead lines as ok.
+1. The demo form through the `lead` function, when requests should land in the database instead of the inbox: set `demoEndpoint` and the function's `LEAD_ORIGINS` secret to `siteUrl` (`supabase/README.md`, "Demo requests"), rerun `npm run site-pages`, commit. `LOTSYNC_SITE_ORIGIN=<siteUrl> npm run check-deploy` then shows both lead lines as ok.
 2. The business details (optional): `business`, only with the entity's real registered address; see the launch checklist's item.
 3. Once the legal texts are final (`legal/legal-status.json` says `"draft": false` and `npm run legal-pages` has rewritten the pages without their draft banners), give `extension/src/legalLinks.js` the three addresses `https://lotcurrent.com/legal/terms/`, `https://lotcurrent.com/legal/privacy/` and `https://lotcurrent.com/legal/posting-rules/` and a new `version`, so the wizard's Terms step starts recording acceptances of the texts people can read (the comment in that file says why not before).
 

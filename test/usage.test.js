@@ -153,6 +153,17 @@ test('supabase/README.md, "Usage report": the three calls, who cannot call it, a
   assert.match(s, /`scan_summaries\.taken_at`/, 'which timestamp stands for the last sync');
   assert.match(s, /The database keeps no log of syncs/, 'and why');
   assert.match(s, /Nothing in the database records a manager opening the manager view/, 'what it cannot say');
+  // review: the section said seconds per post stay in the salespeople's browsers, while the sync uploads
+  // each attempt's seconds (post_attempts.seconds) and the manager view shows their median; only the
+  // records of fields that could not be filled stay local
+  const sync = read('../extension/src/sync.js');
+  if (/seconds: intOrNull\(a\.seconds\)/.test(sync)) {
+    assert.match(read('../supabase/migrations/0001_schema.sql'), /create table public\.post_attempts \([^;]*\bseconds integer/, 'post_attempts has no seconds column');
+    assert.doesNotMatch(s, /stay in the salespeople's browsers \([^)]*seconds per post/, 'the section says seconds per post stay in the browsers; the sync uploads them');
+    assert.match(s, /Time per post is in the database but not in this report: each post attempt's `seconds` in `post_attempts`/, 'the section does not say where time per post is');
+  }
+  assert.match(sync, /fills are never sent/, 'the sync now sends the form-field records: the section changes with it');
+  assert.match(s, /The fields that could not be filled never leave the salespeople's browsers/, 'what stays in the browsers');
 });
 
 test('docs/launch-checklist.md: the weekly run with its SQL line, and what two active salespeople means in the columns', () => {
