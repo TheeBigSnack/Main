@@ -352,6 +352,28 @@ test('README\'s website paragraph gives siteUrl as site/config.js holds it', () 
   }
 });
 
+// PILOT.md defined the blocked reason `no-permission` as a post started from
+// the side panel without the dealership tab. The panel's own list asks Chrome
+// before it starts anything and records nothing after a no; the reason is
+// recorded when a post that began from a dealership tab has to read the car
+// straight from the website (the tab was closed or shows another page) and
+// the permission is missing, so the definition names that case.
+test('PILOT.md defines no-permission by the posts that record it', () => {
+  const panel = read('../extension/sidepanel.js');
+  for (const fn of ['postFromList', 'queueFromList']) {
+    assert.match(panel, new RegExp(`async function ${fn}\\([^)]*\\) \\{\\n  if \\(!\\(await askForSite\\(\\)\\)\\) return undefined;`), `${fn} no longer asks Chrome before it starts: PILOT.md's no-permission line changes with it`);
+  }
+  assert.match(panel, /if \(!fresh\.ok && fresh\.needsPermission\) \{[^}]*block\(fresh\.message, 'no-permission'\)/, 'where the panel records no-permission moved: PILOT.md changes with it');
+  assert.match(read('../extension/src/vehicleDetails.js'), /if \(!r\.tabUnusable\) return r;/, 'a post from a tab no longer falls through to the direct read only when the tab cannot be used');
+  const line = read('../PILOT.md').split('\n').find((l) => l.startsWith('- **Reason (blocked posts):**'));
+  assert.ok(line, 'PILOT.md no longer defines the blocked reasons');
+  const def = line.slice(line.indexOf('`no-permission`'));
+  assert.ok(def.length > 20, 'PILOT.md no longer defines no-permission');
+  assert.doesNotMatch(def, /a post started from the side panel without the dealership tab/, 'PILOT.md credits no-permission to side-panel list posts, which ask Chrome first and record nothing after a no');
+  assert.match(def, /started from the popup whose dealership tab was closed/, 'PILOT.md does not name the popup post whose dealership tab went');
+  assert.match(def, /side panel's own list asks Chrome first and records nothing/, "PILOT.md does not say a side-panel list post records nothing after a no");
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));
