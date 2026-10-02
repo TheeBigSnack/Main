@@ -753,3 +753,23 @@ test('while the committed account config names a project, no text says the shipp
   assert.match(read('../docs/production-setup.md'), /\*\*From then on every build offers sign-in\.\*\*[^\n]*no build goes to a pilot tester before then/);
   assert.match(doc('launch-checklist.md'), /\*\*No tester build before sign-in works\.\*\*/);
 });
+
+// "It didn't post" ends the post attempt the click on Post opened, as
+// not-posted (sidepanel.js notPosted): the Numbers tab counts it under
+// "Started but not posted", and while signed in it syncs with the other post
+// attempts. A text that tells a salesperson or a manager about the button
+// says the attempt is recorded, never that nothing is.
+test('every text that explains It didn\'t post says the attempt is recorded as not posted', () => {
+  const panel = read('../extension/sidepanel.js');
+  const notPosted = panel.slice(panel.indexOf('async function notPosted'), panel.indexOf('\n}\n', panel.indexOf('async function notPosted')));
+  assert.match(notPosted, /endPost\(p, state\.vin, 'not-posted'\)/, 'It didn\'t post no longer records the attempt as not posted: these texts must change with it');
+  let seen = 0;
+  for (const rel of ['../README.md', '../docs/help.md', '../marketing/demo-script.md', '../PILOT.md']) {
+    for (const line of read(rel).split('\n').filter((l) => /It didn't post/.test(l))) {
+      seen++;
+      assert.doesNotMatch(line, /nothing (is|was|gets) recorded|posted or recorded|nothing is kept/i, `${rel}: "${line.trim().slice(0, 120)}" says It didn't post records nothing`);
+      assert.match(line, /\bnot posted\b|recorded as such/i, `${rel}: "${line.trim().slice(0, 120)}" does not say the attempt is recorded as not posted`);
+    }
+  }
+  assert.ok(seen >= 4, 'README, the help doc, the demo script and PILOT.md no longer explain It didn\'t post');
+});

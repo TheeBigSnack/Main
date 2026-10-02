@@ -38,7 +38,7 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
-8. **Numbers** shows the pilot numbers Lot Current records, kept in this browser and, while you are signed in, also in your dealership's account (all but the fields it couldn't fill, which stay in the browser): how long each post took (from the click on Post to "It's posted", your review included), which form fields it couldn't fill, and how long sold cars and price changes stayed on your listings, each with the car's VIN and name, your name from Settings and, for a price change, the website's old and new price. **Download CSV** gives your manager the spreadsheet; **Copy summary** is for the weekly check-in. No customer data, nothing from Facebook beyond your own listings, and never the description text. `PILOT.md` defines each number.
+8. **Numbers** shows the pilot numbers Lot Current records, kept in this browser and, while you are signed in, also in your dealership's account (all but the fields it couldn't fill, which stay in the browser): how long each post took (from the click on Post to "It's posted", your review included) and how each post you started ended (posted, draft, skipped, stopped by the re-check, not posted with **It didn't post**, or left open), which form fields it couldn't fill, and how long sold cars and price changes stayed on your listings, each with the car's VIN and name, your name from Settings and, for a price change, the website's old and new price. **Download CSV** gives your manager the spreadsheet; **Copy summary** is for the weekly check-in. No customer data, nothing from Facebook beyond your own listings, and never the description text. `PILOT.md` defines each number.
 
 ### Several cars at once (the queue)
 
@@ -53,7 +53,7 @@ Facebook sometimes opens the create-listing page with a saved draft or an unfini
 3. On **Ready to post**, click **Post** on any car. Read the description in the side panel; edit a line if you like.
 4. Click **Open the form and check fields only**. Sign in to Facebook if it asks (Lot Current never sees that). The panel reports which of the 13 fields it can find on the page and which it can't, without filling anything. If any are missing, click **Copy report** and paste it into a Claude Code session, or fix the name pattern yourself in `extension/facebook/formMap.js`; each fix is one line.
 5. When the fields are found, click **Fill it in now** and watch the form fill. Compare the panel's "Filled in" list with the form; note anything under "Couldn't fill" or "Needs a click".
-6. **Close the Facebook tab without clicking Publish.** In the panel click **It didn't post**, then **Back**. Nothing was posted or recorded.
+6. **Close the Facebook tab without clicking Publish.** In the panel click **It didn't post**, then **Back**. Nothing was posted; the Numbers tab records the attempt as not posted (the car, your name and how long it was open), and while you are signed in that record syncs to your dealership's account with your other post timings.
 
 Six live runs on Sept 27, 2026 shaped the fill code: Facebook draws dropdown lists slowly and one at a time, reformats the price, suggests same-named towns in other states first, restores a saved draft over the form a few seconds after it opens, and its Make and Model boxes commit their first suggestion on blur. The fill code and the mock form now handle all of that, and single cars and a queue ran on the real form with nothing under "Couldn't fill". If a field ever fails again, the "Couldn't fill" reason says what the form showed, and the dry run's report lists what the page calls its controls.
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1212 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1213 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
