@@ -530,10 +530,11 @@ const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?!(?:new|next|more|other|of|th
 // of the same kind are in those sources (new parts: the same part, too);
 // certified also passes when the website lists the car as certified. The
 // dealership's name, its city and the salesperson's role are not claims
-// about the car and are set aside first, as are banned phrases and one-owner
-// wording (each flagged on its own). A false positive only means the
-// template is used: beyond its own fixed sentences, everything the template
-// writes is copied from those sources.
+// about the car and are set aside first, as are banned phrases and the
+// words of one-owner wording (each flagged on its own; what the wording says
+// about the owner is still checked, see ownerStoryProblems). A false
+// positive only means the template is used: beyond its own fixed sentences,
+// everything the template writes is copied from those sources.
 const PARTS = "tires?|tyres?|brakes?|rotors?|pads|battery|batteries|wipers?|shocks?|struts?|exhaust|alternator|starter|clutch|timing (?:belt|chain)|water pump|engine|motor|transmission|paint|parts";
 export const CLAIM_KINDS = Object.freeze([
   { what: 'certification', re: /\b(?:certified|cpo)\b/i },
@@ -606,6 +607,33 @@ function claimProblems(text, ctx) {
       said.add(part);
       problems.push({ code: 'unsupported-claim', text: `Says "${m[0]}", but the website says nothing about ${kind.what} for this car` });
     }
+  }
+  return problems;
+}
+
+// One-owner wording on a one-owner car. The Carfax flag gives the count of
+// owners and nothing more, so the wording's own words ("one", "owner",
+// "owned by one", "sole", "first") are held to the flag and set aside before
+// the claim check, but what it says between "one" and "owner" stays: "one
+// damage-free owner" is checked as damage history, and "one adult owner",
+// "one retired teacher owner" or "one careful owner" as owner history the
+// website's own words must tell too ("adult owner" in the write-up).
+// "previous", "prior", "original" and the like only restate the count.
+const ONE_OWNER_ALL = new RegExp(ONE_OWNER.source, 'gi');
+const OWNER_COUNT_WORDS = /^(?:previous|prior|original|registered|recorded|reported|listed|carfax|autocheck)$/i;
+const betweenOneAndOwner = (said) => (String(said).match(/^(?:one|1|single)[\s-]+(.*?)[\s-]*owner$/i) || [])[1] || '';
+const withoutOneOwner = (text) => String(text).replace(ONE_OWNER_ALL, (said) => ` ${betweenOneAndOwner(said)} `);
+function ownerStoryProblems(text, source) {
+  const problems = [];
+  const said = new Set();
+  for (const m of String(text).matchAll(ONE_OWNER_ALL)) {
+    const words = betweenOneAndOwner(m[0]).split(/[\s-]+/).filter((w) => w && !OWNER_COUNT_WORDS.test(w));
+    const story = words.join(' ').toLowerCase();
+    // a word of another kind ("damage-free", "non-smoking") is that kind's claim, checked with the rest
+    if (!story || said.has(story) || CLAIM_KINDS.some((k) => k.re.test(story))) continue;
+    if (new RegExp(`\\b${words.map(escapeRe).join('[\\s-]+')}[\\s-]+(?:[a-z']+[\\s-]+)?own(?:er|ed)\\b`, 'i').test(source)) continue;
+    said.add(story);
+    problems.push({ code: 'unsupported-claim', text: `Says "${oneLine(m[0])}", but the website says nothing about its owners or how it was driven for this car` });
   }
   return problems;
 }
@@ -721,9 +749,10 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
-  // a banned phrase is said once, as banned, not again as a claim; one owner is held to the Carfax flag above, not again as owner history
-  const claimText = [...BANNED_RE.map(([, re]) => re), ONE_OWNER].reduce((s, re) => s.replace(new RegExp(re.source, 'gi'), ' '), aboutCar);
+  // a banned phrase is said once, as banned, not again as a claim; one owner is held to the Carfax flag above, not again as owner history, but what the wording says about the owner is still checked
+  const claimText = withoutOneOwner(BANNED_RE.reduce((s, [, re]) => s.replace(new RegExp(re.source, 'gi'), ' '), aboutCar));
   problems.push(...claimProblems(claimText, { vehicle, priceNote }));
+  if (vehicle.carfaxOneOwner) problems.push(...ownerStoryProblems(aboutCar, sourceWords));
   // the dealership is always named: with no name set there is nothing to name it by
   const dealerName = String(dealer.name || '').trim();
   if (!dealerName) problems.push({ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' });

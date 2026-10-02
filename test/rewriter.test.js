@@ -196,6 +196,28 @@ test('a Claude draft with a wrong number, an invented fact, no role or a private
   }
 });
 
+test('on a one-owner car, a Claude draft that hides a claim inside the one-owner wording falls back to the template', async () => {
+  const base = args({ dealer: { name: 'Example Motors', city: 'Springfield' }, salesperson: { name: 'Dana', title: 'sales consultant' }, priceNote: '' });
+  base.vehicle = { ...base.vehicle, carfaxOneOwner: true };
+  const template = (await generateDescription(base)).text;
+  assert.match(template, /One owner according to the Carfax report\./);
+  const drafts = {
+    'One damage-free owner.': /Says "damage", but the website says nothing about accident, damage or title history/,
+    'One non-smoking owner.': /Says "non-smoking"/,
+    'One adult owner.': /Says "One adult owner", but the website says nothing about its owners/,
+  };
+  for (const [sentence, why] of Object.entries(drafts)) {
+    const draft = template.replace('One owner according to the Carfax report.', `${sentence} One owner according to the Carfax report.`);
+    const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: draft }) });
+    assert.equal(r.source, 'template', sentence);
+    assert.match(r.note, why, sentence);
+  }
+  // the count alone is the Carfax flag's, so that draft is used
+  const counted = template.replace('One owner according to the Carfax report.', 'Just one previous owner, according to the Carfax report.');
+  const kept = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: counted }) });
+  assert.equal(kept.source, 'claude', kept.note);
+});
+
 test('a Claude draft that drops the dealership\'s price note falls back to the template, which carries it', async () => {
   const example = { name: 'Example Motors', city: 'Springfield' };
   const note = 'Price is before the $490 doc fee; tax and tags extra.';

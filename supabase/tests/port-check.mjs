@@ -57,6 +57,7 @@ const texts = [
   sixty('2019 GMC SIERRA SLE EXT CAB, GREAT SLE TRUCK FOR YOU.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, pre-owned, driven by its previous owner on highway miles, one previous owner, owned by one family, both keys, all records, powertrain coverage, freshly detailed and garaged.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Message me directly, not the dealership; I have owned it and am selling it for a friend.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, one damage-free owner, one adult owner, one previous owner, one non-smoking owner and one adult owner again.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -70,6 +71,7 @@ const contexts = [
   { vehicle: { ...vehicle, descriptionRaw: '<p>Clean interior</p><p>Runs great with new</p><div>brakes.</div>\r\nSmoke-free.<li>Inspected</li>' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, location: 'Example Certified Motors Route 19' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, make: 'GMC', model: 'SIERRA 2500HD', trim: 'SLE EXT CAB', features: [...vehicle.features, 'AWD', 'ABS', 'USB'], interiorColor: 'BLK/GRY', location: 'SAMPLE CDJR' }, dealer, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, carfaxOneOwner: true, descriptionRaw: 'One adult owner, garage kept.' }, dealer, priceNote: '', price: 28995 },
   {},
 ];
 
