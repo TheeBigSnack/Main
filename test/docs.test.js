@@ -777,6 +777,12 @@ test('while accounts are configured, no text says the posted list stays only in 
       }
     }
   }
+  // README's synced-profile line also called the account a milestone still to
+  // come, two lines above the Account item that describes the one built
+  const profile = read('../README.md').split('\n').find((l) => l.startsWith('- **Your profile follows you.**'));
+  assert.ok(profile, 'README no longer explains the synced profile');
+  assert.doesNotMatch(profile, /account[^.]*\bis Milestone 4\b/i, "README's profile line calls the Lot Current account a milestone still to come");
+  assert.match(profile, /\*\*Account\*\*/, "README's profile line does not point at the Account item");
 });
 
 // Two rewrite services read an Anthropic API key: the standalone backend/
