@@ -492,7 +492,7 @@ test('the FAQ says what Lot Current reads and keeps from Facebook pages, as the 
 // review: How it works said "a person is at the keyboard for every one" of its four steps, and the Terms
 // said Lot Current "does not act while the User is away", while background.js rescans an allowed website
 // every 3 hours with nobody there and, for a signed-in salesperson, syncs the results. The texts now say a
-// person does every step that touches Facebook, and name the rescan and its upload.
+// person starts every step that touches Facebook and clicks its buttons, and name the rescan and its upload.
 test('How it works and the Terms keep "while you are away" to Facebook, and name the unattended rescan', () => {
   const bg = read('../extension/background.js');
   const rescan = bg.slice(bg.indexOf('async function runRescan'), bg.indexOf('async function rescanDueSites'));
@@ -500,7 +500,12 @@ test('How it works and the Terms keep "while you are away" to Facebook, and name
   assert.match(rescan, /\bsyncSite\(/, 'the background rescan no longer syncs: these texts can change');
   const how = stripTags(howPage);
   assert.doesNotMatch(how, /at the keyboard for every/i, 'the 3-hourly rescan runs with nobody at the keyboard');
-  assert.match(how, /A person does every step that touches Facebook/);
+  // review: "A person does every step that touches Facebook" was wrong too: Lot Current types into the form, puts
+  // the new price into the Price box and reads the listing a to-do item opened. A person starts those steps and
+  // clicks every button that publishes or changes a listing.
+  assert.doesNotMatch(how, /A person does every step/, 'Lot Current itself fills the form, so a person does not do every step that touches Facebook');
+  assert.match(how, /A person starts every step that touches Facebook, and clicks Publish, Update, Mark as sold or Delete themselves; Lot Current fills in the form\./);
+  assert.match(how, /The rescan of your website in step four can also run on its own, if you allow it, and it never touches Facebook\./);
   const step = stripTags((howPage.match(/<section aria-labelledby="honest-h">[\s\S]*?<\/section>/) || [''])[0]);
   assert.match(step, /every 3 hours while Chrome is open, with nobody at the keyboard/, 'step four says the rescan runs unattended');
   assert.match(step, /while you are signed in to a Lot Current account it also sends that rescan's results/, 'and what a signed-in rescan sends');
