@@ -84,13 +84,13 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 ## How the pre-owned check works
 
-Three separate signs on the dealer website have to agree the car is pre-owned:
+Lot Current compares three signs on the dealer website:
 
 1. the inventory type from the dealer's system (Used / Certified Used / New)
 2. the condition word in the car's web address (`/inventory/used-2019-...` vs `/inventory/new-2027-...`)
 3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
 
-A demo or loaner flag means "sold as new"; if the website also calls the car pre-owned and nowhere new, it goes to **Needs a look** instead. A trailer, RV, powersport vehicle or boat goes to **Needs a look** too (Lot Current fills in only the car/truck and motorcycle forms), unless it is skipped as new. A car the website lists as damaged or refurbished goes to **Needs a look**, unless it is already skipped as new: a demo or loaner flag, or a new sign with no pre-owned one, decides first. A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
+To pass, at least two of them must say pre-owned, or one must and the car's page must link a Carfax report, and none may say new; a car with only one sign and no Carfax report goes to **Needs a look**. A demo or loaner flag means "sold as new"; if the website also calls the car pre-owned and nowhere new, it goes to **Needs a look** instead. A trailer, RV, powersport vehicle or boat goes to **Needs a look** too (Lot Current fills in only the car/truck and motorcycle forms), unless it is skipped as new. A car the website lists as damaged or refurbished goes to **Needs a look**, unless it is already skipped as new: a demo or loaner flag, or a new sign with no pre-owned one, decides first. A Carfax report counts as a supporting sign, but a missing one never blocks a car whose signs agree. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
 
 ## Limits
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1212 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1215 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

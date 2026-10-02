@@ -17,6 +17,7 @@ import { PAGES, cspFor } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing } from './honesty.js';
+import { checkPreOwned } from '../extension/src/classify.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -397,4 +398,40 @@ test('no customer-facing page says nothing leaves the browser, and the support p
   if (/NHTSA/.test(policy)) assert.match(privacy, /NHTSA/, 'the privacy policy sends a VIN to NHTSA on a click; the support page says so');
   if (/rewrite service/.test(policy)) assert.match(privacy, /rewrite service/, 'the privacy policy sends the car\'s facts to the rewrite service when it is on; the support page says so');
   assert.doesNotMatch(privacy, /Clear everything for this website removes it\b/, 'Clear everything for this website does not remove the synced profile');
+});
+
+// review: the home page, How it works and the README said "three separate signs ... have to agree" a car
+// is pre-owned, while the gate (classify.js checkPreOwned) passes a car on two signs, or on one sign plus a
+// linked Carfax report. The copy says what the gate does, and this reads the gate to keep it so.
+test('the pre-owned check is described as the gate decides it: two signs, or one plus a Carfax link, and none new', () => {
+  const car = { inventoryType: 'Used', urlConditionWord: null, siteTitle: '2019 Sample Sedan LX', mileage: 40000, carfaxUrl: null };
+  const verdict = (v) => checkPreOwned({ ...car, ...v }).verdict;
+  const rule = {
+    two: verdict({ urlConditionWord: 'used' }) === 'pre-owned',
+    oneWithCarfax: verdict({ carfaxUrl: 'https://www.carfax.com/vehicle/sample' }) === 'pre-owned',
+    oneAlone: verdict({}) === 'pre-owned',
+    newBlocks: verdict({ urlConditionWord: 'used', siteTitle: 'New 2019 Sample Sedan LX' }) !== 'pre-owned',
+  };
+  // the gate the copy below describes; a change to it changes the copy too
+  assert.deepEqual(rule, { two: true, oneWithCarfax: true, oneAlone: false, newBlocks: true }, 'checkPreOwned decides differently now: update the home page, How it works, the README and this test together');
+  const overclaim = /three (separate |independent )?signs[^.]*(have to|must) (all )?agree|all three signs/i;
+  const docs = {
+    'site/index.html': stripTags(html),
+    'site/how-it-works/index.html': stripTags(howPage),
+    'README.md': read('../README.md'),
+  };
+  for (const [name, doc] of Object.entries(docs)) assert.doesNotMatch(doc, overclaim, `${name} says all three signs must agree; the gate passes two, or one plus a Carfax link`);
+  for (const rel of [...readdirSync(new URL('../marketing/', import.meta.url)).map((f) => `marketing/${f}`), ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `store/${f}`)].filter((f) => /\.(md|json)$/.test(f))) {
+    assert.doesNotMatch(read(`../${rel}`), overclaim, `${rel} says all three signs must agree`);
+  }
+  const card = stripTags((html.match(/<h3>Pre-owned only<\/h3>\s*<p>[\s\S]*?<\/p>/) || [''])[0]);
+  const how = stripTags((howPage.match(/<section aria-labelledby="preowned-h">[\s\S]*?<\/section>/) || [''])[0]);
+  const readme = (read('../README.md').match(/## How the pre-owned check works\n[\s\S]*?(?=\n## )/) || [''])[0];
+  for (const [name, doc] of [['the home page\'s Pre-owned only card', card], ['How it works', how], ['README.md', readme]]) {
+    assert.ok(doc.length > 0, `${name} still describes the check`);
+    assert.match(doc, /at least two/, `${name} says two signs are enough`);
+    assert.match(doc, /one must and the (website|car's page) must link a Carfax report/, `${name} says one sign plus a Carfax link is enough`);
+    assert.match(doc, /none may say new/, `${name} says a new sign stops the car`);
+  }
+  for (const [name, doc] of [['How it works', how], ['README.md', readme]]) assert.match(doc, /only one sign and no Carfax report goes to \**Needs a look/, `${name} says one sign alone goes to Needs a look`);
 });
