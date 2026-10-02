@@ -228,3 +228,37 @@ test('while the published texts say they apply to no one and the pilot agreement
   const q10 = section(read('legal/questions-for-attorney.md'), '## 10. The Pilot Agreement\'s list of what is recorded');
   assert.match(q10, /^- \*\*10\.2\*\* Section 1 says the Terms of Service and the Privacy Policy apply during the Pilot, but the website publishes both as drafts marked "Not in effect/m, 'the attorney is not asked which text binds during a pilot signed before the texts are final');
 });
+
+// Automatic rescans are switched on, through Chrome's own permission prompt,
+// in set-up and in the popup's Settings (the rescan box on Save, or Allow
+// automatic rescans, which the To do tab also shows when the permission was
+// removed). The answers Google's reviewer reads name every place, not set-up
+// alone.
+test('the Web Store answers name every place that turns automatic rescans on: set-up and the popup\'s Settings, the To do tab\'s button included', () => {
+  // the code: set-up asks Chrome for the website's origins from its own click
+  const wizard = read('extension/wizard.js');
+  assert.match(wizard, /case 'wizGrant': \{[^]*?wiz\.granted = await askChrome\(origins\)/, 'set-up no longer asks Chrome for the rescan permission: update the alarms and https://*/* rows and this test');
+  // the code: Settings asks for the same origins from Allow automatic rescans and from Save with the rescan box ticked
+  const popup = read('extension/popup.js');
+  const allow = popup.slice(popup.indexOf("case 'allowRescans': {"));
+  assert.match(allow, /^case 'allowRescans': \{[^]*?askChrome\(rescanOrigins\(\)\)[^]*?autoRescan: true/, 'Allow automatic rescans no longer asks Chrome and switches rescans on: update these texts and this test');
+  const save = popup.slice(popup.indexOf('async function onSettingsSubmit('));
+  assert.match(save, /^async function onSettingsSubmit\([^]*?autoRescan: form\.get\('autoRescan'\) === 'on'[^]*?askChrome\(rescanOrigins\(\)\)/, 'saving Settings with the rescan box ticked no longer asks Chrome: update these texts and this test');
+  const settings = popup.slice(popup.indexOf('<legend>Automatic rescans</legend>'));
+  assert.match(settings, /^<legend>Automatic rescans<\/legend>[^]*?data-action="allowRescans"/, 'Settings no longer has an Allow automatic rescans button');
+  assert.match(popup.slice(popup.indexOf('function scheduleBanner()')), /^function scheduleBanner\(\)[^]*?data-action="allowRescans"/, 'the To do banner no longer has an Allow automatic rescans button');
+
+  const cws = read('legal/chrome-web-store-privacy.md');
+  const listing = read('store/listing.md');
+  for (const [where, text] of [['legal/chrome-web-store-privacy.md', cws], ['store/listing.md', listing]]) {
+    for (const line of text.split('\n')) assert.doesNotMatch(line, /only for a website (?:the user|you|they) allowe?d? in the set-up wizard/i, `${where} says only set-up turns automatic rescans on: "${line.trim().slice(0, 100)}"`);
+  }
+  const alarms = rowText(cws, '`alarms`');
+  assert.match(alarms, /set-up wizard, or in the popup's Settings/, 'the alarms row does not say Settings can turn automatic rescans on too');
+  for (const [where, row] of [['legal/chrome-web-store-privacy.md', rowText(cws, 'Optional host `https://*/*`')], ['store/listing.md', rowText(listing, '`https://*/*` (optional)')]]) {
+    assert.match(row, /The set-up wizard, and the popup's Settings when the (?:user|person) saves with the rescan box ticked or clicks Allow automatic rescans \(a button the To do tab also shows[^)]*\), request only the chosen dealership's website origin and its inventory-service origin/, `${where}: the https://*/* row does not name every place that asks for the website's origins`);
+  }
+  const tester = listing.split('\n').find((l) => l.includes('Background rescans happen only'));
+  assert.ok(tester, 'store/listing.md no longer has its tester step about background rescans');
+  assert.match(tester, /in the set-up wizard or in Settings/, 'the reviewer\'s tester step says only set-up turns automatic rescans on');
+});
