@@ -451,6 +451,22 @@ test('store/listing.md gives the site, the support inbox and the legal addresses
   assert.ok(listing.includes(`Privacy policy URL: \`${LEGAL.privacyUrl}\``), 'the privacy answers give another privacy policy URL than legalLinks.js');
 });
 
+// Set-up reads the website and finishes with one more read, which saves the
+// snapshot, and the popup's button reads "Rescan website" once a snapshot is
+// saved. The Web Store reviewer's steps say the list is already there after
+// set-up, not to click a "Scan website" button the popup no longer shows.
+test('the store reviewer\'s steps say set-up has already read the website, and name the button the popup shows then', () => {
+  const wizard = read('../extension/wizard.js');
+  const finish = wizard.slice(wizard.indexOf('async function finish('));
+  assert.match(finish, /^async function finish\([^]*?const ok = await runScan\(ctx\);/, 'set-up no longer ends with a read: update store/listing.md step 2 and this test');
+  assert.match(wizard, /chrome\.storage\.local\.set\(\{ \[k\.snapshot\]: kept/, 'set-up\'s read no longer saves the snapshot: update store/listing.md step 2 and this test');
+  assert.match(read('../extension/popup.js'), /\$\('scan'\)\.textContent = state\.snapshot \? 'Rescan website' : 'Scan website';/, 'the popup\'s scan button has another label: update store/listing.md step 2 and this test');
+  const step = read('../store/listing.md').split('\n').find((l) => l.startsWith('2. Click the Lot Current icon in the toolbar.'));
+  assert.ok(step, 'store/listing.md lost the reviewer\'s set-up step');
+  assert.doesNotMatch(step, /click Scan website/i, 'the reviewer is told to click Scan website, which the popup shows only before a scan is saved');
+  assert.match(step, /Set-up reads the website and ends with one more read[^.]*the Ready to post tab already lists the pre-owned cars at that store \(Rescan website, at the top of the popup, reads the website again\)/);
+});
+
 // Every Markdown or script file outside the docs and the history that holds
 // the website's support address is named on support.md's inbox line, so a
 // change of address reaches all of them (the Terms and the onboarding email
