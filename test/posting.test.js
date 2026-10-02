@@ -393,7 +393,9 @@ function extensionFiles(dir = new URL('../extension/', import.meta.url), prefix 
 // is exported under. The adapters' own probe and search are checked in the
 // dealer-site test below for every adapter in ADAPTERS.
 const INJECTORS = {
-  'sidepanel.js': { './facebook/fillForm.js': ['fillFormInPage', 'attachPhotosInPage', 'probeFormInPage'] },
+  // the side panel's fill, photos and dry run, and the read-only listing
+  // reader a queue uses to see the new listing shows the car just published
+  'sidepanel.js': { './facebook/fillForm.js': ['fillFormInPage', 'attachPhotosInPage', 'probeFormInPage', 'readListingInPage'] },
   'upkeep.js': { './facebook/fillForm.js': ['fillPriceInPage', 'readListingInPage'] },
   'src/scanRunner.js': { './scan.js': ['probeSiteInPage'] },
 };
@@ -509,7 +511,7 @@ function selfContainmentProblems(moduleSrc, fnSrc, name) {
 }
 
 test('every function the extension injects into a page is self-contained: no import, nothing from its module around it', async () => {
-  let checked = 0;
+  const checked = new Set(); // a function two files inject (the listing reader) is one function
   for (const [file, allowed] of Object.entries(INJECTORS)) {
     for (const [from, names] of Object.entries(allowed)) {
       const url = new URL(from, new URL('../extension/' + file, import.meta.url));
@@ -518,11 +520,11 @@ test('every function the extension injects into a page is self-contained: no imp
       for (const name of names) {
         assert.equal(typeof mod[name], 'function', `${from} exports ${name}`);
         assert.deepEqual(selfContainmentProblems(moduleSrc, String(mod[name]), name), [], `${from} ${name}`);
-        checked += 1;
+        checked.add(`${url.pathname} ${name}`);
       }
     }
   }
-  assert.equal(checked, 6, 'the five fillForm.js functions and the neutral site probe');
+  assert.equal(checked.size, 6, 'the five fillForm.js functions and the neutral site probe');
   // the check itself
   const fillSrc = readFileSync(new URL('../extension/facebook/fillForm.js', import.meta.url), 'utf8');
   const { fillFormInPage, readListingInPage } = await import('../extension/facebook/fillForm.js');
@@ -603,11 +605,14 @@ test('no file of the extension contains a block-comment opener inside a string',
   }
 });
 
-test('the side panel reaches the Facebook tab only through the known fill functions', () => {
+test('the side panel reaches the Facebook tab only through the known fill functions and the read-only listing reader', () => {
   const src = read('../extension/sidepanel.js');
   const injections = (src.match(/executeScript\(/g) || []).length;
-  const known = (src.match(/func: (fillFormInPage|attachPhotosInPage|probeFormInPage)\b/g) || []).length;
-  assert.ok(injections >= 3 && injections === known, `every executeScript must use one of the known fill functions (${injections} vs ${known})`);
+  const known = (src.match(/func: (fillFormInPage|attachPhotosInPage|probeFormInPage|readListingInPage)\b/g) || []).length;
+  assert.ok(injections >= 4 && injections === known, `every executeScript must use one of the known fill functions or the listing reader (${injections} vs ${known})`);
+  // the listing reader is read only once, by the queue's check of a new listing (readListingInPage is held read-only above)
+  assert.equal((src.match(/func: readListingInPage\b/g) || []).length, 1);
+  assert.match(bodyOf(src, 'confirmIfThisCar'), /func: readListingInPage, args: \[state\.map, LISTING_SIGNS, expect\]/);
   assert.ok(!/files:\s*\[|chrome\.debugger|tabs\.sendMessage|\.submit\s*\(|requestSubmit/i.test(src));
   // the only thing it ever clicks is its own download link
   const clicks = [...src.matchAll(/(\S+)\.click\(/g)];

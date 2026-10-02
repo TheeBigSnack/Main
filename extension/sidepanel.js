@@ -23,12 +23,13 @@ import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
-import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
+import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
 import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
-import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
-import { watchForListing, isNewListingFromForm, onCreatePage, listingLink } from './facebook/detectPost.js';
+import { fillFormInPage, attachPhotosInPage, probeFormInPage, readListingInPage } from './facebook/fillForm.js';
+import { watchForListing, isNewListingFromForm, showsPostedCar, onCreatePage, listingLink } from './facebook/detectPost.js';
+import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
@@ -1071,17 +1072,56 @@ function startWatcher() {
     if (r.status === 'listing' || r.status === 'probably' || r.status === 'closed') {
       state.detected = r;
       const own = postsWindow();
-      // In a queue, the form's tab moving straight from the form to a new
-      // listing means the person clicked Publish: record it and load the next
-      // car. Any other listing address in that tab (one browsed to, or one it
-      // already showed when the panel came back) waits for the person's click.
-      // A panel in a second window only shows it: two panels that both
-      // recorded the post would record it twice.
-      if (own && state.queueMode && isNewListingFromForm(r, state.posted, state.map)) return confirmPosted();
       render();
       if (own) saveFlow(); // the saved post is its own panel's: a second window's late write could land over the next car's
+      // In a queue, the form's tab moving straight from the form to a new
+      // listing that shows this car means the person clicked Publish: record
+      // it and load the next car (confirmIfThisCar). Any other listing address
+      // in that tab (one browsed to, or one it already showed when the panel
+      // came back) waits for the person's click. A panel in a second window
+      // only shows it: two panels that both recorded the post would record it
+      // twice.
+      if (own && state.queueMode && isNewListingFromForm(r, state.posted, state.map)) return confirmIfThisCar(r);
     }
+    return undefined;
   });
+}
+
+// The listing page a queue's form tab moved to straight from the form is
+// read (read-only) a few times while it loads, and the post is recorded by
+// itself only when the page is that listing and shows this car: its VIN, or,
+// when no other posted car has its name, its name and the price the form was
+// filled with (showsPostedCar). A notification or a link clicked on the form
+// page also goes straight to a listing, of another car: then the panel asks,
+// and that listing's address stays out of the Listing link box, so It's
+// posted never saves it as this car's link.
+const VERIFY_READS = 6;
+const VERIFY_EVERY_MS = 1500;
+async function confirmIfThisCar(r) {
+  const run = flowRun;
+  const { vin, vehicle, fbTabId } = state;
+  if (!vehicle) return undefined;
+  const still = () => run === flowRun && state.step === 'publish' && state.vin === vin && state.detected === r;
+  const price = typeof state.price === 'number' && state.price > 0 ? state.price : basisPrice(vehicle, state.settings.basis);
+  const expect = { id: r.id, name: vehicle.name, prices: typeof price === 'number' && price > 0 ? [price] : [], vin };
+  const namesakes = namesakesOf(state.posted, vin, vehicle.name);
+  for (let i = 0; i < VERIFY_READS; i += 1) {
+    if (i) await sleep(VERIFY_EVERY_MS);
+    if (!still()) return undefined;
+    let seen = null;
+    try {
+      const [inj] = await chrome.scripting.executeScript({ target: { tabId: fbTabId }, func: readListingInPage, args: [state.map, LISTING_SIGNS, expect] });
+      seen = inj && inj.result;
+    } catch (e) {
+      seen = null; // the page is still loading, or the tab went where Lot Current may not read: read again
+    }
+    if (!still()) return undefined;
+    if (showsPostedCar(seen, { namesakes })) return confirmPosted();
+  }
+  state.detected = { ...r, unverified: true, name: vehicle.name, price: expect.prices[0] || null };
+  render();
+  await saveFlow();
+  return undefined;
 }
 
 // Records the post of the car on the form, once: the watcher and a click on
@@ -1106,7 +1146,8 @@ async function confirmPosted() {
   // Facebook often lands after Publish, would open the wrong page from To do
   // and in the manager's view. Another address typed in is not swapped for
   // what the tab showed: the post is recorded with no link, and the panel says so.
-  const listingUrl = listingLink(typed || (state.detected && state.detected.url), state.map);
+  const shown = state.detected && !state.detected.unverified ? state.detected.url : ''; // an address the queue could not match to this car is never kept unless typed
+  const listingUrl = listingLink(typed || shown, state.map);
   const linkNote = typed && !listingUrl
     ? `No listing link was saved for ${nameOf(vin)}: the address in Listing link isn't a Marketplace listing's own address (Your listings, say). Its To do items open Your listings, where you pick the listing.`
     : '';
@@ -1658,7 +1699,9 @@ function viewPublish() {
     : '';
   const d = state.detected;
   let detect = '';
-  if (d && (d.status === 'listing' || d.status === 'probably')) {
+  if (d && d.unverified) {
+    detect = `<div class="banner warn" id="detected">The Facebook tab went from the form to a listing page that doesn't show ${esc(d.name || 'this car')} (its VIN, or its name${d.price ? ` at ${money(d.price)}` : ''}), so the queue did not record it by itself. If you clicked <b>Publish</b> and it posted, paste its listing link below if you have it and click <b>It's posted, next car</b>.</div>`;
+  } else if (d && (d.status === 'listing' || d.status === 'probably')) {
     detect = `<div class="banner good" id="detected">Looks like it posted${d.url ? '' : ' (the tab moved to Your listings)'}. Confirm below to record it.</div>`;
   } else if (d && d.status === 'closed') {
     detect = `<div class="banner warn" id="detected">The Facebook tab was closed. Did it post?</div>`;
@@ -1671,7 +1714,7 @@ function viewPublish() {
   return `${carCard()}
   ${preexisting}${changedBanner}
   ${languageHint(f.language, !f.filled.length && !f.partial.length)}
-  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When the Facebook tab goes straight from the form to your new listing, the next car loads by itself; if it does not, click <b>It\'s posted, next car</b>.' : ''}</div>
+  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When the Facebook tab goes straight from the form to your new listing and Lot Current sees this car on it, the next car loads by itself; if it does not, click <b>It\'s posted, next car</b>.' : ''}</div>
   <section id="fillResults">
     <h3>Filled in <span class="pill good">${f.filled.length}</span> <span class="why">as the form shows them</span></h3>
     ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}${x.note ? ` <span class="why">${esc(x.note)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}
@@ -1685,7 +1728,7 @@ function viewPublish() {
     <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="attachAgain">${state.photos && (state.photos.attached || state.photos.again) ? 'Attach photos again' : 'Attach photos'}</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
   </section>
   <section>${detect}
-    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && d.url) || '')}" placeholder="paste the listing's own address if you have it" /></label>
+    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && !d.unverified && d.url) || '')}" placeholder="paste the listing's own address if you have it" /></label>
     <div class="actions">${outcome}</div>
   </section>`;
 }

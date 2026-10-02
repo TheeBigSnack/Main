@@ -24,7 +24,8 @@ import { draftRecord } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
 import { FORM_MAP, applyOverrides } from '../extension/facebook/formMap.js';
-import { isNewListingFromForm, onCreatePage, listingLink } from '../extension/facebook/detectPost.js';
+import { isNewListingFromForm, showsPostedCar, onCreatePage, listingLink } from '../extension/facebook/detectPost.js';
+import { namesakesOf } from '../extension/upkeep.js';
 import { vehicle } from './helpers.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
@@ -88,13 +89,16 @@ test('a queue walked by the side panel of another window still records each post
       origin: 'https://www.example-motors.test', vin: 'AAA', windowId: panelWindowId, queueMode: true, step: 'publish', fbTabId: 77, map: FORM_MAP, posted: {}, detected: null,
       queue: { vins: ['AAA', 'BBB'], index: 1, status: 'running', results: { AAA: 'posted' }, dealerTabId: 7, windowId: made },
     };
-    const fns = compileMany(['startNextInQueue', 'startWatcher', 'postsWindow'], {
+    const fns = compileMany(['startNextInQueue', 'startWatcher', 'postsWindow', 'confirmIfThisCar'], {
       state, currentVin, panelWindowId, isNewListingFromForm, watcher: null,
+      // the new listing's page shows this car (its VIN)
+      flowRun: 0, sleep: async () => {}, basisPrice: () => 20000, namesakesOf, showsPostedCar, readListingInPage: 'readListingInPage', LISTING_SIGNS: {}, VERIFY_READS: 6, VERIFY_EVERY_MS: 0,
+      chrome: { scripting: { executeScript: async () => [{ result: { matchesId: true, matchesVin: true } }] } },
       dailyCap: () => ({ reached: false }), pauseQueue: never('pauseQueue'), saveQueue: never('saveQueue'), clearFlow: never('clearFlow'), setStatus: never('setStatus'), capCount: () => '',
       // startFlow as far as the form: it takes the request's window, then openForm and runFill start the watcher
       startFlow: async (req) => {
         calls.push(`start ${req.vin}`);
-        Object.assign(state, { vin: req.vin, windowId: req.windowId || null, queueMode: true, step: 'publish', detected: null });
+        Object.assign(state, { vin: req.vin, windowId: req.windowId || null, queueMode: true, step: 'publish', detected: null, vehicle: { vin: req.vin, name: 'Car B' }, price: 20000, settings: { basis: 'website' } });
       },
       watchForListing: () => ({ promise: Promise.resolve({ status: 'listing', url: ITEM, id: '556', afterCreate: true }), cancel: () => {} }),
       confirmPosted: async () => calls.push('confirmPosted'), render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'),
@@ -102,7 +106,7 @@ test('a queue walked by the side panel of another window still records each post
     await fns.startNextInQueue();
     fns.startWatcher();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(calls, ['start BBB', 'confirmPosted'], `queue made in window ${made}, walked in window ${panelWindowId}: B is recorded by itself (${calls.join(' | ')})`);
+    assert.deepEqual(calls, ['start BBB', 'render', 'saveFlow', 'confirmPosted'], `queue made in window ${made}, walked in window ${panelWindowId}: B is recorded by itself (${calls.join(' | ')})`);
   }
   // Allow and check again on a blocked car starts it again from this panel: it is this panel's post
   for (const [windowId, panelWindowId, expected] of [[1, 2, 2], [1, null, 1], [null, 2, 2]]) {
@@ -1266,6 +1270,11 @@ test('It\'s posted keeps a listing link only when it is a listing\'s own address
   }
   // nothing typed: the listing the tab showed
   assert.equal((await run({ detected: { status: 'listing', url: ITEM, id: '1234567890' } })).entry.listingUrl, ITEM);
+  // ...unless a queue found it does not show this car: no link, unless the person types one
+  const notThisCar = { status: 'listing', url: ITEM, id: '1234567890', unverified: true };
+  assert.equal((await run({ detected: notThisCar, queueMode: true })).entry.listingUrl, undefined, 'another car\'s listing is never saved as this car\'s link');
+  const OWN = 'https://www.facebook.com/marketplace/item/2222222222/';
+  assert.equal((await run({ detected: notThisCar, queueMode: true, typed: OWN })).entry.listingUrl, OWN);
   assert.equal((await run({})).entry.listingUrl, undefined, 'nothing typed, nothing seen: no link, and nothing to say');
 });
 
@@ -1532,29 +1541,53 @@ test('Saved as draft, next car records one draft for its own car and moves the q
 // In a queue the panel records a post without asking only when the form's
 // own tab went straight from the form to a listing not already recorded;
 // any other listing address shows "Looks like it posted" and waits.
+// What the read-only listing reader sees on the page the tab moved to: this
+// car's new listing (its VIN on the page), or another car's listing.
+const THIS_CAR = { matchesId: true, sold: false, unavailable: false, matchesVin: true, matchesName: true, matchesPrice: true };
+const OTHER_CAR = { matchesId: true, sold: false, unavailable: false, matchesVin: false, matchesName: false, matchesPrice: false };
+// sidepanel.js's own startWatcher, postsWindow and confirmIfThisCar, with
+// the real isNewListingFromForm, showsPostedCar and namesakesOf; `pages` is
+// what each read of the listing page gives (an Error: the read failed), the
+// last one repeated; `during(n, state)` runs at the n-th read.
+async function queueWatch({ queueMode, result, posted = {}, windowId = null, panelWindowId = null, pages = [THIS_CAR], during = null }) {
+  const calls = [];
+  const reads = [];
+  const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, detected: null, windowId, vin: 'AAA', vehicle: { vin: 'AAA', name: '2020 Make Model', price: 21000 }, price: 20000, settings: { basis: 'website' } };
+  const { startWatcher } = compileMany(['startWatcher', 'postsWindow', 'confirmIfThisCar'], {
+    state, watcher: null, isNewListingFromForm, showsPostedCar, namesakesOf, basisPrice, panelWindowId, flowRun: 0,
+    sleep: async () => {}, VERIFY_READS: 6, VERIFY_EVERY_MS: 1500, readListingInPage: 'the listing reader', LISTING_SIGNS: 'the listing signs',
+    chrome: {
+      scripting: {
+        executeScript: async ({ target, func, args }) => {
+          reads.push({ tabId: target.tabId, func, signs: args[1], expect: args[2] });
+          if (during) during(reads.length, state);
+          const page = pages[Math.min(reads.length, pages.length) - 1];
+          if (page instanceof Error) throw page;
+          return [{ result: page }];
+        },
+      },
+    },
+    watchForListing: (opts) => {
+      calls.push('watch ' + opts.createUrl);
+      return { promise: Promise.resolve(result), cancel: () => {} };
+    },
+    confirmPosted: async () => calls.push('confirmPosted'),
+    render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'),
+  });
+  startWatcher();
+  for (let i = 0; i < 40; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  return { calls, state, reads };
+}
+
 test('in a queue, only a new listing the form\'s tab moved to straight from the form is recorded without asking', async () => {
   const ITEM = 'https://www.facebook.com/marketplace/item/555/';
-  const run = async ({ queueMode, result, posted = {}, windowId = null, panelWindowId = null }) => {
-    const calls = [];
-    const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, detected: null, windowId };
-    const { startWatcher } = compileMany(['startWatcher', 'postsWindow'], {
-      state, watcher: null, isNewListingFromForm, panelWindowId,
-      watchForListing: (opts) => {
-        calls.push('watch ' + opts.createUrl);
-        return { promise: Promise.resolve(result), cancel: () => {} };
-      },
-      confirmPosted: async () => calls.push('confirmPosted'),
-      render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'),
-    });
-    startWatcher();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    return { calls, state };
-  };
+  const run = queueWatch;
   const fromForm = { status: 'listing', url: ITEM, id: '555', afterCreate: true };
   const q = await run({ queueMode: true, result: fromForm });
-  assert.deepEqual(q.calls, ['watch ' + FORM_MAP.createUrl, 'confirmPosted'], 'published from the form: recorded, next car');
+  assert.deepEqual(q.calls, ['watch ' + FORM_MAP.createUrl, 'render', 'saveFlow', 'confirmPosted'], 'published from the form, and the listing shows this car: recorded, next car');
+  assert.deepEqual(q.reads, [{ tabId: 77, func: 'the listing reader', signs: 'the listing signs', expect: { id: '555', name: '2020 Make Model', prices: [20000], vin: 'AAA' } }], 'the form\'s tab is read once, for this listing\'s id and this car at the price the form was filled with');
   const own = await run({ queueMode: true, result: fromForm, windowId: 5, panelWindowId: 5 });
-  assert.deepEqual(own.calls, ['watch ' + FORM_MAP.createUrl, 'confirmPosted'], 'the side panel of the window the post started in records it');
+  assert.deepEqual(own.calls, ['watch ' + FORM_MAP.createUrl, 'render', 'saveFlow', 'confirmPosted'], 'the side panel of the window the post started in records it');
   // a side panel in a second window watches the same tab: it shows the
   // listing (so its It's posted keeps the link) but never records it by
   // itself, and leaves the saved post to the panel it belongs to
@@ -1571,7 +1604,36 @@ test('in a queue, only a new listing the form\'s tab moved to straight from the 
     assert.ok(!r.calls.includes('confirmPosted'), `${what}: not recorded without the person (${r.calls.join(' | ')})`);
     assert.equal(r.state.detected, opts.result, `${what}: shown as "Looks like it posted"`);
     assert.ok(r.calls.includes('render') && r.calls.includes('saveFlow'));
+    assert.deepEqual(r.reads, [], `${what}: nothing is read`);
   }
+});
+
+// A notification ("Someone is interested in your ...") or a listing clicked
+// on the form page before Publish also takes the form's tab straight from the
+// form to a listing not yet recorded. The page is read, and only one that
+// shows this car is recorded by itself; another car's listing leaves the
+// panel asking, with that listing's address out of the Listing link box.
+test('in a queue, a listing reached from the form page that does not show this car is not recorded: the panel asks', async () => {
+  const ITEM = 'https://www.facebook.com/marketplace/item/555/';
+  const fromForm = { status: 'listing', url: ITEM, id: '555', afterCreate: true };
+  // another car's listing, read while it loads and after: never recorded, and the panel asks
+  const other = await queueWatch({ queueMode: true, result: fromForm, pages: [new Error('Frame with ID 0 is still loading'), OTHER_CAR] });
+  assert.ok(!other.calls.includes('confirmPosted'), other.calls.join(' | '));
+  assert.equal(other.reads.length, 6, 'read six times, 1.5 s apart, while the page loads');
+  assert.deepEqual(other.calls, ['watch ' + FORM_MAP.createUrl, 'render', 'saveFlow', 'render', 'saveFlow'], 'shown, then shown as not this car, and saved');
+  assert.deepEqual(other.state.detected, { ...fromForm, unverified: true, name: '2020 Make Model', price: 20000 }, 'the panel says the page does not show this car');
+  // a page still loading, then the new listing: recorded at the read that shows it
+  const late = await queueWatch({ queueMode: true, result: fromForm, pages: [new Error('no frame yet'), { ...THIS_CAR, matchesId: false }, THIS_CAR] });
+  assert.deepEqual([late.calls.at(-1), late.reads.length], ['confirmPosted', 3]);
+  // its name and price only: enough when no other posted car has the name, never when one does
+  const nameAndPrice = { ...OTHER_CAR, matchesName: true, matchesPrice: true };
+  assert.equal((await queueWatch({ queueMode: true, result: fromForm, pages: [nameAndPrice] })).calls.at(-1), 'confirmPosted');
+  const twin = await queueWatch({ queueMode: true, result: fromForm, pages: [nameAndPrice], posted: { BBB: { name: '2020 Make Model', price: 20000 } } });
+  assert.ok(!twin.calls.includes('confirmPosted'), 'another posted car of the same name: only its VIN tells them apart');
+  assert.equal(twin.state.detected.unverified, true);
+  // the person clicks It's posted (or the post ends) while the page is read: the reads stop and nothing more is said
+  const clicked = await queueWatch({ queueMode: true, result: fromForm, pages: [OTHER_CAR], during: (n, state) => { if (n === 2) state.step = 'done'; } });
+  assert.deepEqual([clicked.reads.length, clicked.calls.includes('confirmPosted'), clicked.state.detected], [2, false, fromForm]);
 });
 
 // A side panel opened in a second window brings back the same post at

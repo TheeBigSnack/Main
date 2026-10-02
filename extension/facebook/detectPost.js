@@ -4,8 +4,10 @@
 // salesperson to confirm ("Looks like it posted", It's posted, record it)
 // and lets them paste the link. In a queue, a listing address the form's own
 // tab moved to straight from the create page, for a listing not already
-// recorded, is taken as the person's Publish and recorded without asking
-// (isNewListingFromForm); any other listing address waits for their click.
+// recorded (isNewListingFromForm), is read by the side panel, and only a page
+// that shows the car just published (showsPostedCar) is taken as the
+// person's Publish and recorded without asking. Any other listing address
+// waits for their click, its address kept out of the Listing link box.
 
 // 'listing' = a listing page with an id; 'probably' = the "your listings"
 // page, which usually follows a publish; null = nothing to report.
@@ -74,6 +76,20 @@ export function isNewListingFromForm(result, posted, patterns) {
     const known = classifyUrl(p && p.listingUrl, patterns);
     return Boolean(known) && known.status === 'listing' && known.id === result.id;
   });
+}
+
+// In a queue, whether the listing page the form's tab moved to shows the car
+// just published, as the read-only listing reader (readListingInPage, asked
+// for that listing's id, this car's name, VIN and filled price) saw it: still
+// that listing's address, not marked sold or gone, and this car's VIN on the
+// page; or, when no other car in the posted list shares this car's name
+// (namesakes 0; null when unknown), every word of its name and that price.
+// Another listing opened from a notification, or a listing of another car,
+// shows neither, and the panel asks instead.
+export function showsPostedCar(seen, { namesakes = null } = {}) {
+  if (!seen || !seen.matchesId || seen.sold || seen.unavailable) return false;
+  if (seen.matchesVin) return true;
+  return namesakes === 0 && Boolean(seen.matchesName && seen.matchesPrice);
 }
 
 /**

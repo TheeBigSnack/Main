@@ -1,11 +1,15 @@
 // End-to-end test of the batch queue: tick two ready cars in the popup and
 // click "Post 2 cars". The side panel then walks them one at a time: re-check,
 // describe, open and fill the MOCK form. The test clicks Publish on the first
-// car as the salesperson would; the panel notices the listing address, records
-// it and loads the next car by itself. The second car is a mild hybrid (the
-// website says "Gasoline/Mild Electric Hybrid"), so its fuel is an assumption:
-// the queue stops at review with it listed, and the test clicks Open the
-// Marketplace form as the person would. For the second car the test presses
+// car as the salesperson would; the panel notices the listing address, reads
+// the page, sees the car's VIN on it, records it and loads the next car by
+// itself. The second car is a mild hybrid (the website says "Gasoline/Mild
+// Electric Hybrid"), so its fuel is an assumption: the queue stops at review
+// with it listed, and the test clicks Open the Marketplace form as the person
+// would. Its form tab then goes straight to another car's listing (as a
+// clicked notification would take it): nothing is recorded, the panel says
+// the page doesn't show this car, and the Listing link box stays empty. For
+// the second car the test presses
 // "Saved as draft" (as if the person used Facebook's Save draft), and the
 // queue finishes with 1 posted, 1 draft. Then the website drops the draft's
 // car $1,500: the draft's pill says so, and Mark posted records the price
@@ -193,6 +197,19 @@ try {
   assert.match(await panel.textContent('#queueBar'), /paused/);
   await panel.click('#queueResume');
   assert.doesNotMatch(await panel.textContent('#queueBar'), /paused/);
+
+  // Before publishing, the person follows a link from the form page to another car's listing (a
+  // Wagoneer Series II, VIN 1C4SJVBT0NS000616): the tab went straight from the form to a listing
+  // not yet recorded, but the page doesn't show this car, so nothing is recorded and the panel asks.
+  await fb2.goto(`${marketOrigin}/marketplace/item/616161/`);
+  await panel.waitForFunction(() => /doesn't show 2022 Jeep Wagoneer Series III/.test(document.querySelector('#detected')?.textContent || ''), null, { timeout: 30000 });
+  assert.match(await panel.textContent('#detected'), /\(its VIN, or its name at \$38,383\), so the queue did not record it by itself/);
+  assert.match(await panel.textContent('#queueBar'), /Car 2 of 2/);
+  assert.match(await panel.textContent('#queueBar'), /1 posted/);
+  assert.equal(await panel.inputValue('#listingUrl'), '', "the other car's listing is not offered as this car's link");
+  const posted2 = await panel.evaluate(async (o) => (await chrome.storage.local.get(`posted:${o}`))[`posted:${o}`], origin);
+  assert.deepEqual(Object.keys(posted2), [RAM], 'the Wagoneer is not recorded as posted');
+  await panel.screenshot({ path: join(shots, 'queue-2c-not-this-car.png'), fullPage: true });
 
   // ---- 4. Car 2 is saved as a draft on Facebook (the person's choice), not published ----
   await panel.click('#savedDraft');

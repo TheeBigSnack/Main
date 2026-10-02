@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyUrl, onCreatePage, isNewListingFromForm, watchForListing, listingLink } from '../extension/facebook/detectPost.js';
+import { classifyUrl, onCreatePage, isNewListingFromForm, showsPostedCar, watchForListing, listingLink } from '../extension/facebook/detectPost.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 
 test('a listing address means it posted; the "your listings" page probably does; anything else is nothing', () => {
@@ -126,3 +126,31 @@ test('the create page is the map\'s create address, with any query; a queue reco
   assert.equal(isNewListingFromForm({ ...fromForm, id: '556', url: 'https://www.facebook.com/marketplace/item/556/' }, posted, FORM_MAP), true);
 });
 
+
+// A notification or a link clicked on the form page also takes the tab
+// straight from the form to a listing, of another car. A queue records the
+// post by itself only when the listing page shows the car just published
+// (what readListingInPage saw, asked for the listing's id and this car's
+// name, VIN and filled price).
+test('a queue takes a listing page as the post only when it shows the car just published', () => {
+  const page = { matchesId: true, sold: false, unavailable: false, matchesVin: false, matchesName: false, matchesPrice: false };
+  // this car's VIN on the page: yes, whatever else
+  assert.equal(showsPostedCar({ ...page, matchesVin: true }, { namesakes: 2 }), true);
+  assert.equal(showsPostedCar({ ...page, matchesVin: true }), true, 'namesakes unknown');
+  // its name and price, with no other posted car of that name: yes; with one, or unknown: the VIN is needed
+  const namePrice = { ...page, matchesName: true, matchesPrice: true };
+  assert.equal(showsPostedCar(namePrice, { namesakes: 0 }), true);
+  assert.equal(showsPostedCar(namePrice, { namesakes: 1 }), false, 'another posted car has this name');
+  assert.equal(showsPostedCar(namePrice, { namesakes: null }), false);
+  assert.equal(showsPostedCar(namePrice), false);
+  // the name alone or the price alone: another listing
+  assert.equal(showsPostedCar({ ...page, matchesName: true }, { namesakes: 0 }), false);
+  assert.equal(showsPostedCar({ ...page, matchesPrice: true }, { namesakes: 0 }), false);
+  // another car's listing opened from a notification
+  assert.equal(showsPostedCar(page, { namesakes: 0 }), false);
+  // not that listing's address any more (the tab moved on, or the page is still the form), sold, gone, or nothing read
+  assert.equal(showsPostedCar({ ...page, matchesVin: true, matchesId: false }, { namesakes: 0 }), false);
+  assert.equal(showsPostedCar({ ...page, matchesVin: true, sold: true }, { namesakes: 0 }), false);
+  assert.equal(showsPostedCar({ ...page, matchesVin: true, unavailable: true }, { namesakes: 0 }), false);
+  for (const nothing of [null, undefined]) assert.equal(showsPostedCar(nothing, { namesakes: 0 }), false);
+});
