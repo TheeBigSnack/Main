@@ -1119,3 +1119,22 @@ test('the guides keep the fields that could not be filled in each browser, out o
     }
   }
 });
+
+// help.md said every popup tab shows a count, but the popup draws a count
+// only for the tabs in its `counts` (not Numbers). The tab sentence names
+// every tab and the ones drawn without a count.
+test('help.md says which popup tabs show a count, as the popup draws them', () => {
+  const popup = read('../extension/popup.js');
+  const viewList = popup.match(/const VIEWS = \[([\s\S]*?)\];/);
+  const countList = popup.match(/const counts = \{([\s\S]*?)\};/);
+  assert.ok(viewList && countList, 'the popup\'s tab list or tab counts moved: this test must change with it');
+  const views = [...viewList[1].matchAll(/\['(\w+)', '([^']+)'\]/g)].map(([, id, label]) => ({ id, label }));
+  const counted = new Set([...countList[1].matchAll(/^\s*(\w+):/gm)].map((m) => m[1]));
+  assert.ok(views.length > 3 && counted.size > 3, 'the popup\'s tab list or tab counts moved: this test must change with it');
+  const line = doc('help.md').split('\n').find((l) => l.startsWith('- The tabs, left to right:')) || '';
+  for (const v of views) assert.ok(line.includes(`**${v.label}**`), `docs/help.md's tab list does not name the "${v.label}" tab`);
+  const without = views.filter((v) => !counted.has(v.id));
+  if (!without.length) return assert.match(line, /Each shows a count\./, 'every popup tab shows a count, and docs/help.md does not say so');
+  assert.doesNotMatch(line, /Each shows a count\./, `docs/help.md says every tab shows a count; ${without.map((v) => v.label).join(', ')} shows none`);
+  for (const v of without) assert.match(line, new RegExp(`except[^.]*\\*\\*${escapeRe(v.label)}\\*\\*[^.]*shows? a count`), `docs/help.md does not say the "${v.label}" tab shows no count`);
+});
