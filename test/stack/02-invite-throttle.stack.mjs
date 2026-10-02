@@ -26,8 +26,8 @@ export async function run(s) {
 
   const eleventh = await s.rpc('redeem_invite', { code: `WRONG${s.run}11`.toUpperCase(), display_name: null }, guesser.token);
   s.info(`the eleventh wrong code: HTTP ${eleventh.status} ${s.brief(eleventh.body)}`);
-  s.check(`the eleventh gets { code: "P0005", message: "${THROTTLED}" }`, eleventh.body && eleventh.body.code === 'P0005' && eleventh.body.message === THROTTLED, `HTTP ${eleventh.status}`);
-  if (eleventh.status !== 400) s.info(`P0005 is raised, not answered, so PostgREST picks its status: ${eleventh.status} (supabase/README.md names none for it)`);
+  // answered like a miss, so the call's delete of everyone's old misses is committed too
+  s.check(`the eleventh gets HTTP 400 { code: "P0005", message: "${THROTTLED}" }`, eleventh.status === 400 && eleventh.body && eleventh.body.code === 'P0005' && eleventh.body.message === THROTTLED, `HTTP ${eleventh.status}`);
 
   // What the salesperson reads in Settings when the throttle holds.
   const shown = await redeemInvite('ANOTHERWRONG1', null, { url: s.url, anonKey: s.anonKey, session: guesser.session, fetchImpl: s.fetch });

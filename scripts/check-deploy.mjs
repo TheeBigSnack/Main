@@ -18,8 +18,9 @@
 //     lets through: the page calls billing from a browser, so without it the
 //     Billing card cannot call the function at all while the extension's
 //     lines read ok (a note until billing is deployed). Unset, that line is a
-//     note saying it was not checked, so a run that never tried the page's
-//     call does not end in "Every check passed.";
+//     note saying it was not checked once billing is deployed (before that
+//     there is no line), so a run that never tried the page's call does not
+//     end in "Every check passed.";
 //   - with LOTSYNC_TEST_TOKEN (the access token of a signed-in test account
 //     that belongs to no dealership), /sync answers 403, and eleven wrong
 //     invite codes end in the throttle's P0005, which proves the misses are
@@ -61,7 +62,6 @@ export const DEPLOYED_LATER = Object.freeze({
 });
 
 const trimUrl = (u) => String(u || '').trim().replace(/\/+$/, '');
-
 // A page's origin (scheme and host) from its address, as a browser sends it
 // in Origin: https, or http on this computer only; '' for anything else.
 export function pageOrigin(address) {
@@ -196,8 +196,10 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
 
   // the functions: CORS for the extension, 401 without a token (billing: a
   // note until the README's Billing section has deployed it)
+  const preflightStatus = {};
   for (const f of FUNCTIONS) {
     const pre = await call(fetchImpl, `${base}/functions/v1/${f.path}`, { method: 'OPTIONS', headers: { Origin: EXTENSION_ORIGIN, 'Access-Control-Request-Method': f.method, 'Access-Control-Request-Headers': 'authorization, apikey, content-type' } });
+    preflightStatus[f.name] = pre.status;
     out.push(notDeployedYet(f.name, pre.status, { check: `${f.name}: answers the extension's CORS preflight`, ok: pre.status >= 200 && pre.status < 300 && header(pre.headers, 'access-control-allow-origin') === EXTENSION_ORIGIN, detail: `${pre.status}, allow-origin ${header(pre.headers, 'access-control-allow-origin') || 'none'}` }));
     const bare = await call(fetchImpl, `${base}/functions/v1/${f.path}`, { method: f.method, headers: { apikey: anonKey, 'Content-Type': 'application/json', Origin: EXTENSION_ORIGIN }, body: f.body ? JSON.stringify(f.body) : undefined });
     out.push(notDeployedYet(f.name, bare.status, { check: `${f.name}: refuses a call with no user token`, ok: bare.status === 401, detail: String(bare.status) }));
@@ -223,7 +225,8 @@ export async function runChecks({ fetchImpl = globalThis.fetch, url, anonKey, te
       const allow = header(pre.headers, 'access-control-allow-origin');
       out.push(notDeployedYet('billing', pre.status, { check: MANAGER_CORS_CHECK, ok: pre.status >= 200 && pre.status < 300 && allow === origin, detail: `${pre.status}, allow-origin ${allow || 'none'} (is ${origin} in ALLOWED_ORIGINS?)` }));
     }
-  } else {
+  } else if (preflightStatus.billing !== 404) {
+    // nothing to say about the page's address before billing is deployed
     out.push({ check: MANAGER_CORS_CHECK, ok: false, warnOnly: true, detail: "not checked: set LOTSYNC_MANAGER_ORIGIN to the manager view's address; its Billing card works only once that origin is in ALLOWED_ORIGINS" });
   }
 

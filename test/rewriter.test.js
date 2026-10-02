@@ -69,6 +69,26 @@ test('a service error or an unreachable service falls back to the template', asy
   assert.match(b.note, /connection refused/);
 });
 
+test('a Claude draft that drops the salesperson\'s role is not used: the template is shown and the note says why', async () => {
+  const template = (await generateDescription(args())).text;
+  assert.match(template, /sales consultant/);
+  const draft = template.replace(/^I'm Roger, sales consultant at (.+)\.$/m, 'Ask for Roger at $1.');
+  assert.doesNotMatch(draft, /sales consultant/);
+  const r = await generateDescription(args({ settings: on, fetchImpl: reply(200, { ok: true, text: draft }) }));
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Doesn't give your role \(sales consultant\)/);
+});
+
+test('with no dealership name set, the service is not asked and the template says what to fix', async () => {
+  let calls = 0;
+  const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: true, text: 'x' }) }; };
+  const r = await generateDescription(args({ dealer: { name: '', city: '' }, settings: on, fetchImpl: counting }));
+  assert.equal(calls, 0, 'no paid draft that cannot pass');
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /name isn't set in Settings/);
+  assert.ok(r.guardrails.problems.some((p) => p.code === 'no-dealer'));
+});
+
 test('the service is only called when switched on with an address', async () => {
   let calls = 0;
   const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: true, text: 'x' }) }; };

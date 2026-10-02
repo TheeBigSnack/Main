@@ -56,7 +56,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, closedBillingStatus, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, authQueryError, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, SCAN_STALE_WHY } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, closedBillingStatus, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, authQueryError, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, SCAN_STALE_WHY, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, FUTURE_SKEW_MS } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -397,7 +397,7 @@ function renderInvites() {
 function viewData() {
   state.mode = 'view';
   const d = state.data;
-  const s = summarize({ ...d, wholeTeam: myRole() === 'manager', now: new Date().toISOString() }); // a manager reads every membership row
+  const s = summarize({ ...d, role: myRole(), now: new Date().toISOString() }); // the viewer's role: only a manager reads the whole team
   const dealer = d.dealership?.name || 'Your dealership';
   setDealer(dealer);
   const who = state.mock ? 'Sample data' : esc(state.session?.user?.email || '');
@@ -445,14 +445,14 @@ function viewData() {
     ${s.priceUpdates.done ? `<p class="hint">${s.priceUpdates.done} updated so far, median ${hrs(s.priceUpdates.medianHours)} after the flagging scan${s.priceUpdates.cleared ? `; ${s.priceUpdates.cleared} cleared by the website (the price went back)` : ''}.</p>` : ''}
   </section>`;
 
-  // listings up from people no longer in the dealership (a manager's view only): nobody's extension rescans them
-  const unwatched = s.unwatched.length
-    ? `<section id="unwatched"><h2>Listings nobody's extension watches ${pill('warn', String(s.unwatched.length))}</h2>
-    <div class="scroll"><table class="stats"><thead><tr><th>Car</th><th class="n">Posted</th></tr></thead><tbody>${s.unwatched.map((o) => `<tr>${car(o)}<td class="n">${esc(fmtLocal(o.postedAt))}</td></tr>`).join('')}</tbody></table></div>
-    <p class="hint">Posted by people who are no longer in the dealership's Lot Current account. Lot Current still counts them as up, but no extension rescans them now, so a sale or a price change on them is not flagged here, and Lot Current cannot see whether they are still on Marketplace.</p></section>`
+  const gone = s.notOnTeam && s.notOnTeam.length // null for a viewer who is not a manager: no card
+    ? `<section id="notOnTeam"><h2>${esc(NOT_ON_TEAM_TITLE)} ${pill('warn', String(s.notOnTeam.length))}</h2>
+    <div class="scroll"><table class="stats"><thead><tr><th>Car</th><th class="n">Listed for</th></tr></thead><tbody>${s.notOnTeam.map((o) => `<tr>${car(o)}<td class="n">${hrs(o.hoursListed)}</td></tr>`).join('')}</tbody></table></div>
+    <p class="hint">${esc(NOT_ON_TEAM_HINT)}</p>
+  </section>`
     : '';
 
-  $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>` + unwatched;
+  $('main').innerHTML = gettingStartedHtml() + scan + billingHtml() + invitesHtml() + teamHtml() + people + `<div class="grid two">${sold}${prices}</div>` + gone;
   const sel = $('pickDealer');
   // the page and its buttons stay on the shown dealership until the chosen one's rows are in (loadLive)
   if (sel) sel.addEventListener('change', () => { state.billingNote = ''; state.inviteNote = ''; state.inviteError = ''; state.teamNote = ''; state.teamError = ''; state.teamConfirm = ''; loadLive(sel.value).catch((e) => viewError(e.message)); });
@@ -589,7 +589,7 @@ function downloadCsv() {
   if (!state.data) return;
   const now = new Date().toISOString();
   const dealer = state.data.dealership?.name || '';
-  const csv = managerCsv(state.data, { now, dealer, origin: state.data.dealership?.website_origin || '' });
+  const csv = managerCsv(state.data, { role: myRole(), now, dealer, origin: state.data.dealership?.website_origin || '' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = csvFileName(now, { dealer });
@@ -919,7 +919,7 @@ async function loadDealership(wanted, current) {
     read('listings', (q) => own(q).order('posted_at', { ascending: false }).order('id')),
     read('todo_items', (q) => own(q).order('flagged_at', { ascending: false }).order('id')),
     read('post_attempts', (q) => own(q).order('started_at', { ascending: false }).order('id')),
-    latest('scan_summaries', (q) => own(q).order('taken_at', { ascending: false }).limit(50)),
+    latest('scan_summaries', (q) => own(q).lte('taken_at', new Date(Date.now() + FUTURE_SKEW_MS).toISOString()).order('taken_at', { ascending: false }).limit(50)),
     loadBilling(dealership.id),
   ]);
   if (!current()) return;

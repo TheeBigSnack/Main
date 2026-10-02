@@ -193,6 +193,22 @@ test('rewrite: bad bodies are 400 with the function\'s sentence: over 64 KiB, no
   assert.equal(net.calls.length, 0);
 });
 
+test('rewrite: facts with no dealership name are 400 before the model is asked, since no draft can name it; nothing is spent, and the extension shows its template with the reason', async () => {
+  world();
+  anthropic(says(GOOD));
+  const handler = await load();
+  for (const dealer of [{ name: '' }, { name: '   ', city: 'Springfield' }, {}, undefined]) {
+    const r = await rewrite(handler, TOKEN.u1, { ...FACTS, dealer, origin: ORIGIN });
+    assert.deepEqual([r.status, r.body], [400, { ok: false, error: "the dealership's name is missing: add it in Settings" }], JSON.stringify(dealer));
+  }
+  assert.equal(net.to(ANTHROPIC).length, 0, 'no model call');
+  assert.equal(fake.rows('rewrite_usage').length, 0, 'nothing logged or paid for');
+  // an older extension that still asks gets its template and this reason
+  const facts = { ...FACTS, dealer: { name: '' }, origin: ORIGIN };
+  const direct = await rewriteWithBackend({ endpoint: ENDPOINT, key: TOKEN.u1, facts, fetchImpl: functionsFetch({ rewrite: handler }) });
+  assert.deepEqual([direct.ok, direct.error], [false, "the dealership's name is missing: add it in Settings"]);
+});
+
 test('rewrite: a draft that passes answers the documented shape, logs its cost with the service role, and never sends the origin or a VIN', async () => {
   world();
   anthropic(says(GOOD));
@@ -233,7 +249,7 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const r = await rewrite(handler, TOKEN.u1);
   assert.equal(r.status, 200);
   assert.deepEqual([r.body.ok, r.body.text, r.body.error], [false, BAD, 'the draft failed the checks twice']);
-  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'no-dealer', 'too-short', 'unknown-number']);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'no-dealer', 'no-role', 'too-short', 'unknown-number']);
   assert.equal(r.body.costUsd, 0.037, '$0.02 and $0.017');
   const [first, second] = requests();
   assert.doesNotMatch(first.json.messages[0].content, /previous draft failed/);
@@ -244,6 +260,24 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const d = await generateDescription({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, settings: { rewrite: { enabled: true, endpoint: ENDPOINT, key: TOKEN.u1 } }, origin: ORIGIN, fetchImpl: functionsFetch({ rewrite: handler }) });
   assert.equal(d.source, 'template');
   assert.match(d.note, /the draft failed the checks twice/);
+});
+
+test('rewrite: a draft that names the dealership but not the salesperson\'s role is refused and asked for again; their own title is the role checked', async () => {
+  world();
+  const noRole = GOOD.replace("I'm Sam, sales consultant at Example Motors.", 'Ask for Sam at Example Motors.');
+  assert.doesNotMatch(noRole, /sales consultant/);
+  anthropic(says(noRole), says(noRole));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code), ['no-role']);
+  const fixes = requests()[1].json.messages[0].content.split('Your previous draft failed these checks')[1] || '';
+  assert.match(fixes, /Doesn't give your role \(sales consultant\)/, 'the second prompt asks for the role');
+  // the salesperson's own title is the role checked
+  world();
+  anthropic(says(GOOD));
+  const manager = await rewrite(handler, TOKEN.u1, { ...FACTS, salesperson: { name: 'Sam', title: 'sales manager' } });
+  assert.deepEqual(manager.body.guardrails.problems.map((p) => p.code), ['no-role']);
 });
 
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {

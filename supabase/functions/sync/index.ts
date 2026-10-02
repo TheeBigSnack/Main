@@ -1,6 +1,7 @@
 // Lot Current sync function (Milestone 4). One POST …/sync carries the
-// salesperson's own posted registry, the pilot's post attempts and to-do
-// flags that changed since the last sync, and this scan's counts; the
+// salesperson's own posted registry, the pilot's post attempts that changed
+// since the last sync and its open or newly closed to-do flags, and this
+// scan's counts; the
 // function writes them for the caller's dealership (matched by the website
 // origin) and answers with the dealership's whole current registry and
 // open to-do items, so every machine of the dealership converges
@@ -21,7 +22,13 @@
 //     lapsed dealership is refused with 402 before anything is written;
 //   - a listing whose posted_at is more than FUTURE_SKEW_MS ahead of the
 //     server's clock is rejected (counts.rejected): a stamp from the future
-//     would win every merge for ever;
+//     would win every merge for ever. So is a scan whose takenAt is that far
+//     ahead (also counted in counts.rejected): it would stay the newest scan
+//     in the manager view and the owner's usage report until its date came. A price change (updated_at) stamped
+//     that far ahead is written as made at the server's time, and a stored
+//     one that far ahead counts as no change time at all (the posting time
+//     stands in), so a machine whose clock runs ahead cannot outrank a
+//     later change made on a machine with a right clock;
 //   - a VIN that another member currently has listed is theirs: an upload of
 //     it by anyone else is skipped (counts.conflicts), so a car is re-posted
 //     only by the person who has it up, or after their row is taken down;
@@ -36,7 +43,11 @@
 //     sync) and missing from `posted` are marked taken down. No time decides
 //     it: a row that machine never received is never in `known`. A request
 //     without `known` (a machine that never synced) takes nothing down;
-//   - a to-do item is closed by an upload but never reopened;
+//   - a to-do item is closed by an upload but never reopened, and a car
+//     has one item per kind at a time: the same sold car or price change
+//     flagged on two of the salesperson's machines is one row, and an open
+//     flag of a change the caller's listing already shows (a machine that
+//     rescanned before it heard of the fix) adds none (step 4);
 //   - take-downs and closed to-do items come back from CUTOFF_MARGIN_MS
 //     before `since`, not from `since` itself (below, step 6).
 // The rows are built the way extension/src/sync.js toServerRows() builds
@@ -52,7 +63,7 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 const BODY_LIMIT = 512 * 1024; // a registry of a whole lot is a few tens of KiB
 const PER_MINUTE = 12; // syncs per user per minute (the extension syncs after a scan, a post, a price update or a take-down)
 const MAX_ROWS = 2000; // listings, known keys, post attempts or to-do flags in one request
-const FUTURE_SKEW_MS = 5 * 60 * 1000; // how far ahead of the server's clock a posted_at may be
+const FUTURE_SKEW_MS = 5 * 60 * 1000; // how far ahead of the server's clock a posted_at, updated_at or scan's takenAt may be (extension/src/sync.js, manager/data.js and usage_report keep the same)
 const TAKEN_DOWN_WINDOW_DAYS = 90; // how far back taken-down rows go to a machine that never synced
 const CUTOFF_MARGIN_MS = 10 * 60 * 1000; // take-downs and closed to-do items this long before `since` come back again (step 6)
 const KEY_MAX = 80; // a known key is a VIN, an @ and a time; anything longer is not one
@@ -128,10 +139,17 @@ const isoOrNull = (x: unknown): string | null => {
 };
 const text = (s: unknown, max: number): string => String(s ?? '').trim().slice(0, max);
 const vinOf = (v: unknown): string => text(v, 17).toUpperCase();
+// A whole number for an integer column (Postgres integer, 4 bytes), or
+// null. A number outside that range (two website prices run together by a
+// parse slip, say) would fail the whole request with 22003 on every sync of
+// that machine, so it is stored as unknown instead.
+const INT_MIN = -2147483648;
+const INT_MAX = 2147483647;
 const intOrNull = (v: unknown): number | null => {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Math.round(Number(v));
-  return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r >= INT_MIN && r <= INT_MAX ? r : null;
 };
 const httpsUrl = (u: unknown): string | null => (typeof u === 'string' && /^https:\/\//i.test(u.trim()) ? u.trim().slice(0, 500) : null);
 function chunk<T>(list: T[], size: number): T[][] {
@@ -375,8 +393,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (sentListings.length > MAX_ROWS || known.count > MAX_ROWS || attempts.length > MAX_ROWS || todos.length > MAX_ROWS) {
     return json(req, 400, { ok: false, error: `too many entries in one request (at most ${MAX_ROWS} listings, post attempts or to-do flags)` });
   }
-  const latest = Date.now() + FUTURE_SKEW_MS;
+  const now = Date.now();
+  const latest = now + FUTURE_SKEW_MS;
   const incoming = sentListings.filter((r) => (ms(r.posted_at) ?? 0) <= latest);
+  // a price change from a clock that runs ahead is taken as made now: its
+  // price goes in, and a later change from any other machine still wins
+  for (const r of incoming) if ((ms(r.updated_at) ?? 0) > latest) r.updated_at = new Date(now).toISOString();
+  // when a row last changed: its updated_at, unless that is from the future, else its posting time
+  const changedAt = (r: Row | ListingRow): number => {
+    const u = ms(r.updated_at);
+    return (u !== null && u <= latest ? u : ms(r.posted_at)) ?? 0;
+  };
   const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: sentListings.length - incoming.length, conflicts: 0, attempts: 0, todoItems: 0, scans: 0 };
 
   try {
@@ -403,7 +430,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
       if (String(have.user_id) !== me || have.status !== 'listed') continue;
       const patch: Row = {};
-      const newer = (ms(row.updated_at) ?? ms(row.posted_at) ?? 0) > (ms(have.updated_at) ?? ms(have.posted_at) ?? 0);
+      const newer = changedAt(row) > changedAt(have);
       if (newer) {
         patch.price = row.price;
         patch.updated_at = row.updated_at;
@@ -457,14 +484,48 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // 4. to-do items: new ones go in; an open one is closed by an upload
     //    that closed it (or gets the price the website moved to); a closed
-    //    one is never reopened
+    //    one is never reopened. One item per car and kind: each of a
+    //    salesperson's machines flags the same sold car or price change at
+    //    its own scan time, so an upload with no row of its own (the same
+    //    VIN, kind and flagging time) is the same item as a row of that VIN
+    //    and kind whose time overlaps it (flagged before the upload closed,
+    //    and closed, if it is, after the upload was flagged). That row takes
+    //    the upload instead of a second row going in, and an open one keeps
+    //    the earlier flagging time, so its hours count from the first
+    //    sighting; mergeFlags in extension/src/sync.js moves the other
+    //    machine's flag onto it.
+    //    A machine that rescans before it has heard of a fix made on
+    //    another (the laptop shut while the desktop updated the price or
+    //    took the car down) flags the change again, after that item closed.
+    //    Such an open upload, with no row of its own and none it overlaps,
+    //    is a late sighting, not a new item, when the caller's own listing
+    //    already shows the change: every listed row of theirs for the VIN is
+    //    at the flag's new price, or they have rows for it and none is up.
+    //    No row goes in for it, and mergeFlags drops that machine's flag
+    //    once its registry has the fix. A closed upload always goes in: a
+    //    flag raised and fixed on one machine between two syncs is an item.
     if (todos.length) {
       const have = await selectByVin(client, 'todo_items', 'id, vin, kind, flagged_at, done_at, from_price, to_price', dealershipId, todos.map((t) => t.vin));
       const byFlag = new Map<string, Row>(); // vin@kind@ms(flagged_at) -> the row
-      for (const r of have) byFlag.set(`${vinOf(r.vin)}@${String(r.kind)}@${ms(r.flagged_at)}`, r);
+      const byItem = new Map<string, Row[]>(); // vin@kind -> its rows
+      for (const r of have) {
+        byFlag.set(`${vinOf(r.vin)}@${String(r.kind)}@${ms(r.flagged_at)}`, r);
+        const item = `${vinOf(r.vin)}@${String(r.kind)}`;
+        byItem.set(item, [...(byItem.get(item) || []), r]);
+      }
+      const overlaps = (r: Row, t: TodoRow): boolean => {
+        const rDone = ms(r.done_at);
+        const tDone = ms(t.done_at);
+        return (tDone === null || (ms(r.flagged_at) ?? 0) <= tDone) && (rDone === null || (ms(t.flagged_at) ?? 0) <= rDone);
+      };
       const fresh: TodoRow[] = [];
       for (const t of todos) {
-        const h = byFlag.get(`${t.vin}@${t.kind}@${ms(t.flagged_at)}`);
+        let h = byFlag.get(`${t.vin}@${t.kind}@${ms(t.flagged_at)}`);
+        const own = Boolean(h);
+        if (!h) {
+          const same = (byItem.get(`${t.vin}@${t.kind}`) || []).filter((r) => overlaps(r, t));
+          h = same.find((r) => !r.done_at) || same[0];
+        }
         if (!h) {
           fresh.push(t);
           continue;
@@ -477,20 +538,37 @@ Deno.serve(async (req: Request): Promise<Response> => {
           patch.from_price = t.from_price;
           patch.to_price = t.to_price;
         }
+        if (!own && !h.done_at && (ms(t.flagged_at) ?? 0) < (ms(h.flagged_at) ?? 0)) patch.flagged_at = t.flagged_at;
         if (Object.keys(patch).length) {
           must(await client.from('todo_items').update(patch).eq('id', String(h.id)), 'could not update a to-do item');
+          Object.assign(h, patch);
           counts.todoItems += 1;
         }
       }
-      if (fresh.length) {
-        must(await client.from('todo_items').insert(fresh), 'could not add to-do items');
-        counts.todoItems += fresh.length;
+      const openNew = fresh.filter((t) => !t.done_at);
+      let adding = fresh;
+      if (openNew.length) {
+        const mine = (await selectByVin(client, 'listings', 'vin, user_id, price, status', dealershipId, openNew.map((t) => t.vin))).filter((r) => String(r.user_id) === me);
+        const shown = (t: TodoRow): boolean => {
+          const rows = mine.filter((r) => vinOf(r.vin) === t.vin);
+          const up = rows.filter((r) => r.status === 'listed');
+          if (t.kind === 'takeDown') return rows.length > 0 && up.length === 0;
+          return t.to_price !== null && up.length > 0 && up.every((r) => intOrNull(r.price) === t.to_price);
+        };
+        adding = fresh.filter((t) => t.done_at || !shown(t));
+      }
+      if (adding.length) {
+        must(await client.from('todo_items').insert(adding), 'could not add to-do items');
+        counts.todoItems += adding.length;
       }
     }
 
-    // 5. this scan's counts (the same scan sent twice is stored once)
+    // 5. this scan's counts (the same scan sent twice is stored once); one
+    //    stamped further ahead of this clock than FUTURE_SKEW_MS is set
+    //    aside and counted, like a listing
     const scan = scanRow(body.scan, membership.dealership.website_origin, dealershipId);
-    if (scan) {
+    if (scan && (ms(scan.taken_at) ?? 0) > latest) counts.rejected += 1;
+    else if (scan) {
       must(await client.from('scan_summaries').upsert(scan, { onConflict: 'dealership_id,website_origin,taken_at', ignoreDuplicates: true }), 'could not record the scan');
       counts.scans = 1;
     }
@@ -510,12 +588,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // 6. the dealership's current state: every listing that is up, the
     //    take-downs since the last sync, less the margin (the last 90 days
     //    for a machine that never synced), every open to-do item and the
-    //    ones closed since then
+    //    ones closed since then; each read ends its order with the
+    //    id, so the pages of one read fit together: rows that tie on the
+    //    stamp (a chunk of take-downs shares one) would otherwise come back
+    //    in a different order on each page, some twice and some not at all
     const cutoff = since ? new Date(Date.parse(since) - CUTOFF_MARGIN_MS).toISOString() : new Date(Date.now() - TAKEN_DOWN_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
-    const listed = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'listed').order('posted_at', { ascending: false }).range(from, to));
-    const down = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'taken_down').gte('taken_down_at', cutoff).order('taken_down_at', { ascending: false }).range(from, to));
-    const open = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).is('done_at', null).order('flagged_at', { ascending: false }).range(from, to));
-    const closed = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).not('done_at', 'is', null).gte('done_at', cutoff).order('done_at', { ascending: false }).range(from, to));
+    const listed = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'listed').order('posted_at', { ascending: false }).order('id').range(from, to));
+    const down = await selectAll('could not read listings', (from, to) => client.from('listings').select('*').eq('dealership_id', dealershipId).eq('status', 'taken_down').gte('taken_down_at', cutoff).order('taken_down_at', { ascending: false }).order('id').range(from, to));
+    const open = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).is('done_at', null).order('flagged_at', { ascending: false }).order('id').range(from, to));
+    const closed = await selectAll('could not read to-do items', (from, to) => client.from('todo_items').select('*').eq('dealership_id', dealershipId).not('done_at', 'is', null).gte('done_at', cutoff).order('done_at', { ascending: false }).order('id').range(from, to));
 
     // 7. the caller's posts in the calendar day they sent, for the daily
     //    cap: their own rows only (the cap is per salesperson), any status

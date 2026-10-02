@@ -19,6 +19,7 @@ import { LAPSED_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
 import { syncOnce, LAPSED_MESSAGE as EXTENSION_LAPSED_MESSAGE } from '../extension/src/accountFlow.js';
 import { sessionFromTokenResponse, storeSession, ACCOUNT_KEY } from '../extension/src/account.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
+import { markPriceUpdated } from '../extension/src/rescan.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -380,6 +381,22 @@ test('sync: a listing stamped more than 5 minutes ahead of the server is not wri
   assert.deepEqual(fake.rows('listings').map((l) => l.vin), [VIN(2)]);
 });
 
+test('sync: a scan stamped more than 5 minutes ahead of the server is not stored and is counted, so it cannot pin the newest scan; 4 minutes ahead is stored', async () => {
+  world();
+  const handler = await load();
+  // a laptop whose clock runs a month ahead syncs its scan
+  const ahead = await sync(handler, TOKEN.u1, { scan: { takenAt: at(30 * 24 * 60), cars: 12, ready: 9, takeDownCount: 0, priceUpdateCount: 0 } });
+  assert.equal(ahead.status, 200);
+  assert.deepEqual([ahead.body.counts.rejected, ahead.body.counts.scans], [1, 0]);
+  assert.equal(fake.rows('scan_summaries').length, 0, 'nothing from the future is stored');
+  // ten minutes ahead is still too far; four minutes is within the same margin listings get
+  const ten = await sync(handler, TOKEN.u1, { scan: { takenAt: at(10), cars: 12, ready: 9 } });
+  assert.deepEqual([ten.body.counts.rejected, ten.body.counts.scans], [1, 0]);
+  const four = await sync(handler, TOKEN.u1, { scan: { takenAt: at(4), cars: 12, ready: 9 } });
+  assert.deepEqual([four.body.counts.rejected, four.body.counts.scans], [0, 1]);
+  assert.equal(fake.rows('scan_summaries').length, 1);
+});
+
 test('sync: postsToday counts the caller\'s own rows posted inside the day they sent, any status, after the upload; no usable day gives null', async () => {
   const today = { from: at(-6 * 60), to: at(6 * 60) };
   const hourAgo = at(-60);
@@ -404,6 +421,32 @@ test('sync: postsToday counts the caller\'s own rows posted inside the day they 
     const n = await sync(handler, TOKEN.u1, { posted: registry, today: bad });
     assert.equal(n.body.postsToday, null, JSON.stringify(bad));
   }
+});
+
+test('sync: a number too big for an integer column is stored as unknown, and the sync still answers 200, again and again', async () => {
+  world();
+  const handler = await load();
+  const runTogether = 2499525495; // two website prices run together by a parse slip: past Postgres integer
+  const body = {
+    posted: { [VIN(1)]: { name: 'A car', price: runTogether, postedAt: at(-30) }, [VIN(2)]: { name: 'Another', price: String(-runTogether), postedAt: at(-20) } },
+    pilot: {
+      posts: [{ vin: VIN(1), startedAt: at(-31), endedAt: at(-30), outcome: 'posted', seconds: 9e12 }],
+      flags: [{ vin: VIN(1), kind: 'price', flaggedAt: at(-10), from: 20000, to: runTogether }],
+    },
+    scan: { takenAt: at(-5), cars: 3e9, ready: 2, takeDownCount: 0, priceUpdateCount: 1 },
+  };
+  for (const round of [1, 2]) {
+    const r = await sync(handler, TOKEN.u1, body);
+    assert.equal(r.status, 200, `round ${round}: ${JSON.stringify(r.body)}`);
+  }
+  assert.deepEqual(fake.rows('listings').map((l) => [l.vin, l.price]).sort(), [[VIN(1), null], [VIN(2), null]], 'the posts are kept, their price unknown');
+  assert.deepEqual(fake.rows('post_attempts').map((a) => a.seconds), [null]);
+  assert.deepEqual(fake.rows('todo_items').map((t) => [t.from_price, t.to_price]), [[20000, null]]);
+  assert.deepEqual(fake.rows('scan_summaries').map((x) => [x.cars, x.ready]), [[null, 2]]);
+  // the edges of the column still go in as they are
+  const edge = await sync(handler, TOKEN.u1, { posted: { [VIN(3)]: { name: 'Edge', price: 2147483647, postedAt: at(-1) } } });
+  assert.equal(edge.status, 200);
+  assert.equal(fake.rows('listings').find((l) => l.vin === VIN(3)).price, 2147483647);
 });
 
 test('sync: to-do items: a new flag goes in, an upload closes an open one, a closed one is never reopened, an open price flag takes the new prices', async () => {
@@ -437,18 +480,118 @@ test('sync: to-do items: a new flag goes in, an upload closes an open one, a clo
   assert.deepEqual(r.body.todoItems.map((t) => t.vin).sort(), [VIN(1), VIN(2), VIN(3), VIN(4)]);
 });
 
+test('sync: to-do items: the same sold car or price change flagged on another machine at its own scan time is one item, never a second row', async () => {
+  const T = Object.fromEntries([1, 5, 10, 20, 30, 60, 90, 100, 120, 200, 300].map((m) => [m, at(-m)])); // minutes ago, stamped once
+  const rowsOf = (vin) => fake.rows('todo_items').filter((t) => t.vin === vin);
+  world({
+    rows: {
+      todo_items: [
+        // open, flagged by the salesperson's desktop
+        { dealership_id: D1, vin: VIN(1), kind: 'price', flagged_at: T[120], from_price: 20000, to_price: 19000 },
+        { dealership_id: D1, vin: VIN(2), kind: 'takeDown', flagged_at: T[120] },
+        { dealership_id: D1, vin: VIN(3), kind: 'price', flagged_at: T[60], from_price: 20000, to_price: 19000 },
+        // closed on the desktop 30 minutes ago
+        { dealership_id: D1, vin: VIN(4), kind: 'takeDown', flagged_at: T[120], done_at: T[30], how: 'manual' },
+        { dealership_id: D1, vin: VIN(5), kind: 'price', flagged_at: T[120], done_at: T[30], how: 'detected', from_price: 20000, to_price: 19000 },
+      ],
+    },
+  });
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1, {
+    pilot: {
+      posts: [],
+      flags: [
+        // the laptop's flags of the same items, stamped with its own scans
+        { vin: VIN(1), kind: 'price', flaggedAt: T[90], from: 20000, to: 18500 }, // still open: takes the new price, keeps the earlier time
+        { vin: VIN(2), kind: 'takeDown', flaggedAt: T[90], doneAt: T[10], how: 'manual' }, // ticked off on the laptop: closes it
+        { vin: VIN(3), kind: 'price', flaggedAt: T[100], from: 20000, to: 19000 }, // seen there first: the item counts from then
+        { vin: VIN(4), kind: 'takeDown', flaggedAt: T[90] }, // raised before the desktop closed it: stays closed
+        { vin: VIN(5), kind: 'price', flaggedAt: T[90], doneAt: T[5], how: 'cleared' }, // closed on both: stays as the desktop closed it
+        { vin: VIN(4), kind: 'price', flaggedAt: T[20], from: 20000, to: 18000 }, // another kind: its own item
+      ],
+    },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(rowsOf(VIN(1)).map((t) => [t.done_at, t.flagged_at, t.to_price]), [[null, pgTime(T[120]), 18500]], 'one open price item, with the newer price');
+  assert.deepEqual(rowsOf(VIN(2)).map((t) => [Boolean(t.done_at), t.how]), [[true, 'manual']], 'the laptop\'s close closes the desktop\'s item');
+  assert.deepEqual(rowsOf(VIN(3)).map((t) => [t.done_at, t.flagged_at]), [[null, pgTime(T[100])]], 'the hours count from the first sighting');
+  assert.deepEqual(rowsOf(VIN(4)).map((t) => [t.kind, Boolean(t.done_at)]).sort(), [['price', false], ['takeDown', true]], 'a closed item is not opened again as a new row');
+  assert.deepEqual(rowsOf(VIN(5)).map((t) => [t.how, t.to_price]), [['detected', 19000]], 'closed on both machines: one row, as it was closed first');
+  assert.equal(r.body.todoItems.filter((t) => !t.done_at).length, 3, 'VIN 1 and 3 open once each, and the new price item');
+
+  // a flag raised after the item closed is a new item; one wholly before it is its own old item
+  const r2 = await sync(handler, TOKEN.u1, {
+    pilot: {
+      posts: [],
+      flags: [
+        { vin: VIN(4), kind: 'takeDown', flaggedAt: T[1] },
+        { vin: VIN(5), kind: 'price', flaggedAt: T[300], doneAt: T[200], how: 'manual', from: 21000, to: 20000 },
+      ],
+    },
+  });
+  assert.equal(r2.status, 200);
+  assert.deepEqual(rowsOf(VIN(4)).filter((t) => t.kind === 'takeDown').map((t) => Boolean(t.done_at)).sort(), [false, true]);
+  assert.equal(rowsOf(VIN(5)).length, 2);
+});
+
+test('sync: to-do items: an open flag of a change the caller\'s own listing already shows adds no row; anything else still goes in', async () => {
+  const rowsOf = (vin) => fake.rows('todo_items').filter((t) => t.vin === vin).map((t) => [t.kind, Boolean(t.done_at), t.to_price]);
+  world({
+    rows: {
+      listings: [
+        listing({ vin: VIN(1), price: 19000, updated_at: at(-700) }), // the price another machine of the caller's set
+        listing({ vin: VIN(2), status: 'taken_down', taken_down_at: at(-700) }), // taken down on another machine
+        listing({ vin: VIN(3), price: 20000 }), // not updated yet
+        listing({ vin: VIN(4), user_id: U2, price: 19000 }), // a colleague's row is not the caller's listing
+        listing({ vin: VIN(5), price: 19000, updated_at: at(-700) }),
+        listing({ vin: VIN(6), status: 'taken_down', taken_down_at: at(-700) }),
+        listing({ vin: VIN(6), price: 20000, posted_at: at(-600), created_at: at(-600) }), // posted again: up
+      ],
+      todo_items: [{ dealership_id: D1, vin: VIN(1), kind: 'price', flagged_at: at(-800), done_at: at(-700), how: 'manual', from_price: 20000, to_price: 19000 }],
+    },
+  });
+  const handler = await load();
+  const open = (vin, kind, to = null) => ({ vin, kind, flaggedAt: at(-200), ...(kind === 'price' ? { from: 20000, to } : {}) });
+  const r = await sync(handler, TOKEN.u1, {
+    pilot: {
+      posts: [],
+      flags: [
+        open(VIN(1), 'price', 19000), // seen again after the fix: the listing shows it
+        open(VIN(2), 'takeDown'), // the listing is down
+        open(VIN(3), 'price', 19000), // the listing is still at 20000
+        open(VIN(4), 'price', 19000), // the caller has no listing of it
+        open(VIN(4), 'takeDown'),
+        open(VIN(5), 'price', 18000), // the website moved on past the listing's price
+        open(VIN(6), 'takeDown'), // the later post is up
+        { vin: VIN(5), kind: 'takeDown', flaggedAt: at(-300), doneAt: at(-250), how: 'manual' }, // raised and fixed between two syncs: an item
+        { vin: VIN(2), kind: 'price', flaggedAt: at(-300), doneAt: at(-250), how: 'manual', from: 20000, to: 19000 },
+      ],
+    },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(rowsOf(VIN(1)), [['price', true, 19000]], 'one item, as the other machine closed it');
+  assert.deepEqual(rowsOf(VIN(2)), [['price', true, 19000]], 'no take-down item; the closed price item goes in');
+  assert.deepEqual(rowsOf(VIN(3)), [['price', false, 19000]]);
+  assert.deepEqual(rowsOf(VIN(4)).sort(), [['price', false, 19000], ['takeDown', false, null]]);
+  assert.deepEqual(rowsOf(VIN(5)).sort(), [['price', false, 18000], ['takeDown', true, null]]);
+  assert.deepEqual(rowsOf(VIN(6)), [['takeDown', false, null]]);
+  assert.equal(r.body.counts.todoItems, 7);
+});
+
 // The API answers at most 1,000 rows a request (the fake too: fake.maxRows),
 // so a read that does not page loses rows without an error.
 const ranges = (table, match) => fake.queries(table, 'select').filter((c) => c.columns === '*' && c.filters.some(match)).map((c) => c.range);
 
 test('sync: every listed row and every page comes back past 1,000 rows; VINs are looked up 100 at a time and found again on the next upload', async () => {
-  world({ rows: { listings: Array.from({ length: 1001 }, (_, i) => listing({ vin: `OTHER${String(i).padStart(12, '0')}`, user_id: U2 })) } });
+  const same = at(-3000); // one posting time for all 1,001: the order by posted_at ties
+  world({ rows: { listings: Array.from({ length: 1001 }, (_, i) => listing({ vin: `OTHER${String(i).padStart(12, '0')}`, user_id: U2, posted_at: same, created_at: same })) } });
   const handler = await load();
   const posted = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [VIN(i), { price: 1000 + i, postedAt: at(-100 - i) }]));
   const r = await sync(handler, TOKEN.u1, { posted });
   assert.equal(r.status, 200);
   assert.equal(r.body.counts.listingsInserted, 150);
   assert.equal(r.body.listings.length, 1151);
+  assert.deepEqual(new Set(r.body.listings.map((l) => l.id)), new Set(fake.rows('listings').map((l) => l.id)), 'every row once, none twice: 1,001 rows share one posted_at, and the pages fit only with the id as the last key');
   assert.deepEqual(ranges('listings', (f) => f.value === 'listed'), [[0, 999], [1000, 1999]], 'two pages of listed rows');
   const lookups = fake.queries('listings', 'select').filter((c) => c.filters.some((f) => f.op === 'in'));
   assert.deepEqual(lookups.map((c) => c.filters.find((f) => f.op === 'in').value.length), [100, 50]);
@@ -458,15 +601,20 @@ test('sync: every listed row and every page comes back past 1,000 rows; VINs are
 
 test('sync: take-downs, open and closed to-do items past 1,000 rows come back whole, page by page', async () => {
   const id = (prefix, i) => `${prefix}${String(i).padStart(13, '0')}`;
-  const down = Array.from({ length: 1001 }, (_, i) => listing({ vin: id('DOWN', i), user_id: U2, status: 'taken_down', taken_down_at: at(-30) }));
-  const open = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('OPEN', i), kind: 'price', flagged_at: at(-30), from_price: 2, to_price: 1 }));
-  const closed = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('DONE', i), kind: 'takeDown', flagged_at: at(-40), done_at: at(-30), how: 'manual' }));
+  const [t30, t40] = [at(-30), at(-40)]; // one stamp per kind: every order key ties
+  const down = Array.from({ length: 1001 }, (_, i) => listing({ vin: id('DOWN', i), user_id: U2, status: 'taken_down', taken_down_at: t30 }));
+  const open = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('OPEN', i), kind: 'price', flagged_at: t30, from_price: 2, to_price: 1 }));
+  const closed = Array.from({ length: 1001 }, (_, i) => ({ dealership_id: D1, vin: id('DONE', i), kind: 'takeDown', flagged_at: t40, done_at: t30, how: 'manual' }));
   world({ rows: { listings: down, todo_items: [...open, ...closed] } });
   const handler = await load();
   const r = await sync(handler, TOKEN.u1, { since: at(-35) });
   assert.equal(r.status, 200);
   assert.equal(r.body.listings.length, 1001);
   assert.equal(r.body.todoItems.length, 2002);
+  // each kind shares one stamp (a chunk of take-downs is stamped once), so only the id as the last key keeps
+  // the second page from repeating rows of the first and losing others
+  assert.deepEqual(new Set(r.body.listings.map((l) => l.vin)), new Set(down.map((l) => l.vin)), 'every take-down once');
+  assert.deepEqual(new Set(r.body.todoItems.map((t) => t.vin)), new Set([...open, ...closed].map((t) => t.vin)), 'every open and closed to-do item once');
   assert.deepEqual(ranges('listings', (f) => f.value === 'taken_down'), [[0, 999], [1000, 1999]]);
   assert.deepEqual(ranges('todo_items', (f) => f.op === 'is'), [[0, 999], [1000, 1999]]);
   assert.deepEqual(ranges('todo_items', (f) => f.op === 'not.is'), [[0, 999], [1000, 1999]]);
@@ -523,6 +671,43 @@ async function signedIn(token, userId) {
   assert.equal(await storeSession(session, storage), true);
   return storage;
 }
+
+test('sync: a price update stamped on a clock 6 hours ahead does not outrank a later one made on a machine with a right clock', async () => {
+  world();
+  const handler = await load();
+  const config = { url: SUPABASE_URL, anonKey: ANON_KEY, functionsUrl: '' };
+  const fetchImpl = functionsFetch({ sync: handler });
+  const K = siteKeys(ORIGIN);
+  const once = async (storage) => {
+    const r = await syncOnce({ origin: ORIGIN, deps: { config, fetchImpl, storage, now: Date.now() } });
+    assert.equal(r.ok, true, r.error);
+    return r;
+  };
+  const row = () => fake.rows('listings').find((l) => l.vin === VIN(1));
+  const price = (storage) => storage.data[K.posted][VIN(1)].price;
+  const desktop = await signedIn(TOKEN.u1, U1);
+  const laptop = await signedIn(TOKEN.u1, U1); // the same salesperson's second machine
+  desktop.data[K.posted] = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: at(-24 * 60) } };
+  await once(desktop);
+  await once(laptop);
+  // the laptop's clock runs 6 hours ahead (the wall time typed in by hand) when the salesperson updates the price there
+  laptop.data[K.posted] = markPriceUpdated(laptop.data[K.posted], VIN(1), 19000, at(6 * 60));
+  await once(laptop);
+  assert.equal(row().price, 19000, 'the laptop\'s price change is written');
+  assert.ok(Date.parse(row().updated_at) <= Date.now(), 'as made at the server\'s time, not 6 hours from now');
+  assert.equal(laptop.data[K.posted][VIN(1)].updatedAt, new Date(Date.parse(row().updated_at)).toISOString(), 'and the laptop takes the server\'s stamp for it');
+  await once(desktop);
+  assert.equal(price(desktop), 19000);
+  await new Promise((resolve) => setTimeout(resolve, 5)); // a later moment on any clock
+  // the website drops the price again, and the salesperson updates the listing on the desktop
+  desktop.data[K.posted] = markPriceUpdated(desktop.data[K.posted], VIN(1), 18000);
+  const r = await once(desktop);
+  assert.equal(r.counts.listingsUpdated, 1);
+  assert.deepEqual([row().price, price(desktop)], [18000, 18000], 'the later change wins on the server and stays on the desktop');
+  await once(laptop);
+  await once(desktop);
+  assert.deepEqual([row().price, price(laptop), price(desktop)], [18000, 18000, 18000], 'the laptop\'s next sync puts nothing back');
+});
 
 test('sync: the extension\'s syncOnce against the real handler: the registry goes up, a colleague\'s listing comes down marked theirs, and the state is kept', async () => {
   const now = Date.now();

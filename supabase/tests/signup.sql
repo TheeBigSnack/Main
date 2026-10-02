@@ -356,6 +356,12 @@ begin
       ('   ',                    'www.new-motors.test',                            'Pat',            'dealership''s name'),
       (repeat('N', 121),         'www.new-motors.test',                            'Pat',            'dealership''s name'),
       (E'New\nMotors',           'www.new-motors.test',                            'Pat',            'dealership''s name'),
+      -- a line or paragraph separator breaks the line too; a direction override or isolate reorders what follows
+      ('New' || U&'\2028' || 'Motors', 'www.new-motors.test',                       'Pat',            'dealership''s name'),
+      ('New' || U&'\202E' || 'Motors', 'www.new-motors.test',                       'Pat',            'dealership''s name'),
+      ('New' || U&'\2067' || 'Motors', 'www.new-motors.test',                       'Pat',            'dealership''s name'),
+      -- an accented name passes the name check, so the bad website is what is named
+      ('Caf' || chr(233) || ' Motors', 'localhost',                                  'Pat',            'website'),
       (null,                     'www.new-motors.test',                            'Pat',            'dealership''s name'),
       ('New Motors',             'localhost',                                      'Pat',            'website'),
       ('New Motors',             'https://www.new-motors.test:8443',               'Pat',            'website'),
@@ -364,6 +370,8 @@ begin
       ('New Motors',             'www.new-motors.test',                            '',               'your name'),
       ('New Motors',             'www.new-motors.test',                            repeat('y', 81),  'your name'),
       ('New Motors',             'www.new-motors.test',                            E'Pat\tQuinn',    'your name'),
+      ('New Motors',             'www.new-motors.test',                            'Pat' || U&'\2029' || 'Quinn', 'your name'),
+      ('New Motors',             'www.new-motors.test',                            'Pat' || U&'\200F' || 'Quinn', 'your name'),
       ('New Motors',             'www.new-motors.test',                            null,             'your name')
     ) as f(dealer, website, person, field)
   loop

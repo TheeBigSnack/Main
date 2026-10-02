@@ -16,10 +16,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS } from '../manager/data.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 import { AFFILIATION } from './honesty.js';
+import { lastDefinition } from './migrations.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -138,6 +139,22 @@ test('summarize on the sample: the last scan line', () => {
   assert.equal(stale.lastScan.line, 'Last scan 2026-11-16 06:00: 1 car on the website, 0 ready to post, 0 to take down, 0 price changes');
 });
 
+test('summarize: a scan stamped more than 5 minutes ahead of now (a machine whose clock ran ahead) does not pin the last scan line or hide its stale warning', () => {
+  const later = (hours) => ago(-hours);
+  const real = { taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 };
+  const fromTheFuture = { taken_at: later(24 * 365), cars: 99, ready: 99, take_down_count: 0, price_update_count: 0 };
+  const s = summarize({ ...sample(), scans: [fromTheFuture, real] });
+  assert.equal(s.lastScan.takenAt, real.taken_at, 'the newest scan that ran by now');
+  assert.equal(s.lastScan.stale, true, 'nine hours without a real scan is still stale');
+  assert.equal(s.scans, 2, 'the row is still counted as read');
+  // a few minutes ahead is ordinary clock drift and still counts
+  const drift = { taken_at: later(4 / 60), cars: 2, ready: 1, take_down_count: 0, price_update_count: 0 };
+  assert.equal(summarize({ ...sample(), scans: [drift, real] }).lastScan.takenAt, drift.taken_at);
+  // only scans from the future: no last scan at all, rather than a wrong one
+  assert.equal(summarize({ ...sample(), scans: [fromTheFuture] }).lastScan, null);
+  assert.equal(FUTURE_SKEW_MS, 5 * 60 * 1000, 'the same margin /sync gives a scan');
+});
+
 // ---------- hand-built rows ----------
 
 test('done items give the medians; cleared ones are counted but not in the median', () => {
@@ -194,13 +211,106 @@ test('a to-do item joins to the listing that is up, and the ages sort longest fi
   const todoItems = [
     { vin: 'V1', kind: 'takeDown', flagged_at: ago(4) },
     { vin: 'V1', kind: 'price', flagged_at: ago(25), from_price: 100, to_price: 90 },
-    { vin: 'V1', kind: 'price', flagged_at: ago(1), from_price: 100, to_price: 95 },
+    { vin: 'V2', kind: 'price', flagged_at: ago(1), from_price: 100, to_price: 95 },
   ];
   const s = summarize({ listings, todoItems, now: NOW });
   assert.equal(s.soldStillListed[0].salesperson, 'Sam');
   assert.equal(s.soldStillListed[0].listingUrl, 'https://example.test/new');
   assert.equal(s.soldStillListed[0].name, 'New', 'no name on the item: the listing\'s');
   assert.deepEqual(s.priceMismatches.map((o) => [o.hoursOpen, o.overdue, o.toPrice]), [[25, true, 90], [1, false, 95]]);
+});
+
+test('a car with two open items of one kind (two machines of one salesperson that each filed the same sighting) is listed and counted once, from the first sighting', () => {
+  const listings = [{ user_id: 'u1', vin: 'V1', name: 'Car', posted_at: ago(100), salesperson: 'Sam', status: 'listed' }];
+  const todoItems = [
+    { vin: 'V1', kind: 'price', flagged_at: ago(3), from_price: 100, to_price: 90 },
+    { vin: 'v1', kind: 'price', flagged_at: ago(30), from_price: 100, to_price: 90 },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(2) },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(26) },
+  ];
+  const s = summarize({ listings, todoItems, now: NOW });
+  assert.deepEqual(s.priceMismatches.map((o) => [o.vin, o.hoursOpen, o.overdue]), [['V1', 30, true]]);
+  assert.deepEqual(s.soldStillListed.map((o) => [o.vin, o.hoursOpen, o.overdue]), [['V1', 26, true]]);
+  assert.equal(s.priceUpdates.open, 1);
+  assert.equal(s.takeDowns.open, 1);
+  // and flagged = done + still open + cleared, as the CSV says
+  assert.deepEqual([s.priceUpdates.flagged, s.takeDowns.flagged], [1, 1]);
+  const closed = summarize({ listings, todoItems: [...todoItems, { vin: 'V1', kind: 'price', flagged_at: ago(50), done_at: ago(40), how: 'manual' }, { vin: 'V1', kind: 'price', flagged_at: ago(60), done_at: ago(55), how: 'cleared' }], now: NOW });
+  const p = closed.priceUpdates;
+  assert.deepEqual([p.flagged, p.done, p.open, p.cleared], [3, 1, 1, 1]);
+});
+
+test('a car still listed by someone no longer on the team is listed for the manager, since no rescan looks after it; the empty to-do cards claim only what the items show', () => {
+  const memberships = [{ user_id: 'u1', role: 'salesperson', name: 'Alex' }, { user_id: 'u3', role: 'manager', name: 'Jamie' }];
+  const listings = [
+    { user_id: 'u1', vin: 'V1', name: 'Alex car', posted_at: ago(5), salesperson: 'Alex', status: 'listed' },
+    { user_id: 'u9', vin: 'V9', name: 'Left behind', posted_at: ago(72), salesperson: 'Pat', status: 'listed', price: 18995, listing_url: 'https://example.test/v9' },
+    { user_id: 'u9', vin: 'V8', name: 'Taken down', posted_at: ago(90), salesperson: 'Pat', status: 'taken_down', taken_down_at: ago(80) },
+    { user_id: 'u9', vin: 'V7', name: 'Newer', posted_at: ago(10), salesperson: 'Pat', status: 'listed' },
+  ];
+  const s = summarize({ memberships, listings, todoItems: [], role: 'manager', now: NOW });
+  assert.deepEqual(s.notOnTeam.map((o) => [o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]), [['V9', 'Pat', 72, 18995, 'https://example.test/v9'], ['V7', 'Pat', 10, null, '']], 'listed ones only, longest listed first');
+  assert.deepEqual(s.soldStillListed, [], 'no item ever opens for them');
+  assert.equal(summarize({ listings, role: 'manager', now: NOW }).notOnTeam, null, 'without the memberships nobody can be told apart');
+  assert.deepEqual(summarize({ memberships, listings: listings.slice(0, 1), role: 'manager', now: NOW }).notOnTeam, []);
+  // the CSV carries them too
+  const lines = managerCsv({ memberships, listings }, { role: 'manager', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},2`));
+  const at = lines.indexOf(NOT_ON_TEAM_TITLE);
+  assert.equal(lines[at + 1], 'Posted,Car,VIN,Salesperson,Hours listed,Price,Listing link');
+  assert.equal(lines[at + 2], '2026-11-13 15:00,Left behind,V9,Pat,72,18995,https://example.test/v9');
+  // the page shows them with the reason, and its empty cards say what an item is, never that every sold car is down
+  const page = read('manager/manager.js');
+  assert.doesNotMatch(page, /Every sold car is off Marketplace|Every listing shows the website price/);
+  // an empty card's line starts with what an item is (clearLine), and the page shows that line
+  assert.equal(s.clear.sold.line.startsWith(EMPTY_TAKE_DOWNS), true);
+  assert.equal(s.clear.price.line.startsWith(EMPTY_PRICE_ITEMS), true);
+  assert.match(page, /esc\(s\.clear\.sold\.line\)/);
+  assert.match(page, /esc\(s\.clear\.price\.line\)/);
+  assert.match(page, /id="notOnTeam"/);
+  // a 0 there is no all-clear, so its pill takes clearLine's tone, which is never the green one
+  for (const [list, kind] of [['soldStillListed', 'sold'], ['priceMismatches', 'price']]) {
+    assert.match(page, new RegExp(`pill\\(s\\.${list}\\.length \\? \\(.*?\\) : s\\.clear\\.${kind}\\.tone, String\\(s\\.${list}\\.length\\)\\)`), list);
+    assert.notEqual(s.clear[kind].tone, 'good');
+  }
+  for (const line of [EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS]) {
+    assert.doesNotMatch(line, /\bevery\b|\ball\b/i, line);
+    assert.match(line, /poster's own computer/);
+  }
+  assert.match(NOT_ON_TEAM_HINT, /nobody is told when these cars sell or change price/);
+  assert.match(TEAM_HINT, /show under "Listed by people no longer on the team"/);
+});
+
+// a CSV cell as managerCsv writes it
+const csvQuote = (s) => (/[",\n\r']/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+
+test('a salesperson who opens the manager view reads only their own membership, so no colleague\'s car is put under "no longer on the team", on the page or in the CSV', () => {
+  // what row-level security gives a salesperson (0002_rls.sql): their own membership row, and every listing of the dealership
+  const memberships = [{ user_id: 'u1', dealership_id: 'd1', role: 'salesperson', name: 'Alex' }];
+  const listings = [
+    { user_id: 'u1', vin: 'V1', name: 'Own car', posted_at: ago(5), salesperson: 'Alex', status: 'listed' },
+    { user_id: 'u2', vin: 'V2', name: 'Colleague car', posted_at: ago(30), salesperson: 'Pat', status: 'listed', price: 18995 },
+  ];
+  for (const role of ['salesperson', '', undefined]) {
+    assert.equal(summarize({ memberships, listings, role, now: NOW }).notOnTeam, null, `not known for a viewer whose role is ${JSON.stringify(role)}`);
+  }
+  assert.equal(summarize({ memberships, listings, now: NOW }).notOnTeam, null, 'no role given: not known');
+  // the CSV claims no count and lists no car under that heading
+  const lines = managerCsv({ memberships, listings }, { role: 'salesperson', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},`), 'the summary row is blank, not 0 or 1');
+  const at = lines.indexOf(NOT_ON_TEAM_TITLE);
+  assert.ok(at > 0);
+  assert.equal(lines[at + 1], csvQuote(NOT_ON_TEAM_UNKNOWN));
+  assert.equal(lines[at + 2], '', 'and nothing else in the section');
+  assert.match(NOT_ON_TEAM_UNKNOWN, /manager/);
+  // the same data seen by a manager, who reads every membership, lists nobody either: Pat is on the team
+  const team = [...memberships, { user_id: 'u2', dealership_id: 'd1', role: 'salesperson', name: 'Pat' }];
+  assert.deepEqual(summarize({ memberships: team, listings, role: 'manager', now: NOW }).notOnTeam, []);
+  // the page hands the viewer's role to both, and draws the card only for a list
+  const page = read('manager/manager.js');
+  assert.match(page, /summarize\(\{ \.\.\.d, role: myRole\(\),/);
+  assert.match(page, /managerCsv\(state\.data, \{ role: myRole\(\),/);
+  assert.match(page, /const gone = s\.notOnTeam && s\.notOnTeam\.length/);
 });
 
 test('empty or broken input gives zeros, not an exception', () => {
@@ -627,7 +737,7 @@ test('inviteCard: a manager gets the two buttons in the SQL\'s two roles; a sale
   assert.equal(c.hint, INVITE_HINT);
   assert.match(c.hint, /open codes: not used yet and not expired/);
   assert.match(c.hint, /stops working when the manager who made it leaves the dealership or stops being a manager\./, 'the rule redeem_invite and the trigger enforce');
-  assert.match(read('supabase/migrations/0002_rls.sql'), /m\.user_id = inv\.created_by[\s\S]{0,160}m\.role = 'manager'/, 'redeem_invite refuses a code whose maker is no longer a manager, not only one who left');
+  assert.match(lastDefinition('redeem_invite').sql, /m\.user_id = inv\.created_by[\s\S]{0,160}m\.role = 'manager'/, 'redeem_invite refuses a code whose maker is no longer a manager, not only one who left');
   assert.match(read('supabase/migrations/0001_schema.sql'), new RegExp(`expires_at timestamptz not null default \\(now\\(\\) \\+ interval '${INVITE_DAYS} days'\\)`), 'INVITE_DAYS is the schema\'s');
   const invites = [{ code: 'ABCDEF012345', role: 'salesperson', created_at: NOW }];
   for (const role of ['salesperson', '', undefined, 'owner']) {
@@ -1219,7 +1329,7 @@ test('gettingStarted step 4: two different salespeople with a post in the past 7
   assert.notEqual(afterRemoval.line, 'All four steps done');
   assert.equal(four([listing('s1', 5), listing('x9', 6)]).done, false, 'an account that is not a member');
   for (const f of ['docs/help.md', 'site-src/pages/for-managers.html']) assert.ok(read(f).includes('two different salespeople of the dealership posted in the past 7 days; a manager\'s own posts don\'t count, nor do those of someone no longer in the dealership'), `${f} defines the step as the card counts it`);
-  assert.match(read('supabase/migrations/0008_usage.sql'), /join public\.memberships m on m\.dealership_id = l\.dealership_id and m\.user_id = l\.user_id and m\.role = 'salesperson'/, 'the owner\'s measure counts members with the salesperson role');
+  assert.match(lastDefinition('usage_report').sql, /join public\.memberships m on m\.dealership_id = l\.dealership_id and m\.user_id = l\.user_id and m\.role = 'salesperson'/, 'the owner\'s measure (usage_report as the database runs it) counts members with the salesperson role');
   // a row with no account counts by the name the extension recorded, as the Salespeople table does
   assert.equal(four([listing('s1', 5), listing(null, 6, { salesperson: 'Pat' })]).done, true);
   assert.equal(four([listing(null, 6, { salesperson: 'Pat' }), listing(null, 7, { salesperson: 'pat ' })]).done, false, 'the same name twice');
@@ -1387,45 +1497,52 @@ test('readAll: a failed page is an error, never a short list; a row seen twice i
 
 // ---------- what an empty list may say ----------
 
-test('an empty sold or price list says only that nothing is flagged, and why that is worth less: no scan, an old scan, listings nobody watches', () => {
+test('an empty sold or price list says only that nothing is flagged, and why that is worth less: no scan, an old scan, cars listed by people no longer on the team', () => {
   const D = 'd1';
   const members = [{ user_id: 'u-sam', dealership_id: D, role: 'salesperson', name: 'Sam' }, { user_id: 'u-jamie', dealership_id: D, role: 'manager', name: 'Jamie' }];
   const car = (n, user, over = {}) => ({ id: `l${n}`, dealership_id: D, user_id: user, vin: `TESTVIN${String(n).padStart(10, '0')}`, name: `Car ${n}`, price: 20000, posted_at: ago(100 + n), status: 'listed', salesperson: user === 'u-sam' ? 'Sam' : 'Riley', listing_url: `https://www.facebook.com/marketplace/item/${n}/`, ...over });
   const scan = (hoursAgo) => [{ taken_at: ago(hoursAgo), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0 }];
   const listings = [car(1, 'u-sam'), car(2, 'u-sam'), car(3, 'u-riley'), car(4, 'u-riley'), car(5, 'u-riley', { status: 'taken_down', taken_down_at: ago(5) })];
   const never = ['Every sold car is off Marketplace', 'Every listing shows the website price'];
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // no scan yet: no all-clear, and the pill is not green
-  const none = summarize({ listings: listings.slice(0, 2), memberships: members, wholeTeam: true, now: NOW, timeZone: 'UTC' });
+  // no scan yet: no all-clear, and the pill is the plain one
+  const none = summarize({ listings: listings.slice(0, 2), memberships: members, role: 'manager', now: NOW, timeZone: 'UTC' });
   assert.equal(none.lastScan, null);
   assert.equal(none.clear.sold.tone, '');
-  assert.match(none.clear.sold.line, /^No sold car is flagged on a synced listing\. Each salesperson's extension checks their own listings when it rescans\. No scan is recorded yet, so nothing has been checked\.$/);
+  assert.match(none.clear.sold.line, new RegExp(`^${esc(EMPTY_TAKE_DOWNS)} No scan is recorded yet, so nothing has been checked\\.$`));
   assert.equal(none.clear.price.tone, '');
-  assert.match(none.clear.price.line, /^No price change is flagged on a synced listing\./);
+  assert.match(none.clear.price.line, new RegExp(`^${esc(EMPTY_PRICE_ITEMS)} `));
 
   // an old scan: amber, with how old
-  const old = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(60), wholeTeam: true, now: NOW, timeZone: 'UTC' });
+  const old = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(60), role: 'manager', now: NOW, timeZone: 'UTC' });
   assert.equal(old.lastScan.stale, true);
   assert.equal(old.clear.sold.tone, 'warn');
   assert.match(old.clear.sold.line, /The last scan is 60 h old, so a car sold since then is not flagged yet\./);
   assert.match(old.clear.price.line, /so a price that changed since then is not flagged yet\./);
 
-  // a removed salesperson's cars that are up: named, amber, even with a fresh scan; a taken-down one is not
-  const gone = summarize({ listings, memberships: members, scans: scan(1), wholeTeam: true, now: NOW, timeZone: 'UTC' });
-  assert.deepEqual(gone.unwatched.map((o) => [o.name, o.salesperson]), [['Car 4', 'Riley'], ['Car 3', 'Riley']], 'longest up first');
-  assert.equal(gone.unwatched[0].listingUrl, 'https://www.facebook.com/marketplace/item/4/');
+  // a removed salesperson's cars that are listed: named, amber, even with a fresh scan; a taken-down one is not
+  const gone = summarize({ listings, memberships: members, scans: scan(1), role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(gone.notOnTeam.map((o) => [o.name, o.salesperson]), [['Car 4', 'Riley'], ['Car 3', 'Riley']], 'longest listed first');
+  assert.equal(gone.notOnTeam[0].listingUrl, 'https://www.facebook.com/marketplace/item/4/');
   assert.equal(gone.clear.sold.tone, 'warn');
-  assert.match(gone.clear.sold.line, /2 listings are up from people no longer in the dealership, and nobody's extension watches them \(below\)\./);
-  assert.match(clearLine('sold', { stale: false, hoursAgo: 1 }, 1).line, /One listing is up from people no longer in the dealership, and nobody's extension watches it \(below\)\./);
-  // a salesperson reads only their own membership row: nobody else's car is called unwatched for them
-  assert.deepEqual(summarize({ listings, memberships: [members[0]], scans: scan(1), now: NOW }).unwatched, []);
+  assert.match(gone.clear.sold.line, /2 cars are still listed by people no longer on the team, and no rescan checks them \(below\)\./);
+  assert.match(clearLine('sold', { stale: false, hoursAgo: 1 }, 1).line, /One car is still listed by people no longer on the team, and no rescan checks it \(below\)\./);
+  // a salesperson reads only their own membership row: nobody else's car is put on that list for them
+  assert.equal(summarize({ listings, memberships: [members[0]], scans: scan(1), role: 'salesperson', now: NOW }).notOnTeam, null);
 
-  // a fresh scan, every listing someone's: the one green case, still saying only what is known
-  const fine = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(1), wholeTeam: true, now: NOW, timeZone: 'UTC' });
-  assert.deepEqual(fine.unwatched, []);
-  assert.deepEqual(fine.clear.sold, { tone: 'good', line: 'No sold car is flagged on a synced listing. Each salesperson\'s extension checks their own listings when it rescans.' });
-  for (const s of [none, old, gone, fine]) for (const k of ['sold', 'price']) for (const w of never) assert.ok(!s.clear[k].line.includes(w));
+  // a fresh scan, every listed car a member's: still no all-clear, so still the plain pill, saying only what is known
+  const fine = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(1), role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(fine.notOnTeam, []);
+  assert.deepEqual(fine.clear.sold, { tone: '', line: EMPTY_TAKE_DOWNS });
+  assert.deepEqual(fine.clear.price, { tone: '', line: EMPTY_PRICE_ITEMS });
+  for (const s of [none, old, gone, fine]) {
+    for (const k of ['sold', 'price']) {
+      assert.notEqual(s.clear[k].tone, 'good', 'an empty card is never green');
+      for (const w of never) assert.ok(!s.clear[k].line.includes(w));
+    }
+  }
   const js = read('manager/manager.js');
   for (const w of never) assert.ok(!js.includes(w), `manager.js no longer says "${w}"`);
-  assert.match(js, /wholeTeam: myRole\(\) === 'manager'/, 'only a manager\'s read of the memberships is the whole team');
+  assert.match(js, /summarize\(\{ \.\.\.d, role: myRole\(\),/, 'only a manager\'s read of the memberships is the whole team');
 });

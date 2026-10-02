@@ -176,6 +176,10 @@ const textOf = (m: AnthropicMessage): string => (m.content || []).filter((b) => 
 
 // ---------- /rewrite ----------
 
+const NO_DEALER_NAME = "the dealership's name is missing: add it in Settings";
+// read as the prompt and the guardrails read it
+const dealerNameOf = (facts: RewriteFacts): string => String((isRecord(facts.dealer) && facts.dealer.name) || '').trim();
+
 // The guardrails want a vehicle-shaped object; the facts are that object minus the VIN.
 function guardrailContext(facts: RewriteFacts): GuardrailContext {
   return {
@@ -189,6 +193,7 @@ function guardrailContext(facts: RewriteFacts): GuardrailContext {
       carfaxUrl: facts.carfax ? 'yes' : null,
     },
     dealer: isRecord(facts.dealer) ? facts.dealer : {},
+    salesperson: isRecord(facts.salesperson) ? facts.salesperson : {},
     priceNote: typeof facts.priceNote === 'string' ? facts.priceNote : '',
   };
 }
@@ -360,6 +365,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const facts: RewriteFacts = isRecord(body) ? { ...body } : {};
     delete facts.origin; // ours, not a fact about the car
     if (!facts.make || !facts.model) return json(req, 400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
+    // every description must name the dealership (the guardrails' no-dealer),
+    // so without its name no draft can pass: nothing is asked or paid for
+    if (!dealerNameOf(facts)) return json(req, 400, { ok: false, error: NO_DEALER_NAME });
     const out = await rewrite(facts, who, service);
     console.log(`${new Date().toISOString()} rewrite ${facts.year} ${facts.make} ${facts.model} -> ${out.ok ? 'ok' : 'failed checks'} $${out.costUsd} (month $${(spent + out.costUsd).toFixed(2)})`);
     return json(req, 200, out);

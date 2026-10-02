@@ -3,12 +3,13 @@
 // touches the network or chrome.storage. The caller (the popup, the side
 // panel or the worker, wired in with the Settings UI) does:
 //
-//   const body = syncPayload({ origin, posted, pilot, scan, since, known: state.known, userId });
+//   const localSince = new Date().toISOString(); // this machine's clock, before reading storage
+//   const body = syncPayload({ origin, posted, pilot, scan, since, localSince: state.localSince, known: state.known, userId });
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
 //   posted = mergeRegistry(posted, response, { since, userId, sent: body.posted });
-//   pilot  = mergeFlags(pilot, response);
-//   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId })
-//            // since, known, dealership id and role, the plan, the server's count of today's posts
+//   pilot  = mergeFlags(pilot, response, posted); // the merged registry: a flag of a fix made elsewhere goes
+//   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId, localSince })
+//            // since, localSince, known, dealership id and role, the plan, the server's count of today's posts
 //
 // The state is per website; the wiring keeps it under a `sync` entry added
 // to SITE_KEY_NAMES in src/storageKeys.js, so clearing a website removes it.
@@ -49,10 +50,25 @@ export const SYNC_VERSION = 1;
 // has never synced (it cannot have the entry anyway).
 export const TAKEN_DOWN_WINDOW_DAYS = 90;
 
+// The pilot's post attempts and closed flags go up when one of their stamps
+// is later than this long before `localSince`: the machine's own clock when
+// its last successful sync began, so the stamps and the cutoff come from one
+// clock however far it is from the server's. The margin covers an entry
+// stamped just before that sync read storage and written just after, and a
+// clock set back a little between two syncs. Sending one again is harmless:
+// attempts are upserted on their key and a closed item is never reopened.
+export const UPLOAD_MARGIN_MS = 10 * 60 * 1000;
+
 // At most this many keys in `known`: the sync function's cap on the rows of
 // one request (MAX_ROWS), which a registry that syncs at all stays under. A
 // key left out only means its take-down is missed and can be repeated.
 export const MAX_KNOWN = 2000;
+
+// How far ahead of the server's clock a stamp may be: the sync function's
+// FUTURE_SKEW_MS. A price change stamped further ahead than this comes from a
+// clock that runs ahead; the function writes it as made at its own time, and
+// mergeRegistry takes the server's stamp for it (below).
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const ms = (x) => {
   if (x === null || x === undefined || x === '') return null;
@@ -66,10 +82,16 @@ const isoOrNull = (x) => {
 const isObject = (x) => Boolean(x) && typeof x === 'object' && !Array.isArray(x);
 const text = (s, max) => String(s ?? '').trim().slice(0, max);
 const vinOf = (v) => text(v, 17).toUpperCase();
+// A whole number for an integer column (Postgres integer, 4 bytes), or
+// null: the sync function's intOrNull, which stores a number outside that
+// range as unknown rather than fail every sync of this machine.
+const INT_MIN = -2147483648;
+const INT_MAX = 2147483647;
 const intOrNull = (v) => {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Math.round(Number(v));
-  return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r >= INT_MIN && r <= INT_MAX ? r : null;
 };
 const httpsUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u.trim()) ? u.trim().slice(0, 500) : null);
 const sameMoment = (a, b) => {
@@ -222,14 +244,20 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
  *           received at its last sync (the state's `known`, nextSyncState);
  *           the function takes down only those missing from `posted`, so a
  *           machine that never synced takes nothing down
- *   pilot:  posts and flags that changed after `since` (all of them the first time)
+ *   pilot:  every open flag, and the posts and closed flags with a stamp
+ *           later than UPLOAD_MARGIN_MS before `localSince` (all of them
+ *           when there is none: the first sync, or the first one after an
+ *           update from a build that kept no `localSince`)
  *   scan:   this scan's counts, or null when nothing was scanned
- *   since:  the serverTime of the last answer, or null
+ *   since:  the serverTime of the last answer, or null; it only picks what
+ *           comes back down, never what goes up, since the stamps above are
+ *           this machine's clock and the server's clock is another
+ *   localSince: this machine's clock when its last successful sync began
  *   today:  the caller's local calendar day ({ from, to }, localDayRange), so
  *           the function can count their posts in it (postsToday); `now` is
  *           the moment, a parameter for the tests
  */
-export function syncPayload({ origin = '', posted = {}, known = null, pilot = null, scan = null, since = null, userId = '', now = new Date() } = {}) {
+export function syncPayload({ origin = '', posted = {}, known = null, pilot = null, scan = null, since = null, localSince = null, userId = '', now = new Date() } = {}) {
   const own = {};
   for (const [key, e] of Object.entries(isObject(posted) ? posted : {})) {
     if (!isObject(e) || !isOwn(e, userId)) continue;
@@ -245,8 +273,14 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
     };
   }
   const p = withPilotDefaults(pilot);
-  const posts = p.posts.filter((a) => changedAfter(since, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
-  const flags = p.flags.filter((f) => changedAfter(since, f.flaggedAt, f.doneAt));
+  const last = ms(localSince);
+  const cutoff = last === null ? null : last - UPLOAD_MARGIN_MS;
+  const posts = p.posts.filter((a) => changedAfter(cutoff, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
+  // An open flag goes up on every sync: its prices change in place when the
+  // website price moves again while it is open (noteFlags), with no new
+  // stamp, and the function's step 4 applies the new prices to the open item
+  // or changes nothing. A closed flag goes up again after it closed.
+  const flags = p.flags.filter((f) => !f.doneAt || changedAfter(cutoff, f.flaggedAt, f.doneAt));
   return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, known: keyList(known), pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
 }
 
@@ -289,7 +323,12 @@ const rowsOf = (remote, key) => (Array.isArray(remote) ? remote : isObject(remot
  *   - the same post on both sides: the newest change (updatedAt, else
  *     postedAt) wins for the price; a change made here after `since` is
  *     therefore kept unless the server's is newer still; a listing link or a
- *     name that is missing on one side is filled from the other.
+ *     name that is missing on one side is filled from the other. A stamp
+ *     more than FUTURE_SKEW_MS ahead of the answer's serverTime comes from a
+ *     clock that runs ahead: the server's row wins over a local change that
+ *     the request carried as it stands (the function wrote it as made at its
+ *     own time, so the row holds it with a true stamp), and a server stamp
+ *     that far ahead counts as no change time (the posting time stands in).
  * Before all of that, with the caller's `userId` given: a colleague's newer
  * post is never the row an entry the caller owns is judged by. The caller's
  * own latest row for the VIN stands in for it (so their own take-down
@@ -318,6 +357,10 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
   void since; // the newest-change rule covers it; kept in the signature so callers can say when they last synced
   const base = isObject(local) ? local : {};
   const removedHere = sentKeys(sent);
+  // the server's clock, and each sent entry's change stamp as the request carried it (VIN@postedAt -> ISO or null)
+  const serverNow = isObject(remote) ? ms(remote.serverTime) : null;
+  const tooLate = (t) => serverNow !== null && t !== null && t > serverNow + FUTURE_SKEW_MS;
+  const sentChange = new Map(Object.entries(isObject(sent) ? sent : {}).filter(([, e]) => isObject(e)).map(([key, e]) => [postKey(e.vin || key, e.postedAt), isoOrNull(e.updatedAt)]));
   const current = new Map(); // vin -> the latest post the server knows for it
   const own = new Map(); // vin -> the caller's own latest post there
   const later = (r, have) => !have || ms(r.posted_at) > ms(have.posted_at) || (ms(r.posted_at) === ms(have.posted_at) && r.status !== 'listed');
@@ -366,16 +409,25 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
     }
     if (r.status !== 'listed') continue; // taken down elsewhere
     const lStamp = ms(e.updatedAt) ?? localPosted;
-    const rStamp = ms(r.updated_at) ?? remotePosted;
-    const remoteNewer = rStamp > lStamp;
+    const rStamp = (tooLate(ms(r.updated_at)) ? null : ms(r.updated_at)) ?? remotePosted;
+    // a change made here on a clock that runs ahead, which this request carried as it stands: the server took it as made at its own time
+    const aheadHere = tooLate(ms(e.updatedAt)) && sentChange.get(postKey(e.vin || key, e.postedAt)) === isoOrNull(e.updatedAt);
+    const remoteNewer = aheadHere || rStamp > lStamp;
     const merged = { ...e };
     if (remoteNewer) {
       merged.price = intOrNull(r.price);
       if (r.updated_at) merged.updatedAt = isoOrNull(r.updated_at);
+      else if (aheadHere) delete merged.updatedAt;
       if (httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
     }
     if (!merged.listingUrl && httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
-    if (!merged.salesperson && text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
+    if (isTheirs(r, userId)) {
+      // a colleague's post: the server's name stands, an empty one too, so a
+      // name the owner cleared there (forget_person, 0006_privacy.sql) or
+      // corrected leaves this copy at its next sync
+      if (text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
+      else delete merged.salesperson;
+    } else if (!merged.salesperson && text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
     if (!merged.name && text(r.name, 80)) merged.name = text(r.name, 80);
     if (r.user_id) {
       delete merged.mine; // the server says whose it is
@@ -392,29 +444,86 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
 }
 
 /**
- * Closes local to-do flags that were closed on another machine (the same
- * VIN, kind and flagging time, done on the server). Nothing is added or
- * reopened: a flag belongs to the salesperson's own listing and only their
- * machines carry it. Returns the pilot record (unchanged when nothing matched).
- * `remote` is the sync answer ({ todoItems: [...] }) or a plain array.
+ * Follows the server's to-do items for the local open flags. Each of a
+ * salesperson's machines flags the same sold car or price change at its own
+ * scan time, and the server keeps one item per car and kind (the sync
+ * function's step 4), so a local open flag is the same item as a server row
+ * of its VIN and kind that is open, or that closed after the flag was
+ * raised:
+ *   - closed there (its own row, the same VIN, kind and flagging time, or
+ *     that later-closed row): closed here too, with the server's time and
+ *     how, so a fix ticked off on one machine is off the other's list;
+ *   - open there with another flagging time (the other machine's sighting):
+ *     the flag takes that row's time (the earliest, if there are several),
+ *     so both machines carry one key and the hours count from it.
+ * With neither, and with `registry` (the registry this sync merged) showing
+ * the change already (the salesperson's own entry for the car is at the
+ * flag's new price, or, for a take-down, there is no own entry for it any
+ * more), the flag was raised from a registry that had not yet heard of a
+ * fix made on another machine (a rescan that ran before this sync), and the
+ * sync function filed no item for it: it is dropped, so it is never closed
+ * later as cleared by the website, and the item stays as the machine that
+ * fixed it closed it. Nothing is added or reopened: a flag belongs to the
+ * salesperson's own listing and only their machines carry it. Returns the
+ * pilot record (unchanged when nothing matched). `remote` is the sync answer
+ * ({ todoItems: [...] }) or a plain array.
  */
-export function mergeFlags(pilot, remote) {
+export function mergeFlags(pilot, remote, registry = null) {
   const p = withPilotDefaults(pilot);
-  const done = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && t.done_at);
-  if (!done.length || !p.flags.length) return p;
+  const rows = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && ms(t.flagged_at) !== null);
+  const shown = isObject(registry) ? showsChange(registry) : null;
+  if ((!rows.length && !shown) || !p.flags.length) return p;
   let touched = false;
-  const flags = p.flags.map((f) => {
-    if (f.doneAt) return f;
-    const t = done.find((d) => vinOf(d.vin) === vinOf(f.vin) && d.kind === f.kind && sameMoment(d.flagged_at, f.flaggedAt));
-    if (!t) return f;
-    touched = true;
-    const at = isoOrNull(t.done_at);
-    return { ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) };
-  });
+  const flags = [];
+  for (const f of p.flags) {
+    if (f.doneAt) {
+      flags.push(f);
+      continue;
+    }
+    const item = rows.filter((t) => vinOf(t.vin) === vinOf(f.vin) && t.kind === f.kind);
+    const t = item.find((d) => d.done_at && (sameMoment(d.flagged_at, f.flaggedAt) || (ms(d.done_at) ?? -Infinity) >= (ms(f.flaggedAt) ?? Infinity)));
+    if (t) {
+      touched = true;
+      const at = isoOrNull(t.done_at);
+      flags.push({ ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) });
+      continue;
+    }
+    const open = item.filter((d) => !d.done_at);
+    if (open.length) {
+      if (open.some((d) => sameMoment(d.flagged_at, f.flaggedAt))) {
+        flags.push(f);
+        continue;
+      }
+      const first = open.reduce((a, b) => (ms(b.flagged_at) < ms(a.flagged_at) ? b : a));
+      touched = true;
+      flags.push({ ...f, flaggedAt: isoOrNull(first.flagged_at) });
+      continue;
+    }
+    if (shown && shown(f)) {
+      touched = true; // a late sighting of a change already made: dropped
+      continue;
+    }
+    flags.push(f);
+  }
   return touched ? { ...p, flags } : p;
 }
 
-// The plan words the sync function answers (subscription_state() on the server).
+// Whether a registry already shows a flag's change, as the sync function
+// judges it from the listing rows (step 4): the salesperson's own entry for
+// the car is at the flag's new price, or, for a take-down, there is no own
+// entry for the car.
+function showsChange(registry) {
+  const own = new Map();
+  for (const [key, e] of Object.entries(registry)) if (isObject(e) && e.mine !== false) own.set(vinOf(e.vin || key), e);
+  return (f) => {
+    const e = own.get(vinOf(f.vin));
+    if (f.kind === 'takeDown') return !e;
+    const to = intOrNull(f.to);
+    return Boolean(e) && to !== null && intOrNull(e.price) === to;
+  };
+}
+
+// The plan words the sync function answers (planOf() on the server, the same rule as subscription_state() in SQL).
 export const PLAN_STATES = Object.freeze(['none', 'pilot', 'active', 'lapsed']);
 
 // The dealership's plan as the function answers it ({ state, pilotEndsAt,
@@ -445,7 +554,9 @@ export function planFrom(plan) {
 // known and never taken down from here. Without `held` (direct callers), the
 // caller's own listed rows in the answer stand in. Only an answer that
 // synced (it carries a serverTime) replaces it; a 402 keeps the last one.
-export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null } = {}) {
+// `localSince` is this machine's clock when the sync began (before it read
+// storage); only an answer that synced keeps it, for the next syncPayload.
+export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null, localSince = null } = {}) {
   const prev = isObject(previous) ? previous : {};
   const r = isObject(response) ? response : {};
   const d = isObject(r.dealership) ? r.dealership : {};
@@ -457,6 +568,7 @@ export function nextSyncState(previous, response, { today = null, sent = null, u
   return {
     version: SYNC_VERSION,
     since: isoOrNull(r.serverTime) || prev.since || null,
+    localSince: (synced && isoOrNull(localSince)) || isoOrNull(prev.localSince) || null,
     known: synced ? keyList([...sentKeys(sent), ...received]) : keyList(prev.known),
     dealershipId: d.id || prev.dealershipId || null,
     dealershipName: d.name || prev.dealershipName || '',

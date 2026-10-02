@@ -82,6 +82,7 @@ test('a correct deploy passes every check, the signed-in ones included', async (
   const findings = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, managerOrigin: MANAGER, configs });
   const failed = findings.filter((f) => !f.ok);
   assert.deepEqual(failed, []);
+  assert.ok(findings.some((f) => f.check === "billing: answers the manager view's CORS preflight" && f.ok));
   for (const t of TABLES) assert.ok(findings.some((f) => f.check === `anon reads nothing from ${t}` && f.ok), t);
   assert.ok(findings.some((f) => /throttle answers P0005/.test(f.check) && f.ok));
   const { text, failed: n } = report(findings);
@@ -332,4 +333,27 @@ test('with the manager view\'s origin, billing\'s preflight from it is checked: 
   assert.equal(report(unset).failed, 0, 'a note, not a failure');
   assert.doesNotMatch(report(unset).text, /Every check passed/);
   assert.match(report(good).text, /Every check passed/);
+});
+
+test('billing is judged from the manager view\'s address too: without it the line is a note, with a path it is the origin, before billing is deployed a note', async () => {
+  const line = (findings) => findings.find((f) => f.check === "billing: answers the manager view's CORS preflight");
+  const skipped = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, configs });
+  assert.deepEqual([line(skipped).ok, line(skipped).warnOnly], [false, true], 'not checked is a note, never an ok');
+  assert.match(line(skipped).detail, /LOTSYNC_MANAGER_ORIGIN.*ALLOWED_ORIGINS/);
+  assert.doesNotMatch(report(skipped).text, /Every check passed/);
+  const missing = line(await runChecks({ fetchImpl: fakeProject({ noManagerOrigin: true }), url: URL_, anonKey: KEY, managerOrigin: MANAGER + '/' }));
+  assert.deepEqual([missing.ok, Boolean(missing.warnOnly)], [false, false]);
+  assert.match(missing.detail, /allow-origin none \(is https:\/\/app\.lotsync\.example in ALLOWED_ORIGINS\?\)/);
+  assert.equal(line(await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, managerOrigin: `${MANAGER}/?view=billing` })).ok, true, 'an address with a path is checked as its origin');
+  const early = line(await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing'] }), url: URL_, anonKey: KEY, managerOrigin: MANAGER }));
+  assert.deepEqual([early.ok, early.warnOnly], [false, true]);
+  assert.equal(line(await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing'] }), url: URL_, anonKey: KEY })), undefined, 'nothing to say about an address before billing is deployed');
+  // the commands that deploy billing by hand set the manager view's address in ALLOWED_ORIGINS and check it
+  // (on production the Dashboard's secrets table does: docs/stripe-setup.md step 5, tested above)
+  const readme = read('supabase/README.md');
+  const block = readme.split('Then the secrets and the function')[1].split('```')[1];
+  assert.match(block, /^supabase secrets set ALLOWED_ORIGINS=https:\/\/</m, 'supabase/README.md: the billing commands set ALLOWED_ORIGINS');
+  assert.match(block, /^supabase functions deploy billing/m, 'supabase/README.md: the block read is the billing one');
+  assert.match(readme.split('Then the secrets and the function')[1], /\nThen `LOTSYNC_MANAGER_ORIGIN=https:\/\/<[^>]+> npm run check-deploy` again/);
+  assert.doesNotMatch(readme, /`ALLOWED_ORIGINS` \| function secret, optional/, 'the hosted manager view needs it');
 });

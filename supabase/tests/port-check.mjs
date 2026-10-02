@@ -39,12 +39,16 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn. Price includes the $490 doc fee; tax and tags extra.'),
   sixty('2019 Ram 1500 Big Horn from a private seller, my truck.') + ' '.repeat(3) + Array(70).fill('word').join(' ') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41230 miles for $28,505.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex, sales consultant at Example Motors.', 'Ask for Alex.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', 'Sales  Consultant') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
   { vehicle, dealer, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 28995 },
   { vehicle: { ...vehicle, carfaxOneOwner: true }, dealer, priceNote: 'Price includes the $500 doc fee; tax and tags extra.', price: 28995 },
   { vehicle: { ...vehicle, priceBeforeFees: null }, dealer: {}, priceNote: 'doc fee of $490', price: null },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: 'sales manager' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: '' }, priceNote: '', price: 28995 },
   {},
 ];
 

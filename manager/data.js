@@ -48,7 +48,7 @@
 //     for the salesperson's own listings. So an empty list says only that
 //     nothing is flagged, never that every sold car is off Marketplace:
 //     clearLine() words it, with what it rests on (no scan yet, an old
-//     scan, listings nobody's extension watches).
+//     scan, cars still listed by people no longer on the team).
 //   - A to-do item names no salesperson; the listing with the same VIN does,
 //     so each item is joined to its listing for the name and the link.
 //   - Posts are counted from listings (the posted registry: one row per
@@ -64,6 +64,26 @@ export const OVERDUE_HOURS = 24; // an open item past this is shown in red
 export const SCAN_STALE_HOURS = 6; // with automatic rescans allowed they run every 3 hours while Chrome is open; twice that and something is off
 // What the stale pill says after the hours: why a scan can be that old.
 export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed';
+// A scan stamped further ahead of this computer's clock than this ran on a
+// machine whose clock was ahead: /sync refuses such a scan (the same margin,
+// FUTURE_SKEW_MS in supabase/functions/sync/index.ts), and the last scan line
+// leaves out one stored before it did, so it cannot stay "0 hours ago" and
+// hide the stale warning until its date comes.
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+// What the to-do cards say, claiming only what the items show: an item opens
+// only on the poster's own computer, when their extension's rescan finds the
+// car gone from the website or its price changed. So no open item does not
+// mean every sold car is down: the poster's Chrome may be closed, or they
+// may have left the team (summarize's notOnTeam lists those cars for a
+// manager).
+export const EMPTY_TAKE_DOWNS = 'No open take-down items. One opens when a rescan on the poster\'s own computer finds their car gone from the website.';
+export const EMPTY_PRICE_ITEMS = 'No open price items. One opens when a rescan on the poster\'s own computer finds the website price changed.';
+export const NOT_ON_TEAM_TITLE = 'Listed by people no longer on the team';
+export const NOT_ON_TEAM_HINT = 'Their extension no longer syncs, and sold-car and price items come only from the poster\'s own extension, so nobody is told when these cars sell or change price. Check each one against the website, and have the person who posted it take it down or update the price on Facebook: the listing is on their own profile.';
+// The CSV's line in place of that list when the viewer is not a manager:
+// only a manager reads the whole team, so nobody else can be told apart.
+export const NOT_ON_TEAM_UNKNOWN = 'Left out: only a manager reads the whole team, so only a manager\'s download lists these cars.';
 
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
@@ -160,14 +180,12 @@ function peopleOf(memberships, listings, attempts) {
 /**
  * @param {object} input
  *   listings, todoItems, postAttempts, scans, memberships: rows as above
- *   wholeTeam: true when `memberships` is every member of the dealership (a
- *              manager reads them all; a salesperson reads only their own
- *              row), so a listing whose user is not among them belongs to
- *              someone no longer in the dealership
+ *   role:     the signed-in viewer's role in the dealership; only for
+ *             'manager' is notOnTeam a list (else null: not known)
  *   now:      ISO time the ages count from (default: the clock)
  *   timeZone: IANA zone for the last-scan line (default: this computer's)
  */
-export function summarize({ listings, todoItems, postAttempts, scans, memberships, wholeTeam = false, now = nowIso(), timeZone } = {}) {
+export function summarize({ listings, todoItems, postAttempts, scans, memberships, role = '', now = nowIso(), timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
@@ -234,37 +252,68 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     };
   };
   const longestFirst = (a, b) => (b.hoursOpen ?? -1) - (a.hoursOpen ?? -1) || a.name.localeCompare(b.name);
-  const soldStillListed = T.filter((f) => f.kind === 'takeDown' && isOpen(f)).map(item).sort(longestFirst);
-  const priceMismatches = T.filter((f) => f.kind === 'price' && isOpen(f)).map((f) => ({ ...item(f), fromPrice: num(f.from_price), toPrice: num(f.to_price) })).sort(longestFirst);
+  // One open item per car and kind, the first flagged: the sync function
+  // keeps one, but two machines of one salesperson that synced the same
+  // sighting at the same moment (or before it kept one) can each have left
+  // a row, and the car is still one car to fix.
+  const openOf = (kind) => {
+    const first = new Map();
+    for (const f of T) {
+      if (f.kind !== kind || !isOpen(f)) continue;
+      const have = first.get(vinOf(f));
+      if (!have || (ms(f.flagged_at) ?? Infinity) < (ms(have.flagged_at) ?? Infinity)) first.set(vinOf(f), f);
+    }
+    return [...first.values()];
+  };
+  const soldStillListed = openOf('takeDown').map(item).sort(longestFirst);
+  const priceMismatches = openOf('price').map((f) => ({ ...item(f), fromPrice: num(f.from_price), toPrice: num(f.to_price) })).sort(longestFirst);
+
+  // ----- listings no rescan looks after -----
+  // A to-do item comes only from the poster's own extension (its rescan
+  // flags the salesperson's own listings, extension/src/pilot.js noteFlags),
+  // so a car still listed by someone who is no longer a member is checked by
+  // nobody: no item ever opens for it, whatever the website does. They are
+  // listed here, oldest first, for the manager to chase. Only a manager
+  // reads every membership of the dealership; row-level security shows a
+  // salesperson their own row alone (0002_rls.sql) while they read every
+  // listing, so for anyone else each colleague's car would look left
+  // behind. For a viewer who is not a manager, or without the memberships,
+  // notOnTeam is null: not known, never a list.
+  const memberIds = new Set(M.map((m) => String(m.user_id || '')).filter(Boolean));
+  const notOnTeam = role === 'manager' && memberIds.size
+    ? L.filter((l) => isListed(l) && l.user_id && !memberIds.has(String(l.user_id)))
+      .map((l) => ({
+        vin: vinOf(l),
+        name: text(l.name, 80) || vinOf(l),
+        salesperson: nameOf(l),
+        listingUrl: l.listing_url ? String(l.listing_url) : '',
+        listedPrice: num(l.price),
+        postedAt: l.posted_at || null,
+        hoursListed: hoursBetween(l.posted_at, nowAt),
+      }))
+      .sort((a, b) => (b.hoursListed ?? -1) - (a.hoursListed ?? -1) || a.name.localeCompare(b.name))
+    : null;
 
   const flagStats = (flags) => {
     const done = flags.filter((f) => f.done_at && f.how !== 'cleared');
     const hours = done.map((f) => hoursBetween(f.flagged_at, f.done_at)).filter((h) => typeof h === 'number');
+    const openRows = flags.filter(isOpen);
+    const open = new Set(openRows.map(vinOf)).size; // one per car, as the lists above
     return {
-      flagged: flags.length,
+      flagged: flags.length - openRows.length + open, // open rows of one car count once here too, so flagged = done + open + cleared
       done: done.length,
       detected: done.filter((f) => f.how === 'detected').length,
       cleared: flags.filter((f) => f.how === 'cleared').length,
-      open: flags.filter(isOpen).length,
+      open,
       medianHours: median(hours),
       longestHours: hours.length ? Math.max(...hours) : null,
     };
   };
 
-  // ----- the last scan -----
+  // ----- the last scan: the newest one that has run by now (FUTURE_SKEW_MS) -----
   let last = null;
-  for (const s of S) if (ms(s.taken_at) !== null && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
+  for (const s of S) if (ms(s.taken_at) !== null && ms(s.taken_at) <= t + FUTURE_SKEW_MS && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
   const lastScan = last ? scanLine(last, nowAt, zone) : null;
-
-  // ----- listings nobody's extension watches -----
-  // up, and posted by someone who is no longer a member: their extension
-  // stopped syncing when they were removed, and a rescan only flags its own
-  // salesperson's listings, so nothing flags a sale or a price change on them
-  const members = new Set(M.map((m) => m.user_id).filter(Boolean));
-  const unwatched = !wholeTeam ? [] : L
-    .filter((l) => isListed(l) && !(l.user_id && members.has(l.user_id)))
-    .map((l) => ({ vin: vinOf(l), name: text(l.name, 80) || vinOf(l), salesperson: text(l.salesperson, 60), listingUrl: l.listing_url ? String(l.listing_url) : '', postedAt: l.posted_at || null, hoursUp: hoursBetween(l.posted_at, nowAt) }))
-    .sort((a, b) => (b.hoursUp ?? -1) - (a.hoursUp ?? -1) || a.name.localeCompare(b.name));
 
   return {
     now: nowAt,
@@ -276,38 +325,38 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     totals,
     soldStillListed,
     priceMismatches,
-    unwatched,
-    clear: { sold: clearLine('sold', lastScan, unwatched.length), price: clearLine('price', lastScan, unwatched.length) },
+    notOnTeam,
+    clear: { sold: clearLine('sold', lastScan, notOnTeam ? notOnTeam.length : 0), price: clearLine('price', lastScan, notOnTeam ? notOnTeam.length : 0) },
     takeDowns: flagStats(T.filter((f) => f.kind === 'takeDown')),
     priceUpdates: flagStats(T.filter((f) => f.kind === 'price')),
   };
 }
 
 // What an empty "Sold cars still listed" or "Price changes not yet updated"
-// says, and its pill's tone. Only what the rows support: nothing is flagged
-// on a synced listing, each salesperson's extension checks only their own
-// listings, and why that is worth less when there is no scan yet, the last
-// one is old, or some listings are up with nobody watching them. 'good' only
-// when none of those holds; 'warn' for an old scan or unwatched listings; ''
-// when nothing has been scanned yet.
+// says, and its pill's tone. Only what the rows support: what an item is
+// (EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS: one opens only on the poster's own
+// computer), and why an empty card is worth less when there is no scan yet,
+// the last one is old, or some cars are still listed by people no longer on
+// the team (notOnTeam, a manager's view only). An empty card is never an
+// all-clear, so its tone is never 'good': '' (the plain pill) unless an old
+// scan or such cars make it 'warn'.
 const CLEAR_WORDS = Object.freeze({
-  sold: { none: 'No sold car is flagged on a synced listing.', since: 'a car sold since then' },
-  price: { none: 'No price change is flagged on a synced listing.', since: 'a price that changed since then' },
+  sold: { none: EMPTY_TAKE_DOWNS, since: 'a car sold since then' },
+  price: { none: EMPTY_PRICE_ITEMS, since: 'a price that changed since then' },
 });
-export function clearLine(kind, lastScan, unwatchedCount = 0) {
+export function clearLine(kind, lastScan, notOnTeamCount = 0) {
   const w = CLEAR_WORDS[kind] || CLEAR_WORDS.sold;
-  const parts = [w.none, 'Each salesperson\'s extension checks their own listings when it rescans.'];
-  let tone = 'good';
+  const parts = [w.none];
+  let tone = '';
   if (!lastScan) {
     parts.push('No scan is recorded yet, so nothing has been checked.');
-    tone = '';
   } else if (lastScan.stale) {
     parts.push(`The last scan is ${typeof lastScan.hoursAgo === 'number' ? `${lastScan.hoursAgo} h` : 'hours'} old, so ${w.since} is not flagged yet.`);
     tone = 'warn';
   }
-  const n = count(unwatchedCount) || 0;
+  const n = count(notOnTeamCount) || 0;
   if (n) {
-    parts.push(`${n === 1 ? 'One listing is' : `${n} listings are`} up from people no longer in the dealership, and nobody's extension watches ${n === 1 ? 'it' : 'them'} (below).`);
+    parts.push(`${n === 1 ? 'One car is' : `${n} cars are`} still listed by people no longer on the team, and no rescan checks ${n === 1 ? 'it' : 'them'} (below).`);
     tone = 'warn';
   }
   return { tone, line: parts.join(' ') };
@@ -465,8 +514,8 @@ const salespeopleIn = (s) => (s.role === 'manager' ? count(s.salespeople) : null
  * The seats Subscribe asks Checkout for: one per salesperson now, never
  * fewer than the plan includes (the rooftop price covers those, and the
  * billing function bills only the seats above them). Null when the answer
- * has no count; Subscribe then sends none and the function keeps the
- * included count, or the seats the row already had.
+ * has no count; Subscribe then sends none and the billing function bills the
+ * included count, never the seats of a subscription that has ended.
  * @param {object} status   GET .../billing/status's answer
  * @param {object} options  pricing: { includedSalespeople } fallback, as billingCard takes it
  * @returns {number|null}
@@ -827,7 +876,7 @@ export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZo
 // ---------- the Team card ----------
 
 export const TEAM_LINE = 'Everyone in this dealership\'s Lot Current account. A manager can invite, bill and change the team; a salesperson posts.';
-export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
+export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers, and any they still have listed show under "Listed by people no longer on the team", because no one\'s rescans check them any more. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
 export const TEAM_UNCHANGED = 'Nothing changed: the team was changed elsewhere.';
 
 // The Team card's line after Make manager, Make salesperson or Remove, from
@@ -1072,15 +1121,16 @@ const kindLabel = (k) => (k === 'price' ? 'price change' : 'sold / take down');
 /**
  * @param {object} input   listings, todoItems, postAttempts, scans, memberships
  * @param {object} options
+ *   role:     the signed-in viewer's role, as summarize takes it
  *   now:      ISO time of the export
  *   dealer:   the dealership's name
  *   origin:   the dealership's website origin
  *   timeZone: IANA zone for every time in the file; default: this computer's
  */
-export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '', timeZone } = {}) {
+export function managerCsv(input = {}, { role = '', now = nowIso(), dealer = '', origin = '', timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const local = (iso) => fmtLocal(iso, zone);
-  const s = summarize({ ...input, now, timeZone: zone });
+  const s = summarize({ ...input, role, now, timeZone: zone });
   const L = rows(input.listings);
   const T = rows(input.todoItems);
   const A = rows(input.postAttempts);
@@ -1109,6 +1159,7 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Price changes still open', s.priceUpdates.open]));
   out.push(csvRow(['Price changes cleared by the website', s.priceUpdates.cleared]));
   out.push(csvRow(['Median hours from the flagging scan until updated', s.priceUpdates.medianHours]));
+  out.push(csvRow([NOT_ON_TEAM_TITLE, s.notOnTeam ? s.notOnTeam.length : null])); // blank when not known
   out.push(csvRow(['Last scan', s.lastScan ? s.lastScan.line : 'none yet']));
   out.push('');
   out.push(csvRow(['Definitions']));
@@ -1125,6 +1176,14 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Price changes not yet updated']));
   out.push(csvRow(['Flagged', 'Car', 'VIN', 'Salesperson', 'Hours open', 'Price from', 'Price to', 'Listing link']));
   for (const o of s.priceMismatches) out.push(csvRow([local(o.flaggedAt), o.name, o.vin, o.salesperson, o.hoursOpen, o.fromPrice, o.toPrice, o.listingUrl]));
+  out.push('');
+  out.push(csvRow([NOT_ON_TEAM_TITLE]));
+  if (s.notOnTeam) {
+    out.push(csvRow(['Posted', 'Car', 'VIN', 'Salesperson', 'Hours listed', 'Price', 'Listing link']));
+    for (const o of s.notOnTeam) out.push(csvRow([local(o.postedAt), o.name, o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]));
+  } else {
+    out.push(csvRow([NOT_ON_TEAM_UNKNOWN]));
+  }
   out.push('');
   out.push(csvRow(['Listings']));
   out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link']));

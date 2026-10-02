@@ -273,6 +273,7 @@ test('billing: checkout for a store with no plan makes a Stripe customer carryin
     'line_items[0][price]': 'price_rooftop_test', 'line_items[0][quantity]': '1',
     success_url: `${MANAGER_PAGE}/?view=billing&billing=success`, cancel_url: `${MANAGER_PAGE}/?view=billing&billing=canceled`,
     allow_promotion_codes: 'true', 'subscription_data[metadata][dealership_id]': D1,
+    'subscription_data[metadata][included_salespeople]': String(PRICING.includedSalespeople),
   });
   assert.match(session.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
   for (const w of fake.writes()) assert.equal(w.key, SERVICE_KEY);
@@ -623,6 +624,30 @@ test('billing: which row an event lands on: the customer\'s, the subscription\'s
   assert.deepEqual([fake.queries('subscriptions').length, fake.rows('billing_events').length], [0, 1]);
 });
 
+test('billing: when Stripe cannot answer the customer lookup, the event is not recorded and answers 500, so Stripe delivers it again; a customer Stripe does not know is recorded, not applied', async () => {
+  const handler = await load();
+  const event = JSON.stringify(subscriptionEvent({ id: 'evt_flaky' }, { customer: 'cus_7' }));
+  for (const [status, body] of [[503, { error: { message: 'Stripe is busy' } }], [429, { error: { message: 'Too many requests', code: 'rate_limit' } }], [500, null]]) {
+    world();
+    stripe({ fail: () => ({ status, body }) });
+    const r = await deliver(handler, event);
+    assert.equal(r.status, 500, `a ${status} from Stripe is not taken as "not a Lot Current customer"`);
+    assert.equal(r.body.ok, false);
+    assert.deepEqual([fake.rows('billing_events'), fake.rows('subscriptions')], [[], []], 'nothing recorded, so the redelivery is not skipped as a duplicate');
+  }
+  // Stripe recovers and redelivers the same event: it lands on the customer's dealership
+  stripe({ customers: { cus_7: { metadata: { dealership_id: D2 } } } });
+  const again = await deliver(handler, event);
+  assert.deepEqual([again.status, again.body], [200, { ok: true, applied: true, attached: true }]);
+  assert.equal(fake.rows('subscriptions')[0].dealership_id, D2);
+  // a customer Stripe answers 404 for is no Lot Current customer: recorded once, not applied
+  world();
+  stripe({ customers: {} });
+  const unknown = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_unknown' }, { customer: 'cus_gone' })));
+  assert.deepEqual([unknown.status, unknown.body], [200, { ok: true, applied: false, attached: false }]);
+  assert.deepEqual(fake.rows('billing_events').map((e) => e.stripe_event_id), ['evt_unknown']);
+});
+
 test('billing: an event older than the row\'s last change is stored and not applied; an invoice about another subscription is ignored', async () => {
   const handler = await load();
   const recent = Math.floor(Date.now() / 1000);
@@ -638,11 +663,81 @@ test('billing: an event older than the row\'s last change is stored and not appl
   assert.deepEqual([r.body.applied, fake.rows('subscriptions')[0].status], [true, 'past_due']);
 });
 
+// One paid Checkout without a trial: Stripe makes the subscription
+// incomplete, takes the first payment and makes it active, all in the same
+// second, and delivers the events in any order, some of them at once.
+const checkoutEvents = (created = Math.floor(Date.now() / 1000)) => ({
+  created: subscriptionEvent({ id: 'evt_created', type: 'customer.subscription.created', created }, { status: 'incomplete' }),
+  updated: subscriptionEvent({ id: 'evt_updated', type: 'customer.subscription.updated', created }, { status: 'active' }),
+  paid: { id: 'evt_paid', object: 'event', type: 'invoice.paid', created, data: { object: { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [{ period: { start: created, end: 1790000000 } }] } } } },
+});
+
+test('billing: a paid Checkout\'s events from one second, the first one delivered last, leave the store active and served', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const e = checkoutEvents();
+  for (const event of [e.updated, e.paid, e.created]) {
+    const r = await deliver(handler, JSON.stringify(event));
+    assert.equal(r.status, 200, event.id);
+  }
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.stripe_subscription_id, row.status], ['sub_1', 'active'], 'the late created(incomplete) is older than what the row holds');
+  // Stripe redelivers the first event hours later (after a failed delivery) with its first stamp: still active
+  const again = await deliver(handler, JSON.stringify({ ...e.created, id: 'evt_created_retry' }));
+  assert.deepEqual(again.body, { ok: true, applied: false, attached: true });
+  assert.equal(fake.rows('subscriptions')[0].status, 'active');
+});
+
+test('billing: two deliveries at once do not write over each other: the one decided on a row that changed meanwhile decides again', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const e = checkoutEvents();
+  // created(incomplete) reads the row with no subscription and is about to write it...
+  const held = fake.hold((c) => c.table === 'subscriptions' && c.op !== 'select' && c.payload && c.payload.status === 'incomplete');
+  const slow = deliver(handler, JSON.stringify(e.created));
+  await held.arrived;
+  // ...when updated(active) is delivered, read and written in full
+  const fast = await deliver(handler, JSON.stringify(e.updated));
+  assert.deepEqual(fast.body, { ok: true, applied: true, attached: true });
+  held.commit();
+  const late = await slow;
+  assert.equal(late.status, 200);
+  assert.deepEqual([fake.rows('subscriptions')[0].status, late.body.applied], ['active', false], 'the slower delivery read the row again and found itself older');
+  // a row that keeps changing is not written over: 500, so Stripe delivers the event again
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: [], error: null, status: 200 } : undefined);
+  const busy = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_busy' })));
+  fake.script = null;
+  assert.equal(busy.status, 500);
+  assert.match(busy.body.error, /kept changing/);
+  assert.deepEqual(fake.rows('billing_events'), [], 'not recorded, so the redelivery applies it');
+});
+
+test('billing: a write counts as landed only when the database hands back the row it changed, never on a missing row count', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  // the conditional write asks for the changed row back, as the manager view's own writes do
+  const ok = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_ok' })));
+  assert.deepEqual(ok.body, { ok: true, applied: true, attached: true });
+  const [write] = fake.queries('subscriptions').filter((c) => c.op === 'update');
+  assert.equal(write.columns, 'dealership_id', 'update(...).select(\'dealership_id\')');
+  // an answer that carries neither rows nor a count (a lost race on an API
+  // that leaves the count out) is not taken as written: no event is recorded as applied
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: null, error: null, count: null } : undefined);
+  const silent = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_silent' })));
+  fake.script = null;
+  assert.equal(silent.status, 500);
+  assert.match(silent.body.error, /kept changing/);
+  assert.deepEqual(fake.rows('billing_events'), [], 'not recorded as applied');
+  assert.equal(fake.rows('subscriptions')[0].status ?? null, null, 'and the row was not written');
+});
+
 test('billing: a database failure answers 500 so Stripe retries, and the event is not recorded, so the retry applies it', async () => {
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
   const handler = await load();
   const raw = JSON.stringify(subscriptionEvent());
-  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'upsert' ? { error: { message: 'deadlock detected', code: '40P01' } } : undefined);
+  fake.script = (c) => (c.table === 'subscriptions' && c.op !== 'select' ? { error: { message: 'deadlock detected', code: '40P01' } } : undefined);
   const failed = await deliver(handler, raw);
   assert.deepEqual([failed.status, failed.body], [500, { ok: false, error: 'could not write subscriptions: deadlock detected' }]);
   assert.deepEqual(fake.rows('billing_events'), []);
@@ -663,6 +758,7 @@ test('billing: scripts/check-deploy.mjs reads its billing lines as ok against th
   findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY, managerOrigin: MANAGER_PAGE })).filter((f) => f.check.startsWith('billing:'));
   assert.deepEqual(findings.map((f) => [f.check, f.ok, Boolean(f.warnOnly)]).slice(-1), [['billing: answers the manager view\'s CORS preflight', false, false]]);
   assert.ok(findings.slice(0, 3).every((f) => f.ok), 'the extension\'s own lines still pass: only the page is blocked');
+  assert.match(findings.at(-1).detail, /allow-origin none .*ALLOWED_ORIGINS/);
   billing = await load({ STRIPE_WEBHOOK_SECRET: undefined });
   findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY })).filter((f) => f.check === 'billing: the webhook refuses an unsigned event');
   assert.deepEqual(findings.map((f) => [f.ok, f.warnOnly]), [[false, true]]);

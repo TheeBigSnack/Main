@@ -387,20 +387,27 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const flag = storage.data[K.pilot].flags[0];
   assert.equal(flag.doneAt, T(40), 'the flag closed on the colleague\'s machine is closed here');
   assert.equal(flag.how, 'detected');
-  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, known: [postKey(VIN_A, T(0))], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today } }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap; the Ram, sent, is known, the colleague\'s Honda is not');
+  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, localSince: new Date(NOW).toISOString(), known: [postKey(VIN_A, T(0))], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today } }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap; the Ram, sent, is known, the colleague\'s Honda is not');
   assert.equal(storage.data[ACCOUNT_KEY].accessToken, freshSession().accessToken, 'the session is untouched');
 
-  // the second sync carries `since`, sends only pilot changes after it, and writes nothing that did not change
+  // the second sync carries `since` and writes nothing that did not change;
+  // the pilot entries stamped after the first sync began, by this machine's
+  // clock (NOW), go up again: sending one twice changes nothing
   const writesBefore = storage.writes.length;
-  const r2 = await syncOnce({ origin: ORIGIN, scan: { takenAt: T(50), cars: 2, ready: 1, takeDownCount: 0, priceUpdateCount: 0 }, deps: deps({ fetchImpl, storage }) });
+  const r2 = await syncOnce({ origin: ORIGIN, scan: { takenAt: T(50), cars: 2, ready: 1, takeDownCount: 0, priceUpdateCount: 0 }, deps: deps({ fetchImpl, storage, now: Date.parse(T(55)) }) });
   assert.equal(r2.ok, true);
   assert.equal(calls[1].body.since, r.serverTime);
   assert.deepEqual(calls[1].body.known, [postKey(VIN_A, T(0))], 'what the last sync sent goes up as known');
-  assert.deepEqual(calls[1].body.pilot, { posts: [], flags: [] }, 'nothing in the pilot changed since');
+  assert.deepEqual([calls[1].body.pilot.posts.map((a) => a.vin), calls[1].body.pilot.flags.map((f) => f.vin)], [[VIN_A], [VIN_A]]);
+  assert.equal(storage.data[K.sync].localSince, T(55));
   assert.deepEqual(calls[1].body.scan, { takenAt: T(50), cars: 2, ready: 1, takeDownCount: 0, priceUpdateCount: 0 }, 'the counts passed in win');
   assert.deepEqual(storage.writes.slice(writesBefore), [[K.sync]], 'only the state was written');
   assert.equal(r2.counts.listingsInserted, 0);
   assert.equal(server.listings.length, 2, 'the same post twice is one row');
+  // the third sends only pilot changes after the second began, less the margin: none
+  const r3 = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage, now: Date.parse(T(57)) }) });
+  assert.equal(r3.ok, true);
+  assert.deepEqual(calls[2].body.pilot, { posts: [], flags: [] }, 'nothing in the pilot changed since');
 });
 
 test('syncOnce: a token the function rejects signs the person out; not a member and a network failure write nothing', async () => {

@@ -9,7 +9,8 @@
 //   client.auth.getUser(token)                  the user the test registered for that token
 //   from(t).select(columns, { count, head }?)   then eq, in, lt, lte, gte, is, not(col, 'is', null),
 //                                               order, range, maybeSingle
-//   from(t).update(patch)                       then eq or in
+//   from(t).update(patch, { count }?)           then eq, in or is (count: 'exact' answers how many rows it changed),
+//                                               then select(columns)? (answers the changed rows, projected)
 //   from(t).insert(rows), from(t).upsert(rows, { onConflict, ignoreDuplicates? })
 //
 // The tables live in memory and answer the way PostgREST would. Their
@@ -182,6 +183,8 @@ function stored(table, column, value) {
     case 'serial': {
       const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
       if (typeof n !== 'number' || !Number.isInteger(n)) throw bad();
+      // int is Postgres integer (4 bytes); serial stands for bigint identities
+      if (type === 'int' && (n < -2147483648 || n > 2147483647)) throw new PgError('22003', `value "${n}" is out of range for type integer`);
       return n;
     }
     case 'num': {
@@ -309,6 +312,30 @@ function filterValue(table, column, value) {
   return value === null ? null : stored(table, column, value);
 }
 
+// Rows that tie on every ORDER BY key come back from Postgres in no set
+// order, and a LIMIT/OFFSET page may break the ties differently from the
+// page before it (a bounded top-N sort for one, a full sort for the next),
+// so a paged read whose last key is not unique can repeat some rows and lose
+// others. The fake does the same to a paged read: it shuffles the rows,
+// seeded by the page's offset, before its stable sort, so each page breaks
+// ties its own way and only a unique last key (the id) makes the pages fit.
+function shuffled(rows, seed) {
+  const out = [...rows];
+  let s = (seed * 2654435761 + 1013904223) >>> 0;
+  const next = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 function ordered(table, rows, order) {
   const out = [...rows];
   for (const { column, ascending } of [...order].reverse()) {
@@ -383,7 +410,8 @@ function runSelect(q) {
   const rows = tableOf(q.table);
   const filters = q.filters.map((f) => ({ ...f, value: f.op === 'in' ? f.value.map((v) => filterValue(q.table, f.column, v)) : f.op === 'is' || f.op === 'not.is' ? null : filterValue(q.table, f.column, f.value) }));
   for (const o of q.order) columnOf(q.table, o.column);
-  const hits = ordered(q.table, rows.filter((r) => matches(q.table, r, filters)), q.order);
+  const found = rows.filter((r) => matches(q.table, r, filters));
+  const hits = ordered(q.table, q.range ? shuffled(found, q.range[0]) : found, q.order);
   const count = q.count === 'exact' ? hits.length : null;
   const page = (q.range ? hits.slice(q.range[0], q.range[1] + 1) : hits).slice(0, fake.maxRows);
   const data = page.map((r) => project(q.table, r, q.columns));
@@ -397,14 +425,23 @@ function runSelect(q) {
 
 function runUpdate(q) {
   const rows = tableOf(q.table);
-  const filters = q.filters.map((f) => ({ ...f, value: f.op === 'in' ? f.value.map((v) => filterValue(q.table, f.column, v)) : filterValue(q.table, f.column, f.value) }));
+  const filters = q.filters.map((f) => ({ ...f, value: f.op === 'in' ? f.value.map((v) => filterValue(q.table, f.column, v)) : f.op === 'is' ? null : filterValue(q.table, f.column, f.value) }));
   const patch = {};
   for (const [column, value] of Object.entries(q.payload)) patch[columnOf(q.table, column)] = stored(q.table, column, value);
-  const next = rows.map((r) => (matches(q.table, r, filters) ? { ...r, ...patch } : r));
+  const changed = [];
+  const next = rows.map((r) => {
+    if (!matches(q.table, r, filters)) return r;
+    const row = { ...r, ...patch };
+    changed.push(row);
+    return row;
+  });
   next.forEach((r) => checkRow(q.table, r));
   checkKeys(q.table, next);
   tables[q.table] = next;
-  return { data: null, error: null, count: null, status: 204 };
+  const count = q.options?.count === 'exact' ? changed.length : null;
+  // select() after an update is PostgREST's return=representation: the changed rows come back
+  if (q.columns) return { data: changed.map((r) => project(q.table, r, q.columns)), error: null, count, status: 200 };
+  return { data: null, error: null, count, status: 204 };
 }
 
 // insert and upsert. An upsert names its conflict columns, which must be
@@ -507,15 +544,21 @@ function builder(client, table, op, init) {
     q.filters.push({ op: 'in', column, value: [...values] });
     return b;
   };
-  if (op === 'update') return b;
-  b.lt = filter('lt');
-  b.lte = filter('lte');
-  b.gte = filter('gte');
   b.is = (column, value) => {
     if (value !== null) throw new Error('the fake models is(column, null) only');
     q.filters.push({ op: 'is', column, value: null });
     return b;
   };
+  if (op === 'update') {
+    b.select = (columns = '*') => {
+      q.columns = columns;
+      return b;
+    };
+    return b;
+  }
+  b.lt = filter('lt');
+  b.lte = filter('lte');
+  b.gte = filter('gte');
   b.not = (column, operator, value) => {
     if (operator !== 'is' || value !== null) throw new Error("the fake models not(column, 'is', null) only");
     q.filters.push({ op: 'not.is', column, value: null });

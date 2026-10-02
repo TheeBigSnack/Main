@@ -6,21 +6,15 @@
 --
 --   psql -v ON_ERROR_STOP=1 -d lotsync_test \
 --     -f supabase/tests/local-shim.sql \
---     -f supabase/migrations/0001_schema.sql \
---     -f supabase/migrations/0002_rls.sql \
---     -f supabase/migrations/0003_views.sql \
---     -f supabase/migrations/0004_billing.sql \
---     -f supabase/migrations/0005_leads.sql \
---     -f supabase/migrations/0006_privacy.sql \
---     -f supabase/migrations/0007_signup.sql \
---     -f supabase/migrations/0008_usage.sql \
---     -f supabase/migrations/0009_cancel_at.sql \
+--     $(printf -- '-f %s ' supabase/migrations/*.sql) \
 --     -f supabase/tests/rls.sql \
 --     -f supabase/tests/billing.sql \
 --     -f supabase/tests/privacy.sql \
 --     -f supabase/tests/signup.sql \
 --     -f supabase/tests/usage.sql
--- (or: node scripts/sql-test.mjs, which applies them all and runs every test file)
+-- (every migration, in order, the later ones changing what earlier ones made;
+-- or: node scripts/sql-test.mjs, which applies them all and runs every test
+-- file, concurrency.sql too)
 
 create schema if not exists auth;
 

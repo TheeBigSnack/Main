@@ -8,7 +8,9 @@
 //   - 60-120 words (the VIN line does not count)
 //   - every number in the text must be in the website's data for the car
 //   - a price note quoting a dollar amount must match the car's two-price gap
-//   - the VIN and the dealership's name must be present
+//   - the VIN and the dealership's name must be present (a dealership with
+//     no name set fails), and so must the salesperson's role (their title,
+//     or the default one)
 //   - banned phrases (claims the data can't support, posing as a private
 //     seller, protected characteristics), "one owner" only with the flag,
 //     no ALL CAPS shouting, no walls of emoji
@@ -46,12 +48,25 @@ export interface GuardrailDealer {
   zip?: unknown;
 }
 
+export interface GuardrailSalesperson {
+  name?: unknown;
+  title?: unknown;
+}
+
 export interface GuardrailContext {
   vehicle?: GuardrailVehicle;
   dealer?: GuardrailDealer;
+  salesperson?: GuardrailSalesperson;
   priceNote?: string;
   price?: number | null;
 }
+
+// The title a salesperson has when they set none (extension/src/settings.js DEFAULT_SALESPERSON_TITLE).
+export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
+
+// The salesperson's role as a description must name it: their title, or the
+// default one, with its spacing evened out.
+export const roleOf = (salesperson: GuardrailSalesperson | undefined): string => String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
 
 export interface GuardrailProblem {
   code: string;
@@ -139,7 +154,7 @@ const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, new Reg
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
  */
-export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, priceNote = '', price = null }: GuardrailContext = {}): GuardrailResult {
+export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null }: GuardrailContext = {}): GuardrailResult {
   const t = String(text || '');
   const prose = stripVin(t);
   const problems: GuardrailProblem[] = [];
@@ -176,10 +191,12 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, priceN
   if (/\b(one|1|single)[- ]owner\b/i.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
+  // who is posting: the dealership and the salesperson's role, in every description
   const dealerName = String(dealer.name || '').trim();
-  if (dealerName && !t.toLowerCase().includes(dealerName.toLowerCase())) {
-    problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
-  }
+  if (!dealerName) problems.push({ code: 'no-dealer', text: "The dealership's name isn't set; add it in Settings" });
+  else if (!t.toLowerCase().includes(dealerName.toLowerCase())) problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
+  const role = roleOf(salesperson);
+  if (role && !t.replace(/\s+/g, ' ').toLowerCase().includes(role.toLowerCase())) problems.push({ code: 'no-role', text: `Doesn't give your role (${role})` });
   if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
   if (emojiCount(t) > 3) problems.push({ code: 'emoji', text: 'Too many emoji' });
   return { ok: problems.length === 0, problems, words };

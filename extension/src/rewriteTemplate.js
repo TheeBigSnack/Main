@@ -7,7 +7,8 @@
 //   - the 4-6 most useful features, plus mileage
 //   - "one owner" only when the Carfax one-owner flag is true
 //   - the dealer's own price note (e.g. doc fee wording) from settings
-//   - a sign-off naming the salesperson's role and the dealership
+//   - a sign-off naming the salesperson's role and the dealership (checked:
+//     a description without either, or with no dealership name set, fails)
 //   - no ALL CAPS, no walls of emoji, no claims the data doesn't support,
 //     nothing about protected characteristics, never posing as a private seller
 // The template is the final fallback, so it is built to pass its own checks.
@@ -211,6 +212,14 @@ function firstSentences(text, maxSentences, maxWords) {
 }
 
 const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const signOffLine = (person, title, dealerName) => {
+  const at = dealerName ? ` at ${dealerName}` : '';
+  return person ? `I'm ${person}, ${title}${at}.` : `${capitalize(title)}${at}.`;
+};
+
+// The salesperson's role as a description must name it: their title from
+// Settings, or the default one, with its spacing evened out.
+export const roleOf = (salesperson) => String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
 
 /**
  * @param {object} args
@@ -249,7 +258,8 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'stock', keep: 'filler', text: v.stock ? `Stock number ${v.stock}.` : '' },
     { id: 'vin', keep: 'always', text: v.vin ? `VIN ${String(v.vin).toUpperCase().replace(/[^A-Z0-9]/g, '')}.` : '' },
     { id: 'priceNote', keep: 'always', text: String(priceNote || '').trim() },
-    { id: 'signoff', keep: 'always', text: person ? `I'm ${person}, ${title} at ${dealerName}.` : `${capitalize(title)} at ${dealerName}.` },
+    // with no dealership name set, the sign-off says no "at" (runGuardrails asks for the name)
+    { id: 'signoff', keep: 'always', text: signOffLine(person, title, dealerName) },
     { id: 'closing', keep: 'always', text: closing },
     // the salesperson's own closing line takes the place of the stock invitation
     { id: 'cta', keep: 'optional', text: closing ? '' : 'Message me to set up a test drive or ask a question.' },
@@ -298,7 +308,7 @@ const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).r
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
  */
-export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '', price = null, closingLine = '' } = {}) {
+export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null, closingLine = '' } = {}) {
   const t = String(text || '');
   // the closing line is the salesperson's, checked on its own (checkClosingLine) wherever the text carries it
   const closing = cleanClosingLine(closingLine);
@@ -338,10 +348,12 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, priceNote = '',
   if (/\b(one|1|single)[- ]owner\b/i.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
+  // who is posting: the dealership and the salesperson's role, in every description
   const dealerName = String(dealer.name || '').trim();
-  if (dealerName && !t.toLowerCase().includes(dealerName.toLowerCase())) {
-    problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
-  }
+  if (!dealerName) problems.push({ code: 'no-dealer', text: "The dealership's name isn't set; add it in Settings" });
+  else if (!t.toLowerCase().includes(dealerName.toLowerCase())) problems.push({ code: 'no-dealer', text: `Doesn't name ${dealerName}` });
+  const role = roleOf(salesperson);
+  if (role && !t.replace(/\s+/g, ' ').toLowerCase().includes(role.toLowerCase())) problems.push({ code: 'no-role', text: `Doesn't give your role (${role})` });
   if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
   if (emojiCount(t) > 3) problems.push({ code: 'emoji', text: 'Too many emoji' });
   if (hasClosing) for (const p of checkClosingLine(closing).problems) if (!problems.some((q) => q.text === p.text)) problems.push(p);

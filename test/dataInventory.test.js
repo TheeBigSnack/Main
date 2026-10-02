@@ -579,3 +579,24 @@ test('the privacy texts stay templates for any dealership', () => {
     assert.equal(hit, null, `${f} contains the pilot value "${hit && hit[0]}"`);
   }
 });
+
+test('the texts that say where synced post attempts and to-do items go say that every member reads them, as the policies allow', () => {
+  const rls = read('supabase/migrations/0002_rls.sql');
+  for (const table of ['post_attempts', 'todo_items']) {
+    assert.match(rls, new RegExp(`on public\\.${table} for select to authenticated\\s+using \\(public\\.is_member\\(dealership_id\\)\\);`), `${table}: every member reads every row of the dealership; if that changed, change the texts below with it`);
+  }
+  // 0002's own comment says a manager sees all of them; 0002 is applied in production and never edited,
+  // so a later migration's header corrects it
+  const notes = MIGRATIONS.filter((f) => f > '0002').map((f) => read('supabase/migrations/' + f)).join('\n').replace(/^-- ?/gm, '').replace(/\s+/g, ' ');
+  assert.match(notes, /0002_rls\.sql, post_attempts: every member reads all of the dealership's, not only a manager/, 'a later migration corrects 0002\'s comment on who reads post attempts');
+  const item = questions.split('\n').find((l) => l.startsWith('- **8.4**'));
+  assert.match(item, /where every member of the dealership, salespeople as well as managers, can read them/, 'the attorney is told who reads them');
+  assert.doesNotMatch(item, /where its managers see them/);
+  const usageRow = (text) => text.split('\n').find((l) => l.startsWith('| Usage numbers'));
+  for (const [name, text] of [['the privacy policy', policy], ['the Chrome Web Store answers', storeTexts]]) {
+    assert.match(usageRow(text), /where every member of that dealership, salespeople as well as managers, can see them/, name);
+  }
+  const faq = read('site-src/pages/faq.html');
+  assert.doesNotMatch(faq, /where your manager sees them/);
+  assert.match(faq, /where your manager and the other people in your dealership who are signed in can see them/);
+});

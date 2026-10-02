@@ -436,6 +436,7 @@ test('no doc tells the owner to turn CAPTCHA on while neither sign-in request se
   }
   assert.match(read('docs/production-setup.md'), /leave CAPTCHA off\. Neither the extension nor the manager view sends a captcha token/);
   assert.match(read('supabase/README.md'), /Leave \*\*CAPTCHA protection\*\* \(Authentication, Attack protection\) off: neither/);
+  for (const p of ['supabase/README.md', 'docs/production-setup.md']) assert.match(read(p), /do not stop a lockout/, `${p} says plainly what the rate limits leave open`);
   // the old instruction, in either doc's words, as a failing example
   assert.match('5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.', turnOn);
   assert.match('and turn on **CAPTCHA protection** (Authentication, Attack protection) once the manager page is public.', turnOn);
@@ -467,4 +468,54 @@ test('the signed-in deploy check is run by the owner in their own terminal, with
   assert.match(read('scripts/check-deploy.mjs'), /testToken: process\.env\.LOTSYNC_TEST_TOKEN \|\| ''/);
   assert.match(readme, /copy only the `access_token` field[^.]*never the whole entry/);
   assert.doesNotMatch(readme, /copy `access_token` from the browser's local storage/);
+});
+
+// review: the Stripe test and the two-machine sync check named no dealership, and the only one the owner
+// had made was the pilot store, whose pilot starts once and whose numbers keep a removed member's posts
+test('the Stripe test runs on a test dealership made for it, and the sync check never leaves test rows in the pilot dealership', () => {
+  const stripe = read('docs/stripe-setup.md');
+  const six = stripe.slice(stripe.indexOf('## 6. Try it as a manager would'), stripe.indexOf('## Later: switching to live mode'));
+  assert.match(six, /one made for this test, never the pilot store or any real dealership/);
+  assert.match(six, /the first two statements of `supabase\/README\.md` step 5 \(the dealership and its manager's code, no pilot row/, 'made with the owner\'s SQL, without a pilot row so Start the free pilot can run');
+  assert.match(six, /a made-up website such as `https:\/\/billing-test\.invalid`/);
+  assert.match(six, /With a second test dealership, made the same way with another made-up website/);
+  assert.match(stripe.slice(stripe.indexOf('## Later: switching to live mode')), /Use one that was never used in test mode, and delete the test dealerships step 6 made \(`select public\.delete_dealership\('<id>', '<its website_origin exactly as stored>'\);`/);
+  assert.match(six, /redeem the code with a test address of your own \(the extension's Settings, Account\), not the one `check-deploy` signs in with/, 'check-deploy\'s address must stay in no dealership, and its wrong codes throttle it');
+  const setup = read('docs/production-setup.md');
+  const step7 = setup.slice(setup.indexOf('## Step 7.'), setup.indexOf('\n---', setup.indexOf('## Step 7.')));
+  assert.match(step7, /^1\. \*\*\[Claude\]\*\* Prepares the first SQL statement of `supabase\/README\.md` step 5 for the pilot dealership, the dealership alone/m, 'no manager code or pilot dates before the check: 3 deletes the row');
+  const check = step7.slice(step7.indexOf('3. **[Owner]** On two computers'));
+  assert.match(check, /test addresses of your own, not step 2's, and codes made for the test with step 5's invite statement: two salesperson codes .* and a manager code for the address you open the manager view with/);
+  assert.match(check, /delete the dealership\*\* \(`supabase\/README\.md`, "Delete": `select public\.delete_dealership\('<id>', '<its website_origin exactly as stored>'\);`\) and make it again with step 5's three statements/i);
+  assert.match(check, /^\d\. \*\*\[Owner\]\*\* On two computers.*a test browser keeps its copy of the test afterwards\. So:$/m);
+});
+
+// review: deleting and remaking the pilot dealership cleared only the server; a test computer's browser
+// still held the test's posts and post timings, and its first sync to the remade dealership, under any
+// account, sends them again (post attempts carry no account, and sign-out starts a first sync).
+// Review, round 3: clearing the browser is no fix on the owner's own computer at the store. The check
+// sends that browser's real posts into the test dealership, and Clear everything then deletes the real
+// posted list and Numbers, so nothing flags a real listing when its car sells. The check runs in a Chrome
+// profile made for it, records its car without publishing it, and that profile is deleted afterwards.
+test('the sync check runs in Chrome profiles made for it, never in a browser with real listings, and leaves nothing behind', () => {
+  const setup = read('docs/production-setup.md');
+  const step7 = setup.slice(setup.indexOf('## Step 7.'), setup.indexOf('\n---', setup.indexOf('## Step 7.')));
+  const check = step7.slice(step7.indexOf('3. **[Owner]** On two computers'));
+  assert.match(check, /A browser's first sync to a dealership sends, under whichever account is signed in, the post timings, the to-do items and the posts not synced yet that it holds for that website, and a test browser keeps its copy of the test afterwards\./);
+  const profile = check.indexOf('**Run the check in a Chrome profile made for it** on each computer');
+  assert.ok(profile > 0, 'the check runs in a Chrome profile made for it');
+  assert.match(check, /add a Chrome profile without signing in to Chrome there, so Chrome sync stays off and a test name typed in Settings never reaches your synced profile, and load Lot Current into it as `README\.md` says/);
+  assert.match(check, /Never run the check in a browser that has used Lot Current on the store's website, such as your own at the store\. The check would send that browser's real posts and post timings into the test dealership, to be deleted with it\./);
+  assert.match(check, /\*\*Clear everything for this website\*\* removes everything Lot Current holds for the website in that browser, the real posted list and Numbers included, after which nothing flags those listings when a car sells or its price changes\./, 'clearing a browser is said to delete its real data too');
+  assert.match(check, /If the check already ran in such a browser, stop and ask Claude before clearing anything or deleting the dealership\./);
+  assert.match(check, /\*\*Record the test's car with Mark posted\*\* \(Ready to post tab\), not by publishing it on Marketplace\. If a test car was published, take that listing down on Facebook yourself before the profile goes: nothing will flag it afterwards\./);
+  const done = check.indexOf('**When the check is done**, before the store\'s manager first signs in, **delete the Chrome profile made for the check on each test computer**. That removes everything Lot Current kept in it.');
+  const remake = check.indexOf('**Delete the dealership**');
+  assert.ok(profile < done && done > 0 && done < remake, 'the profiles are made before the check and deleted before the dealership is made again');
+  assert.doesNotMatch(check, /On each test computer\*\*, open the store's website/, 'clearing a browser in place is not the way');
+  const popup = read('extension/popup.js');
+  assert.ok(popup.includes('data-action="clear">Clear everything for this website</button>'), 'the popup\'s Settings has Clear everything for this website');
+  assert.match(popup, /data-action="post" [^>]*>Mark posted<\/button>/, 'the Ready to post tab has Mark posted');
+  assert.match(popup, /\['ready', 'Ready to post'\]/, 'the tab is called Ready to post');
+  assert.match(read('README.md'), /Click \*\*Load unpacked\*\*/, 'README.md says how to load Lot Current');
 });

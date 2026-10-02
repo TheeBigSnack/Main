@@ -106,12 +106,13 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rp
       return rpcs[fn] ? rpcs[fn](args) : { data: fn === 'list_invites' ? [] : null, error: null };
     },
     from(table) {
-      const q = { table, eq: [], order: [], range: null, limit: null, count: null };
+      const q = { table, eq: [], lte: [], order: [], range: null, limit: null, count: null };
       const builder = {
         select(_cols, opts) { q.count = (opts && opts.count) || null; return builder; },
         update(patch) { q.update = patch; return builder; },
         delete() { q.delete = true; return builder; },
         eq(col, value) { q.eq.push([col, value]); return builder; },
+        lte(col, value) { q.lte.push([col, value]); return builder; },
         order(col, opts) { q.order.push([col, !opts || opts.ascending !== false]); return builder; },
         limit(n) { q.limit = n; return builder; },
         range(from, to) { q.range = [from, to]; return builder; },
@@ -122,7 +123,7 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rp
   };
   function run(q) {
     requests.push(q);
-    const all = (tables[q.table] || []).filter((r) => q.eq.every(([c, v]) => r[c] === v));
+    const all = (tables[q.table] || []).filter((r) => q.eq.every(([c, v]) => r[c] === v) && q.lte.every(([c, v]) => r[c] != null && String(r[c]) <= String(v)));
     if (q.update) { for (const r of all) Object.assign(r, q.update); return { data: all.map((r) => ({ ...r })), error: null }; }
     if (q.delete) { tables[q.table] = (tables[q.table] || []).filter((r) => !all.includes(r)); return { data: all.map((r) => ({ ...r })), error: null }; }
     const sorted = [...all].sort((a, b) => {
@@ -334,22 +335,23 @@ test('nothing flagged, no scan yet, and a removed salesperson\'s cars still up: 
   const html = main(page);
   assert.ok(!html.includes('Every sold car is off Marketplace'));
   assert.ok(!html.includes('Every listing shows the website price'));
-  assert.match(html, /Sold cars still listed <span class="pill warn">0<\/span>/, 'amber, never green, with no scan and cars nobody watches');
-  assert.match(html, /No sold car is flagged on a synced listing\.[^<]*No scan is recorded yet/);
-  assert.match(html, /No price change is flagged on a synced listing\./);
-  const unwatched = html.slice(html.indexOf('id="unwatched"'));
-  assert.ok(html.includes('id="unwatched"'), 'the removed salesperson\'s cars get their own list');
-  assert.match(unwatched, /Listings nobody's extension watches <span class="pill warn">3<\/span>/);
-  for (const n of [3, 4, 5]) assert.match(unwatched, new RegExp(`>Car ${n}</a><div class="sub">Riley · TESTVIN`));
-  assert.ok(!/>Car [12]</.test(unwatched), 'a member\'s cars are not in it');
+  assert.match(html, /Sold cars still listed <span class="pill warn">0<\/span>/, 'amber, never green, with no scan and cars listed by people no longer on the team');
+  assert.match(html, /No open take-down items\.[^<]*No scan is recorded yet/);
+  assert.match(html, /No open price items\./);
+  const notOnTeam = html.slice(html.indexOf('id="notOnTeam"'));
+  assert.ok(html.includes('id="notOnTeam"'), 'the removed salesperson\'s cars get their own list');
+  assert.match(notOnTeam, /Listed by people no longer on the team <span class="pill warn">3<\/span>/);
+  for (const n of [3, 4, 5]) assert.match(notOnTeam, new RegExp(`>Car ${n}</a><div class="sub">Riley · TESTVIN`));
+  assert.ok(!/>Car [12]</.test(notOnTeam), 'a member\'s cars are not in it');
 
-  // with a fresh scan and the cars all members', the green pill comes back, still saying only what is known
+  // with a fresh scan and the cars all members', the pill is the plain one, never green, and the card says only what an item is
   const fresh = { ...tables, listings: listings.slice(0, 2), scan_summaries: [{ id: 's1', dealership_id: D, taken_at: at(1), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0 }] };
   const ok = main(await openPage(PAGE, { client: fakeClient({ session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } }, tables: fresh }), fetchImpl: billing }));
-  assert.match(ok, /Sold cars still listed <span class="pill good">0<\/span>/);
-  assert.match(ok, /<p class="empty">No sold car is flagged on a synced listing\. Each salesperson&#39;s extension checks their own listings when it rescans\.<\/p>/);
-  assert.ok(!ok.includes('id="unwatched"'));
-  assert.ok(readFileSync(join(root, 'docs/help.md'), 'utf8').includes('**Listings nobody\'s extension watches**'), 'docs/help.md names the list as the page labels it');
+  assert.match(ok, /Sold cars still listed <span class="pill ">0<\/span>/);
+  assert.ok(!ok.includes('class="pill good">0<'), 'an empty card is never green');
+  assert.match(ok, /<p class="empty">No open take-down items\. One opens when a rescan on the poster&#39;s own computer finds their car gone from the website\.<\/p>/);
+  assert.ok(!ok.includes('id="notOnTeam"'));
+  assert.ok(readFileSync(join(root, 'docs/help.md'), 'utf8').includes('**Listed by people no longer on the team**'), 'docs/help.md names the list as the page labels it');
 });
 
 // ---------- in no dealership yet ----------

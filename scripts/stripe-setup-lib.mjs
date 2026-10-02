@@ -20,6 +20,11 @@
 //   webhook   the endpoint at the billing function's /webhook, subscribed to
 //             exactly HANDLED_EVENTS
 //
+// One setting it neither reads nor sets: what Stripe does when every retry
+// of a payment fails. Every run ends with a note asking for "Cancel the
+// subscription" in the Dashboard (docs/stripe-setup.md step 3), which is
+// what lets a dealership that stops paying end and reach the retention list.
+//
 // Without apply it only reads, and a missing or different object is a FAIL
 // line saying what --apply would do. With apply it creates what is missing
 // and fixes what it safely can (the portal's features, the webhook's events).
@@ -50,6 +55,8 @@ export const LOOKUP_KEYS = Object.freeze({ rooftop: 'lotcurrent_rooftop_monthly'
 // stays the price before tax. Stripe refuses automatic tax on a price with no
 // tax behavior, and lets an unspecified one be set once and never changed.
 export const TAX_BEHAVIOR = 'exclusive';
+// The failed-payment setting is the Dashboard's alone (docs/stripe-setup.md step 3).
+export const FAILED_PAYMENTS_NOTE = 'not read or set here: in the Stripe Dashboard set "If all retries for a payment fail" to "Cancel the subscription" (docs/stripe-setup.md step 3), so a dealership that stops paying ends and reaches the retention list instead of being kept with no end date';
 
 const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 const cents = (dollars) => Math.round(Number(dollars) * 100);
@@ -362,6 +369,7 @@ export async function runSetup(opts) {
     }
     if (portal) secrets.STRIPE_PORTAL_CONFIGURATION = portal.id;
     if (!want.portal.business_profile.terms_of_service_url) note('billing portal: legal links', 'no --site-url given, so the portal shows no Terms or Privacy link; add it once the legal pages are final, and run --apply again');
+    note('failed payments', FAILED_PAYMENTS_NOTE);
 
     // the webhook endpoint
     const url = webhookUrlFor(opts.webhookUrl);

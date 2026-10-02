@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { lastDefinition } from './migrations.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const sql = read('../supabase/migrations/0007_signup.sql');
@@ -22,11 +23,15 @@ const readme = read('../supabase/README.md');
 const support = read('../docs/support.md');
 const fixture = JSON.parse(read('./fixtures/website-origins.json'));
 
+// a function as the database runs it: its last definition (0007_signup.sql,
+// or a later migration that replaced it), comments left out
 const body = (name) => {
-  const start = code.indexOf(`create or replace function public.${name}(`);
-  const end = code.indexOf(`comment on function public.${name}(`, start);
-  assert.ok(start >= 0 && end > start, `0007_signup.sql has no ${name}() with a comment after it`);
-  return code.slice(start, end);
+  const { file, sql: text } = lastDefinition(name);
+  const src = text.replace(/--.*$/gm, '');
+  const start = src.indexOf(`create or replace function public.${name}(`);
+  const end = src.indexOf(`comment on function public.${name}(`, start);
+  assert.ok(start >= 0 && end > start, `${file} has no ${name}() with a comment after it`);
+  return src.slice(start, end);
 };
 const section = (text, heading) => {
   const start = text.indexOf(heading);
@@ -112,6 +117,11 @@ test('create_dealership: the checks run in order a to g, and the throttle and th
   // the three fields, and the website through the one rule
   const origin = at('origin := public.website_origin_of(create_dealership.website);');
   assert.ok(d < origin && origin < lock, 'the website is checked with the fields, through website_origin_of');
+  // the errors promise no line breaks or control characters: the C0 and C1 controls, the line and
+  // paragraph separators, and the marks, embeddings, overrides and isolates that reorder text
+  const controls = fn.match(/controls constant text := '(\[[^']*\])';/);
+  assert.ok(controls, 'create_dealership names its controls class');
+  assert.equal(controls[1], '[\\u0001-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]');
   for (const [field, limit] of [['dealer_name', 120], ['person_name', 80]]) {
     assert.match(fn, new RegExp(`if length\\(${field}\\) not between 1 and ${limit} or ${field} ~ controls then\\s+raise exception '[^;]*' using errcode = '22023';`), `${field}: 1 to ${limit} characters, no control characters`);
   }
@@ -152,8 +162,8 @@ test('create_dealership: P0005 and P0009 are answered, not raised, and a taken w
 });
 
 test('the trim is JavaScript\'s trim(), in both functions, so the manager page\'s copy and the SQL agree', () => {
-  const classes = [...code.matchAll(/ws constant text := '(\[[^']*\]\+)';/g)].map((m) => m[1]);
-  assert.equal(classes.length, 2, 'website_origin_of and create_dealership each trim with the same class');
+  const classes = ['website_origin_of', 'create_dealership'].map((name) => body(name).match(/ws constant text := '(\[[^']*\]\+)';/)?.[1]);
+  assert.ok(classes.every(Boolean), 'website_origin_of and create_dealership each trim with a class of their own');
   assert.equal(classes[0], classes[1]);
   const ws = new RegExp(`^${classes[0]}$`);
   for (let cp = 0; cp <= 0xffff; cp += 1) {

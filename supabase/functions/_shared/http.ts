@@ -6,7 +6,8 @@
 // requests. Those are always allowed; any other page origin is listed in the
 // ALLOWED_ORIGINS secret, comma separated: the hosted manager view's, whose
 // Billing card calls the billing function from the browser (without it the
-// card cannot load), and a local page during development. A request from anywhere else gets no CORS header and the
+// card cannot load; scripts/check-deploy.mjs checks it with
+// LOTSYNC_MANAGER_ORIGIN), and a local manager page during development. A request from anywhere else gets no CORS header and the
 // browser refuses to show it the answer. The token check is the real
 // protection; this only keeps random pages from probing the functions.
 const EXTENSION_ORIGIN = /^(chrome|moz)-extension:\/\/[a-z0-9-]+$/i;

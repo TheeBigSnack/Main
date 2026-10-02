@@ -93,6 +93,7 @@ function guardrailContext(facts) {
       carfaxUrl: facts.carfax ? 'yes' : null,
     },
     dealer: facts.dealer || {},
+    salesperson: facts.salesperson || {},
     priceNote: facts.priceNote || '',
   };
 }
@@ -204,6 +205,9 @@ const server = http.createServer(async (req, res) => {
     const facts = body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : null;
     if (facts) delete facts.origin;
     if (!facts || !facts.make || !facts.model) return send(400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
+    // every description must name the dealership, so without its name no
+    // draft can pass: nothing is asked or paid for (as in the Supabase function)
+    if (!String((facts.dealer && facts.dealer.name) || '').trim()) return send(400, { ok: false, error: "the dealership's name is missing: add it in Settings" });
     const out = await rewrite(facts);
     console.log(`${new Date().toISOString()} rewrite ${facts.year} ${facts.make} ${facts.model} -> ${out.ok ? 'ok' : 'failed checks'} $${out.costUsd} (month $${usage.usd.toFixed(2)})`);
     return send(200, out);

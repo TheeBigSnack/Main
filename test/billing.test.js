@@ -13,6 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
+import { MIGRATIONS, migration, lastDefinition } from './migrations.js';
 import {
   PRICING, STATUSES, STATES, HANDLED_EVENTS, MAX_SEATS, MIN_TRIAL_SECONDS,
   ms, subscriptionState, pilotAvailable, statusAnswer, SEAT_ROLE, seatCount,
@@ -20,7 +21,7 @@ import {
   planOf, lapsedAnswer, LAPSED_CODE, LAPSED_MESSAGE, todayRange, MAX_TODAY_HOURS,
   normalizeSeats, checkoutLineItems, parseAllowedOrigins, allowedReturnUrl, returnUrls, trialEndFor, checkoutSessionParams,
   automaticTaxOn, portalSessionParams,
-  formEncode, applyStripeEvent, normalizeStatus, PRICE_TAG,
+  formEncode, applyStripeEvent, normalizeStatus, goesBack, PRICE_TAG, INCLUDED_KEY,
   parseStripeSignature, hmacSha256Hex, timingSafeEqualHex, verifyStripeSignature,
 } from '../supabase/functions/_shared/billing.mjs';
 import * as page from '../manager/data.js';
@@ -134,6 +135,15 @@ test('the manager page\'s copies of MAX_SEATS and the open-subscription rule are
     }
   }
   assert.equal(page.subscribeSeats({ role: 'manager', salespeople: 250, includedSalespeople: 5 }), MAX_SEATS, 'the card asks for no more seats than Checkout bills');
+  // a Subscribe without a count: the page says what checkout does (billing/index.ts, normalizeSeats)
+  assert.equal(page.subscribeSeats({ role: 'manager', salespeople: null, includedSalespeople: 5 }), null);
+  assert.equal(normalizeSeats(undefined, 5), 5);
+  const src = read('../manager/data.js');
+  const at = src.indexOf('export function subscribeSeats');
+  const doc = src.slice(src.lastIndexOf('/**', at), at).replace(/\s*\* ?/g, ' ');
+  assert.doesNotMatch(doc, /the seats the row already had/, 'checkout never keeps an old seat count');
+  assert.match(doc, /Subscribe then sends none and the billing function bills the included count, never the seats of a subscription that has ended/);
+  assert.match(read('../supabase/functions/billing/index.ts'), /a request without seats gets\s+\/\/ the included count, never the row's old one/);
 });
 
 // Before billing opens the page offers Start the free pilot from the row it
@@ -377,8 +387,9 @@ test('checkoutSessionParams: subscription mode, the customer, the dealership in 
     success_url: 'https://manager.example.com/?billing=success',
     cancel_url: 'https://manager.example.com/?billing=canceled',
     allow_promotion_codes: true,
-    subscription_data: { metadata: { dealership_id: DEALER } },
+    subscription_data: { metadata: { dealership_id: DEALER, included_salespeople: String(pricing.includedSalespeople) } },
   });
+  assert.equal(checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/', included: 3 }).subscription_data.metadata.included_salespeople, '3', 'the included count the subscription is sold with');
   const t = checkoutSessionParams({ customerId: 'cus_1', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/', trialEnd: 1800000000 });
   assert.equal(t.subscription_data.trial_end, 1800000000);
   assert.throws(() => checkoutSessionParams({ customerId: '', dealershipId: DEALER, lineItems, returnUrl: 'https://manager.example.com/' }), /customer/);
@@ -482,6 +493,24 @@ test('applyStripeEvent: subscription created and updated copy the status, ids, p
   // no prices configured at all: the seats column is left alone
   const noPrices = applyStripeEvent(null, event('customer.subscription.updated', sub()), { included: 5 });
   assert.equal(noPrices.seats, undefined);
+  // after `stripe-setup --apply --reprice` the function is set to the new seat price, while a
+  // subscription sold before keeps the old one: its tag (stripe-setup's metadata) still makes it seats
+  const tagged = (id, tag) => ({ id, object: 'price', metadata: { [PRICE_TAG]: tag } });
+  const soldBefore = sub({ items: { data: [{ price: tagged('price_rooftop_old', 'rooftop'), quantity: 1 }, { price: tagged('price_seat_old', 'seat'), quantity: 3 }] } });
+  const repriced = { included: 5, priceRooftop: 'price_rooftop_new', priceSeat: 'price_seat_new' };
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldBefore), opts).seats, 8);
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldBefore), repriced).seats, 8, 'the renewal after a reprice keeps the seats paid for');
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldBefore), { included: 5 }).seats, 8, 'tagged prices need no configured id');
+  // seats added on the new price next to the old one: both count
+  const both = sub({ items: { data: [{ price: tagged('price_rooftop_old', 'rooftop'), quantity: 1 }, { price: tagged('price_seat_old', 'seat'), quantity: 3 }, { price: tagged('price_seat_new', 'seat'), quantity: 2 }] } });
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', both), repriced).seats, 10);
+  // the included count the subscription was sold with, not today's PRICING
+  const soldWithThree = sub({ metadata: { dealership_id: DEALER, [INCLUDED_KEY]: '3' }, items: { data: [{ price: tagged('price_rooftop_old', 'rooftop'), quantity: 1 }, { price: tagged('price_seat_old', 'seat'), quantity: 2 }] } });
+  assert.equal(applyStripeEvent(null, event('customer.subscription.updated', soldWithThree), { ...repriced, included: 10 }).seats, 5);
+  for (const bad of ['', 'five', '-1', '9999', 3.5]) {
+    const s = sub({ metadata: { dealership_id: DEALER, [INCLUDED_KEY]: bad }, items: { data: [{ price: { id: 'price_rooftop' }, quantity: 1 }] } });
+    assert.equal(applyStripeEvent(null, event('customer.subscription.updated', s), opts).seats, 5, `an unusable included count (${JSON.stringify(bad)}) falls back to the configured one`);
+  }
   // the period end from the items (API versions from 2025-03-31 carry it there, not on the subscription)
   const basil = applyStripeEvent(null, event('customer.subscription.updated', sub({ current_period_end: undefined, items: { data: [{ price: { id: 'price_rooftop' }, quantity: 1, current_period_end: T + 20 * 86400 }, { price: { id: 'price_seat' }, quantity: 1, current_period_end: T + 25 * 86400 }] } })), opts);
   assert.equal(basil.current_period_end, iso(NOW + 25 * DAY));
@@ -568,10 +597,13 @@ test('applyStripeEvent: deleted is canceled; a stale event never wins; unrelated
     assert.equal(other.stripe_subscription_id, 'sub_2', String(status));
     assert.equal(other.status, 'active', String(status));
     assert.equal(subscriptionState({ ...over, ...other }, NOW + 60_000), 'active', String(status));
-    // not by an update or a delete of it, and not by a created older than the row's last change
-    assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2' }), T + 60), opts), null, String(status));
+    // or by an update saying it is trialing or active (Stripe sends it in the same second as created, in any order)
+    for (const s of ['active', 'trialing']) assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2', status: s }), T + 60), opts).stripe_subscription_id, 'sub_2', `${status}, updated ${s}`);
+    // not by another update, a delete of it, or anything older than the row's last change
+    assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2', status: 'past_due' }), T + 60), opts), null, String(status));
     assert.equal(applyStripeEvent(over, event('customer.subscription.deleted', sub({ id: 'sub_2' }), T + 60), opts), null, String(status));
     assert.equal(applyStripeEvent(over, event('customer.subscription.created', sub({ id: 'sub_2' }), T - 60), opts), null, String(status));
+    assert.equal(applyStripeEvent(over, event('customer.subscription.updated', sub({ id: 'sub_2' }), T - 60), opts), null, String(status));
   }
   // and a row that never had a subscription (a pilot) takes whatever comes
   const pilot = row({ status: 'pilot', pilot_ends_at: iso(NOW + 5 * DAY), updated_at: iso(NOW) });
@@ -584,6 +616,49 @@ test('applyStripeEvent: deleted is canceled; a stale event never wins; unrelated
   assert.equal(applyStripeEvent(active, { id: 'evt_x', type: 'customer.subscription.updated' }, opts), null, 'no data.object');
   assert.equal(applyStripeEvent(active, null, opts), null);
   assert.equal(applyStripeEvent(active, 'text', opts), null);
+});
+
+test('applyStripeEvent: one Checkout\'s events in the same second end active in any order; incomplete comes only first and a final status stays final', () => {
+  const shell = row({ stripe_customer_id: 'cus_1', updated_at: iso(NOW - DAY) });
+  const invoice = { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [{ period: { start: T, end: T + 30 * 86400 } }] } };
+  const created = event('customer.subscription.created', sub({ status: 'incomplete' }), T);
+  const updated = event('customer.subscription.updated', sub({ status: 'active' }), T);
+  const paid = event('invoice.paid', invoice, T);
+  const orders = [[created, updated, paid], [created, paid, updated], [updated, created, paid], [updated, paid, created], [paid, created, updated], [paid, updated, created]];
+  for (const order of orders) {
+    let current = shell;
+    for (const e of order) {
+      const patch = applyStripeEvent(current, e, opts);
+      if (patch) current = { ...current, ...patch };
+    }
+    assert.equal(current.status, 'active', order.map((e) => e.type).join(' then '));
+    assert.equal(subscriptionState(current, NOW), 'active');
+  }
+  // the lifecycle the tie is settled by
+  assert.equal(goesBack('active', 'incomplete'), true);
+  assert.equal(goesBack('incomplete', 'incomplete'), false);
+  assert.equal(goesBack('incomplete', 'active'), false);
+  assert.equal(goesBack('canceled', 'past_due'), true);
+  assert.equal(goesBack('incomplete_expired', 'active'), true);
+  assert.equal(goesBack('incomplete_expired', 'canceled'), false);
+  assert.equal(goesBack('past_due', 'active'), false);
+  // the last dunning retry fails in the same second the subscription ends: it stays ended, so a new Checkout is open to the manager
+  const ended = row({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', updated_at: iso(NOW) });
+  assert.equal(applyStripeEvent(ended, event('invoice.payment_failed', invoice, T), opts), null);
+  assert.equal(applyStripeEvent(ended, event('customer.subscription.updated', sub({ status: 'past_due' }), T), opts), null);
+  assert.equal(checkoutRefusal(ended, NOW), null);
+  // a redelivery of the first event hours later, with its first stamp, does not undo a paid Checkout
+  const active = row({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', updated_at: iso(NOW) });
+  assert.equal(applyStripeEvent(active, created, opts), null);
+  // a replacement for a canceled subscription, paid in one Checkout, ends active in any order too
+  for (const order of orders) {
+    let current = row({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_0', updated_at: iso(NOW - DAY) });
+    for (const e of order) {
+      const patch = applyStripeEvent(current, e, opts);
+      if (patch) current = { ...current, ...patch };
+    }
+    assert.deepEqual([current.stripe_subscription_id, current.status], ['sub_1', 'active'], 'replacement: ' + order.map((e) => e.type).join(' then '));
+  }
 });
 
 test('applyStripeEvent: invoices mark a failed payment past due and a paid one paid up, in both API shapes', () => {
@@ -740,6 +815,27 @@ test('0004_billing.sql: RLS on, members read, nobody but the service role writes
   assert.match(sql, /when s\.pilot_ends_at is not null and s\.pilot_ends_at > now\(\) then 'pilot'/);
   assert.match(sql, /when s\.status is null and s\.pilot_ends_at is null then 'none'/);
   assert.match(sql, /else 'lapsed'/);
+});
+
+test('subscription_state(): its comment names who calls it, and no Edge Function does: they compute the same word in billing.mjs', () => {
+  // 0004_billing.sql is applied in production and never edited, so the comment that says who calls the
+  // function is corrected in a later migration's header (supabase/README.md, step 2)
+  const later = MIGRATIONS.filter((f) => f > '0004').map(migration).join('\n');
+  const at = later.lastIndexOf('0004_billing.sql, subscription_state(dealership_id):');
+  assert.ok(at >= 0, 'a migration after 0004 corrects the comment on subscription_state()');
+  const comment = later.slice(at).split(/\n-- {3}\d{4}_|\n-- -{10}/)[0].replace(/^-- ?/gm, '').replace(/\s+/g, ' ');
+  // a maintainer who changes the SQL rule must not believe /sync, /rewrite or billing follow it
+  const callers = ['sync', 'rewrite', 'billing'].filter((fn) => /\.rpc\(\s*['"]subscription_state['"]/.test(read(`../supabase/functions/${fn}/index.ts`)));
+  assert.deepEqual(callers, [], 'no Edge Function calls subscription_state()');
+  assert.doesNotMatch(comment, /The function calls it/, 'the comment does not say a function calls it');
+  assert.match(comment, /No Edge Function calls it/);
+  assert.match(comment, /subscriptionState\(\) and planOf\(\) in functions\/_shared\/billing\.mjs/);
+  assert.match(comment, /supabase\/tests\/billing\.sql and test\/billing\.test\.js/);
+  // and its real callers
+  assert.match(comment, /start_pilot\(\)/);
+  assert.match(comment, /usage_report\(\)/);
+  assert.match(lastDefinition('usage_report').sql, /public\.subscription_state\(d\.id\) as plan_state/, 'usage_report as the database runs it');
+  assert.doesNotMatch(read('../extension/src/sync.js'), /\(subscription_state\(\) on the server\)/, 'the extension says planOf answers, the same rule');
 });
 
 // ---------- the function ----------

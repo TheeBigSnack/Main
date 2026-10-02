@@ -13,7 +13,7 @@ import {
   LOOKUP_KEYS, FOUNDING_COUPON_ID, TAG,
 } from '../scripts/stripe-setup-lib.mjs';
 import { parseArgs } from '../scripts/stripe-setup.mjs';
-import { HANDLED_EVENTS } from '../supabase/functions/_shared/billing.mjs';
+import { HANDLED_EVENTS, PRICE_TAG } from '../supabase/functions/_shared/billing.mjs';
 
 const pricing = JSON.parse(readFileSync(new URL('../marketing/pricing.json', import.meta.url), 'utf8'));
 const KEY = 'sk_test_abc123';
@@ -260,7 +260,7 @@ test('stripe setup: --apply creates everything once, prints the ids and the sign
   assert.deepEqual(second.secrets, first.secrets);
   const read = await run(s);
   assert.equal(read.ok, true);
-  assert.ok(read.lines.every((l) => l.ok));
+  assert.deepEqual(read.lines.filter((l) => !l.ok).map((l) => l.check), ['failed payments'], 'everything is ok but the one setting only the Dashboard has');
 });
 
 test('stripe setup: a price that differs from pricing.json fails and is left alone; --apply --reprice moves the lookup key to a new price', async () => {
@@ -279,6 +279,9 @@ test('stripe setup: a price that differs from pricing.json fails and is left alo
   assert.equal(old.lookup_key, null);
   assert.equal(re.secrets.STRIPE_PRICE_ROOFTOP, s.db.prices[2].id);
   assert.ok(s.calls.some((c) => c.path === '/v1/prices' && c.form.transfer_lookup_key === 'true'));
+  // the billing webhook tells seats from the rooftop by this tag, so a subscription still on the old price keeps its seats
+  assert.equal(TAG, PRICE_TAG);
+  assert.deepEqual(s.db.prices.map((p) => [p.id === old.id, p.metadata[PRICE_TAG]]), [[true, 'rooftop'], [false, 'seat'], [false, 'rooftop']], 'the old price keeps its tag, the new one has the same');
 });
 
 test('stripe setup: a portal or webhook changed in the Dashboard is reported on a read and set back by --apply', async () => {
@@ -423,4 +426,22 @@ test('stripe setup doc: the live switch resets every Stripe column test mode wro
   assert.ok(push >= 0 && push < live.indexOf('```sql'), 'the live switch applies the migrations (the workflow\'s database step) before the reset');
   assert.doesNotMatch(doc, /nothing made here leaks into live mode/);
   assert.match(doc.slice(0, doc.indexOf('## What you need first')), /stay there until the live switch resets them/);
+});
+
+test('stripe setup: every run that reaches Stripe notes the failed-payment setting it cannot set, and the docs give the step', async () => {
+  const s = fakeStripe();
+  for (const r of [await run(s), await run(s, { apply: true })]) {
+    const l = line(r, 'failed payments');
+    assert.ok(l, 'a failed payments line');
+    assert.equal(l.note, true, 'a note: it never fails the run');
+    assert.match(l.detail, /"If all retries for a payment fail" to "Cancel the subscription"/);
+    assert.match(l.detail, /docs\/stripe-setup\.md step 3/);
+  }
+  const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
+  const step3 = doc.slice(doc.indexOf('## 3. '), doc.indexOf('## 4. '));
+  assert.match(step3, /set \*\*If all retries for a payment fail\*\* to \*\*Cancel the subscription\*\*/);
+  assert.match(doc.slice(doc.indexOf('## Later: switching to live mode')), /\*\*If all retries for a payment fail\*\* is \*\*Cancel the subscription\*\*/, 'checked again in live mode');
+  const readme = readFileSync(new URL('../supabase/README.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(readme, /Stripe is still collecting/, 'an unpaid subscription is no longer retried');
+  assert.match(readme, /`past_due` and `unpaid` are left out: the subscription is still open/);
 });

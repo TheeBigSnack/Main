@@ -15,6 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { MIGRATIONS, migration, lastDefinition } from './migrations.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const schema = read('../supabase/migrations/0001_schema.sql');
@@ -35,7 +36,8 @@ const readme = read('../supabase/README.md');
 // made inside one reaches a fresh build but never production, where the code
 // that relies on it then fails. Those files stay exactly as deployed, comments
 // included, and every change is a new numbered file (0009_cancel_at.sql was
-// the first). Line endings are folded so a Windows checkout reads the same.
+// the first, 0010_backend_review_fixes.sql the next). Line endings are folded
+// so a Windows checkout reads the same.
 const APPLIED_MIGRATIONS = Object.freeze({
   '0001_schema.sql': 'a781dc0771958bacbe86448c3fe5ea1cd258583fe11a677a76955ff5bc3877d8',
   '0002_rls.sql': '25c73dc346820f882563b2ccc91ca58f3cff46d97bffbdbc678bc72de67e47c7',
@@ -48,14 +50,36 @@ const APPLIED_MIGRATIONS = Object.freeze({
 });
 
 test('the migrations production applied (0001 to 0008) are the deployed files unchanged; every later change is a new numbered file', () => {
-  const files = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
   for (const [file, sha] of Object.entries(APPLIED_MIGRATIONS)) {
-    assert.ok(files.includes(file), `${file} is applied in production and must stay`);
-    const text = read(`../supabase/migrations/${file}`).replace(/\r\n/g, '\n');
-    assert.equal(createHash('sha256').update(text).digest('hex'), sha, `${file} is applied in production and must not change, not even a comment: put the change in a new numbered migration`);
+    assert.ok(MIGRATIONS.includes(file), `${file} is applied in production and must stay`);
+    const text = migration(file).replace(/\r\n/g, '\n');
+    assert.equal(createHash('sha256').update(text).digest('hex'), sha, `${file} is applied in production and must not change, not even a comment: put the change in a new numbered migration and restore it (git checkout 8a09dc1 -- supabase/migrations/${file})`);
   }
   const last = Object.keys(APPLIED_MIGRATIONS).sort().pop();
-  for (const f of files.filter((x) => !Object.hasOwn(APPLIED_MIGRATIONS, x))) assert.ok(f.slice(0, 4) > last.slice(0, 4), `${f} sorts after ${last}, so it applies on top of what production has`);
+  const later = MIGRATIONS.filter((x) => !Object.hasOwn(APPLIED_MIGRATIONS, x));
+  for (const f of later) assert.ok(f.slice(0, 4) > last.slice(0, 4), `${f} sorts after ${last}, so it applies on top of what production has`);
+  // one file per number, so applying 0001..N in order on the deployed project is the same as a fresh build
+  const numbers = MIGRATIONS.map((f) => f.slice(0, 4));
+  assert.equal(new Set(numbers).size, numbers.length, `two migrations share a number: ${MIGRATIONS.join(', ')}`);
+  for (const f of later) {
+    const text = migration(f);
+    const code = text.replace(/--.*$/gm, '');
+    assert.doesNotMatch(text, /changed in place/i, `${f}: nothing applied is changed in place`);
+    assert.doesNotMatch(code, /^\s*create function /im, `${f}: a function is changed with create or replace`);
+    // a replaced function keeps its security settings only when they are written out again
+    const definers = (code.match(/security definer/g) || []).length;
+    assert.equal((code.match(/security definer\s*\n\s*set search_path = ''/g) || []).length, definers, `${f}: every security definer function pins search_path`);
+  }
+  // the functions 0010 replaces keep the language, security and search_path they were made with
+  for (const [name, file] of [['redeem_invite', '0002_rls.sql'], ['create_dealership', '0007_signup.sql'], ['usage_report', '0008_usage.sql']]) {
+    const header = (sql) => {
+      const start = sql.indexOf(`create or replace function public.${name}(`);
+      return sql.slice(start, sql.indexOf('as $$', start));
+    };
+    const latest = lastDefinition(name);
+    assert.notEqual(latest.file, file, `${name} is replaced by a later file`);
+    assert.equal(header(latest.sql), header(migration(file)), `${latest.file} changes ${name}()'s signature, language, security or search_path`);
+  }
   assert.match(readme, /The production project has applied `0001_schema\.sql` to `0008_usage\.sql`/, 'the README says the applied files are fixed');
   assert.doesNotMatch(readme, /Until the first project has applied them, a change to the schema is made in the file that defines it/, 'the README no longer says to change a migration in place');
 });
@@ -101,9 +125,12 @@ test('0001_schema.sql: every table gets RLS in 0002_rls.sql; listings carry the 
 });
 
 test('0002_rls.sql: redeem_invite folds both sides of the code; invites have no policy and no API privilege; every definer pins search_path', () => {
-  assert.match(rls, /where upper\(trim\(i\.code\)\) = upper\(trim\(redeem_invite\.code\)\)/);
-  assert.doesNotMatch(rls, /where i\.code = /, 'the stored code is never compared verbatim');
-  assert.match(rls, /where invites\.code = inv\.code;/, 'the used mark goes on the row that was found');
+  const { sql: redeemFile } = lastDefinition('redeem_invite');
+  for (const text of [rls, redeemFile]) {
+    assert.match(text, /where upper\(trim\(i\.code\)\) = upper\(trim\(redeem_invite\.code\)\)/);
+    assert.doesNotMatch(text, /where i\.code = /, 'the stored code is never compared verbatim');
+    assert.match(text, /where invites\.code = inv\.code;/, 'the used mark goes on the row that was found');
+  }
   assert.doesNotMatch(rls, /on public\.invites for/, 'no policy on invites: read only inside redeem_invite');
   assert.doesNotMatch(rls, /grant [^;]*on public\.invites to (anon|authenticated)/);
   const definers = (rls.match(/security definer/g) || []).length;
@@ -297,13 +324,23 @@ test('every command block that sets ALLOWED_RETURN_ORIGINS sets ALLOWED_ORIGINS 
   assert.doesNotMatch(http, /\(the manager\s*\n?\/\/ page during development, say\)/, 'http.ts says the hosted manager view needs it');
 });
 
-test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule', () => {
+test('supabase/README.md says what the code does: the code folding, the known-keys rule, the rewrite origin rule, the migrations rule', () => {
   assert.match(readme, /a code works once and for 7 days/);
   assert.match(readme, /marks as taken down the caller's listed rows whose key is in `known` and missing from `posted` \(no time decides it/);
   assert.match(readme, /a request without `known` takes nothing down/);
   assert.match(readme, /the answer looks back 10 minutes before `since`/);
   assert.match(readme, /matches none of their dealerships gets 403/);
-  assert.match(readme, /The pilot lists are the one place a client clock still meets `since`/);
+  assert.match(readme, /The production project has applied `0001_schema\.sql` to `0008_usage\.sql`, and `db push` never runs a file again once it has applied it, so those files are never edited, not even their comments/);
+  assert.doesNotMatch(readme, /Until the first project has applied them/, 'the in-place rule ended when production applied the files');
+  // the pilot lists go up by the machine's own clock, never by the server's `since`
+  assert.match(readme, /The pilot lists never meet `since`: their stamps are the machine's own clock/);
+  assert.match(readme, /`localSince`, its own clock when its last successful sync began/);
+  assert.doesNotMatch(readme, /a clock running far behind can keep an attempt or a flag from going up/);
+});
+
+test('supabase/README.md says how the webhook settles events from one second and two deliveries at once', () => {
+  assert.match(readme, /a tie is settled by Stripe's own lifecycle: a subscription is incomplete only when it is created, and canceled and incomplete_expired are final/);
+  assert.match(readme, /an event's change is written only onto the row as it was read/);
 });
 
 // Security audit (2026-09-29): invite codes expire, die with their maker, give one answer and are throttled;
@@ -314,9 +351,14 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   assert.match(schema, /create table public\.invite_misses/);
   assert.match(rls, /revoke all on public\.invite_misses from anon, authenticated, service_role;/);
   assert.match(rls, /alter table public\.invite_misses enable row level security;/);
-  const redeem = rls.slice(rls.indexOf('create or replace function public.redeem_invite'), rls.indexOf('comment on function public.redeem_invite'));
+  // the definition the database runs: the last migration that creates the function
+  const { sql: redeemFile } = lastDefinition('redeem_invite');
+  const redeem = redeemFile.slice(redeemFile.indexOf('create or replace function public.redeem_invite'), redeemFile.indexOf('comment on function public.redeem_invite'));
   assert.ok(redeem.indexOf('invite_misses') < redeem.indexOf('from public.invites'), 'the throttle runs before the code is looked up');
-  assert.match(redeem, /if misses >= 10 then\s+raise exception 'too many attempts; try again in an hour' using errcode = 'P0005'/);
+  // answered, not raised: a raise would roll back the delete of every account's old misses that runs first
+  assert.match(redeem, /if misses >= 10 then\s+perform set_config\('response\.status', '400', true\);\s+return jsonb_build_object\('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text\);/);
+  assert.doesNotMatch(redeem, /raise exception[^;]*'P0005'/, 'the throttle is never raised');
+  assert.ok(rlsTest.includes('another account\'\'s miss from three hours ago survived a throttled redeem_invite'), 'rls.sql checks a throttled call keeps its delete');
   // round H review: misses older than an hour go at anyone's call (docs/data-inventory.md's retention line), which rls.sql proves
   assert.match(rlsTest, /insert into public\.invite_misses \(user_id, at\) values\s+\(:'b_sales', now\(\) - interval '2 hours'\),\s+\(:'c_sales', now\(\) - interval '5 minutes'\);/);
   for (const words of ['another account\'\'s miss from two hours ago survived the newcomer\'\'s redeem_invite', 'another account\'\'s miss from five minutes ago was dropped']) {
@@ -344,7 +386,7 @@ test('invite codes: 7-day expiry, one answer for every bad code, a throttle, lis
   }
   assert.match(rls, /grant select on public\.dealerships to authenticated;\s[\s\S]*?grant update \(name\) on public\.dealerships to authenticated;/);
   assert.doesNotMatch(rls, /grant select, update on public\.dealerships/);
-  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was looked up', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice', 'making a manager a salesperson kept the unused code they made', 'a salesperson changed a stored salesperson name through the API']) {
+  for (const words of ['a refused code made the newcomer a member', 'the eleventh try inside an hour was answered % with status %', 'a_mgr changed the website of A', 'a removed manager\'\'s unused codes survived', 'a salesperson listed their dealership\'\'s invites', 'a revoked code was revoked twice', 'making a manager a salesperson kept the unused code they made', 'a salesperson changed a stored salesperson name through the API', 'a_sales made themselves a manager', 'a_sales renamed a member', 'a_sales removed another member', 'a_sales renamed their dealership', 'redeeming a salesperson code made a manager a salesperson', 'a manager who already belongs used up the code meant for a new hire']) {
     assert.ok(rlsTest.includes(words), `rls.sql checks: ${words}`);
   }
 });
@@ -393,5 +435,6 @@ test('the owner\'s pilot of an agreed length: the README\'s statement is the one
   assert.match(readme, /When the signed agreement names another length, record the pilot yourself before the manager signs in/);
   const pilot = read('../PILOT.md');
   assert.match(pilot, /A pilot on the accounts is extended by the owner's statement in `supabase\/README\.md` step 5/, 'PILOT.md says how "extend the pilot" is done');
-  assert.match(pilot, /If the signed pilot agreement names a pilot length other than the standard `pilotDays`, also run the README's pilot statement/);
+  // every pilot dealership gets the statement, whatever its length (test/privacy.test.js: its clock starts the day it is made)
+  assert.match(pilot, /its pilot row with the signed agreement's start date and length \(the README's pilot statement, "A pilot of the length a signed pilot agreement names", with the agreed end date, run before the manager signs in whatever the length\)/);
 });
