@@ -13,7 +13,7 @@ import { markPosted, basisPrice } from './src/rescan.js';
 import { draftRecord, draftPill } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
-import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins } from './src/panelList.js';
+import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
 import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
@@ -25,7 +25,7 @@ import { createQueue, currentVin, advance, pause as pauseQueue, resume as resume
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
-import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
+import { neededPatterns, patternCovers, patternHost, hostList, isFacebookServer } from './src/photoHosts.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage, readListingInPage } from './facebook/fillForm.js';
 import { watchForListing, isNewListingFromForm, showsPostedCar, onCreatePage, listingLink } from './facebook/detectPost.js';
@@ -298,10 +298,6 @@ const noPhotosPicked = () => Boolean(state.vehicle) && !pickedPhotos().length &&
 const NO_PHOTOS_TEXT = 'No photos are ticked. Marketplace needs at least one: tick the photos to post first.';
 const photoList = () => (state.listing ? state.listing.photos : pickedPhotos());
 const photoPatterns = (urls = photoList()) => neededPatterns(urls, { manifestHosts: MANIFEST_HOSTS, granted: grantedOrigins });
-const hostList = (patterns) => {
-  const hosts = patterns.map(patternHost);
-  return hosts.length > 1 ? `${hosts.slice(0, -1).join(', ')} and ${hosts[hosts.length - 1]}` : hosts.join('');
-};
 const askSentence = (patterns) => `Chrome will ask to let Lot Current download this car's photos from ${hostList(patterns)}.`;
 
 // Asks Chrome, in one request, for every server this car's photos sit on
@@ -1341,7 +1337,8 @@ const siteMissing = () => missingOrigins(siteNeeds(), grantedOrigins);
 // registry (the read then says what to do instead).
 async function askForSite(origins = siteMissing()) {
   if (!origins.length) return true;
-  setStatus(`Chrome will ask to let Lot Current read ${hostOf(state.origin)} from the side panel (the same permission automatic rescans use).`);
+  const asking = missingOrigins(origins, grantedOrigins);
+  setStatus(siteAskText(asking.length ? asking : origins)); // every host Chrome's prompt will name, the inventory service's included
   promptOpen = true;
   let granted = false;
   try {

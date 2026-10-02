@@ -115,6 +115,8 @@ test('without the website permission nothing is sent: the answer names the patte
     assert.equal(r.needsPermission, true);
     assert.deepEqual(r.origins.sort(), ['https://example-dealer.test/*', 'https://websites-search.api.carscommerce.inc/*']);
     assert.match(r.message, /Click Allow reading example-dealer\.test, or open the website's used inventory page and click Post in the popup\./);
+    // Chrome's prompt lists the inventory service too, so the message names every host it asks for
+    assert.match(r.message, /Chrome has to let Lot Current read example-dealer\.test and websites-search\.api\.carscommerce\.inc \(/);
     assert.deepEqual(asked, [{ origins: r.origins }]);
     const threw = await fetchVehicleDetailsDirect(DEALER, DI_INFO, fixtures.usedNormal.vin, { contains: async () => { throw new Error('no such API'); } });
     assert.equal(threw.needsPermission, true, 'a check that fails counts as not granted');

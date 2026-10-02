@@ -20,6 +20,7 @@ import { adapterById, adapterForService } from '../adapters/index.js';
 import { SITES_KEY } from './storageKeys.js';
 import { assessVehicle, DECISION } from './classify.js';
 import { siteReadOrigins } from './panelList.js';
+import { hostList } from './photoHosts.js';
 
 const errText = (e) => String((e && e.message) || e);
 const sentence = (t) => (/[.!?]$/.test(String(t).trim()) ? String(t).trim() : String(t).trim() + '.');
@@ -172,7 +173,7 @@ export async function fetchVehicleDetailsDirect(origin, info, vin, { url = null,
       ok: false,
       needsPermission: true,
       origins,
-      message: `To re-check this car on ${host} from here, Chrome has to let Lot Current read the website (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
+      message: `To re-check this car on ${host} from here, Chrome has to let Lot Current read ${hostList(origins) || 'the website'} (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
     };
   }
   const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url));

@@ -139,6 +139,12 @@ export function patternHost(pattern) {
   return p.subdomains ? '*.' + p.host : p.host;
 }
 
+/** The hosts these patterns name, as a sentence says them: "a", "a and b", "a, b and c". */
+export function hostList(patterns) {
+  const hosts = (Array.isArray(patterns) ? patterns : []).map(patternHost).filter(Boolean);
+  return hosts.length > 1 ? `${hosts.slice(0, -1).join(', ')} and ${hosts[hosts.length - 1]}` : hosts.join('');
+}
+
 /**
  * The patterns to ask Chrome for so the worker can download these photos:
  * one per server that neither the manifest's host_permissions nor the
