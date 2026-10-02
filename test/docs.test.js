@@ -481,6 +481,11 @@ test('the help says the daily cap counts your posts from all your computers when
   // unmarking a car never hands a post back (cap.js: nothing takes an entry off the day's log)
   assert.doesNotMatch(help, /takes that post back off the count/);
   assert.match(section, /Unmarking a car \(clicking \*\*Posted ✓\*\*\) does not take it off the count either/);
+  // and the data inventory's day's-log row says the same
+  const logRow = read('../docs/data-inventory.md').split('\n').find((l) => l.startsWith('| `postLog:<origin>`'));
+  assert.doesNotMatch(logRow, /an unmarking takes its own entry off/);
+  assert.match(logRow, /still counts a post taken down or unmarked the same day/);
+  assert.match(logRow, /a take-down or unmarking leaves it as it is/);
 });
 
 // A no to Chrome's question from the side panel's own list (Post, Post the
