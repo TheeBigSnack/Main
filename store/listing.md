@@ -39,7 +39,7 @@ What it won't do
 What it needs
 
 - Chrome 116 or newer.
-- A dealership website Lot Current can read: Dealer Inspire websites that use the Cars Commerce inventory search, DealerOn and Dealer.com websites, and websites that publish standard vehicle data (schema.org) on their used-inventory pages. The DealerOn, Dealer.com and standard-data readers have been tested only on sample websites so far. Other platforms come later.
+- A dealership website Lot Current can read. Checked on a real dealership website: Dealer Inspire websites that use the Cars Commerce inventory search. Also tries, not yet checked on a real dealership website: DealerOn and Dealer.com websites, and websites that publish standard vehicle data (schema.org) on their used-inventory pages; those readers have been tested only on sample websites so far. Other platforms come later.
 - Your own Facebook account, signed in as usual. Lot Current never sees the login.
 - A dealership that has signed up for Lot Current, and your manager's go-ahead. Your dealership stands behind every listing: the price, the fees and the dealer identification are its responsibility under advertising law.
 
@@ -114,7 +114,7 @@ Everything after the line below goes into the dashboard's "Test instructions" bo
 
 Lot Current needs no account or sign-in for this test.
 
-1. Open a dealership's used-inventory page, for example [a public dealership used-inventory page the extension reads, picked by the owner with that dealership's OK]. Any dealership website that publishes standard vehicle data (schema.org Vehicle or Car) on its inventory pages also works.
+1. Open this dealership's used-inventory page: [a public used-inventory page on a Dealer Inspire website that uses the Cars Commerce inventory search, picked by the owner with that dealership's OK]. Please use that page: Dealer Inspire is the one website platform Lot Current has been checked on with a real dealership website, and its readers for other platforms have been tested only on sample websites so far.
 2. Click the Lot Current icon in the toolbar. The first time, click Set up Lot Current and follow the few steps in the side panel (the website, the store, a name and role for the listing's sign-off; any test name works). Then click Scan website in the popup. It lists the pre-owned cars at that store; new, demo and loaner cars never appear under Ready to post.
 3. Click Post on any car. The side panel opens, re-checks that car on the website and shows the description it wrote from the website's facts, with the dealership's name.
 4. To see the form fill, sign in to your own Facebook account in the same window and click "Open the Marketplace form" in the side panel. Lot Current opens the vehicle listing page and fills in the fields and photos. It does not click Publish, and there is no code for it to do so. Close the tab without publishing; nothing is posted unless a person clicks Publish.
