@@ -654,6 +654,25 @@ test('copy that says the numbers are kept in the browser also says they go to th
   assert.ok(seen >= 4, 'README, the help doc, the store listing and the website still describe where the numbers are kept');
 });
 
+// README once said each salesperson's posted list was "kept only in their own
+// browser" after the committed account config began offering sign-in and
+// the sync began sending that list to the dealership's account. While the
+// config names a project, no tester or launch text says so, and a line that
+// says the posted list is kept in the browser names the sync too.
+test('while accounts are configured, no text says the posted list stays only in the browser', () => {
+  if (!accountsConfigured()) return;
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  const ONLY_HERE = /kept only in (?:their|your|this|the) (?:own )?browser|only in (?:their|your) own browser/i;
+  for (const f of ['../README.md', '../PILOT.md', '../store/listing.md', ...md('docs'), ...md('marketing')]) {
+    for (const line of read(f).split('\n')) {
+      assert.doesNotMatch(line, ONLY_HERE, `${f.slice(3)}: "${line.trim().slice(0, 120)}" says the data stays in the browser, but a signed-in salesperson's posted list syncs to the dealership's account`);
+      if (/posted list/.test(line) && /kept in (?:their|your|this|the) (?:own )?browser(?!')/i.test(line)) {
+        assert.ok(/dealership's account/.test(line) && /\bsign(?:ed)? in\b/.test(line), `${f.slice(3)}: "${line.trim().slice(0, 120)}" leaves out the sync to the dealership's account`);
+      }
+    }
+  }
+});
+
 // Clear the numbers keeps the to-do items still open (src/pilot.js
 // clearNumbers): the texts that say what it deletes say what it keeps.
 test('every text that says what Clear the numbers deletes says the to-do items still open stay', () => {

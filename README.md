@@ -70,7 +70,7 @@ Six live runs on Sept 27, 2026 shaped the fill code: Facebook draws dropdown lis
 - **Account** (optional, Milestone 4): sign in with a code sent to your email, and your posted list and pilot numbers sync to your dealership's account so a colleague's machine and the manager view see them; a manager's invite code joins you to the dealership. This build names the production account project (`extension/src/accountConfig.js`), so set-up and Settings offer sign-in, but until the account service is live (`docs/production-setup.md` steps 3 to 6: the functions, the sign-in email and its sender, the manager view) a sign-in may not complete: skip it (set-up's **Skip for now**) and everything else works without an account. A build with an empty `accountConfig.js` shows only a line saying accounts are not set up, and contacts nothing. The sign-in is kept in your browser's local storage, never in the synced profile.
 - **Description writer**: off by default. With the rewrite service running (see `backend/README.md`), first drafts come from Claude, and for a car whose website record gives no usable color, the service looks at the photos and guesses one from Facebook's list (shown as a guess, never overriding a stated color). Either way every draft is checked: every number must be on the website, no banned claims ("no accidents", "best price in town"), the dealership must be named, the VIN must be there, 60 to 120 words.
 
-Each salesperson's scans, settings and posted list are kept only in their own browser, separately per website.
+Each salesperson's scans, settings, posted list and numbers are kept in their own browser, separately per website, and the profile part of their settings also in Chrome's synced storage (above). While they are signed in to a Lot Current account, their posted list, post timings, to-do items and each scan's counts also sync to the dealership's account, after each scan (the automatic rescans included) and after each post, take-down or price update they record: the manager view sees them, and the posted list reaches colleagues' machines and the person's other computers. The record of which form fields could not be filled stays in the browser.
 
 ## What Lot Current won't do
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1216 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1217 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
