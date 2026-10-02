@@ -13,7 +13,7 @@ For a used car manager, at their desk, on their own website. One laptop with Chr
 
 ## 0:00 The problem, in one breath
 
-"Your salespeople post used cars on Marketplace from their own accounts because Facebook stopped taking dealer feeds. Each post is minutes of copying from your website, so it doesn't get done, and when a car sells the listing sits there. Lot Current fills the listing from your website in seconds, the salesperson checks it and clicks Publish, and with automatic rescans on it tells them the same day when a car sells or the price changes."
+"Your salespeople post used cars on Marketplace from their own accounts because Facebook stopped taking dealer feeds. Each post is minutes of copying from your website, so it doesn't get done, and when a car sells the listing sits there. Lot Current fills the listing from your website in seconds, the salesperson checks it and clicks Publish, and with automatic rescans on and Chrome open it tells them the same day when a car sells or the price changes."
 
 ## 1:00 Scan the website
 

@@ -553,28 +553,72 @@ test('the free pilot is offered for the salespeople named in the pilot agreement
 // lead, the pilot offer email, the demo pitch and the home page's lead said it "tells you the same day" when a car
 // sells, with no condition. Automatic rescans are opt-in (set-up offers Allow automatic rescans or Skip for now,
 // and background.js skips a website whose rescans are off), so a salesperson who skipped is flagged only when
-// they rescan by hand. Every sentence that promises the schedule or the same-day flag names the condition.
-test('every page and marketing text that promises the 3-hour rescan or the same-day flag says it needs automatic rescans allowed', () => {
-  const promise = /\bevery (?:3|three|few) hours\b|\b(?:tells?|flagged|flags?) (?:you |them )?the same day\b/i;
-  const condition = /\b(?:automatic )?rescans (?:allowed|on)\b|\bif you allow it\b|\bonly if you allow\b|\bwebsites? (?:the person|you) allow(?:ed)?\b/i;
-  const paragraphs = (rel) => (rel.endsWith('.md')
-    ? read(rel).split('\n')
-    : read(rel).replace(/<head>[\s\S]*?<\/head>/, ' ').split(/<\/(?:p|li|h[1-6]|figcaption|td|th|dd|dt|summary)>/i).map(stripTags));
+// they rescan by hand. The rescans also run only while someone's Chrome is open (a chrome.alarms alarm in the
+// service worker), so a store whose salespeople close Chrome for the weekend hears nothing until Monday. Every
+// sentence that promises the schedule or the same-day flag names both conditions: rescans allowed, Chrome open.
+// A posting rule ("take sold cars down the same day") asks something of the salesperson and is not a promise.
+const RESCAN_PROMISE = /\b(?:3|three)[- ]hour(?:s|ly)?\b|\bevery few hours\b|\bsame[- ]day\b|\bwithin one rescan\b/i;
+const TAKE_DOWN_RULE = /\bdown the same day\b|\bsame-day take-?downs?\b/gi;
+const RESCANS_ALLOWED = /\b(?:automatic )?rescans (?:allowed|on)\b|\bif you allow it\b|\bonly if you allow\b|\bwebsites? (?:the person|you) allow(?:ed)?\b/i;
+const CHROME_OPEN = /\bChrome (?:is )?open\b/i;
+// the sentences of a page or a Markdown text that promise the rescan, with their rule wording taken out
+function rescanPromises(src, markdown) {
+  const paragraphs = markdown
+    ? src.split('\n')
+    : src.replace(/<head>[\s\S]*?<\/head>/, ' ').split(/<\/(?:p|li|h[1-6]|figcaption|td|th|dd|dt|summary)>/i).map(stripTags);
+  return paragraphs
+    .flatMap((para) => para.split(/(?<=[.!?]["”)]?)\s+(?=["“(]?[A-Z])/))
+    .filter((sentence) => RESCAN_PROMISE.test(sentence.replace(TAKE_DOWN_RULE, ' ')));
+}
+function unconditionalRescanPromises(src, markdown) {
+  return rescanPromises(src, markdown).filter((s) => !RESCANS_ALLOWED.test(s) || !CHROME_OPEN.test(s));
+}
+
+test('the rescan-promise check catches a same-day or 3-hour promise without both conditions, and leaves posting rules alone', () => {
+  for (const said of [
+    'With automatic rescans allowed, it also tells you the same day when a car sells or its price changes.',
+    'Lot Current flags sold cars and price changes the same day.',
+    'Sold cars flagged the same day.',
+    'Same-day sold-car flags, with automatic rescans on.',
+    'Every 3 hours while Chrome is open, Lot Current re-reads your website.',
+    'Flagged within one rescan (3 hours while Chrome is open), with the listing opened for you.',
+    'It re-reads the website every few hours and tells them when a car sells.',
+    'Lot Current flags sold cars the same day so they come down the same day.',
+  ]) assert.equal(unconditionalRescanPromises(`<p>${said}</p>`, false).length, 1, said);
+  for (const said of [
+    'With automatic rescans allowed and Chrome open, it also tells you the same day when a car sells or its price changes.',
+    'Then, with automatic rescans allowed, it re-reads the website every 3 hours while their Chrome is open.',
+    'Take sold cars down the same day.',
+    'facts only, sold cars down the same day.',
+    'Same-day take-downs are the point of the pilot, so please clear To do items the day they appear.',
+    'The posting rules ask for sold cars to come down the same day.',
+  ]) assert.deepEqual(unconditionalRescanPromises(said, true), [], said);
+});
+
+test('every page and marketing text that promises the 3-hour rescan or the same-day flag says it needs automatic rescans allowed and Chrome open', () => {
   const files = [
     ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
     ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
     ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+    '../README.md',
   ];
   let promises = 0;
+  const problems = [];
   for (const rel of files) {
-    for (const para of paragraphs(rel).filter((t) => promise.test(t))) {
-      promises += 1;
-      assert.match(para, condition, `${rel.slice(3)}: "${para.trim().slice(0, 120)}..." promises the rescan without saying automatic rescans must be allowed`);
+    const src = read(rel);
+    promises += rescanPromises(src, rel.endsWith('.md')).length;
+    for (const s of unconditionalRescanPromises(src, rel.endsWith('.md'))) {
+      problems.push(`${rel.slice(3)}: "${s.trim().slice(0, 140)}" promises the rescan without saying ${RESCANS_ALLOWED.test(s) ? 'it runs only while Chrome is open' : 'automatic rescans must be allowed'}`);
     }
   }
+  assert.deepEqual(problems, []);
   assert.ok(promises >= 8, `the texts still describe the rescan (${promises} found)`);
-  // the condition is real: background.js rescans only the websites whose rescans are on
-  assert.match(read('../extension/background.js'), /if \(!info\.auto\) continue;/, 'background.js no longer skips a website whose automatic rescans are off: these texts can drop the condition');
+  // the conditions are real: background.js rescans only the websites whose rescans are on, from a chrome.alarms
+  // alarm every RESCAN_PERIOD_MINUTES (an alarm fires only while Chrome runs)
+  const background = read('../extension/background.js');
+  assert.match(background, /if \(!info\.auto\) continue;/, 'background.js no longer skips a website whose automatic rescans are off: these texts can drop that condition');
+  assert.match(background, /chrome\.alarms\.create\(RESCAN_ALARM, \{ periodInMinutes: RESCAN_PERIOD_MINUTES/, 'the rescan no longer runs from a Chrome alarm: change "while Chrome is open" with it');
+  assert.match(read('../extension/src/rescanSchedule.js'), /export const RESCAN_PERIOD_MINUTES = 180;/, 'the rescan no longer runs every 3 hours: change the texts with it');
 });
 
 // review: For managers said "Start the free pilot, Subscribe and Manage billing open Stripe's own pages for the card
