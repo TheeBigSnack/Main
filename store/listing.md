@@ -90,7 +90,7 @@ From `extension/manifest.json`; this file follows the manifest, never the other 
 | Pattern | One line for the dashboard |
 |---|---|
 | `activeTab` | Reads the inventory search on the dealership website tab the person is looking at when they click Scan website. |
-| `scripting` | Runs the read-only scan in that tab, and fills the Marketplace create-listing form the person opened when they click Post. |
+| `scripting` | Runs the read-only scan in that tab; fills the Marketplace create-listing form Lot Current opens from the person's click (in a queue they started, each car's form in turn without another click, the next one once they have published the previous one); and, for a to-do item they open, reads that listing's page and puts the new price into its edit form. |
 | `storage` | Scans, settings, the posted list and the usage numbers, per website, and the Lot Current sign-in session, in the person's browser; the profile (name, role, closing line, dealership details, listing defaults, the rewrite-service address, the Terms acceptance) in Chrome's sync storage under their own Google account, removable in Settings. |
 | `sidePanel` | The guided post flow and the set-up wizard run in the side panel so they stay open while the person moves between the dealership tab and the Marketplace tab. |
 | `alarms` | Re-reads a dealership website the person allowed every 3 hours while Chrome is open, to keep the to-do count on the icon current, and, while they are signed in to a Lot Current account, sends that rescan's results to their dealership's account; while signed in, it also tries a sync again a minute after the Lot Current server asked it to wait (more than a dozen syncs in a minute). It never touches Facebook. |
