@@ -406,6 +406,13 @@ test('no customer-facing page says nothing leaves the browser, and the support p
   }
   if (/NHTSA/.test(policy)) assert.match(privacy, /NHTSA/, 'the privacy policy sends a VIN to NHTSA on a click; the support page says so');
   if (/rewrite service/.test(policy)) assert.match(privacy, /rewrite service/, 'the privacy policy sends the car\'s facts to the rewrite service when it is on; the support page says so');
+  // review: neither page named where the rewrite service sends the facts on to, which the privacy policy does
+  if (/Anthropic/.test(policy)) {
+    assert.match(privacy, /rewrite service[^.]*on to Anthropic's API/, 'the support page names Anthropic as the privacy policy does');
+    const where = stripTags(faqPage).match(/Where is my data\? (.*?) What about my Facebook password\?/);
+    assert.ok(where, 'the FAQ has its Where is my data? answer');
+    assert.match(where[1], /rewrite service[^.]*on to Anthropic's API/, 'the FAQ\'s Where is my data? names Anthropic as the privacy policy does');
+  }
   assert.doesNotMatch(privacy, /Clear everything for this website removes it\b/, 'Clear everything for this website does not remove the synced profile');
 });
 
