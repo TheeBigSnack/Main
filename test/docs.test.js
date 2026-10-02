@@ -319,6 +319,22 @@ test('README shows the description sign-off with brackets and names no guessed p
   assert.doesNotMatch(readme, /\bRoger\b/, 'README names a person whose name was only guessed from a git email');
 });
 
+// README's dry-run step said the panel reports on "13 fields" while
+// FORM_MAP.fields, which probeFormInPage walks, held 17, so a tester could
+// take a short list for a pass. A count of the form's fields in README, the
+// help doc or PILOT.md is the form map's.
+test('a text that counts the form fields the field check reports gives FORM_MAP\'s number', () => {
+  const n = FORM_MAP.fields.length;
+  assert.ok(n > 5, 'FORM_MAP.fields is shorter than expected');
+  for (const rel of ['../README.md', '../docs/help.md', '../PILOT.md']) {
+    for (const line of read(rel).split('\n').filter((l) => /check fields only|field check|fields it can find/i.test(l))) {
+      for (const m of line.matchAll(/\b(\d+) (?:form )?fields\b/g)) {
+        assert.equal(Number(m[1]), n, `${rel.slice(3)}: "${line.trim().slice(0, 100)}..." counts ${m[1]} fields; FORM_MAP has ${n}`);
+      }
+    }
+  }
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));
