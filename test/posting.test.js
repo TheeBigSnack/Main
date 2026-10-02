@@ -219,22 +219,26 @@ test('the dry run looks for each kind of field with the same controls the fill d
   assert.match(probe.typeahead, /\[contenteditable="true"\]/, 'so is an editable box');
 });
 
-// What these source checks prove: the usual ways to click, submit or inject
-// in ordinary code are caught. Code written to hide a click from them (a
-// method name built from pieces, say) is for code review; the e2e mock form
-// also counts real clicks on its own Publish button.
-test('the fill code never submits a form, and clicks only inside the dropdown and checkbox helpers', () => {
-  const src = read('../extension/facebook/fillForm.js');
+// What these source checks prove: the usual ways to click, submit, press a
+// key on or inject into a page in ordinary code are caught, and so are the
+// common indirect ones (a method name built from pieces, .call, a stored
+// event). They are a tripwire, not a proof: the e2e mock form
+// (test/e2e/mock-marketplace.mjs) puts decoy Next, Post, Save draft, Update,
+// Delete and Mark as sold controls beside its Publish button and the flows
+// assert that no fill ever touched one.
+function fillCodeProblems(src) {
+  const problems = [];
+  const fail = (bad, why) => { if (bad) problems.push(why); };
   // the read-only probe and the listing reader must not act on the page at all
   const probe = src.slice(src.indexOf('function probeFormInPage'), src.indexOf('function fillPriceInPage'));
-  assert.ok(probe.length > 100 && !/\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(probe), 'probeFormInPage must be read-only');
+  fail(probe.length < 100 || /\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(probe), 'probeFormInPage must be read-only');
   const reader = src.slice(src.indexOf('function readListingInPage'), src.indexOf('function attachPhotosInPage'));
-  assert.ok(reader.length > 100 && !/\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(reader), 'readListingInPage must be read-only');
+  fail(reader.length < 100 || /\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(reader), 'readListingInPage must be read-only');
   // the price filler touches one box and never clicks
   const pricer = src.slice(src.indexOf('function fillPriceInPage'), src.indexOf('function readListingInPage'));
-  assert.ok(pricer.length > 100 && !/\.click\b/.test(pricer), 'fillPriceInPage must not click');
+  fail(pricer.length < 100 || /\.click\b/.test(pricer), 'fillPriceInPage must not click');
   // no submit by any spelling (form.submit(), requestSubmit, ['submit'], a submit button), and no Publish, Mark as sold or Delete
-  assert.ok(!/submit|\bpublish\b|mark as sold|\bdelete\b/i.test(src), 'fillForm.js must not contain submit/publish/delete paths');
+  fail(/submit|\bpublish\b|mark as sold|\bdelete\b/i.test(src), 'fillForm.js must not contain submit/publish/delete paths');
   // every click sits in one of three helpers, one click each: opening a
   // dropdown, choosing one of its options, ticking a checkbox the map names.
   // Anywhere else, .click in any form (a call, .click.call or .apply,
@@ -242,15 +246,63 @@ test('the fill code never submits a form, and clicks only inside the dropdown an
   let rest = src;
   for (const helper of ['openDropdown', 'chooseOption', 'setCheckbox']) {
     const body = bodyOf(src, helper);
-    assert.ok(body.length > 50, `${helper} is still there`);
-    assert.equal((body.match(/\.click\b/g) || []).length, 1, `${helper} has exactly one click`);
-    assert.equal((body.match(/\.click\(\)/g) || []).length, 1, `${helper}'s click is a plain call`);
+    fail(body.length < 50, `${helper} is missing`);
+    fail((body.match(/\.click\b/g) || []).length !== 1, `${helper} must have exactly one click`);
+    fail((body.match(/\.click\(\)/g) || []).length !== 1, `${helper}'s click must be a plain call`);
     rest = rest.replace(body, '');
   }
-  assert.ok(!/\.click\b|\bclick\s*\(/.test(rest), 'fillForm.js clicks only inside openDropdown, chooseOption and setCheckbox');
-  // and no click can be synthesised as an event, and no Enter pressed (Enter commits a form)
-  assert.ok(!/['"`]click['"`]/.test(src), 'fillForm.js must not dispatch a click event');
-  assert.ok(!/['"`]Enter['"`]/.test(src), 'fillForm.js must not press Enter');
+  fail(/\.click\b|\bclick\s*\(/.test(rest), 'fillForm.js clicks only inside openDropdown, chooseOption and setCheckbox');
+  // no click synthesised as an event, and no Enter pressed (Enter commits a form)
+  fail(/['"`]click['"`]/.test(src), 'fillForm.js must not dispatch a click event');
+  fail(/['"`]Enter['"`]/.test(src), 'fillForm.js must not press Enter');
+  // nothing called through a computed name (btn['cl' + 'ick']()), and no
+  // apply, Reflect, eval or Function; .call only for the value setter, and no
+  // prototype but the two input setters' (so no HTMLElement.prototype.click)
+  fail(/\]\s*\(/.test(src), 'fillForm.js must not call through a computed name');
+  fail(/\.apply\b|\bReflect\b|\bFunction\s*\(|\beval\b/.test(src), 'fillForm.js must not call through apply, Reflect, eval or Function');
+  fail(/\.call\b/.test(src.replace(/\bdesc\.set\.call\(/g, '')), 'fillForm.js uses .call only for the value setter');
+  fail(/prototype/.test(src.replace(/\bHTML(Input|TextArea)Element\.prototype\b/g, '')), 'fillForm.js reaches no prototype but the input setters\'');
+  fail(/execCommand\((?!\s*'insertText')/.test(src), 'fillForm.js runs no editing command but insertText');
+  // every event is one of the helpers' own: pointer and mouse presses, key
+  // presses through key(), input and change; none dispatched from a variable
+  for (const [ctor, count] of [['MouseEvent', 1], ['PointerEvent', 1], ['KeyboardEvent', 1]]) fail((src.match(new RegExp(`new ${ctor}\\(`, 'g')) || []).length !== count, `only the ${ctor} helper builds a ${ctor}`);
+  fail(/new (?!(Mouse|Pointer|Keyboard)Event\(type\b|Event\('(input|change)'|InputEvent\('input')\w*Event\b/.test(src), 'fillForm.js builds only pointer, mouse, key, input and change events');
+  fail(/dispatchEvent\((?!new (Mouse|Pointer|Keyboard|Input)?Event\()/.test(src), 'fillForm.js dispatches only events it builds in place');
+  const calls = (s, fn) => [...s.matchAll(new RegExp(`\\b${fn}\\(([^,()]+),\\s*([^)]*)\\)`, 'g'))].map((m) => m[2].trim());
+  for (const t of calls(src, 'mouse')) fail(!["'mousedown'", "'mouseup'"].includes(t), `mouse(…, ${t})`);
+  for (const t of calls(src, 'pointer')) fail(!["'pointerdown'", "'pointerup'"].includes(t), `pointer(…, ${t})`);
+  // keys: Escape and ArrowDown anywhere, Space only on the checkbox, a typed character only in typeText's box
+  const checkbox = bodyOf(src, 'setCheckbox');
+  const typing = bodyOf(src, 'typeText');
+  fail(typing.length < 50, 'typeText is missing');
+  for (const k of calls(checkbox, 'key')) fail(k !== "' '", `setCheckbox presses ${k}`);
+  for (const k of calls(typing, 'key')) fail(k !== 'ch', `typeText presses ${k}`);
+  for (const k of calls(src.replace(checkbox, '').replace(typing, ''), 'key')) fail(!["'Escape'", "'ArrowDown'"].includes(k), `fillForm.js presses ${k} outside setCheckbox and typeText`);
+  return problems;
+}
+
+test('the fill code never submits a form, and clicks or presses keys only where its helpers say', () => {
+  const src = read('../extension/facebook/fillForm.js');
+  assert.deepEqual(fillCodeProblems(src), []);
+  // the check itself: each way to reach an action button from the fill function is caught
+  const plant = (code) => src.replace('return result;', `${code}\n  return result;`);
+  assert.equal(plant('X'), src.replace('return result;', 'X\n  return result;'), 'the fill function ends in return result');
+  const planted = {
+    'HTMLElement.prototype.click': 'HTMLElement.prototype.click.call(btn);',
+    'a click built from pieces': "btn['cl' + 'ick']();",
+    'a click on a receiver named control': "const control = [...document.querySelectorAll('[role=button]')].find((b) => /^(next|post)$/i.test(b.textContent)); control.click();",
+    'a submit built from pieces': "f['sub' + 'mit']();",
+    'Enter on a focused button': "btn.focus(); key(btn, 'Enter');",
+    'Space on a focused button': "btn.focus(); key(btn, ' ');",
+    'a key named in a variable': 'const k = String.fromCharCode(13); key(btn, k);',
+    'a stored event': "const ev = new MouseEvent(type, {}); btn.dispatchEvent(ev);",
+    'a click event under another name': 'mouse(btn, kind);',
+    'a pointer event of another kind': "pointer(btn, 'pointercancel');",
+    'Reflect.apply': 'Reflect.apply(HTMLElement.prototype.focus, btn, []);',
+    'a borrowed method': 'btn.focus.apply(btn);',
+    'an editing command': "document.execCommand('delete');",
+  };
+  for (const [what, code] of Object.entries(planted)) assert.ok(fillCodeProblems(plant(code)).length, `${what} is caught`);
 });
 
 test('bodyOf finds a helper whole, braces in strings and comments and all', () => {

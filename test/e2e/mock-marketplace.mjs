@@ -18,10 +18,21 @@
 // textarea, a file input) plus the two fields the extension must never touch
 // (condition, title status). Only a person clicks Publish; the server counts
 // those clicks so the test can prove it.
+//
+// Beside Publish sit decoys of the other action controls Facebook draws
+// around a listing (Next, Post, Save draft, Update, Delete, Mark as sold),
+// each as a submit button of the form and as a role=button element, plus a
+// menu button and an expandable button that the fill code's dropdown finder
+// does consider. Nothing may ever touch them: every pointer, mouse, click or
+// key event that reaches one, any submit event of the form and any
+// form.submit() (the form posts to /form-submitted) is recorded, and GET
+// /actions lists what was. The flows assert that list stays empty.
 
 import http from 'node:http';
 
 let publishClicks = 0;
+// What touched a decoy action control or submitted the create form: only ever empty.
+const actions = [];
 // Like Facebook restoring a saved draft: after GET /prefill?name=honda the
 // create page opens already holding another car.
 const PREFILLS = {
@@ -30,6 +41,7 @@ const PREFILLS = {
 };
 let prefill = null;
 
+const DECOYS = ['Next', 'Post', 'Save draft', 'Update', 'Delete', 'Mark as sold'];
 const COLORS = ['Black', 'Blue', 'Brown', 'Gold', 'Green', 'Grey', 'Pink', 'Purple', 'Red', 'Silver', 'Orange', 'White', 'Yellow', 'Charcoal', 'Tan', 'Beige', 'Burgundy', 'Turquoise', 'Off white', 'Other'];
 const YEARS = [];
 for (let y = 2027; y >= 1990; y -= 1) YEARS.push(String(y));
@@ -66,6 +78,8 @@ const ES = {
   'This vehicle has a clean title.': 'Este vehículo tiene el título limpio.',
   'This vehicle has no significant damage or persistent problems.': 'Este vehículo no tiene daños importantes ni problemas persistentes.',
   Publish: 'Publicar',
+  // the decoy action controls
+  Next: 'Siguiente', Post: 'Publicar ahora', 'Save draft': 'Guardar borrador', Update: 'Actualizar', Delete: 'Eliminar', 'Mark as sold': 'Marcar como vendido', 'More options': 'Más opciones', 'Publish options': 'Opciones de publicación',
   // the options
   'Car/Truck': 'Coche/Camioneta', Motorcycle: 'Motocicleta', Powersport: 'Vehículo recreativo', 'RV/Camper': 'Autocaravana', Trailer: 'Remolque', Boat: 'Barco', 'Commercial/Industrial': 'Comercial/Industrial', Other: 'Otro',
   Black: 'Negro', Blue: 'Azul', Brown: 'Marrón', Gold: 'Dorado', Green: 'Verde', Grey: 'Gris', Pink: 'Rosa', Purple: 'Morado', Red: 'Rojo', Silver: 'Plateado', Orange: 'Naranja', White: 'Blanco', Yellow: 'Amarillo', Charcoal: 'Carbón', Tan: 'Canela', Burgundy: 'Burdeos', Turquoise: 'Turquesa', 'Off white': 'Blanco roto',
@@ -92,7 +106,7 @@ function page(lang) {
 </head><body>
 <h1>${t('Create vehicle listing (mock)')}</h1>
 <p>${t('Add up to 20 photos.')}</p>
-<form onsubmit="return false">
+<form action="/form-submitted" method="post" onsubmit="return false">
   <label for="photos">${t('Add photos')}</label>
   <input id="photos" type="file" multiple accept="image/*"> <span id="photoCount">0 ${t('photos')}</span>
   ${combo('vehicleType', 'Vehicle type', ['Car/Truck', 'Motorcycle', 'Powersport', 'RV/Camper', 'Trailer', 'Boat', 'Commercial/Industrial', 'Other'], 0)}
@@ -116,8 +130,22 @@ function page(lang) {
   <div id="locationList" role="listbox" hidden></div>
   <label>${t('Description')} <textarea id="description" rows="10" cols="60"></textarea></label>
   <button type="button" id="publish">${t('Publish')}</button>
+  <div id="decoys">
+    ${DECOYS.map((d) => `<button data-decoy="${d} (button)">${t(d)}</button> <div role="button" tabindex="0" data-decoy="${d} (role=button)">${t(d)}</div>`).join('\n    ')}
+    <div role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" data-decoy="More options (menu button)">${t('More options')}</div>
+    <button type="button" aria-expanded="false" data-decoy="Publish options (expandable)">${t('Publish options')}</button>
+  </div>
 </form>
 <script>
+  // The decoys: anything that reaches one, or submits the form, is reported.
+  const report = (what) => fetch('/action', { method: 'POST', body: what, keepalive: true });
+  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'keydown', 'keyup']) {
+    document.addEventListener(type, (e) => {
+      const d = e.target && e.target.closest ? e.target.closest('[data-decoy]') : null;
+      if (d) report(d.dataset.decoy + ' ' + type + (e.key ? ' ' + e.key : ''));
+    }, true);
+  }
+  document.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); report('form submit event'); });
   // One popup at a time, like the real page: clicking a control while another
   // list is open only closes that list.
   let openList = null;
@@ -275,6 +303,20 @@ export function startMockMarketplace(port = 0) {
       publishClicks += 1;
       res.writeHead(204);
       return res.end();
+    }
+    if (req.method === 'POST' && (url.pathname === '/action' || url.pathname === '/form-submitted')) {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        actions.push(url.pathname === '/action' ? raw.slice(0, 200) : 'form.submit()');
+        res.writeHead(url.pathname === '/action' ? 204 : 200, { 'content-type': 'text/html' });
+        res.end(url.pathname === '/action' ? undefined : '<!doctype html><title>Form submitted (mock)</title><h1>The form was submitted</h1>');
+      });
+      return;
+    }
+    if (url.pathname === '/actions') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(actions));
     }
     // ---- the person's published listings, and the actions only they take ----
     const item = /^\/marketplace\/item\/(\d+)\/(sold|delete)$/.exec(url.pathname);

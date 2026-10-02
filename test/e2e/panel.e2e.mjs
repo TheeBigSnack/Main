@@ -65,7 +65,12 @@ try {
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
   const get = async (path) => (await context.request.get(`${path.startsWith('http') ? '' : origin}${path}`)).text();
-  const publishCount = async () => (await context.request.get(`${marketOrigin}/publish-count`)).text();
+  // How many times Publish was clicked; and first, that nothing ever touched the
+  // mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+  const publishCount = async () => {
+    assert.deepEqual(await (await context.request.get(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+    return (await context.request.get(`${marketOrigin}/publish-count`)).text();
+  };
 
   // Settings and the test hooks straight into storage. Every store is the
   // salesperson's, so the Ram (Waynesburg) and the Wagoneer (Cranberry) are both ready.

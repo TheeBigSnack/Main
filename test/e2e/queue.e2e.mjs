@@ -56,7 +56,12 @@ const watch = (p) => {
   p.on('pageerror', (e) => errors.push(String(e)));
   return p;
 };
-const publishCount = async (p) => (await p.request.get(`${marketOrigin}/publish-count`)).text();
+// How many times Publish was clicked; and first, that nothing ever touched the
+// mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+const publishCount = async (p) => {
+  assert.deepEqual(await (await p.request.get(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  return (await p.request.get(`${marketOrigin}/publish-count`)).text();
+};
 const RAM = '1C6RR7FT0KS643289';
 const WAGONEER = '1C4SJVDT7NS142834';
 

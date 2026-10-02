@@ -7,8 +7,10 @@
 // one of that dropdown's options, and a checkbox the form map names (the
 // clean-title box): one click each, in openDropdown, chooseOption and
 // setCheckbox. It has no selector for Publish or any other button.
-// test/posting.test.js checks the source for the usual ways to click, submit
-// or inject; code written to slip past such checks is for review to catch.
+// test/posting.test.js checks the source for the usual ways to click, submit,
+// press a key or inject, and the e2e mock form records any event that reaches
+// its decoy Next, Post, Save draft, Update, Delete and Mark as sold controls;
+// code written to slip past both is for review to catch.
 //
 // Lessons from the first live run (2026-09-27): Facebook draws a dropdown's
 // option list slowly and leaves it open until something closes it, and a
