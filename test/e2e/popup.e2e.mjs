@@ -18,7 +18,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension that may script the local mock site without a
 // click on the toolbar icon (the real one relies on that click via activeTab).
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -32,7 +32,7 @@ const siteUrl = `http://127.0.0.1:${server.address().port}/used-vehicles/`;
 // unpacked extensions. LOTSYNC_E2E_CHANNEL can point at another Chromium
 // build, but note that branded Google Chrome and Edge 137+ ignore
 // --load-extension, so they can't run this test.
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-popup-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-popup-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,

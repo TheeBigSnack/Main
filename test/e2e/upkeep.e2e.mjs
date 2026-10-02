@@ -21,7 +21,7 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -34,7 +34,7 @@ const market = await startMockMarketplace();
 const siteUrl = `http://127.0.0.1:${site.address().port}/used-vehicles/`;
 const origin = new URL(siteUrl).origin;
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-upkeep-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-upkeep-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,

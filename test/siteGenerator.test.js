@@ -144,7 +144,7 @@ test('config.js: validateSite accepts the committed config and every honest shap
     [{ siteUrl: 'https://fixture.lotcurrent.com/site' }, /no path/],
     [{ siteUrl: 'http://fixture.lotcurrent.com' }, /https origin/],
     [{ siteUrl: 'fixture.lotcurrent.com' }, /https origin/],
-    [{ siteUrl: 'https://lotsync.example' }, /reserved placeholder host/],
+    [{ siteUrl: 'https://lotcurrent.example' }, /reserved placeholder host/],
     [{ siteUrl: 'https://www.example.com' }, /reserved placeholder host/],
     [{ siteUrl: 'https://site.test' }, /reserved placeholder host/],
     [{ siteUrl: 'https://localhost' }, /reserved placeholder host/],
@@ -152,17 +152,17 @@ test('config.js: validateSite accepts the committed config and every honest shap
     [{ siteUrl: null }, /must be a string/],
     [{ demoEndpoint: 'https://lead.example/functions/v1/lead' }, /reserved placeholder host/],
     [{ demoEndpoint: 'http://abcdefgh.supabase.co/functions/v1/lead' }, /https address/],
-    [{ demoMailto: 'mailto:demo@lotsync.example' }, /reserved placeholder host/],
+    [{ demoMailto: 'mailto:demo@lotcurrent.example' }, /reserved placeholder host/],
     [{ demoMailto: 'demo@fixture.lotcurrent.com' }, /'mailto:<address>'/],
     [{ demoMailto: 'mailto:not an address' }, /'mailto:<address>'/],
     [{ supportEmail: 'mailto:support@fixture.lotcurrent.com' }, /plain address/],
     [{ supportEmail: 'support@example.org' }, /reserved placeholder host/],
     [{ supportEmail: 'support' }, /plain address/],
-    [{ signupUrl: 'https://app.lotsync.example/manager/' }, /reserved placeholder host/],
+    [{ signupUrl: 'https://app.lotcurrent.example/manager/' }, /reserved placeholder host/],
     [{ business: { ...EMPTY_BUSINESS, name: 'Lot Current' } }, /partly filled \(missing streetAddress, addressLocality, addressRegion, postalCode, addressCountry\)/],
     [{ business: { ...BUSINESS, postalCode: '' } }, /partly filled \(missing postalCode\)/],
     [{ business: { ...EMPTY_BUSINESS, telephone: '555' } }, /optional fields but no name or address/],
-    [{ business: { ...BUSINESS, url: 'https://lotsync.example' } }, /business\.url/],
+    [{ business: { ...BUSINESS, url: 'https://lotcurrent.example' } }, /business\.url/],
     [{ business: { ...BUSINESS, url: 'fixture.lotcurrent.com' } }, /business\.url/],
     [{ business: { ...BUSINESS, email: 'x@example.com' } }, /business\.email/],
     [{ business: { ...BUSINESS, openingHours: 'Mo-Fr' } }, /openingHours must be a list/],
@@ -174,7 +174,7 @@ test('config.js: validateSite accepts the committed config and every honest shap
   }
   const { business: _b, ...noBusiness } = base;
   assert.throws(() => validateSite(noBusiness), /business must be an object/);
-  for (const host of ['lotsync.example', 'example', 'a.test', 'x.invalid', 'localhost', 'app.localhost', 'example.com', 'www.example.org', 'sub.example.net', '', 'EXAMPLE.COM', 'a.test.']) assert.equal(isPlaceholderHost(host), true, host);
+  for (const host of ['lotcurrent.example', 'example', 'a.test', 'x.invalid', 'localhost', 'app.localhost', 'example.com', 'www.example.org', 'sub.example.net', '', 'EXAMPLE.COM', 'a.test.']) assert.equal(isPlaceholderHost(host), true, host);
   for (const host of ['fixture.lotcurrent.com', 'example.co', 'test.org', 'notexample.com', 'abcdefgh.supabase.co', 'my-test.io']) assert.equal(isPlaceholderHost(host), false, host);
   // the committed file: a switch is empty until the owner has the real thing,
   // and no invented address is in it, comments included. The only addresses
@@ -477,7 +477,7 @@ test('what the generator refuses: a second h1, a lost description, an unknown va
   assert.throws(() => renderFragmentPage(p, good + '<p>lorem ipsum</p>', ctx), /contains "lorem"/);
   assert.throws(() => renderFragmentPage(p, good + '<!-- TODO: later -->', ctx), /contains "TODO"/);
   assert.throws(() => renderFragmentPage(p, good + '<input placeholder="x" aria-label="x">', ctx), /contains "placeholder"/);
-  assert.throws(() => renderFragmentPage(p, good + '<p>demo@lotsync.example</p>', ctx), /contains ".example"/);
+  assert.throws(() => renderFragmentPage(p, good + '<p>demo@lotcurrent.example</p>', ctx), /contains ".example"/);
   assert.throws(() => renderFragmentPage(p, good + '<p>yourdomain</p>', ctx), /contains "yourdomain"/);
   assert.throws(() => renderFragmentPage(p, good + '<p>Ron Lewis</p>', ctx), /pilot dealer is a fixture/);
   assert.throws(() => assertClean('x example.com y', 'f'), /f contains "example.com"/);
@@ -489,7 +489,7 @@ test('what the generator refuses: a second h1, a lost description, an unknown va
 });
 
 test('--check exits 1 naming each output that is missing, differs or must not exist, writes nothing, and reports the siteUrl state either way; a run writes and removes', async () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'lotsync-site-'));
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-'));
   try {
     for (const rel of [CONFIG_FILE, PRICING_FILE, STATUS_FILE]) {
       mkdirSync(join(tmp, rel, '..'), { recursive: true });
@@ -562,12 +562,12 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     assert.equal((await run(['--check'])).code, 0);
     // a config that cannot be published: refused, nothing written
     const before = readFileSync(faqFile, 'utf8');
-    writeFileSync(join(tmp, CONFIG_FILE), config.replace("siteUrl: '',", "siteUrl: 'https://lotsync.example',"));
+    writeFileSync(join(tmp, CONFIG_FILE), config.replace("siteUrl: '',", "siteUrl: 'https://lotcurrent.example',"));
     r = await run([]);
     assert.equal(r.code, 1);
     assert.match(r.error.join('\n'), /siteUrl is on a reserved placeholder host/);
     assert.equal(readFileSync(faqFile, 'utf8'), before);
-    writeFileSync(join(tmp, CONFIG_FILE), config.replace("demoMailto: '',", "demoMailto: 'mailto:demo@lotsync.example',"));
+    writeFileSync(join(tmp, CONFIG_FILE), config.replace("demoMailto: '',", "demoMailto: 'mailto:demo@lotcurrent.example',"));
     assert.match((await run(['--check'])).error.join('\n'), /demoMailto is on a reserved placeholder host/);
     writeFileSync(join(tmp, CONFIG_FILE), config.replace("name: '',", "name: 'Lot Current',"));
     assert.match((await run(['--check'])).error.join('\n'), /business is partly filled/);

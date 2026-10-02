@@ -18,11 +18,26 @@ import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
+import { LEGAL } from '../extension/src/legalLinks.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
 const doc = (name) => read('../docs/' + name);
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// A host nobody can serve mail or pages from (RFC 2606 and RFC 6761 names).
+const PLACEHOLDER_HOST = /(^|\.)(example|test|invalid|localhost)$|(^|\.)example\.(com|org|net)$/i;
+// The support inbox: the address docs/support.md gives under "The inbox", a
+// real one (it replaced a placeholder on the reserved .example domain once
+// the mailbox existed).
+function supportInbox() {
+  const line = doc('support.md').split('\n').find((l) => l.startsWith('- Address: '));
+  assert.ok(line, 'docs/support.md has no "- Address:" line under "The inbox"');
+  const m = line.match(/^- Address: `([^`@\s]+@([^`@\s]+))`/);
+  assert.ok(m, 'the inbox line of docs/support.md does not start with the address in backticks');
+  assert.doesNotMatch(m[2], PLACEHOLDER_HOST, `docs/support.md gives ${m[1]}, an address on a placeholder domain`);
+  return m[1];
+}
 
 // Labels the help doc must use, word for word, and that the popup and the
 // side panel must still render. `&amp;` in the popup's HTML strings is the
@@ -118,7 +133,8 @@ test('no docs/ file carries a pilot-dealer value or Meta-affiliation wording', (
 
 test('support.md has the inbox, what to ask for, the one-business-day answer, the log, the severity words and what is never done', () => {
   const s = doc('support.md');
-  assert.match(s, /support@lotsync\.example/, 'the placeholder inbox');
+  supportInbox();
+  assert.doesNotMatch(s, /@[\w-]+(\.[\w-]+)*\.example\b/, 'a placeholder inbox is still in docs/support.md');
   assert.match(s, /within one business day/, 'the PLAN.md M6 commitment');
   for (const ask of ['Copy report', 'Settings', 'The website', 'What was on screen']) assert.ok(s.includes(ask), `support.md does not ask for "${ask}"`);
   assert.match(s, /^\| Date \| Dealer \| Who \| What happened \| The report \| Severity \| Fix commit \| Answered when \|$/m, 'the log template');
@@ -310,18 +326,52 @@ test('the CHANGELOG entry for the shipped version names what support and the hel
 });
 
 test('the files support.md and the launch checklist say hold the support address do hold it', () => {
+  const inbox = supportInbox();
   for (const name of ['support.md', 'launch-checklist.md']) {
-    const lines = doc(name).split('\n').filter((l) => l.includes('support@lotsync.example'));
-    assert.ok(lines.length, `docs/${name} no longer names the placeholder inbox`);
+    assert.doesNotMatch(doc(name), /\bsupport@[\w-]+(\.[\w-]+)*\.example\b/, `docs/${name} still names a placeholder inbox`);
+    const lines = doc(name).split('\n').filter((l) => l.includes(inbox));
+    assert.ok(lines.length, `docs/${name} does not name the support inbox ${inbox}`);
     for (const line of lines) {
       const paths = [...line.matchAll(/`([\w./-]+\.(?:md|js))`/g)].map((m) => m[1]).filter((p) => p !== 'docs/' + name);
       for (const p of paths) {
         const url = new URL('../' + p, import.meta.url);
         assert.ok(existsSync(url), `${p}, named in docs/${name}, does not exist`);
-        assert.match(readFileSync(url, 'utf8'), /[\w.+-]+@[\w-]+\.[\w.]+|\[support email\]/, `docs/${name} says the support address lives in ${p}, which has no support address or bracket for one`);
+        assert.ok(readFileSync(url, 'utf8').includes(inbox), `docs/${name} says the support address lives in ${p}, which does not have ${inbox}`);
       }
     }
   }
+  // the website shows the same address once it has one
+  if (SITE.supportEmail) assert.equal(SITE.supportEmail, inbox, 'site/config.js supportEmail is not the inbox docs/support.md gives');
+});
+
+// store/listing.md is what goes into the Web Store dashboard: its homepage and
+// support lines are the site and the inbox, and its legal addresses are the
+// ones the wizard links to, placeholders until the texts are final.
+test('store/listing.md gives the site, the support inbox and the legal addresses legalLinks.js holds', () => {
+  const listing = read('../store/listing.md');
+  const inbox = supportInbox();
+  const section = listing.slice(listing.indexOf('## Support and homepage'), listing.indexOf('## Before submitting'));
+  assert.ok(section.startsWith('## Support and homepage'), 'store/listing.md has no "Support and homepage" section');
+  const values = (label) => {
+    const line = section.split('\n').find((l) => l.startsWith(`- ${label}: `));
+    assert.ok(line, `store/listing.md has no "${label}" line`);
+    return [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  };
+  assert.doesNotMatch(listing, /\[support email\]|\[support page URL\]/, 'store/listing.md still has a support bracket');
+  const [home] = values('Homepage');
+  assert.match(home, /^https:\/\/[^/]+\/$/, 'the homepage is not an https origin with its slash');
+  assert.doesNotMatch(new URL(home).hostname, PLACEHOLDER_HOST, 'the homepage is a placeholder');
+  if (SITE.siteUrl) assert.equal(home, SITE.siteUrl + '/', 'the homepage is not siteUrl in site/config.js');
+  const supportPage = new URL('support/', home).href;
+  assert.deepEqual(values('Support'), [inbox, supportPage], 'the support line is not the inbox and the support page');
+  assert.ok(existsSync(new URL('../site/support/index.html', import.meta.url)), 'the support page the listing names is not in site/');
+  const described = listing.split('\n').find((l) => l.startsWith('Support: '));
+  assert.ok(described && described.includes(inbox) && described.includes(supportPage), 'the detailed description does not give the support inbox and page');
+  // the three documents, and the privacy policy URL in the privacy answers, are LEGAL's addresses
+  assert.deepEqual(values('Terms of Service'), [LEGAL.termsUrl]);
+  assert.deepEqual(values('Privacy Policy'), [LEGAL.privacyUrl]);
+  assert.deepEqual(values('Posting rules'), [LEGAL.rulesUrl]);
+  assert.ok(listing.includes(`Privacy policy URL: \`${LEGAL.privacyUrl}\``), 'the privacy answers give another privacy policy URL than legalLinks.js');
 });
 
 // Every Markdown or script file outside the docs and the history that holds

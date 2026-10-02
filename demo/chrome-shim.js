@@ -165,7 +165,7 @@
 
     const hub = {
       manifest: options.manifest || { name: 'Lot Current', version: '' },
-      extensionId: options.extensionId || 'lot-sync-sandbox',
+      extensionId: options.extensionId || 'lot-current-sandbox',
       extensionBase: options.extensionBase || '',
       tabs: options.tabs || null,
       alarms,
