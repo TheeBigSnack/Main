@@ -373,3 +373,28 @@ test('Start a free pilot: hidden in the page, shown only once config.js names th
   assertHonest(text.replaceAll('Start a free pilot', `Start a free ${pricing.pilotDays}-day pilot`), 'the page with sign-up open');
   assert.doesNotMatch(js, /https?:\/\//i, 'site.js still names no address of its own');
 });
+
+// review: the support page's privacy section said "nothing leaves your browser" and that Clear everything
+// for this website removes it, while the privacy policy (and the code) put the profile in Chrome's sync
+// storage, send a VIN to NHTSA on a click and send the car's facts to the rewrite service when it is on,
+// and keep the synced profile until Forget my synced profile.
+test('no customer-facing page says nothing leaves the browser, and the support page names where data goes without an account', () => {
+  const policy = read('../legal/privacy-policy.md');
+  const claim = /nothing (ever )?(leaves|leaving) (your|the) (browser|computer)|never leaves (your|the) (browser|computer)|everything stays in (your|the) browser/i;
+  const files = [
+    ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
+    ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+  ];
+  for (const rel of files) assert.doesNotMatch(stripTags(read(rel)), claim, `${rel.slice(3)} says nothing leaves the browser`);
+  const support = stripTags(read('../site/support/index.html'));
+  const privacy = support.slice(support.indexOf('Privacy requests'), support.indexOf('What support never does'));
+  assert.ok(privacy.length > 100, 'the support page has its Privacy requests section');
+  if (/Chrome's sync storage/.test(policy)) {
+    assert.match(privacy, /Chrome's sync storage/, 'the privacy policy keeps the profile in Chrome sync; the support page says so');
+    assert.match(privacy, /Forget my synced profile/, 'and names the button that removes it');
+  }
+  if (/NHTSA/.test(policy)) assert.match(privacy, /NHTSA/, 'the privacy policy sends a VIN to NHTSA on a click; the support page says so');
+  if (/rewrite service/.test(policy)) assert.match(privacy, /rewrite service/, 'the privacy policy sends the car\'s facts to the rewrite service when it is on; the support page says so');
+  assert.doesNotMatch(privacy, /Clear everything for this website removes it\b/, 'Clear everything for this website does not remove the synced profile');
+});
