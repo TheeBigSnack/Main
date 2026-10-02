@@ -19,15 +19,19 @@
 //     don't make, and no number, in digits or in words, that isn't in the
 //     website's data
 // The template is the final fallback, so it is built to pass its own checks
-// and, when in doubt, to say less. Its write-up line is at most two finished
-// sentences from one segment of the write-up: the first segment that starts
-// a sentence on the website and holds a finished one (description.js
-// openingSegment). A segment that may carry on a sentence (one after a line
-// that did not end a sentence or a heading with a colon, or one that starts
-// in lower case) is never copied, nothing from a later segment is added,
-// and with no such segment there is no write-up line. Only sentences the
-// checks would accept, and none about fees, taxes or tags (the price note's
-// to say), are copied. When the website's words shout beyond the car's own
+// and, when in doubt, to say less. Its write-up line comes only from the
+// write-up's first segment past any heading, and only when that segment
+// starts a sentence on the website (description.js openingSegment): a later
+// segment is never read instead, since one may carry on a sentence the
+// website broke and say the opposite read alone. From it, the line is the
+// opening sentences in order, before any equipment list taken out of it
+// (writeUpParts' lead), at most two and 45 words, stopping at the first one
+// that is unfinished (it does not end in ".", "!" or "?", or ends on an
+// abbreviation) or that the checks would refuse or that is about fees,
+// taxes, tags, title, registration or licence (the price note's to say),
+// and copying nothing after it (storyLine). A sentence is never cut at an
+// abbreviation it knows (description.js splitSentences). With nothing to
+// copy there is no write-up line. When the website's words shout beyond the car's own
 // abbreviations ("SLE", "AWD": they stay as written, and the checks pass
 // over them) it writes them calmly, leaves out a write-up, colour or engine
 // line that still shouts on its own, and counts words as the checks do.
@@ -38,7 +42,7 @@
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
-import { splitSegments, splitSentences, openingSegment, ENDS_SENTENCE, STARTS_SENTENCE } from './description.js';
+import { splitSegments, splitSentences, openingSegment, finishesSentence } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -238,11 +242,12 @@ function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = n
 // may copy: no price at all (the price is the listing's own field), no
 // price change, and no mileage other than the website's.
 const statesNoOtherNumbers = (text, vehicle) => !priceAndMileageProblems(text, { vehicle }).length;
-// Fees, taxes and tags are the dealer's price note's to state (Settings, in
-// every description it applies to): a write-up sentence about them is never
-// copied, so a disclaimer the lot-wide check could not catch (on a lot of one
-// or two cars) never contradicts the note.
-const FEE_WORDS = /\b(?:fees?|tax(?:es)?|tags?|registration)\b/i;
+// Fees, taxes, tags, title, registration and licence are the dealer's price
+// note's to state (Settings, in every description it applies to): a
+// write-up sentence about any of them is never copied, so a disclaimer the
+// lot-wide check could not catch (on a lot of one or two cars) never
+// contradicts the note.
+const FEE_WORDS = /\b(?:fees?|tax(?:es)?|tags?|title[ds]?|titling|registration|registered|doc|docs|documentation|licen[cs]e[ds]?|licensing|charges?|processing)\b/i;
 
 // A write-up sentence the template may copy: that, and nothing the checks
 // would refuse in the template's own text, a banned phrase ("no accidents",
@@ -252,17 +257,25 @@ const FEE_WORDS = /\b(?:fees?|tax(?:es)?|tags?|registration)\b/i;
 const narrativeSentenceOk = (sentence, vehicle) =>
   statesNoOtherNumbers(sentence, vehicle) && !FEE_WORDS.test(sentence) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence, ownAbbreviations(vehicle)) && emojiCount(sentence) <= 1;
 
-// The sentences of the write-up's opening segment, as the template reads
-// them: a piece that starts in lower case belongs to the sentence before it
-// ("Comes with approx. two keys." is one sentence, never "Comes with
-// approx."), so every sentence copied starts as a sentence does.
-function openingSentences(segment) {
+// The write-up line: the opening sentences of the write-up's opening
+// segment (description.js openingSegment), in order, from its first. It
+// stops at the first sentence that is not finished (it does not end in
+// ".", "!" or "?", or it ends on an abbreviation such as "Mfr." or
+// "approx."), that the checks would refuse (narrativeSentenceOk), or that
+// would take it past two sentences or 45 words, and copies nothing from
+// there on: it never leaves a sentence out and copies the one after it.
+// splitSentences already keeps a sentence whole across an abbreviation
+// ("the original Mfr. Warranty applies") and before a piece in lower case.
+const STORY_MAX_SENTENCES = 2;
+const STORY_MAX_WORDS = 45;
+function storyLine(segment, vehicle) {
   const out = [];
-  for (const piece of splitSentences(segment)) {
-    if (out.length && !STARTS_SENTENCE.test(piece)) out[out.length - 1] += ` ${piece}`;
-    else out.push(piece);
+  for (const sentence of splitSentences(segment)) {
+    if (out.length === STORY_MAX_SENTENCES || !finishesSentence(sentence) || !narrativeSentenceOk(sentence, vehicle)) break;
+    if (wordCount([...out, sentence].join(' ')) > STORY_MAX_WORDS) break;
+    out.push(sentence);
   }
-  return out;
+  return out.join(' ');
 }
 
 // The website's features a description can name as highlights: each once,
@@ -375,15 +388,6 @@ function stripClosing(text, line) {
   return String(text || '').replace(closingPattern(c), ' ');
 }
 
-function firstSentences(sentences, maxSentences, maxWords, keep = () => true) {
-  const out = [];
-  for (const s of sentences.filter(keep).slice(0, maxSentences)) {
-    if (wordCount([...out, s].join(' ')) > maxWords) break;
-    out.push(s);
-  }
-  return out.join(' ');
-}
-
 const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /**
@@ -392,8 +396,8 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   dealer:      { name, city }
  *   salesperson: { name, title }
  *   priceNote:   the dealer's wording about fees, typed in Settings (a suggested sentence is offered from the website's price gap)
- *   narrative:   the car-specific write-up from description.js: writeUpParts' { text, opens } per segment, or plain
- *                strings (cleanDescription) read as the website's segments in order
+ *   narrative:   the car-specific write-up from description.js: writeUpParts' { text, opens, lead } per segment
+ *                (plain strings are never copied: whether a string starts a sentence on the website is not known)
  *   highlights:  the salesperson's pick of the website's features (settleHighlights); null for the usual pick
  *   closingLine: the salesperson's own line from Settings (salesperson.closingLine), used when it passes checkClosingLine
  *   stores:      the salesperson's ticked stores (settings.myStores); a car the website lists at any other store, or
@@ -413,10 +417,9 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  // the write-up line: the first two finished sentences of one segment of the write-up, the first that starts a
-  // sentence on the website and holds a finished one (openingSegment), leaving out any the checks would refuse;
-  // never a segment that carries on an unfinished sentence, and nothing from a later segment
-  const story = firstSentences(openingSentences(openingSegment(narrative)), 2, 45, (sentence) => ENDS_SENTENCE.test(sentence) && narrativeSentenceOk(sentence, v));
+  // the write-up line: the opening sentences of the write-up's opening segment, stopping at the first one that is
+  // unfinished or refused (storyLine); nothing from a later segment
+  const story = storyLine(openingSegment(narrative), v);
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.

@@ -34,15 +34,54 @@ function linesOf(raw) {
   return raw.split(BLOCK_BREAK).map((block) => block.split(/\r\n|\r|\n/).map(plain).filter(Boolean)).filter((lines) => lines.length);
 }
 
-// A plain line break that only wraps a sentence: the line before leaves the
-// sentence open, and either the next line carries on in lower case or the
-// line before stops on a comma, a dash or a word in lower case ("comes with
-// the", "new"), whatever the next line starts with ("Michelin", "3.6L"). A
-// heading or a title stops on neither ("Dealer Comments:", "Vehicle
-// Highlights", "2019 Jeep Grand Cherokee Limited"), so it keeps its own line,
-// and a list item ("- Heated seats") never joins the line before it.
+// A piece of text that ends as a sentence does, and one that starts as a
+// sentence does: its first letter or digit is a capital or a digit, with
+// nothing before it but opening punctuation ("(", "\u201c", "\u00a1",
+// "\u00bf"), quotes or emoji. A piece that starts in lower case ("warranty
+// of any kind.", "brakes and tires.") carries on a sentence begun before it.
+export const ENDS_SENTENCE = /[.!?][\p{Pe}\p{Pf}"']*$/u;
+export const STARTS_SENTENCE = /^[\s\p{Ps}\p{Pi}"'\u00a1\u00bf\p{Extended_Pictographic}\ufe0f\u200d]*[\p{Lu}\p{N}]/u;
+
+// A full stop after an abbreviation does not end a sentence: "the original
+// Mfr. Warranty", "approx. two keys", "a Jeep Cert. Pre-Owned unit". An
+// abbreviation is a single letter or letters with full stops between them
+// ("J.", "U.S.", "e.g."), a word on this list, or a word in lower case or
+// mixed case with no vowel ("Mfr.", "pkg.", "St.", "Ltd."), except right
+// after a number, where it is a unit ("30 mpg.", "395 hp."). A word in
+// capitals with no vowel ("RWD.", "SLT.") is the car's own name, not one.
+const ABBREVIATIONS = new Set([
+  'approx', 'appx', 'incl', 'excl', 'est', 'orig', 'cert', 'certif', 'manuf', 'mfr', 'mfrs', 'mfg', 'pkg', 'pkgs', 'warr',
+  'opt', 'opts', 'equip', 'avail', 'eq', 'misc', 'vs', 'no', 'nos', 'inc', 'co', 'corp', 'llc', 'ave', 'hwy', 'pkwy', 'ste',
+  'apt', 'dept', 'bros', 'gen', 'gov', 'prof', 'capt', 'col', 'rev', 'yr', 'yrs', 'mo', 'mos', 'jan', 'feb', 'mar', 'apr',
+  'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec', 'prem', 'nav', 'sys', 'reg', 'ext', 'int', 'adj', 'elec', 'alum',
+  'conv', 'susp', 'trans', 'eng', 'cyl', 'cap', 'gal', 'ea', 'ref', 'vol', 'sec', 'temp',
+]);
+export function endsAtAbbreviation(text) {
+  const t = String(text ?? '').trimEnd();
+  if (!t.endsWith('.')) return false;
+  const tokens = t.slice(0, -1).split(/\s+/);
+  const word = tokens[tokens.length - 1].replace(/^[\p{Ps}\p{Pi}"'\u00a1\u00bf]+/u, '');
+  const before = tokens.length > 1 ? tokens[tokens.length - 2] : '';
+  if (/^(?:\p{L}\.)*\p{L}$/u.test(word)) return true;
+  if (!/^\p{L}+$/u.test(word)) return false;
+  if (ABBREVIATIONS.has(word.toLowerCase())) return true;
+  return /\p{Ll}/u.test(word) && !/[aeiouy\u00e0-\u00ff]/i.test(word) && !/\d$/.test(before);
+}
+
+// Whether a piece of text finishes a sentence: it ends as a sentence does,
+// and not on an abbreviation.
+export const finishesSentence = (text) => ENDS_SENTENCE.test(String(text ?? '').trimEnd()) && !endsAtAbbreviation(text);
+
+// A plain line break that only wraps a sentence: the line before stops on an
+// abbreviation ("approx.", "the original mfr."), or it leaves the sentence
+// open and either the next line carries on in lower case or the line before
+// stops on a comma, a dash or a word in lower case ("comes with the", "new"),
+// whatever the next line starts with ("Michelin", "3.6L"). A heading or a
+// title stops on neither ("Dealer Comments:", "Vehicle Highlights", "2019
+// Jeep Grand Cherokee Limited"), so it keeps its own line, and a list item
+// ("- Heated seats") never joins the line before it.
 const wraps = (before, next) =>
-  OPEN_SENTENCE.test(before) && !/^[-\u2022*]\s/.test(next) && (/^[a-z]/.test(next) || /(?:[,\u2013\u2014-]|\b[a-z][a-z'\u2019]*)$/.test(before));
+  !/^[-\u2022*]\s/.test(next) && (endsAtAbbreviation(before) || (OPEN_SENTENCE.test(before) && (/^[a-z]/.test(next) || /(?:[,\u2013\u2014-]|\b[a-z][a-z'\u2019]*)$/.test(before))));
 
 // The description's segments: its lines, with each wrapped line joined to the
 // one before it. `keep` gives what is kept of each line ('' leaves it out)
@@ -71,9 +110,17 @@ export function splitSegments(raw, keep = (line) => line) {
   return segmentsOf(raw, keep).map((seg) => seg.text);
 }
 
-// The sentences of one segment, split where the template splits them.
+// The sentences of one segment: split after ".", "!" or "?", except that a
+// piece stays with the one before it when that one stops on an abbreviation
+// ("the original Mfr. Warranty applies", "approx. Two keys") or when the
+// piece does not start as a sentence does ("tow pkg. and a bed liner").
 export function splitSentences(segment) {
-  return String(segment || '').split(/(?<=[.!?])\s+/).filter(Boolean);
+  const out = [];
+  for (const piece of String(segment || '').split(/(?<=[.!?])\s+/).filter(Boolean)) {
+    if (out.length && (endsAtAbbreviation(out[out.length - 1]) || !STARTS_SENTENCE.test(piece))) out[out.length - 1] += ` ${piece}`;
+    else out.push(piece);
+  }
+  return out;
 }
 
 // The absolute floor under the share: a share alone misbehaves on a tiny
@@ -137,42 +184,68 @@ function looksLikeEquipmentDump(text) {
   return items.length >= 3 && items.every((item) => /^[A-Z0-9]/.test(item) && item.split(/\s+/).length <= 3 && !SENTENCE_WORD.test(item));
 }
 
-// A piece of text that ends as a sentence does, and one that starts as a
-// sentence does: its first letter or digit is a capital or a digit, with
-// nothing before it but quotes, brackets or emoji. A piece that starts in
-// lower case ("warranty of any kind.", "brakes and tires.") carries on a
-// sentence begun before it.
-export const ENDS_SENTENCE = /[.!?]["'\u2019\u201d)]*$/;
-export const STARTS_SENTENCE = /^[\s"'\u2018\u201c([\p{Extended_Pictographic}\ufe0f\u200d]*[\p{Lu}\p{N}]/u;
+// A heading: a line of at most four words that ends in a colon and only
+// names a part of the write-up, in words from this list ("Dealer
+// Comments:", "Vehicle Highlights:", "About this vehicle:", "Manager's
+// Notes:"). After any other line that ends in a colon the next line may
+// finish what it began ("This vehicle does not come with:", "The previous
+// owner removed the following:", "Sold without:") or carry a meaning it
+// gave ("Exclusions:", "Known issues:"), so that next line never starts
+// the write-up line.
+const HEADING_MAX_WORDS = 4;
+const HEADING_WORDS = new Set([
+  'dealer', 'dealers', 'dealership', 'comments', 'comment', 'notes', 'note', 'remarks', 'description', 'overview', 'summary',
+  'details', 'detail', 'info', 'information', 'highlights', 'highlight', 'features', 'feature', 'options', 'equipment', 'specs',
+  'specifications', 'facts', 'vehicle', 'car', 'truck', 'suv', 'van', 'about', 'this', 'the', 'our', 'sales', 'manager',
+  'key', 'quick', 'more', 'additional', 'why', 'buy', 'from', 'us', 'please', 'read', 'and', '&',
+]);
+export function isHeading(line) {
+  const t = String(line ?? '').trim();
+  if (!/:$/.test(t)) return false;
+  const words = t.slice(0, -1).trim().split(/\s+/).map((w) => w.toLowerCase().replace(/['\u2019]s$/, ''));
+  return words.length <= HEADING_MAX_WORDS && words.every((w) => HEADING_WORDS.has(w));
+}
 
 // A segment starts a sentence on the website when it comes first, or the
-// line right before it ended a sentence or is a heading that ends in a colon
-// ("Dealer Comments:"), and it starts as a sentence does. Any other segment
-// may carry on a sentence the website broke across a line break, a
+// line right before it finished a sentence (not on an abbreviation such as
+// "Mfr.") or is a heading, and it starts as a sentence does. Any other
+// segment may carry on a sentence the website broke across a line break, a
 // paragraph or a list item ("...is not a Jeep" + "Certified Pre-Owned
-// vehicle."), and read alone it can say the opposite of the website; so may
-// the one after a heading or a title with no colon ("Vehicle Highlights").
-const startsAfter = (before) => before === null || ENDS_SENTENCE.test(before) || /:$/.test(before);
+// vehicle.", "Sold without:" + "Warranty of any kind."), and read alone it
+// can say the opposite of the website; so may the one after a title with no
+// colon ("Vehicle Highlights").
+const startsAfter = (before) => before === null || finishesSentence(before) || isHeading(before);
 
 // The car-specific narrative left after boilerplate, award blurbs, feature
-// bullets and raw equipment dumps are removed: one { text, opens } per
+// bullets and raw equipment dumps are removed: one { text, opens, lead } per
 // segment, with any lot-wide sentence or equipment list inside it taken out
 // and the rest of the segment kept as written. `opens` is whether the
 // segment starts a sentence on the website, judged against the line the
-// website shows right before it, even one left out here.
+// website shows right before it, even one left out here; it is false when
+// the segment starts with an equipment list, or comes right after a bullet,
+// an award line or an equipment list ("Not included: Heated Seats, ...").
+// `lead` is the segment's own sentences up to the first equipment list
+// taken out of it.
 export function writeUpParts(raw, boilerplate = new Set()) {
   const kept = [];
   // a lot-wide line, or a lot-wide sentence in a line, goes before wrapped lines are joined
   const own = (line) => (boilerplate.has(line) ? '' : splitSentences(line).filter((s) => !boilerplate.has(s)).join(' '));
+  let afterList = false;
   for (const { text: seg, before } of segmentsOf(raw, own)) {
-    const opens = startsAfter(before) && STARTS_SENTENCE.test(seg);
+    const opens = !afterList && startsAfter(before) && STARTS_SENTENCE.test(seg);
+    afterList = false;
     if (boilerplate.has(seg)) continue;
-    if (AWARDS_PREFIX.test(seg)) continue;
-    if (looksLikeBullet(seg)) continue;
+    if (AWARDS_PREFIX.test(seg) || looksLikeBullet(seg)) {
+      afterList = true;
+      continue;
+    }
     const carText = splitSentences(seg).filter((s) => !boilerplate.has(s)).join(' ');
-    const stripped = carText.replace(CARFAX_PREFIX, '').trim();
-    const text = splitSentences(stripped).filter((s) => !looksLikeEquipmentDump(s)).join(' ');
-    if (text) kept.push({ text, opens: opens && STARTS_SENTENCE.test(text) });
+    const sentences = splitSentences(carText.replace(CARFAX_PREFIX, '').trim());
+    const list = sentences.findIndex(looksLikeEquipmentDump);
+    afterList = sentences.length > 0 && looksLikeEquipmentDump(sentences[sentences.length - 1]);
+    const text = sentences.filter((s) => !looksLikeEquipmentDump(s)).join(' ');
+    const lead = (list === -1 ? sentences : sentences.slice(0, list)).join(' ');
+    if (text) kept.push({ text, opens: opens && list !== 0 && STARTS_SENTENCE.test(text), lead });
   }
   return kept;
 }
@@ -183,20 +256,17 @@ export function cleanDescription(raw, boilerplate = new Set()) {
   return writeUpParts(raw, boilerplate).map((p) => p.text);
 }
 
-// The one segment the template's write-up line may come from: the first
-// that starts a sentence on the website and holds a finished sentence. A
-// segment that does not start a sentence is never it, and no later segment
-// is added to it; with no such segment there is none (''). Takes
-// writeUpParts' { text, opens }, or plain strings read as the website's
-// segments in order, each judged against the one before it.
+// The one segment the template's write-up line may come from: the
+// write-up's first, passing over headings ("Dealer Comments:"), and only
+// when it starts a sentence on the website (writeUpParts' `opens`); that
+// segment's `lead` is returned. No later segment is ever read instead or
+// added to it: when the first does not start a sentence there is none ('').
+// A part that is not writeUpParts' { text, opens, lead } (a plain string)
+// never starts one.
 export function openingSegment(parts) {
-  let before = null;
   for (const part of Array.isArray(parts) ? parts : []) {
-    const plainText = typeof part === 'string';
-    const text = plainText ? part : String((part && part.text) || '');
-    const opens = plainText ? startsAfter(before) && STARTS_SENTENCE.test(text) : Boolean(part && part.opens);
-    before = text;
-    if (opens && splitSentences(text).some((s) => ENDS_SENTENCE.test(s))) return text;
+    if (part && typeof part === 'object' && isHeading(part.text)) continue;
+    return part && typeof part === 'object' && part.opens === true ? String(part.lead ?? part.text ?? '') : '';
   }
   return '';
 }

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, ensureVinLine, stripVin, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
 import { vehicle } from './helpers.js';
+import { writeUpParts } from '../extension/src/description.js';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
 const ME = { name: 'Roger', title: 'sales consultant' };
@@ -83,11 +84,11 @@ test('a sparse car still reaches the word minimum, with or without the salespers
 });
 
 test('a wordy write-up and lots of features are trimmed to the limit', () => {
-  const narrative = [
+  const narrative = writeUpParts(
     'This striking 2016 Dodge Challenger SRT Hellcat delivers premium performance wrapped in sophisticated style, with a supercharged engine that makes every drive an event. ' +
       'Inside, the cabin is comfortable and well appointed with everything you need for a long trip or a quick run into town. ' +
       'It has been well cared for and shows nicely inside and out.',
-  ];
+  );
   const v = vehicle('usedNoCarfax', { features: FEATURES });
   const text = buildTemplateDescription({ ...ctx(v), narrative });
   const g = runGuardrails(text, ctx(v));
@@ -95,10 +96,12 @@ test('a wordy write-up and lots of features are trimmed to the limit', () => {
   assert.ok(g.words <= WORD_LIMITS.max, `${g.words} words`);
 });
 
-test('the write-up sentence is used only when it fits', () => {
+test('the write-up sentence is used only when it fits, and only from the write-up as description.js reads it', () => {
   const v = vehicle('usedNormal', { features: FEATURES.slice(0, 4) });
-  const text = buildTemplateDescription({ ...ctx(v), narrative: ['Local trade with new tires and brakes.'] });
+  const text = buildTemplateDescription({ ...ctx(v), narrative: writeUpParts('Local trade with new tires and brakes.') });
   assert.match(text, /Local trade with new tires and brakes\./);
+  // a plain string says nothing of whether it starts a sentence on the website, so it is never copied
+  assert.doesNotMatch(buildTemplateDescription({ ...ctx(v), narrative: ['Local trade with new tires and brakes.'] }), /Local trade/);
 });
 
 test('numbers are normalised before comparing', () => {
@@ -263,13 +266,18 @@ test('distances, ranges and warranty terms are not read as the mileage', () => {
   assert.deepEqual(dollarAmounts('$28,995, $ 490 and $28.5k').map((a) => a.value), [28995, 490, 28500]);
 });
 
-test('the template leaves out write-up sentences with a price or another mileage, and still passes its own checks', async () => {
+test('the template\'s write-up line stops at a sentence with a price or another mileage, and still passes its own checks', async () => {
   const v = { ...vehicle('usedNormal'), descriptionRaw: STALE };
   const r = await generateDescription({ vehicle: v, dealer: EXAMPLE, salesperson: SAM, price: 26673 });
   assert.doesNotMatch(r.text, /\$|38,000|now just/);
-  assert.match(r.text, /Rides on 20-inch wheels with the 8\.4-inch touchscreen\./, 'the next sentence is used instead');
+  assert.doesNotMatch(r.text, /Rides on 20-inch wheels/, 'nothing after a sentence it leaves out');
   assert.deepEqual(r.guardrails.problems, []);
   assert.match(r.text, /with 20,986 miles\./);
+  // the sentences before it are copied
+  const before = await generateDescription({ vehicle: { ...v, descriptionRaw: 'Rides on 20-inch wheels with the 8.4-inch touchscreen. Was $31,995, now just $28,995 with 38,000 miles!' }, dealer: EXAMPLE, salesperson: SAM, price: 26673 });
+  assert.match(before.text, /^Rides on 20-inch wheels with the 8\.4-inch touchscreen\.$/m);
+  assert.doesNotMatch(before.text, /\$|38,000|now just/);
+  assert.deepEqual(before.guardrails.problems, []);
 });
 
 test('the template passes its own word count whatever the features and write-up (the VIN line is not counted)', () => {
@@ -277,7 +285,7 @@ test('the template passes its own word count whatever the features and write-up 
   for (let n = 0; n <= picks.length; n += 1) {
     for (const narrative of [[], ['A clean truck.'], ['A clean truck that drives well.'], ['A clean truck that drives well and has been kept up nicely.']]) {
       const v = { ...vehicle('usedNoCarfax', { features: picks.slice(0, n) }), descriptionRaw: narrative.join(' ') }; // the write-up comes from the website's description
-      const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price, narrative };
+      const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price, narrative: writeUpParts(v.descriptionRaw) };
       assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], `${n} features, ${JSON.stringify(narrative)}`);
     }
   }
@@ -309,10 +317,10 @@ test('a stale mileage or price is caught in the usual ways a write-up states it,
   for (const [sentence, codes] of Object.entries(stale)) {
     const got = runGuardrails(`${base}\n${sentence}`, c).problems.map((p) => p.code).filter((code) => /price|mileage/.test(code));
     assert.deepEqual([...new Set(got)].sort(), codes, sentence);
-    // the template, given the same sentence in the write-up, leaves it out and still passes
-    const r = await generateDescription({ vehicle: { ...v, descriptionRaw: `${sentence} Rides on 20-inch wheels with the 8.4-inch touchscreen.` }, dealer: EXAMPLE, salesperson: SAM, price: 26673 });
+    // the template, given the same sentence in the write-up, stops before it and still passes
+    const r = await generateDescription({ vehicle: { ...v, descriptionRaw: `Rides on 20-inch wheels with the 8.4-inch touchscreen. ${sentence}` }, dealer: EXAMPLE, salesperson: SAM, price: 26673 });
     assert.ok(!r.text.includes(sentence), `the template leaves out: ${sentence}`);
-    assert.match(r.text, /Rides on 20-inch wheels/);
+    assert.match(r.text, /^Rides on 20-inch wheels with the 8\.4-inch touchscreen\.$/m);
     assert.deepEqual(r.guardrails.problems, [], sentence);
   }
   assert.ok(runGuardrails(`${base}\nOnly 38,000 original miles.`, c).problems.some((p) => p.text === 'Says 38,000 miles, but the website shows 20,986 miles'));
@@ -334,13 +342,17 @@ test('a model year, fuel economy, a warranty, a range or a weight is never read 
   assert.deepEqual(dollarAmounts('Only 2,019 dollars down, 1500 bucks off, save 1,500 or save up to 2k.').map((a) => a.value), [2019, 1500, 1500, 2000]);
 });
 
-test('the template leaves out write-up sentences the checks would refuse: a banned phrase, or one owner without the Carfax flag', async () => {
+test('the template\'s write-up line stops at a sentence the checks would refuse: a banned phrase, or one owner without the Carfax flag', async () => {
   const v = vehicle('usedNormal', { features: FEATURES });
   for (const sentence of ['Priced for our private sale event this weekend.', 'No accidents and runs perfect!', 'A one-owner truck, traded in here.']) {
-    const r = await generateDescription({ vehicle: { ...v, carfaxOneOwner: false, descriptionRaw: `${sentence} Rides on 20-inch wheels with the 8.4-inch touchscreen.` }, dealer: EXAMPLE, salesperson: SAM, price: v.price });
+    const r = await generateDescription({ vehicle: { ...v, carfaxOneOwner: false, descriptionRaw: `Rides on 20-inch wheels with the 8.4-inch touchscreen. ${sentence}` }, dealer: EXAMPLE, salesperson: SAM, price: v.price });
     assert.ok(!r.text.includes(sentence), `the template leaves out: ${sentence}`);
-    assert.match(r.text, /Rides on 20-inch wheels/);
+    assert.match(r.text, /^Rides on 20-inch wheels with the 8\.4-inch touchscreen\.$/m);
     assert.deepEqual(r.guardrails.problems, [], sentence);
+    // and copies nothing after it
+    const first = await generateDescription({ vehicle: { ...v, carfaxOneOwner: false, descriptionRaw: `${sentence} Rides on 20-inch wheels with the 8.4-inch touchscreen.` }, dealer: EXAMPLE, salesperson: SAM, price: v.price });
+    assert.doesNotMatch(first.text, /Rides on 20-inch wheels/, sentence);
+    assert.deepEqual(first.guardrails.problems, [], sentence);
   }
   // with the Carfax one-owner flag the same sentence is the website's own fact
   const flagged = await generateDescription({ vehicle: { ...v, carfaxOneOwner: true, descriptionRaw: 'A one-owner truck, traded in here. Rides on 20-inch wheels.' }, dealer: EXAMPLE, salesperson: SAM, price: v.price });
@@ -643,7 +655,10 @@ test('a denial of accidents is banned in any number, and "first owner" is a one-
   assert.deepEqual(codesAfter('Sold new here to its first owner.'), ['one-owner']);
   assert.deepEqual(codesAfter('Sold new here to its first owner.', plainCtx({ ...PLAIN(), carfaxOneOwner: true })), []);
   // the template never copies such a sentence from the write-up
-  assert.deepEqual(runGuardrails(buildTemplateDescription({ ...plainCtx(), narrative: ['No accident on record and its first owner kept it garaged.'] }), plainCtx()).problems, []);
+  const told = plainCtx({ ...PLAIN(), descriptionRaw: 'No accident on record and its first owner kept it garaged.' });
+  const text = buildTemplateDescription({ ...told, narrative: writeUpParts(told.vehicle.descriptionRaw) });
+  assert.doesNotMatch(text, /accident|first owner/);
+  assert.deepEqual(runGuardrails(text, told).problems, []);
 });
 
 test('a write-up with markup inside a claim still backs the template that copies it', async () => {
@@ -820,59 +835,117 @@ test('a name in capitals is written calmly in the description only; one that doe
   }
 });
 
-test('the write-up line comes from one segment of the write-up, the first that starts a sentence on the website: never one that carries on a sentence, and nothing from a later one', async () => {
-  const story = {
-    // a heading that ends in a colon: the write-up after it starts a sentence
-    'Dealer Comments:\nLocal trade with new brakes and tires.': 'Local trade with new brakes and tires.',
-    'Dealer Comments:<br>Local trade with new brakes and tires.': 'Local trade with new brakes and tires.',
-    // a plain line break after a word in lower case, a comma or a dash wraps a sentence, which is read whole
-    'Local trade with new\nMichelin tires and fresh brakes.': 'Local trade with new Michelin tires and fresh brakes.',
-    'This truck comes with the\n8.4-inch touchscreen and a tow package.': 'This truck comes with the 8.4-inch touchscreen and a tow package.',
-    // so a heading on a line of its own that stops on a word in lower case, with no colon, is read as the start of that sentence
-    'Dealer comments\nLocal trade with new brakes and tires.': 'Dealer comments Local trade with new brakes and tires.',
-    // a segment that carries on a sentence the website broke is never copied, whatever it starts with: read alone
-    // it can say the opposite of the website ("...is not a Jeep" + "Certified Pre-Owned vehicle.")
-    'Please note this vehicle is not a Jeep\nCertified Pre-Owned vehicle.': null,
-    'Please note this vehicle is not a Jeep<br>Certified Pre-Owned vehicle.': null,
-    'This vehicle does not come with a<br>warranty of any kind.': null,
-    'Please note this vehicle is not a<br>certified pre-owned vehicle.': null,
-    'This one is not part of the Mopar\nCertified program.': null,
-    'This Limited has a new set of Michelin\nDefender tires and fresh brakes.': null,
-    'Local trade, serviced here with the 3.6L\nV6 and a new battery.': null,
-    'Local trade with new<br>brakes and tires.': null,
-    // after a heading or a title with no colon, the next segment might carry on from it, so it is not copied either
-    '<p><strong>Vehicle Highlights</strong></p><p>Local trade with new brakes and tires.</p>': null,
-    '2019 Ram 1500 Classic Express\nLocal trade with new brakes and tires.': null,
-    // the finished sentences before a sentence the website broke, and nothing of that sentence
-    'Sold as is. It does not include the Uconnect\nNavigation package.': 'Sold as is.',
-    'Local trade. The previous owner removed the Mopar\nTow package and hitch.': 'Local trade.',
-    // one segment only: a later line or paragraph is never added to it
-    'Line one of the write-up.\n\tLine two, after a raw line break and a tab.': 'Line one of the write-up.',
-    'Local trade with new brakes.<br>Price does not include dealer documentation fee, tax or tags.': 'Local trade with new brakes.',
-    'Local trade with new brakes.<br><br>Vehicle subject to prior sale. See dealer for details.': 'Local trade with new brakes.',
-    // a piece that starts in lower case belongs to the sentence before it, so a sentence copied is never cut at an abbreviation
-    'Comes with the tow pkg. and a bed liner. Clean interior.': 'Comes with the tow pkg. and a bed liner. Clean interior.',
-    // a heading and a list with no sentence in it give no write-up line at all
-    'Features:\nHeated Seats\nNavigation\nSunroof': null,
-  };
-  for (const [raw, line] of Object.entries(story)) {
-    const v = { ...PLAIN(), descriptionRaw: raw, location: '' };
-    const r = await generateDescription({ ...plainCtx(v), settings: {} });
-    const second = r.text.split('\n')[1];
-    if (line) assert.equal(second, line, raw);
-    else assert.match(second, /^Highlights: /, raw);
-    assert.deepEqual(r.guardrails.problems, [], raw);
+// Every write-up the reviews of this rule tried, with the write-up line the template gives: the website's whole
+// sentence or sentences, or none (null). Never the second half of a sentence, and never a sentence after one left out.
+const WRITE_UP_LINES = {
+  // the write-up's first line or paragraph, or the first after a heading, is the only one the line may come from
+  'Dealer Comments:\nLocal trade with new brakes and tires.': 'Local trade with new brakes and tires.',
+  'Dealer Comments:<br>Local trade with new brakes and tires.': 'Local trade with new brakes and tires.',
+  'Local trade with new brakes.<br><br>Certified Pre-Owned vehicle.': 'Local trade with new brakes.',
+  'Line one of the write-up.\n\tLine two, after a raw line break and a tab.': 'Line one of the write-up.',
+  'Local trade with new brakes.<br>Price does not include dealer documentation fee, tax or tags.': 'Local trade with new brakes.',
+  'Local trade with new brakes.<br><br>Vehicle subject to prior sale. See dealer for details.': 'Local trade with new brakes.',
+  'Local trade with new brakes.\nAll vehicles are sold as is with no warranty.': 'Local trade with new brakes.',
+  'This SUV is not a Jeep Certified Pre-Owned vehicle.<br>Local trade.': 'This SUV is not a Jeep Certified Pre-Owned vehicle.',
+  // a line in the website's own text that stops on a word in lower case, a comma, a dash or an abbreviation wraps a sentence, read whole
+  'Local trade with new\nMichelin tires and fresh brakes.': 'Local trade with new Michelin tires and fresh brakes.',
+  'This truck comes with the\n8.4-inch touchscreen and a tow package.': 'This truck comes with the 8.4-inch touchscreen and a tow package.',
+  'Comes with approx.\ntwo keys and a spare tire.': 'Comes with approx. two keys and a spare tire.',
+  'This one is not covered by the original mfr.\nWarranty applies only to new units.': 'This one is not covered by the original mfr. Warranty applies only to new units.',
+  'Local trade with new brakes and the tow pkg.\nIncludes a bed liner.': 'Local trade with new brakes and the tow pkg. Includes a bed liner.',
+  // so a heading on a line of its own with no colon that stops in lower case, or a sentence with no full stop, runs into the next line
+  'Dealer comments\nLocal trade with new brakes and tires.': 'Dealer comments Local trade with new brakes and tires.',
+  'Local trade with new brakes and tires\nCall today.': 'Local trade with new brakes and tires Call today.',
+  // a sentence is never cut at an abbreviation: it is copied whole, or not at all when the whole is refused
+  'Local trade, not a Jeep Cert. Pre-Owned unit.': 'Local trade, not a Jeep Cert. Pre-Owned unit.',
+  'Comes with the tow pkg. and a bed liner. Clean interior.': 'Comes with the tow pkg. and a bed liner. Clean interior.',
+  'Tax and tags extra, and this unit is not a Mfr. Certified Pre-Owned vehicle.': null,
+  'Price excludes tax and is not eligible for the Mfr. Certified Pre-Owned program.': null,
+  'No doc fees and no remaining Mfr. Warranty on this one.': null,
+  'Price plus tax; not a Mfr. Certified vehicle.': null,
+  'No dealer fees and it is not covered by the Mfg. Warranty anymore.': null,
+  'Priced at $28,995 and not covered by any Mfr. Warranty.': null,
+  'Has 45,000 miles and is no longer under Mfr. Warranty.': null,
+  'No accidents, but this is not a Mfr. Certified Pre-Owned unit.': null,
+  'This truck has 98,000 miles and is past the original Mfr. Warranty coverage is still active on the powertrain.': null,
+  'Was $32,995 and is no longer under the Mfr. Warranty applies to the next owner.': null,
+  'Price excludes tax; this is not a Jeep Cert. Pre-Owned vehicle. Local trade.': null,
+  // the line stops at the first sentence it leaves out and copies nothing after it
+  'Local trade. Tax and tags extra and not under the Mfr. Warranty.': 'Local trade.',
+  'Sold as is. It does not include the Uconnect\nNavigation package.': 'Sold as is.',
+  'Local trade. The previous owner removed the Mopar\nTow package and hitch.': 'Local trade.',
+  'No accidents.\nCertified Pre-Owned vehicle with warranty.': null,
+  'Price excludes the dealer documentation charge and title. Local trade.': null,
+  'Plus doc, title and license.<br>Local trade.': null,
+  'Local trade. Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package. Floor mats.': 'Local trade.',
+  'Not included: Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package. Floor mats.': null,
+  // nor anything right after a bullet, an award line or a list of equipment it sets aside
+  'Not included: Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package.<br>Floor mats.': null,
+  '- Not included: floor mats.<br>Spare key.': null,
+  'Awards: Not a 2019 KBB Best Buy.<br>Certified Pre-Owned vehicle.': null,
+  'CARFAX One-Owner.<br>Local trade.': 'Local trade.',
+  // a line or paragraph that may carry on a sentence the website broke is never copied: read alone it can say the opposite
+  'Please note this vehicle is not a Jeep\nCertified Pre-Owned vehicle.': null,
+  'Please note this vehicle is not a Jeep<br>Certified Pre-Owned vehicle.': null,
+  '<p>This SUV is not a Jeep</p><p>Certified Pre-Owned vehicle.</p>': null,
+  'This vehicle does not come with a<br>warranty of any kind.': null,
+  'Please note this vehicle is not a<br>certified pre-owned vehicle.': null,
+  'This one is not part of the Mopar\nCertified program.': null,
+  'Our Jeep\nCertified technicians replaced the brakes.': null,
+  'This Limited has a new set of Michelin\nDefender tires and fresh brakes.': null,
+  'Local trade, serviced here with the 3.6L\nV6 and a new battery.': null,
+  'Comes loaded with Uconnect\nNavigation, a sunroof and heated seats.': null,
+  'Equipped with the 5.7L HEMI\nV8 engine and a tow package.': null,
+  'Local trade with new<br>brakes and tires.': null,
+  'Comes with the tow pkg.<br>and a bed liner.': null,
+  'This vehicle is not a Jeep<br>All vehicles are sold as is.<br>Certified Pre-Owned vehicle.': null,
+  '"Not a CPO"<br>Certified Pre-Owned vehicle.': null,
+  // nor is anything after a line that ends in a colon but is not a heading
+  'Please note, this vehicle is not:<br>Certified Pre-Owned.': null,
+  'Sold without:<br>Warranty of any kind.': null,
+  'The previous owner removed the following:<br>Tow package and hitch.': null,
+  'This vehicle does not come with:<br>A spare key.': null,
+  'This vehicle does not come with:<br>A spare key.<br>Floor mats.': null,
+  'Not included with this vehicle:<br>Factory warranty coverage.': null,
+  'Exclusions:<br>Floor mats.': null,
+  'Known issues:\nCheck engine light.': null,
+  'Dealer Comments:<br>This vehicle does not come with:<br>A spare key.': null,
+  // nor anything after a title or a list, or when the write-up's first line is one
+  '<p><strong>Vehicle Highlights</strong></p><p>Local trade with new brakes and tires.</p>': null,
+  'Vehicle Highlights<br>Local trade with new brakes.<br>Clean interior.': null,
+  '2019 Ram 1500 Classic Express\nLocal trade with new brakes and tires.': null,
+  '<ul><li>Heated seats</li></ul><p>Local trade with new brakes.</p>': null,
+  '*** Local trade with new brakes ***<br>Clean interior.': null,
+  'Features:\nHeated Seats\nNavigation\nSunroof': null,
+  // a write-up in another language starts its sentences its own way
+  '¡Camioneta local con frenos nuevos!': '¡Camioneta local con frenos nuevos!',
+};
+
+test('the write-up line is the opening sentences of the write-up\'s first line or paragraph, whole, up to the first one left out: never part of a sentence, and nothing after', async () => {
+  for (const priceNote of ['', 'Price includes the doc fee; tax and tags extra.']) {
+    for (const [raw, line] of Object.entries(WRITE_UP_LINES)) {
+      const v = { ...PLAIN(), descriptionRaw: raw, location: '' };
+      const r = await generateDescription({ ...plainCtx(v, { priceNote }), boilerplate: [], settings: {} });
+      const second = r.text.split('\n')[1];
+      if (line) assert.equal(second, line, raw);
+      else assert.match(second, /^Highlights: /, raw);
+      assert.deepEqual(r.guardrails.problems, [], raw);
+    }
   }
 });
 
-test('the template never copies what the write-up says about fees, taxes or tags: the price note says that', async () => {
+test('the template never copies what the write-up says about fees, taxes, tags, title, registration or licence: the price note says that', async () => {
   // on a lot of one or two cars the lot-wide check finds no disclaimer, and the write-up's own fee line would contradict the note
   const priceNote = 'Price includes the doc fee; tax and tags extra.';
+  const FEES = /\b(?:fees?|tax(?:es)?|tags?|doc|documentation|title|licen[cs]e|charges?|processing|registration)\b/gi;
   const story = {
     'Local trade with new brakes.<br>Price does not include dealer documentation fee, tax or tags.': 'Local trade with new brakes.',
     'Local trade with new brakes. Price does not include dealer documentation fee, tax or tags.': 'Local trade with new brakes.',
+    'Local trade with new brakes. Plus doc, title and license.': 'Local trade with new brakes.',
+    'Local trade with new brakes. Price excludes the dealer documentation charge.': 'Local trade with new brakes.',
+    'Local trade with new brakes. A processing charge applies.': 'Local trade with new brakes.',
     'Dealer Comments:<br>Price does not include dealer documentation fee, tax or tags.': null,
-    'Price excludes taxes and registration. Local trade with new brakes.': 'Local trade with new brakes.',
+    'Price excludes taxes and registration. Local trade with new brakes.': null,
   };
   for (const [raw, line] of Object.entries(story)) {
     const v = { ...PLAIN(), descriptionRaw: raw, location: '' };
@@ -880,7 +953,7 @@ test('the template never copies what the write-up says about fees, taxes or tags
     const second = r.text.split('\n')[1];
     if (line) assert.equal(second, line, raw);
     else assert.match(second, /^Highlights: /, raw);
-    assert.equal(r.text.match(/\b(?:fee|tax|tags)\b/gi).length, 3, `only the price note speaks of fees: ${raw}`);
+    assert.equal(r.text.match(FEES).length, 4, `only the price note speaks of fees: ${raw}`);
     assert.deepEqual(r.guardrails.problems, [], raw);
   }
 });
