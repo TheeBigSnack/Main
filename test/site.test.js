@@ -20,6 +20,7 @@ import { honestyProblems, offPricing } from './honesty.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { profileFrom } from '../extension/src/settings.js';
 import { ADAPTERS, isCheckedLive } from '../extension/adapters/index.js';
+import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -757,4 +758,25 @@ test('the FAQ, How it works and the sales sheet name every website reader, each 
     if (ADAPTERS.some((a) => !isCheckedLive(a))) assert.match(said, /tested only on sample websites/, `${place} names readers that have not read a real website without saying so`);
     assert.doesNotMatch(said, /on the way/, `${place} promises platforms instead of naming the readers there are`);
   }
+});
+
+// review: the home page said "Your dealership sets how many posts a day each salesperson may make", and For
+// managers that the cap is 10 "unless your dealership changes it". The only control is each salesperson's own
+// Settings field (popup.js, 1 to 100), and nothing in the manager view or the database sets or locks it. The
+// pages now say the dealership chooses the number and each salesperson enters it, and For managers says the
+// manager view does not lock it. If a dealership-level cap is ever built, this test says to change the copy.
+test('the daily cap is described as the code has it: the dealership chooses, each salesperson enters it, nothing locks it', () => {
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /field\('Posts per day, per salesperson', 'dailyCap', s\.dailyCap, 'type="number" min="1" max="100"'\)/, 'the cap field moved or changed its range: change the copy with it');
+  assert.match(popup, /dailyCap: Math\.max\(1, Math\.min\(100, /, 'the saved cap is no longer 1 to 100');
+  const managerCode = ['../manager/data.js', '../manager/manager.js'].map(read).join('\n');
+  const migrations = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter((f) => f.endsWith('.sql')).map((f) => read(`../supabase/migrations/${f}`)).join('\n');
+  assert.doesNotMatch(managerCode + migrations, /daily_?cap/i, 'a dealership-level cap now exists: the home page and For managers can say the dealership sets it');
+  const home = stripTags(html);
+  const managers = stripTags(read('../site/for-managers/index.html'));
+  for (const [name, page] of [['the home page', home], ['For managers', managers]]) {
+    assert.doesNotMatch(page, /dealership (sets|changes)|cap you set\b/i, `${name} says the dealership sets the cap, but each salesperson enters it`);
+  }
+  assert.match(home, /Your dealership chooses how many posts a day each salesperson may make, and each salesperson enters that number in their own Settings\./);
+  assert.match(managers, new RegExp(`posts a day, ${DEFAULT_DAILY_CAP} unless changed\\. Your dealership chooses the number, and each salesperson enters it in their own extension's Settings \\(Safety, Posts per day, per salesperson\\), up to 100; the manager view does not set or lock it\\.`));
 });
