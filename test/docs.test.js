@@ -482,3 +482,23 @@ test('the help says the daily cap counts your posts from all your computers when
   assert.doesNotMatch(help, /takes that post back off the count/);
   assert.match(section, /Unmarking a car \(clicking \*\*Posted ✓\*\*\) does not take it off the count either/);
 });
+
+// A no to Chrome's question from the side panel's own list (Post, Post the
+// next N, Rescan the website) starts nothing: askForSite only sets the
+// status line, and a click on the same button asks again. The help said the
+// panel stopped with an Allow reading button, which the panel draws only for
+// a post already under way that stopped at its re-check for the permission.
+test('the help says what a no to Chrome from the side panel\'s list does: nothing starts, and the same button asks again', () => {
+  const panel = read('../extension/sidepanel.js');
+  for (const fn of ['postFromList', 'queueFromList', 'rescanFromList']) {
+    assert.match(panel, new RegExp(`async function ${fn}\\([^)]*\\) \\{\\n  if \\(!\\(await askForSite\\(\\)\\)\\) return undefined;`), `${fn} starts nothing after a no`);
+  }
+  assert.match(panel, /setStatus\(`Not allowed, so Lot Current can't read \$\{hostOf\(state\.origin\)\} from the side panel\. /, 'what the panel says after a no');
+  assert.match(panel, /function viewBlocked\(\) \{[\s\S]*?state\.blockedOrigins[\s\S]*?id="allowSite"/, 'Allow reading is drawn only on a post stopped for the permission');
+  const help = doc('help.md');
+  assert.doesNotMatch(help, /If you said no, the panel stops with \*\*Allow reading/);
+  assert.doesNotMatch(help, /or click \*\*Allow reading \[website\]\*\* to be asked again/);
+  assert.match(help, /If you say no, nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button/);
+  assert.match(help, /Decline and nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button again to be asked again/);
+  for (const line of help.split('\n').filter((l) => /Allow reading \[website\]/.test(l))) assert.match(line, /stopped at (the|its) re-check/, `help.md ties Allow reading to a stopped post: ${line.slice(0, 80)}`);
+});
