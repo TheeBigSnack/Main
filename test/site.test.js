@@ -435,3 +435,30 @@ test('the pre-owned check is described as the gate decides it: two signs, or one
   }
   for (const [name, doc] of [['How it works', how], ['README.md', readme]]) assert.match(doc, /only one sign and no Carfax report goes to \**Needs a look/, `${name} says one sign alone goes to Needs a look`);
 });
+
+// review: the FAQ (sent to search engines as FAQPage data) said Lot Current reads back only the
+// create-listing form and keeps nothing from Facebook beyond the links a person saves. The upkeep flow
+// (upkeep.js) also reads a listing the person opens to update or take down, and a queue records the
+// listing link after Publish without a click; the privacy policy says both.
+test('the FAQ says what Lot Current reads and keeps from Facebook pages, as the code and the privacy policy do', () => {
+  const policy = read('../legal/privacy-policy.md');
+  const upkeep = read('../extension/upkeep.js');
+  const qa = (q) => {
+    const m = faqPage.match(new RegExp(`<h3>${q.replace(/[?]/g, '\\?')}</h3>\\s*<p>([\\s\\S]*?)</p>`));
+    assert.ok(m, `the FAQ asks "${q}"`);
+    return stripTags(m[1]);
+  };
+  const reads = qa('What does it read?');
+  if (/func: readListingInPage/.test(upkeep)) {
+    assert.match(policy, /on a listing the User opened to update or take down, that listing's title, price and sold status/, 'the privacy policy names the listing read');
+    assert.match(reads, /listings? that you open from the To do tab to update or take down, it reads that listing's title, price and sold status/, 'the FAQ names the listing read the upkeep flow makes');
+  }
+  const kept = qa('Where is my data?');
+  assert.doesNotMatch(kept, /beyond the listing links you save\./, 'a queue records the listing link after Publish without a click');
+  assert.match(kept, /Nothing from Facebook is kept beyond the links to your own listings \(the ones you save, or that Lot Current records after you click Publish\)/);
+  assert.match(kept, /only while a post or an update is under way, what the form or the listing showed/, 'and what a post or an update read, only while it runs');
+  // the structured data carries the same answers
+  const ld = JSON.parse(faqPage.match(/<script type="application\/ld\+json">([^<]*)<\/script>/)[1]);
+  const faq = ld['@graph'].find((n) => n['@type'] === 'FAQPage');
+  assert.equal(faq.mainEntity.find((e) => e.name === 'What does it read?').acceptedAnswer.text, reads);
+});
