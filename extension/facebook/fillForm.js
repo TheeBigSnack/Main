@@ -746,11 +746,13 @@ export function fillPriceInPage(map, price) {
 // page's static text counts: text inside buttons, links, menus, tabs and
 // dialogs is skipped, so a "Mark as sold" button never reads as a sold
 // listing, and the sold sign is looked for in short standalone labels only,
-// never in prose such as a description. `expect` ({ id, name, prices })
+// never in prose such as a description. `expect` ({ id, name, prices, vin })
 // says which listing the panel is working on; the result reports what on
 // this page says it is: its id in the address (matchesId), every word of its
 // name as a whole word (matchesName), one of its prices (matchesPrice: the
-// price it is listed at, or the new one), on the page or in the Price box.
+// price it is listed at, or the new one), on the page or in the Price box,
+// and its VIN as a whole word (matchesVin), on the page or in one of the
+// page's boxes (the form's VIN box, the description, which carries it).
 export function readListingInPage(map, signs, expect) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -815,6 +817,10 @@ export function readListingInPage(map, signs, expect) {
   const priceBoxValue = box ? String(box.value || '') : '';
   const wanted = (Array.isArray(want.prices) ? want.prices : []).filter((p) => typeof p === 'number' && p > 0).map((p) => String(Math.round(p)));
   const matchesPrice = wanted.some((p) => prices.includes(p) || priceBoxValue.replace(/\D/g, '') === p);
+  // what tells two listings of the same name and price apart
+  const vin = String(want.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const boxes = [...document.querySelectorAll('input:not([type="hidden"]), textarea, [role="textbox"]')].filter(visible).map((el) => String(el.value || text(el) || ''));
+  const matchesVin = vin.length >= 11 && new RegExp('(^|[^A-Z0-9])' + vin + '($|[^A-Z0-9])').test([document.title, body, ...boxes].join(' ').toUpperCase());
   return {
     url: location.href,
     title: document.title,
@@ -824,6 +830,7 @@ export function readListingInPage(map, signs, expect) {
     matchesId,
     matchesName,
     matchesPrice,
+    matchesVin,
     hasPriceBox: Boolean(box),
     priceBoxValue,
   };

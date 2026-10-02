@@ -11,10 +11,12 @@
 //     (onListing): its id in the address when the listing's id is known; with
 //     no saved link, never on the Your listings page, and elsewhere only a
 //     page that shows every word of the car's name as a whole word and the
-//     price it was listed at (or the new price). Such a page that is a
-//     listing gives the id, which is what counts from then on. A car with
-//     neither a link nor a listed price is never matched: the person uses
-//     I updated it / I took it down;
+//     price it was listed at (or the new price), and also its VIN when
+//     another car in the posted list has every word of this car's name in
+//     its own (two identical units at one price look alike otherwise). Such
+//     a page that is a listing gives the id, which is what counts from then
+//     on. A car with neither a link nor a listed price is never matched: the
+//     person uses I updated it / I took it down;
 //   - a sold/removed sign counts only if it appeared after the page was first
 //     read, so a page that already says "sold" somewhere waits for the person.
 
@@ -87,7 +89,33 @@ export async function startUpkeep(req, ctx) {
 // What the listing reader is told about this car's listing: its id when
 // known, else its name and the prices that identify it.
 const knownId = (map) => up.listingId || listingIdFrom(up.listingUrl, map.listingUrlPattern);
-const expectFor = (map) => ({ id: knownId(map), name: up.name, prices: [up.listedPrice, up.price].filter((p) => typeof p === 'number' && p > 0) });
+const expectFor = (map) => ({ id: knownId(map), name: up.name, prices: [up.listedPrice, up.price].filter((p) => typeof p === 'number' && p > 0), vin: up.vin });
+
+// The words of a car's name as the listing reader compares them.
+const nameWords = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase().split(' ').map((t) => t.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')).filter(Boolean);
+
+// How many other cars in the posted list have every word of this car's name
+// in their own: a listing of one of them shows this car's name too (a second
+// 2021 Jeep Grand Cherokee Laredo, or a Wrangler Unlimited Sport for a
+// Wrangler Sport), and perhaps the same price.
+export function namesakesOf(posted, vin, name) {
+  const mine = nameWords(name);
+  if (mine.length < 2) return 0;
+  const own = String(vin || '').toUpperCase();
+  return Object.entries(posted && typeof posted === 'object' ? posted : {})
+    .filter(([v, p]) => String(v).toUpperCase() !== own && p && mine.every((w) => nameWords(p.name).includes(w))).length;
+}
+
+// The same, from what is stored now; null when the posted list can't be read
+// (onListing then asks for the VIN, as if there were one).
+async function namesakesNow() {
+  try {
+    const k = siteKeys(up.origin).posted;
+    return namesakesOf((await chrome.storage.local.get(k))[k], up.vin, up.name);
+  } catch (e) {
+    return null;
+  }
+}
 
 // The page of an address, without its query, for comparing two addresses.
 function pageOf(url) {
@@ -103,12 +131,15 @@ function pageOf(url) {
 // known, only its id in the address counts: a listing of another car with
 // the same name never does. Without it, never the Your listings page (every
 // listing's name is on it), and elsewhere every word of the name as a whole
-// word plus the price it was listed at (or the new price). A car with no
-// listed price and no id is never matched.
-export function onListing(seen, { id = '', yourListingsUrl = '' } = {}) {
+// word plus the price it was listed at (or the new price); and when other
+// posted cars carry this name too (namesakes, null when unknown), this car's
+// VIN on the page as well. A car with no listed price and no id is never
+// matched.
+export function onListing(seen, { id = '', yourListingsUrl = '', namesakes = 0 } = {}) {
   if (!seen) return false;
   if (id) return Boolean(seen.matchesId);
   if (yourListingsUrl && pageOf(seen.url) === pageOf(yourListingsUrl)) return false;
+  if (namesakes !== 0 && !seen.matchesVin) return false;
   return Boolean(seen.matchesName && seen.matchesPrice);
 }
 
@@ -134,7 +165,8 @@ async function poll(ctx) {
     if (!seen) return;
     up.seen = seen;
     const id = knownId(map);
-    const onTarget = onListing(seen, { id, yourListingsUrl: map.yourListingsUrl });
+    const namesakes = id ? 0 : await namesakesNow();
+    const onTarget = onListing(seen, { id, yourListingsUrl: map.yourListingsUrl, namesakes });
     // the car's own listing page, found by its name and price: its id is what counts from now on
     if (onTarget && !id) up.listingId = listingIdFrom(seen.url, map.listingUrlPattern);
     if (!up.baseline || up.baseline.url !== seen.url) {
@@ -142,9 +174,10 @@ async function poll(ctx) {
       up.baseline = { url: seen.url, sold: seen.sold, unavailable: seen.unavailable };
       if (up.status === 'filled' && up.kind === 'price' && !onTarget) up.status = 'waiting'; // moved to another page after the fill
     }
-    if (up.offTarget !== !onTarget) {
+    const note = onTarget ? '' : offTargetNote(id, seen, namesakes);
+    if (up.offTarget !== !onTarget || (!onTarget && up.note !== note)) {
       up.offTarget = !onTarget;
-      up.note = onTarget ? '' : offTargetNote(id);
+      up.note = note;
       ctx.render();
     }
     if (!onTarget) return;
@@ -210,11 +243,16 @@ async function finish(ctx, how) {
 }
 
 // Said while the tab is not on this car's listing.
-function offTargetNote(id) {
+export function offTargetNote(id, seen, namesakes = 0) {
   const done = up.kind === 'price' ? 'I updated it' : 'I took it down';
   if (id) return `This tab isn't showing the listing for ${up.name}. Open that listing and Lot Current continues.`;
   if (!up.listedPrice) return `No listing link or listed price was saved for ${up.name}, so Lot Current can't tell which listing is its own and fills in or ticks off nothing. Do it on Facebook, then click ${done}.`;
-  return `This tab isn't showing the listing for ${up.name}. Open its own listing page (Lot Current looks for its full name and ${money(up.listedPrice)}) and Lot Current continues; if it doesn't, click ${done} when you are done.`;
+  if (namesakes !== 0 && seen && seen.matchesName && seen.matchesPrice && !seen.matchesVin) {
+    const why = namesakes === null ? `Lot Current couldn't read your posted cars to check whether another one is also a ${up.name}` : `Another car you posted also has ${up.name} in its name`;
+    return `${why}, so a listing counts as this car's only when its page shows this car's VIN, ${up.vin}, and this page doesn't. Open this car's own listing (its description carries the VIN); if the VIN isn't on it, do it on Facebook, then click ${done}.`;
+  }
+  const looksFor = namesakes !== 0 ? `its full name, ${money(up.listedPrice)} and its VIN, ${up.vin}` : `its full name and ${money(up.listedPrice)}`;
+  return `This tab isn't showing the listing for ${up.name}. Open its own listing page (Lot Current looks for ${looksFor}) and Lot Current continues; if it doesn't, click ${done} when you are done.`;
 }
 
 export function endUpkeep() {

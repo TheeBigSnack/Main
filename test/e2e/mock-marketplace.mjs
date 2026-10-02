@@ -259,13 +259,16 @@ function page(lang) {
 </script></body></html>`;
 }
 
-// Listings the person has published, for the upkeep pages: id -> { title, price, sold, deleted }.
+// Listings the person has published, for the upkeep pages: id -> { title, price, vin, sold, deleted }.
 // 616161 is another listing of the same year, make and model as 515151 (a
-// different trim): upkeep must never take one for the other.
+// different trim), and 434343 a second unit of 424242's car at the same
+// price, told apart only by the VIN its description carries: upkeep must
+// never take one for the other.
 const listings = {
-  424242: { title: '2019 Ram 1500 Classic Express', price: 27163, sold: false, deleted: false },
-  515151: { title: '2022 Jeep Wagoneer Series III', price: 38383, sold: false, deleted: false },
-  616161: { title: '2022 Jeep Wagoneer Series II', price: 41500, sold: false, deleted: false },
+  424242: { title: '2019 Ram 1500 Classic Express', price: 27163, vin: '1C6RR7FT0KS643289', sold: false, deleted: false },
+  434343: { title: '2019 Ram 1500 Classic Express', price: 27163, vin: '1C6RR7FT0KS000434', sold: false, deleted: false },
+  515151: { title: '2022 Jeep Wagoneer Series III', price: 38383, vin: '1C4SJVDT7NS142834', sold: false, deleted: false },
+  616161: { title: '2022 Jeep Wagoneer Series II', price: 41500, vin: '1C4SJVBT0NS000616', sold: false, deleted: false },
 };
 
 // Like Marketplace's Your listings: every listing's name, price and status on one page.
@@ -281,7 +284,7 @@ const itemPage = (id, l) => `<!doctype html><html><head><meta charset="utf-8"><t
 <div role="tablist"><span role="tab">Active</span><span role="tab">Sold</span></div>
 <h1>${l.title}</h1>
 ${l.deleted ? '<p>This content isn\'t available right now.</p>' : `<p class="price">$${l.price.toLocaleString('en-US')}</p>${l.sold ? '<p class="badge">Sold</p>' : ''}
-<p class="description">Sold as-is with the remaining factory warranty. Ask for Roger, sales consultant at the dealership.</p>
+<p class="description">Sold as-is with the remaining factory warranty. Ask for Roger, sales consultant at the dealership. VIN ${l.vin}.</p>
 <p><a href="/marketplace/edit/${id}/">Edit listing</a></p>
 <form method="post" action="/marketplace/item/${id}/sold"><button type="submit">Mark as sold</button></form>
 <form method="post" action="/marketplace/item/${id}/delete"><button type="submit">Delete</button></form>`}

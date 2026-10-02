@@ -6,9 +6,12 @@
 // marks the item done. Along the way the tab is moved to another car's edit
 // form and to another listing of the same year, make and model: nothing is
 // filled there. The sold car's listing link is then forgotten (a car marked
-// posted by hand): "Open listing" opens Your listings, where nothing is
-// ticked off, the test opens the car's own listing from it and clicks Mark
-// as sold, and the panel notices and marks it taken down.
+// posted by hand), and a second unit of the same car at the same price is in
+// the posted list: "Open listing" opens Your listings, where nothing is
+// ticked off; the person opens the other unit's listing and marks it sold,
+// and nothing is ticked off there either (its VIN is not this car's); the
+// test opens the car's own listing and clicks Mark as sold, and the panel
+// notices and marks it taken down.
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:upkeep
 
@@ -55,6 +58,7 @@ const watch = (p) => {
 };
 const RAM = '1C6RR7FT0KS643289';
 const WAGONEER = '1C4SJVDT7NS142834';
+const RAM_TWIN = '1C6RR7FT0KS000434'; // a second unit of the Ram, same name and price (mock-marketplace.mjs listing 434343)
 
 try {
   const ext = await context.newPage();
@@ -150,13 +154,14 @@ try {
   await tab(popup, 'mine').click();
   assert.match(await popup.textContent('.panel'), /Wagoneer[\s\S]*Listed \$36,883/);
 
-  // ---- 3. Take the Ram down, its listing link forgotten (as for a car marked posted by hand): Your listings opens, nothing is ticked off there; the person opens the Ram's listing and clicks Mark as sold; Lot Current notices ----
-  await popup.evaluate(async ({ o, vin }) => {
+  // ---- 3. Take the Ram down, its listing link forgotten (as for a car marked posted by hand), with a second Ram of the same name and price posted too: Your listings opens, nothing is ticked off there or on the other Ram's listing; the person opens this Ram's listing and clicks Mark as sold; Lot Current notices ----
+  await popup.evaluate(async ({ o, vin, twin }) => {
     const k = `posted:${o}`;
     const posted = (await chrome.storage.local.get(k))[k];
     delete posted[vin].listingUrl;
+    posted[twin] = { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' };
     await chrome.storage.local.set({ [k]: posted });
-  }, { o: origin, vin: RAM });
+  }, { o: origin, vin: RAM, twin: RAM_TWIN });
   await popup.close();
   popup = await openPopup();
   await tab(popup, 'todo').click();
@@ -169,10 +174,19 @@ try {
   assert.match(listing2.url(), /\/marketplace\/you\/selling$/, 'with no link, Your listings opens');
   await panel.waitForSelector('#takeDownWaiting');
   assert.equal(context.pages().filter((p) => /\/marketplace\/you\/selling/.test(p.url())).length, 1, 'the request is acted on once');
-  await panel.waitForFunction(() => /Open its own listing page/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
+  await panel.waitForFunction(() => /Open its own listing page \(Lot Current looks for its full name, \$27,163 and its VIN, 1C6RR7FT0KS643289\)/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
   await listing2.waitForTimeout(3500);
   assert.ok(await panel.$('#takeDownWaiting'), 'nothing is ticked off on Your listings');
-  await listing2.click('text=2019 Ram 1500 Classic Express'); // the person opens the car's own listing
+  // the person opens the OTHER Ram (same name, same price) and marks it sold: not this car's take-down
+  await listing2.click('a[href="/marketplace/item/434343/"]');
+  await listing2.waitForURL(/\/marketplace\/item\/434343\/$/);
+  await panel.waitForFunction(() => /Another car you posted also has 2019 Ram 1500 Classic Express in its name.*VIN, 1C6RR7FT0KS643289, and this page doesn't/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
+  await listing2.click('text=Mark as sold'); // the person, on the wrong Ram
+  await listing2.waitForTimeout(3500);
+  assert.equal((await listingState())['434343'].sold, true);
+  assert.ok(await panel.$('#takeDownWaiting'), 'the other Ram marked sold ticks nothing off');
+  await listing2.goto(`${marketOrigin}/marketplace/you/selling`);
+  await listing2.click('a[href="/marketplace/item/424242/"]'); // the person opens the car's own listing
   await listing2.waitForURL(/\/marketplace\/item\/424242\/$/);
   await panel.waitForFunction(() => !document.querySelector('#upkeepNote'), null, { timeout: 10000 });
   // A listing page with a "Mark as sold" button, a "Sold" filter tab and
@@ -188,7 +202,7 @@ try {
 
   popup = await openPopup();
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
-  assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '1');
+  assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '2', 'the Wagoneer and the other Ram');
   assert.equal(await popup.evaluate(() => chrome.action.getBadgeText({})), '');
 
   // ---- 4. The Numbers tab (view id 'pilot'): both items were flagged by the day-2 scan and seen done on the listing by Lot Current ----
