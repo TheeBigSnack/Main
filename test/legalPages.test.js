@@ -367,7 +367,7 @@ test('a final page cannot keep the DRAFT line or a blank in brackets, and drops 
 test('--check exits 1 when a file is missing or differs, names it and writes nothing; a run writes all six and --check passes', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-legal-'));
   try {
-    for (const rel of [STATUS_FILE, 'site/config.js', 'site/pricing.json', ...PAGES.map((p) => p.source)]) {
+    for (const rel of [STATUS_FILE, 'site/config.js', 'marketing/pricing.json', ...PAGES.map((p) => p.source)]) {
       mkdirSync(dirname(join(tmp, rel)), { recursive: true });
       cpSync(join(root, rel), join(tmp, rel));
     }

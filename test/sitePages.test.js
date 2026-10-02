@@ -627,7 +627,8 @@ function pageHonesty(html) {
 }
 
 test('the prices on every page are pricing.json\'s, through data-pricing spans with fallback text, and no other figure', () => {
-  assert.deepEqual(pricing, JSON.parse(read('marketing/pricing.json')), 'site/pricing.json equals marketing/pricing.json');
+  const marketing = JSON.parse(read('marketing/pricing.json'));
+  for (const [k, v] of Object.entries(pricing)) assert.deepEqual(v, marketing[k], `site/pricing.json's ${k} is marketing/pricing.json's`);
   for (const p of PAGES) {
     const html = htmlOf(p);
     const text = visibleText(p);

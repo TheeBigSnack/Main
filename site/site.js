@@ -1,5 +1,6 @@
 // Lot Current website. Three jobs: fill the pricing numbers from pricing.json
-// (the one pricing config, copied from marketing/), send the demo request
+// (the public numbers of marketing/pricing.json, which npm run site-pages
+// writes next to this file), send the demo request
 // form, and show the Start a free pilot links once config.js names the
 // manager view. Every page works with this file switched off; the pricing
 // numbers are already in the HTML as fallback text. The home page and the

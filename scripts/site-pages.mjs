@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Writes the website's pages (site/) from the page fragments in
-// site-src/pages/, site/config.js, site/pricing.json and
+// site-src/pages/, site/config.js, marketing/pricing.json and
 // legal/legal-status.json, and the files a site needs next to them:
 //
 //   site-src/pages/home.html          -> site/index.html
@@ -12,7 +12,13 @@
 //   site-src/pages/legal.html         -> site/legal/index.html
 //   site-src/pages/not-found.html     -> site/404.html
 //   (always)                          -> site/robots.txt, site/llms.txt
+//   marketing/pricing.json            -> site/pricing.json (the public fields only)
 //   (only once config.js has siteUrl) -> site/sitemap.xml, site/CNAME
+//
+// site/pricing.json is served to anyone who asks (site.js reads it on the
+// home and pricing pages), so it carries only the numbers the pages show
+// (SITE_PRICING_FIELDS), never marketing/pricing.json's reasoning, what
+// would change the price, or its notes.
 //
 // The three legal documents (site/legal/<name>/index.html) and the redirect
 // stubs at their old addresses are written by scripts/legal-pages.mjs, which
@@ -66,6 +72,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
 export const CONFIG_FILE = 'site/config.js';
 export const PRICING_FILE = 'site/pricing.json';
+export const MARKETING_PRICING_FILE = 'marketing/pricing.json';
+// What site/pricing.json carries: what site.js fills (data-pricing, the
+// founding term, the pilot's length on the sign-up links) and what the
+// generator reads (hypothesis, currency, the rooftop price for an Offer).
+export const SITE_PRICING_FIELDS = Object.freeze(['hypothesis', 'asOf', 'currency', 'perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'pilotDays', 'foundingDealerMonthly', 'foundingDealerMonths', 'foundingDealerCount']);
+export const sitePricing = (pricing) => Object.fromEntries(SITE_PRICING_FIELDS.filter((k) => pricing && Object.hasOwn(pricing, k)).map((k) => [k, pricing[k]]));
+export const pricingJson = (pricing) => JSON.stringify(sitePricing(pricing), null, 2) + '\n';
 export const STATUS_FILE = 'legal/legal-status.json';
 
 export const SITE_NAME = 'Lot Current';
@@ -186,12 +199,12 @@ export const REDIRECTS = Object.freeze([
 ]);
 
 // The files under site/ that are neither a page of the map nor a stub: the
-// ones kept by hand (the config, the pricing copy, the stylesheet, the
+// ones kept by hand (the config, the stylesheet, the
 // script, the mark), the favicons scripts/favicons.mjs draws from the mark,
 // and the index of the share images scripts/social-images.mjs draws (one
 // site/social/<slug>.png per page with a social heading). Screenshots
 // (scripts/screenshots.mjs) belong to the site while a page shows them.
-export const KEPT_FILES = Object.freeze([CONFIG_FILE, PRICING_FILE, 'site/site.css', 'site/site.js', 'site/favicon.svg']);
+export const KEPT_FILES = Object.freeze([CONFIG_FILE, 'site/site.css', 'site/site.js', 'site/favicon.svg']);
 export const FAVICON_FILES = Object.freeze(['site/favicon-32.png', 'site/apple-touch-icon.png', 'site/favicon.ico']);
 export const SOCIAL_INDEX = 'site/social/images.json';
 export const socialFile = (page) => `site/social/${page.slug}.png`;
@@ -731,7 +744,8 @@ export function readStatus(text) {
 }
 
 /**
- * The inputs under a repository root: config.js (validated), pricing.json
+ * The inputs under a repository root: config.js (validated), the public
+ * fields of marketing/pricing.json (sitePricing)
  * and the draft flag. ctx.dir is that root; the per-page root is added by
  * buildSite. config.js is imported fresh each time its file changes.
  */
@@ -747,11 +761,11 @@ export async function readContext(root = ROOT) {
   assertClean(configText, CONFIG_FILE);
   let pricing;
   try {
-    pricing = JSON.parse(readFileSync(join(root, PRICING_FILE), 'utf8'));
+    pricing = sitePricing(JSON.parse(readFileSync(join(root, MARKETING_PRICING_FILE), 'utf8')));
   } catch (e) {
-    throw new Error(`${PRICING_FILE} could not be read (${e.message})`);
+    throw new Error(`${MARKETING_PRICING_FILE} could not be read (${e.message})`);
   }
-  if (!pricing || typeof pricing.hypothesis !== 'boolean') throw new Error(`${PRICING_FILE} needs "hypothesis": true or false`);
+  if (typeof pricing.hypothesis !== 'boolean') throw new Error(`${MARKETING_PRICING_FILE} needs "hypothesis": true or false`);
   const { draft } = readStatus(readFileSync(join(root, STATUS_FILE), 'utf8'));
   return { dir: root, site, pricing, legalDraft: draft };
 }
@@ -808,6 +822,7 @@ export function buildSite(ctx) {
   }
   files.push({ file: 'site/robots.txt', content: robotsTxt(ctx.site) });
   files.push({ file: 'site/llms.txt', content: llmsTxt(ctx.site, ctx.legalDraft) });
+  files.push({ file: PRICING_FILE, content: pricingJson(ctx.pricing) });
   const remove = [];
   if (ctx.site.siteUrl) {
     files.push({ file: 'site/sitemap.xml', content: sitemapXml(ctx.site, ctx.legalDraft) });
@@ -876,7 +891,7 @@ export function writeSite(ctx) {
 }
 
 export const USAGE = [
-  'Usage: npm run site-pages              write the pages, robots.txt, llms.txt (and sitemap.xml, CNAME once siteUrl is set)',
+  'Usage: npm run site-pages              write the pages, robots.txt, llms.txt, pricing.json (and sitemap.xml, CNAME once siteUrl is set)',
   '       node scripts/site-pages.mjs --check',
   '                                       write nothing; exit 1 when an output is missing, differs, or exists although it must not,',
   '                                       or a file under site/ is none of the site\'s (no generator writes it, it is not kept',
@@ -884,6 +899,7 @@ export const USAGE = [
   '',
   ...FRAGMENT_PAGES.map((p) => `  ${p.source.padEnd(32)}-> ${p.file}`),
   '  (always)                        -> site/robots.txt, site/llms.txt',
+  '  marketing/pricing.json          -> site/pricing.json (only the numbers the pages show)',
   '  (once config.js has siteUrl)    -> site/sitemap.xml, site/CNAME',
   '',
   'site/config.js holds the one address and the inboxes (siteUrl, demoEndpoint,',
@@ -911,7 +927,7 @@ export async function main(argv, io = { log: (s) => console.log(s), error: (s) =
       const stray = strayFiles(ctx);
       for (const s of stale) io.error(`${s}: run npm run site-pages`);
       for (const file of stray) io.error(strayAdvice(file));
-      if (!stale.length && !stray.length) io.log('The website pages match site-src/, site/config.js, site/pricing.json and legal/legal-status.json.');
+      if (!stale.length && !stray.length) io.log('The website pages match site-src/, site/config.js, marketing/pricing.json and legal/legal-status.json.');
       return stale.length || stray.length ? 1 : 0;
     }
     for (const line of writeSite(ctx)) io.log(line);

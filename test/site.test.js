@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { PAGES, cspFor } from '../scripts/site-pages.mjs';
+import { PAGES, cspFor, sitePricing, SITE_PRICING_FIELDS } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing } from './honesty.js';
@@ -71,8 +71,17 @@ test('no claim we have not measured, and nothing that sounds like Meta approval'
   assert.doesNotMatch(text, /\b(reviews?|rated|trusted by)\b/i, 'no review or trust claims');
 });
 
-test('site/pricing.json is the marketing pricing config, and the page quotes it', () => {
-  assert.deepEqual(JSON.parse(read('../site/pricing.json')), pricing, 'site/pricing.json equals marketing/pricing.json');
+test('site/pricing.json is the public part of the marketing pricing config, and the page quotes it', () => {
+  // review: the site served marketing/pricing.json whole, its reasoning ("why"), what would change the price
+  // ("wouldChangeIt") and its notes included; it carries only the numbers the pages show
+  const served = JSON.parse(read('../site/pricing.json'));
+  assert.deepEqual(served, sitePricing(pricing), 'site/pricing.json is the public fields of marketing/pricing.json (npm run site-pages)');
+  for (const k of ['why', 'wouldChangeIt', 'notes']) assert.ok(!(k in served), `site/pricing.json publishes marketing/pricing.json's "${k}"`);
+  assert.deepEqual(Object.keys(served).sort(), SITE_PRICING_FIELDS.filter((k) => k in pricing).sort());
+  for (const k of Object.keys(served)) assert.equal(served[k], pricing[k], `site/pricing.json's ${k} is marketing/pricing.json's`);
+  // every field the pages and site.js read is there: the data-pricing keys, the founding term's months, the pilot's length
+  for (const m of (html + pricingPage).matchAll(/data-pricing="([^"]+)"/g)) assert.ok(m[1] === 'foundingDealerTerm' || m[1] in served, `data-pricing="${m[1]}" is in site/pricing.json`);
+  for (const k of ['foundingDealerMonths', 'pilotDays', 'hypothesis', 'currency']) assert.ok(k in served, `site/pricing.json carries ${k}`);
   // the fallback text (what a visitor sees with JavaScript off) carries the same numbers
   assert.match(text, new RegExp(`\\${money(pricing.perRooftopMonthly)} per rooftop per month`), 'quotes the monthly price');
   assert.match(text, new RegExp(`\\${money(pricing.extraSalespersonMonthly)} a month`), 'quotes the seat price');

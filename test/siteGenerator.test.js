@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   PAGES, REDIRECTS, NAV, LEGAL_PAGES, FRAGMENT_PAGES, SITE_NAME, TITLE_SUFFIX, FOOTER_LINE, BRAND_TAGLINE, LINE, THEME_COLOR, NO_SCRIPT_CSP, FORBIDDEN, PILOT,
-  TITLE_MAX, DESCRIPTION_MAX, CONFIG_FILE, PRICING_FILE, STATUS_FILE, USAGE,
+  TITLE_MAX, DESCRIPTION_MAX, CONFIG_FILE, PRICING_FILE, MARKETING_PRICING_FILE, SITE_PRICING_FIELDS, sitePricing, STATUS_FILE, USAGE,
   fullTitle, rootFor, cspFor, render, renderPage, jsonLdFor, socialAlt, faqItems, ancestorsOf, textOf, escapeHtml,
   robotsTxt, sitemapXml, llmsTxt, listedPages, cnameTxt, isPlaceholderHost, validateSite, validatePages, siteUrlReport, templateVars, renderFragmentPage,
   readContext, buildSite, staleFiles, writeSite, assertClean, main,
@@ -215,12 +215,12 @@ test('siteUrl is not set: the site is not ready to publish', async () => {
   assert.equal(siteUrlReport({ siteUrl: FIXTURE_URL }), `siteUrl is ${FIXTURE_URL}: canonical, og:url, og:image, sitemap.xml and CNAME are written`);
 });
 
-test('the committed pages, robots.txt and llms.txt are what the sources make now (npm run site-pages)', async () => {
+test('the committed pages, robots.txt, llms.txt and pricing.json are what the sources make now (npm run site-pages)', async () => {
   const ctx = await readContext(root);
   assert.deepEqual(staleFiles(ctx), [], 'an output differs from its sources: run npm run site-pages and commit');
   assert.deepEqual(strayFiles(ctx), [], 'a file under site/ is none of the site\'s: the deploy would publish it unchecked');
   const { files, remove } = buildSite(ctx);
-  assert.deepEqual(files.map((f) => f.file), [...FRAGMENT_PAGES.map((p) => p.file), 'site/robots.txt', 'site/llms.txt', ...(SITE.siteUrl ? ['site/sitemap.xml', 'site/CNAME'] : [])]);
+  assert.deepEqual(files.map((f) => f.file), [...FRAGMENT_PAGES.map((p) => p.file), 'site/robots.txt', 'site/llms.txt', PRICING_FILE, ...(SITE.siteUrl ? ['site/sitemap.xml', 'site/CNAME'] : [])]);
   assert.deepEqual(remove, SITE.siteUrl ? [] : ['site/sitemap.xml', 'site/CNAME']);
 });
 
@@ -495,7 +495,7 @@ test('what the generator refuses: a second h1, a lost description, an unknown va
 test('--check exits 1 naming each output that is missing, differs or must not exist, writes nothing, and reports the siteUrl state either way; a run writes and removes', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-'));
   try {
-    for (const rel of [CONFIG_FILE, PRICING_FILE, STATUS_FILE]) {
+    for (const rel of [CONFIG_FILE, MARKETING_PRICING_FILE, STATUS_FILE]) {
       mkdirSync(join(tmp, rel, '..'), { recursive: true });
       cpSync(join(root, rel), join(tmp, rel));
     }
@@ -514,15 +514,15 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     let r = await run(['--check']);
     assert.equal(r.code, 1, 'no pages yet');
     assert.equal(r.log[0], notReady, 'the state is reported before the findings');
-    assert.equal(r.error.length, FRAGMENT_PAGES.length + 2);
+    assert.equal(r.error.length, FRAGMENT_PAGES.length + 3);
     assert.match(r.error[0], /^site\/index\.html is missing: run npm run site-pages$/);
     assert.ok(!existsSync(join(tmp, 'site/index.html')), '--check writes nothing');
     r = await run([]);
     assert.equal(r.code, 0);
-    assert.deepEqual(r.log, [notReady, ...FRAGMENT_PAGES.map((p) => `wrote ${p.file}`), 'wrote site/robots.txt', 'wrote site/llms.txt']);
+    assert.deepEqual(r.log, [notReady, ...FRAGMENT_PAGES.map((p) => `wrote ${p.file}`), 'wrote site/robots.txt', 'wrote site/llms.txt', 'wrote site/pricing.json']);
     r = await run(['--check']);
     assert.deepEqual([r.code, r.error], [0, []]);
-    assert.deepEqual(r.log, [notReady, 'The website pages match site-src/, site/config.js, site/pricing.json and legal/legal-status.json.']);
+    assert.deepEqual(r.log, [notReady, 'The website pages match site-src/, site/config.js, marketing/pricing.json and legal/legal-status.json.']);
     // a hand edit, a missing file, a fragment change
     const faqFile = join(tmp, 'site/faq/index.html');
     const written = readFileSync(faqFile, 'utf8');
