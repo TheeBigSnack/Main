@@ -159,6 +159,7 @@ test('an equipment list or a lot-wide sentence inside a paragraph takes only its
   assert.deepEqual(cleanDescription('Local trade with new brakes. Heated Seats, Navigation, Sunroof.'), ['Local trade with new brakes.']);
   // a sentence that names features among its own words is the write-up
   assert.deepEqual(cleanDescription('It has leather, a sunroof, and navigation.'), ['It has leather, a sunroof, and navigation.']);
+  assert.deepEqual(cleanDescription('Comes with Navigation, Heated Seats, Sunroof.'), ['Comes with Navigation, Heated Seats, Sunroof.']);
 });
 
 test('non-text input is handled', () => {

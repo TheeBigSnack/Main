@@ -118,12 +118,15 @@ function looksLikeBullet(segment) {
 // A raw equipment dump has no real sentences, just a long comma list of
 // feature/option names pulled from the options field. A list the website
 // breaks into short "sentences" ("Heated Seats, Navigation, Sunroof.") is one
-// too: three or more items, each a name of three words or fewer.
+// too: three or more items, each a name of three words or fewer, with none of
+// the small words a sentence has ("Comes with Navigation, Heated Seats,
+// Sunroof." is a sentence).
+const SENTENCE_WORD = /\b(?:with|has|have|is|are|was|comes|come|the|a|an|of|for|to|in|on|this|it|its)\b/;
 function looksLikeEquipmentDump(text) {
   const commas = text.split(',').length - 1;
   if (commas >= 6) return true;
   const items = text.replace(/[.!?]+$/, '').split(/\s*,\s*(?:and\s+|&\s+)?/);
-  return items.length >= 3 && items.every((item) => /^[A-Z0-9]/.test(item) && item.split(/\s+/).length <= 3);
+  return items.length >= 3 && items.every((item) => /^[A-Z0-9]/.test(item) && item.split(/\s+/).length <= 3 && !SENTENCE_WORD.test(item));
 }
 
 // Returns the car-specific narrative left after boilerplate, award blurbs,
