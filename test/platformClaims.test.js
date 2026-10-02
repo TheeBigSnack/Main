@@ -30,6 +30,11 @@ test('the unsupported-page message names only the readers checked on a real webs
     }
   }
   assert.match(message, /^Lot Current can't read the cars on this page\. /, 'the survey reads the first sentence');
+  // each checked reader has been read on one real dealership website so far
+  // (README.md: Dealer Inspire on the pilot dealer's live site), so the
+  // message claims one website, not several
+  assert.doesNotMatch(message, /real dealership websites/, 'the message claims more real websites than any reader has been checked on');
+  assert.match(message, /Checked on a real dealership website: /);
   assert.match(message, /Open your dealership's used inventory page and try again\.$/);
 });
 

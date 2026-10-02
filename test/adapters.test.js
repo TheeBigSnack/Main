@@ -248,7 +248,7 @@ test('the registry: by id, by probe, by stored service, and the unsupported-page
   assert.equal(adapterById('schemaOrg'), schemaOrg);
   assert.equal(detectAdapter({ site: {}, service: { kind: 'schemaOrg', origin: 'https://x.test', listUrl: null }, adapterId: null }), schemaOrg);
   assert.deepEqual(platformNames(), ['Dealer Inspire', 'DealerOn', 'Dealer.com', 'Standard vehicle data (schema.org)']);
-  assert.equal(unsupportedSiteMessage(), "Lot Current can't read the cars on this page. Checked on real dealership websites: Dealer Inspire. Also tries, not yet checked on a real dealership website: DealerOn; Dealer.com; Standard vehicle data (schema.org). Open your dealership's used inventory page and try again.");
+  assert.equal(unsupportedSiteMessage(), "Lot Current can't read the cars on this page. Checked on a real dealership website: Dealer Inspire. Also tries, not yet checked on a real dealership website: DealerOn; Dealer.com; Standard vehicle data (schema.org). Open your dealership's used inventory page and try again.");
   for (const a of ADAPTERS) assert.ok(unsupportedSiteMessage().includes(a.PLATFORM.name));
 });
 

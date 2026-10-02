@@ -63,7 +63,7 @@ export function unsupportedSiteMessage() {
   const checked = ADAPTERS.filter(isCheckedLive).map((a) => a.PLATFORM.name);
   const tried = ADAPTERS.filter((a) => !isCheckedLive(a)).map((a) => a.PLATFORM.name);
   const parts = ["Lot Current can't read the cars on this page."];
-  if (checked.length) parts.push(`Checked on real dealership websites: ${checked.join('; ')}.`);
+  if (checked.length) parts.push(`Checked on a real dealership website: ${checked.join('; ')}.`);
   if (tried.length) parts.push(`Also tries, not yet checked on a real dealership website: ${tried.join('; ')}.`);
   parts.push("Open your dealership's used inventory page and try again.");
   return parts.join(' ');
