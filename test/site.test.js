@@ -496,3 +496,21 @@ test('How it works and the Terms keep "while you are away" to Facebook, and name
   const page = stripTags(read('../site/legal/terms/index.html'));
   assert.match(page, /does nothing on Facebook while the User is away/, 'npm run legal-pages wrote the Terms page from the Markdown');
 });
+
+// review: the For managers page said the manager view's numbers include "which form fields could not be
+// filled", and the home page's Numbers caption put those fields in the dealership's account too, while
+// sync.js never sends the fill records (syncPayload's pilot carries posts and flags only).
+test('the site never puts the form fields that could not be filled in the manager view or the dealership\'s account', async () => {
+  const { syncPayload } = await import('../extension/src/sync.js');
+  const body = syncPayload({ origin: 'https://www.dealer.test', pilot: { posts: [], flags: [], fills: [{ vin: '1HGCM82633A004352', at: new Date().toISOString(), failed: ['price'] }] } });
+  assert.deepEqual(Object.keys(body.pilot).sort(), ['flags', 'posts'], 'the sync sends fill records now: the site can say the manager view shows them');
+  const managers = stripTags(read('../site/for-managers/index.html'));
+  const numbers = managers.slice(managers.indexOf('The numbers'), managers.indexOf('Getting started'));
+  assert.ok(numbers.length > 100, 'For managers has its numbers section');
+  assert.doesNotMatch(numbers, /numbers the salespeople's own Numbers tab keeps: how long each post took, which form fields/, 'the manager view does not show the form fields');
+  assert.match(numbers, /Which form fields could not be filled is not synced: it stays in each salesperson's own browser/);
+  const caption = stripTags((html.match(/<figcaption><b>The numbers you can share[\s\S]*?<\/figcaption>/) || [''])[0]);
+  assert.ok(caption, 'the home page has its Numbers caption');
+  if (/dealership's account/.test(caption)) assert.match(caption, /fields that could not be filled, which stay in your browser/, 'the caption says the fields stay in the browser');
+  assert.doesNotMatch(text, /managers will see the same numbers for the whole store/, 'managers see the post and to-do numbers, not the form fields');
+});
