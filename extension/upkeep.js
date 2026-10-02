@@ -17,11 +17,15 @@ import { fillPriceInPage, readListingInPage } from './facebook/fillForm.js';
 import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { resolveFlag, updatePilot } from './src/pilot.js';
 import { siteKeys } from './src/storageKeys.js';
+import { noteTakenDown } from './src/takenDown.js';
 import { updateKey, storageErrorText } from './src/storage.js';
+import { accountsConfigured } from './src/accountConfig.js';
+import { loadSession } from './src/account.js';
 
 export const up = {
   active: false,
   origin: null, vin: null, kind: null, price: null, listingUrl: '', name: '', listedPrice: null,
+  basis: null, // the price basis the new price was taken at (the popup's request), recorded with it
   tabId: null, status: 'idle', // idle | opening | waiting | filled | done | gone
   note: '', filledShown: '', seen: null, error: '', fills: 0,
   baseline: null, // { url, sold, unavailable } from the first read of the current page
@@ -52,7 +56,7 @@ function stopPolling() {
 
 export async function startUpkeep(req, ctx) {
   stopPolling();
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: req.listingUrl || '', name: req.name || req.vin, listedPrice: req.listedPrice || null, tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, basis: req.basis || null, listingUrl: req.listingUrl || '', name: req.name || req.vin, listedPrice: req.listedPrice || null, tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
   ctx.render();
   const map = ctx.map();
   const url = up.listingUrl || map.yourListingsUrl;
@@ -152,7 +156,14 @@ async function finish(ctx, how) {
   const k = siteKeys(up.origin);
   const price = up.kind === 'price';
   try {
-    await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
+    // a post taken down is kept for the daily cap first (src/takenDown.js);
+    // this item came from the scan (sold, gone or sale pending), so the
+    // website no longer listed the car as ready
+    if (!price) {
+      const entry = ((await chrome.storage.local.get(k.posted))[k.posted] || {})[up.vin];
+      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false }));
+    }
+    await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price, undefined, up.basis) : markTakenDown(posted || {}, up.vin)));
     await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook']));
   } catch (e) {
     up.error = storageErrorText(e);
@@ -163,6 +174,8 @@ async function finish(ctx, how) {
   // pilot numbers: how long the item stayed open, and whether Lot Current saw the change itself
   await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, up.kind === 'price' ? 'price' : 'takeDown', { how })).catch(() => null);
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
+  // signed in: the worker syncs the change, so the manager view and colleagues see it now (fire and forget; Settings shows how it went)
+  if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin: up.origin }).catch(() => {});
   up.status = 'done';
   up.note = how === 'detected' ? (up.kind === 'price' ? `The listing now shows ${money(up.price)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
   ctx.render();

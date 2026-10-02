@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
+import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeWarning, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
@@ -90,9 +90,23 @@ test('the synced profile carries the person and dealer details but never the ser
   assert.equal(other.salesperson.name, 'Roger');
   assert.deepEqual(other.defaults, { titleStatus: 'Clean', condition: 'Very good' });
   assert.equal(other.rewrite.endpoint, 'http://localhost:8787');
-  // no origin to compare (a profile saved before 0.4.0, or a site without one): keep the profile, as before
+  // no origin to compare (a site without one): keep the profile, as before
   assert.equal(settingsFromProfile(p, {}).dealer.name, WAYNESBURG);
-  assert.equal(settingsFromProfile({ ...p, origin: '' }, { origin: 'https://www.some-other-dealer.test', name: 'Some Other Dealer' }).priceNote, 'Tax and tags extra.');
+  // a profile saved before 0.4.0 has no origin key at all: kept whole, as before
+  const legacy = { ...p };
+  delete legacy.origin;
+  assert.equal(settingsFromProfile(legacy, { origin: 'https://www.some-other-dealer.test', name: 'Some Other Dealer' }).priceNote, 'Tax and tags extra.');
+  // a profile saved with no website (from a Facebook tab, before the popup
+  // refused that) names no dealership: only the person's own fields carry
+  const nowhere = settingsFromProfile({ ...p, origin: '' }, { origin: 'https://www.some-other-dealer.test', name: 'Some Other Dealer' });
+  assert.deepEqual(nowhere.dealer, { name: 'Some Other Dealer', city: '', state: '', zip: '' });
+  assert.deepEqual([nowhere.priceNote, nowhere.dailyCap, nowhere.basis, nowhere.myStores], ['', 10, 'website', []]);
+  assert.equal(nowhere.salesperson.name, 'Roger', 'the person\'s own fields still carry');
+  // and no profile is written without the website it belongs to
+  const before = JSON.stringify(store);
+  assert.equal(await saveProfile(s, fake, ''), false);
+  assert.equal(await saveProfile(s, fake), false);
+  assert.equal(JSON.stringify(store), before, 'nothing was written');
   assert.equal(settingsFromProfile(null), null);
   assert.equal(DEFAULT_SALESPERSON_TITLE, 'sales consultant');
 });
@@ -107,6 +121,18 @@ test('the lower second price is a basis only on a website that shows one; withou
   assert.equal(chooseBasis('website', 'beforeFees', lot), 'website');
   assert.equal(chooseBasis('website', 'beforeFees', null), 'beforeFees', 'no scan yet: a Save must not flip a synced choice');
   assert.equal(chooseBasis('beforeFees', 'website', null), 'website');
+});
+
+// Settings and set-up's Price step say the same before a change of basis:
+// how many listings the person has here, and that only those whose car
+// shows a lower second price move (a car with none is at the main price
+// under either choice).
+test('the warning before a change of Price to post counts the listings and says only those whose car shows a lower price move', () => {
+  assert.equal(basisChangeWarning(0), '');
+  assert.equal(basisChangeWarning(undefined), '');
+  assert.equal(basisChangeWarning(1), 'You have one posted listing on this website. If its car shows a lower second price, changing the price to post changes its price too: after the next rescan it is listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.');
+  assert.equal(basisChangeWarning(3), 'You have 3 posted listings on this website. Changing the price to post changes the price of each one whose car shows a lower second price: after the next rescan each of those is listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.');
+  assert.doesNotMatch(basisChangeWarning(3), /[<>&]/, 'plain text: the popup and the wizard put it in a paragraph as it is');
 });
 
 test("the wizard's Price step model: the lower price only on a website that shows one, the gap's wording, and the example's prices only", () => {

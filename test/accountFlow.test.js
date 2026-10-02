@@ -65,6 +65,7 @@ function fakeStorage(initial = {}) {
     data,
     writes,
     async get(keys) {
+      if (keys === null || keys === undefined) return { ...data }; // everything, as chrome.storage answers get(null)
       const list = Array.isArray(keys) ? keys : [keys];
       return Object.fromEntries(list.map((k) => [k, data[k]]));
     },
@@ -222,6 +223,79 @@ test('signOutAll tells the auth server, forgets the session and the named websit
   assert.deepEqual(await signOutAll(deps({ fetchImpl: async () => { throw new TypeError('Failed to fetch'); }, storage: offline })), { ok: true });
   assert.equal(ACCOUNT_KEY in offline.data, false);
   assert.deepEqual(await signOutAll(deps({ fetchImpl, storage: fakeStorage() })), { ok: true }, 'nothing stored is fine too');
+});
+
+// Signing out from one website (or from a Facebook tab, which names none)
+// must not leave another website showing the last account's dealership,
+// role and plan, or counting its posts today in the daily cap.
+test('signOutAll forgets every website\'s sync state on this computer, not only the website open, and nothing else', async () => {
+  const OTHER = 'https://www.example-sister-store.test';
+  const O = siteKeys(OTHER);
+  const stored = () => ({
+    [ACCOUNT_KEY]: freshSession(),
+    [K.sync]: { since: T(1), dealershipName: 'Example Motors', role: 'manager', postsToday: 3 },
+    [O.sync]: { since: T(2), dealershipName: 'Example Motors', role: 'manager', postsToday: 3, plan: { state: 'lapsed' } },
+    [K.posted]: { [VIN_A]: { postedAt: T(0) } },
+    [O.posted]: { [VIN_B]: { postedAt: T(0) } },
+    [O.settings]: { dailyCap: 10 },
+    [GLOBAL_KEYS.sites]: { [ORIGIN]: { name: 'Example Motors' } },
+  });
+  const { fetchImpl } = fakeFetch({ logout: { status: 204, body: null } });
+  const left = (storage) => Object.keys(storage.data).sort();
+  const kept = [K.posted, O.posted, O.settings, GLOBAL_KEYS.sites].sort();
+
+  // the popup open on one website: the other website's state goes too
+  const one = fakeStorage(stored());
+  assert.deepEqual(await signOutAll(deps({ fetchImpl, storage: one, origins: [ORIGIN] })), { ok: true });
+  assert.deepEqual(left(one), kept, 'both websites\' sync state and the session go; the posted lists, settings and registry stay');
+
+  // the popup open on Facebook names no website: every website's state goes all the same
+  const none = fakeStorage(stored());
+  await signOutAll(deps({ fetchImpl, storage: none, origins: [] }));
+  assert.deepEqual(left(none), kept);
+
+  // where Chrome has getKeys(), it is used instead of reading everything
+  const listed = fakeStorage(stored());
+  let readAll = false;
+  const get = listed.get;
+  listed.get = async (keys) => { if (keys === null) readAll = true; return get(keys); };
+  listed.getKeys = async () => Object.keys(listed.data);
+  await signOutAll(deps({ fetchImpl, storage: listed }));
+  assert.deepEqual(left(listed), kept);
+  assert.equal(readAll, false, 'the key list is enough');
+
+  // the keys cannot be listed: the website named still goes
+  const blind = fakeStorage(stored());
+  const blindGet = blind.get;
+  blind.get = async (keys) => { if (keys === null) throw new Error('not available'); return blindGet(keys); };
+  assert.deepEqual(await signOutAll(deps({ fetchImpl, storage: blind, origins: [ORIGIN] })), { ok: true });
+  assert.equal(K.sync in blind.data, false);
+  assert.equal(ACCOUNT_KEY in blind.data, false);
+});
+
+// The registry entry of each website also records the last sync (when it
+// was tried, when it answered, its error, a retry due): the last account's,
+// which the next account's Settings would otherwise show as its own, such as
+// "the last attempt failed: your account is not a member of …".
+test('signOutAll forgets the last account\'s sync times and error on every website\'s registry entry, and keeps the rest of it', async () => {
+  const OTHER = 'https://www.example-sister-store.test';
+  const { fetchImpl } = fakeFetch({ logout: { status: 204, body: null } });
+  const storage = fakeStorage({
+    [ACCOUNT_KEY]: freshSession(),
+    [GLOBAL_KEYS.sites]: {
+      [ORIGIN]: { name: 'Example Motors', auto: true, lastScan: T(0), lastSync: T(1), lastSyncAttempt: T(2), lastSyncError: `your account is not a member of the dealership for ${ORIGIN}`, lastSyncRetry: T(3) },
+      [OTHER]: { name: 'Example Sister Store', auto: false, lastScan: T(0), lastSyncAttempt: T(2), lastSyncError: 'too many syncs; try again in a minute' },
+    },
+  });
+  assert.deepEqual(await signOutAll(deps({ fetchImpl, storage, origins: [] })), { ok: true });
+  assert.deepEqual(storage.data[GLOBAL_KEYS.sites], {
+    [ORIGIN]: { name: 'Example Motors', auto: true, lastScan: T(0) },
+    [OTHER]: { name: 'Example Sister Store', auto: false, lastScan: T(0) },
+  }, 'the rescan settings and scan times stay');
+
+  const untouched = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [GLOBAL_KEYS.sites]: { [ORIGIN]: { name: 'Example Motors' } } });
+  await signOutAll(deps({ fetchImpl, storage: untouched }));
+  assert.deepEqual(untouched.writes, [], 'a registry with no sync record is not rewritten');
 });
 
 // ---------- the rewrite service's key ----------
@@ -383,6 +457,9 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   assert.equal(r.listed, 2);
   assert.equal(r.serverTime, r.state.since);
   assert.equal(describeSync(r), 'Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent.');
+  // a post the function would not share is named, never passed over
+  assert.equal(describeSync({ ...r, counts: { ...r.counts, conflicts: 1 } }), 'Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent. 1 of your posts was not shared with your dealership: a colleague already has that car listed (My listings shows which).');
+  assert.equal(describeSync({ ...r, counts: { ...r.counts, conflicts: 2, rejected: 1 } }), "Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent. 2 of your posts were not shared with your dealership: a colleague already has those cars listed (My listings shows which). 1 of your posts was not shared with your dealership: its posting time is ahead of the server's clock, so check this computer's date and time.");
   // merged into storage
   const merged = storage.data[K.posted];
   assert.deepEqual(Object.keys(merged).sort(), [VIN_A, VIN_C].sort(), 'the colleague\'s Honda arrived');
@@ -397,7 +474,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const flag = storage.data[K.pilot].flags[0];
   assert.equal(flag.doneAt, T(40), 'the flag closed on the colleague\'s machine is closed here');
   assert.equal(flag.how, 'detected');
-  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, localSince: new Date(NOW).toISOString(), known: [postKey(VIN_A, T(0))], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today } }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap; the Ram, sent, is known, the colleague\'s Honda is not');
+  assert.deepEqual(storage.data[K.sync], { version: 1, since: r.serverTime, localSince: new Date(NOW).toISOString(), known: [postKey(VIN_A, T(0))], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: r.serverTime, plan: server.plan, postsToday: { count: 1, ...today }, notShared: [] }, 'the plan and the server\'s count of today\'s posts (the Ram, counted after the upload) are kept for Settings and the cap; the Ram, sent, is known, the colleague\'s Honda is not; every post of the person\'s is shared');
   assert.equal(storage.data[ACCOUNT_KEY].accessToken, freshSession().accessToken, 'the session is untouched');
 
   // the second sync carries `since` and writes nothing that did not change;
@@ -456,6 +533,12 @@ test('syncOnce: a token the function rejects signs the person out; not a member 
   assert.equal(ACCOUNT_KEY in elsewhere.data, true, 'not a member is not signed out');
   assert.deepEqual(elsewhere.data, before2, 'a refused sync leaves the storage as it found it (its first-sync placeholder removed)');
   assert.equal(describeSync(r2), `Sync failed: ${r2.error}`);
+
+  // the server's brake (a dozen syncs a minute): a 429 with the server's own words, which the worker retries
+  const busy = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl: fakeFetch({ sync: { status: 429, body: { ok: false, error: 'too many syncs; try again in a minute' } } }).fetchImpl, storage: fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted }) }) });
+  assert.equal(busy.status, 429, 'the worker sets its retry from the status');
+  assert.equal(describeSync(busy), 'Sync failed: too many syncs; try again in a minute');
+  assert.equal(describeSync({ ...busy, retryAt: '2026-10-01T10:01:00.000Z' }), 'Sync failed: too many syncs; try again in a minute. Lot Current tries again on its own in a minute.');
 
   const offline = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
   const before3 = structuredClone(offline.data);

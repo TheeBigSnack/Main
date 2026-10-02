@@ -580,23 +580,23 @@ test('the privacy texts stay templates for any dealership', () => {
   }
 });
 
-test('the texts that say where synced post attempts and to-do items go say that every member reads them, as the policies allow', () => {
+// Who reads the synced post attempts (the person and the dealership's
+// managers, 0011_ui_post_attempts_read.sql) is test/postAttemptsRead.test.js;
+// the to-do items stay readable by every member.
+test('the texts that say where synced to-do items go say that every member reads them, as the policies allow', () => {
   const rls = read('supabase/migrations/0002_rls.sql');
-  for (const table of ['post_attempts', 'todo_items']) {
-    assert.match(rls, new RegExp(`on public\\.${table} for select to authenticated\\s+using \\(public\\.is_member\\(dealership_id\\)\\);`), `${table}: every member reads every row of the dealership; if that changed, change the texts below with it`);
+  assert.match(rls, /on public\.todo_items for select to authenticated\s+using \(public\.is_member\(dealership_id\)\);/, 'todo_items: every member reads every row of the dealership; if that changed, change the texts below with it');
+  for (const f of MIGRATIONS.filter((m) => m.slice(0, 4) > '0002')) {
+    assert.doesNotMatch(read('supabase/migrations/' + f).replace(/--[^\n]*/g, ''), /policy[^;]*on public\.todo_items\s+for select/, `${f} changes who reads the to-do items: change the texts below with it`);
   }
-  // 0002's own comment says a manager sees all of them; 0002 is applied in production and never edited,
-  // so a later migration's header corrects it
-  const notes = MIGRATIONS.filter((f) => f > '0002').map((f) => read('supabase/migrations/' + f)).join('\n').replace(/^-- ?/gm, '').replace(/\s+/g, ' ');
-  assert.match(notes, /0002_rls\.sql, post_attempts: every member reads all of the dealership's, not only a manager/, 'a later migration corrects 0002\'s comment on who reads post attempts');
   const item = questions.split('\n').find((l) => l.startsWith('- **8.4**'));
-  assert.match(item, /where every member of the dealership, salespeople as well as managers, can read them/, 'the attorney is told who reads them');
+  assert.match(item, /and the to-do items by every member of the dealership\./, 'the attorney is told every member reads the to-do items');
   assert.doesNotMatch(item, /where its managers see them/);
   const usageRow = (text) => text.split('\n').find((l) => l.startsWith('| Usage numbers'));
   for (const [name, text] of [['the privacy policy', policy], ['the Chrome Web Store answers', storeTexts]]) {
-    assert.match(usageRow(text), /where every member of that dealership, salespeople as well as managers, can see them/, name);
+    assert.match(usageRow(text), /and the to-do items by every member of the dealership/i, name);
   }
   const faq = read('site-src/pages/faq.html');
   assert.doesNotMatch(faq, /where your manager sees them/);
-  assert.match(faq, /where your manager and the other people in your dealership who are signed in can see them/);
+  assert.match(faq, /where everyone signed in at your dealership sees your posted list, to-do items and scan counts/);
 });

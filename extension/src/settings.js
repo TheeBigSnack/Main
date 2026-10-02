@@ -108,9 +108,12 @@ export function profileFrom(settings, origin = '') {
 export function settingsFromProfile(profile, site = {}) {
   if (!profile || typeof profile !== 'object') return null;
   // The website the profile was saved from decides, never the editable dealer
-  // name. A profile saved before that was recorded (0.4.0) is kept whole, as
-  // before, until it is saved again.
-  const sameDealer = !profile.origin || !site.origin || profile.origin === site.origin;
+  // name. A profile saved before that was recorded (0.4.0: no `origin` key at
+  // all) is kept whole, as before, until it is saved again. One that records
+  // no website (origin '': saved from a tab that was not a dealer's website,
+  // before saveProfile refused that) belongs to no dealership.
+  const legacy = !Object.prototype.hasOwnProperty.call(profile, 'origin');
+  const sameDealer = legacy || !site.origin || (Boolean(profile.origin) && profile.origin === site.origin);
   const person = { salesperson: profile.salesperson, defaults: profile.defaults, legal: profile.legal, rewrite: { ...(profile.rewrite || {}), key: '' } };
   return withDefaults(sameDealer ? { ...profile, ...person } : person, site);
 }
@@ -145,6 +148,18 @@ export function priceStepModel(entries, basis = 'website') {
   };
 }
 
+// Said before "Price to post" changes (Settings and set-up's Price step),
+// given how many of the person's own listings this website has. Only a
+// listing whose car shows a lower second price moves: a car with none is
+// posted at the main price under either choice. Plain text, no markup.
+export function basisChangeWarning(n) {
+  if (!n) return '';
+  const lead = n === 1
+    ? 'You have one posted listing on this website. If its car shows a lower second price, changing the price to post changes its price too: after the next rescan it is listed'
+    : `You have ${n} posted listings on this website. Changing the price to post changes the price of each one whose car shows a lower second price: after the next rescan each of those is listed`;
+  return `${lead} under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.`;
+}
+
 export async function loadProfile(storage) {
   try {
     const area = storage || chrome.storage.sync;
@@ -154,7 +169,11 @@ export async function loadProfile(storage) {
   }
 }
 
+// Saved only with the website the settings belong to: a profile with none
+// would carry one dealership's name, address, price note and cap to every
+// other dealer's website (settingsFromProfile).
 export async function saveProfile(settings, storage, origin = '') {
+  if (!origin) return false;
   try {
     const area = storage || chrome.storage.sync;
     await area.set({ [PROFILE_KEY]: profileFrom(settings, origin) });

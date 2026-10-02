@@ -7,7 +7,10 @@
 // npm run check-deploy showing no FAIL), and docs/release.md says not to hand
 // a build to anyone before then. Nothing is sent to the project until a
 // salesperson asks for a sign-in code, and nothing syncs until one is signed
-// in.
+// in. The committed values name the production project (the deploy
+// workflow refuses to run unless they name the project it deploys to), so
+// every build made from this file offers sign-in. The test drive (demo/)
+// never reaches the project: its chrome-shim.js answers every request to it.
 //
 // With every value empty, accountsConfigured() is false and the extension
 // behaves exactly as it did without accounts: the Account section in

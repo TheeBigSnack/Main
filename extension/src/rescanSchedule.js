@@ -8,6 +8,20 @@ import { isFacebookServer } from './photoHosts.js';
 export const RESCAN_ALARM = 'lot-sync-rescan';
 export const RESCAN_PERIOD_MINUTES = 180; // every 3 hours while Chrome is open
 
+// A sync the account server turned away for coming too often (its per-person
+// brake counts the last minute) is tried again a minute later, by a
+// one-shot alarm named after the website: one per website, so a second
+// refusal moves it rather than adding another.
+export const SYNC_RETRY_PREFIX = 'sync-retry:';
+export const SYNC_RETRY_MINUTES = 1;
+export const syncRetryAlarm = (origin) => SYNC_RETRY_PREFIX + String(origin || '');
+
+// The website a retry alarm is for; null for any other alarm.
+export function originOfSyncRetryAlarm(name) {
+  const n = String(name || '');
+  return n.startsWith(SYNC_RETRY_PREFIX) && n.length > SYNC_RETRY_PREFIX.length ? n.slice(SYNC_RETRY_PREFIX.length) : null;
+}
+
 // The salesperson's own to-do count from a diff: take-downs, price updates
 // and needs-a-look items on cars they posted.
 export function todoCountFor(diff) {

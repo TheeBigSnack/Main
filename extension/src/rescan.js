@@ -37,32 +37,22 @@ export function basisPrice(v, basis = 'website') {
   return main;
 }
 
-// The basis a posted listing's price was taken on: recorded on the entry
-// when it was posted (markPosted), or stamped on an older entry when the
-// setting changed (withPostedBasis); else the current setting. A listing is
-// always compared with the website on its own basis, so changing the setting
-// is never read as a website price change.
-export function postedBasis(entry, basis = 'website') {
-  const own = entry && entry.basis;
-  if (own === 'website' || own === 'beforeFees') return own;
-  return basis === 'beforeFees' ? 'beforeFees' : 'website';
-}
+const BASES = ['website', 'beforeFees'];
+const basisOf = (b) => (BASES.includes(b) ? b : null);
+const normBasis = (b) => (b === 'beforeFees' ? 'beforeFees' : 'website');
 
-// The posted list with the basis in force until now (the setting being
-// changed) stamped on every entry posted before the basis was recorded per
-// entry; undefined when every entry already has one, so nothing is written.
-export function withPostedBasis(posted, basis) {
-  if (!posted || typeof posted !== 'object') return undefined;
-  const stamp = basis === 'beforeFees' ? 'beforeFees' : 'website';
-  let changed = false;
-  const next = {};
-  for (const [vin, e] of Object.entries(posted)) {
-    if (e && typeof e === 'object' && e.basis !== 'website' && e.basis !== 'beforeFees') {
-      next[vin] = { ...e, basis: stamp };
-      changed = true;
-    } else next[vin] = e;
-  }
-  return changed ? next : undefined;
+// A posted listing whose price differs from the price to post only because
+// the price basis changed in Settings since it was posted (or last updated):
+// it was posted under another basis (entry.basis), and the website's price
+// under that basis is still the listed one. The listing still has to follow
+// the chosen basis, so it still needs editing, but the website did not
+// change: it is told apart, never counted as a price change (src/pilot.js
+// noteFlags). An entry without a recorded basis is judged as before.
+export function basisOnlyChange(entry, now, basis = 'website') {
+  const own = basisOf(entry && entry.basis);
+  const was = entry && entry.price;
+  if (!own || own === normBasis(basis) || !was || !now) return false;
+  return basisPrice(now, own) === was && basisPrice(now, basis) !== was;
 }
 
 // The compact per-car record kept between scans.
@@ -184,8 +174,9 @@ function whatGotReady(before, now) {
  *            car is called gone; unchecked: cars whose own check failed
  *            while the others' verdicts still stand
  *   basis:   'website' | 'beforeFees' which price goes on Marketplace; a
- *            posted car is compared on the basis recorded on its entry
- *            (postedBasis), so a change of the setting is not a price change
+ *            posted car whose price differs only because this basis changed
+ *            since it was posted (basisOnlyChange) is listed with why
+ *            'basis', never as a website price change
  */
 export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'website' } = {}) {
   const out = {
@@ -240,8 +231,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   for (const [vin, now] of Object.entries(currVehicles)) {
     const before = prevVehicles[vin];
     const mine = yours(vin);
-    // a posted car on the basis its listing was posted at (postedBasis)
-    const nowPrice = basisPrice(now, mine ? postedBasis(posted[vin], basis) : basis);
+    const nowPrice = basisPrice(now, basis);
 
     // A posted car the website marks sold or sale-pending, or no longer
     // calls pre-owned, is raised on every scan while it is still marked
@@ -264,7 +254,10 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
       if (was && !nowPrice) {
         out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, text: `Website no longer shows a price (${now.priceLabel || 'call for price'})` });
       } else if (was && nowPrice && was !== nowPrice) {
-        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was });
+        // why 'basis': the price to post changed in Settings, not on the website (basisOnlyChange).
+        // basis: the one `to` was taken at, recorded with it when the item is acted on, even after Settings changes it
+        const why = mine && basisOnlyChange(posted[vin], now, basis) ? { why: 'basis' } : {};
+        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was, basis: normBasis(basis), ...why });
       }
     }
 
@@ -312,13 +305,35 @@ export function settleDiff(diff, posted) {
 
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
 // `extra` can carry the listing link and who posted (listingUrl, salesperson).
+// Each entry records the basis its price was taken at (basisOnlyChange).
 export function markPosted(posted, entry, basis = 'website', now = new Date().toISOString(), extra = {}) {
-  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), basis: postedBasis(null, basis), postedAt: now, ...extra } };
+  return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), postedAt: now, basis: normBasis(basis), ...extra } };
 }
 
-export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {
+// The listing now shows `price`, taken at `basis` (the basis in force when it
+// was updated) when given.
+export function markPriceUpdated(posted, vin, price, now = new Date().toISOString(), basis = null) {
   if (!posted[vin]) return posted;
-  return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now } };
+  const b = basisOf(basis);
+  return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now, ...(b ? { basis: b } : {}) } };
+}
+
+// When the price basis changes, the person's own listings that do not
+// record theirs (posted before entries did, or brought by sync) were posted
+// under the basis in force until then: they get it, so the next scan tells
+// the change apart from a website price change. Undefined when nothing
+// changes (src/storage.js updateKey then leaves the key alone).
+export function stampBasis(posted, basis) {
+  const b = basisOf(basis);
+  if (!b || !posted || typeof posted !== 'object') return undefined;
+  let touched = false;
+  const next = { ...posted };
+  for (const [vin, e] of Object.entries(posted)) {
+    if (!e || typeof e !== 'object' || e.mine === false || basisOf(e.basis)) continue;
+    next[vin] = { ...e, basis: b };
+    touched = true;
+  }
+  return touched ? next : undefined;
 }
 
 export function markTakenDown(posted, vin) {

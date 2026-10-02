@@ -67,14 +67,16 @@ try {
   const get = async (path) => (await context.request.get(`${path.startsWith('http') ? '' : origin}${path}`)).text();
   const publishCount = async () => (await context.request.get(`${marketOrigin}/publish-count`)).text();
 
-  // Settings and the test hooks straight into storage. Every store is the
-  // salesperson's, so the Ram (Waynesburg) and the Wagoneer (Cranberry) are both ready.
+  // Settings and the test hooks straight into storage. Both stores are the
+  // salesperson's, so the Ram (Waynesburg) and the Wagoneer (Cranberry) are
+  // both ready. Named, not left empty: the website's first scan ticks only
+  // the store named after it when none is chosen (src/scanRunner.js).
   const setup = await context.newPage();
   await setup.goto(extUrl('popup.html'));
   await setup.evaluate(async ({ origin, marketOrigin }) => {
     await chrome.storage.local.set({
       [`settings:${origin}`]: {
-        myStores: [],
+        myStores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', 'Ron Lewis Chrysler Dodge Jeep Ram Cranberry'],
         basis: 'website',
         salesperson: { name: 'Roger', title: 'sales consultant' },
         dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', state: 'PA', zip: '15370' },
@@ -163,9 +165,19 @@ try {
   await panel.waitForFunction(() => !document.getElementById('panelSite'));
 
   // ---- 3. The Ram sold since the scan: Post re-checks it on the website, with no tab, and stops ----
+  // Set-up was never run here, so the posting rules come first: nothing is
+  // read or begun until they are ticked, and the tick goes on with the same car.
   await get('/scenario?name=day2');
   await panel.click(`button[data-post-vin="${RAM}"]`);
+  await panel.waitForSelector('#postingRules');
+  assert.match(await panel.textContent('#postingRules'), /Pre-owned cars only\./);
+  assert.equal(await panel.isDisabled('#rulesContinue'), true, 'nothing goes on before the tick');
+  assert.equal(Number(await get('/direct-count')), directBefore, 'the car is not read before the tick');
+  await panel.check('#rulesRead');
+  assert.equal(await panel.isDisabled('#rulesContinue'), false);
+  await panel.click('#rulesContinue');
   await panel.waitForSelector('#blocked', { timeout: 20000 });
+  assert.ok(await panel.evaluate(async (o) => Boolean((await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`].rulesReadAt), origin), 'the tick is saved for this website');
   assert.match(await panel.textContent('#blocked'), /isn't on the website any more/);
   assert.ok(Number(await get('/direct-count')) > directBefore, 'the car was read from the extension, straight from the inventory service');
   await panel.screenshot({ path: join(shots, 'panel-2-sold.png') });

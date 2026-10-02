@@ -21,8 +21,9 @@ import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems } from './honesty.js';
-import { ADAPTERS, platformNames } from '../extension/adapters/index.js';
+import { ADAPTERS, platformNames, unsupportedSiteMessage } from '../extension/adapters/index.js';
 import { LEGAL } from '../extension/src/legalLinks.js';
+import { accountsConfigured } from '../extension/src/accountConfig.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -117,6 +118,9 @@ test('the adapter contract\'s PLATFORM row names every adapter and quotes no sta
   // a quoted message must be the one the extension shows (index.js builds it from every adapter's name)
   const quoted = /What it reads today: ([^"]*?)\.?"/.exec(row);
   if (quoted) assert.equal(quoted[1], platformNames().join('; '));
+  // the message as it reads now, in its two groups (checked on a real website, and not yet)
+  const groups = /"((?:Checked on a real dealership website|Also tries, not yet checked)[^"]*)"/.exec(row);
+  if (groups) assert.ok(unsupportedSiteMessage().includes(groups[1]), `the PLATFORM row quotes "${groups[1]}", which is not the message the extension shows: ${unsupportedSiteMessage()}`);
 });
 
 test('the adapter contract and help.md say a car whose own page could not be checked is left unchecked, not that it stops every verdict', () => {
@@ -337,7 +341,7 @@ test('PILOT.md runs a second dealership on the accounts and the manager view, wi
 
 test('help.md describes the Terms step and the Settings section in both states the code renders', () => {
   const help = doc('help.md');
-  const wizard = read('../extension/wizard.js');
+  const wizard = read('../extension/wizard.js') + read('../extension/src/wizardSteps.js');
   const popup = read('../extension/popup.js');
   const tick = 'I have read and accept the Terms of Service and the Privacy Policy';
   assert.ok(wizard.includes(tick) && popup.includes(tick), 'the tick label moved: update the help doc and this test together');
@@ -351,6 +355,12 @@ test('help.md describes the Terms step and the Settings section in both states t
     assert.match(terms, /published/, `docs/help.md "${name}" does not say when the links and the tick appear`);
     assert.ok(terms.includes(tick), `docs/help.md "${name}" does not quote the tick`);
   }
+  // while the documents are drafts no acceptance is recorded, but the usage
+  // numbers are recorded from the first post: the help never says the step
+  // "records nothing"
+  const step = setup.slice(setup.indexOf('**Terms and privacy**'));
+  assert.doesNotMatch(step.slice(0, step.indexOf('\n')), /records nothing|nothing is recorded/, 'docs/help.md says the Terms step records nothing while the usage numbers are recorded from the first post');
+  assert.match(step, /records no acceptance/);
 });
 
 // The salesperson part of the profile, in the words the lists use.
@@ -614,6 +624,16 @@ test('every text that says what Lot Current does on its own names the upload a s
     assert.ok(lines.length >= 1, `${rel} no longer describes the background rescan`);
     for (const l of lines) assert.match(l, /[Ww]hile (you are|they are|the user is) signed in to a Lot Current account, (it also )?sends that rescan(\\)?'s results/, `${rel}: "${l.trim().slice(0, 90)}..." leaves out what a signed-in rescan sends`);
   }
+  // the store listing's tester steps and set-up's permission step say it too
+  const SAYS_SYNC = /signed in[^.|]*(sync|sends? (that rescan's |the )?results)/;
+  const tester = read('../store/listing.md').split('\n').find((l) => l.includes('Background rescans happen only'));
+  assert.ok(tester, 'store/listing.md no longer has its tester step about background rescans');
+  assert.match(tester, SAYS_SYNC, 'store/listing.md: the tester step about background rescans does not say they sync while signed in');
+  const wizard = read('../extension/wizard.js');
+  const step = wizard.slice(wizard.indexOf("case 'permission':"), wizard.indexOf("case 'rules':"));
+  assert.ok(step.length > 100, "wizard.js's permission step moved: update this test");
+  assert.match(step, SAYS_SYNC, 'the set-up permission step does not say the rescan sends its results while signed in');
+  assert.doesNotMatch(wizard, ONLY_READS, 'set-up says the background job only reads the website');
 });
 
 // The screenshot captions, README and the help doc once said the numbers were
@@ -630,4 +650,106 @@ test('copy that says the numbers are kept in the browser also says they go to th
     }
   }
   assert.ok(seen >= 4, 'README, the help doc, the store listing and the website still describe where the numbers are kept');
+});
+
+// Clear the numbers keeps the to-do items still open (src/pilot.js
+// clearNumbers): the texts that say what it deletes say what it keeps.
+test('every text that says what Clear the numbers deletes says the to-do items still open stay', () => {
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/data-inventory.md', '../docs/help.md']) {
+    const sentences = read(rel).split(/(?<=\.)\s+|\n/);
+    assert.ok(sentences.some((t) => /Clear the numbers/.test(t) && /still open/.test(t)), `${rel} does not say Clear the numbers keeps the to-do items still open`);
+  }
+});
+
+// While signed in, Clear the numbers also keeps the to-do items closed since
+// the last sync until the next sync sends them (src/sync.js
+// clearNumbersKeepingUnsynced, the popup's pilotClear): the same texts say so.
+test('every text that says what Clear the numbers deletes says the items closed since the last sync wait for the next sync', () => {
+  assert.match(read('../extension/popup.js'), /clearNumbersKeepingUnsynced\(got\[k\.pilot\], got\[k\.sync\]\)/, 'the popup no longer keeps the closed items the next sync sends: these texts can drop the clause');
+  for (const rel of ['../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../docs/data-inventory.md', '../docs/help.md']) {
+    const sentences = read(rel).split(/(?<=\.)\s+|\n/);
+    assert.ok(sentences.some((t) => /Clear the numbers/.test(t) && /closed since the last sync/.test(t) && /next sync/.test(t)), `${rel} does not say Clear the numbers keeps the to-do items closed since the last sync until the next sync`);
+  }
+});
+
+// While signed in, the popup's Scan, Mark posted, unmarking, Taken down and
+// Updated, and a take-down or price update the side panel saw done, each ask
+// the worker to sync (popup.js syncInBackground, upkeep.js finish). So the
+// texts that list when Lot Current syncs count them, and none says a change
+// made in the popup waits for the next sync.
+test('every text that lists when the extension syncs counts the scans, take-downs and price updates recorded in the popup and the side panel', () => {
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /resolveFlag\(p, vin, null, \{ how: 'manual' \}\)\)\.then\(syncInBackground\)/, 'Taken down no longer asks for a sync: these texts can say it waits for the next one');
+  assert.match(popup, /resolveFlag\(p, vin, 'price', \{ how: 'manual' \}\)\)\.then\(syncInBackground\)/, 'Updated no longer asks for a sync');
+  assert.match(popup, /recordFlags\(state\.origin, (?:r|state)\.diff, (?:r|state)\.diff\.takenAt\)[^\n]*\n\s*syncInBackground\(\);/, 'the popup\'s Scan no longer asks for a sync');
+  assert.match(read('../extension/upkeep.js'), /type: 'syncNow', origin: up\.origin/, 'the side panel\'s take-downs and price updates no longer ask for a sync');
+  assert.match(popup, /Lot Current also syncs after every rescan and after each post, take-down or price update you record\./, 'Settings says when it syncs');
+  const lineWith = (rel, marker) => {
+    const line = read(rel).split('\n').find((l) => l.includes(marker));
+    assert.ok(line, `${rel} has no line with "${marker}"`);
+    return line;
+  };
+  for (const [rel, marker] of [['../docs/data-inventory.md', '| Sync ('], ['../docs/help.md', '**What leaves the browser'], ['../legal/chrome-web-store-privacy.md', '| While signed in:']]) {
+    const line = lineWith(rel, marker);
+    assert.match(line, /take-down/, `${rel}: the sync triggers leave out take-downs`);
+    assert.match(line, /price update/, `${rel}: the sync triggers leave out price updates`);
+    assert.match(line, /each scan/, `${rel}: the sync triggers leave out the popup's scan`);
+    assert.doesNotMatch(line, /next of these|do not sync on their own/, `${rel} says a change made in the popup waits for the next sync`);
+  }
+});
+
+// A sync the account server turns away for coming too often (its brake is a
+// dozen a minute) is tried again a minute later by a one-shot alarm
+// (background.js planRetry), so a run of Mark posted clicks still reaches
+// the dealership. That is a call the extension makes a minute after the
+// click, with the alarms permission: the texts that list when it syncs and
+// what the alarms permission does say so.
+test('every text that lists when the extension syncs, or what the alarms permission does, says a sync the server asked to wait is tried again a minute later', () => {
+  const worker = read('../extension/background.js');
+  assert.match(worker, /if \(r\.status !== 429\) return null;[^]*?chrome\.alarms\.create\(name, \{ delayInMinutes: SYNC_RETRY_MINUTES \}\)/, 'the worker no longer retries a sync the server asked to wait: these texts must stop saying it does');
+  const lineWith = (rel, marker) => {
+    const line = read(rel).split('\n').find((l) => l.includes(marker));
+    assert.ok(line, `${rel} has no line with "${marker}"`);
+    return line;
+  };
+  for (const [rel, marker] of [
+    ['../docs/data-inventory.md', '| Sync ('],
+    ['../docs/help.md', '**What leaves the browser'],
+    ['../legal/chrome-web-store-privacy.md', '| While signed in:'],
+    ['../legal/chrome-web-store-privacy.md', '| `alarms` |'],
+    ['../store/listing.md', '| `alarms` |'],
+  ]) {
+    const line = lineWith(rel, marker);
+    assert.match(line, /asked (it )?to wait|asks to wait|turns away/, `${rel}: "${marker}" does not say when the server turns a sync away`);
+    assert.match(line, /again a minute (later|after)/, `${rel}: "${marker}" does not say the sync is tried again a minute later`);
+  }
+});
+
+// Only Save settings (the popup's onSettingsSubmit) and finishing set-up
+// (wizard.js) write the synced profile; a scan, the rescan permission or a
+// sign-in never puts back a profile the person forgot. Every text that says
+// what re-creates it says exactly that.
+test('every text that says what re-creates the forgotten profile names only Save settings and finishing set-up', () => {
+  const popup = read('../extension/popup.js');
+  assert.equal((popup.match(/await saveProfile\(/g) || []).length, 1, 'popup.js writes the profile from more than one place: these texts must say what else re-creates it');
+  assert.match(popup.slice(popup.indexOf('async function onSettingsSubmit(')), /^[^]*?await saveProfile\(/, 'the popup writes the profile outside Save settings');
+  assert.equal((read('../extension/wizard.js').match(/await saveProfile\(/g) || []).length, 1, 'set-up writes the profile from more than one place');
+  for (const rel of ['../legal/privacy-policy.md', '../docs/help.md', '../docs/data-inventory.md', '../extension/popup.js']) {
+    const sentences = read(rel).split(/(?<=\.)\s+|\n/).filter((t) => /re-creates?/.test(t));
+    assert.ok(sentences.length, `${rel} no longer says what re-creates the profile`);
+    for (const t of sentences) assert.match(t, /only saving Settings or finishing set-up re-creates/i, `${rel}: "${t.trim().slice(0, 120)}" does not say only Save settings and finishing set-up re-create the profile`);
+  }
+});
+
+// The committed extension/src/accountConfig.js names the production project
+// (docs/production-setup.md step 1), so every build offers sign-in: no text
+// may still say the shipped config is empty, and the setup docs say that no
+// build goes to a tester before sign-in works there.
+test('while the committed account config names a project, no text says the shipped build has accounts off', () => {
+  if (!accountsConfigured()) return;
+  for (const rel of ['../extension/src/accountConfig.js', '../extension/src/wizardSteps.js', '../docs/data-inventory.md', '../README.md']) {
+    assert.doesNotMatch(read(rel), /shipped empty config|as shipped\*\* \(`extension\/src\/accountConfig\.js` empty\)|until then every value is empty|Until the owner has set the account service up/i, `${rel} still says the shipped build has no account config`);
+  }
+  assert.match(read('../docs/production-setup.md'), /\*\*From then on every build offers sign-in\.\*\*[^\n]*no build goes to a pilot tester before then/);
+  assert.match(doc('launch-checklist.md'), /\*\*No tester build before sign-in works\.\*\*/);
 });

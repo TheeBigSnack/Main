@@ -1,20 +1,23 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, basisOnlyChange, stampBasis } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeWarning, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP } from './facebook/formMap.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
+import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
+import { clearNumbersKeepingUnsynced } from './src/sync.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from './src/readyList.js';
 
@@ -33,7 +36,7 @@ const state = {
   siteName: '',
   snapshot: null, // last saved scan
   diff: null, // to-do list from the last scan
-  posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }
+  posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }; with an account, colleagues' too, marked `mine: false` by sync
   settings: null, // see src/settings.js
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [],
@@ -43,6 +46,7 @@ const state = {
   wizardActive: false, // set-up started in the side panel and not finished
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
   pilot: null, // pilot numbers (src/pilot.js): post timings, fill failures per field, to-do item durations
+  takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap still counts the day's
   syncState: null, // this website's sync state (src/sync.js nextSyncState): dealership, role, when it last synced, the plan, the server's count of today's posts (the cap reads it); accounts only
   account: { session: null, email: '', note: '', error: '' }, // the signed-in session (read only when accounts are configured) and what the Account section says
   rescanPermission: null, // true/false once known: may the service worker read this website?
@@ -58,6 +62,12 @@ const state = {
 // everything" clears it too); SITES_KEY is the background-rescan registry.
 
 const rescanOrigins = () => (state.site ? originsFor(state.site.site || { origin: state.origin }, state.site.service) : []);
+
+// What the last scan read about the website, for the blanks in the settings
+// (withDefaults): nothing before the website's first scan, so a Settings
+// save or a sign-in then never stores the website's address as the
+// dealership's name; the first scan fills in the name the website gives.
+const knownSite = () => state.snapshot?.site || {};
 
 async function checkRescanPermission() {
   const origins = rescanOrigins();
@@ -91,6 +101,7 @@ async function loadSaved() {
   state.wizardActive = Boolean(data[k.wizard] && data[k.wizard].active && data[k.wizard].step !== 'done');
   state.site = (data[SITES_KEY] || {})[state.origin] || null;
   state.pilot = data[k.pilot] || null;
+  state.takenDown = data[k.takenDown] || null;
   state.syncState = data[k.sync] || null;
   await checkRescanPermission();
 }
@@ -154,7 +165,16 @@ async function setSiteAuto(auto) {
 
 // Writes what the popup holds for these fields. False when the write failed
 // (the status says why; the values stay on screen until the popup closes).
+// Every key belongs to a website, so with none open nothing is written. The
+// synced profile is not written here: only Save settings (onSettingsSubmit)
+// and finishing set-up write it, so "Forget my synced profile" holds until
+// the person saves again, as the popup and the privacy policy say.
+const NO_SITE_TEXT = "Open your dealership's website in this tab first: settings are kept for each dealership website.";
 async function save(...names) {
+  if (!state.origin) {
+    setStatus(NO_SITE_TEXT, 'error');
+    return false;
+  }
   const k = siteKeys(state.origin);
   const out = {};
   for (const name of names) out[k[name]] = state[name];
@@ -164,7 +184,6 @@ async function save(...names) {
     setStatus(storageErrorText(e), 'error');
     return false;
   }
-  if (names.includes('settings') && state.settings) await saveProfile(state.settings, undefined, state.origin);
   if (names.includes('diff') || names.includes('posted')) chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   return true;
 }
@@ -242,6 +261,7 @@ async function scan() {
     });
     if (!saved) return; // the status says why (the quota); the read stays on screen
     state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
+    syncInBackground(); // the scan's counts and the to-do items it flagged
     // the scan registered the website for background rescans; show its state
     state.site = ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {})[state.origin] || null;
     await checkRescanPermission();
@@ -260,6 +280,7 @@ async function scan() {
 function lists() {
   const all = Object.values(state.snapshot?.vehicles || {}).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const has = (e, code) => (e.blockers || []).includes(code);
+  const posted = Object.entries(state.posted).map(([vin, p]) => ({ vin, ...p, now: state.snapshot?.vehicles?.[vin] || null }));
   return {
     all,
     ready: all.filter((e) => e.decision === DECISION.READY),
@@ -267,9 +288,19 @@ function lists() {
     otherStores: all.filter((e) => e.decision === DECISION.NOT_READY && has(e, 'other-store')),
     review: all.filter((e) => e.decision === DECISION.REVIEW),
     skipped: all.filter((e) => e.decision === DECISION.SKIP),
-    mine: Object.entries(state.posted).map(([vin, p]) => ({ vin, ...p, now: state.snapshot?.vehicles?.[vin] || null })),
+    mine: posted.filter((p) => p.mine !== false),
+    colleagues: posted.filter((p) => p.mine === false), // merged in by sync: shown, never the person's to update or take down
   };
 }
+
+// A colleague's listing, merged into the posted list by sync (`mine: false`,
+// src/sync.js): it keeps the car off the Post buttons so nobody lists it
+// twice, but updating or taking it down is theirs, so no button here acts on it.
+const colleagueEntry = (vin) => {
+  const p = state.posted[vin];
+  return p && p.mine === false ? p : null;
+};
+const byWhom = (p) => (p.salesperson ? esc(p.salesperson) : 'a colleague');
 
 const todoCount = () => todoCountFor(state.diff);
 
@@ -366,6 +397,8 @@ function empty(text) {
 // "Post" opens the guided flow in the side panel (only for ready cars). "Mark
 // posted" is for a listing the salesperson made by hand.
 function postButton(vin, { canPost = true } = {}) {
+  const theirs = colleagueEntry(vin);
+  if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark">Posted ✓</button>`;
   if (state.drafts[vin]) {
     return `<span class="actions"><span class="pill warn" title="Saved as a draft on Facebook; publish it there, then mark it posted">Draft on Facebook</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
@@ -394,7 +427,7 @@ function setupBanner() {
   const text = active
     ? '<b>Set-up is not finished.</b> Pick up where you left off in the side panel.'
     : "<b>First time here?</b> Set-up runs in the side panel: your store, your name, the store's address, the price to post, automatic rescans, the posting rules and the Terms of Service.";
-  const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields">Not now</button>' : '';
+  const later = state.snapshot ? '<button type="button" class="small" data-action="skipSetup" title="Settings has the same fields, the posting rules included">Not now</button>' : '';
   return `<div class="banner setup" id="setup">${text}<div class="toolbar"><button type="button" class="small go" data-action="setup">${active ? 'Continue set-up' : 'Set up Lot Current'}</button>${later}</div></div>`;
 }
 
@@ -412,12 +445,15 @@ function scheduleBanner() {
   return '';
 }
 
+// Why a to-do item has no buttons: a colleague's listing, or a car nobody marked as posted.
+const notYours = (vin) => (colleagueEntry(vin) ? ` · posted by ${byWhom(colleagueEntry(vin))}` : ' · not marked as posted');
+
 function viewTodo(l) {
   const d = state.diff;
   if (!state.snapshot && !d) {
     return setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
   }
-  let html = setupBanner() + scheduleBanner();
+  let html = setupBanner() + scheduleBanner() + notSharedBanner();
   html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
   if (d?.firstScan) {
@@ -429,7 +465,7 @@ function viewTodo(l) {
     parts.push(
       section('Take down', 'bad', takeDown.map((t) =>
         row(t, {
-          sub: esc(t.text) + (t.yours ? '' : ' · not marked as posted'),
+          sub: esc(t.text) + (t.yours ? '' : notYours(t.vin)),
           right: t.lastPrice ? money(t.lastPrice) : '',
           action: t.yours
             ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="takeDown" data-vin="${esc(t.vin)}" title="Opens your listing so you can mark it sold or delete it">Open listing</button><button type="button" class="small" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button></span>`
@@ -439,17 +475,31 @@ function viewTodo(l) {
       ))
     );
   }
-  const updates = d?.priceUpdates || [];
+  const all = d?.priceUpdates || [];
+  const updates = all.filter((p) => p.why !== 'basis');
+  const basisChanges = all.filter((p) => p.why === 'basis'); // src/rescan.js basisOnlyChange: only the price to post changed
+  // data-basis: the basis the scan took `to` at, recorded with it even when Settings changed since (buttonBasis)
+  const basisAttr = (p) => (p.basis ? ` data-basis="${esc(p.basis)}"` : '');
+  const priceButtons = (p) => `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}"${basisAttr(p)} title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}"${basisAttr(p)}>Updated</button></span>`;
   if (updates.length) {
     parts.push(
       section('Update price', 'warn', updates.map((p) =>
         row(p, {
-          sub: (p.yours ? 'Your listing' : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
+          sub: (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
           right: `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
-          action: p.yours
-            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`
-            : '',
+          action: p.yours ? priceButtons(p) : '',
           muted: !p.yours,
+        })
+      ))
+    );
+  }
+  if (basisChanges.length) {
+    parts.push(
+      section('Price to post changed in Settings', 'warn', basisChanges.map((p) =>
+        row(p, {
+          sub: `Your listing${p.stock ? ' · Stock ' + esc(p.stock) : ''} · posted under the earlier "Price to post" choice. Edit its price, and the price note in its description if it has one.`,
+          right: `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
+          action: priceButtons(p),
         })
       ))
     );
@@ -475,7 +525,7 @@ function viewTodo(l) {
   const nowReady = d?.nowReady || [];
   if (nowReady.length) parts.push(section('Just became ready', 'good', nowReady.map((n) => row(n, { sub: esc(n.what), action: postButton(n.vin) }))));
   const look = d?.needsALook || [];
-  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : '') }))));
+  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : '') }))));
   if (!parts.length && d && !d.firstScan) html += empty('Nothing changed since the last scan.');
   return html + parts.join('');
 }
@@ -492,9 +542,10 @@ function queueStatusHtml() {
   return `<div class="banner info queue" id="queueStatus"><b>${esc(describeQueue(q))}</b>${next ? ` · next: ${esc(name)}` : ''}<div class="toolbar">${buttons}</div></div>`;
 }
 
-// The day's cap for this salesperson: this machine's posts and, after a
-// sync, the server's count of theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
+// The day's cap for this salesperson: this machine's posts (the ones taken
+// down since included) and, after a sync, the server's count of theirs
+// across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday, takenDown: state.takenDown });
 const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
 
 // The Ready tab: the sort menu (remembered for this website in
@@ -567,7 +618,7 @@ function renderReadyBody() {
 // every other change to a shared key.
 async function changeReadySort(value) {
   const order = sortOrder(value);
-  const site = state.snapshot?.site || { name: state.siteName };
+  const site = knownSite();
   state.settings = withDefaults({ ...(state.settings || {}), readySort: order }, site);
   renderReadyBody();
   if (!state.origin) return;
@@ -637,31 +688,69 @@ function viewReview(l) {
   return html;
 }
 
+// One of the person's posts the last sync could not put on the dealership's
+// list (src/sync.js notSharedFrom), or null: the person is told on the car.
+function notShared(p) {
+  const list = state.syncState && Array.isArray(state.syncState.notShared) ? state.syncState.notShared : [];
+  return list.find((n) => n && n.vin === String(p.vin || '').toUpperCase() && Date.parse(n.postedAt) === Date.parse(p.postedAt)) || null;
+}
+const notSharedText = (n) => (n.reason === 'clock'
+  ? "Not shared with your dealership: this post's time is ahead of the server's clock. Check this computer's date and time, then sync again."
+  : `Not shared with your dealership: ${n.by ? esc(n.by) : 'a colleague'} already has this car listed, so your dealership's list and the manager view show theirs, not yours.`);
+
+// How many of the person's own posts on this computer the dealership's list
+// does not hold: a post taken down here since the last sync is not counted.
+const notSharedCount = () => Object.entries(state.posted || {}).filter(([vin, p]) => p && p.mine !== false && notShared({ vin, ...p })).length;
+
+// On To do, where the person looks first: how many of their posts the
+// dealership's list does not hold. My listings says which and why.
+function notSharedBanner() {
+  const n = notSharedCount();
+  if (!n) return '';
+  return `<div class="banner warn" id="notSharedBanner">${n === 1 ? 'One of your posts is' : `${n} of your posts are`} not on your dealership's list: the last sync could not share ${n === 1 ? 'it' : 'them'}. <b>My listings</b> says why.</div>`;
+}
+
 function viewMine(l) {
   const lead = `<p class="lead">Cars you've marked as posted. Each scan compares these with the website.</p>`;
-  if (!l.mine.length) return lead + empty('Nothing marked as posted yet. Use <b>Mark posted</b> on the Ready to post tab.');
+  if (!l.mine.length) return lead + empty('Nothing marked as posted yet. Use <b>Mark posted</b> on the Ready to post tab.') + viewColleagues(l);
   return (
     lead +
     rows(
       l.mine.map((p) => {
         const now = p.now;
-        const own = postedBasis(p, state.settings?.basis); // the basis this listing was posted at (src/rescan.js postedBasis)
-        const site = now ? basisPrice(now, own) : null;
-        const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
-        // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus)
+        const site = now ? price(now) : null;
+        // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus);
+        // a price that differs only because Price to post changed in Settings is told apart (src/rescan.js basisOnlyChange)
         const status = listingStatus(now, p.price, site);
-        const pill = `<span class="pill ${status.tone}">${esc(status.text)}</span>`;
+        const text = status.priceChanged && basisOnlyChange(p, now, state.settings?.basis) ? 'Price to post changed in Settings' : status.text;
+        const pill = `<span class="pill ${status.tone}">${esc(text)}</span>`;
         const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
         const entry = { name: p.name, url: now?.url };
         const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
+        const refused = notShared(p);
         return row(entry, {
-          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
+          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${link}`,
+          line: refused ? `<span class="notShared" style="color: var(--bad)">${notSharedText(refused)}</span>` : '',
           right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
       })
-    )
+    ) +
+    viewColleagues(l)
   );
+}
+
+// Colleagues' listings, as the last sync brought them: who posted the car,
+// when, at what price and the link, so nobody lists it again. No buttons:
+// marking one taken down or updated here would change nothing on Facebook
+// or for the colleague, only this computer's copy.
+function viewColleagues(l) {
+  if (!l.colleagues.length) return '';
+  const items = l.colleagues.map((p) => {
+    const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
+    return row({ name: p.name || p.vin, url: p.now?.url }, { sub: `Posted by ${byWhom(p)} ${esc(when(p.postedAt))}${link}`, right: `Listed ${money(p.price)}`, muted: true });
+  });
+  return `<h3 id="colleagueListings">Posted by colleagues <span class="pill">${items.length}</span></h3><p class="hint">Their listings, as of the last sync. Keeping them up to date is theirs to do.</p>${rows(items)}`;
 }
 
 // ---------- pilot numbers ----------
@@ -677,7 +766,7 @@ const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
 // and with accounts the posts and the to-do items also sync (src/sync.js).
 function viewPilot() {
   const synced = accountsConfigured() ? ' While you are signed in, the posts and the to-do items also sync to your dealership\'s account for the manager view.' : '';
-  const lead = `<p class="lead">The numbers your dealership sees, kept in this browser per website: how long each post takes, which form fields Lot Current couldn't fill, and how long sold cars and price changes stayed on your listings.${synced} No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
+  const lead = `<p class="lead">The numbers your dealership sees, kept in this browser per website: how long each post takes, which form fields Lot Current couldn't fill, and how long sold cars and price changes stayed on your listings. Each record names the car (its VIN and name) and you (your name from Settings), and a price change keeps the website's old and new price.${synced} No customer data, and nothing from Facebook beyond your own listings. <b>Download CSV</b> gives your manager the spreadsheet.</p>`;
   if (!hasPilotData(state.pilot)) return lead + empty('Nothing recorded yet. The numbers start with the first post through the side panel.');
   const s = summarizePilot(state.pilot, { labels: FIELD_LABELS });
   const stat = (k, v) => `<tr><td>${k}</td><td class="n">${v}</td></tr>`;
@@ -705,7 +794,8 @@ function viewPilot() {
     ${stat('Still open', t.open ? t.openItems.map((o) => `${esc(o.name)} (${hrs(o.hoursOpen)})`).join('<br>') : '0')}
     ${t.cleared ? stat('Cleared by the website (the car came back, or the price went back)', t.cleared) : ''}
   </table>`;
-  const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear the numbers</button></div>`;
+  const toolbar = `<div class="toolbar"><button type="button" class="small go" data-action="pilotCsv">Download CSV</button><button type="button" class="small" data-action="pilotCopy">Copy summary</button><button type="button" class="small" data-action="pilotClear">Clear the numbers</button></div>
+    <p class="hint" id="pilotClearNote">Clear the numbers keeps the to-do items still open, so they close as usual once done.${accountsConfigured() ? ' While you are signed in, it also keeps the items closed since the last sync until the next sync sends them, and it does not remove what has already synced to your dealership\'s account.' : ''}</p>`;
   return lead + toolbar + posts + fields + flagTable('Sold cars to take down', s.takeDowns, 'pilotTakeDowns') + flagTable('Price changes', s.priceUpdates, 'pilotPrices');
 }
 
@@ -748,9 +838,13 @@ function accountFieldset() {
   const plan = planText(ss.plan);
   const planLine = plan ? ` · <span id="planStatus"${ss.plan.state === 'lapsed' ? ' style="color: var(--bad)"' : ''}>${esc(plan)}</span>` : '';
   const last = ss.lastSyncAt ? `Last sync ${esc(when(ss.lastSyncAt))}` : 'Not synced yet';
-  const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}` : '';
+  // a sync the server asked to wait is tried again by the service worker (background.js planRetry); said only while that is still to come
+  const retry = site.lastSyncRetry && Date.parse(site.lastSyncRetry) > Date.now() ? `; Lot Current tries again on its own at ${esc(when(site.lastSyncRetry))}` : '';
+  const failed = site.lastSyncError && (!site.lastSync || String(site.lastSyncAttempt || '') > String(site.lastSync)) ? ` · the last attempt failed: ${esc(site.lastSyncError)}${retry}` : '';
+  const refused = notSharedCount(); // the same count as To do's banner
+  const notSharedNote = refused ? ` · ${refused} of your posts ${refused === 1 ? 'is' : 'are'} not shared with your dealership (My listings says why)` : '';
   const syncHint = state.origin
-    ? `<p class="hint" id="syncStatus">${last}${failed}. Lot Current also syncs after every rescan and after each post you record.</p>`
+    ? `<p class="hint" id="syncStatus">${last}${failed}${notSharedNote}. Lot Current also syncs after every rescan and after each post, take-down or price update you record.</p>`
     : `<p class="hint" id="syncStatus">Open your dealership's website to sync its listings.</p>`;
   return `<fieldset><legend>Account</legend>
     <p id="accountStatus">Signed in as <b>${esc(email)}</b>${dealership}${planLine}</p>
@@ -763,10 +857,60 @@ function accountFieldset() {
   </fieldset>`;
 }
 
+// What Settings keeps beside the form: the synced profile, and the problem report.
+const PROFILE_HINT = "Your profile (name, role, closing line, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.";
+const forgetProfileHtml = () => `<p class="hint">${PROFILE_HINT}</p>
+      <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>`;
+const reportProblemHtml = () => `<fieldset><legend>Report a problem</legend>
+      <p class="hint">Copies a short technical report to paste into your message to support: the versions, this website and its platform, the last scan and its error, the tab counts, which form fields the last fill couldn't do, your Chrome version and time zone. No names, no cars, no listing links.</p>
+      <button type="button" class="small" data-action="reportProblem">Copy problem report</button>
+    </fieldset>`;
+const versionHtml = () => {
+  const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
+  return `<p class="hint" id="version">Lot Current ${esc(version)} · form map ${esc(FORM_MAP.version)}</p>`;
+};
+
+// Settings belong to a dealership's website: with none open in this tab (a
+// Facebook page, a new tab) there is nothing to show or save, only the
+// account, the synced profile and the problem report.
+function viewSettingsWithoutSite() {
+  return `<form id="settings" class="settings">
+    ${versionHtml()}
+    <div class="banner info" id="settingsNeedSite">Settings are kept for each dealership website. Open your dealership's website in this tab to see or change them.</div>
+    ${accountFieldset()}
+    <fieldset><legend>Saved data</legend>
+      ${forgetProfileHtml()}
+    </fieldset>
+    ${reportProblemHtml()}
+  </form>`;
+}
+
+// The basis a price button's price was taken at: a To do item's own (the
+// scan's, src/rescan.js diffScans), so acting on an item listed before
+// "Price to post" changed records the price with the basis it really is;
+// else (My listings, priced from this scan) the basis in force now.
+function buttonBasis(btn) {
+  const b = btn && btn.dataset && btn.dataset.basis;
+  return b === 'website' || b === 'beforeFees' ? b : state.settings?.basis || 'website';
+}
+
+// The person's own listings on this website (a colleague's are theirs to keep up).
+const ownListings = () => Object.values(state.posted || {}).filter((p) => p && p.mine !== false).length;
+
+// Said before a change of "Price to post" is saved: each listing posted
+// under the old choice has to be edited by hand to the new one.
+// Drawn only beside the choice of the lower second price: on a website that
+// shows none there is no other basis to change to.
+function basisWarning() {
+  const text = basisChangeWarning(ownListings());
+  return text ? `<p class="hint" id="basisWarning">${text}</p>` : '';
+}
+
 function viewSettings() {
+  if (!state.origin) return viewSettingsWithoutSite();
   const entries = Object.values(state.snapshot?.vehicles || {});
   const locations = [...new Set(entries.map((e) => e.location).filter(Boolean))].sort();
-  const s = withDefaults(state.settings || {}, { name: state.siteName });
+  const s = withDefaults(state.settings || {}, knownSite());
   const fee = feeGap(entries);
   const example = fee.example;
   const suggested = suggestedPriceNote(fee.gap, s.basis);
@@ -778,9 +922,8 @@ function viewSettings() {
   const feeNote = example
     ? `<p class="hint">On this website the main price is usually ${money(fee.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>`
     : '';
-  const version = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
   return `<form id="settings" class="settings">
-    <p class="hint" id="version">Lot Current ${esc(version)} · form map ${esc(FORM_MAP.version)}</p>
+    ${versionHtml()}
     <fieldset><legend>You</legend>
       ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name"')}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
@@ -797,7 +940,7 @@ function viewSettings() {
       <p class="hint">Counted from the in-stock date the website gives for the car, or else from the scan that first saw it. A car you have posted is never marked new. ${MIN_NEW_DAYS} to ${MAX_NEW_DAYS} days; kept for this website only, so it does not follow your profile to another website. The order of the Ready to post list is remembered the same way.</p>
     </fieldset>
     <fieldset><legend>Dealership, named on every listing</legend>
-      ${field('Dealership name', 'dealerName', s.dealer.name)}
+      ${field('Dealership name', 'dealerName', s.dealer.name, state.snapshot ? undefined : 'type="text" placeholder="Filled in from the website at the first scan"')}
       ${field('City', 'dealerCity', s.dealer.city)}
       ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="e.g. OH" maxlength="2"')}
       ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="e.g. 43215" inputmode="numeric"')}
@@ -807,7 +950,8 @@ function viewSettings() {
       <label><input type="radio" name="basis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> <span>The website's main price${example ? ` (e.g. ${money(example.price)} "${esc(example.priceLabel)}")` : ''}</span></label>
       ${!state.snapshot || showsLowerPrice(entries)
         ? `<label><input type="radio" name="basis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> <span>The lower second price the website shows${example ? ` (e.g. ${money(example.priceBeforeFees)}; usually the price before the doc fee)` : ''}</span></label>
-      <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>`
+      <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>
+      ${basisWarning()}`
         : ''}
       ${feeNote}
       ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}
@@ -822,13 +966,20 @@ function viewSettings() {
       ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="100"')}
       <p class="hint">A safety setting, not a guarantee: Meta doesn't publish its limits.</p>
     </fieldset>
+    <fieldset><legend>Posting rules</legend>
+      <details id="postingRules"><summary>Read the posting rules</summary><ol class="rules">${POSTING_RULES.map((r) => `<li><b>${esc(r.title)}</b> ${esc(r.text)}</li>`).join('')}</ol></details>
+      ${s.rulesReadAt
+        ? `<p class="hint" id="rulesStatus">You ticked that you will follow them on ${esc(dateOnly(s.rulesReadAt))}.</p>`
+        : `<p class="hint" id="rulesStatus">Not ticked yet for this website: the side panel shows them before your first post, or tick here.</p>
+      <label><input type="checkbox" name="rulesAccept" /> <span>I have read the posting rules and will follow them</span></label>`}
+    </fieldset>
     <fieldset><legend>Automatic rescans</legend>
       <label><input type="checkbox" name="autoRescan" ${s.autoRescan ? 'checked' : ''} /> <span>Rescan this website every 3 hours while Chrome is open, and show the to-do count on the icon</span></label>
       <label><input type="checkbox" name="notify" ${s.notify !== false ? 'checked' : ''} /> <span>Desktop notification when listings need attention</span></label>
       ${!state.site
         ? '<p class="hint">Scan this website once first. Then the permission to read it in the background can be granted here.</p>'
         : state.rescanPermission
-          ? '<p class="hint">Permission to read this website in the background: granted. Lot Current then re-reads the website and, while you are signed in to a Lot Current account, sends that rescan\'s results (your posted list, post records, to-do items and the scan\'s counts) to your dealership\'s account; it never touches Facebook on its own.</p>'
+          ? `<p class="hint">Permission to read this website in the background: granted. Lot Current then re-reads the website${accountsConfigured() ? " and, while you are signed in to a Lot Current account, sends that rescan's results (your posted list, post records, to-do items and the scan's counts) to your dealership's account" : ''}; it never touches Facebook on its own.</p>`
           : '<p class="hint">Needs permission to read this website in the background (Chrome will ask). <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></p>'}
     </fieldset>
     ${accountFieldset()}
@@ -851,15 +1002,11 @@ function viewSettings() {
     </fieldset>
     <div class="actions"><button type="submit" class="plain">Save settings</button><span class="hint" id="saved"></span></div>
     <fieldset style="margin-top:14px"><legend>Saved data</legend>
-      <p class="hint">Scans and your posted list are kept in this browser, separately for each website. When you are signed in, your posted list, post timings, to-do items and scan counts also sync to your dealership's account.</p>
+      <p class="hint">Scans and your posted list are kept in this browser, separately for each website. When you are signed in, your posted list, post timings, to-do items and scan counts also sync to your dealership's account. Clearing this website does not remove them there: while you are signed in, the next sync brings your posted list and its open to-do items back.</p>
       <button type="button" class="danger" data-action="clear">Clear everything for this website</button>
-      <p class="hint">Your profile (name, role, closing line, dealership, stores, price basis, note, cap, listing defaults, rewrite service address, Terms acceptance) is also kept in Chrome's sync storage under your own Google account, so it follows you to other computers. This removes it from there; the settings on this computer stay.</p>
-      <button type="button" class="danger" data-action="forgetProfile">Forget my synced profile</button>
+      ${forgetProfileHtml()}
     </fieldset>
-    <fieldset><legend>Report a problem</legend>
-      <p class="hint">Copies a short technical report to paste into your message to support: the versions, this website and its platform, the last scan and its error, the tab counts, which form fields the last fill couldn't do, your Chrome version and time zone. No names, no cars, no listing links.</p>
-      <button type="button" class="small" data-action="reportProblem">Copy problem report</button>
-    </fieldset>
+    ${reportProblemHtml()}
   </form>`;
 }
 
@@ -900,7 +1047,7 @@ function problemReport() {
     `Last error: ${site.lastError || 'none'}`,
     `Automatic rescans: ${site.auto ? 'on' : 'off'}; background permission: ${permission}`,
     `Account: ${accountsConfigured() ? (state.account.session ? 'signed in' : 'signed out') : 'not set up'}; plan: ${state.syncState && state.syncState.plan ? state.syncState.plan.state : 'unknown'}; last sync: ${site.lastSync || 'never'}; last sync error: ${site.lastSyncError || 'none'}`,
-    `Counts: to do ${todoCount()}, ready to post ${l.ready.length}, not ready ${l.notReady.length}, other stores ${l.otherStores.length}, needs a look ${l.review.length + l.skipped.length}, my listings ${l.mine.length}, queue: ${state.queue ? describeQueue(state.queue) : 'none'}`,
+    `Counts: to do ${todoCount()}, ready to post ${l.ready.length}, not ready ${l.notReady.length}, other stores ${l.otherStores.length}, needs a look ${l.review.length + l.skipped.length}, my listings ${l.mine.length}, colleagues' listings ${l.colleagues.length}, queue: ${state.queue ? describeQueue(state.queue) : 'none'}`,
     lastFill
       ? `Last fill: ${lastFill.at || 'unknown time'}, form map ${lastFill.mapVersion || 'unknown'}, build ${lastFill.version || 'unknown'}; needed a click: ${keysOf(lastFill.partial)}; couldn't fill: ${keysOf(lastFill.blocked)}; changed by the form afterwards: ${keysOf(lastFill.changed)}`
       : 'Last fill: none recorded',
@@ -940,8 +1087,30 @@ function render() {
 let clearArmed = false;
 let pilotClearArmed = false;
 
+// Before a post leaves the posted list (Taken down, or Posted ✓ unmarked):
+// it is kept in takenDown:<origin> (src/takenDown.js), so the daily cap
+// still counts it on the day it was made. Written first: if the posted list
+// then fails to change, the post is still counted once. A colleague's entry
+// is theirs and has no such buttons. False when the write failed.
+async function keepTakenDown(vin) {
+  const entry = state.posted[vin];
+  if (!entry || entry.mine === false) return true;
+  const stillListed = stillListedNow(state.snapshot, state.diff, vin);
+  return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed }));
+}
+
 // Pilot numbers: an item the person ticked off by hand, or a car unmarked.
 const notePilot = (change) => updatePilot(state.origin, change).then((p) => { state.pilot = p; }).catch(() => null);
+
+// After a change recorded here (a scan, a car marked or unmarked, taken
+// down or updated), the worker syncs this website with the dealership's
+// account while the person is signed in, so the manager view and colleagues
+// see it now rather than at the next rescan. Fire and forget: the popup may
+// close first, and Settings shows how the sync went.
+function syncInBackground() {
+  if (!signedIn() || !state.origin) return;
+  chrome.runtime.sendMessage({ type: 'syncNow', origin: state.origin }).catch(() => {});
+}
 
 async function onPanelClick(ev) {
   const btn = ev.target.closest('button[data-action]');
@@ -951,7 +1120,7 @@ async function onPanelClick(ev) {
     case 'post': {
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry) return;
-      await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis));
+      if (await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis))) syncInBackground(); // colleagues see the car is taken
       break;
     }
     case 'openPost': {
@@ -1032,7 +1201,7 @@ async function onPanelClick(ev) {
       // sees the change. The person clicks Update / Mark as sold / Delete.
       if (!state.tab) return;
       const p = state.posted[vin] || {};
-      const item = { origin: state.origin, vin, kind: btn.dataset.kind, price: Number(btn.dataset.price) || null, listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
+      const item = { origin: state.origin, vin, kind: btn.dataset.kind, price: Number(btn.dataset.price) || null, basis: buttonBasis(btn), listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
       let opened = true;
       try {
         await chrome.sidePanel.open({ windowId: state.tab.windowId }); // straight from the click
@@ -1058,7 +1227,7 @@ async function onPanelClick(ev) {
     case 'skipSetup':
       state.wizardDone = true;
       await ownSet({ [siteKeys(state.origin).wizardDone]: { skipped: true, at: new Date().toISOString() } });
-      setStatus('Settings has the same fields. Set-up can be run later after "Clear everything for this website".');
+      setStatus(`Settings has the same fields, the posting rules included.${state.settings && state.settings.rulesReadAt ? '' : ' The side panel shows the rules before your first post until you tick them.'} Set-up can be run later after "Clear everything for this website".`);
       break;
     case 'allowRescans': {
       // Asks Chrome straight from the click (a user gesture) for the host
@@ -1072,7 +1241,7 @@ async function onPanelClick(ev) {
       }
       state.rescanPermission = granted;
       if (granted) {
-        state.settings = withDefaults({ ...(state.settings || {}), autoRescan: true }, state.snapshot?.site || { name: state.siteName });
+        state.settings = withDefaults({ ...(state.settings || {}), autoRescan: true }, knownSite());
         if (!(await save('settings'))) break; // the status says why; the registry the worker reads is left as it was
         if (await setSiteAuto(true)) setStatus('Automatic rescans are on: every 3 hours while Chrome is open.');
       } else {
@@ -1081,21 +1250,25 @@ async function onPanelClick(ev) {
       }
       break;
     }
-    case 'unpost':
-      await update('posted', (p) => markTakenDown(p || {}, vin));
-      notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
+    case 'unpost': {
+      if (!(await keepTakenDown(vin))) break;
+      const unmarked = await update('posted', (p) => markTakenDown(p || {}, vin));
+      // fire-and-forget: the redraw must not wait for the pilot bookkeeping; the sync goes after it, so it carries both
+      notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })).then(() => { if (unmarked) syncInBackground(); });
       break;
+    }
     // Two keys, two writes: stop at the first that fails (the status says
     // why) so the item stays open and can be ticked again once there is room.
     case 'takenDown':
+      if (!(await keepTakenDown(vin))) break;
       if (!(await update('posted', (p) => markTakenDown(p || {}, vin)))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook'])))) break;
-      notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' }));
+      notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' })).then(syncInBackground);
       break;
     case 'priceUpdated':
-      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
+      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price), undefined, buttonBasis(btn))))) break; // recorded with the basis the price was taken at
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
-      notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' }));
+      notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })).then(syncInBackground);
       break;
     case 'pilotCsv': {
       // A file for the manager, saved by the browser like any download.
@@ -1130,7 +1303,7 @@ async function onPanelClick(ev) {
     case 'forgetProfile':
       try {
         await chrome.storage.sync.remove(PROFILE_KEY);
-        setStatus('Your synced profile was removed from Chrome\'s sync storage. The settings on this computer are unchanged; saving them again re-creates the profile.');
+        setStatus('Your synced profile was removed from Chrome\'s sync storage. The settings on this computer are unchanged; only saving Settings or finishing set-up re-creates the profile.');
       } catch (e) {
         setStatus("Couldn't reach Chrome's sync storage: " + ((e && e.message) || e), 'error');
       }
@@ -1142,9 +1315,29 @@ async function onPanelClick(ev) {
         return;
       }
       pilotClearArmed = false;
-      state.pilot = null;
-      await ownRemove([siteKeys(state.origin).pilot]);
-      setStatus('The numbers for this website were cleared.');
+      // The to-do items still open, and a post under way, stay (src/pilot.js
+      // clearNumbers): the item stays on To do, and its synced copy on the
+      // manager's list closes only when this computer sends it closed. So the
+      // items closed since the last sync stay too, until the next sync sends
+      // them (src/sync.js clearNumbersKeepingUnsynced).
+      try {
+        const k = siteKeys(state.origin);
+        const left = await withLock(k.pilot, async () => {
+          const got = await chrome.storage.local.get([k.pilot, k.sync]);
+          const kept = clearNumbersKeepingUnsynced(got[k.pilot], got[k.sync]);
+          if (hasPilotData(kept)) await ownSet({ [k.pilot]: kept });
+          else await ownRemove([k.pilot]);
+          return kept;
+        });
+        state.pilot = hasPilotData(left) ? left : null;
+        const open = left.flags.filter((f) => !f.doneAt).length;
+        const waiting = left.flags.length - open;
+        const openText = open ? ` ${open === 1 ? 'The to-do item still open stays' : `The ${open} to-do items still open stay`} until ${open === 1 ? 'it is' : 'they are'} done.` : '';
+        const waitingText = waiting ? ` ${waiting === 1 ? 'The to-do item closed since the last sync stays' : `The ${waiting} to-do items closed since the last sync stay`} until the next sync sends ${waiting === 1 ? 'it' : 'them'} to your dealership's account.` : '';
+        setStatus(`The numbers for this website were cleared.${openText}${waitingText}`);
+      } catch (e) {
+        setStatus(storageErrorText(e), 'error');
+      }
       break;
     case 'clear':
       if (!clearArmed) {
@@ -1154,6 +1347,11 @@ async function onPanelClick(ev) {
       }
       Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
       await ownRemove(Object.values(siteKeys(state.origin)));
+      // The synced profile is the person's, not this website's data: start
+      // again from it, as a popup opened on a website with no settings does,
+      // so the next Scan or Settings save puts it back instead of defaults.
+      state.settings = settingsFromProfile(await loadProfile(), { origin: state.origin });
+      state.settingsFromProfile = Boolean(state.settings);
       // forget the website for background rescans too, and take its count off the badge
       try {
         await updateKey(SITES_KEY, (sites) => {
@@ -1218,7 +1416,7 @@ async function syncNow() {
 // a key typed for a self-hosted backend is kept in case they switch back.
 async function pointRewriteAtAccount() {
   if (!state.origin) return;
-  const site = state.snapshot?.site || { name: state.siteName };
+  const site = knownSite();
   const prev = withDefaults(state.settings || {}, site);
   const endpoint = rewriteEndpointFor(ACCOUNT);
   if (!endpoint || sameAddress(prev.rewrite.endpoint, endpoint)) return;
@@ -1311,6 +1509,10 @@ async function onSettingsSubmit(ev) {
     render();
     return;
   }
+  if (!state.origin) {
+    setStatus(NO_SITE_TEXT, 'error');
+    return;
+  }
   const form = new FormData(ev.target);
   // the closing line goes into every description: a line that fails its checks is not saved, and the form keeps what was typed
   const closing = checkClosingLine(form.get('closingLine'));
@@ -1320,7 +1522,7 @@ async function onSettingsSubmit(ev) {
     if (box) box.focus();
     return;
   }
-  const prev = withDefaults(state.settings || {}, { name: state.siteName });
+  const prev = withDefaults(state.settings || {}, knownSite());
   const str = (k) => String(form.get(k) ?? '').trim();
   state.settings = withDefaults(
     {
@@ -1337,8 +1539,9 @@ async function onSettingsSubmit(ev) {
       autoRescan: form.get('autoRescan') === 'on',
       notify: form.get('notify') === 'on',
       legal: form.get('legalAccept') === 'on' && legalHosted() ? acceptLegal() : prev.legal, // the tick is the same acceptance the wizard's Terms step records; nothing while the documents are placeholders
+      rulesReadAt: form.get('rulesAccept') === 'on' ? new Date().toISOString() : prev.rulesReadAt, // the same tick as set-up's rules step and the side panel's
     },
-    { name: state.siteName }
+    knownSite()
   );
   let message = 'Saved. Click Rescan website to apply.';
   if (state.settings.autoRescan && state.site && !state.rescanPermission) {
@@ -1357,12 +1560,20 @@ async function onSettingsSubmit(ev) {
     state.settings.autoRescan = false;
     message = 'Saved, but automatic rescans need one scan of this website first.';
   }
-  // listings posted before the price basis was kept on each one stay on the
-  // basis they were posted at: the new setting is for new posts, and a
-  // changed setting is never shown as a website price change
-  if (state.settings.basis !== prev.basis && !(await update('posted', (p) => withPostedBasis(p, prev.basis)))) { render(); return; }
+  const basisChanged = state.settings.basis !== prev.basis;
+  // Listings that record no basis were posted under the one in force until
+  // now (src/rescan.js stampBasis). Stamped before the new basis is saved, so
+  // a background rescan in between never reads them under the new one as a
+  // website price change; true whether or not the save below goes through.
+  if (basisChanged) await update('posted', (p) => stampBasis(p, prev.basis));
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
-  if (state.settings.basis !== prev.basis && Object.values(state.posted || {}).some((p) => p && p.mine !== false)) message += ' Your listings keep the price they were posted at; the new price setting is for new posts.';
+  await saveProfile(state.settings, undefined, state.origin); // the person's explicit save is what (re)creates the synced profile
+  if (basisChanged) {
+    const n = ownListings();
+    if (n) message += n === 1
+      ? ' After the next rescan, your posted listing is listed under To do to edit to the new price to post, if its car shows a lower second price.'
+      : ` After the next rescan, each of your ${n} posted listings whose car shows a lower second price is listed under To do to edit to the new price to post.`;
+  }
   await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');
   if (note) note.textContent = message;
@@ -1426,10 +1637,13 @@ async function init() {
     take(k.diff, 'diff', null);
     take(k.snapshot, 'snapshot', null);
     take(k.pilot, 'pilot', null);
+    take(k.takenDown, 'takenDown', null); // a take-down from the side panel's To do upkeep: the cap counts it
     if (changes[k.sync]) {
       const next = changes[k.sync].newValue ?? null;
-      // the server's count of today's posts feeds the cap, so the lists are redrawn when it moves; the rest is shown in Settings only
+      // the server's count of today's posts feeds the cap, and the posts it would not share are named on To do and My listings,
+      // so the lists are redrawn when either moves; the rest is shown in Settings only
       if (!same(next && next.postsToday, state.syncState && state.syncState.postsToday)) touched = true;
+      if (!same(next && next.notShared, state.syncState && state.syncState.notShared)) touched = true;
       state.syncState = next;
     }
     if (accountsConfigured() && changes[GLOBAL_KEYS.account]) state.account.session = changes[GLOBAL_KEYS.account].newValue || null; // the worker refreshed the session, or a rejected token signed the person out

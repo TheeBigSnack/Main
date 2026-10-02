@@ -70,12 +70,14 @@ try {
   await setup.evaluate(async ({ origin, marketOrigin }) => {
     await chrome.storage.local.set({
       [`settings:${origin}`]: {
-        myStores: [], // every store, so two cars are ready
+        // the two stores the ready cars are at, named: with none chosen, the website's first scan ticks only its own (src/scanRunner.js)
+        myStores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', 'Ron Lewis Chrysler Dodge Jeep Ram Cranberry'],
         basis: 'website',
         salesperson: { name: 'Roger', title: 'sales consultant' },
         dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: '', state: '', zip: '' }, // filled from the website's own address
         priceNote: 'Price includes the $490 doc fee; tax and tags extra.',
         dailyCap: 10,
+        rulesReadAt: new Date().toISOString(), // set-up's posting rules, ticked (the side panel asks first otherwise: test/e2e/panel.e2e.mjs)
         rewrite: { enabled: false, endpoint: '', key: '' },
       },
       devOverrides: {

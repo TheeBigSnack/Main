@@ -262,3 +262,17 @@ test('the demo script says what every Chrome permission prompt the extension rai
   assert.ok(line, 'the demo script lost its "Chrome asks for a permission" line');
   for (const kind of kinds) assert.match(line, WORDS[kind], `the demo script does not say a prompt can be the ${kind} permission`);
 });
+
+// The dealer is told every salesperson ticks the posting rules before their
+// first post. Set-up can be skipped (Not now), so that holds only while the
+// side panel stops a post on a website whose settings have no tick and shows
+// the rules (test/panelFlow.test.js runs it).
+test('the store email says every salesperson ticks the posting rules before posting, and the side panel still makes it so', () => {
+  const store = read('../marketing/onboarding-store.md');
+  const sentence = store.split('\n').find((l) => l.startsWith('**5. The posting rules.**'));
+  assert.ok(sentence, 'onboarding-store.md has no posting-rules paragraph');
+  assert.match(sentence, /ticks that they will follow them before their first post: in set-up, or in the side panel if they skipped set-up/);
+  assert.doesNotMatch(sentence, /during set-up and ticks/, 'set-up can be skipped: say where else the tick is asked for');
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /if \(!state\.settings\.rulesReadAt\) \{[^}]*state\.step = 'rules';/, 'the side panel no longer stops a post until the posting rules are ticked: change the email');
+});

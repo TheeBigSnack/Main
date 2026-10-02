@@ -81,6 +81,7 @@ try {
       dealer: { name, city: 'Springfield', state: 'OH', zip: '43215' },
       priceNote: 'Price includes the $490 doc fee; tax and tags extra.',
       dailyCap: 10,
+      rulesReadAt: new Date().toISOString(), // set-up's posting rules, ticked (the side panel asks first otherwise: test/e2e/panel.e2e.mjs)
       rewrite: { enabled: false, endpoint: '', key: '' },
     });
     await chrome.storage.local.set({

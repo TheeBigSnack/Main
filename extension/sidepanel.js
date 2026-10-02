@@ -30,6 +30,8 @@ import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
 import { watchForListing } from './facebook/detectPost.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
+import { relistNotice } from './src/takenDown.js';
+import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
@@ -60,11 +62,13 @@ const state = {
   photoPick: null, // the salesperson's pick of this car's photos, in order (src/photoPick.js); null: the website's first ones
   highlights: null, // the salesperson's pick of this car's features for the description (rewriteTemplate.js settleHighlights); null: the usual pick
   highlightsUsed: null, // the highlights the description on screen was written with
+  relist: null, // this car's take-down while the website still listed it (src/takenDown.js relistNotice): the review says so, a queue waits
   queue: null, // the batch queue (src/queue.js), shared with the popup
   queueMode: false, // this car is being posted as part of the queue
   drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
   snapshotVehicles: {}, // names for the queue bar
   syncState: null, // this website's sync state (src/sync.js nextSyncState): the server's count of today's posts feeds the cap
+  takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap still counts the day's
   sites: {}, // the site registry (src/scanRunner.js rememberSite): every website this computer has read, for the list's website choice
   siteInfo: null, // this website's registry entry: its adapter and service, so a car can be read without the dealer tab
   snapshotTakenAt: null, // when the saved snapshot behind the list was taken
@@ -123,7 +127,7 @@ const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet 
 async function loadSaved() {
   const origin = state.origin;
   const k = siteKeys(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, GLOBAL_KEYS.sites]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, k.takenDown, GLOBAL_KEYS.sites]);
   const sites = data[GLOBAL_KEYS.sites] || {};
   const siteInfo = sites[origin] || null;
   const siteName = data[k.snapshot]?.site?.name || siteInfo?.name || origin;
@@ -142,6 +146,7 @@ async function loadSaved() {
     drafts: data[k.drafts] || {},
     snapshotVehicles: data[k.snapshot]?.vehicles || {},
     syncState: data[k.sync] || null,
+    takenDown: data[k.takenDown] || null,
   });
   return true;
 }
@@ -156,7 +161,7 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'relist', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -176,7 +181,7 @@ async function clearFlow() {
   if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
 }
 
@@ -309,6 +314,14 @@ async function startFlow(req) {
     setStatus(`${name} is already marked as posted on this website, so it isn't posted again. Its listing is under My listings in the popup.`);
     return render();
   }
+  if (!state.settings.rulesReadAt) {
+    // The posting rules come before the first post from this website. Set-up
+    // shows them; whoever skipped it reads and ticks them here, and the post
+    // (or the queue) goes on from the tick (acceptRules).
+    state.step = 'rules';
+    setStatus('');
+    return render();
+  }
   await refreshGranted(); // current before canAutoOpen below looks at the photo servers
   state.step = 'checking';
   setStatus('');
@@ -334,6 +347,8 @@ async function startFlow(req) {
   state.noteApplies = !(state.settings.basis === 'beforeFees' && state.price === fresh.vehicle.price);
   if (!state.price) return block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
 
+  // taken down by this person while the website still listed it: possibly a delete and repost (posting rule 3)
+  state.relist = relistNotice(state.takenDown, state.vin);
   state.message = 'Writing the description…';
   render();
   await maybeGuessColors();
@@ -348,15 +363,17 @@ async function startFlow(req) {
   if (state.queueMode && canAutoOpen()) await openForm();
 }
 
-// The day's cap for this salesperson: this machine's posts and, after a
-// sync, the server's count of theirs across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday });
+// The day's cap for this salesperson: this machine's posts (the ones taken
+// down since included) and, after a sync, the server's count of theirs
+// across their machines (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday, takenDown: state.takenDown });
 
 // Anything assumed besides the dealership's own defaults (a reading of the
 // website's words, a colour guessed from the photos, a motorcycle read from
 // the make) holds a queued car at review, where the assumed list is shown.
 function canAutoOpen() {
   if (!state.guardrails || !state.guardrails.ok) return false;
+  if (state.relist) return false; // the person sees the take-down notice first
   if (state.vinCheck && state.vinCheck.local && !state.vinCheck.local.ok) return false;
   const listing = currentListing();
   const blockers = listing.missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
@@ -1089,12 +1106,62 @@ function highlightsHtml() {
   </fieldset>`;
 }
 
+// The posting rules, before the first post from a website whose settings
+// have no tick for them (set-up skipped, or started from Scan and Settings).
+function viewRules() {
+  return `<section id="postingRules" aria-labelledby="postingRulesLabel">
+    <h3 id="postingRulesLabel">The posting rules</h3>
+    <p class="lead">Before your first post from this website, read the posting rules and tick that you will follow them. Set-up shows the same rules.</p>
+    <ol class="rules">${POSTING_RULES.map((r) => `<li><b>${esc(r.title)}</b> ${esc(r.text)}</li>`).join('')}</ol>
+    <label class="block"><input type="checkbox" id="rulesRead" /> I have read the posting rules and will follow them</label>
+    <div class="actions"><button type="button" class="primary" id="rulesContinue" disabled>Continue to the post</button><button type="button" class="plain" id="rulesCancel">Not now</button></div>
+  </section>`;
+}
+
+// The tick: saved in this website's settings (rulesReadAt, as set-up's
+// finish saves it), then the same post starts again from the top.
+async function acceptRules() {
+  const box = $('rulesRead');
+  if (!box || !box.checked) return undefined;
+  const at = new Date().toISOString();
+  const key = siteKeys(state.origin).settings;
+  try {
+    await updateKey(key, (stored) => ({ ...(stored || state.settings), rulesReadAt: at }), panelStorage);
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+    return undefined;
+  }
+  state.settings = { ...state.settings, rulesReadAt: at };
+  return startFlow({ origin: state.origin, vin: state.vin, dealerTabId: state.dealerTabId, windowId: state.windowId, queue: state.queueMode });
+}
+
+// Not now: no post without the tick. A queue waits, paused, for the next try.
+async function leaveRules() {
+  const queued = state.queueMode && state.queue;
+  if (queued) {
+    state.queue = pauseQueue(state.queue);
+    await saveQueue();
+  }
+  await clearFlow();
+  setStatus(`Nothing was posted: the posting rules come first.${queued ? ' The queue is paused; Resume shows the rules again.' : ''}`);
+  render();
+}
+
+// A car this person took off their listings while the website still listed
+// it: re-posting it may be the delete and repost that posting rule 3 forbids.
+// Said, never refused: the old listing may be gone for another reason.
+function relistHtml() {
+  const r = state.relist;
+  if (!r) return '';
+  return `<div class="banner warn" id="relistNotice" role="alert">You took this car off your listings on ${esc(when(r.takenDownAt))}, while the website still listed it. The posting rules say: no deleting and reposting to bump a listing. Post it again only if the old listing is gone for another reason, such as Facebook removing it or a Taken down clicked by mistake.</div>`;
+}
+
 const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
 
 function viewReview() {
   const cap = dailyCap();
   const rw = state.settings.rewrite;
-  return `${carCard()}
+  return `${relistHtml()}${carCard()}
   <section>
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
     ${state.note ? `<div class="banner warn">${esc(state.note)}</div>` : ''}
@@ -1275,7 +1342,7 @@ function refocus(kept) {
 
 function render() {
   $('site').textContent = state.siteName || '';
-  const views = { idle: viewIdle, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone, wizard: wizardHtml };
+  const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone, wizard: wizardHtml };
   if (state.step === 'wizard') {
     $('panel').innerHTML = wizardHtml();
     return;
@@ -1573,6 +1640,8 @@ async function onClick(ev) {
   switch (btn.id) {
     case 'panelQueue': return state.step === 'idle' ? oneAtATime(() => queueFromList()) : undefined;
     case 'panelRescan': return state.step === 'idle' ? rescanFromList() : undefined;
+    case 'rulesContinue': return state.step === 'rules' ? acceptRules() : undefined;
+    case 'rulesCancel': return state.step === 'rules' ? leaveRules() : undefined;
     case 'allowSite': return state.step === 'blocked' ? oneAtATime(() => allowSiteAndRetry()) : undefined;
     case 'openForm':
       await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
@@ -1687,12 +1756,13 @@ const handlers = { [GLOBAL_KEYS.postRequest]: startFlow, [GLOBAL_KEYS.setupReque
 // bar and the next car's record are current without reopening the panel.
 // The panel's own writes echo back too: they are marked (ownSet), and a value
 // the panel already holds is not a change. What is redrawn: steps without a
-// text box are redrawn whole; on review and publish only the queue bar and
-// the cap line are replaced, so the description and the listing link the
-// person is typing stay put; the wizard and upkeep draw their own views.
+// text box are redrawn whole; on the posting rules, review and publish only
+// the queue bar and the cap line are replaced, so the rules' tick, the
+// description and the listing link the person is typing stay put; the
+// wizard and upkeep draw their own views.
 // When the popup stops the queue while a car is under way, that car can
 // still be finished; afterQueueStep then finds no queue and stops.
-const INPUT_STEPS = ['review', 'publish'];
+const INPUT_STEPS = ['rules', 'review', 'publish'];
 const OWN_VIEW_STEPS = ['wizard', 'upkeep'];
 function adoptChanges(changes) {
   // the site registry: a website scanned or set up elsewhere, its service and permission state
@@ -1737,6 +1807,7 @@ function adoptChanges(changes) {
     }
   }
   take(k.sync, 'syncState', null); // the server's count of today's posts feeds the cap line
+  take(k.takenDown, 'takenDown', null); // a post taken down still counts toward the cap
   if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
     state.settings = withDefaults(changes[k.settings].newValue, { name: state.siteName });
     touched = true;
@@ -1773,6 +1844,7 @@ async function init() {
   $('panel').addEventListener('input', onInput);
   $('panel').addEventListener('change', (ev) => {
     if (state.step === 'wizard') handleWizardChange(ev.target);
+    else if (ev.target.id === 'rulesRead') { const b = $('rulesContinue'); if (b) b.disabled = !ev.target.checked; }
     else if (ev.target.id === 'panelSite') chooseSite(ev.target.value);
     else if (ev.target.id === 'panelSort') changeSort(ev.target.value);
     else onPickChange(ev.target);

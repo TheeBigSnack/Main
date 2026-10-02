@@ -18,6 +18,7 @@ import {
 } from '../scripts/legal-pages.mjs';
 import { NAV, NO_SCRIPT_CSP, fullTitle, rootFor, ancestorsOf, readContext } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
+import { LEGAL, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -431,4 +432,34 @@ test('the script needs nothing beyond Node and the site generator, and npm run l
   for (const p of PAGES) assert.ok(existsSync(dirname(join(root, p.file))));
   const ctx = await readContext(root);
   assert.equal(typeof ctx.legalDraft, 'boolean');
+});
+
+// Once legalHosted() is true the wizard's Terms step and the tick in
+// Settings record acceptance of LEGAL.version. Pointing LEGAL at pages that
+// are still marked "not in effect" would record a false acceptance, so the
+// addresses follow legal/legal-status.json: placeholders while it says
+// draft; once real, all three, with an edition that is not a draft's.
+const LINK_KEYS = ['termsUrl', 'privacyUrl', 'rulesUrl'];
+function linkProblems(legal, draft) {
+  const real = LINK_KEYS.filter((key) => !isPlaceholderUrl(legal[key]));
+  const problems = [];
+  if (draft && real.length) problems.push(`${real.join(', ')} point at real pages while ${STATUS_FILE} says draft`);
+  if (real.length && real.length < LINK_KEYS.length) problems.push(`only ${real.join(', ')} are real addresses: all three go live together`);
+  if (real.length && /draft/i.test(String(legal.version || ''))) problems.push(`version ${legal.version} is a draft's edition: bump it with the real addresses`);
+  return problems;
+}
+
+test('legalLinks.js names real pages only once legal-status.json says the texts are final, all three at once, with a new edition', () => {
+  const placeholders = { version: '2026-09-28-draft', termsUrl: 'https://placeholder.example/terms', privacyUrl: 'https://placeholder.example/privacy', rulesUrl: 'https://placeholder.example/posting-rules' };
+  const live = { version: '2026-12-01', termsUrl: 'https://lotcurrent.com/legal/terms/', privacyUrl: 'https://lotcurrent.com/legal/privacy/', rulesUrl: 'https://lotcurrent.com/legal/posting-rules/' };
+  // the rule, on sample values
+  assert.deepEqual(linkProblems(placeholders, true), [], 'drafts behind placeholders: fine');
+  assert.deepEqual(linkProblems(placeholders, false), [], 'final texts not linked yet: fine');
+  assert.deepEqual(linkProblems(live, false), [], 'final texts, real addresses, a new edition: fine');
+  assert.match(linkProblems(live, true).join('\n'), /point at real pages while legal\/legal-status\.json says draft/);
+  assert.match(linkProblems({ ...live, version: '2026-09-28-draft' }, false).join('\n'), /a draft's edition/);
+  assert.match(linkProblems({ ...live, rulesUrl: placeholders.rulesUrl }, false).join('\n'), /all three go live together/);
+  // and on what is committed
+  assert.deepEqual(linkProblems(LEGAL, status.draft), [], `extension/src/legalLinks.js and ${STATUS_FILE} disagree`);
+  if (status.draft) assert.equal(legalHosted(), false, 'while the texts are drafts nobody can accept them');
 });

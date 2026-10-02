@@ -1,5 +1,6 @@
-// Pilot numbers (Milestone 3): what the pilot agreement lets Lot Current record,
-// kept per dealer website in this browser only:
+// Pilot numbers (Milestone 3): the measures pilot agreement section 2 names,
+// kept per dealer website in this browser (and, while signed in, the post
+// attempts and the to-do flags in the dealership's account, src/sync.js):
 //   - time per post: from the click on Post to "It's posted", including the
 //     salesperson's review and their own Publish click;
 //   - which form fields could not be filled, per fill attempt (field keys
@@ -7,8 +8,14 @@
 //   - how long a sold car or a price change stayed on the salesperson's
 //     listing: from the scan that flagged it to the moment Lot Current saw the
 //     change on the listing or the person ticked the item off.
-// No customer or buyer data, and nothing from Facebook beyond what the posted
-// registry already holds. Everything here is pure; updatePilot at the end is
+// Each record also carries what identifies it, which section 2's list does
+// not spell out (legal/questions-for-attorney.md 10.1) and the privacy
+// policy's Usage numbers row does: the car's VIN and name, a post attempt the
+// salesperson's name from Settings, its queue flag and the reason it stopped,
+// a price change the website's old and new price (test/pilotDisclosure.test.js
+// holds the full field list). No customer or buyer data, and nothing from
+// Facebook beyond what the posted registry already holds. Everything here is
+// pure; updatePilot at the end is
 // the one storage helper the popup, the side panel and the worker share, and
 // it runs under the key's lock (src/storage.js) so those three never
 // overwrite each other's writes. Times are stored as ISO; only the CSV and
@@ -162,7 +169,8 @@ export function noteFlags(pilot, diff, { at } = {}) {
   const when = at || diff.takenAt || nowIso();
   const wanted = [];
   for (const t of Array.isArray(diff.takeDown) ? diff.takeDown : []) if (t && t.yours && t.vin) wanted.push({ vin: t.vin, kind: 'takeDown', name: clean(t.name, 80), why: clean(t.why, 40) });
-  for (const u of Array.isArray(diff.priceUpdates) ? diff.priceUpdates : []) if (u && u.yours && u.vin) wanted.push({ vin: u.vin, kind: 'price', name: clean(u.name, 80), from: u.from, to: u.to });
+  // a price to post changed in Settings (why 'basis', src/rescan.js basisOnlyChange) is no website price change
+  for (const u of Array.isArray(diff.priceUpdates) ? diff.priceUpdates : []) if (u && u.yours && u.vin && u.why !== 'basis') wanted.push({ vin: u.vin, kind: 'price', name: clean(u.name, 80), from: u.from, to: u.to });
   const reliable = !diff.unreliable && !(Array.isArray(diff.warnings) && diff.warnings.length);
   const unsettled = new Set((Array.isArray(diff.needsALook) ? diff.needsALook : []).filter((n) => n && n.yours && n.vin).map((n) => n.vin));
   const flags = p.flags.map((f) => {
@@ -193,6 +201,22 @@ export function resolveFlag(pilot, vin, kind = null, { at = nowIso(), how = 'man
     return { ...f, doneAt: at, how: done, hours: hoursBetween(f.flaggedAt, at) };
   });
   return touched ? { ...p, flags } : p;
+}
+
+// "Clear the numbers" (the Numbers tab): the finished records go, what is
+// still under way stays. An open to-do flag is the item still on To do, and
+// once synced the dealership's copy of it is closed only by an upload of
+// this flag closed (src/sync.js), so dropping it would leave that copy open
+// on the manager's list for good while the next scan opened a second one. A
+// post attempt the side panel is still on stays so its end is recorded.
+// `keep` lists closed flags that stay too (matched by VIN, kind and flagging
+// time): the ones the next sync still has to send, since that upload is what
+// closes the dealership's copy (src/sync.js clearNumbersKeepingUnsynced).
+export function clearNumbers(pilot, { keep = [] } = {}) {
+  const p = withPilotDefaults(pilot);
+  const held = (Array.isArray(keep) ? keep : []).filter((f) => f && typeof f === 'object');
+  const kept = (f) => flagOpen(f) || held.some((k) => k.vin === f.vin && k.kind === f.kind && k.flaggedAt === f.flaggedAt);
+  return { ...p, posts: p.posts.filter((a) => !a.endedAt), fills: [], flags: p.flags.filter(kept) };
 }
 
 // ---------- the numbers ----------

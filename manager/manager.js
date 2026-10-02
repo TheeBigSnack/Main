@@ -394,6 +394,16 @@ function renderInvites() {
   renderGettingStarted(); // an open code is step 2
 }
 
+// A salesperson reads only their own post attempts (the database's rule,
+// supabase/migrations/0011_ui_post_attempts_read.sql), so a colleague's
+// seconds and the Everyone median are not theirs to see: the table says so.
+// A manager reads everyone's and is told nothing; when the page could not
+// read the person's role, the sentence names both roles rather than calling
+// a manager a salesperson.
+const OWN_SECONDS_ONLY = 'As a salesperson you see only your own seconds per post, so the Everyone median is yours too; your managers see everyone\'s.';
+const SECONDS_BY_ROLE = 'A salesperson sees only their own seconds per post here, and a manager everyone\'s.';
+const secondsNote = (role) => (role === 'manager' ? '' : ` ${role === 'salesperson' ? OWN_SECONDS_ONLY : SECONDS_BY_ROLE}`);
+
 function viewData() {
   state.mode = 'view';
   const d = state.data;
@@ -420,7 +430,7 @@ function viewData() {
       <tbody>${peopleRows}</tbody>
       <tfoot><tr><td>Everyone</td><td class="n">${s.totals.postedThisWeek}</td><td class="n">${s.totals.postedAllTime}</td><td class="n">${secs(s.totals.medianSeconds)}</td><td class="n">${s.totals.listed}</td><td class="n hide-narrow">${s.totals.takenDown}</td></tr></tfoot>
     </table></div>
-    <p class="hint">"This week" is the last 7 days. Seconds per post run from the click on Post to "It's posted", the salesperson's own review and Publish click included.</p>`;
+    <p class="hint">"This week" is the last 7 days. Seconds per post run from the click on Post to "It's posted", the salesperson's own review and Publish click included.${secondsNote(myRole())}</p>`;
 
   const car = (o) => `<td class="name">${o.listingUrl ? `<a href="${esc(o.listingUrl)}" target="_blank" rel="noopener">${esc(o.name)}</a>` : esc(o.name)}<div class="sub">${esc(o.salesperson || 'no salesperson on record')} · ${esc(o.vin)}</div></td>`;
   const age = (o) => `<td class="n">${pill(o.overdue ? 'bad' : '', hrs(o.hoursOpen))}</td>`;

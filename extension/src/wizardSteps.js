@@ -1,8 +1,9 @@
 // The first-run wizard's pure parts (wizard.js draws them): which steps it
 // has, and what the Account step shows. The Account step is there only when
 // the extension has an account server to talk to (src/accountConfig.js
-// accountsConfigured()); with an empty config the wizard has exactly the
-// steps it had before accounts. The step's words are Settings' own
+// accountsConfigured()): the committed config names the production project,
+// so the shipped build has it (eleven steps); with an empty config the
+// wizard has exactly the ten steps it had before accounts. The step's words are Settings' own
 // (popup.js accountFieldset), so a salesperson who skips it and signs in
 // later under Settings, Account meets the same labels.
 
@@ -33,6 +34,29 @@ export const LATER = Object.freeze({
   signIn: 'Signing in is optional here: click Skip for now and sign in later under Settings, Account.',
   join: 'No code yet? Click Next. If you started your dealership in the manager view, you are in it already and need no code; otherwise join later under Settings, Account.',
 });
+
+// The Terms step's summary of what Lot Current keeps, in plain text. With
+// accounts configured a person can be signed in (here or later under
+// Settings, Account), and then their posted list, post timings, to-do items
+// and scan counts go to the dealership's account (src/sync.js syncPayload),
+// so the summary says so in the words Settings' Saved data uses, and who
+// sees what there (every member the posted list and the to-do items; the
+// person and the managers their post timings: 0011_ui_post_attempts_read.sql);
+// it never says the data stays in the browser alone.
+export function termsSummary(configured = false) {
+  const synced = configured
+    ? " While you are signed in, your posted list (each car's VIN, name and price, when you posted and updated it, the listing link and your name), your post timings, your to-do items (with the old and new price of a price change) and each scan's counts also sync to your dealership's account in Lot Current's database. There everyone at your dealership sees the posted list and the to-do items, and only you and your managers see your post timings."
+    : '';
+  return "In short: Lot Current reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed, each with the car's VIN and name, your name from Settings and, for a price change, the website's old and new price), and never your Facebook login."
+    + synced
+    + ' You publish every post yourself. Lot Current is not affiliated with Meta Platforms, Inc.';
+}
+
+// The Terms step while the documents are not published (legalHosted()
+// false): no acceptance is asked for or recorded, but the usage numbers the
+// summary names are recorded from the first post all the same, so the note
+// says which of the two waits.
+export const TERMS_PENDING = 'The Terms of Service and the Privacy Policy are being finalised. Once they are published you can read and accept them in Settings (Terms and privacy); your acceptance is recorded then. The usage numbers above are recorded from your first post.';
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
 const sameAddress = (a, b) => trimSlash(a).toLowerCase() === trimSlash(b).toLowerCase();
@@ -98,15 +122,4 @@ export function accountStepModel({ configured = false, session = null, joined = 
     later: !signedIn ? LATER.signIn : !isJoined ? LATER.join : '',
     next: signedIn ? 'Next' : 'Skip for now',
   };
-}
-
-// The Terms step's one-paragraph summary. With accounts it says what leaves
-// the browser while the person is signed in, in the words the Numbers tab
-// uses (popup.js viewPilot), so the summary never says the data stays in
-// the browser when it also goes to the dealership's account.
-export function termsSummary(configured = false) {
-  const synced = configured
-    ? ' While you are signed in, your posted list, those post timings, your to-do items and each scan\'s counts also sync to your dealership\'s account for the manager view.'
-    : '';
-  return `In short: Lot Current reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed), and never your Facebook login.${synced} You publish every post yourself. Lot Current is not affiliated with Meta Platforms, Inc.`;
 }

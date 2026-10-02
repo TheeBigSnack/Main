@@ -3,7 +3,7 @@
 // websites-search.api.carscommerce.inc). This is the adapter the popup, the
 // wizard, the side panel's post-time re-check and the background rescan all
 // use. The contract every adapter implements is in README.md; in short:
-//   PLATFORM                         { id, name }
+//   PLATFORM                         { id, name, checkedLive? }
 //   probeInPage()                    runs IN the dealer tab: this platform's service details, or null
 //   searchInPage(service, body)      runs IN the dealer tab: one search, the way the page's own helper makes it
 //   detect(probe)                    does this adapter handle the probed page?
@@ -24,7 +24,10 @@
 
 import { normalizeVehicle } from './dealerInspireNormalize.js';
 
-export const PLATFORM = Object.freeze({ id: 'dealerInspire', name: 'Dealer Inspire' });
+// checkedLive: this reader has read a real dealership website (the pilot's
+// records in test/fixtures/ come from one), so the unsupported-page message
+// names it without a caveat.
+export const PLATFORM = Object.freeze({ id: 'dealerInspire', name: 'Dealer Inspire', checkedLive: true });
 
 export const FIELDS = Object.freeze([
   'vin', 'stock', 'type', 'year', 'make', 'model', 'trim', 'mileage', 'vdp_url', 'status', 'in_transit',

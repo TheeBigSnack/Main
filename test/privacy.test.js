@@ -159,7 +159,7 @@ test('tests/privacy.sql checks the export, the API roles, both guards and that B
 });
 
 test('supabase/README.md: the migration count, the psql recipe and the privacy section', () => {
-  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
   assert.match(readme, new RegExp(`\`db push\` applies the ${WORDS[MIGRATIONS.length]} migrations in order`), `${MIGRATIONS.length} migrations`);
   const recipe = readme.slice(readme.indexOf('createdb lotsync_test'), readme.indexOf('```', readme.indexOf('createdb lotsync_test')));
   for (const f of MIGRATIONS) assert.ok(recipe.includes(`-f supabase/migrations/${f}`), `the plain-Postgres recipe does not apply ${f}`);

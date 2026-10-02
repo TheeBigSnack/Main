@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  withPilotDefaults, hasPilotData, beginPost, notePostStep, endPost, noteFill, noteFlags, resolveFlag,
+  withPilotDefaults, hasPilotData, beginPost, notePostStep, endPost, noteFill, noteFlags, resolveFlag, clearNumbers,
   summarizePilot, pilotText, pilotCsv, pilotFileName, updatePilot, recordFlags, median, secondsBetween, hoursBetween, pilotKey,
   DEFINITIONS, fmtLocal, PILOT_RETENTION_DAYS,
 } from '../extension/src/pilot.js';
@@ -459,4 +459,35 @@ test('posts and fills older than 90 days go when the next one is recorded; open 
   // a stamp that cannot be read never causes a drop
   const odd = { version: 1, posts: [{ vin: 'X', startedAt: 'garbage' }], fills: [], flags: [] };
   assert.equal(beginPost(odd, { vin: 'Y', at: later(200) }).posts.length, 2);
+});
+
+// "Clear the numbers": an open to-do flag is the item still on To do, and
+// once synced only this flag, closed, closes the dealership's copy.
+test('clearNumbers keeps the to-do items still open and a post under way; finished posts, fills and closed items go', () => {
+  let p = noteFlags(null, { takeDown: [{ vin: RAM, name: 'Ram', yours: true, why: 'gone' }], priceUpdates: [{ vin: WAGONEER, name: 'Wagoneer', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
+  p = resolveFlag(p, WAGONEER, 'price', { at: T(30), how: 'manual' });
+  p = beginPost(p, { vin: WAGONEER, name: 'Wagoneer', salesperson: 'Sam', at: T(1) });
+  p = endPost(p, WAGONEER, 'posted', { at: T(2) });
+  p = noteFill(p, { vin: WAGONEER, fill: { filled: [{ key: 'price' }] }, at: T(2) });
+  p = beginPost(p, { vin: RAM, name: 'Ram', salesperson: 'Sam', at: T(40) });
+  const kept = clearNumbers(p);
+  assert.deepEqual(kept.flags, [p.flags[0]], 'the open take-down stays, flagging time and all');
+  assert.deepEqual(kept.posts.map((a) => [a.vin, a.endedAt]), [[RAM, undefined]], 'the post the side panel is still on stays');
+  assert.deepEqual(kept.fills, []);
+  // the open item closes as usual later, from its own flagging time
+  const later = resolveFlag(noteFlags(kept, { takeDown: [{ vin: RAM, name: 'Ram', yours: true, why: 'gone' }], priceUpdates: [], warnings: [] }, { at: T(55) }), RAM, null, { at: T(60), how: 'manual' });
+  assert.deepEqual(later.flags.map((f) => [f.vin, f.flaggedAt, f.doneAt, f.hours]), [[RAM, T(0), T(60), 1]], 'no second flag; one hour from the first scan');
+  assert.equal(hasPilotData(clearNumbers(resolveFlag(p, RAM, null, { at: T(50) }))), true, 'the post under way still');
+  assert.equal(hasPilotData(clearNumbers(endPost(resolveFlag(p, RAM, null, { at: T(50) }), RAM, 'posted', { at: T(51) }))), false, 'nothing open: nothing left');
+});
+
+test('clearNumbers keeps the closed flags it is told to keep (matched by VIN, kind and flagging time), and only those', () => {
+  let p = noteFlags(null, { takeDown: [{ vin: RAM, name: 'Ram', yours: true, why: 'gone' }], priceUpdates: [{ vin: WAGONEER, name: 'Wagoneer', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
+  p = resolveFlag(p, RAM, null, { at: T(20), how: 'manual' });
+  p = resolveFlag(p, WAGONEER, null, { at: T(25), how: 'manual' });
+  const ram = structuredClone(p.flags[0]); // as read back from storage: equal, not the same object
+  assert.deepEqual(clearNumbers(p, { keep: [ram] }).flags, [p.flags[0]]);
+  assert.deepEqual(clearNumbers(p, { keep: [{ ...ram, flaggedAt: T(1) }, { ...ram, kind: 'price' }] }).flags, [], 'another flagging time or kind is another item');
+  assert.deepEqual(clearNumbers(p, { keep: 'garbage' }).flags, []);
+  assert.deepEqual(clearNumbers(p, { keep: [null, 7] }).flags, []);
 });
