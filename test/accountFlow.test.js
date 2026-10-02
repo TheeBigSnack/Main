@@ -253,6 +253,16 @@ test('scanFromStored turns the stored snapshot and diff into the sync function\'
   assert.equal(scanFromStored(), null);
 });
 
+test('scanFromStored sends no counts for a scan judged a website hiccup, from the worker or from storage', () => {
+  // the hiccup scan read 8 of a 20-car lot; its snapshot was not saved
+  const hiccup = { takenAt: T(9), vehicles: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`V${i}`, { decision: 'ready' }])) };
+  const saved = { takenAt: T(0), vehicles: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`V${i}`, { decision: 'ready' }])) };
+  const diff = { takenAt: T(9), unreliable: true, warnings: ['12 of 20 cars disappeared at once.'], takeDown: [], priceUpdates: [] };
+  assert.equal(scanFromStored({ snapshot: hiccup, diff }), null, 'the worker\'s own scan: never the short count');
+  assert.equal(scanFromStored({ snapshot: saved, diff }), null, 'the stored pair: never the old count under the hiccup\'s time');
+  assert.equal(scanFromStored({ snapshot: saved, diff: { ...diff, unreliable: false } }).cars, 20);
+});
+
 // A small model of the sync function (supabase/functions/sync/index.ts):
 // a lapsed plan is refused with 402 before anything else; the caller's rows
 // are upserted; the caller's listed rows whose key is in `known` (the posts
@@ -408,6 +418,18 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const r3 = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage, now: Date.parse(T(57)) }) });
   assert.equal(r3.ok, true);
   assert.deepEqual(calls[2].body.pilot, { posts: [], flags: [] }, 'nothing in the pilot changed since');
+});
+
+test('syncOnce: after a scan judged a website hiccup, no scan counts go up, so the manager keeps the last trusted scan', async () => {
+  const server = fakeSyncServer();
+  const { fetchImpl, calls } = fakeFetch({ sync: server.handler });
+  const saved = { takenAt: T(0), vehicles: { [VIN_A]: { decision: 'ready' }, [VIN_B]: { decision: 'ready' } } };
+  const hiccup = { takenAt: T(9), unreliable: true, warnings: ['That\'s usually a website hiccup'], takeDown: [], priceUpdates: [] };
+  const storage = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.snapshot]: saved, [K.diff]: hiccup });
+  const r = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(calls[0].body.scan, null);
+  assert.equal(r.counts.scans, 0);
 });
 
 test('syncOnce: a token the function rejects signs the person out; not a member and a network failure write nothing', async () => {

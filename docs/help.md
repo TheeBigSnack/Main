@@ -103,7 +103,7 @@ First run on a new machine: on the review screen, **Open the form and check fiel
 
 Only cars marked as posted are watched: cars posted through the panel or marked with **Mark posted**. A to-do item for a car you did not mark shows greyed out with "not marked as posted" and no button.
 
-**A sold car.** The **To do** tab lists it under **Take down**, with the reason (sold, or gone sale-pending).
+**A sold car.** The **To do** tab lists it under **Take down**, with the reason (gone from the website, marked sold, or sale pending). The item stays on every rescan until you click **Taken down** or the website shows the car for sale again.
 
 1. Click **Open listing**. The side panel opens your listing in a new tab.
 2. On Facebook, click **Mark as sold** (or **Delete**) yourself. The panel notices ("The listing shows it as sold or removed") and ticks the item off.
@@ -121,7 +121,10 @@ Notes:
 - If no listing link was saved for the car, the panel opens Marketplace's Your listings page instead and asks you to open the listing there.
 - The panel only fills or ticks off when the tab is showing that car's listing. If you moved to another page it says "This tab isn't showing the listing for [car]".
 - A post that is under way blocks a to-do item: finish or stop it first, then click the To do button again.
-- **My listings** shows each car as "Matches the website", "Website price changed" (with **Updated**) or "Not on the website at the last scan", with **Taken down** and, when a link was saved, **Open listing**.
+- **My listings** shows each car as "Matches the website", "Website price changed" (with **Updated**), "Website no longer shows a price", "Not on the website at the last scan", "Marked sold on the website", "Sale pending on the website", "Not pre-owned on the website" or "Needs a look (see To do)", with **Taken down** and, when a link was saved, **Open listing**.
+- A car you posted that the website now calls new, demo or loaner, or whose details need a look, stays under **Needs a look** on every rescan until the website is fixed or you take the listing down and click **Taken down**.
+- On a website Lot Current reads from the standard vehicle data on each car's page, a car that left the website but whose own page could not be checked (it gave an error, had no vehicle details, or sent Lot Current to another website) is not marked gone: it stays under **Needs a look** with the reason. Check the car on the website; if it sold, take your listing down and click **Taken down** on **My listings**. Other sold cars are still put under **Take down** as usual.
+- On Dealer Inspire, DealerOn and Dealer.com websites, one failed check holds back every missing car for that scan: each shows under **Needs a look** as "Missing from this scan but not confirmed gone. Rescan later." and the scan says why. The next scan that checks them puts the sold ones under **Take down**.
 - The posting rules ask for sold cars to come down the same day.
 
 ## The Numbers tab
@@ -147,7 +150,7 @@ Click **Settings** at the top of the popup. Click **Save settings** at the botto
 - **Your store**: tick your store or stores. Leave all unticked to include every store.
 - **New arrivals**: **Mark cars as new for N days** (1 to 30, 7 by default). Counted from the in-stock date the website gives for the car, or else from the scan that first saw it; a posted car is never marked new. This number, and the order of the Ready to post list, are kept for this website only and do not follow your profile to another website.
 - **Dealership, named on every listing**: dealership name, city, state, ZIP. The scan fills these from the website; what you type wins. Marketplace suggests every town with the same name, and Lot Current only accepts the one in your state, so keep the state and ZIP filled.
-- **Price to post**: the website's main price, or the lower second price the website shows (only offered when the website shows one; ask your manager first). **Price note in every description** explains what the price includes. Lot Current suggests wording from the website's price gap but never fills it in for you.
+- **Price to post**: the website's main price, or the lower second price the website shows (only offered when the website shows one; ask your manager first). A change applies to new posts: a listing you already posted keeps the price it was posted at, still checked against the website on that price (main or lower), and **My listings** says so on its line. **Price note in every description** explains what the price includes. Lot Current suggests wording from the website's price gap but never fills it in for you.
 - **Listing defaults**: **Title status** and **Vehicle condition**, filled in on every listing. "Leave blank" answers them per car on the form.
 - **Safety**: **Posts per day, per salesperson**. See the daily cap below.
 - **Automatic rescans**: the rescan tick, the desktop notification tick, and **Allow automatic rescans** when the permission has not been granted yet.
@@ -201,7 +204,7 @@ Lot Current never asks for your Facebook password, cookies or tokens, in Chrome'
 - The website is not one Lot Current can read yet. Today it reads Dealer Inspire websites that use the Cars Commerce inventory search, and DealerOn and Dealer.com websites from their used inventory page. It also tries websites that publish standard vehicle data for search engines on each car's page. The DealerOn, Dealer.com and standard-data readers have been tested only on sample websites so far. Tell support which website yours is.
 - "Couldn't see the list of cars this page loads" (DealerOn and Dealer.com websites): the page had not loaded its list of cars yet, or the tab is on a single car's page. Open the used inventory page, wait until the cars show, then click **Scan website** again.
 - "Couldn't reach the dealership tab" during set-up: open the used inventory page, click the Lot Current icon and click **Continue set-up**.
-- A warning that many cars vanished at once: if more than half the lot disappears between scans, nothing is marked gone and the last good scan is kept. Scan again later; if it repeats, tell support.
+- A warning that many cars vanished at once: on a lot of 10 cars or more, if more than half of it disappears between scans, nothing is marked gone and the last good scan is kept. Scan again later; if it repeats, tell support. A smaller lot has no such rule, so a car is marked gone only when the website's own search or the car's own page says it is no longer there, and an answer from the website that is not a list of cars stops the scan instead.
 - "Automatic rescans are on, but Lot Current has no permission to read this website in the background": click **Allow automatic rescans** on the banner.
 - "The last automatic rescan failed" (or "The last rescan from the side panel failed"): the website could not be read at that moment. A scan by hand still works; if it keeps failing, send the message to support.
 

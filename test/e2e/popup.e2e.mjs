@@ -89,6 +89,39 @@ try {
   await popup.waitForSelector('button[data-action="unpost"]');
   await popup.screenshot({ path: join(shots, '2-ready-marked-posted.png') });
 
+  // ---- The price setting changes while the Ram is posted ----
+  // A listing posted before the basis was kept on each entry (as an older
+  // build left it) stays on the basis it was posted at: switching Settings to
+  // the lower second price is not a website price change, and To do offers no
+  // "price drop" for it.
+  const postedNow = () => popup.evaluate(async () => { const all = await chrome.storage.local.get(null); return all[Object.keys(all).find((k) => k.startsWith('posted:'))]; });
+  await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const key = Object.keys(all).find((k) => k.startsWith('posted:'));
+    const posted = all[key];
+    for (const e of Object.values(posted)) delete e.basis;
+    await chrome.storage.local.set({ [key]: posted });
+  });
+  await popup.click('#settingsBtn');
+  await popup.check('input[name="basis"][value="beforeFees"]');
+  await popup.click('#panel button[type="submit"]');
+  await popup.waitForFunction(() => (document.querySelector('#saved')?.textContent || '').length > 0);
+  assert.match(await popup.textContent('#saved'), /Your listings keep the price they were posted at; the new price setting is for new posts\./);
+  assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, 'website']], 'the listing keeps the basis it was posted at');
+  await popup.click('#scan');
+  // the view turns to To do only once the scan is saved
+  await popup.waitForFunction(() => document.querySelector('#settingsBtn').getAttribute('aria-pressed') === 'false' && document.querySelector('#panel .meta') && !document.querySelector('#scan').disabled);
+  assert.match(await popup.textContent('#panel .meta'), /6 used cars/);
+  assert.doesNotMatch(await popup.textContent('#panel'), /Update price/, 'a changed setting is not a website price change');
+  assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
+  await tab(popup, 'mine').click();
+  assert.match(await popup.textContent('.panel'), /Matches the website[\s\S]*posted at the website's main price; your price setting now applies to new posts/);
+  await popup.click('#settingsBtn'); // back to the main price for the rest of the run
+  await popup.check('input[name="basis"][value="website"]');
+  await popup.click('#panel button[type="submit"]');
+  await popup.waitForFunction(() => /^Saved\./.test(document.querySelector('#saved')?.textContent || ''));
+  await tab(popup, 'ready').click();
+
   await tab(popup, 'otherStores').click();
   await popup.screenshot({ path: join(shots, '3-other-stores.png') });
   await tab(popup, 'notReady').click();

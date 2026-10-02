@@ -16,10 +16,12 @@ import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
 import { checkPreOwned } from '../extension/src/classify.js';
+import { listingStatus, MASS_DISAPPEARANCE_MIN_LOT, diffScans } from '../extension/src/rescan.js';
 import { readdirSync } from 'node:fs';
 import { SITE } from '../site/config.js';
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems } from './honesty.js';
+import { ADAPTERS, platformNames } from '../extension/adapters/index.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -69,6 +71,80 @@ test('help.md names the popup and side panel controls as the code labels them', 
     assert.ok(ui.includes(label), `"${label}" is no longer a label in popup.js or sidepanel.js: update the help doc and this list together`);
     assert.ok(help.includes(label), `docs/help.md does not name "${label}"`);
   }
+});
+
+test('help.md names every state My listings can show a posted car in, as the code words it', () => {
+  const help = doc('help.md');
+  const states = [
+    listingStatus(null, 1, null),
+    listingStatus({ status: 'pend-sale' }, 1, 1),
+    listingStatus({ statusLabel: 'Sold' }, 1, 1),
+    listingStatus({ decision: 'skip' }, 1, 1),
+    listingStatus({ decision: 'review' }, 1, 1),
+    listingStatus({ decision: 'not-ready' }, 1, null),
+    listingStatus({ decision: 'ready' }, 1, 2),
+    listingStatus({ decision: 'ready' }, 1, 1),
+  ];
+  assert.equal(new Set(states.map((s) => s.text)).size, states.length);
+  for (const s of states) assert.ok(help.includes(`"${s.text}"`), `docs/help.md does not name the My listings state "${s.text}"`);
+});
+
+test('help.md and README give the "vanished at once" rule with the lot size it starts at', () => {
+  const floor = String(MASS_DISAPPEARANCE_MIN_LOT);
+  assert.match(doc('help.md'), new RegExp(`on a lot of ${floor} cars or more, if more than half of it disappears between scans, nothing is marked gone`));
+  assert.match(read('../README.md'), new RegExp(`If more than half the cars of a lot of ${floor} or more vanish between scans, nothing is marked gone`));
+});
+
+test('the adapter contract\'s PLATFORM row names every adapter and quotes no stale unsupported-page message', () => {
+  const row = read('../extension/adapters/README.md').split('\n').find((l) => l.startsWith('| `PLATFORM` |')) || '';
+  assert.ok(row, 'the PLATFORM row is there');
+  for (const a of ADAPTERS) assert.ok(row.includes('`' + a.PLATFORM.id + '`'), `the PLATFORM row names the ${a.PLATFORM.id} adapter`);
+  // a quoted message must be the one the extension shows (index.js builds it from every adapter's name)
+  const quoted = /What it reads today: ([^"]*?)\.?"/.exec(row);
+  if (quoted) assert.equal(quoted[1], platformNames().join('; '));
+});
+
+test('the adapter contract and help.md say a car whose own page could not be checked is left unchecked, not that it stops every verdict', () => {
+  const contract = read('../extension/adapters/README.md');
+  assert.match(contract, /`confirm\.unchecked`, `\{ vin: reason \}`/);
+  assert.match(contract, /A refusal \(403, 429, 503, a bot check\) sets `confirm\.error`/);
+  assert.doesNotMatch(contract, /Anything else \(403, 429, 5xx/, 'the old whole-check rule for a 5xx is gone');
+  assert.match(doc('help.md'), /whose own page could not be checked .* stays under \*\*Needs a look\*\* with the reason/);
+  assert.match(read('../PILOT.md'), /neither does a scan that keeps the sold car under Needs a look because its page could not be checked/);
+});
+
+// The rescan raises a posted car the website marks sale-pending or sold on
+// every scan (rescan.js), so its pilot flag stays open until Taken down or
+// the website shows it for sale again; the runbook defines "cleared" that way.
+test('PILOT.md says a take-down flag on a car the website still marks sale-pending or sold stays open, and when it counts as cleared', () => {
+  const cleared = /\("cleared": ([^)]*)\)/.exec(read('../PILOT.md'));
+  assert.ok(cleared, 'PILOT.md defines "cleared"');
+  assert.match(cleared[1], /for sale again after a sale-pending or sold mark/);
+  assert.match(cleared[1], /a car the website still marks sale-pending or sold stays open/);
+});
+
+test('the adapter contract says what the standard-data reader does with robots.txt, as the code does it', () => {
+  const contract = read('../extension/adapters/README.md');
+  const code = read('../extension/adapters/schemaOrg.js').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  if (!/disallow|crawl-?delay/i.test(code)) {
+    // robots.txt is read for its Sitemap lines only: the contract must not let a reader think its rules are obeyed
+    assert.match(contract, /`robots\.txt` is read only for its `Sitemap` lines[^.]*: its `Disallow` and `Crawl-delay` lines are not applied to these reads/);
+    assert.match(contract, /open question for the owner/);
+  } else {
+    assert.match(contract, /`Disallow`/, 'the reader now applies robots.txt rules: the contract must say how');
+  }
+  assert.match(read('../docs/data-inventory.md'), /`\/robots\.txt` \(read for its sitemap lines only\)/);
+});
+
+test('help.md gives the one-car-at-a-time sold check only for the standard-data reader, and the whole-check rule the others still use, as the code words it', () => {
+  const help = doc('help.md');
+  const own = help.split('\n').find((l) => /whose own page could not be checked/.test(l)) || '';
+  assert.match(own, /^- On a website Lot Current reads from the standard vehicle data on each car's page,/, 'the per-car rule is the standard-data reader\'s only');
+  // what every other reader still does when its check fails: no car is marked gone that scan
+  const one = { vin: 'V1', name: 'Car', decision: 'ready', price: 1 };
+  const held = diffScans({ vehicles: { V1: one } }, { vehicles: {} }, { confirm: { checked: [], notFound: [], error: 'HTTP 500' } }).needsALook[0].text;
+  const rest = help.split('\n').find((l) => l.includes(`"${held}"`)) || '';
+  assert.match(rest, /^- On Dealer Inspire, DealerOn and Dealer\.com websites, one failed check holds back every missing car for that scan/, `help.md names the readers that still show "${held}"`);
 });
 
 test('help.md is organised by what people are trying to do', () => {

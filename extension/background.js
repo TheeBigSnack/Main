@@ -23,7 +23,8 @@
 import { adapterById } from './adapters/index.js';
 import { scanWithSearch } from './src/scanRunner.js';
 import { siteKeys, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText } from './src/storage.js';
+import { settleDiff } from './src/rescan.js';
 import { withDefaults } from './src/settings.js';
 import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
@@ -58,6 +59,54 @@ function toBase64(buffer) {
 }
 
 class PhotoTooLarge extends Error {}
+
+// What a downloaded file really is, from its first bytes: a JPEG, PNG, GIF,
+// WebP or AVIF photo, or null. A server's content type can be missing or
+// wrong (S3 serves an upload without one as binary/octet-stream), and a 200
+// answer can be an error or bot-check page instead of the photo.
+export function sniffPhotoType(bytes) {
+  const b = bytes || new Uint8Array(0);
+  const starts = (...sig) => sig.every((x, i) => b[i] === x);
+  const ascii = (from, to) => String.fromCharCode(...b.subarray(from, to));
+  if (starts(0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
+  if (starts(0x47, 0x49, 0x46, 0x38)) return 'image/gif';
+  if (starts(0x52, 0x49, 0x46, 0x46) && ascii(8, 12) === 'WEBP') return 'image/webp';
+  if (b.length >= 12 && ascii(4, 8) === 'ftyp' && /^avi[fs]$/.test(ascii(8, 12))) return 'image/avif';
+  return null;
+}
+
+// The content types of the formats sniffPhotoType knows: a body under one of
+// these that shows none of them is not that photo.
+const KNOWN_PHOTO_TYPE = /^image\/(?:jpe?g|pjpeg|png|gif|webp|avif)$/;
+
+// The type a downloaded file goes to the form with, or null when it is not a
+// photo. An empty body is never a photo. The bytes win when they show a
+// photo format, whatever the header says. Otherwise only a server that calls
+// it an image of a format the bytes check doesn't know (any image/ type, such as
+// HEIC or SVG) is believed: an SVG only when the body is an SVG drawing, any
+// other only when the body is not a page of markup. Anything else (a
+// text/html answer, a missing or octet-stream type over bytes of no photo
+// format, an empty, JSON or text body under a JPEG or PNG type) is no photo.
+export function photoTypeFor(declared, bytes) {
+  const b = bytes || new Uint8Array(0);
+  if (!b.length) return null;
+  const sniffed = sniffPhotoType(b);
+  if (sniffed) return sniffed;
+  const type = String(declared || '').toLowerCase();
+  if (!/^image\/[\w.+-]+$/.test(type) || KNOWN_PHOTO_TYPE.test(type)) return null;
+  const head = String.fromCharCode(...b.subarray(0, 1024)).toLowerCase();
+  if (type === 'image/svg+xml') return /<svg[\s>]/.test(head) && !/<html[\s>]|<!doctype html/.test(head) ? type : null;
+  if (/^[\s\u00ef\u00bb\u00bf]*</.test(head)) return null; // '<': an HTML page under an image type
+  return type;
+}
+
+// The file name's ending for a photo type: the usual one for the formats
+// above, else the type's own name (image/heic: heic).
+function photoExtension(type) {
+  const known = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/svg+xml': 'svg' };
+  return known[type] || type.slice('image/'.length).replace(/^x-/, '').replace(/[^a-z0-9]/g, '').slice(0, 8) || 'img';
+}
 
 // The body, read a chunk at a time and given up on as soon as it passes the
 // cap: a server that sends gigabytes never gets them into memory. Every read
@@ -107,14 +156,18 @@ export async function downloadPhoto(url, index, { fetchImpl = globalThis.fetch, 
   try {
     const res = await Promise.race([fetchImpl(url, { credentials: 'omit', signal: controller.signal }), deadline]);
     if (!res.ok) return { url, ok: false, error: `HTTP ${res.status} from ${hostOf(url)}` };
-    const type = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+    const declared = (res.headers.get('content-type') || '').split(';')[0].trim();
     // A server that says up front the photo is too large is not read at all.
     if (Number(res.headers.get('content-length')) > MAX_PHOTO_BYTES) {
       if (res.body && typeof res.body.cancel === 'function') res.body.cancel().catch(() => {});
       throw new PhotoTooLarge();
     }
     const bytes = await cappedBytes(res, deadline);
-    const ext = /png/i.test(type) ? 'png' : /webp/i.test(type) ? 'webp' : 'jpg';
+    // a 200 answer that is not a photo (an error or bot-check page) is a
+    // photo that couldn't be downloaded, never one attached under a .jpg name
+    const type = photoTypeFor(declared, bytes);
+    if (!type) return { url, ok: false, error: `not a photo (${declared || 'no type given'}) from ${hostOf(url)}` };
+    const ext = photoExtension(type);
     return {
       url,
       ok: true,
@@ -223,7 +276,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`, reason);
   if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION, reason);
   const k = siteKeys(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.diff, k.boilerplate]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate]);
   if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS, reason);
   const site = { ...(info.site || {}), origin, name: info.name, adapter: info.adapter };
   const settings = withDefaults(data[k.settings], site);
@@ -235,18 +288,29 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
     out = { ok: false, message: String((e && e.message) || e) };
   }
   if (!out.ok) return noteFailure(origin, info, out.message, reason);
-  const save = { [k.diff]: out.diff, [k.boilerplate]: out.boilerplate };
-  if (!out.diff.unreliable) save[k.snapshot] = out.snapshot;
+  // Saved under the diff's lock, against the posted list as it is now: the
+  // salesperson may have ticked an item off while this scan ran, and the
+  // popup and the side panel change the diff under the same lock
+  // (src/rescan.js settleDiff, src/storage.js).
+  let diff;
+  let before;
   try {
-    await chrome.storage.local.set(save);
+    ({ diff, before } = await withLock(k.diff, async () => {
+      const now = await chrome.storage.local.get([k.posted, k.diff]);
+      const settled = settleDiff(out.diff, now[k.posted] || {});
+      const save = { [k.diff]: settled, [k.boilerplate]: out.boilerplate };
+      if (!settled.unreliable) save[k.snapshot] = out.snapshot;
+      await chrome.storage.local.set(save);
+      return { diff: settled, before: now[k.diff] };
+    }));
   } catch (e) {
     return noteFailure(origin, info, storageErrorText(e), reason); // the quota, most likely: the popup's To do shows it as the last error
   }
-  await recordFlags(origin, out.diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
-  const count = todoCountFor(out.diff);
+  await recordFlags(origin, diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
+  const count = todoCountFor(diff);
   // Compared with the person's outstanding list (the saved diff, which the
   // popup and upkeep trim as items are handled), not with the last rescan's count.
-  const note = notificationFor(todoCountFor(data[k.diff]), count);
+  const note = notificationFor(todoCountFor(before), count);
   try {
     await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count } }));
   } catch (e) {
@@ -254,13 +318,13 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   }
   await updateBadge();
   // the dealership's shared registry, once accounts exist: recorded on the site entry, never a reason for the rescan to fail
-  if (accountsConfigured()) await syncSite(origin, { scan: scanFromStored({ snapshot: out.snapshot, diff: out.diff }) });
+  if (accountsConfigured()) await syncSite(origin, { scan: scanFromStored({ snapshot: out.snapshot, diff }) });
   if (note && settings.notify !== false && reason === 'alarm') {
     try {
       await chrome.notifications.create(`lot-sync-${origin}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: note.title, message: `${note.message} (${info.name || origin})`, priority: 0 });
     } catch (e) { /* notifications may be blocked; the badge still shows */ }
   }
-  return { ok: true, count, warnings: out.diff.warnings, cars: Object.keys(out.snapshot.vehicles).length };
+  return { ok: true, count, warnings: diff.warnings, cars: Object.keys(out.snapshot.vehicles).length };
 }
 
 async function rescanDueSites(reason) {

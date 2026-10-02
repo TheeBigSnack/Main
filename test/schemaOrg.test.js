@@ -158,12 +158,13 @@ test('microdataVehicles reads itemprop microdata into nodes of the same shape', 
 
 // ---------- page facts ----------
 
-test('pageFacts: the title, canonical, next page, same-origin links, Carfax links and only the visible text', () => {
+test('pageFacts: the title, canonical, next and previous page, same-origin links, Carfax links and only the visible text', () => {
   const f = pageFacts(html('graph-vdp.html'), civicUrl + '?from=search');
-  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'links', 'carfaxLinks', 'text']);
+  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'prev', 'links', 'carfaxLinks', 'text', 'segments']);
   assert.equal(f.title, 'Used 2019 Honda Civic EX Sedan', 'the og:title, without the site name');
   assert.equal(f.canonical, civicUrl);
   assert.equal(f.next, null);
+  assert.equal(f.prev, null);
   assert.deepEqual(f.links, [SITE + '/', SITE + '/used-vehicles/', civicUrl + '?from=search'], 'absolute, once each, fragments dropped; mailto and other sites left out');
   assert.deepEqual(f.carfaxLinks, ['https://www.carfax.com/VehicleHistory/p/Report.cfx?partner=SMP_0&vin=2HGSAMPL8KH000101', 'https://www.carfax.com/value/']);
   assert.match(f.text, /Sample Motors Price \$ 19,995 41,230 miles/);
@@ -182,6 +183,8 @@ test('pageFacts: the title, canonical, next page, same-origin links, Carfax link
     SITE + '/used-vehicles/#/compare',
   ], 'the photo link and the "#photos" link are one page; a "#/" route is a page of its own');
   assert.equal(pageFacts('<a rel="next nofollow" href="p2">2</a>', SITE + '/list/').next, SITE + '/list/p2');
+  assert.equal(pageFacts('<link rel="prev" href="?page=1"><a rel="previous" href="p0">0</a>', SITE + '/list/?page=2').prev, SITE + '/list/?page=1');
+  assert.equal(pageFacts('<a rel="previous nofollow" href="p1">1</a>', SITE + '/list/').prev, SITE + '/list/p1');
   assert.equal(pageFacts(html('entities.html'), SITE + '/x/').title, 'Used 2020 GMC Sierra 1500 SLE & Z71');
   assert.match(pageFacts(html('entities.html'), SITE + '/x/').text, /Price: \$38,450 36,112 miles/, 'a non-breaking space is a space');
   // without a usable page address nothing can be called same-origin
@@ -489,6 +492,95 @@ test('price: a price the page shows only crossed out, after "Was", "MSRP" or the
     assert.equal(at(24995, facts.text), null, struck);
   }
   assert.equal(pageFacts('<p><span style="text-decoration: underline">$24,995</span></p>', civicUrl).text, '$24,995', 'only a line through the text crosses it out');
+});
+
+test('price: a guide or estimate value, a class that strikes the old price through, or a page style rule that does, is not the car\'s price', () => {
+  const at = (price, text) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text)).value;
+  // a value from a price guide, an estimate or the window sticker at the stale markup amount
+  for (const label of ['KBB Fair Market Value', 'Market value', 'Sticker price', 'Book value:', 'Estimated value', 'Window sticker', 'Kelley Blue Book® Value:', 'Trade-in value', 'Edmunds True Market Value',
+    // a guide's own labels, and an offer to buy the car
+    'Kelley Blue Book® Fair Purchase Price', 'KBB Fair Purchase Price', 'Kelley Blue Book Typical Listing Price', 'Instant Cash Offer', 'NADA value', 'J.D. Power value', 'JD Power', 'Black Book', 'Average market price', 'Fair Market Price']) {
+    assert.equal(at(26000, `${label} $26,000 Our price $24,995`), null, label);
+    assert.equal(at(24995, `${label} $26,000 Our price $24,995`), 24995, `${label}: the current price is still read`);
+  }
+  assert.equal(at(26000, 'Value Price $26,000'), 26000, 'a bare "value" is no cue');
+  for (const label of ['Our price', 'Internet price', 'Sale price', 'Listing price', 'Cash price', 'Power package. Price']) assert.equal(at(26000, `${label} $26,000`), 26000, `${label} is the car's price`);
+  // crossed out by a class named for it, word by word, never by a piece of a word
+  for (const cls of ['strike', 'price strikethrough', 'old-price', 'price-was', 'was_price', 'originalPrice', 'price--previous', 'line-through', 'is-crossed']) {
+    const facts = pageFacts(`<p><span class="${cls}">$24,995</span> <b>$23,995</b></p>`, civicUrl);
+    assert.equal(facts.text, '$23,995', cls);
+    assert.equal(at(24995, facts.text), null, cls);
+  }
+  for (const cls of ['font-bold', 'holder', 'golden', 'price', 'price-box theme-old', 'wash', 'old-school', 'original-content']) {
+    assert.equal(pageFacts(`<p><span class="${cls}">$24,995</span></p>`, civicUrl).text, '$24,995', `${cls} is not crossed out`);
+  }
+  // crossed out by the page's own style rule for a class
+  const styled = pageFacts('<html><head><style>.tag{color:red} .card .gone, .x > span.price-tag { text-decoration: gray line-through; } .keep{text-decoration:underline}</style></head><body><p><span class="gone">$24,995</span> <span class="price-tag">$24,500</span> <span class="keep">$23,995</span></p></body></html>', civicUrl);
+  assert.equal(styled.text, '$23,995');
+  assert.equal(pageFacts('<html><head><style>' + '{'.repeat(20000) + '.a{text-decoration:line-through}</style></head><body><span class="a">$1</span></body></html>', civicUrl).text, '', 'a long run of braces is read in one pass');
+});
+
+test('price: the page text comes in segments, each tied to the car whose card holds it', () => {
+  const page = `<html><body><h1>Used 2019 Honda Civic EX</h1><div class="price-box"><p>Our price $20,995</p><a href="/finance/">Payments</a></div>
+  <aside><a href="/inventory/used-2018-honda-accord-1hgsampl0jh000102/">2018 Accord $21,995</a><div class="tile"><a href="/inventory/used-2017-ford-escape-1fmsampl0hu000103/"><img alt="">2017 Escape</a> <span>$19,000</span></div></aside>
+  <a href="${civicUrl}">This car</a> <a href="https://www.carfax.com/x">Carfax</a></body></html>`;
+  // without a carKey, every address on this website is a car of its own
+  const f = pageFacts(page, civicUrl);
+  assert.equal(f.text, 'Used 2019 Honda Civic EX Our price $20,995 Payments 2018 Accord $21,995 2017 Escape $19,000 This car Carfax');
+  assert.deepEqual(f.segments, [
+    { car: null, text: 'Used 2019 Honda Civic EX' },
+    { car: SITE + '/finance/', text: 'Our price $20,995 Payments' },
+    { car: SITE + '/inventory/used-2018-honda-accord-1hgsampl0jh000102/', text: '2018 Accord $21,995' },
+    { car: SITE + '/inventory/used-2017-ford-escape-1fmsampl0hu000103/', text: '2017 Escape $19,000' },
+    { car: null, text: 'This car Carfax' },
+  ], 'a link to this page or another website is no card');
+  // with one, a link to no car shapes no card
+  const byVin = () => (href) => (href.match(/\b[a-z0-9]{17}\b/i) || [null])[0];
+  assert.deepEqual(pageFacts(page, civicUrl, { carKey: byVin }).segments, [
+    { car: null, text: 'Used 2019 Honda Civic EX Our price $20,995 Payments' },
+    { car: '1hgsampl0jh000102', text: '2018 Accord $21,995' },
+    { car: '1fmsampl0hu000103', text: '2017 Escape $19,000' },
+    { car: null, text: 'This car Carfax' },
+  ]);
+});
+
+test('price: a card holds all of its car\'s links, so a contact, finance or "Check availability" link does not split it, and the car\'s own title and price are never another car\'s card', () => {
+  const byVin = () => (href) => {
+    const vins = href.match(/\b[a-z0-9]{17}\b/gi) || [];
+    return vins.length === 1 ? vins[0].toUpperCase() : null; // several VINs: a comparison, no one car
+  };
+  const A = '1HGSAMPL0JH000102';
+  const B = '1FMSAMPL0HU000103';
+  const C = '5XYSAMPL6MG000114';
+  const card = (vin, price, extra) => `<div class="card"><a href="/inventory/used-${vin.toLowerCase()}/"><img alt=""></a><h3><a href="/inventory/used-${vin.toLowerCase()}/">Used car ${vin.slice(-3)}</a></h3><span class="price">${price}</span> ${extra}</div>`;
+  const extras = [
+    '<a href="/contact-us/">Check availability</a>',
+    '<a href="/finance/apply/">Get pre-approved</a> <a href="/value-your-trade/">Value your trade</a>',
+    `<a href="/contact-us/?vin=VIN">Check availability</a>`,
+  ];
+  // a list: each card with its price, whatever else it links to
+  for (const extra of extras) {
+    const list = `<html><body><h1>Used vehicles</h1><nav><a href="/">Home</a> <a href="/used-vehicles/?page=2">Next page</a></nav><main>${[[A, '$15,000'], [B, '$15,500'], [C, '$16,000']].map(([vin, price]) => card(vin, price, extra.replace('VIN', vin))).join('')}</main></body></html>`;
+    const segments = pageFacts(list, SITE + '/used-vehicles/', { carKey: byVin }).segments;
+    for (const [vin, price] of [[A, '$15,000'], [B, '$15,500'], [C, '$16,000']]) {
+      const own = segments.filter((g) => g.car === vin).map((g) => g.text).join(' ');
+      assert.match(own, new RegExp(`Used car ${vin.slice(-3)} \\${price}`), `${extra}: the card of ${vin} holds its price`);
+    }
+  }
+  // a car's page with one other car's tile, the tile's price outside its link, beside a contact link
+  for (const extra of extras) {
+    const one = `<html><body><header><a href="/">Home</a></header><main><h1>Used 2021 Kia Sorento LX</h1><p>Our price $14,000</p><section><h2>You may also like</h2>${card(A, '$15,000', extra.replace('VIN', A))}</section></main><footer><a href="/about/">About</a></footer></body></html>`;
+    const segments = pageFacts(one, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments;
+    assert.deepEqual(segments.filter((g) => g.car === null).map((g) => g.text).join(' '), 'Home Used 2021 Kia Sorento LX Our price $14,000 About', extra);
+    assert.match(segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /You may also like Used car 102 \$15,000/, extra);
+  }
+  // the car's own title, price and form link next to that tile, with no heading: still not the tile's
+  const plain = `<html><body><div><p>Our price $14,000</p><a href="/contact-us/?vin=${C}">Ask about this car</a></div>${card(A, '$15,000', '')}</body></html>`;
+  const own = pageFacts(plain, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments;
+  assert.deepEqual(own.map((g) => [g.car, g.text]), [[C, 'Our price $14,000 Ask about this car'], [A, 'Used car 102 $15,000']]);
+  // a link naming two cars (a comparison) goes with neither
+  const compare = `<html><body><h1>t</h1><div>${card(A, '$15,000', `<a href="/compare/?vins=${A},${B}">Compare</a>`)}${card(B, '$15,500', '')}</div></body></html>`;
+  assert.match(pageFacts(compare, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /\$15,000 Compare/);
 });
 
 test('price: priceSpecification without an offer price; a strikethrough, list or MSRP entry is never the price', () => {

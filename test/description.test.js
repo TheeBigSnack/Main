@@ -64,6 +64,18 @@ test('the absolute floor: a share alone never decides on a tiny lot', () => {
   assert.ok(findBoilerplate(three, 0.3, 1).has('Local trade.'));
 });
 
+test('the share is of the whole lot: three pages read out of a 33-car lot make no lot-wide line', () => {
+  const SHARED = 'Rebuilt title after hail damage, fully repaired and inspected.';
+  const arrivals = [0, 1, 2].map((i) => `Car ${i}.<br>${SHARED}`);
+  // only the three new arrivals' pages were read this time; the lot has 33 cars
+  assert.ok(!findBoilerplate(arrivals, 0.3, MIN_BOILERPLATE_COUNT, 33).has(SHARED), '3 of 33 is 9%');
+  // the same three pages in a 9-car lot are a third of it
+  assert.ok(findBoilerplate(arrivals, 0.3, MIN_BOILERPLATE_COUNT, 9).has(SHARED));
+  // a lot size under the pages read changes nothing (every page read is the lot)
+  assert.ok(findBoilerplate(arrivals, 0.3, MIN_BOILERPLATE_COUNT, 1).has(SHARED));
+  assert.ok(findBoilerplate(arrivals).has(SHARED), 'without a lot size the pages read are the lot');
+});
+
 test('a segment counts once per car even if the site repeats it', () => {
   const lot = [`${DISCLAIMER}<br>${DISCLAIMER}`, 'Nice car.', 'Another car.', 'Yet another.'];
   assert.ok(!findBoilerplate(lot).has(DISCLAIMER)); // 1 of 4 = 25%

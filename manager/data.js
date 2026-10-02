@@ -62,8 +62,11 @@
 export const WEEK_MS = 7 * 24 * 3600 * 1000; // "this week" is the last 7 days
 export const OVERDUE_HOURS = 24; // an open item past this is shown in red
 export const SCAN_STALE_HOURS = 6; // with automatic rescans allowed they run every 3 hours while Chrome is open; twice that and something is off
-// What the stale pill says after the hours: why a scan can be that old.
-export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed';
+// What the stale pill says after the hours: why a scan can be that old. No
+// rescan ran (Chrome closed, or automatic rescans not allowed), or the ones
+// that ran looked like a website hiccup, which the extension never sends
+// (accountFlow.js scanFromStored).
+export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one that looks like a website hiccup (most of the lot gone at once) is not recorded here';
 // A scan stamped further ahead of this computer's clock than this ran on a
 // machine whose clock was ahead: /sync refuses such a scan (the same margin,
 // FUTURE_SKEW_MS in supabase/functions/sync/index.ts), and the last scan line

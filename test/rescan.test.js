@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt } from '../extension/src/rescan.js';
-import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff, postedBasis, withPostedBasis } from '../extension/src/rescan.js';
+import { noteFlags } from '../extension/src/pilot.js';
+import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, standardCarPage, standardListPage, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
 import { scanWithSearch } from '../extension/src/scanRunner.js';
@@ -23,7 +24,8 @@ test('the price to post: the lower second price only when this car shows one bel
   assert.equal(basisPrice({ price: 20000 }, 'beforeFees'), 20000, 'no second price: the main price');
   assert.equal(basisPrice({ price: 20000, priceBeforeFees: 21000 }, 'beforeFees'), 20000, 'a higher second number is not a price before fees');
   assert.equal(basisPrice({ price: 20000, priceBeforeFees: 0 }, 'beforeFees'), 20000);
-  assert.equal(basisPrice({ priceBeforeFees: 19000 }, 'beforeFees'), 19000);
+  assert.equal(basisPrice({ priceBeforeFees: 19000 }, 'beforeFees'), null, 'no main price (call for price): no price on either basis');
+  assert.equal(basisPrice({ price: null, priceBeforeFees: 19000 }, 'beforeFees'), null);
   assert.equal(basisPrice({}, 'beforeFees'), null);
   assert.equal(basisPrice(null), null);
 });
@@ -83,7 +85,7 @@ test('more than half the lot vanishing at once is treated as a website hiccup', 
 
 test('price drop on a car you posted: update from your listing price', () => {
   const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
-  const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '26163' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { value: '26163' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   const d = diffScans(snapshot(LOT), curr, { posted, confirm: confirmed() });
   assert.equal(d.priceUpdates.length, 1);
   assert.deepEqual(
@@ -100,7 +102,7 @@ test('posted listing still at an old price is caught even if the website changed
 });
 
 test('price increase on a car nobody posted is reported too', () => {
-  const curr = snapshot([['usedNormal'], ['certified'], ['usedNoCarfax'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { label: 'Ron Lewis Real Price', value: '34485' } } } } }]]);
+  const curr = snapshot([['usedNormal'], ['certified'], ['usedNoCarfax'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { value: '34485' } } } } }]]);
   const d = diffScans(snapshot(LOT), curr, { confirm: confirmed() });
   assert.equal(d.priceUpdates.length, 1);
   assert.equal(d.priceUpdates[0].change, 1000);
@@ -108,12 +110,42 @@ test('price increase on a car nobody posted is reported too', () => {
 });
 
 test('"before fees" price basis compares the price without the doc fee', () => {
-  const curr = snapshot([['usedNormal', { pricing: { internet_price: 25673 } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { high: { label: 'Was', value: '25673' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   const website = diffScans(snapshot(LOT), curr, { confirm: confirmed() });
   const beforeFees = diffScans(snapshot(LOT), curr, { confirm: confirmed(), basis: 'beforeFees' });
   assert.equal(website.priceUpdates.length, 0);
   assert.equal(beforeFees.priceUpdates.length, 1);
   assert.equal(beforeFees.priceUpdates[0].change, -1000);
+});
+
+test('a change of the price setting is not a website price change: each listing is compared on the basis it was posted at', () => {
+  const s = snapshot(LOT);
+  const ram = s.vehicles[VIN.ram]; // $27,163 main, $26,673 shown below it
+  const at = '2026-09-26T21:00:00.000Z';
+  // posted on the main price; the dealer then switches to the lower second price; the website is unchanged
+  const posted = markPosted({}, ram, 'website', at);
+  const d = diffScans(s, snapshot(LOT), { posted, confirm: confirmed(), basis: 'beforeFees' });
+  assert.deepEqual(d.priceUpdates, []);
+  assert.equal(noteFlags(null, d).flags.length, 0, 'nothing for the pilot numbers either');
+  assert.equal(listingStatus(ram, posted[VIN.ram].price, basisPrice(ram, postedBasis(posted[VIN.ram], 'beforeFees'))).text, 'Matches the website');
+  // a real website change is still mirrored, on the listing's own basis
+  const drop = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { value: '26163' }, high: { label: 'Was', value: '25673' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.deepEqual(diffScans(s, drop, { posted, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates.map((u) => [u.from, u.to]), [[27163, 26163]]);
+  // the other way round: posted on the lower price, the setting back to the main price
+  const lower = markPosted({}, ram, 'beforeFees', at);
+  assert.equal(lower[VIN.ram].price, 26673);
+  assert.deepEqual(diffScans(s, snapshot(LOT), { posted: lower, confirm: confirmed(), basis: 'website' }).priceUpdates, []);
+  // an entry kept before the basis was recorded follows the setting, which is why a change of the setting stamps it first
+  const legacy = { [VIN.ram]: { name: 'Ram', price: 27163, postedAt: at } };
+  assert.equal(diffScans(s, snapshot(LOT), { posted: legacy, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates.length, 1);
+  const stamped = withPostedBasis(legacy, 'website');
+  assert.deepEqual(stamped[VIN.ram], { name: 'Ram', price: 27163, postedAt: at, basis: 'website' });
+  assert.deepEqual(diffScans(s, snapshot(LOT), { posted: stamped, confirm: confirmed(), basis: 'beforeFees' }).priceUpdates, []);
+  assert.equal(withPostedBasis(stamped, 'beforeFees'), undefined, 'an entry that has a basis keeps it: nothing to write');
+  assert.equal(withPostedBasis(null, 'website'), undefined);
+  assert.equal(postedBasis({ basis: 'beforeFees' }, 'website'), 'beforeFees');
+  assert.equal(postedBasis({}, 'beforeFees'), 'beforeFees');
+  assert.equal(postedBasis(null, 'anything else'), 'website');
 });
 
 test('website switches to "call for price": needs a look', () => {
@@ -125,12 +157,105 @@ test('website switches to "call for price": needs a look', () => {
   assert.match(d.needsALook[0].text, /no longer shows a price/);
 });
 
+test('under the "before fees" basis, "call for price" still needs a look, and a hidden number never becomes a price update', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 26673 } }; // posted at the "Was" line
+  const call = { low: false, high: { label: 'Price', value: 'Please call for price' } };
+  // the display says call for price; the hidden internet_price is still 26673
+  const day2 = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: call } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const d2 = diffScans(snapshot(LOT), day2, { posted, confirm: confirmed(), basis: 'beforeFees' });
+  assert.equal(d2.priceUpdates.length, 0);
+  assert.equal(d2.needsALook.length, 1);
+  assert.match(d2.needsALook[0].text, /no longer shows a price/);
+  assert.equal(listingStatus(day2.vehicles[VIN.ram], 26673, basisPrice(day2.vehicles[VIN.ram], 'beforeFees')).text, 'Website no longer shows a price');
+  // the hidden number changes while the page still says call for price: not a price the website shows
+  const day3 = snapshot([['usedNormal', { pricing: { internet_price: 24999, price: 24999 }, extra_fields: { lightning: { pricing: call } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const d3 = diffScans(day2, day3, { posted, confirm: confirmed(), basis: 'beforeFees' });
+  assert.equal(d3.priceUpdates.length, 0);
+  assert.match(d3.needsALook.map((n) => n.text).join(' '), /no longer shows a price/);
+});
+
+test('settleDiff: a diff saved after a long scan drops the salesperson\'s items handled meanwhile, and keeps everything else', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 27163 }, [VIN.hellcat]: { name: 'Hellcat', price: 53485 }, [VIN.tradesman]: { name: 'Tradesman', price: 33485 } };
+  const curr = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoPhotos', { extra_fields: { lightning: { pricing: { low: { value: '32485' } } } } }]]);
+  const d = diffScans(snapshot(LOT), curr, { posted, confirm: { checked: [], notFound: [], error: null } });
+  assert.deepEqual(d.takeDown.map((t) => t.vin), [VIN.ram]);
+  assert.deepEqual(d.priceUpdates.map((u) => u.vin), [VIN.tradesman]);
+  assert.deepEqual(d.needsALook.map((n) => n.vin), [VIN.hellcat], 'the posted car missing from this scan');
+  // meanwhile: the Ram taken down, the Tradesman's price updated, the Hellcat taken down
+  const now = { [VIN.tradesman]: { ...posted[VIN.tradesman], price: 32485 } };
+  const settled = settleDiff(d, now);
+  assert.deepEqual([settled.takeDown, settled.priceUpdates, settled.needsALook], [[], [], []]);
+  assert.equal(settled.counts, d.counts, 'the rest of the diff as it was');
+  // nothing handled: nothing changes; a price updated to another number keeps the item
+  assert.deepEqual(settleDiff(d, posted), d);
+  assert.deepEqual(settleDiff(d, { ...posted, [VIN.tradesman]: { ...posted[VIN.tradesman], price: 30000 } }).priceUpdates.map((u) => u.vin), [VIN.tradesman]);
+  // a colleague's car (mine: false) is never the salesperson's item; items about the lot are kept
+  const lot = { ...d, newArrivals: [{ vin: 'X' }], priceUpdates: [...d.priceUpdates, { vin: VIN.wagoneer, yours: false, from: 1, to: 2 }] };
+  assert.deepEqual(settleDiff(lot, { ...posted, [VIN.ram]: { ...posted[VIN.ram], mine: false } }).takeDown, []);
+  assert.deepEqual(settleDiff(lot, {}).priceUpdates.map((u) => u.vin), [VIN.wagoneer]);
+  assert.deepEqual(settleDiff(lot, {}).newArrivals, [{ vin: 'X' }]);
+  assert.equal(settleDiff(null, posted), null);
+});
+
 test('car you posted goes sale-pending: take down', () => {
   const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
   const curr = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   const d = diffScans(snapshot(LOT), curr, { posted, confirm: confirmed() });
   assert.equal(d.takeDown.length, 1);
   assert.equal(d.takeDown[0].why, 'sale-pending');
+});
+
+test('a posted car stays on Take down on every scan while the website marks it sale-pending or sold, until Taken down', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
+  const pending = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  const first = diffScans(snapshot(LOT), pending, { posted, confirm: confirmed() });
+  const again = diffScans(pending, pending, { posted, confirm: confirmed() }); // the next rescan: the saved snapshot already says pending
+  for (const d of [first, again]) assert.deepEqual(d.takeDown.map((t) => [t.vin, t.why, t.text, t.yours]), [[VIN.ram, 'sale-pending', 'Sale pending on the website', true]]);
+  // a website that marks the car sold (a schema.org SoldOut offer reads "Sold") says sold, scan after scan
+  const sold = snapshot([['usedNormal', { extra_fields: { lightning: { statusLabel: 'Sold' } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  for (const prev of [snapshot(LOT), sold]) assert.deepEqual(diffScans(prev, sold, { posted, confirm: confirmed() }).takeDown.map((t) => t.text), ['Marked sold on the website']);
+  // Taken down ends it; the car back for sale ends it
+  assert.deepEqual(diffScans(pending, pending, { posted: markTakenDown(posted, VIN.ram), confirm: confirmed() }).takeDown, []);
+  assert.deepEqual(diffScans(pending, snapshot(LOT), { posted, confirm: confirmed() }).takeDown, []);
+});
+
+test('a posted car the pre-owned check now holds back stays under Needs a look on every scan, not only the first', () => {
+  const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
+  const retyped = snapshot([['usedNormal', { type: 'New', vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.equal(retyped.vehicles[VIN.ram].decision, 'skip', 'every sign now says new');
+  const disagree = snapshot([['usedNormal', { vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.equal(disagree.vehicles[VIN.ram].decision, 'review', 'the signs disagree');
+  for (const now of [retyped, disagree]) {
+    for (const prev of [snapshot(LOT), now]) {
+      const d = diffScans(prev, now, { posted, confirm: confirmed() });
+      assert.deepEqual(d.needsALook.map((n) => [n.vin, n.yours, n.text]), [[VIN.ram, true, now.vehicles[VIN.ram].reason]]);
+    }
+    assert.deepEqual(diffScans(now, now, { posted: {}, confirm: confirmed() }).needsALook, [], 'not posted: the Review tab holds it, To do does not');
+  }
+});
+
+test('My listings: sold, sale-pending and held back by the pre-owned check come before a price change', () => {
+  const entry = (patch) => snapshot([['usedNormal', patch]]).vehicles[VIN.ram];
+  assert.deepEqual(listingStatus(null, 27163, null), { tone: 'bad', text: 'Not on the website at the last scan' });
+  assert.deepEqual(listingStatus(entry({ status: 'pend-sale' }), 27163, 26163), { tone: 'bad', text: 'Sale pending on the website' });
+  assert.deepEqual(listingStatus(entry({ extra_fields: { lightning: { statusLabel: 'Sold' } } }), 27163, 27163), { tone: 'bad', text: 'Marked sold on the website' });
+  assert.deepEqual(listingStatus(entry({ vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/' }), 27163, 27163), { tone: 'warn', text: 'Needs a look (see To do)' });
+  assert.deepEqual(listingStatus({ decision: 'skip' }, 27163, 27163), { tone: 'bad', text: 'Not pre-owned on the website' });
+  assert.deepEqual(listingStatus(entry(), 28000, 27163), { tone: 'warn', text: 'Website price changed', priceChanged: true });
+  assert.deepEqual(listingStatus(entry(), 27163, 27163), { tone: 'good', text: 'Matches the website' });
+  assert.equal(pendingText({ statusLabel: 'Reserved (sale pending)' }), 'Sale pending on the website');
+  assert.equal(pendingText({ status: 'publish', statusLabel: '' }), null);
+});
+
+test('My listings: a posted car whose website price is gone says so, as To do does, not "Matches the website"', () => {
+  const entry = snapshot([['usedNormal']]).vehicles[VIN.ram];
+  const noPrice = { ...entry, price: null, priceLabel: 'call for price' };
+  const status = listingStatus(noPrice, 27163, null);
+  assert.deepEqual(status, { tone: 'warn', text: 'Website no longer shows a price' });
+  const posted = markPosted({}, { vin: VIN.ram, name: entry.name, price: 27163 });
+  const todo = diffScans({ vehicles: { [VIN.ram]: entry } }, { vehicles: { [VIN.ram]: noPrice } }, { posted, confirm: confirmed() }).needsALook.map((n) => n.text);
+  assert.ok(todo.some((t) => t.startsWith(status.text)), `To do says ${JSON.stringify(todo)}`);
+  assert.deepEqual(listingStatus(noPrice, null, null), { tone: 'good', text: 'Matches the website' }, 'a listing posted without a price still matches');
 });
 
 test('new arrival shows up with its decision', () => {
@@ -184,9 +309,10 @@ test('a colleague\'s entry (mine: false, merged in by sync) is never yours: no t
 test('posted-listing bookkeeping', () => {
   const s = snapshot(LOT);
   let posted = markPosted({}, s.vehicles[VIN.ram], 'website', '2026-09-26T21:00:00.000Z');
-  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' });
+  assert.deepEqual(posted[VIN.ram], { name: '2019 Ram 1500 Classic Express', price: 27163, basis: 'website', postedAt: '2026-09-26T21:00:00.000Z' });
   posted = markPriceUpdated(posted, VIN.ram, 26163, '2026-09-27T21:00:00.000Z');
   assert.equal(posted[VIN.ram].price, 26163);
+  assert.equal(posted[VIN.ram].basis, 'website', 'an updated price stays on the basis the listing was posted at');
   posted = markTakenDown(posted, VIN.ram);
   assert.deepEqual(posted, {});
 });
@@ -232,12 +358,51 @@ test('a website read from its pages: half the lot gone, each page confirming it,
 
 test('a website read from its pages: a missing car whose page could not be checked is never marked gone', async () => {
   const cars = standardCars(12);
-  for (const status of [403, 429, 500]) {
+  // a refusal stops the whole check: nothing is marked gone, and the scan says so
+  for (const status of [403, 429, 503]) {
     const { out } = await standardRescan(cars, cars.slice(1), (site) => site.set(STANDARD_ORIGIN + cars[0].path, httpError(status)));
     assert.match(out.res.confirm.error, new RegExp(String(status)));
     assert.deepEqual(out.diff.takeDown, [], `HTTP ${status}`);
     assert.deepEqual(out.diff.needsALook.map((n) => n.vin), [cars[0].vin]);
     assert.match(out.diff.warnings.join(' '), /Couldn't double-check missing cars .*Nothing was marked as gone/);
+  }
+  // any other failure leaves that one car unchecked, under Needs a look with the reason
+  const { out } = await standardRescan(cars, cars.slice(1), (site) => site.set(STANDARD_ORIGIN + cars[0].path, httpError(500)));
+  assert.equal(out.res.confirm.error, null);
+  assert.deepEqual(out.diff.takeDown, [], 'HTTP 500');
+  assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Missing from this scan, and its page gave HTTP 500, so it was not marked gone. Check the car on the website.']]);
+});
+
+test('a website read from its pages: one posted car whose page keeps failing never holds back another sold car, scan after scan', async () => {
+  const cars = standardCars(8);
+  const [broken, sold] = cars;
+  const page = (text, extra = {}) => ({ ok: true, status: 200, contentType: 'text/html', text, ...extra });
+  for (const failure of [httpError(500), page('<html><body>This vehicle is no longer available</body></html>'), page(standardCarPage(broken), { redirected: true, finalUrl: 'https://other.example/x' })]) {
+    // one car is the salesperson's own listing, the other a colleague's (merged in by sync): either one's page used to block every verdict
+    for (const [mineBroken, mineSold] of [[true, true], [false, true]]) {
+      let posted = markPosted({}, { vin: sold.vin, name: 'sold car', price: sold.price });
+      posted = markPosted(posted, { vin: broken.vin, name: 'broken car', price: broken.price });
+      posted[broken.vin].mine = mineBroken;
+      posted[sold.vin].mine = mineSold;
+      const first = await rescanOf(standardSite({ cars }), null, posted);
+      let prev = first.snapshot;
+      for (const day of [2, 3, 4]) {
+        const site = standardSite({ cars: cars.slice(2) });
+        site.set(STANDARD_ORIGIN + broken.path, failure);
+        site.set(STANDARD_ORIGIN + sold.path, httpError(404));
+        const out = await rescanOf(site, prev, posted);
+        const label = `day ${day}, ${failure.finalUrl || (failure.ok ? 'no data' : failure.status)}, broken car ${mineBroken ? 'mine' : 'a colleague\'s'}`;
+        assert.equal(out.res.confirm.error, null, label);
+        assert.deepEqual(out.diff.takeDown.map((t) => [t.vin, t.why]), [[sold.vin, 'gone']], `${label}: the 404 car is on Take down`);
+        const held = out.diff.needsALook.find((n) => n.vin === broken.vin);
+        assert.ok(held, `${label}: the car that could not be checked stays under Needs a look`);
+        assert.doesNotMatch(held.text, /Rescan later/, label);
+        assert.match(held.text, /^Missing from this scan, and its page (gave HTTP 500|has no vehicle data to check against|sent Lot Current to another website), so it was not marked gone\./, label);
+        if (mineBroken) assert.match(held.text, /click Taken down on My listings/, label);
+        assert.ok(!out.diff.warnings.some((w) => /Couldn't double-check/.test(w)), label);
+        prev = out.snapshot;
+      }
+    }
   }
 });
 
@@ -285,6 +450,147 @@ test('a website read from its pages: a posted car sold on a bad server day is ta
     const prev = day === 1 ? bad.snapshot : (await rescanOf(thinListSite(rest), bad.snapshot, posted)).snapshot;
     const good = await rescanOf(thinListSite(rest), prev, posted);
     assert.deepEqual(good.diff.takeDown.map((t) => [t.vin, t.why]), [[cars[0].vin, 'gone']], `rescan ${day} after the bad day`);
+  }
+});
+
+// A price drop the page shows while its markup still says the old price (the
+// case the visible-price check exists for), with another car at that old
+// price on the same page: the other car's tile or card is not this car's price.
+const htmlAnswer = (text) => ({ ok: true, status: 200, contentType: 'text/html', text });
+test('a website read from its pages: a posted car whose page dropped its price while its markup did not is not kept at the old price by another car\'s tile at that price', async () => {
+  const cars = standardCars(6);
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  assert.equal(first.snapshot.vehicles[cars[0].vin].price, 15000);
+  const dropped = (carousel) => {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0], { carousel }).replace('Our price $15,000', 'Our price $14,000')));
+    return site;
+  };
+  for (const carousel of [[{ ...cars[1], price: 15000 }], [{ ...cars[1], price: 15000 }, { ...cars[2], price: 17000 }]]) {
+    const day2 = await rescanOf(dropped(carousel), first.snapshot, posted);
+    assert.deepEqual(day2.diff.priceUpdates, [], `${carousel.length} other car(s) on the page`);
+    assert.deepEqual(day2.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']], `${carousel.length} other car(s) on the page`);
+  }
+  // with no other car at the old price the same page reads the same way, and the page's own price is still read when the markup has it
+  const fixed = standardSite({ cars, perPage: 10 });
+  fixed.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0], { price: 14000, carousel: [{ ...cars[1], price: 15000 }] })));
+  const day3 = await rescanOf(fixed, first.snapshot, posted);
+  assert.deepEqual(day3.diff.priceUpdates.map((u) => [u.vin, u.from, u.to]), [[cars[0].vin, 15000, 14000]]);
+});
+
+test('a website read from its pages: a car read from the list is priced from its own card, never from another car\'s card at its markup price', async () => {
+  const cars = standardCars(4);
+  // the list's data says $15,000 for the first car, its card shows $14,000, and the second car's card shows $15,000
+  const listed = [{ ...cars[0], price: 15000 }, { ...cars[1], price: 15000 }, cars[2], cars[3]];
+  const list = standardListPage(listed).replace(/<span>\$15,000<\/span>/, '<span>$14,000</span>');
+  const site = standardSite({ cars: listed, perPage: 10 });
+  site.set(STD.listUrl, htmlAnswer(list));
+  site.set(STANDARD_ORIGIN + cars[0].path, httpError(500)); // its own page can't be read: the list's data stands in
+  const out = await rescanOf(site, null);
+  const car0 = out.vehicles.find((v) => v.vin === cars[0].vin);
+  assert.equal(car0.price, null, 'the card for this car shows another amount');
+  assert.equal(car0.priceLabel, 'the page does not show this price');
+  assert.equal(out.vehicles.find((v) => v.vin === cars[1].vin).price, 15000, 'the second car\'s own page is read as usual');
+  // its own card at the list's price: the list's data stands
+  const same = standardSite({ cars: listed, perPage: 10 });
+  same.set(STANDARD_ORIGIN + cars[0].path, httpError(500));
+  assert.equal((await rescanOf(same, null)).vehicles.find((v) => v.vin === cars[0].vin).price, 15000);
+});
+
+// Real tiles and cards link to more than the car's page: a "Check
+// availability" form, financing, a trade-in page. Those links don't make a
+// card something else: it is still that car's card.
+const extraLinks = {
+  'a contact link': () => ' <a href="/contact-us/">Check availability</a>',
+  'a finance link': () => ' <a href="/finance/apply/">Get pre-approved</a>',
+  'a form with its VIN': (c) => ` <a href="/contact-us/?vin=${c.vin}">Ask about it</a>`,
+};
+const withExtraLinks = (html, cars, extra) => {
+  let k = 0;
+  return html.replace(/<\/div>/g, () => extra(cars[k++]) + '</div>');
+};
+
+test('a website read from its pages: a car read from the list keeps the list\'s price when its card also links to a contact form, financing or a form with its VIN', async () => {
+  const cars = standardCars(4);
+  for (const [name, extra] of Object.entries(extraLinks)) {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STD.listUrl, htmlAnswer(withExtraLinks(standardListPage(cars), cars, extra)));
+    // the car pages carry no markup of their own: the list's data is all there is
+    for (const c of cars) site.set(STANDARD_ORIGIN + c.path, htmlAnswer(standardCarPage(c).replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '')));
+    const out = await rescanOf(site, null);
+    assert.deepEqual(out.vehicles.map((v) => v.price), cars.map((c) => c.price), name);
+    assert.deepEqual(Object.values(out.snapshot.vehicles).map((e) => e.decision), cars.map(() => 'ready'), name);
+  }
+});
+
+test('a website read from its pages: on a lot whose cards link to more than the car, a later scan still takes unchanged cars from the list instead of reading every car page again', async () => {
+  const cars = standardCars(24);
+  const site = () => {
+    const s = standardSite({ cars, perPage: 30 });
+    s.set(STD.listUrl, htmlAnswer(withExtraLinks(standardListPage(cars), cars, extraLinks['a finance link'])));
+    return s;
+  };
+  const first = await rescanOf(site(), null);
+  assert.equal(first.res.requests, 25, 'the first scan reads the list and every car page');
+  const second = await rescanOf(site(), first.snapshot);
+  assert.equal(second.res.requests, 1, 'the second reads only the list');
+  assert.equal(second.diff.priceUpdates.length + second.diff.needsALook.length, 0);
+});
+
+test('a website read from its pages: another car\'s tile at the old price is not this car\'s price when the tile also links to a contact form or a form with its VIN, or is the only other car on the page', async () => {
+  const cars = standardCars(6);
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  const tile = (c, price, extra) => `<div class="tile"><a href="${c.path}">${c.year} ${c.make} ${c.model}</a> <span>$${price.toLocaleString('en-US')}</span>${extra(c)}</div>`;
+  const asides = {};
+  for (const [name, extra] of Object.entries(extraLinks)) asides[`two tiles, each with ${name}`] = `<aside>${tile(cars[1], 15000, extra)}${tile(cars[2], 17000, extra)}</aside>`;
+  asides['one tile, with a contact link'] = `<section><h2>You may also like</h2>${tile(cars[1], 15000, extraLinks['a contact link'])}</section>`;
+  asides['one tile, with a form with its VIN'] = `<section><h2>You may also like</h2>${tile(cars[1], 15000, extraLinks['a form with its VIN'])}</section>`;
+  for (const [name, aside] of Object.entries(asides)) {
+    const site = standardSite({ cars, perPage: 10 });
+    // the page now says $14,000; its markup still says $15,000, the other car's price
+    const html = standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', aside + '<a href="/used-vehicles/">');
+    site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(html));
+    const out = await rescanOf(site, first.snapshot, posted);
+    assert.equal(out.snapshot.vehicles[cars[0].vin].price, null, name);
+    assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']], name);
+  }
+});
+
+test('a website read from its pages: on a lot whose car addresses carry no VIN, a tile for a car the list does not name (a new car, another store\'s) at the old price is not this car\'s price', async () => {
+  const cars = standardCars(6).map((c) => ({ ...c, path: `/used/${c.year}-${c.make}-${c.model}-${c.stock}/`.toLowerCase() }));
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  assert.equal(first.snapshot.vehicles[cars[0].vin].price, 15000);
+  const elsewhere = '<aside><div class="tile"><a href="/new/2027-kia-telluride-n5000/">2027 Kia Telluride</a> <span>$15,000</span> <a href="/contact-us/">Ask about it</a></div></aside>';
+  const site = standardSite({ cars, perPage: 10 });
+  site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', elsewhere + '<a href="/used-vehicles/">')));
+  const out = await rescanOf(site, first.snapshot, posted);
+  assert.equal(out.snapshot.vehicles[cars[0].vin].price, null);
+  assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']]);
+});
+
+test('a website read from its pages: a car\'s own price stays its own when its price box also links to a model search, another address of the same car, or a page of its own', async () => {
+  const cars = standardCars(4);
+  const c = cars[0];
+  const boxes = {
+    'a "See all" search for its model': `<a href="/used-vehicles/${c.year}-${c.make}-${c.model}/">See all ${c.year} ${c.make} ${c.model}</a>`.toLowerCase(),
+    'another address of the same car': `<a href="/used/${c.year}-${c.make}-${c.model}-${c.stock}/">Share</a>`.toLowerCase(),
+    'its print page': `<a href="${c.path}?print=1">Print</a>`,
+  };
+  for (const [name, link] of Object.entries(boxes)) {
+    const html = standardCarPage(c, { carousel: [cars[1], cars[2]] }).replace(/<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, `<section class="info"><p>Our price $1</p><p>$2</p>${link}</section>`);
+    // read in a scan, which knows the lot's car addresses
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STANDARD_ORIGIN + c.path, htmlAnswer(html));
+    const out = await rescanOf(site, null);
+    const v = out.vehicles.find((x) => x.vin === c.vin);
+    assert.equal(v.price, c.price, `scan: ${name}`);
+    assert.equal(v.mileage, c.miles, `scan: ${name}`);
+    // and at post time, from the car's page alone
+    const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
+    assert.equal(schemaOrg.normalize(one.record).price, c.price, `post time: ${name}`);
   }
 });
 

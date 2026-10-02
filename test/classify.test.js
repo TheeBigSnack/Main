@@ -6,6 +6,7 @@ import { websitePrice, conditionWordFromUrl, normalizeVehicle } from '../extensi
 import { trimRecord } from '../extension/adapters/dealerInspire.js';
 import { assessVehicle, readCondition, titleConditionWords, DECISION } from '../extension/src/classify.js';
 import { fixtures, vehicle, raw, MY_STORE } from './helpers.js';
+import { showsLowerPrice } from '../extension/src/settings.js';
 
 const assess = (name, patch, settings = MY_STORE) => assessVehicle(vehicle(name, patch), settings);
 
@@ -24,9 +25,31 @@ test('"Please call for price" means no price, even if a number is buried elsewhe
 });
 
 test('falls back to the pricing block when the display pricing is absent', () => {
-  const r = raw('usedNormal');
+  const r = structuredClone(raw('usedNormal'));
   delete r.extra_fields.lightning.pricing;
   assert.equal(websitePrice(r).value, 27163);
+});
+
+test('the lower second price is one the website displays: never only the hidden pricing fields, never an MSRP', () => {
+  const display = (pricing) => ({ extra_fields: { lightning: { pricing } } });
+  // the hidden fields say otherwise: the displayed "Was" line decides
+  assert.equal(vehicle('usedNormal', { pricing: { internet_price: 25500, price: 25500 } }).priceBeforeFees, 26673);
+  // the website shows its main price only; internet_price still holds a lower number
+  const single = vehicle('usedNormal', display({ high: false }));
+  assert.equal(single.price, 27163);
+  assert.equal(single.priceBeforeFees, null);
+  assert.equal(showsLowerPrice([single]), false, 'a number only the hidden fields carry is never offered as a basis');
+  // "Please call for price" with the hidden fields still filled in
+  const call = vehicle('usedNormal', display({ low: false, high: { label: 'Price', value: 'Please call for price' } }));
+  assert.equal(call.price, null);
+  assert.equal(call.priceBeforeFees, null);
+  assert.equal(normalizeVehicle(fixtures.newHighMiles).priceBeforeFees, null, 'the live record: call for price over internet_price 33295');
+  // a second number labelled MSRP is not a price before fees
+  assert.equal(vehicle('usedNormal', display({ high: { label: 'MSRP', value: '26673' } })).priceBeforeFees, null);
+  // no display pricing at all: nothing shows a second price
+  const bare = structuredClone(raw('usedNormal'));
+  delete bare.extra_fields.lightning.pricing;
+  assert.equal(normalizeVehicle(bare).priceBeforeFees, null);
 });
 
 test('reads the condition word from the vehicle page address', () => {

@@ -44,6 +44,8 @@ export const SCENARIOS = {
     list.push(withPrice(arrival, 36603));
     return list;
   },
+  // Day 2, then the website marks the Wagoneer sale-pending (it stays listed).
+  day2pending: () => SCENARIOS.day2().map((r) => (r.vin === fx.certified.vin ? { ...r, status: 'pend-sale' } : r)),
   day3: () => {
     const list = SCENARIOS.day2();
     const tradesman = list.find((r) => r.vin === fx.usedNoPhotos.vin);

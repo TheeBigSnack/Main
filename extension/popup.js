@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
@@ -12,7 +12,7 @@ import { FORM_MAP } from './facebook/formMap.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
@@ -229,11 +229,19 @@ async function scan() {
     state.settings = r.settings;
     state.settingsFromProfile = false;
     state.boilerplate = r.boilerplate;
-    state.diff = r.diff;
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
     state.siteName = r.site.name;
-    if (!(await save('snapshot', 'diff', 'settings', 'boilerplate'))) return; // the status says why (the quota); the read stays on screen
-    state.pilot = await recordFlags(state.origin, r.diff, r.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
+    // saved under the diff's lock, against the posted list as it is now: the
+    // side panel may have finished a to-do item while this scan ran (src/rescan.js settleDiff)
+    const diffKey = siteKeys(state.origin).diff;
+    const saved = await withLock(diffKey, async () => {
+      const postedKey = siteKeys(state.origin).posted;
+      state.posted = (await chrome.storage.local.get(postedKey))[postedKey] || {};
+      state.diff = settleDiff(r.diff, state.posted);
+      return save('snapshot', 'diff', 'settings', 'boilerplate');
+    });
+    if (!saved) return; // the status says why (the quota); the read stays on screen
+    state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
     // the scan registered the website for background rescans; show its state
     state.site = ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {})[state.origin] || null;
     await checkRescanPermission();
@@ -637,18 +645,17 @@ function viewMine(l) {
     rows(
       l.mine.map((p) => {
         const now = p.now;
-        const site = now ? price(now) : null;
-        let pill = '<span class="pill good">Matches the website</span>';
-        let extra = '';
-        if (!now) pill = '<span class="pill bad">Not on the website at the last scan</span>';
-        else if (site && site !== p.price) {
-          pill = '<span class="pill warn">Website price changed</span>';
-          extra = `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>`;
-        }
+        const own = postedBasis(p, state.settings?.basis); // the basis this listing was posted at (src/rescan.js postedBasis)
+        const site = now ? basisPrice(now, own) : null;
+        const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
+        // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus)
+        const status = listingStatus(now, p.price, site);
+        const pill = `<span class="pill ${status.tone}">${esc(status.text)}</span>`;
+        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
         const entry = { name: p.name, url: now?.url };
         const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
         return row(entry, {
-          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${link}`,
+          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
           right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
@@ -1350,7 +1357,12 @@ async function onSettingsSubmit(ev) {
     state.settings.autoRescan = false;
     message = 'Saved, but automatic rescans need one scan of this website first.';
   }
+  // listings posted before the price basis was kept on each one stay on the
+  // basis they were posted at: the new setting is for new posts, and a
+  // changed setting is never shown as a website price change
+  if (state.settings.basis !== prev.basis && !(await update('posted', (p) => withPostedBasis(p, prev.basis)))) { render(); return; }
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
+  if (state.settings.basis !== prev.basis && Object.values(state.posted || {}).some((p) => p && p.mine !== false)) message += ' Your listings keep the price they were posted at; the new price setting is for new posts.';
   await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');
   if (note) note.textContent = message;

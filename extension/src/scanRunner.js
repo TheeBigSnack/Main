@@ -6,7 +6,7 @@
 import { ADAPTERS, detectAdapter, unsupportedSiteMessage } from '../adapters/index.js';
 import { assessVehicle } from './classify.js';
 import { makeSnapshot, diffScans } from './rescan.js';
-import { findBoilerplate } from './description.js';
+import { findBoilerplate, MIN_BOILERPLATE_COUNT } from './description.js';
 import { withDefaults } from './settings.js';
 import { storeNames, shortLocation, matchStore } from './normalize.js';
 import { probeSiteInPage } from './scan.js';
@@ -82,13 +82,30 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   diff.takenAt = res.fetchedAt;
   diff.requests = res.requests;
   // Text that repeats across the lot (disclaimers, legal lines) is kept so the
-  // description writer can strip it. A descriptionRaw of null is a car whose
-  // description this scan did not read (an adapter that re-reads only what
-  // may have changed): the lines found before are kept next to what the
-  // descriptions read this time show.
-  const read = vehicles.map((v) => v.descriptionRaw).filter((d) => d !== null);
-  const found = findBoilerplate(read);
-  const boilerplate = read.length < vehicles.length ? [...new Set([...(Array.isArray(savedBoilerplate) ? savedBoilerplate : []), ...found])] : [...found];
+  // description writer can strip it. A scan that read every car's
+  // description works the lines out again from scratch. Any other scan keeps
+  // the lines saved from the last one and adds a line only when it is on the
+  // share of the whole lot, not of the pages it happened to read:
+  //  - a car whose description this scan did not read (res.descriptionsUnread,
+  //    an adapter that re-reads only what may have changed, or res.unread, a
+  //    car kept from the last snapshot) counts in the lot, so three new
+  //    arrivals sharing a sentence never make it a lot-wide line; a car that
+  //    simply has no description (a descriptionRaw of null that is not
+  //    listed there, such as a list card without dealer comments) is not a
+  //    description and counts in neither;
+  //  - a scan that did not get the whole list (res.complete false) keeps
+  //    the saved lines too, and one whose snapshot is not saved
+  //    (diff.unreliable, a website hiccup) is measured against the lot as
+  //    last saved, so an empty or near-empty answer never wipes them;
+  //  - fewer descriptions than MIN_BOILERPLATE_COUNT can show no line at
+  //    all, so the saved ones stay.
+  const notRead = new Set(Array.isArray(res.descriptionsUnread) ? res.descriptionsUnread : []);
+  const skipped = vehicles.filter((v) => notRead.has(v.vin)).length + (Array.isArray(res.unread) ? res.unread.length : 0);
+  const read = vehicles.filter((v) => !notRead.has(v.vin)).map((v) => v.descriptionRaw).filter((d) => d !== null && d !== undefined);
+  const saved = Array.isArray(savedBoilerplate) ? savedBoilerplate : [];
+  const whole = skipped === 0 && read.length >= MIN_BOILERPLATE_COUNT && res.complete && !diff.unreliable;
+  const lot = diff.unreliable ? Math.max(read.length + skipped, (diff.counts && diff.counts.previous) || 0) : read.length + skipped;
+  const boilerplate = whole ? [...findBoilerplate(read)] : [...new Set([...saved, ...findBoilerplate(read, undefined, undefined, lot)])];
   // Where this lot's photos are hosted: recorded here; the side panel asks
   // Chrome for a car's photo servers from the salesperson's click (src/photoHosts.js).
   const photoOrigins = typeof adapter.photoOrigins === 'function' ? adapter.photoOrigins(res.records) : [];
@@ -149,7 +166,7 @@ export function incompleteWarning(res) {
   const found = res.records.length + kept;
   const left = Number(res.leftForLater) || 0;
   const c = res.confirm;
-  const doubleChecked = c && !c.error && Array.isArray(c.checked) && c.checked.length ? ' Missing cars were double-checked one by one.' : '';
+  const doubleChecked = c && !c.error && Array.isArray(c.checked) && c.checked.length ? ' Missing cars were looked up again on the website.' : '';
   if (left) {
     const those = left === 1 ? "one car's page was" : `${left} cars' pages were`;
     const shows = kept ? ' A car whose page was not read this time shows what the last scan read.' : '';

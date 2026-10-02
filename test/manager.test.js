@@ -50,7 +50,7 @@ test('the definitions are the pilot\'s, sentence for sentence (both files read a
 // either, not only that nobody had Chrome open. The website and the
 // onboarding email say so; the manager view and its CSV say so too.
 test('every rescan line on the manager view names the condition: automatic rescans allowed', () => {
-  assert.equal(SCAN_STALE_WHY, 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed');
+  assert.equal(SCAN_STALE_WHY, 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one that looks like a website hiccup (most of the lot gone at once) is not recorded here');
   assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_WHY\}`\)/);
   assert.equal(DEFINITIONS.at(-1), 'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.');
   for (const file of ['manager/manager.js', 'manager/data.js', 'extension/src/pilot.js']) {
@@ -137,6 +137,10 @@ test('summarize on the sample: the last scan line', () => {
   const stale = summarize({ ...sample(), scans: [{ taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 }] });
   assert.equal(stale.lastScan.stale, true);
   assert.equal(stale.lastScan.line, 'Last scan 2026-11-16 06:00: 1 car on the website, 0 ready to post, 0 to take down, 0 price changes');
+  // a stale scan's note gives both reasons: no rescan ran, or the ones that ran looked like a website hiccup and were never sent
+  assert.match(SCAN_STALE_WHY, /every 3 hours only while a salesperson's Chrome is open/);
+  assert.match(SCAN_STALE_WHY, /website hiccup .* not recorded here/);
+  assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_WHY\}`\)/);
 });
 
 test('summarize: a scan stamped more than 5 minutes ahead of now (a machine whose clock ran ahead) does not pin the last scan line or hide its stale warning', () => {

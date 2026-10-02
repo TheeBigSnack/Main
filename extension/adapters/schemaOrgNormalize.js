@@ -160,9 +160,16 @@ const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|
 // Words right before an amount that make it a price other than the car's
 // current one: the old price ("Was $24,995", "Reg. $24,995", "Originally
 // $24,995"), the sticker or list price ("MSRP: $24,995", "Retail price
-// $24,995", "Compare at $24,995"), or the price a payment is worked out
-// from ("$389/mo based on a price of $24,995").
-const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on)\b\.?(?:[\s:\-\u2013\u2014]*(?:price|pricing|of|a|the|at|for)\b)*[\s:\-\u2013\u2014]*$/i;
+// $24,995", "Compare at $24,995", "Window sticker $24,995"), the price a
+// payment is worked out from ("$389/mo based on a price of $24,995"), or a
+// value from a guide, an estimate or an offer ("KBB Fair Market Value
+// $24,995", "Kelley Blue Book® Fair Purchase Price", "Typical Listing
+// Price", "Book value", "Trade-in value", "Instant Cash Offer", "NADA
+// value", "J.D. Power value", "Black Book", "Edmunds", "Estimated value",
+// "Average market price"), the words inventoryJson.js also never takes for
+// the price. Always whole phrases: a bare "value" is no cue ("Value Price
+// $24,995" is a selling price).
+const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|market value|market price|fair market|fair purchase|typical listing|book value|trade[-\s]?in(?: value)?|kbb|kelley(?: blue book)?|blue book|black book|nada|j\.?\s?d\.?\s?power|cash offer|edmunds|estimated(?: value)?|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$/i;
 
 // Every dollar amount the page shows: its value, whether it is written with
 // a dollar sign, and whether the words before it make it a reference price.

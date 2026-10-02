@@ -5,6 +5,7 @@ import { capStatus, postsToday, DEFAULT_DAILY_CAP } from '../extension/src/cap.j
 import { markPosted } from '../extension/src/rescan.js';
 import { FORM_MAP, DEV_OVERRIDE_KEYS, applyOverrides } from '../extension/facebook/formMap.js';
 import { ADAPTERS } from '../extension/adapters/index.js';
+import { probeSiteInPage } from '../extension/src/scan.js';
 import { snapshot, fixtures, stripComments, commentStripperBlindSpots, strippedSourceFiles } from './helpers.js';
 
 const VIN = fixtures.usedNormal.vin;
@@ -29,7 +30,7 @@ test('daily cap counts only today, in local time', () => {
 test('the posted registry can carry the listing link and who posted, without breaking old callers', () => {
   const s = snapshot([['usedNormal']]);
   const plain = markPosted({}, s.vehicles[VIN], 'website', '2026-09-26T21:00:00.000Z');
-  assert.deepEqual(plain[VIN], { name: '2019 Ram 1500 Classic Express', price: 27163, postedAt: '2026-09-26T21:00:00.000Z' });
+  assert.deepEqual(plain[VIN], { name: '2019 Ram 1500 Classic Express', price: 27163, basis: 'website', postedAt: '2026-09-26T21:00:00.000Z' });
   const full = markPosted({}, s.vehicles[VIN], 'beforeFees', '2026-09-26T21:00:00.000Z', {
     listingUrl: 'https://www.facebook.com/marketplace/item/424242/',
     salesperson: 'Roger',
@@ -37,6 +38,7 @@ test('the posted registry can carry the listing link and who posted, without bre
   assert.deepEqual(full[VIN], {
     name: '2019 Ram 1500 Classic Express',
     price: 26673,
+    basis: 'beforeFees',
     postedAt: '2026-09-26T21:00:00.000Z',
     listingUrl: 'https://www.facebook.com/marketplace/item/424242/',
     salesperson: 'Roger',
@@ -150,6 +152,123 @@ test('the side panel sends the dealer website\'s origin with every draft and col
   }
 });
 
+// Code injected into the dealer's tab (src/scan.js probeSiteInPage, every
+// adapter's probeInPage and searchInPage) only reads the page. This guard is
+// a text check for the usual spellings of acting on it, and it looks for
+// exactly these, written with a dot where a dot is shown:
+//  - clicks, events, focus, scrolling: click and submit (as words, so by any
+//    name), requestSubmit, dispatchEvent, .focus, .blur(, scrollIntoView,
+//    scroll(, scrollTo(, scrollBy(;
+//  - an assignment (=, +=, ??= and the like) to .value, .checked, .selected,
+//    .selectedIndex, .files, .textContent, .innerText, .outerText,
+//    .innerHTML, .outerHTML, .nodeValue, .className, .classList, .style,
+//    .hidden, .disabled, .contentEditable, .src, .srcdoc, .href, .action,
+//    .style.<any>, .dataset.<any>, document.title, document.designMode or
+//    document.body; .style.setProperty, .style.removeProperty,
+//    .style.cssText; .classList.add(, .remove(, .toggle(, .replace(;
+//  - attributes: .setAttribute(, .setAttributeNS(, .setAttributeNode(,
+//    .setAttributeNodeNS(, .removeAttribute(, .removeAttributeNS(,
+//    .removeAttributeNode(, .toggleAttribute(;
+//  - adding, moving or removing nodes: .append( (except on a name ending in
+//    params or Params, a URL's search params), .appendChild(, .prepend(,
+//    .before(, .after(, .insertBefore(, .insertAdjacentHTML,
+//    .insertAdjacentElement, .insertAdjacentText, .moveBefore(, .remove(,
+//    .removeChild(, .replaceChild(, .replaceChildren(, .replaceWith(,
+//    .attachShadow(, .setHTML(, .setHTMLUnsafe(, .insertNode(,
+//    .deleteContents(, .extractContents(, .surroundContents(, .reset(,
+//    document.write(, .writeln(, .open(, .close(, execCommand;
+//  - navigation: an assignment to location or to any location.<part>,
+//    location.href, .assign, .replace, .reload(, history.pushState,
+//    .replaceState, .back, .forward, .go, navigation.navigate, .reload,
+//    .back, .forward, .traverseTo (and .src, .srcdoc, .href, .action above);
+//  - windows and dialogs: open(, close(, stop(, print(, alert(, confirm(,
+//    prompt( on their own or after window., self., top., parent. or
+//    globalThis.; .show(, .showModal(, .showPopover(, .togglePopover(;
+//  - cookie, storage and messaging: an assignment to document.cookie,
+//    cookieStore, localStorage and sessionStorage .setItem(, .removeItem(,
+//    .clear( or an assignment to any of their keys, indexedDB, caches,
+//    BroadcastChannel, .postMessage(;
+//  - .call(, .apply(, Reflect., new Function and eval, which could reach any
+//    of these another way.
+// The next test puts a line using each of these into a real probe and
+// expects it caught, and holds read-only lines to passing: an assignment
+// never matches a comparison (==, ===, =>). A text check does not see a name
+// built at run time, a property reached with brackets or a write through an
+// API not listed here, so a person reviewing a change to these functions
+// still checks the rule.
+const ASSIGN = String.raw`\s*(?:\*\*|<<|>>>?|\?\?|\|\||&&|[-+*/%&|^])?=(?![=>])`;
+const READ_ONLY = new RegExp([
+  String.raw`\bclick\b|\bsubmit\b|requestSubmit|dispatchEvent|\.focus\b|\.blur\(|scrollIntoView|\bscroll(?:To|By)?\(`,
+  String.raw`\.(?:value|checked|selected|selectedIndex|files|textContent|innerText|outerText|innerHTML|outerHTML|nodeValue|className|classList|style|hidden|disabled|contentEditable|src|srcdoc|href|action)${ASSIGN}`,
+  String.raw`\bdocument\.(?:title|designMode|body)${ASSIGN}|\.style\.[\w$]+${ASSIGN}|\.style\.(?:setProperty|removeProperty|cssText)\b|\.classList\.(?:add|remove|toggle|replace)\(|\.dataset\.[\w$]+${ASSIGN}`,
+  String.raw`\.(?:setAttribute|setAttributeNS|setAttributeNode|setAttributeNodeNS|removeAttribute|removeAttributeNS|removeAttributeNode|toggleAttribute)\(`,
+  String.raw`(?<![Pp]arams)\.append\(|\.insertAdjacent(?:HTML|Element|Text)\b|\.(?:appendChild|prepend|before|after|insertBefore|moveBefore|remove|removeChild|replaceChild|replaceChildren|replaceWith|attachShadow|setHTML|setHTMLUnsafe|insertNode|deleteContents|extractContents|surroundContents|reset)\(`,
+  String.raw`\bdocument\.(?:write|writeln|open|close)\(|\bexecCommand\b`,
+  String.raw`location\.(?:href|assign|replace)|(?<!\b(?:const|let|var)\s+)\blocation${ASSIGN}|\blocation\.[\w$]+${ASSIGN}|\.reload\(|\bhistory\.(?:pushState|replaceState|back|forward|go)\b|\bnavigation\.(?:navigate|reload|back|forward|traverseTo)\b`,
+  String.raw`\b(?:window|self|top|parent|globalThis)\.(?:open|close|stop|print|alert|confirm|prompt)\b|(?<![\w$.])(?:open|close|stop|print|alert|confirm|prompt)\(|\.(?:show|showModal|showPopover|togglePopover)\(`,
+  String.raw`\bdocument\.cookie${ASSIGN}|\bcookieStore\b|\b(?:localStorage|sessionStorage)\.(?:setItem|removeItem|clear)\(|\b(?:localStorage|sessionStorage)\.[\w$]+${ASSIGN}|\bindexedDB\b|\bcaches\b|\bBroadcastChannel\b|\.postMessage\(`,
+  String.raw`\.call\(|\.apply\(|Reflect\.|new Function|\beval\b`,
+].join('|'));
+// The text of injected code with its comments taken out, trailing // ones
+// too (stripComments, test/helpers.js), so a word in a comment ("open(",
+// "remove(") neither trips the guard nor hides anything.
+const codeOf = (src) => stripComments(src, { trailing: true });
+
+test('the dealer-tab read-only guard catches every spelling it names, and lets comparisons through', () => {
+  const caught = [
+    // clicks, events, focus, scrolling
+    'el.click();', "form['submit']();", 'form.submit();', 'form.requestSubmit();', "el.dispatchEvent(new Event('change'));", 'el.focus();', 'el.blur();',
+    'el.scrollIntoView();', 'scroll(0, 1);', 'scrollTo(0, 0);', 'window.scrollBy(0, 1);',
+    // assignments
+    "input.value = 'x';", "input.value ??= 'x';", 'box.checked = true;', 'opt.selected = true;', 'sel.selectedIndex = 2;', 'input.files = list;',
+    "el.textContent = '';", "document.body.textContent = '';", "el.innerText += 'x';", "el.outerText = '';", "el.innerHTML = '';", "el.outerHTML = '';",
+    "text.nodeValue = 'x';", "el.className = 'x';", "el.classList = 'x';", "el.style = 'display:none';", 'el.hidden = true;', 'btn.disabled = false;',
+    "el.contentEditable = 'true';", "frame.src = '/x';", "frame.srcdoc = '<p>';", "link.href = '/x';", "form.action = '/x';",
+    "el.style.display = 'none';", "el.dataset.lc = '1';", "document.title = 'x';", "document.designMode = 'on';", 'document.body = el;',
+    "el.style.setProperty('color', 'red');", "el.style.removeProperty('color');", "el.style.cssText = '';",
+    "el.classList.add('x');", "el.classList.remove('x');", "el.classList.toggle('x');", "el.classList.replace('a', 'b');",
+    // attributes
+    "el.setAttribute('a', 'b');", "el.setAttributeNS(null, 'a', 'b');", 'el.setAttributeNode(attr);', 'el.setAttributeNodeNS(attr);',
+    "el.removeAttribute('a');", "el.removeAttributeNS(null, 'a');", 'el.removeAttributeNode(attr);', "el.toggleAttribute('a');",
+    // nodes
+    'el.append(child);', 'form.append(input);', 'document.body.append(el);', 'document.body.appendChild(el);', 'el.prepend(x);', 'el.before(x);', 'el.after(x);',
+    'parent.insertBefore(a, b);', "el.insertAdjacentHTML('beforeend', '<b>');", "el.insertAdjacentElement('afterend', x);", "el.insertAdjacentText('afterend', 'x');",
+    'parent.moveBefore(a, b);', 'el.remove();', 'parent.removeChild(el);', 'parent.replaceChild(a, b);', 'el.replaceChildren();', 'el.replaceWith(x);',
+    "el.attachShadow({ mode: 'open' });", "el.setHTML('<b>');", "el.setHTMLUnsafe('<b>');", 'range.insertNode(el);', 'range.deleteContents();',
+    'range.extractContents();', 'range.surroundContents(el);', 'box.form && box.form.reset();', "document.write('<p>');", "document.writeln('<p>');",
+    'document.open();', 'document.close();', "document.execCommand('bold');",
+    // navigation
+    "location = '/x';", 'window.location = u;', "document.location = '/z';", 'location.href = u;', 'location.assign(u);', 'location.replace(u);',
+    "location.hash = '#x';", "location.search += '&a=1';", 'location.reload();', 'top.location.reload(true);', "history.pushState({}, '', '/y');",
+    "history.replaceState({}, '', '/y');", 'history.back();', 'history.forward();', 'history.go(-1);', "navigation.navigate('/n');", 'navigation.reload();',
+    'navigation.back();', 'navigation.forward();', "navigation.traverseTo('k');",
+    // windows and dialogs
+    "open('/x');", "window.open('/x');", 'close();', 'window.close();', 'self.close();', 'stop();', 'window.stop();', 'print();', 'window.print();',
+    "alert('hi');", "top.alert('hi');", "confirm('ok?');", "window.confirm('ok?');", "prompt('x');", "parent.prompt('x');", "globalThis.open('/x');",
+    'dialog.show();', 'dialog.showModal();', 'el.showPopover();', 'el.togglePopover();',
+    // cookie, storage, messaging
+    "document.cookie = 'lc=1';", "cookieStore.set('a', 'b');", "localStorage.setItem('a', '1');", "sessionStorage.removeItem('a');", 'sessionStorage.clear();',
+    "localStorage.lc = '1';", "indexedDB.open('x');", "caches.open('x');", "new BroadcastChannel('x');", 'window.postMessage({ go: 1 }, "*");',
+    // another way round
+    'fn.call(el);', 'fn.apply(el, []);', "Reflect.set(el, 'value', 'x');", "new Function('x')();", "eval('x');",
+  ];
+  const free = [
+    'if (location === u) return null;', "const on = box.checked === true;", 'const picked = opt.selected == true;', 'const t = document.title;',
+    'const here = location.origin + location.pathname;', 'const text = el.textContent.trim();', 'if (el.hidden !== false) return null;',
+    "const url = new URL('/x', location.origin);", "params.append('page', '2');", "url.searchParams.append('page', '2');",
+    'const keep = (location) => location.origin;', "const location = window.location.origin;", "const ok = el.innerText.length >= 3;",
+    "const shown = el.style.display !== 'none';", 'if (a.href == b.href) return a;', 'const pic = img.src || img.currentSrc;', 'const opened = isOpen(x);',
+  ];
+  // each one put into a copy of a real injected function, the way a later edit would land
+  const host = codeOf(String(ADAPTERS[ADAPTERS.length - 1].probeInPage));
+  const at = host.indexOf('{') + 1;
+  assert.ok(!READ_ONLY.test(host), 'the host function itself only reads');
+  for (const line of caught) assert.ok(READ_ONLY.test(host.slice(0, at) + line + host.slice(at)), `the guard misses: ${line}`);
+  for (const line of free) assert.ok(!READ_ONLY.test(host.slice(0, at) + line + host.slice(at)), `the guard refuses read-only code: ${line}`);
+  // a comment is not code: a word in one neither trips the guard nor counts
+  assert.ok(!READ_ONLY.test(codeOf("function f() {\n  const a = 1; // never open( or remove( anything\n  return a;\n}")));
+});
+
 test('the dealer-site scan reaches the dealer tab only through the neutral probe and each adapter\'s own read-only probe and search', () => {
   // the wizard, the popup and the post-time re-check all go through scanRunner.js
   const runner = read('../extension/src/scanRunner.js');
@@ -157,16 +276,13 @@ test('the dealer-site scan reaches the dealer tab only through the neutral probe
   const known = (runner.match(/func: (probeSiteInPage|adapter\.probeInPage|adapter\.searchInPage)\b/g) || []).length;
   assert.ok(injections === 3 && injections === known, `scanRunner.js may inject only the neutral probe and the adapters' probe and search (${injections} vs ${known})`);
   assert.ok(!/files:\s*\[|chrome\.debugger|tabs\.sendMessage/.test(runner), 'no other way into a page');
-  // word forms and indirect calls too: no click or submit by any name, no
-  // assignment into the page, no navigation, no call/apply/Reflect/eval
-  // that could reach one of those another way
-  const READ_ONLY = /\bclick\b|\bsubmit\b|requestSubmit|dispatchEvent|\.focus\b|\.value\s*[?|&+-]*=|\.innerHTML\s*=|\.setAttribute\(|\.insertAdjacentHTML|location\.(href|assign|replace)|\.call\(|\.apply\(|Reflect\.|new Function|\beval\b/;
-  const page = read('../extension/src/scan.js');
-  assert.ok(!READ_ONLY.test(page), 'scan.js must only read the page');
+  assert.ok(String(probeSiteInPage).length > 50);
+  assert.ok(!READ_ONLY.test(codeOf(String(probeSiteInPage))), 'scan.js probeSiteInPage must only read the page');
+  assert.ok(!READ_ONLY.test(codeOf(readFileSync(new URL('../extension/src/scan.js', import.meta.url), 'utf8'))), 'nor anything else in scan.js');
   assert.ok(ADAPTERS.length >= 1);
   for (const adapter of ADAPTERS) {
     for (const name of ['probeInPage', 'searchInPage']) {
-      const src = stripComments(String(adapter[name]));
+      const src = codeOf(String(adapter[name]));
       assert.ok(src.length > 50, `${adapter.PLATFORM.id}.${name} exists`);
       assert.ok(!READ_ONLY.test(src), `${adapter.PLATFORM.id}.${name} must only read the page`);
       assert.ok(!/['"`]click['"`]/.test(src), `${adapter.PLATFORM.id}.${name} must not name a click event`);

@@ -32,6 +32,23 @@ export function websitePrice(raw) {
   return { value, label: value ? raw?.extra_fields?.our_price_label || 'Price' : 'Call for price' };
 }
 
+// The second price the website shows next to its main one (the "Was" line
+// under a fee-included main price), for the dealer's "lower second price"
+// basis. Only a number the display itself shows counts: the hidden pricing
+// fields (internet_price, price) can hold a number while the page says "call
+// for price" or shows one price only, and a number labelled MSRP is not a
+// price before fees. Null when the display shows no main price, no second
+// price, or is absent.
+export function displayedSecondPrice(raw) {
+  const display = raw?.extra_fields?.lightning?.pricing;
+  if (!display || typeof display !== 'object') return null;
+  const main = display.low && positive(display.low.value);
+  const second = display.high && positive(display.high.value);
+  if (!main || !second) return null;
+  if (/\bmsrp\b/i.test(String(display.high.label || ''))) return null;
+  return second;
+}
+
 // Reads the condition word out of a vehicle page address, e.g.
 // /inventory/certified-used-2022-jeep-... -> "certified used".
 export function conditionWordFromUrl(url) {
@@ -45,7 +62,6 @@ export function normalizeVehicle(raw) {
   const extra = raw.extra_fields || {};
   const display = extra.lightning || {};
   const history = raw.history_report || {};
-  const pricing = raw.pricing || {};
   const media = raw.media || {};
   const images = Array.isArray(media.images) ? media.images.filter((u) => typeof u === 'string' && u) : [];
   const price = websitePrice(raw);
@@ -77,7 +93,7 @@ export function normalizeVehicle(raw) {
     // Everything the "ready to post" check and the rescan look at
     price: price.value, // the website's main price, under the dealer's own label
     priceLabel: price.label,
-    priceBeforeFees: positive(pricing.internet_price) || positive(pricing.price),
+    priceBeforeFees: displayedSecondPrice(raw), // shown on the page, never only in the hidden pricing fields
     status: raw.status || '', // "publish", "modified", "pend-sale"
     statusLabel: display.statusLabel || '',
     availability, // "In-Stock", "In-Transit"

@@ -49,7 +49,8 @@ test('the fee gap is what most priced cars agree on, and it becomes the suggeste
   assert.equal(suggestedPriceNote(490, 'beforeFees'), 'Price is before the $490 doc fee; tax and tags extra.');
   assert.equal(suggestedPriceNote(0), '');
   // no agreement: no gap
-  assert.equal(feeGap([vehicle('usedNormal'), vehicle('certified', { pricing: { internet_price: 30000 } }), vehicle('usedNoCarfax', { pricing: { internet_price: 40000 } })]).gap, 0);
+  const shown = (value) => ({ extra_fields: { lightning: { pricing: { high: { label: 'Was', value } } } } });
+  assert.equal(feeGap([vehicle('usedNormal'), vehicle('certified', shown('30000')), vehicle('usedNoCarfax', shown('40000'))]).gap, 0);
 });
 
 test('the synced profile carries the person and dealer details but never the service key', async () => {

@@ -42,10 +42,11 @@ export function snapshot(items, settings = MY_STORE, takenAt = '2026-09-26T21:00
 // offers the functions chrome.scripting.executeScript copies into it:
 // window.SEARCH_SERVICE and IDPSearchServiceHelper backed by `records`, a
 // document with the og:site_name and a schema.org address, a location.
-// `withService: false` gives a page no adapter recognises. The result is a
-// vm sandbox for fakeChrome: injected functions run inside it, with nothing
-// else in scope, so one that reached outside its own body throws.
-export function fakeDealerPage({ records = [], origin = 'https://example-dealer.test', withService = true, name = 'Example Motors' } = {}) {
+// `withService: false` gives a page no adapter recognises; `withLd: false`
+// a page with no structured address, whose `bodyText` is all there is. The
+// result is a vm sandbox for fakeChrome: injected functions run inside it,
+// with nothing else in scope, so one that reached outside its own body throws.
+export function fakeDealerPage({ records = [], origin = 'https://example-dealer.test', withService = true, name = 'Example Motors', withLd = true, bodyText = 'USED AND CERTIFIED USED FOR SALE' } = {}) {
   const getListings = async (body) => {
     const f = body.filters || {};
     const list = records.filter((r) => (!f.type || f.type.includes(r.type)) && (!f.vin || f.vin.includes(r.vin)) && (!f.status || f.status.includes(r.status)));
@@ -61,9 +62,9 @@ export function fakeDealerPage({ records = [], origin = 'https://example-dealer.
   const ld = { '@context': 'https://schema.org', '@type': 'AutoDealer', name, telephone: '(555) 555-0100', address: { '@type': 'PostalAddress', streetAddress: '1 Example Way', addressLocality: 'Springfield', addressRegion: 'OH', postalCode: '43215' } };
   const document = {
     title: `Used Vehicles for Sale | ${name}`,
-    body: { innerText: 'USED AND CERTIFIED USED FOR SALE' },
+    body: { innerText: bodyText },
     querySelector: (sel) => (sel === 'meta[property="og:site_name"]' ? { content: name } : null),
-    querySelectorAll: (sel) => (sel === 'script[type="application/ld+json"]' ? [{ textContent: JSON.stringify(ld) }] : []),
+    querySelectorAll: (sel) => (sel === 'script[type="application/ld+json"]' && withLd ? [{ textContent: JSON.stringify(ld) }] : []),
   };
   const location = { origin, hostname: new URL(origin).hostname, href: origin + '/used-vehicles/' };
   return vm.createContext({ window, document, location, URL });
@@ -156,12 +157,13 @@ ${carousel.length ? `<aside>${carousel.map((o) => `<a href="${escHtml(o.path)}">
 }
 
 // One page of the used list: the ItemList of its cars, a card per car that
-// shows its price, and rel=next when another page follows.
-export function standardListPage(cars, { origin = STANDARD_ORIGIN, next = null, numberOfItems = null, listData = true, noPrice = new Set() } = {}) {
+// shows its price, rel=next when another page follows and rel=prev when one
+// comes before.
+export function standardListPage(cars, { origin = STANDARD_ORIGIN, next = null, prev = null, numberOfItems = null, listData = true, noPrice = new Set() } = {}) {
   const list = { '@context': 'https://schema.org', '@type': 'ItemList', name: 'Used vehicles', itemListElement: cars.map((c, n) => ({ '@type': 'ListItem', position: n + 1, item: standardCarNode(c, origin, noPrice.has(c.vin) ? { price: undefined } : {}) })) };
   if (numberOfItems !== null) list.numberOfItems = numberOfItems;
   const cards = cars.map((c) => `<div class="card"><a href="${escHtml(c.path)}">Used ${c.year} ${c.make} ${c.model} ${c.trim}</a> <span>${noPrice.has(c.vin) ? 'Call for price' : money(c.price)}</span> <span>${c.miles.toLocaleString('en-US')} miles</span> <a href="https://www.carfax.com/VehicleHistory/p/Report.cfx?vin=${c.vin}">Carfax</a></div>`).join('\n');
-  return `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title>${next ? `<link rel="next" href="${escHtml(next)}">` : ''}${ldScript(DEALER_NODE)}${listData ? ldScript(list) : ''}</head>
+  return `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title>${prev ? `<link rel="prev" href="${escHtml(prev)}">` : ''}${next ? `<link rel="next" href="${escHtml(next)}">` : ''}${ldScript(DEALER_NODE)}${listData ? ldScript(list) : ''}</head>
 <body><h1>Used Vehicles for Sale</h1><nav><a href="/">Home</a> <a href="/new-vehicles/">New</a> <a href="/used-vehicles/">Used</a> <a href="/about/">About us</a></nav>
 ${cards}</body></html>`;
 }
@@ -182,7 +184,8 @@ export function standardSite({ cars = standardCars(6), perPage = 4, origin = STA
   for (let p = 1; p <= pages; p += 1) {
     const at = p === 1 ? origin + '/used-vehicles/' : `${origin}/used-vehicles/?page=${p}`;
     const next = p < pages ? `/used-vehicles/?page=${p + 1}` : null;
-    site.set(at, page(standardListPage(cars.slice((p - 1) * perPage, p * perPage), { origin, next, numberOfItems, listData, noPrice })));
+    const prev = p > 2 ? `/used-vehicles/?page=${p - 1}` : p === 2 ? '/used-vehicles/' : null;
+    site.set(at, page(standardListPage(cars.slice((p - 1) * perPage, p * perPage), { origin, next, prev, numberOfItems, listData, noPrice })));
   }
   for (const c of cars) site.set(origin + c.path, page(standardCarPage(c, { origin, price: noPrice.has(c.vin) ? null : c.price })));
   site.set(origin + '/', page(`<!doctype html><html><head><title>Sample Motors</title>${ldScript(DEALER_NODE)}</head><body><a href="/used-vehicles/">Shop used</a> <a href="/new-vehicles/">Shop new</a></body></html>`));
@@ -223,8 +226,12 @@ export function fakeSiteSearch(site, { delay = 0 } = {}) {
 // `path`, with the document calls the probes make (JSON-LD scripts,
 // itemtype elements, links with their absolute href and text) and a fetch
 // that answers from `site`. Like fakeDealerPage, a vm sandbox for
-// runInPage and fakeChrome.
-export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles/', origin = STANDARD_ORIGIN, html = null } = {}) {
+// runInPage and fakeChrome. The answer's body streams its text in chunks
+// (`body.getReader()`), as Chrome's fetch does, so the injected search reads
+// it the way it does in the browser; `stream: false` gives an answer with
+// only `text()`. `fetchCalls` lists the requests, `cancelled` the bodies the
+// page stopped reading.
+export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles/', origin = STANDARD_ORIGIN, html = null, stream = true, chunk = 65536 } = {}) {
   const url = new URL(path, origin).href;
   const source = html ?? (site.get(url) || {}).text ?? '';
   const scripts = [...source.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => ({ textContent: m[1] }));
@@ -232,10 +239,28 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
   const links = [...source.matchAll(/<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => ({ href: new URL(m[1].replace(/&amp;/g, '&'), url).href, textContent: m[2].replace(/<[^>]*>/g, '') }));
   const title = (/<title>([\s\S]*?)<\/title>/.exec(source) || [])[1] || '';
   const fetchCalls = [];
+  const cancelled = [];
+  const bodyOf = (href, text) => {
+    const bytes = new TextEncoder().encode(text || '');
+    let at = 0;
+    return {
+      getReader: () => ({
+        read: async () => {
+          if (at >= bytes.length) return { done: true, value: undefined };
+          const value = bytes.slice(at, at + chunk);
+          at += chunk;
+          return { done: false, value };
+        },
+        cancel: async () => { cancelled.push(href); },
+      }),
+    };
+  };
   const fetch = async (href, init) => {
     fetchCalls.push({ url: String(href), init });
     const got = site.get(String(href)) || httpError(404, 'Not found');
-    return { ok: got.ok, status: got.status, url: got.finalUrl || String(href), redirected: Boolean(got.redirected), headers: { get: (n) => (n.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+    const res = { ok: got.ok, status: got.status, url: got.finalUrl || String(href), redirected: Boolean(got.redirected), headers: { get: (n) => (n.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+    if (stream) res.body = bodyOf(String(href), got.text);
+    return res;
   };
   const document = {
     URL: url,
@@ -247,6 +272,7 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
   const location = { origin, hostname: new URL(origin).hostname, href: url };
   const context = vm.createContext({ window: {}, document, location, URL, fetch, setTimeout, clearTimeout, AbortController, TextDecoder });
   context.fetchCalls = fetchCalls;
+  context.cancelled = cancelled;
   return context;
 }
 
