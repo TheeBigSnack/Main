@@ -17,9 +17,10 @@
 //     seller, protected characteristics), "one owner" only with the flag,
 //     no ALL CAPS shouting, no walls of emoji
 //   - no claim about the car's certification, warranty, financing, history,
-//     care, new parts or condition that the facts' own words (write-up,
-//     features, price note) don't make, and no number in words that isn't
-//     in them
+//     care, new parts, condition, previous owners, how it was driven,
+//     where it came from (a local trade, a lease return) or its keys that
+//     the facts' own words (write-up, features, price note) don't make, and
+//     no number in words that isn't in them
 //
 // Keep this file equal to the original in what it returns;
 // supabase/tests/port-check.mjs runs both on the same inputs.
@@ -297,12 +298,13 @@ const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?!(?:new|next|more|other|of|th
 
 // ---------- claims only the website can make ----------
 // What a description says about the car's certification, warranty,
-// financing, history, care, parts or condition comes from the website's own
-// words for this car (here: the facts' write-up, features and the rest of
-// the record) or the dealer's price note, never from the writer. Each kind
-// is found by its words, and passes when words of the same kind are in those
-// sources (new parts: the same part, too). The dealership's name, its city and the role are
-// set aside first, as are banned phrases (flagged on their own).
+// financing, history, care, parts, condition, owners, use, origin or keys
+// comes from the website's own words for this car (here: the facts'
+// write-up, features and the rest of the record) or the dealer's price
+// note, never from the writer. Each kind is found by its words, and passes
+// when words of the same kind are in those sources (new parts: the same
+// part, too). The dealership's name, its city and the role are set aside
+// first, as are banned phrases and one-owner wording (each flagged on its own).
 interface ClaimKind {
   what: string;
   re: RegExp;
@@ -311,13 +313,17 @@ interface ClaimKind {
 const PARTS = 'tires?|tyres?|brakes?|rotors?|pads|battery|batteries|wipers?|shocks?|struts?|exhaust|alternator|starter|clutch|timing (?:belt|chain)|water pump|engine|motor|transmission|paint|parts';
 export const CLAIM_KINDS: readonly ClaimKind[] = Object.freeze([
   { what: 'certification', re: /\b(?:certified|cpo)\b/i },
-  { what: 'a warranty or guarantee', re: /\b(?:warrant(?:y|ies|eed)|guarantee[ds]?)\b/i },
+  { what: 'a warranty or guarantee', re: /\b(?:warrant(?:y|ies|eed)|guarantee[ds]?|coverage|protection plans?|service contracts?)\b/i },
   { what: 'financing or credit', re: /\b(?:financ\w*|credit|approv\w*|loans?|lenders?|apr|down[\s-]payments?|monthly payments?|per month|lease\w*|buy[\s-]here)\b/i },
   { what: 'accident, damage or title history', re: /\b(?:accidents?|collisions?|wreck(?:s|ed)?|damaged?|flood\w*|salvage|rebuilt|titles?|clean (?:carfax|autocheck|history|record|report))\b/i },
   { what: 'smoking or pets', re: /\b(?:non[\s-]?smok\w*|smok(?:er|ers|ing|ed)|smoke[\s-]?free|pet[\s-]?free|no pets)\b/i },
-  { what: 'service history, inspection or upkeep', re: /\b(?:inspect\w*|serviced|service (?:history|records?)|maintenance|maintained|oil changes?|tune[\s-]?up|reconditioned|garage[\s-]kept|well[\s-](?:kept|cared)|taken care of)\b/i },
+  { what: 'service history, inspection or upkeep', re: /\b(?:inspect\w*|serviced|service (?:history|records?)|records|maintenance|maintained|oil changes?|tune[\s-]?up|reconditioned|(?:fully|freshly|just|professionally|recently) detailed|garage[\s-]kept|garaged|well[\s-](?:kept|cared)|taken care of)\b/i },
   { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:set of\\s+)?(${PARTS})\\b`, 'i'), part: true },
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
+  // who had it and how it was used ("one owner" has its own check, against the Carfax flag; "Pre-owned" is not a claim)
+  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned|driven (?:by|only|mostly|mainly|gently|sparingly|carefully)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
+  { what: 'where it came from', re: /\b(?:local(?:ly)? trade[ds]?|traded in locally|lease returns?|off[\s-]lease)\b/i },
+  { what: 'its keys', re: /\b(?:(?:both|spare|extra|second|two|2|three|3|(?:sets?|pairs?) of) (?:keys|key[\s-]?fobs|fobs|remotes)|(?:spare|extra|second) (?:key|key[\s-]?fob|fob|remote))\b/i },
 ]);
 
 // The write-up split at its line breaks, paragraphs and list items, markup
@@ -485,8 +491,9 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
-  // a banned phrase is said once, as banned, not again as a claim
-  problems.push(...claimProblems(BANNED_RE.reduce((s, [, re]) => s.replace(new RegExp(re.source, 'gi'), ' '), aboutCar), { vehicle, priceNote }));
+  // a banned phrase is said once, as banned, not again as a claim; one owner is held to the Carfax flag above, not again as owner history
+  const claimText = [...BANNED_RE.map(([, re]) => re), ONE_OWNER].reduce((s, re) => s.replace(new RegExp(re.source, 'gi'), ' '), aboutCar);
+  problems.push(...claimProblems(claimText, { vehicle, priceNote }));
   // the dealership is always named: with no name set there is nothing to name it by
   const dealerName = String(dealer.name || '').trim();
   if (!dealerName) problems.push({ code: 'no-dealer', text: 'No dealership name is set; add it in Settings (Dealership name)' });

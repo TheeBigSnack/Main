@@ -55,6 +55,8 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, pre-owned and on the lot at Example Certified Motors Route 19.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 GMC Sierra 2500HD SLE EXT CAB with AWD, ABS, USB and a CR-V EX-L AWD next to it.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 GMC SIERRA SLE EXT CAB, GREAT SLE TRUCK FOR YOU.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, pre-owned, driven by its previous owner on highway miles, one previous owner, owned by one family, both keys, all records, powertrain coverage, freshly detailed and garaged.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Message me directly, not the dealership; I have owned it and am selling it for a friend.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

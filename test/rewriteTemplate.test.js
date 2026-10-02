@@ -494,10 +494,27 @@ test('a draft that invents warranty, financing, certification, history, care, ne
     'Two owners, both local.': ['unknown-number'],
     'One careful owner, only one previous owner.': ['one-owner'],
     'A single-owner truck.': ['one-owner'],
+    // who owned it and how it was driven, the keys, records, coverage and detailing
+    'It was only driven by a retired teacher on weekends.': ['unsupported-claim'],
+    'Owned by a retired teacher and babied by its previous owner.': ['unsupported-claim'],
+    'Two previous owners, both local.': ['unsupported-claim'],
+    'Mostly highway miles from an adult-owned weekend driver.': ['unsupported-claim'],
+    'A local trade from one family.': ['unsupported-claim'],
+    'Comes with both keys, a spare fob and all records.': ['unsupported-claim'],
+    'Lifetime powertrain coverage included.': ['unsupported-claim'],
+    'Freshly detailed and garaged.': ['unsupported-claim'],
   };
   for (const [sentence, codes] of Object.entries(invented)) assert.deepEqual(codesAfter(sentence), codes, sentence);
   const c = plainCtx();
   const said = (sentence) => runGuardrails(`${buildTemplateDescription(c)}\n${sentence}`, c).problems.filter((p) => p.code === 'unsupported-claim').map((p) => p.text);
+  assert.deepEqual(said('It was only driven by a retired teacher, with both keys.'), [
+    'Says "driven by", but the website says nothing about its owners or how it was driven for this car',
+    'Says "both keys", but the website says nothing about its keys for this car',
+  ]);
+  // wording that only sounds like it: the template's own "Pre-owned", a buyer's plans, the keyless entry
+  for (const sentence of ['Pre-owned by our standards and ready for you.', 'Ready for weekend trips and highway drives.', 'Keyless entry with the push-button start.']) {
+    assert.deepEqual(codesAfter(sentence), [], sentence);
+  }
   assert.deepEqual(said('Comes with a warranty and financing for all credit.'), [
     'Says "warranty", but the website says nothing about a warranty or guarantee for this car',
     'Says "financing", but the website says nothing about financing or credit for this car',
@@ -522,6 +539,19 @@ test('a claim the website itself makes passes, and the template built from such 
   }
   // new brakes in the write-up are not new rotors
   assert.deepEqual(codesAfter('New rotors too.', c), ['unsupported-claim']);
+  // who owned it, how it was driven and its keys, when the write-up says so
+  const h = { ...PLAIN(), descriptionRaw: 'Driven by its previous owner on mostly highway miles. Comes with both keys and all service records.' };
+  const hr = await generateDescription({ ...plainCtx(h), settings: {} });
+  assert.match(hr.text, /Driven by its previous owner on mostly highway miles\./);
+  assert.deepEqual(hr.guardrails.problems, []);
+  assert.deepEqual(codesAfter('Its previous owner drove it on highway miles, and both keys and the records come with it.', plainCtx(h)), []);
+  // one owner on the Carfax report is said by the one-owner check, not refused again as owner history
+  const one = plainCtx({ ...PLAIN(), carfaxOneOwner: true });
+  for (const sentence of ['Just one previous owner.', 'Owned by one family.', 'Its sole owner.']) assert.deepEqual(codesAfter(sentence, one), [], sentence);
+  // a write-up that says where the car came from says nothing about who drove it
+  const trade = plainCtx({ ...PLAIN(), descriptionRaw: 'Local trade with the 8.4-inch touchscreen.' });
+  assert.deepEqual(codesAfter('A local trade.', trade), []);
+  assert.deepEqual(codesAfter('A local trade, driven by a retired teacher.', trade), ['unsupported-claim']);
   // spelled-out numbers the website writes the same way, or as digits, are its own
   const w = { ...PLAIN(), descriptionRaw: 'Two sets of keys and twenty-two inch wheels.' };
   assert.deepEqual(codesAfter('Comes with two sets of keys.', plainCtx(w)), []);

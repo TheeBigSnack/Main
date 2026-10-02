@@ -93,6 +93,13 @@ test('the service system prompt names no real person or dealer', () => {
   assert.doesNotMatch(SYSTEM_PROMPT, /Ron Lewis|Waynesburg|Roger/);
 });
 
+test('the service system prompt asks for none of the claims the checks refuse unless the facts make them', () => {
+  const rule = SYSTEM_PROMPT.split('\n').find((l) => l.startsWith('- Use only facts from the JSON.'));
+  for (const what of ['condition', 'service history', 'previous owners', 'how or where it was driven', 'where it came from', 'accidents', 'tires', 'keys', 'title', 'financing', 'warranty']) {
+    assert.ok(rule.includes(what), what);
+  }
+});
+
 test('the service user prompt tells Claude the exact sign-off, built from the facts', () => {
   const facts = rewriteFacts({ vehicle: vehicle('usedNormal'), dealer: { name: 'Test Motors', city: 'Testville' }, salesperson: { name: 'Dana', title: 'sales consultant' }, priceNote: NOTE });
   const { system, user } = buildRewritePrompt(facts);
