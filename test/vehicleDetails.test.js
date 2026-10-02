@@ -6,7 +6,7 @@ import { probeSiteInPage } from '../extension/src/scan.js';
 import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, STANDARD_ORIGIN } from './helpers.js';
 import { SITES_KEY } from '../extension/src/storageKeys.js';
 import { adapterById } from '../extension/adapters/index.js';
-import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage } from './platformSites.js';
+import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage, answerWith } from './platformSites.js';
 
 test('the post-time re-check lets a ready car through and nothing else', () => {
   assert.equal(recheck(vehicle('usedNormal'), MY_STORE).ok, true);
@@ -224,6 +224,56 @@ test('readCarForPost: the tab when it shows the website, the direct read only wh
     const undefinedTab = await readCarForPost({ origin: DEALER, info: DI_INFO, vin: fixtures.usedNormal.vin, contains: async () => true });
     assert.equal(undefinedTab.via, 'direct');
   });
+});
+
+// The side panel's own list posts with no dealer tab at all. For a DealerOn
+// or Dealer.com website that read goes registry entry -> adapter ->
+// permission patterns -> the adapter's getDetails over its direct search (the
+// list, then the car's own page), the same way the automatic rescan reads it.
+function platformFetch(site, calls) {
+  return async (url, init) => {
+    calls.push({ url: String(url), credentials: init && init.credentials });
+    const got = site.get(String(url)) || answerWith(404, 'Not found');
+    return { ok: got.ok, status: got.status, url: String(url), redirected: false, headers: { get: () => got.contentType }, text: async () => got.text };
+  };
+}
+
+test('a DealerOn or Dealer.com car posted from the side panel\'s list is read without a tab: the list, then its own page, with the website permission only', async () => {
+  const cars = platformCars(6);
+  const car = cars[2];
+  for (const [kind, origin, list, siteFn] of [['dealerOn', DEALERON_ORIGIN, DEALERON_LIST, dealerOnSite], ['dealerCom', DEALERCOM_ORIGIN, DEALERCOM_LIST, dealerComSite]]) {
+    const service = { kind, origin, inventoryUrl: list, listUrl: origin + '/used-inventory/' };
+    // the registry entry as the scan stores it, and an older one that does not name its adapter
+    for (const info of [{ name: 'Sample', adapter: kind, service, site: { origin, name: 'Sample' } }, { name: 'Sample', service }]) {
+      const calls = [];
+      await withFetch(platformFetch(siteFn({ cars }), calls), async () => {
+        const asked = [];
+        const r = await readCarForPost({ tabId: null, origin, info, vin: car.vin.toLowerCase(), contains: async (p) => { asked.push(p); return true; } });
+        assert.deepEqual([r.ok, r.via], [true, 'direct'], `${kind}: read straight from the extension`);
+        assert.deepEqual(asked, [{ origins: [origin + '/*'] }], `${kind}: only the website itself is asked for`);
+        assert.equal(r.vehicle.vin, car.vin);
+        assert.equal(r.vehicle.photos.length, car.photos, `${kind}: every photo, not the list's thumbnail`);
+        assert.equal(r.vehicle.price, car.base + car.fee, `${kind}: the website's price`);
+        assert.equal(r.site.origin, origin);
+        assert.ok(calls.length >= 2 && calls.every((c) => c.url.startsWith(origin + '/')), `${kind}: only the website is read`);
+        assert.ok(calls.every((c) => c.credentials === 'omit'), `${kind}: without the browser's cookies`);
+        assert.equal(calls[0].url, list, `${kind}: the list first`);
+        assert.ok(calls.slice(1).some((c) => c.url.includes(car.vin.slice(-8).toLowerCase()) || c.url.includes(car.vin)), `${kind}: then the car's own page`);
+
+        // a car the list no longer has is gone
+        const gone = await readCarForPost({ tabId: null, origin, info, vin: platformCars(1, { from: 50 })[0].vin, contains: async () => true });
+        assert.deepEqual([gone.ok, gone.notFound], [false, true], `${kind}: a car missing from the whole list is not on the website any more`);
+      });
+      // without the permission nothing is sent, and the patterns to ask for are named
+      const none = [];
+      await withFetch(platformFetch(siteFn({ cars }), none), async () => {
+        const ask = await readCarForPost({ tabId: null, origin, info, vin: car.vin, contains: async () => false });
+        assert.equal(ask.needsPermission, true);
+        assert.deepEqual(ask.origins, [origin + '/*']);
+      });
+      assert.equal(none.length, 0, `${kind}: nothing sent without the permission`);
+    }
+  }
 });
 
 // A queue's start tab the salesperson has since moved to Facebook: nothing of
