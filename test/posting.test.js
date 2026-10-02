@@ -357,6 +357,8 @@ function injectionProblems(file, src) {
   const calls = callArgs(src, 'chrome\\.scripting\\.executeScript');
   if (scripting !== calls.length || (src.match(/executeScript/g) || []).length !== calls.length) problems.push(`${file}: chrome.scripting is used other than as chrome.scripting.executeScript(...)`);
   if (/chrome\.debugger|tabs\.sendMessage/.test(src)) problems.push(`${file}: another way into a page`);
+  // code that runs on pages by itself, registered at run time (the manifest's side is checked below)
+  if (/\b(registerContentScripts|updateContentScripts|userScripts|declarativeContent|RequestContentScript)\b/.test(src)) problems.push(`${file}: registers code to run on pages`);
   // outside the adapters, the adapters' in-page functions are only ever reached through an adapter object, never defined
   if (!file.startsWith('adapters/') && /\b(probeInPage|searchInPage)\b/.test(src.replace(/\badapter\.(probeInPage|searchInPage)\b/g, ''))) problems.push(`${file}: defines or names probeInPage/searchInPage outside an adapter`);
   if (!calls.length) return problems;
@@ -402,6 +404,9 @@ test('every file of the extension reaches a page only through the known injected
     'a parameter under a known name': ['sidepanel.js', panel.replace('async function runProbe() {', 'async function runProbe(probeFormInPage) {')],
     'an alias of executeScript': ['sidepanel.js', panel + '\nconst inject = chrome.scripting.executeScript;\n'],
     'a content script registered at run time': ['upkeep.js', read('../extension/upkeep.js') + "\nchrome.scripting.registerContentScripts([]);\n"],
+    'a content script registered from the worker': ['background.js', read('../extension/background.js') + "\nchrome.scripting.registerContentScripts([{ id: 'x', matches: [FB + '*'], js: ['facebook/x.js'] }]).catch(() => {});\n"],
+    'a user script': ['background.js', read('../extension/background.js') + "\nchrome.userScripts.register([{ id: 'x', matches: [FB + '*'], js: [{ file: 'facebook/x.js' }] }]);\n"],
+    'a declared content rule': ['background.js', read('../extension/background.js') + "\nnew chrome.declarativeContent.RequestContentScript({ js: ['facebook/x.js'] });\n"],
     'an injected file': ['upkeep.js', read('../extension/upkeep.js').replace('func: fillPriceInPage', "files: ['x.js'], func: fillPriceInPage")],
     'a function from elsewhere': ['upkeep.js', read('../extension/upkeep.js').replace('func: fillPriceInPage', 'func: somethingElse')],
   };
@@ -607,9 +612,20 @@ test('listing upkeep only reads the listing page and fills the Price box; the pe
   assert.ok(!/button|role=|querySelector|\.click|\[data-/i.test(signs), 'listingSigns.js must describe text only');
 });
 
-test('the background worker and the listing watcher never touch the page', () => {
-  for (const rel of ['../extension/background.js', '../extension/facebook/detectPost.js']) {
-    const src = read(rel);
-    assert.ok(!/\.click\(\)|\.submit\s*\(|requestSubmit|executeScript|tabs\.sendMessage/i.test(src), `${rel} must not act on any page`);
-  }
+// Outside fillForm.js, nothing the extension ships for Facebook (detectPost.js,
+// listingSigns.js, formMap.js and any file added to facebook/ later) acts on a
+// page, and neither does the service worker: no click, no synthetic event,
+// no key, no submit, no focus. fillForm.js has its own, narrower check above.
+const ACTS_ON_A_PAGE = /\.click\b|['"`]click['"`]|dispatchEvent|new (Mouse|Pointer|Keyboard|Input|Focus|Submit)?Event\b|\.submit\s*\(|requestSubmit|\.focus\s*\(|execCommand|executeScript|tabs\.sendMessage/;
+test('the background worker and every Facebook file but the fill code never touch the page', () => {
+  const files = extensionFiles().filter((f) => f === 'background.js' || (f.startsWith('facebook/') && f !== 'facebook/fillForm.js'));
+  assert.ok(['background.js', 'facebook/detectPost.js', 'facebook/listingSigns.js', 'facebook/formMap.js'].every((f) => files.includes(f)), 'every file in facebook/ is read');
+  for (const file of files) assert.ok(!ACTS_ON_A_PAGE.test(read('../extension/' + file)), `extension/${file} must not act on any page`);
+  // the check itself: a new file in facebook/ that clicks or fires events is caught
+  for (const code of [
+    "setInterval(() => { for (const b of document.querySelectorAll('[role=button], button')) if (/^(Next|Publish|Post)$/.test(b.textContent.trim())) b.click(); }, 4000);",
+    "export function done(b) { b.dispatchEvent(new MouseEvent('click', { bubbles: true })); }",
+    'export function done(f) { f.requestSubmit(); }',
+    "export function done(b) { b.focus(); }",
+  ]) assert.ok(ACTS_ON_A_PAGE.test(code), code);
 });

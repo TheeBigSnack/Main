@@ -42,9 +42,14 @@
 //                                              shown on the sandbox page's Lot Current toolbar icon
 //   chrome.sidePanel.open / setPanelBehavior   the panel is always docked in the sandbox; open() only flashes it (STUB)
 //   chrome.storage.managed                     always empty (STUB)
-// Nothing here can reach the Publish, Update, Delete or Mark as sold buttons
-// on the sandbox's Marketplace pages: the shim has no page-clicking API at
-// all, only what the extension itself calls.
+// The shim adds no way onto a page of its own. executeScript runs whatever
+// function the extension passes, in the page's window, as Chrome does; what
+// the extension may pass (its fill functions and site probes, none of which
+// clicks Publish, Update, Delete or Mark as sold) is held by
+// test/posting.test.js. There is deliberately no registerContentScripts or
+// unregisterContentScripts: extension code that called one would fail
+// test/demo.test.js ("the shim defines every chrome.* member ...") instead
+// of passing silently here.
 
 (function (root) {
   'use strict';
@@ -349,8 +354,6 @@
           const result = await fn(...args);
           return [{ frameId: 0, documentId: 'sandbox', result: result === undefined ? undefined : clone(result) }];
         },
-        registerContentScripts: () => Promise.resolve(),
-        unregisterContentScripts: () => Promise.resolve(),
       },
 
       tabs: {
