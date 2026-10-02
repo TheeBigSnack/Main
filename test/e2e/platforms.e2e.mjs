@@ -188,9 +188,11 @@ try {
     // the second car was listed by hand
     await tab(popup, 'ready').click();
     await popup.click(`button[data-action="post"][data-vin="${dropped.vin}"]`);
+    await popup.click(`button[data-action="markBefore"][data-vin="${dropped.vin}"]`); // listed before today
     await popup.waitForSelector(`button[data-action="unpost"][data-vin="${dropped.vin}"]`);
     if (kind === 'dealerCom') {
       await popup.click(`button[data-action="post"][data-vin="${sold.vin}"]`);
+      await popup.click(`button[data-action="markBefore"][data-vin="${sold.vin}"]`);
       await popup.waitForSelector(`button[data-action="unpost"][data-vin="${sold.vin}"]`);
     }
 

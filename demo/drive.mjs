@@ -417,6 +417,7 @@ try {
   await openPopup();
   await popupTab('ready').click();
   await popup.locator(`button[data-action="post"][data-vin="${STD_ACCORD}"]`).click();
+  await popup.locator(`button[data-action="markBefore"][data-vin="${STD_ACCORD}"]`).click(); // listed before today
   await popup.locator(`button[data-action="unpost"][data-vin="${STD_ACCORD}"]`).waitFor();
 
   // ---- 15. Day 2: the older listing sells (its page is gone), the newer one drops its price ----

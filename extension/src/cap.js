@@ -9,10 +9,14 @@ const localDay = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 // `mine: false`) is not this salesperson's post: the cap is per salesperson.
 const own = (p) => Boolean(p) && p.mine !== false;
 
+// A listing the salesperson made by hand before the day they marked it
+// posted (Mark posted, "Before today": `listedBefore`) is watched like any
+// other but is not a post of that day: on a first day with Lot Current, the
+// listings made earlier would otherwise use up the cap.
 export function postsToday(posted, now = new Date()) {
   const today = localDay(now);
   return Object.values(posted || {}).filter((p) => {
-    if (!own(p) || !p.postedAt) return false;
+    if (!own(p) || !p.postedAt || p.listedBefore === true) return false;
     const d = new Date(p.postedAt);
     return !Number.isNaN(d.getTime()) && localDay(d) === today;
   }).length;
@@ -70,9 +74,22 @@ export function loggedToday(log, now = new Date()) {
 // never twice.
 export function draftsToday(drafts, { posted = {}, log = [], now = new Date() } = {}) {
   const logged = new Set(entries(log).filter((e) => sameDay(e.at, now)).map((e) => e.vin));
+  // a car marked as listed before today is no post of today's; its draft from today still counts
+  const postedToday = (vin) => Boolean(posted && posted[vin] && posted[vin].listedBefore !== true);
   return Object.entries(drafts && typeof drafts === 'object' ? drafts : {}).filter(([vin, d]) => (
-    d && typeof d === 'object' && typeof d.savedAt === 'string' && sameDay(d.savedAt, now) && !(posted && posted[vin]) && !logged.has(vin)
+    d && typeof d === 'object' && typeof d.savedAt === 'string' && sameDay(d.savedAt, now) && !postedToday(vin) && !logged.has(vin)
   )).length;
+}
+
+// Mark posted records a listing already live on Facebook. Whether it went
+// up today decides whether it is one of today's posts, and only the
+// salesperson knows, so the popup asks: "Posted today" or "Before today"
+// (`listedBefore`, left out of postsToday above, and out of the sync
+// function's count and the manager's posted this week). A form Lot Current
+// filled and the person saved as a Facebook draft today went up today at
+// the earliest: there is nothing to ask, it is today's.
+export function askWhenListed(draft, now = new Date()) {
+  return !(draft && typeof draft === 'object' && typeof draft.savedAt === 'string' && sameDay(draft.savedAt, now));
 }
 
 // The day's standing: the largest of three counts of this person's posts

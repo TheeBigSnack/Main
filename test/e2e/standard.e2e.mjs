@@ -261,7 +261,20 @@ try {
   popup = await openPopup();
   await tab(popup, 'ready').click();
   await popup.click(`button[data-action="post"][data-vin="${V.accord}"]`);
+  await popup.click(`button[data-action="markBefore"][data-vin="${V.accord}"]`); // listed before today
   await popup.waitForSelector(`button[data-action="unpost"][data-vin="${V.accord}"]`);
+  // a listing made by hand before today is watched, but it is no post of today's
+  assert.match(await popup.textContent('#status'), /^Recorded as listed before today: rescans watch [^,]*Accord[^,]*, and it doesn't count toward today's posts\.$/);
+  const marked = await popup.evaluate(async (vin) => {
+    const all = await chrome.storage.local.get(null);
+    const posted = Object.entries(all).find(([k]) => k.startsWith('posted:'))[1];
+    const log = Object.entries(all).find(([k]) => k.startsWith('postLog:'));
+    return { entry: posted[vin], log: (log ? log[1] : []).filter((e) => e.vin === vin) };
+  }, V.accord);
+  assert.equal(marked.entry.listedBefore, true, 'recorded as listed before today');
+  assert.deepEqual(marked.log, [], 'not on the day\'s post log');
+  await tab(popup, 'mine').click();
+  assert.match(await popup.textContent('.panel'), /Accord[\s\S]*Listed before [A-Z][a-z]{2} \d{1,2}/, 'My listings says it was listed before the day it was marked');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '2');
 
   // ---- 3. Day 2 on a bad server day: the Accord sold, but its old page answers 429 and another car's page 500 ----

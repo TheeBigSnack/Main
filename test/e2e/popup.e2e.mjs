@@ -87,8 +87,24 @@ try {
 
   await tab(popup, 'ready').click();
   assert.match(await popup.textContent('.rows'), /2019 Ram 1500 Classic Express/);
+  // Mark posted asks when the listing went up (Cancel records nothing); this one went up today
   await popup.click('button[data-action="post"]');
+  await popup.waitForSelector('.markWhen button[data-action="markBefore"]');
+  assert.match(await popup.textContent('.markWhen'), /Listed on Facebook:\s*Today\s*Before today\s*Cancel/);
+  await popup.click('button[data-action="markCancel"]');
+  await popup.waitForSelector('button[data-action="post"]');
+  assert.equal(await popup.$('button[data-action="unpost"]'), null, 'Cancel records nothing');
+  await popup.click('button[data-action="post"]');
+  await popup.click('button[data-action="markToday"]');
   await popup.waitForSelector('button[data-action="unpost"]');
+  const marked = await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const posted = Object.entries(all).find(([k]) => k.startsWith('posted:'))[1];
+    const log = Object.entries(all).find(([k]) => k.startsWith('postLog:'));
+    return { entry: Object.values(posted)[0], log: log ? log[1] : [] };
+  });
+  assert.equal(marked.entry.listedBefore, undefined, 'a post of today');
+  assert.equal(marked.log.length, 1, 'on the day\'s post log');
   await popup.screenshot({ path: join(shots, '2-ready-marked-posted.png') });
 
   await tab(popup, 'otherStores').click();

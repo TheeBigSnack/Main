@@ -33,9 +33,9 @@ test('toServerRows: a registry entry becomes one listing row, the caller\'s, wit
   assert.equal(listings.length, 2, 'the colleague\'s entry, the garbage and the entry without a time are left out');
   assert.deepEqual(listings[0], {
     dealership_id: D, user_id: U1, vin: VIN_A, name: '2019 Ram 1500', price: 28995, posted_at: T(0),
-    listing_url: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', updated_at: T(5), status: 'listed', taken_down_at: null,
+    listing_url: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', updated_at: T(5), status: 'listed', taken_down_at: null, listed_before: false,
   });
-  assert.deepEqual(listings[1], { dealership_id: D, user_id: U1, vin: VIN_B, name: '2020 Jeep', price: null, posted_at: T(1), listing_url: null, salesperson: null, updated_at: null, status: 'listed', taken_down_at: null });
+  assert.deepEqual(listings[1], { dealership_id: D, user_id: U1, vin: VIN_B, name: '2020 Jeep', price: null, posted_at: T(1), listing_url: null, salesperson: null, updated_at: null, status: 'listed', taken_down_at: null, listed_before: false });
   assert.deepEqual(postAttempts, []);
   assert.deepEqual(todoItems, []);
   // an http link is not a listing link

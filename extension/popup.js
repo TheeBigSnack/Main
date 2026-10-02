@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
-import { capStatus, capCount, logPost, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
@@ -25,6 +25,7 @@ const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.r
 const signedMoney = (n) => (n < 0 ? '−' : '+') + money(Math.abs(n));
 const miles = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') + ' mi' : 'no mileage');
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+const day = (iso) => (iso ? new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '');
 const dateOnly = (iso) => (iso ? new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 
 const state = {
@@ -50,6 +51,7 @@ const state = {
   scanning: false,
   view: 'todo',
   readyFilter: '', // the Ready tab's search box, for as long as the popup is open
+  markAsk: null, // the VIN whose Mark posted is asking "Posted today" or "Before today", for as long as the popup is open
   picked: new Set(), // the Ready tab's ticked cars (VINs), for as long as the popup is open: a tick survives the search box hiding its row and a redraw; the queue takes them all
 };
 
@@ -363,6 +365,7 @@ function empty(text) {
 // when the website's price moved or the car is not ready any more.
 function postButton(vin, { canPost = true } = {}) {
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
+  if (state.markAsk === vin) return markChoice(vin);
   if (state.drafts[vin]) {
     const pill = draftPill(state.drafts[vin], state.snapshot?.vehicles?.[vin], { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
@@ -372,6 +375,14 @@ function postButton(vin, { canPost = true } = {}) {
     ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${capReached ? 'disabled' : ''} title="${capReached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
     : '';
   return `<span class="actions">${post}<button type="button" class="small" data-action="post" data-vin="${esc(vin)}" title="Already listed it yourself? Mark it posted so rescans watch it.">Mark posted</button></span>`;
+}
+
+// Mark posted's question: did the listing go up today? A listing made by
+// hand before today is watched the same, but it is not one of today's posts
+// (src/cap.js askWhenListed, postsToday).
+function markChoice(vin) {
+  const v = esc(vin);
+  return `<span class="actions markWhen" role="group" aria-label="When did this listing go up on Facebook?"><span class="hint">Listed on Facebook:</span><button type="button" class="small go" data-action="markToday" data-vin="${v}" title="It went up today: it counts toward today's posts.">Today</button><button type="button" class="small" data-action="markBefore" data-vin="${v}" title="You listed it by hand before today: rescans watch it, and it doesn't count toward today's posts.">Before today</button><button type="button" class="small" data-action="markCancel" data-vin="${v}">Cancel</button></span>`;
 }
 
 function decisionPill(decision) {
@@ -656,7 +667,7 @@ function viewMine(l) {
         const entry = { name: p.name, url: now?.url };
         const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
         return row(entry, {
-          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${link}`,
+          sub: `${pill} ${p.listedBefore ? `Listed before ${esc(day(p.postedAt))}` : `Posted ${esc(when(p.postedAt))}`}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${link}`,
           right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
@@ -949,15 +960,34 @@ async function onPanelClick(ev) {
   if (!btn) return;
   const vin = btn.dataset.vin;
   switch (btn.dataset.action) {
-    case 'post': {
+    case 'markCancel':
+      state.markAsk = null;
+      break;
+    case 'post':
+    case 'markToday':
+    case 'markBefore': {
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry) return;
-      const at = new Date().toISOString();
-      const basis = state.settings?.basis;
       // a listing published from a draft shows the draft's price: that is what is recorded (src/drafts.js)
       const draft = state.drafts[vin] || null;
-      if (!(await update('posted', (p) => (draft ? markDraftPosted(p || {}, entry, draft, basis, at) : markPosted(p || {}, entry, basis, at))))) break;
-      await update('postLog', (log) => logPost(log, vin, at, undefined, { alreadyLive: true })); // the day's log for the cap, which a take-down or an unmark leaves alone; a car unmarked today and marked again counts once
+      // Mark posted first asks whether the listing went up today, unless a draft saved today says so
+      if (btn.dataset.action === 'post' && askWhenListed(draft)) {
+        state.markAsk = vin;
+        render();
+        const today = document.querySelector(`button[data-action="markToday"][data-vin="${CSS.escape(vin)}"]`);
+        if (today) today.focus();
+        return;
+      }
+      state.markAsk = null;
+      const before = btn.dataset.action === 'markBefore';
+      const at = new Date().toISOString();
+      const basis = state.settings?.basis;
+      const extra = before ? { listedBefore: true } : {};
+      if (!(await update('posted', (p) => (draft ? markDraftPosted(p || {}, entry, draft, basis, at, extra) : markPosted(p || {}, entry, basis, at, extra))))) break;
+      // the day's log for the cap, which a take-down or an unmark leaves alone; a car unmarked today and marked again counts once.
+      // A listing made before today is not one of today's posts, so it stays off the log.
+      if (!before) await update('postLog', (log) => logPost(log, vin, at, undefined, { alreadyLive: true }));
+      else setStatus(`Recorded as listed before today: rescans watch ${entry.name || 'it'}, and it doesn't count toward today's posts.`);
       if (!draft) break;
       const gap = draftPriceUpdate(draft, entry, basis);
       if (gap) {

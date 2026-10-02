@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { capStatus, postsToday, serverPostsToday, draftsToday, capCount } from '../extension/src/cap.js';
+import { capStatus, postsToday, serverPostsToday, draftsToday, capCount, askWhenListed } from '../extension/src/cap.js';
 import { createQueue } from '../extension/src/queue.js';
 import { nextToPost } from '../extension/src/panelList.js';
 import { draftRecord } from '../extension/src/drafts.js';
@@ -219,8 +219,53 @@ test('forms saved as drafts today count toward the daily cap, once, until they a
 
 test('Mark posted always records a live listing, at the cap or not: only filling a form is capped', () => {
   const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
-  const markPostedCase = popup.slice(popup.indexOf("case 'post': {"), popup.indexOf("case 'openPost':"));
+  const markPostedCase = popup.slice(popup.indexOf("case 'post':\n"), popup.indexOf("case 'openPost':"));
   assert.ok(markPostedCase.length > 100, 'the popup\'s Mark posted is found');
   assert.doesNotMatch(markPostedCase, /dailyCap|capStatus|reached/, 'Mark posted never looks at the cap');
 });
 
+
+// A salesperson's first day: they mark the listings they made by hand
+// earlier, as the help tells them to. Those are watched like any other, but
+// they are not posts of today: before, twelve of them used the whole cap of
+// 10 and no new car could be posted that day.
+test('listings marked as made by hand before today leave the day\'s cap alone; a listing marked as posted today counts', () => {
+  const vins = Array.from({ length: 12 }, (_, i) => `HANDVIN000000${String(i).padStart(4, '0')}`);
+  let posted = {};
+  for (const [i, vin] of vins.entries()) posted = markPosted(posted, { vin, name: `Car ${i}`, price: 20000 + i }, 'website', today(i), { listedBefore: true });
+  assert.equal(postsToday(posted, now), 0);
+  assert.deepEqual(capStatus(posted, 10, now, { log: [], drafts: {} }), { used: 0, cap: 10, remaining: 10, reached: false }, 'twelve earlier listings marked: all ten posts of the day are left');
+  // one marked "Posted today" is today's post (it is logged as well)
+  const one = markPosted(posted, { vin: VIN_A, name: 'A', price: 1 }, 'website', today(30));
+  assert.equal(capStatus(one, 10, now, { log: logPost([], VIN_A, today(30), now), drafts: {} }).used, 1);
+  // the flag goes through a sync and back: the server's count leaves it out, and the merged entry keeps it
+  const body = syncPayload({ origin: 'https://www.example-motors.test', posted, userId: U1, now });
+  assert.equal(body.posted[vins[0]].listedBefore, true);
+  assert.equal(body.posted[vins[0]].postedAt, today(0), 'posted at the moment of marking: the sync key');
+  const merged = mergeRegistry({}, { listings: [row(vins[0], U1, { listed_before: true })] }, { userId: U1 });
+  assert.equal(merged[vins[0]].listedBefore, true);
+  assert.equal(postsToday(merged, now), 0);
+  assert.equal(postsToday(mergeRegistry({}, { listings: [row(vins[0], U1)] }, { userId: U1 }), now), 1, 'a row without the flag is a post of its day');
+});
+
+// Mark posted asks "Today" or "Before today", except for a car whose form
+// Lot Current filled and the person saved as a draft today: that listing
+// went up today at the earliest. And a draft of today's stays on the count
+// even if its car is marked as listed before today.
+test('Mark posted asks when the listing went up, unless a draft saved today answers it; today\'s draft still counts', () => {
+  assert.equal(askWhenListed(null, now), true);
+  assert.equal(askWhenListed(undefined, now), true);
+  assert.equal(askWhenListed(draftRecord({ name: 'A', price: 1, basis: 'website', savedAt: today(5) }), now), false, 'saved as a draft today: today\'s post');
+  assert.equal(askWhenListed(draftRecord({ name: 'A', price: 1, basis: 'website', savedAt: new Date(2026, 8, 25, 18, 0).toISOString() }), now), true, 'a draft from yesterday may have gone up yesterday');
+  const drafts = { [VIN_A]: draftRecord({ name: 'A', price: 1, basis: 'website', savedAt: today(5) }) };
+  const before = markPosted({}, { vin: VIN_A, name: 'A', price: 1 }, 'website', today(9), { listedBefore: true });
+  assert.equal(capStatus(before, 10, now, { log: [], drafts }).used, 1, 'the form filled today still counts');
+  // the popup offers the choice and records the flag, and keeps such a listing off the day's log
+  const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  const markCase = popup.slice(popup.indexOf("case 'post':\n"), popup.indexOf("case 'openPost':"));
+  assert.match(markCase, /askWhenListed\(draft\)/);
+  assert.match(markCase, /before \? \{ listedBefore: true \} : \{\}/);
+  assert.match(markCase, /if \(!before\) await update\('postLog'/);
+  assert.match(popup, /data-action="markToday"[^>]*>Today<\/button>/);
+  assert.match(popup, /data-action="markBefore"[^>]*>Before today<\/button>/);
+});

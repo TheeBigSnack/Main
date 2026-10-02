@@ -179,10 +179,10 @@ test('sync/index.ts and rewrite/index.ts refuse a lapsed dealership with 402 and
   assert.doesNotMatch(billing, /lapsedAnswer|402/);
 });
 
-test('sync/index.ts answers plan and postsToday; postsToday counts the caller\'s own rows, any status, in the day the extension sent, after the writes', () => {
+test('sync/index.ts answers plan and postsToday; postsToday counts the caller\'s own rows, any status, in the day the extension sent, after the writes, less the ones listed before that day', () => {
   assert.match(sync, /import \{[^}]*\btodayRange\b[^}]*\} from '\.\.\/_shared\/billing\.mjs'/);
   assert.match(sync, /const today = todayRange\(body\.today\);/, 'the request\'s day is taken through the shared check, or it is null');
-  const count = /const postsToday = today \? await countOf\(client\.from\('listings'\)\.select\('id', \{ count: 'exact', head: true \}\)\.eq\('dealership_id', dealershipId\)\.eq\('user_id', me\)\.gte\('posted_at', today\.from\)\.lt\('posted_at', today\.to\), 'could not count listings'\) : null;/;
+  const count = /const postsToday = today \? await countOf\(client\.from\('listings'\)\.select\('id', \{ count: 'exact', head: true \}\)\.eq\('dealership_id', dealershipId\)\.eq\('user_id', me\)\.eq\('listed_before', false\)\.gte\('posted_at', today\.from\)\.lt\('posted_at', today\.to\), 'could not count listings'\) : null;/;
   assert.match(sync, count);
   assert.ok(sync.search(count) > sync.indexOf('const serverTime = new Date().toISOString();'), 'after the writes, so the posts this call brought are in the count');
   assert.doesNotMatch(sync, /gte\('posted_at', since\)|lt\('posted_at', since\)|lte\('posted_at', since\)/, 'the day is the only thing posted_at is compared with');

@@ -38,7 +38,7 @@ const USERS = {
   [TOKEN.u3]: { id: U3, email: 'kim@other-motors.test' },
   [TOKEN.u4]: { id: U4, email: 'new@example.test' },
 };
-const LISTING_COLUMNS = ['created_at', 'dealership_id', 'id', 'listing_url', 'name', 'posted_at', 'price', 'salesperson', 'status', 'taken_down_at', 'updated_at', 'user_id', 'vin'];
+const LISTING_COLUMNS = ['created_at', 'dealership_id', 'id', 'listed_before', 'listing_url', 'name', 'posted_at', 'price', 'salesperson', 'status', 'taken_down_at', 'updated_at', 'user_id', 'vin'];
 const VIN = (n) => `TESTVIN0000000${String(n).padStart(3, '0')}`;
 const at = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 
@@ -406,6 +406,31 @@ test('sync: postsToday counts the caller\'s own rows posted inside the day they 
   }
 });
 
+// Listings the salesperson marked posted but had made by hand before that
+// day (Mark posted, "Before today") are stored with listed_before and are
+// not posts of that day: on a first day, a dozen of them used up the cap.
+test('sync: a listing marked as made by hand before that day is stored as such and left out of postsToday; the flag never changes afterwards', async () => {
+  const today = { from: at(-6 * 60), to: at(6 * 60) };
+  const hourAgo = at(-60);
+  world({ rows: { listings: [listing({ vin: VIN(1), posted_at: hourAgo, listed_before: false })] } });
+  const handler = await load();
+  const registry = { [VIN(1)]: { postedAt: hourAgo } };
+  for (let i = 2; i < 14; i += 1) registry[VIN(i)] = { name: `Earlier ${i}`, price: 20000 + i, postedAt: at(-30 + i), listedBefore: true };
+  const r = await sync(handler, TOKEN.u1, { posted: registry, today });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.counts.listingsInserted, 12);
+  assert.equal(r.body.postsToday, 1, 'the twelve earlier listings are not posts of today; the one posted today is');
+  const rows = fake.rows('listings');
+  assert.equal(rows.filter((l) => l.listed_before === true).length, 12);
+  assert.equal(rows.find((l) => l.vin === VIN(1)).listed_before, false, 'a row without the flag is a post of its day');
+  assert.ok(r.body.listings.filter((l) => l.listed_before === true).length === 12, 'the answer carries the flag, so other machines leave them out too');
+  // a later upload of the same post cannot change it either way
+  const again = await sync(handler, TOKEN.u1, { posted: { ...registry, [VIN(1)]: { postedAt: hourAgo, listedBefore: true, price: 1, updatedAt: at(-1) }, [VIN(2)]: { ...registry[VIN(2)], listedBefore: false, price: 2, updatedAt: at(-1) } }, today });
+  assert.equal(again.body.postsToday, 1);
+  assert.equal(fake.rows('listings').find((l) => l.vin === VIN(1)).listed_before, false);
+  assert.equal(fake.rows('listings').find((l) => l.vin === VIN(2)).listed_before, true);
+});
+
 test('sync: to-do items: a new flag goes in, an upload closes an open one, a closed one is never reopened, an open price flag takes the new prices', async () => {
   const flags = [
     { dealership_id: D1, vin: VIN(1), kind: 'takeDown', flagged_at: '2026-09-20T10:00:00.000Z' },
@@ -608,6 +633,10 @@ test('the fake database models the migrations\' tables: the same columns, types,
       const identity = /generated (always|by default) as identity/.test(line) || type === 'bigserial';
       columns[name] = TYPES[type.replace(/\(.*$/, '')] + (/not null|primary key/.test(line) || identity ? '!' : '');
       if (/\bprimary key\b|\bunique\b/.test(line)) keys.push(name);
+    }
+    // a column a later migration adds (alter table ... add column)
+    for (const a of sql.matchAll(new RegExp(`^alter table public\\.${table} add column (?:if not exists )?(\\w+) (\\w+)([^;]*);`, 'gm'))) {
+      columns[a[1]] = TYPES[a[2]] + (/not null/.test(a[3]) ? '!' : '');
     }
     assert.deepEqual(spec.columns, columns, `${table}: columns`);
     assert.deepEqual(spec.keys.map(keyText).sort(), keys.sort(), `${table}: unique keys`);

@@ -216,6 +216,7 @@ try {
   assert.equal(await tab(popup, 'ready').locator('.count').textContent(), '1');
   await tab(popup, 'ready').click();
   await popup.click('button[data-action="post"]'); // Mark posted
+  await popup.click('button[data-action="markToday"]'); // it went up today
   await popup.waitForSelector('button[data-action="unpost"]');
 
   // ---- 4. The car sells; the service worker rescans with no tab, and the badge shows the to-do ----
