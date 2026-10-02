@@ -190,6 +190,13 @@ Logs are Supabase's function logs (Dashboard, Edge Functions, the function, Logs
 - **The log**: date, dealer, who (name and role), what happened, the report, severity, the fix, when answered. Kept in a spreadsheet or in `docs/support.md`. Privacy requests are logged with the function run and its counts, never the export.
 - **How long**: no period is set [Pending attorney answer: questions-for-attorney.md 8.5].
 
+## The owner's records
+
+Kept by the owner outside the product, in a spreadsheet or folder of the owner's choosing; no code writes them, and `delete_dealership` does not reach them.
+
+- **The pipeline sheet** (`docs/launch-checklist.md`, "A pipeline sheet exists" and "Run usage_report weekly and keep the partner list"): each dealership approached, with its name, website, where the lead came from and its stage (demo, pilot, paid or stopped), and, for each design partner, its `usage_report` row for each week: plan state, the counts of managers, salespeople, active salespeople, posts, cars listed now and open to-do items, the oldest open item's hours and the last synced scan's time. The usage rows carry no person's name or email and no VIN. Read by the owner. When a partner's pilot ends without a subscription, or its records are deleted (`supabase/README.md`, "Delete"), its weekly rows go from the sheet within the same 30 days (pilot agreement section 6), and only its name, website, source, stage and outcome stay.
+- **The Numbers tab CSVs** the salespeople send during a pilot without accounts (`PILOT.md`, "During the pilot"): what "Files and the clipboard" lists for the CSV, names and VINs included. Deleted within 30 days of the pilot's end unless the dealer subscribes (pilot agreement section 6; `PILOT.md`, "Clearing").
+
 ## Who receives data
 
 **Named in** lists the files that must name each recipient, word for word; the privacy policy names every processor in its "Processors" section.

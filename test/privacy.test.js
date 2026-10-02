@@ -279,6 +279,26 @@ test('every pilot reaches the retention line: its clock starts when the owner ma
   assert.match(read('../docs/production-setup.md'), /make it again with step 5's three statements: the dealership, the manager's invite code, which you keep for the manager, and its pilot row with the signed agreement's start date and length\. If the agreement is not signed yet, run the pilot row the day it is; until then the weekly list of dealerships with no plan/, 'the production steps run the pilot row too, or the no-plan list shows the dealership until they do');
 });
 
+// review: the launch checklist copies each partner's usage_report row into the pipeline sheet every week, but
+// the data inventory did not list the sheet and no deletion step reached it, so a pilot that ended unpaid kept
+// its weekly numbers there past the pilot agreement's 30 days
+test('the pipeline sheet the weekly usage report fills is an owner\'s record in the inventory, and every deletion takes a dealership\'s weekly rows out of it', () => {
+  const checklist = read('../docs/launch-checklist.md');
+  const weekly = checklist.split('\n').find((l) => l.includes('**Run usage_report weekly and keep the partner list.**'));
+  assert.ok(weekly, 'the launch checklist has the weekly usage_report item');
+  if (!/pipeline sheet/.test(weekly)) return; // the rows are kept nowhere outside the database
+  assert.match(weekly, /has its weekly rows taken out of the sheet within the same 30 days as its database records \(pilot agreement section 6\)/, 'the weekly item does not say when a partner\'s rows leave the sheet');
+  const inventory = read('../docs/data-inventory.md');
+  const owners = inventory.slice(inventory.indexOf("\n## The owner's records\n"), inventory.indexOf('\n## Who receives data\n'));
+  assert.ok(owners.length > 40, "docs/data-inventory.md has no \"The owner's records\" section");
+  assert.match(owners, /\*\*The pipeline sheet\*\*[^\n]*`usage_report` row for each week[^\n]*its weekly rows go from the sheet within the same 30 days \(pilot agreement section 6\)/, 'the inventory does not say what the sheet holds and when a dealership\'s rows leave it');
+  const del = readme.slice(readme.indexOf('### Delete: a manager asked'), readme.indexOf('**The retention line.**'));
+  assert.match(del, /\*\*The owner's copies\.\*\* Nothing in the database reaches them either\. Take the dealership's weekly usage rows out of the pipeline sheet/, 'the delete steps leave the dealership\'s rows in the pipeline sheet');
+  const pilot = read('../PILOT.md');
+  assert.match(pilot, /and its weekly usage rows in the pipeline sheet/, 'PILOT.md does not count the sheet\'s rows among the pilot records');
+  assert.match(pilot, /its weekly rows in the pipeline sheet with them/, 'PILOT.md\'s end of a pilot leaves the sheet\'s rows');
+});
+
 // review: asking for a sign-in code creates an account for any address typed, and one that never joined a
 // dealership was kept forever, in no retention rule, with no owner list to find it
 test('accounts that never joined are listed and deleted in the weekly run, and the policy and the attorney question say so', () => {
