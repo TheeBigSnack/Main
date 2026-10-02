@@ -178,6 +178,15 @@ try {
   await panel.waitForSelector('#panelReady');
 
   // ---- 4. The Wagoneer's price dropped: posted at the website's price now, not the scan's ----
+  // (first started and stopped at review: Stop this post goes back to the list, nothing opened)
+  await panel.click(`button[data-post-vin="${WAGONEER}"]`);
+  await panel.waitForSelector('#stopPost', { timeout: 20000 });
+  const tabsBeforeStop = context.pages().length;
+  await panel.click('#stopPost');
+  await panel.waitForSelector('#panelReady');
+  assert.match(await panel.textContent('#status'), /Stopped the post of 2022 Jeep Wagoneer Series III\./);
+  assert.equal(await panel.evaluate(async (o) => (await chrome.storage.local.get(`postFlow:${o}`))[`postFlow:${o}`] ?? null, origin), null, 'the stopped post is not saved');
+  assert.equal(context.pages().length, tabsBeforeStop, 'no Facebook tab opened');
   await panel.click(`button[data-post-vin="${WAGONEER}"]`);
   await panel.waitForSelector('#openForm', { timeout: 20000 });
   assert.match(await panel.textContent('#vehicle'), /2022 Jeep Wagoneer Series III/);
@@ -261,11 +270,11 @@ try {
   assert.match(await panel.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/, 'a colleague\'s post does not count against this salesperson\'s cap');
   await panel.screenshot({ path: join(shots, 'panel-5-cap.png'), fullPage: true });
 
-  // ---- 9. The pilot numbers: two attempts from the panel, one blocked as gone, one posted ----
+  // ---- 9. The pilot numbers: three attempts from the panel, one blocked as gone, one stopped at review, one posted ----
   const pilot = await panel.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
   const outcome = (vin) => pilot.posts.filter((p) => p.vin === vin).map((p) => [p.outcome, p.reason || '']);
   assert.deepEqual(outcome(RAM), [['blocked', 'not-on-website']]);
-  assert.deepEqual(outcome(WAGONEER), [['posted', '']]);
+  assert.deepEqual(outcome(WAGONEER), [['abandoned', ''], ['posted', '']]);
 
   assert.deepEqual(errors, [], 'no console errors');
   console.log('Panel E2E passed. Screenshots in test/e2e/screenshots/');

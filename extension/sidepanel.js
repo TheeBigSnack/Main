@@ -400,9 +400,13 @@ function takeCar(car) {
   state.readAt = car.readAt;
 }
 
-// No time recorded (a post saved before reads were timed) counts as old.
+// No time recorded (a post saved before reads were timed) counts as old, and
+// so does a read that a scan since then contradicts: the car is not in it
+// (sold, or taken off the website meanwhile). The read again decides.
 function readIsOld() {
-  return !(Date.now() - Date.parse(state.readAt || '') < READ_MAX_AGE_MS);
+  const readAt = Date.parse(state.readAt || '');
+  if (!(Date.now() - readAt < READ_MAX_AGE_MS)) return true;
+  return Date.parse(state.snapshotTakenAt || '') > readAt && !(state.snapshotVehicles || {})[state.vin];
 }
 
 // What the form would get from the car as it stands: every field but the
@@ -1552,6 +1556,7 @@ function viewReview() {
     <div id="photoServers">${photoServersHtml()}</div>
     <button type="button" class="plain wide" id="checkForm" ${formOff ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
     <p class="hint">For the first run: the panel reports which fields it can find on the page, without filling anything. You can fill it in from there.</p>
+    ${state.queueMode ? '' : '<button type="button" class="plain wide" id="stopPost">Stop this post</button>'}
   </section>`;
 }
 
@@ -2166,6 +2171,15 @@ async function onClick(ev) {
       if (watcher) watcher.cancel();
       await clearFlow();
       setStatus(stopped);
+      return render();
+    }
+    case 'stopPost': {
+      // a single post at review: nothing is filled yet, so it can simply be
+      // dropped (a queued car has Skip in the queue bar instead)
+      if (state.step !== 'review' || state.queueMode) return undefined;
+      const name = state.vehicle ? state.vehicle.name : nameOf(state.vin);
+      await clearFlow();
+      setStatus(`Stopped the post of ${name}. Click Post on any car to start again.`);
       return render();
     }
     case 'back':

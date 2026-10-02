@@ -1715,3 +1715,64 @@ test('Open the Marketplace form and Check fields are off while the description b
   fns.onInput({ target: { id: 'description', value: `Pre-owned at ${DEALER.name}. VIN ${v.vin}.` } });
   assert.deepEqual([buttons.openForm.disabled, buttons.checkForm.disabled], [false, false], 'a style warning (too short) leaves them on');
 });
+
+// A scan that lands after the car was read and no longer lists it (the
+// worker's rescan, the popup's Scan, a colleague's sale) contradicts the read
+// even inside READ_MAX_AGE_MS: Open the Marketplace form and Fill it in now
+// read the car again first, and the read decides. A scan that still lists
+// it, or one older than the read, changes nothing.
+test('a scan since the read that no longer lists the car has it read again before the form opens or fills', async () => {
+  const v = vehicle('usedNormal');
+  const description = buildTemplateDescription({ vehicle: v, dealer: DEALER, salesperson: { name: 'Pat', title: 'sales consultant' } });
+  const minuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+  const gone = async () => ({ ok: false, notFound: true, message: "This car isn't on the website any more." });
+  const opened = (calls) => calls.filter((c) => c === 'tabs.create' || c.startsWith('runFill') || c === 'runProbe');
+  for (const step of ['review', 'probe']) {
+    const o = formOpener({ description, step, readAt: minuteAgo, read: gone });
+    Object.assign(o.state, { snapshotTakenAt: now, snapshotVehicles: { OTHERVIN0000000001: { name: 'another car' } } });
+    if (step === 'review') await o.fns.openForm();
+    else await o.fns.fillFromProbe();
+    assert.deepEqual(opened(o.calls), [], `${step}: nothing opened or filled`);
+    assert.ok(o.calls.includes(`readCarForPost ${v.vin} tab 41`), `${step}: read again`);
+    assert.ok(o.calls.includes('block: not-on-website'), `${step}: ${o.calls.join(' | ')}`);
+  }
+  // the scan still lists the car, or it is older than the read: no read
+  for (const [what, snapshotTakenAt, listed] of [['still listed', now, true], ['an older scan', new Date(Date.now() - 3600 * 1000).toISOString(), false], ['no scan time', null, false]]) {
+    const o = formOpener({ description, readAt: minuteAgo });
+    Object.assign(o.state, { snapshotTakenAt, snapshotVehicles: listed ? { [v.vin]: { name: v.name } } : {} });
+    await o.fns.openForm();
+    assert.deepEqual(opened(o.calls), ['tabs.create', `runFill: ${description}`], what);
+  }
+});
+
+// A single post at review can be dropped there (the person would otherwise
+// have to post it, or post another car, before a To do item opens). A queued
+// car has Skip this car on the queue bar instead.
+test('Stop this post on the review screen drops a single post; a queued car has no such button', async () => {
+  const v = vehicle('usedNormal');
+  const blank = () => '';
+  const state = { step: 'review', vin: v.vin, vehicle: v, price: v.price, description: 'x', guardrails: { ok: true, problems: [] }, note: '', descriptionSource: 'template', settings: { dealer: DEALER, rewrite: { enabled: false } }, queueMode: false };
+  const calls = [];
+  const fns = compileMany(['viewReview', 'onClick'], {
+    state, ruleProblems: () => [], dailyCap: () => ({ reached: false, used: 0, cap: 10 }), esc: (s) => String(s ?? ''),
+    carCard: blank, readAgainHtml: blank, sourcePill: blank, checksHtml: blank, highlightsHtml: blank, photoPickHtml: blank,
+    fieldsTable: blank, vinCheckHtml: blank, assumptionsHtml: blank, capHtml: blank, photoServersHtml: blank,
+    promptOpen: false, nameOf: (vin) => vin,
+    clearFlow: async () => { calls.push('clearFlow'); Object.assign(state, { step: 'idle', vin: null, vehicle: null }); },
+    setStatus: (text) => calls.push('status: ' + text), render: () => calls.push('render:' + state.step),
+  });
+  assert.match(fns.viewReview(), /<button type="button" class="plain wide" id="stopPost">Stop this post<\/button>/);
+  const click = (id) => fns.onClick({ target: { closest: () => ({ id, dataset: {} }) } });
+  state.queueMode = true;
+  assert.doesNotMatch(fns.viewReview(), /id="stopPost"/, 'a queued car: Skip this car on the queue bar instead');
+  await click('stopPost');
+  assert.deepEqual(calls, [], 'a queued car is not dropped this way');
+  state.queueMode = false;
+  state.step = 'publish';
+  await click('stopPost');
+  assert.deepEqual(calls, [], 'never once a form is open');
+  state.step = 'review';
+  await click('stopPost');
+  assert.deepEqual(calls, ['clearFlow', `status: Stopped the post of ${v.name}. Click Post on any car to start again.`, 'render:idle']);
+});
