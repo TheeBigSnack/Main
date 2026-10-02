@@ -40,6 +40,10 @@ async function readOne(adapter, search, wanted, options) {
     return { ok: false, message: "Couldn't read the dealership website: " + errText(e) };
   }
   if (!r.ok) return { ok: false, message: r.message || "Couldn't read the dealership website." };
+  // a list the website did not give whole can't say a car is gone
+  if (!r.record && r.complete === false) {
+    return { ok: false, message: "Couldn't read the website's whole list of cars just now, so this car couldn't be checked. Try again in a minute." };
+  }
   if (!r.record) {
     return { ok: false, notFound: true, message: "This car isn't on the website any more (sold, removed or hidden). Rescan before posting anything." };
   }

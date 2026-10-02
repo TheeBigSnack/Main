@@ -5,6 +5,7 @@ import { recheck, fetchVehicleDetails, fetchVehicleDetailsDirect, readCarForPost
 import { probeSiteInPage } from '../extension/src/scan.js';
 import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, STANDARD_ORIGIN } from './helpers.js';
 import { SITES_KEY } from '../extension/src/storageKeys.js';
+import { adapterById } from '../extension/adapters/index.js';
 import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage } from './platformSites.js';
 
 test('the post-time re-check lets a ready car through and nothing else', () => {
@@ -340,5 +341,30 @@ test('a dealer tab on another list of the website does not call a used car sold:
     } finally {
       delete globalThis.chrome;
     }
+  }
+});
+
+// An adapter that read only part of the website's list (a later list page
+// failed, or the paging did not move the list on) cannot say a car is gone:
+// getDetails answers record null with complete false, and the side panel is
+// told the list could not be read whole, never that the car is sold.
+test('a car missing from a list the website did not give whole is not called gone', async () => {
+  const adapter = adapterById('dealerOn');
+  const real = adapter.getDetails;
+  const info = { adapter: 'dealerOn', service: { kind: 'dealerOn', origin: DEALERON_ORIGIN, inventoryUrl: DEALERON_LIST, listUrl: DEALERON_ORIGIN + '/searchused.aspx' } };
+  const vin = platformCars(1, { from: 3 })[0].vin;
+  try {
+    adapter.getDetails = async () => ({ ok: true, record: null, complete: false, fetchedAt: new Date().toISOString() });
+    const partial = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
+    assert.equal(partial.ok, false);
+    assert.equal(partial.notFound, undefined, 'not "not on the website any more"');
+    assert.match(partial.message, /Couldn't read the website's whole list of cars just now, so this car couldn't be checked\. Try again in a minute\./);
+    adapter.getDetails = async () => ({ ok: true, record: null, complete: true, fetchedAt: new Date().toISOString() });
+    const whole = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
+    assert.deepEqual([whole.ok, whole.notFound], [false, true], 'a whole list without the car: gone, as before');
+    adapter.getDetails = async () => ({ ok: true, record: null, fetchedAt: new Date().toISOString() });
+    assert.equal((await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true })).notFound, true, 'an adapter that does not say: as before');
+  } finally {
+    adapter.getDetails = real;
   }
 });
