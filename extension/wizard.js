@@ -18,7 +18,7 @@ import { siteKeys } from './src/storageKeys.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount } from './src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, addressHint } from './src/wizardSteps.js';
 
 const steps = () => wizardSteps(accountsConfigured());
 // The Account step's own state: what was typed and answered, never a token.
@@ -209,7 +209,7 @@ export function wizardHtml() {
     }
     case 'address':
       return `${progress}<h3>The store's address</h3>
-        <p class="hint">Read from the website${wiz.site && wiz.site.address && wiz.site.address.source ? ` (${esc(wiz.site.address.source)})` : ''}. Marketplace asks for a location; the ZIP is what gets typed.</p>
+        <p class="hint" id="wizAddressHint">${esc(addressHint(wiz.site && wiz.site.address))}</p>
         <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" /></label>
         <label class="block">City <input type="text" id="wizCity" value="${esc(s.dealer.city)}" /></label>
         <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="e.g. OH" /></label>

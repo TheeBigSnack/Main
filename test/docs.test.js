@@ -424,6 +424,21 @@ test('README\'s pre-owned rules say what classify.js decides when the signs mix'
   assert.match(demo, /pre-owned and nowhere new, it goes to \*\*Needs a look\*\*/);
 });
 
+// The settings never guess a town from a store name (src/settings.js
+// withDefaults): the dealership's city, state and ZIP come from the website's
+// own address or from a person. The texts a salesperson or dealer reads say
+// so, instead of promising an address that is always already filled in.
+test('help, README and the onboarding emails say the address comes from the website only when it shows one', () => {
+  assert.equal(withDefaults({ myStores: ['Example Auto Mall'] }, { name: 'Example Auto Mall' }).dealer.city, '', 'the city is never guessed from a store name');
+  const step = doc('help.md').split('\n').find((l) => l.includes("**The store's address**"));
+  assert.ok(step, "docs/help.md describes the wizard's address step");
+  assert.match(step, /when it shows one/, 'docs/help.md does not say the address is read only when the website shows one');
+  assert.match(step, /never guesses a town/, 'docs/help.md does not say a missing town is asked for, not guessed');
+  for (const rel of ['../README.md', '../docs/help.md', '../marketing/onboarding-emails.md', '../marketing/onboarding-store.md']) {
+    assert.doesNotMatch(read(rel), /already filled from the website/i, `${rel} promises the address is always filled from the website`);
+  }
+});
+
 // node --test runs every test( and it( call site once; none of the files
 // makes tests in a loop, so the count of call sites is the count npm test prints.
 test('README\'s unit-test count is the number of tests npm test runs', () => {

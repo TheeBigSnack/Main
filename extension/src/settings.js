@@ -1,7 +1,7 @@
 // Settings shared by the popup and the side panel, with defaults so a
 // settings object saved by v0.1 ({ myStores, basis }) keeps working.
 
-import { shortLocation, storeNames, matchStore } from './normalize.js';
+import { storeNames, matchStore } from './normalize.js';
 import { DEFAULT_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 import { sortOrder, newDaysOf } from './readyList.js';
@@ -46,10 +46,13 @@ export function withDefaults(settings, site = {}) {
     basis: s.basis === 'beforeFees' ? 'beforeFees' : 'website',
     // closingLine: the salesperson's own line after the sign-off (src/rewriteTemplate.js checkClosingLine); '' for none
     salesperson: { name: String(sp.name || ''), title: String(sp.title || DEFAULT_SALESPERSON_TITLE), closingLine: String(sp.closingLine || '').replace(/\s+/g, ' ').trim().slice(0, CLOSING_LINE_MAX_CHARS) },
-    // blanks are filled from the website's own address (site.address, read by the scan)
+    // blanks are filled from the website's own address (site.address, read by the scan). The city
+    // is never guessed from a store name: with no address on the website it stays blank, and the
+    // wizard and Settings ask a person to type it (a store name is not a town to put in a listing
+    // or in Marketplace's location box)
     dealer: {
       name: String(d.name || site.name || ''),
-      city: String(d.city || (site.address && site.address.city) || (myStores[0] ? shortLocation(myStores[0]) : '')),
+      city: String(d.city || (site.address && site.address.city) || ''),
       state: String(d.state || (site.address && site.address.state) || ''),
       zip: String(d.zip || (site.address && site.address.zip) || ''),
     },

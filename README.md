@@ -49,7 +49,7 @@ Facebook sometimes opens the create-listing page with a saved draft or an unfini
 ### Try it on one real car without publishing
 
 1. Load the extension (above) and open your dealership's used inventory page (the pilot's is `ronlewischryslerdodgejeepramwaynesburg.com/used-vehicles/`).
-2. Settings: enter your name, tick your store; city, state and ZIP are filled from the website, check them; keep "the website's main price", save. Scan.
+2. Settings: enter your name, tick your store; city, state and ZIP are filled from the website's address when it shows one, check them and type any it leaves blank; keep "the website's main price", save. Scan.
 3. On **Ready to post**, click **Post** on any car. Read the description in the side panel; edit a line if you like.
 4. Click **Open the form and check fields only**. Sign in to Facebook if it asks (Lot Current never sees that). The panel reports which of the 13 fields it can find on the page and which it can't, without filling anything. If any are missing, click **Copy report** and paste it into a Claude Code session, or fix the name pattern yourself in `extension/facebook/formMap.js`; each fix is one line.
 5. When the fields are found, click **Fill it in now** and watch the form fill. Compare the panel's "Filled in" list with the form; note anything under "Couldn't fill" or "Needs a click".
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new", and so does the word demo, demonstrat
 ## For development
 
 ```
-npm test              # 994 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 997 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

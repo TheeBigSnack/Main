@@ -118,6 +118,7 @@ try {
   await panel.waitForSelector('#wizZip');
   assert.match(await panel.textContent('#panel'), stepOf('address'));
   assert.equal(await panel.inputValue('#wizCity'), 'Waynesburg');
+  assert.match(await panel.textContent('#wizAddressHint'), /^Read from the website \(structured data\)\. Marketplace asks/, 'the step says where the address came from');
   assert.equal(await panel.inputValue('#wizState'), 'PA');
   assert.equal(await panel.inputValue('#wizZip'), '15370', "from the website's structured data");
   await panel.click('#wizNext'); // -> price

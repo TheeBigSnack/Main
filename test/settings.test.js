@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
+import { locationQuery } from '../extension/src/listingData.js';
+import { buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
 test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () => {
@@ -10,7 +12,7 @@ test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () =>
   assert.deepEqual(s.myStores, [WAYNESBURG]);
   assert.equal(s.basis, 'beforeFees');
   assert.deepEqual(s.salesperson, { name: '', title: 'sales consultant', closingLine: '' });
-  assert.deepEqual(s.dealer, { name: 'Ron Lewis CDJR Waynesburg', city: 'Waynesburg', state: '', zip: '' });
+  assert.deepEqual(s.dealer, { name: 'Ron Lewis CDJR Waynesburg', city: '', state: '', zip: '' }, 'no address on the website: the city is left for a person to type');
   assert.equal(s.priceNote, '');
   assert.equal(s.dailyCap, 10);
   assert.deepEqual(s.rewrite, { enabled: false, endpoint: '', key: '' });
@@ -29,6 +31,26 @@ test("the website's own address fills blank city, state and ZIP but never overri
   const partial = withDefaults({ dealer: { city: 'Waynesburg' } }, site);
   assert.deepEqual(partial.dealer, { name: WAYNESBURG, city: 'Waynesburg', state: 'PA', zip: '15370' });
   assert.equal(defaultSettings(site, []).dealer.zip, '15370');
+});
+
+test('the city is never guessed from a store name, and a city a person clears stays clear unless the website gives one', () => {
+  // A store name is a label (normalize.js shortLocation), not a town: whole, or a fragment like
+  // 'Superstore', it would read "on the lot at X in <store name>" and be typed into Marketplace's location box.
+  for (const store of ['Smith Chevrolet Buick GMC', 'Jones Toyota Superstore', 'Example Auto Mall', 'Smith Chevrolet of Dayton']) {
+    const s = withDefaults({ myStores: [store] }, { name: store });
+    assert.equal(s.dealer.city, '', store);
+    assert.equal(locationQuery(s.dealer), '', `${store}: nothing to type into the location box`);
+    assert.equal(defaultSettings({ name: store }, [{ location: store }]).dealer.city, '', `${store}: first-run defaults`);
+  }
+  // the wizard and Settings save a blank City box through withDefaults: it stays blank
+  assert.equal(withDefaults({ myStores: ['Example Auto Mall'], dealer: { city: '', state: 'OH' } }, { name: 'Example Auto Mall' }).dealer.city, '');
+  // the website's own address still fills a blank city
+  const site = { name: 'Example Auto Mall', address: { city: 'Springfield', state: 'OH', zip: '', source: 'page text' } };
+  assert.equal(withDefaults({ myStores: ['Example Auto Mall'], dealer: { city: '' } }, site).dealer.city, 'Springfield');
+  // with no city the description names the dealership alone
+  const s = withDefaults({ myStores: ['Example Auto Mall'] }, { name: 'Example Auto Mall' });
+  const text = buildTemplateDescription({ vehicle: { year: 2020, make: 'Ford', model: 'F-150', mileage: 1000, location: 'Example Auto Mall' }, dealer: s.dealer, salesperson: { name: 'Pat' }, stores: s.myStores });
+  assert.match(text, /^Pre-owned and on the lot at Example Auto Mall\.$/m);
 });
 
 test('bad input becomes safe defaults', () => {
@@ -134,7 +156,7 @@ test('first-run defaults: the store matching the site name; the price note is on
   const s = defaultSettings(site, lot);
   assert.deepEqual(s.myStores, [WAYNESBURG]);
   assert.equal(s.dealer.name, WAYNESBURG);
-  assert.equal(s.dealer.city, 'Waynesburg');
+  assert.equal(s.dealer.city, '', 'the site gives no address here, so the city is not guessed from the store name');
   assert.equal(s.priceNote, '', 'a person decides what the price gap means');
   assert.match(suggestedPriceNote(feeGap(lot).gap, s.basis), /\$490 doc fee/);
 });

@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, addressHint, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
 import { redeemInvite } from '../extension/src/account.js';
@@ -153,6 +153,25 @@ test('wizard.js: the step list from wizardSteps, the sign-in functions and messa
   // after finish, a signed-in person's first sync runs in the worker
   const fin = wizard.slice(wizard.indexOf('async function finish('), wizard.indexOf('\n}\n', wizard.indexOf('async function finish(')));
   assert.match(fin, /if \(accountsConfigured\(\) && \(await loadSession\(chrome\.storage\.local\)\)\) chrome\.runtime\.sendMessage\(\{ type: 'syncNow', origin: wiz\.origin \}\)\.catch\(\(\) => \{\}\);/);
+});
+
+test('the address step calls read from the website only what the website gave, and asks for the rest', () => {
+  const TAIL = 'Marketplace asks for a location; the ZIP is what gets typed.';
+  const none = `No address was found on the website: type the store's city, state and ZIP. ${TAIL}`;
+  // the scan found no address (src/scan.js leaves source '' and every part blank)
+  assert.equal(addressHint({ street: '', city: '', state: '', zip: '', phone: '', source: '' }), none);
+  assert.equal(addressHint(undefined), none, 'no site read yet');
+  assert.equal(addressHint(null), none);
+  assert.doesNotMatch(addressHint({ source: '' }), /Read from the website/);
+  // all of it read
+  assert.equal(addressHint({ city: 'Springfield', state: 'OH', zip: '43215', source: 'structured data' }), `Read from the website (structured data). ${TAIL}`);
+  // structured data with a ZIP and no city: the missing part is named, not filled in
+  assert.equal(addressHint({ city: '', state: '', zip: '43215', source: 'structured data' }), `Read from the website (structured data). It gives no city or state: type them. ${TAIL}`);
+  assert.equal(addressHint({ city: 'Springfield', state: 'OH', zip: '', source: 'structured data' }), `Read from the website (structured data). It gives no ZIP: type it. ${TAIL}`);
+  // wizard.js draws this hint, not a fixed "Read from the website"
+  const wizard = read('../extension/wizard.js');
+  assert.match(wizard, /addressHint\(wiz\.site && wiz\.site\.address\)/);
+  assert.doesNotMatch(wizard, />Read from the website/);
 });
 
 test('HANDOFF.md 5.7 lists the wizard steps with the Account step in its place', () => {
