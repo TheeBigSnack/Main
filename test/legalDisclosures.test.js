@@ -181,3 +181,19 @@ test('the privacy texts say Anthropic\'s servers fetch and look at the colour-gu
   const never = inventory.split('\n').find((l) => l.startsWith('- **Never kept or sent anywhere:**'));
   assert.match(never, /the photos themselves \([^)]*the up to four photos Anthropic's servers fetch from their addresses for a colour guess/, 'the inventory says the photos are never sent anywhere, and Anthropic fetches them for a colour guess');
 });
+
+test('the subscription agreement says what removing a User does and does not do, and the attorney is asked where the Dealer\'s responsibility ends', () => {
+  // the code: the account service turns a non-member away from sync and the description writer
+  assert.match(read('supabase/functions/sync/index.ts'), /json\(req, 403, \{ ok: false, error: memberships\.length \? `your account is not a member of the dealership/, 'sync no longer refuses a removed member: update dealer-subscription-agreement.md 3 and this test');
+  assert.match(read('supabase/functions/rewrite/index.ts'), /if \(!membership\) return json\(req, 403,/, 'the description writer no longer refuses a removed member: update dealer-subscription-agreement.md 3 and this test');
+  // the code: reading the website and preparing a listing need no account
+  for (const rel of ['extension/src/scanRunner.js', 'extension/src/vehicleDetails.js', 'extension/src/listingData.js', 'extension/facebook/fillForm.js']) {
+    assert.doesNotMatch(read(rel), /accountFlow|currentSession|accountConfig/, `${rel} now depends on the account: removal may stop the extension, update dealer-subscription-agreement.md 3 and this test`);
+  }
+
+  const s3 = section(read('legal/dealer-subscription-agreement.md'), '## 3. Authorisation for staff to post');
+  assert.match(s3, /Removing a User from the Dealer's account in the Service ends that person's syncing/, 'section 3 does not say what removing a User ends');
+  assert.match(s3, /it does not stop the extension on that person's computer, which needs no account to read the Dealer's public website and prepare a listing/, 'section 3 lets the Dealer think removal stops the extension');
+  const q7 = section(read('legal/questions-for-attorney.md'), '## 7. Employees posting from personal accounts');
+  assert.match(q7, /Should the Dealer's responsibility for a person's conduct end at removal/, 'the attorney is not asked whether the Dealer\'s responsibility ends at removal');
+});
