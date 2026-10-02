@@ -102,9 +102,12 @@ export const BANNED_PHRASES: readonly string[] = Object.freeze([
   'selling it myself', 'i am the owner', "i'm the owner", 'i\u2019m the owner', 'selling my', 'my personal', 'my truck', 'my car', 'my suv', 'my daily driver',
   //   steering the buyer away from the dealership, or selling for someone else
   'not the dealership', 'not the dealer', 'not through the dealership', 'not through the dealer', 'not at the dealership', 'skip the dealership', 'skip the dealer',
-  'for the owner', 'on behalf of the owner', 'for a friend', 'for my friend', 'reason for selling',
+  'instead of the dealership', 'instead of the dealer', "don't call the dealership", "don't call the dealer", 'don\u2019t call the dealership', 'don\u2019t call the dealer',
+  'bypass the dealership', 'bypass the dealer', 'avoid the dealership', 'avoid the dealer',
+  'for the owner', 'for the owners', 'on behalf of the owner', 'for a friend', 'for my friend', 'for my brother', 'for my sister', 'for my neighbor', 'for my neighbour', 'reason for selling',
   //   the car as the writer's own
-  "i've owned", 'i\u2019ve owned', 'i have owned', 'my own truck', 'my own car', 'my own vehicle', 'my vehicle', 'my jeep', 'my van',
+  "i've owned", 'i\u2019ve owned', 'i have owned', 'my own truck', 'my own car', 'my own vehicle', 'my own suv', 'my own jeep', 'my own van', 'my vehicle', 'my jeep', 'my van',
+  'our family truck', 'our family car', 'our family suv', 'our family van', 'our family vehicle',
   // protected characteristics have no place in a car ad
   'christian', 'muslim', 'jewish', 'hindu', 'catholic', 'religious', 'hispanic', 'latino', 'immigrant', 'citizens only',
   'disabled', 'handicapped', 'elderly', 'seniors only', 'for men', 'for women', 'for ladies', 'family only', 'no kids',
@@ -168,7 +171,9 @@ const MILE_WORDS = '(?:original|actual|true|indicated|documented|verified|certif
 const MEASURE_AFTER = new RegExp(`^\\s?(?:(?:k|thousand)\\b)?[\\s-]*(?:${MILE_WORDS}[\\s-]+){0,2}(?:miles?\\b|mi\\b|kms?\\b|kilomet|lbs?\\b|pounds?\\b|rpm\\b|cc\\b|hp\\b|horsepower|mpg|gal|watts?\\b|volts?\\b|ft\\b|feet|on the (?:odometer|odo|clock)\\b)`, 'i');
 
 const DOLLARS = /\$\s?(\d[\d,]*(?:\.\d+)?)(\s?k\b)?/gi;
-const PRICE_WORD = /\b(prices?|priced|msrp|asking|was|now(?:\s+(?:just|only))?|yours for|reduced to|dropped to)(?:\s+(?:is|of|at|to|just|only|now))*\s*[:\-–]?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d{4,7}(?:\.\d{1,2})?|\d{1,3}(?:\.\d+)?(?=\s?k\b))(?![\d,]\d)(\s?k\b)?/gi;
+// An amount with the word instead of "$": "1,500 dollars", "2k bucks".
+const DOLLAR_WORDS = /\b(\d[\d,]*(?:\.\d+)?)(\s?k\b)?[\s-]*(?:dollars?|bucks)\b/gi;
+const PRICE_WORD = /\b(prices?|priced|msrp|asking|was|now(?:\s+(?:just|only))?|yours for|reduced to|dropped to|sav(?:e|ings?)(?:\s+(?:up to|over))?)(?:\s+(?:is|of|at|to|just|only|now))*\s*[:\-–]?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d{4,7}(?:\.\d{1,2})?|\d{1,3}(?:\.\d+)?(?=\s?k\b))(?![\d,]\d)(\s?k\b)?/gi;
 function priceWordAmounts(t: string): WordAmount[] {
   const out: WordAmount[] = [];
   for (const m of t.matchAll(PRICE_WORD)) {
@@ -181,7 +186,7 @@ function priceWordAmounts(t: string): WordAmount[] {
 }
 export function dollarAmounts(text: unknown): Amount[] {
   const t = String(text ?? '');
-  const signed = [...t.matchAll(DOLLARS)].map((m) => ({ text: m[0].trim(), value: amountOf(m[1], m[2]), at: m.index as number }));
+  const signed = [...t.matchAll(DOLLARS), ...t.matchAll(DOLLAR_WORDS)].map((m) => ({ text: m[0].trim(), value: amountOf(m[1], m[2]), at: m.index as number }));
   return [...signed, ...priceWordAmounts(t)].sort((a, b) => a.at - b.at).map(({ text: said, value }) => ({ text: said, value }));
 }
 
@@ -315,7 +320,7 @@ interface ClaimKind {
 const PARTS = 'tires?|tyres?|brakes?|rotors?|pads|battery|batteries|wipers?|shocks?|struts?|exhaust|alternator|starter|clutch|timing (?:belt|chain)|water pump|engine|motor|transmission|paint|parts';
 export const CLAIM_KINDS: readonly ClaimKind[] = Object.freeze([
   { what: 'certification', re: /\b(?:certified|cpo)\b/i },
-  { what: 'a warranty or guarantee', re: /\b(?:warrant(?:y|ies|eed)|guarantee[ds]?|coverage|protection plans?|service contracts?)\b/i },
+  { what: 'a warranty or guarantee', re: /\b(?:warrant(?:y|ies|eed)|guarantee[ds]?|(?<!air[\s-]?bags?[\s-])coverage|protection plans?|service contracts?)\b/i },
   { what: 'financing or credit', re: /\b(?:financ\w*|credit|approv\w*|loans?|lenders?|apr|down[\s-]payments?|monthly payments?|per month|lease\w*|buy[\s-]here)\b/i },
   { what: 'accident, damage or title history', re: /\b(?:accidents?|collisions?|wreck(?:s|ed)?|damaged?|flood\w*|salvage|rebuilt|titles?|clean (?:carfax|autocheck|history|record|report))\b/i },
   { what: 'smoking or pets', re: /\b(?:non[\s-]?smok\w*|smok(?:er|ers|ing|ed)|smoke[\s-]?free|pet[\s-]?free|no pets)\b/i },
@@ -323,8 +328,8 @@ export const CLAIM_KINDS: readonly ClaimKind[] = Object.freeze([
   { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:set of\\s+)?(${PARTS})\\b`, 'i'), part: true },
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
   // who had it and how it was used ("one owner" has its own check, against the Carfax flag; "Pre-owned" is not a claim)
-  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned|driven (?:by|only|mostly|mainly|gently|sparingly|carefully)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
-  { what: 'where it came from', re: /\b(?:local(?:ly)? trade[ds]?|traded in locally|lease returns?|off[\s-]lease)\b/i },
+  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned(?![\s-]+(?:and|&)[\s-]+operated)|driven (?:by(?!\s+(?:(?:a|an|the|its)\s+)?(?:\d|v-?\d|hemi\b|turbo|twin[\s-]turbo|supercharged|diesel\b|hybrid\b|electric\b|ecoboost|duramax|cummins|power[\s-]?stroke|pentastar|vortec))|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
+  { what: 'where it came from', re: /\b(?:local(?:ly)? trade[ds]?|traded in locally|(?:came|taken|took) in on trade|on trade from|trade[\s-]in from|lease returns?|off[\s-]lease)\b/i },
   { what: 'its keys', re: /\b(?:(?:both|spare|extra|second|two|2|three|3|(?:sets?|pairs?) of) (?:keys|key[\s-]?fobs|fobs|remotes)|(?:spare|extra|second) (?:key|key[\s-]?fob|fob|remote))\b/i },
 ]);
 
@@ -513,8 +518,11 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   }
   const vin = String(vehicle.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (vin && !t.toUpperCase().includes(vin)) problems.push({ code: 'no-vin', text: "Doesn't include the VIN" });
+  // a banned phrase only the dealership's price note says is the note's to change, in Settings: no edit or template can drop the note
+  const besideNote = noteSaid ? without(t, [noteSaid]) : t;
   for (const [phrase, re] of BANNED_RE) {
-    if (re.test(t)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
+    if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
+    else if (re.test(t)) problems.push({ code: 'banned-phrase', text: `Your dealership's price note says "${phrase}"; change the note in Settings` });
   }
   if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });

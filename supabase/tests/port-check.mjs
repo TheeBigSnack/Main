@@ -58,6 +58,10 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, pre-owned, driven by its previous owner on highway miles, one previous owner, owned by one family, both keys, all records, powertrain coverage, freshly detailed and garaged.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Message me directly, not the dealership; I have owned it and am selling it for a friend.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, one damage-free owner, one adult owner, one previous owner, one non-smoking owner and one adult owner again.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Plus tax, title and registration, which go to the state, not the dealer. Text me instead of the dealership; our family truck, selling for my brother.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Example Motors is locally owned and operated; this one was adult owned.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, only 2,019 dollars down, save 1,500 today, 1500 bucks off, driven by a 5.7L V8, never driven in winter, came in on trade from a local customer, full airbag coverage.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -72,6 +76,7 @@ const contexts = [
   { vehicle: { ...vehicle, location: 'Example Certified Motors Route 19' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, make: 'GMC', model: 'SIERRA 2500HD', trim: 'SLE EXT CAB', features: [...vehicle.features, 'AWD', 'ABS', 'USB'], interiorColor: 'BLK/GRY', location: 'SAMPLE CDJR' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, carfaxOneOwner: true, descriptionRaw: 'One adult owner, garage kept.' }, dealer, priceNote: '', price: 28995 },
+  { vehicle, dealer, priceNote: 'Plus tax, title and registration, which go to the state, not the dealer.', price: 28995 },
   {},
 ];
 

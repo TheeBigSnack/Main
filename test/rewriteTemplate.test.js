@@ -300,6 +300,11 @@ test('a stale mileage or price is caught in the usual ways a write-up states it,
     'Internet price: 28,995.': ['price-mismatch'],
     'Yours for 28,995 today.': ['price-mismatch'],
     'Now 26,673!': ['price-change'],
+    // the year's or the model's digits as money, with the word instead of "$"
+    'Only 2,019 dollars down.': ['price-mismatch'],
+    '1500 dollars off this week.': ['price-mismatch'],
+    'Save 1,500 today.': ['price-mismatch'],
+    'Savings of 1,500 bucks.': ['price-mismatch'],
   };
   for (const [sentence, codes] of Object.entries(stale)) {
     const got = runGuardrails(`${base}\n${sentence}`, c).problems.map((p) => p.code).filter((code) => /price|mileage/.test(code));
@@ -320,12 +325,13 @@ test('a stale mileage or price is caught in the usual ways a write-up states it,
 });
 
 test('a model year, fuel economy, a warranty, a range or a weight is never read as the mileage or a price', () => {
-  for (const words of ['Low mileage 2019 Ram 1500.', 'Great gas mileage of 30 mpg.', 'Fuel mileage: 28 city / 36 highway.', '1 owner low miles.', 'Range: 290 Miles', 'Free Oil Changes 2 Years or 24,000 Miles', '24 months or 24,000 miles of coverage.', '5 Miles to Empty Warning', 'Towing capacity was 7,500 lbs.', 'The price includes 2 keys.', 'It was 2019 when it came in.']) {
+  for (const words of ['Low mileage 2019 Ram 1500.', 'Great gas mileage of 30 mpg.', 'Fuel mileage: 28 city / 36 highway.', '1 owner low miles.', 'Range: 290 Miles', 'Free Oil Changes 2 Years or 24,000 Miles', '24 months or 24,000 miles of coverage.', '5 Miles to Empty Warning', 'Towing capacity was 7,500 lbs.', 'The price includes 2 keys.', 'It was 2019 when it came in.', 'The Ram 1500 Classic saves fuel.', 'Save time with remote start.']) {
     assert.deepEqual(mileageClaims(words), [], words);
     assert.deepEqual(dollarAmounts(words), [], words);
   }
   assert.deepEqual(mileageClaims('Only 38,000 original miles. Mileage: 38,000 miles. Odometer reads 41,230; 45k on the odo.').map((m) => m.value), [38000, 38000, 41230, 45000]);
   assert.deepEqual(dollarAmounts('Was 31,995, now just $28,995. Internet price: 28,995. Priced at 26,673; yours for 28.5k.').map((a) => a.value), [31995, 28995, 28995, 26673, 28500]);
+  assert.deepEqual(dollarAmounts('Only 2,019 dollars down, 1500 bucks off, save 1,500 or save up to 2k.').map((a) => a.value), [2019, 1500, 1500, 2000]);
 });
 
 test('the template leaves out write-up sentences the checks would refuse: a banned phrase, or one owner without the Carfax flag', async () => {
@@ -419,6 +425,14 @@ test('private-seller wording is refused in the closing line, in the template and
     'Selling it for a friend, message me.',
     'Reason for selling: I bought a new one.',
     'Come see me, not at the dealership.',
+    'Message me instead of the dealership.',
+    "Don't call the dealership, text me.",
+    'Don\u2019t call the dealer, text me.',
+    'Bypass the dealer and message me.',
+    'Avoid the dealership, text me.',
+    'Selling it for my brother.',
+    'Selling it for my neighbor.',
+    'Selling for the owners.',
     // the car as the writer's own
     "I've owned this truck since new.",
     'I\u2019ve owned it since new.',
@@ -427,6 +441,9 @@ test('private-seller wording is refused in the closing line, in the template and
     'My Jeep is ready for you.',
     'My van, ready for you.',
     'My vehicle is ready.',
+    'This is my own SUV.',
+    'My own Jeep, ready to go.',
+    'Our family truck for years.',
   ];
   for (const line of posing) {
     assert.ok(checkClosingLine(line).problems.some((p) => p.code === 'closing-banned'), `closing line: ${line}`);
@@ -468,6 +485,21 @@ test('a description without the dealership\'s price note fails the checks; the t
   assert.deepEqual(runGuardrails(dropped, { ...c, priceNote: '   ' }).problems, []);
 });
 
+test('a banned phrase in the dealership\'s own price note is named as the note\'s, to change in Settings', () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const note = 'Plus tax, title and registration, which go to the state, not the dealer.';
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: note, price: v.price };
+  const text = buildTemplateDescription(c);
+  assert.ok(text.includes(note));
+  // still refused (the note goes into every description), but no edit or Reset to template can fix it, so the reason says where it can be
+  assert.deepEqual(runGuardrails(text, c).problems, [{ code: 'banned-phrase', text: 'Your dealership\'s price note says "not the dealer"; change the note in Settings' }]);
+  // the same words in the description itself are the description's
+  assert.deepEqual(runGuardrails(`${text}\nText me, not the dealer.`, c).problems.map((p) => p.text), ['Says "not the dealer"']);
+  // a note without them: nothing to say
+  const fine = { ...c, priceNote: 'Plus tax, title and registration, which go to the state.' };
+  assert.deepEqual(runGuardrails(buildTemplateDescription(fine), fine).problems, []);
+});
+
 // ---------- claims only the website can make ----------
 
 // A car whose write-up and features say nothing about warranty, financing,
@@ -503,6 +535,11 @@ test('a draft that invents warranty, financing, certification, history, care, ne
     'Comes with both keys, a spare fob and all records.': ['unsupported-claim'],
     'Lifetime powertrain coverage included.': ['unsupported-claim'],
     'Freshly detailed and garaged.': ['unsupported-claim'],
+    'A retired teacher drove it to church on Sundays.': ['unsupported-claim'],
+    'Never driven in winter.': ['unsupported-claim'],
+    "It was Grandma's car.": ['unsupported-claim'],
+    'Came in on trade from a local customer.': ['unsupported-claim'],
+    'A trade-in from a local family.': ['unsupported-claim'],
   };
   for (const [sentence, codes] of Object.entries(invented)) assert.deepEqual(codesAfter(sentence), codes, sentence);
   const c = plainCtx();
@@ -512,7 +549,7 @@ test('a draft that invents warranty, financing, certification, history, care, ne
     'Says "both keys", but the website says nothing about its keys for this car',
   ]);
   // wording that only sounds like it: the template's own "Pre-owned", a buyer's plans, the keyless entry
-  for (const sentence of ['Pre-owned by our standards and ready for you.', 'Ready for weekend trips and highway drives.', 'Keyless entry with the push-button start.']) {
+  for (const sentence of ['Pre-owned by our standards and ready for you.', 'Ready for weekend trips and highway drives.', 'Keyless entry with the push-button start.', 'Driven by a 5.7L HEMI V8.', 'Driven by the turbocharged engine.', 'Full airbag coverage front and rear.', 'We take trade-ins.']) {
     assert.deepEqual(codesAfter(sentence), [], sentence);
   }
   assert.deepEqual(said('Comes with a warranty and financing for all credit.'), [
@@ -552,6 +589,11 @@ test('a claim the website itself makes passes, and the template built from such 
   const trade = plainCtx({ ...PLAIN(), descriptionRaw: 'Local trade with the 8.4-inch touchscreen.' });
   assert.deepEqual(codesAfter('A local trade.', trade), []);
   assert.deepEqual(codesAfter('A local trade, driven by a retired teacher.', trade), ['unsupported-claim']);
+  // the dealership's "locally owned and operated" is about the business, not the car, and never vouches for an owner story
+  assert.deepEqual(codesAfter('We are locally owned and operated.'), []);
+  assert.deepEqual(codesAfter('This one was locally owned.'), ['unsupported-claim']);
+  const business = plainCtx({ ...PLAIN(), descriptionRaw: 'Rides on 20-inch wheels. We are locally owned and operated.' });
+  assert.deepEqual(codesAfter('It was adult owned and driven by a retired teacher.', business), ['unsupported-claim']);
   // spelled-out numbers the website writes the same way, or as digits, are its own
   const w = { ...PLAIN(), descriptionRaw: 'Two sets of keys and twenty-two inch wheels.' };
   assert.deepEqual(codesAfter('Comes with two sets of keys.', plainCtx(w)), []);
