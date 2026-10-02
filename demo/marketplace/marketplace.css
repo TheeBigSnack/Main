@@ -1,22 +1,24 @@
-/* The sandbox's stand-in Marketplace pages: plain, so the form controls and their labels are the point. */
-:root { --ink: #1c1c1e; --muted: #65676b; --line: #ced0d4; --accent: #1b74e4; --bg: #f0f2f5; }
+/* The sandbox's stand-in Marketplace pages: plain, so the form controls and their labels are the point.
+   Every colour is one of the website's (site/site.css), never Facebook's, and the name in the header is plain
+   ink: these pages are in the screenshots on the website (legal/trademark-note.md, test/siteImages.test.js). */
+:root { --ink: #1c1f1d; --muted: #5f6661; --line: #e2e5e1; --accent: #1c1f1d; --bg: #f6f7f5; --paper: #ffffff; }
 * { box-sizing: border-box; }
 body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
-.sample { background: #fff4dc; color: #8a5300; padding: 6px 16px; font-size: 12px; text-align: center; border-bottom: 1px solid #f1dba8; }
-header.mp { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: #fff; border-bottom: 1px solid var(--line); }
-header.mp .logo { font-weight: 800; font-size: 18px; color: var(--accent); }
+.sample { background: #fff4dc; color: #8a5300; padding: 6px 16px; font-size: 12px; text-align: center; border-bottom: 1px solid var(--line); }
+header.mp { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: var(--paper); border-bottom: 1px solid var(--line); }
+header.mp .logo { font-weight: 600; font-size: 18px; color: var(--ink); }
 header.mp nav a { margin-left: 14px; color: var(--ink); text-decoration: none; }
-main { max-width: 680px; margin: 16px auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px 22px; }
+main { max-width: 680px; margin: 16px auto; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px 22px; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 .hint { color: var(--muted); font-size: 12px; }
 label { display: block; margin: 10px 0 0; font-weight: 600; }
-label input, label textarea, label select { display: block; width: 100%; margin-top: 4px; font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+label input, label textarea, label select { display: block; width: 100%; margin-top: 4px; font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
 label input[type="checkbox"] { display: inline-block; width: auto; margin: 0 8px 0 0; }
 .field { margin: 10px 0 0; }
 .field > .k { font-weight: 600; display: block; margin-bottom: 4px; }
-[role="combobox"] { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; cursor: pointer; background: #fff; }
+[role="combobox"] { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; cursor: pointer; background: var(--paper); }
 [role="combobox"][aria-expanded="true"] { border-color: var(--accent); }
-[role="listbox"] { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 4px; max-width: 320px; max-height: 180px; overflow: auto; box-shadow: 0 6px 20px rgba(0,0,0,0.12); margin-top: 4px; }
+[role="listbox"] { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 4px; max-width: 320px; max-height: 180px; overflow: auto; box-shadow: 0 6px 20px rgba(0,0,0,0.12); margin-top: 4px; }
 [role="option"] { padding: 6px 8px; cursor: pointer; border-radius: 6px; }
 [role="option"]:hover { background: var(--bg); }
 [hidden] { display: none !important; }
@@ -26,12 +28,12 @@ label input[type="checkbox"] { display: inline-block; width: auto; margin: 0 8px
 .photos { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0 0; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .thumbs img { width: 92px; height: 69px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
-button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 18px; font: inherit; font-weight: 700; cursor: pointer; margin-top: 16px; }
-button.plain { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--paper); border: 0; border-radius: 8px; padding: 10px 18px; font: inherit; font-weight: 700; cursor: pointer; margin-top: 16px; }
+button.plain { background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
 .price { font-size: 22px; font-weight: 800; margin: 6px 0; }
-.badge { display: inline-block; background: #e4e6eb; border-radius: 6px; padding: 2px 10px; font-weight: 700; }
-.badge.sold { background: #fde2e2; color: #b42318; }
+.badge { display: inline-block; background: var(--line); border-radius: 6px; padding: 2px 10px; font-weight: 700; }
+.badge.sold { background: #fdecec; color: #9f1d1d; }
 .tabs { display: flex; gap: 12px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
 .tabs [role="tab"] { padding: 4px 0; border-bottom: 2px solid transparent; }
 .tabs [role="tab"][aria-selected="true"] { color: var(--ink); border-color: var(--accent); }

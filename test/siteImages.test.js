@@ -219,3 +219,33 @@ test('the share-image helpers: the size and limit, the alt sentence, images.json
   assert.equal(templateText('<html><body><!-- no --><h1>Lot Current</h1> <p>A &amp; B</p></body></html>'), 'Lot Current A & B');
   assert.throws(() => restingHeading('<html><body><h2>no id</h2></body></html>'), /no <h2 id="heading">/);
 });
+
+// review: the sandbox's stand-in Marketplace pages, which the website's screenshots show (03-form-filled.png, and
+// the listing behind 05-pilot.png), were drawn in Facebook's own web colours (#1b74e4 blue, #f0f2f5 wash, #65676b
+// and #ced0d4 greys) with a bold blue "Sample Marketplace" name. legal/trademark-note.md rules out Meta's brand
+// colours and wordmark styling in screenshots and on the website, so those pages take the website's own colours, the
+// way the store tile does (test/storeImages.test.js), and the name is plain ink.
+test('the sandbox\'s stand-in Marketplace pages in the screenshots use only the website\'s colours and a plain name', () => {
+  const sandbox = read('demo/marketplace/marketplace.css');
+  const six = (c) => (c.length === 4 ? '#' + [...c.slice(1)].map((x) => x + x).join('') : c).toLowerCase();
+  const ours = new Set([...css.matchAll(/#[0-9a-f]{3,8}\b/gi)].map((m) => six(m[0])));
+  const used = [...new Set([...sandbox.matchAll(/#[0-9a-f]{3,8}\b/gi)].map((m) => six(m[0])))];
+  assert.ok(used.length >= 4, 'the sandbox stylesheet names its colours');
+  for (const c of used) assert.ok(ours.has(c), `${c} in demo/marketplace/marketplace.css is not one of site/site.css's colours`);
+  // no colour written another way, but the shadow's black
+  for (const m of sandbox.matchAll(/\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(([^)]*)\)/gi)) {
+    assert.match(m[0], /^rgba\(0,\s*0,\s*0,\s*[\d.]+\)$/, `demo/marketplace/marketplace.css writes a colour as ${m[0]}`);
+  }
+  for (const name of ['blue', 'royalblue', 'dodgerblue', 'steelblue', 'cornflowerblue']) assert.doesNotMatch(sandbox, new RegExp(`:\\s*${name}\\b`, 'i'));
+  // the stand-in's name is plain: ink, not the accent, and not heavy
+  const logo = (sandbox.match(/header\.mp \.logo \{([^}]*)\}/) || [, ''])[1];
+  assert.match(logo, /color: var\(--ink\)/, 'the "Sample Marketplace" name is drawn in ink');
+  const weight = Number((logo.match(/font-weight: (\d+)/) || [, 400])[1]);
+  assert.ok(weight <= 600, `the "Sample Marketplace" name is drawn at weight ${weight}`);
+  // the pages carry no colour of their own
+  for (const page of readdirSync(path('demo/marketplace/')).filter((f) => f.endsWith('.html'))) {
+    const html = read(`demo/marketplace/${page}`);
+    assert.doesNotMatch(html, /#[0-9a-f]{3,8}\b|\brgba?\(/i, `demo/marketplace/${page} writes a colour of its own`);
+    assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]), ['marketplace.css'], `demo/marketplace/${page} takes its look from marketplace.css alone`);
+  }
+});
