@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitSegments, splitSentences, findBoilerplate, cleanDescription, writeUpParts, openingSegment, endsAtAbbreviation, finishesSentence, isHeading, STARTS_SENTENCE, MIN_BOILERPLATE_COUNT } from '../extension/src/description.js';
+import { splitSegments, splitSentences, findBoilerplate, cleanDescription, openingSentences, endsAtAbbreviation, isHeading, STARTS_SENTENCE, MIN_BOILERPLATE_COUNT } from '../extension/src/description.js';
 
 // Text captured from the live Waynesburg site on 2026-09-26 (the equipment
 // dump is abridged; the real one runs to 30+ items).
@@ -87,6 +87,9 @@ test('without a boilerplate set the disclaimer would survive, so the scan must s
 test('a short real sentence after a Carfax prefix is kept', () => {
   assert.deepEqual(cleanDescription('Recent Arrival! Clean CARFAX. Local trade with new tires and brakes.'), ['Local trade with new tires and brakes.']);
   assert.deepEqual(cleanDescription('CARFAX One-Owner.'), []);
+  // a sentence that only starts with those words keeps them: they are part of what it says
+  assert.deepEqual(cleanDescription('Clean CARFAX Not Available On This Unit. Local trade.'), ['Clean CARFAX Not Available On This Unit. Local trade.']);
+  assert.deepEqual(cleanDescription('Clean Carfax except one reported accident.'), ['Clean Carfax except one reported accident.']);
 });
 
 // A lot-wide line written the ways other websites write it: on a line of its
@@ -134,19 +137,21 @@ test('a line that stops on a word in lower case, a comma or a dash joins the nex
   assert.deepEqual(splitSegments('Dealer comments\nLocal trade with new brakes and tires.'), ['Dealer comments Local trade with new brakes and tires.']);
   // a list item is never joined to the line before it
   assert.deepEqual(splitSegments('Great truck with\n- Heated seats'), ['Great truck with', '- Heated seats']);
+  // a line that starts in lower case (in any alphabet) carries on the one before it, even after a full stop
+  assert.deepEqual(splitSegments('Runs and drives great.\nexcept for the transmission.'), ['Runs and drives great. except for the transmission.']);
+  assert.deepEqual(splitSegments('Camioneta local.\n\u00e9sta tiene frenos nuevos.'), ['Camioneta local. \u00e9sta tiene frenos nuevos.']);
+  // a line that ends on a closing bracket or quote ends there
+  assert.deepEqual(splitSegments('Comes with [Tech Package]\nLocal trade.'), ['Comes with [Tech Package]', 'Local trade.']);
+  assert.deepEqual(splitSegments('Comes with the \u2018Tech\u2019\nLocal trade.'), ['Comes with the \u2018Tech\u2019', 'Local trade.']);
 });
 
-test('a full stop after an abbreviation does not end a sentence, and a sentence may start after opening punctuation', () => {
-  for (const text of ['the original Mfr.', 'Comes with approx.', 'the tow pkg.', 'Ace Auto Inc.', 'Main St.', 'No.', 'Built in the U.S.', 'J.', 'a Jeep Cert.', 'by the Mfg.', 'e.g.']) {
+test('for finding lot-wide text, a full stop after an abbreviation does not end a sentence, and a sentence may start after opening punctuation', () => {
+  for (const text of ['the original Mfr.', 'Comes with approx.', 'the tow pkg.', 'Ace Auto Inc.', 'Main St.', 'No.', 'Built in the U.S.', 'J.', 'a Jeep Cert.', 'by the Mfg.', 'e.g.', 'the Tech.', 'by the Auth.']) {
     assert.equal(endsAtAbbreviation(text), true, text);
-    assert.equal(finishesSentence(text), false, text);
   }
-  // a word with a vowel, a unit after a number, the car's own name in capitals or a word with a digit ends a sentence
-  for (const text of ['Local trade.', 'Gets 30 mpg.', 'Makes 395 hp.', 'This Challenger is RWD.', 'A Ram 1500 SLT.', 'It has the 5.7L V8.', 'Ready to go!', 'Is it yours?', 'Call Ace Auto.']) {
+  for (const text of ['Local trade.', 'Gets 30 mpg.', 'Makes 395 hp.', 'This Challenger is RWD.', 'A Ram 1500 SLT.', 'It has the 5.7L V8.', 'Ready to go!', 'Is it yours?', 'Call Ace Auto.', 'Local trade with new brakes']) {
     assert.equal(endsAtAbbreviation(text), false, text);
-    assert.equal(finishesSentence(text), true, text);
   }
-  assert.equal(finishesSentence('Local trade with new brakes'), false);
   // so a sentence stays whole across an abbreviation, and before a piece in lower case
   assert.deepEqual(splitSentences('This one is past the original Mfr. Warranty coverage. Local trade.'), ['This one is past the original Mfr. Warranty coverage.', 'Local trade.']);
   assert.deepEqual(splitSentences('Comes with approx. Two keys. Local trade.'), ['Comes with approx. Two keys.', 'Local trade.']);
@@ -166,48 +171,114 @@ test('a heading is a short line ending in a colon that only names a part of the 
   }
 });
 
-test('each segment of the write-up says whether it starts a sentence on the website, and the opening segment is always the write-up\'s first, past headings', () => {
-  const opens = (raw, boilerplate) => writeUpParts(raw, new Set(boilerplate)).map((p) => [p.text, p.opens]);
-  // first, after a finished sentence, or after a heading
-  assert.deepEqual(opens('Local trade.<br>New brakes.'), [['Local trade.', true], ['New brakes.', true]]);
-  assert.deepEqual(opens('Dealer Comments:\nLocal trade.'), [['Dealer Comments:', true], ['Local trade.', true]]);
-  // a segment that carries on a sentence the website broke never starts one, whatever it starts with
-  assert.deepEqual(opens('Please note this vehicle is not a Jeep<br>Certified Pre-Owned vehicle.'), [['Please note this vehicle is not a Jeep', true], ['Certified Pre-Owned vehicle.', false]]);
-  assert.deepEqual(opens('This vehicle does not come with a<br>warranty of any kind.'), [['This vehicle does not come with a', true], ['warranty of any kind.', false]]);
-  assert.deepEqual(opens('<p>Vehicle Highlights</p><p>Local trade.</p>'), [['Vehicle Highlights', true], ['Local trade.', false]]);
-  // nor does one after a line that ends in a colon but is not a heading, or after an abbreviation
-  assert.deepEqual(opens('Sold without:<br>Warranty of any kind.'), [['Sold without:', true], ['Warranty of any kind.', false]]);
-  assert.deepEqual(opens('Exclusions:<br>Floor mats.'), [['Exclusions:', true], ['Floor mats.', false]]);
-  assert.deepEqual(opens('This one is not covered by the original Mfr.<br>Warranty applies only to new units.'), [['This one is not covered by the original Mfr.', true], ['Warranty applies only to new units.', false]]);
-  // judged against the line the website shows right before it, even one the narrative leaves out
-  assert.deepEqual(opens('- Heated seats and the<br>Tow package and hitch.'), [['Tow package and hitch.', false]]);
-  assert.deepEqual(opens('Local trade.<br>All prices exclude tax and the<br>Documentation fee.', ['All prices exclude tax and the']), [['Local trade.', true], ['Documentation fee.', false]]);
-  assert.deepEqual(opens('CARFAX One-Owner.<br>Local trade.'), [['Local trade.', true]]);
-  // a segment that starts with an equipment list never starts the write-up line, and its lead stops at a list inside it
-  const dump = 'Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package.';
-  assert.deepEqual(opens(`${dump} Floor mats.`), [['Floor mats.', false]]);
-  assert.deepEqual(writeUpParts(`Local trade. ${dump} Floor mats.`), [{ text: 'Local trade. Floor mats.', opens: true, lead: 'Local trade.' }]);
-  // nor does a segment right after a bullet, an award line or an equipment list
-  assert.deepEqual(opens(`Not included: ${dump}<br>Floor mats.`), [['Floor mats.', false]]);
-  assert.deepEqual(opens('- Not included: floor mats.<br>Spare key.'), [['Spare key.', false]]);
-  assert.deepEqual(opens('Awards: Not a 2019 KBB Best Buy.<br>Certified Pre-Owned vehicle.'), [['Certified Pre-Owned vehicle.', false]]);
-  // the narrative itself is the same plain strings as before
-  assert.deepEqual(cleanDescription('Local trade.<br>New brakes.'), ['Local trade.', 'New brakes.']);
+// ---------- the template's write-up line ----------
 
-  // the opening segment is the write-up's first, past headings, and only when it starts a sentence
-  assert.equal(openingSegment(writeUpParts('Please note this vehicle is not a Jeep<br>Certified Pre-Owned vehicle.')), 'Please note this vehicle is not a Jeep');
-  assert.equal(openingSegment(writeUpParts('Dealer Comments:<br>Local trade with new brakes.<br>Price excludes tax.')), 'Local trade with new brakes.');
-  assert.equal(openingSegment(writeUpParts('Sold as is. It does not include the Uconnect\nNavigation package.')), 'Sold as is. It does not include the Uconnect');
-  assert.equal(openingSegment(writeUpParts('Features:\nHeated Seats\nSunroof')), 'Heated Seats');
-  // never a later segment instead of the first
-  assert.equal(openingSegment(writeUpParts('This vehicle does not come with:<br>A spare key.<br>Floor mats.')), 'This vehicle does not come with:');
-  assert.equal(openingSegment(writeUpParts('Vehicle Highlights<br>Local trade.<br>Clean interior.')), 'Vehicle Highlights');
-  assert.equal(openingSegment(writeUpParts('- Heated seats and the<br>Tow package and hitch.')), '');
-  assert.equal(openingSegment(writeUpParts(`${dump} Floor mats.<br>Local trade.`)), '');
-  // plain strings carry no word on whether they start a sentence, so none does
-  assert.equal(openingSegment(['Local trade.']), '');
-  assert.equal(openingSegment([]), '');
-  assert.equal(openingSegment(undefined), '');
+test('the write-up line is cut only at a clear sentence end: a single mark after a word in lower case, then a capital, a digit or nothing', () => {
+  assert.deepEqual(openingSentences('Local trade. New brakes and tires! Is it ready? 2 keys included.'), ['Local trade.', 'New brakes and tires!', 'Is it ready?', '2 keys included.']);
+  assert.deepEqual(openingSentences('\u00a1Camioneta local con frenos nuevos!'), ['\u00a1Camioneta local con frenos nuevos!']);
+  // anything else does not end a sentence, so what follows it stays with it and the sentence is whole
+  for (const raw of [
+    'Equipped with the 8-Speed Auto. Transmission and heated seats.', // a capitalised word
+    'Comes with the Tech. Package and adaptive cruise.',
+    'Covered by the DLR. Warranty applies only to new units.', // capitals
+    'Not a Yahoo! Autos Certified vehicle.', // "!" after a capitalised word
+    'Built in 2019. Local trade.', // a number
+    'Comes with approx. Two keys.', // an abbreviation in lower case
+    'Fits 20 in. Wheels and a spare.',
+    'Not covered by the original mfr. Warranty applies only to new units.', // a word with no vowel
+    'Runs great... Mostly on weekends.', // an ellipsis
+    'He called it "great." Local trade.', // a closing quote
+    'Wow!! Local trade.', // a doubled mark
+    'Runs and drives great. except the transmission slips.', // a word in lower case after it
+  ]) assert.deepEqual(openingSentences(raw), [raw], raw);
+  // with no clear end at all, nothing is taken
+  for (const raw of ['Local trade with new brakes', 'This SUV is not a Ford Auth.', 'Built in 2019.', 'Runs great...', 'Smoker? No.', 'Comes with the tow pkg.']) {
+    assert.deepEqual(openingSentences(raw), [], raw);
+  }
+  // nor after the last clear end
+  assert.deepEqual(openingSentences('Local trade. This truck does not have the Max. Tow Package.'), ['Local trade.']);
+});
+
+test('the write-up line starts at the write-up\'s first line, past headings and labels, and never at a later line instead', () => {
+  for (const raw of ['Local trade.', 'Dealer Comments:\nLocal trade.', 'Dealer Comments:<br>Vehicle Highlights:<br>Local trade.', 'CARFAX One-Owner.<br>Local trade.', 'Recent Arrival! Clean CARFAX. Local trade.', 'Recent Arrival!\nLocal trade.']) {
+    assert.deepEqual(openingSentences(raw), ['Local trade.'], raw);
+  }
+  // a first line that does not start a sentence, or a label that does not end in "." or "!", gives nothing, and no later line is read
+  for (const raw of [
+    'Vehicle Highlights<br>Local trade.',
+    '2019 Ram 1500 Classic Express\nLocal trade.',
+    'Sold without:<br>Warranty of any kind.',
+    'Exclusions:<br>Floor mats.',
+    'Dealer Comments:<br>This vehicle does not come with:<br>A spare key.',
+    '- Heated seats<br>Local trade.',
+    '- Local trade with new brakes.',
+    '1. Local trade with new brakes.',
+    '2) Local trade with new brakes.',
+    'Awards: Not a 2019 KBB Best Buy.<br>Certified Pre-Owned vehicle.',
+    'local trade with new brakes.',
+    '*** Local trade with new brakes ***<br>Clean interior.',
+    'Clean CARFAX Not Available On This Unit. Local trade.',
+    'CARFAX One-Owner Status Not Verified.',
+    'Recent Arrival! Clean CARFAX Not Available. Local trade.',
+    'Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package.<br>Local trade.',
+    'Please note this vehicle is not a Jeep<br>Certified Pre-Owned vehicle.',
+    // after a label or a heading, a line that carries it on
+    'Clean CARFAX.<br>Not available for this unit.',
+    'Dealer Comments:<br>But not on this unit.',
+  ]) assert.deepEqual(openingSentences(raw), [], raw);
+  // a first line that starts that way has nothing before it to carry on
+  assert.deepEqual(openingSentences('Not a rental, not a fleet unit.'), ['Not a rental, not a fleet unit.']);
+  // lines the website's own text wraps are read as one, up to a paragraph or a <br>
+  assert.deepEqual(openingSentences('Local trade with new\nMichelin tires.'), ['Local trade with new Michelin tires.']);
+  assert.deepEqual(openingSentences('Runs and drives great.\nexcept for the transmission, which slips.'), ['Runs and drives great. except for the transmission, which slips.']);
+  assert.deepEqual(openingSentences('Comes with approx.\ntwo keys.'), ['Comes with approx. two keys.']);
+  // a list of equipment stops it
+  assert.deepEqual(openingSentences('Local trade. Heated Seats, Navigation, Sunroof. Floor mats.'), ['Local trade.']);
+});
+
+test('the write-up line never starts after, or takes, text the lot shares', () => {
+  const lot = (raw, ...shared) => openingSentences(raw, new Set(shared));
+  // a lot-wide first line: nothing, not the line after it
+  assert.deepEqual(lot('All prices exclude tax.<br>Local trade.', 'All prices exclude tax.'), []);
+  assert.deepEqual(lot('The following items are not included with this vehicle.<br>Spare key and floor mats.', 'The following items are not included with this vehicle.'), []);
+  assert.deepEqual(lot('This vehicle is not a Ford Auth.<br>Certified Pre-Owned Escape.', 'This vehicle is not a Ford Auth.'), []);
+  // a lot-wide sentence first, or inside a sentence: nothing; after the car's own: the car's own only
+  assert.deepEqual(lot('All prices exclude tax. Local trade.', 'All prices exclude tax.'), []);
+  assert.deepEqual(lot('This vehicle is not a Ford Auth. Certified Pre-Owned Escape with new brakes.', 'This vehicle is not a Ford Auth.'), []);
+  assert.deepEqual(lot('Local trade. All prices exclude tax. New brakes.', 'All prices exclude tax.'), ['Local trade.']);
+  // a lot-wide line is never read as a wrapped part of the car's own line
+  assert.deepEqual(lot('Local trade with new\nbrakes and tires.', 'brakes and tires.'), []);
+});
+
+test('the write-up line never ends on a question, or on a sentence the next words carry on', () => {
+  const two = (sentence, taken) => taken.length < 2;
+  assert.deepEqual(openingSentences('Smoker? No.<br>Local trade.'), []);
+  assert.deepEqual(openingSentences('Any rust? No. Frame damage? Yes, repaired.', new Set(), two), []);
+  assert.deepEqual(openingSentences('Local trade. Smoker? No.', new Set(), two), ['Local trade.']);
+  assert.deepEqual(openingSentences('Smoker? No, never. Local trade.'), ['Smoker?', 'No, never.', 'Local trade.']);
+  // the next line, or the next sentence past the last one taken, carries it on or takes it back
+  for (const raw of [
+    'Comes with the factory warranty.<br>until it expired last spring.',
+    '<p>This Jeep comes fully loaded.</p><p>except for the navigation and sunroof.</p>',
+    'Comes with the factory warranty.<br>Except the engine.',
+    'Comes with the factory warranty.<br>- except the engine',
+    'Comes fully loaded.<br>(minus the sunroof)',
+    'Comes fully loaded.<br>, minus the sunroof',
+    'Certified Pre-Owned.<br>NOT!',
+    'Local trade with the warranty.<br>But it expired.',
+  ]) assert.deepEqual(openingSentences(raw), [], raw);
+  assert.deepEqual(openingSentences('Local trade. Covered by the factory warranty. Except it expired.', new Set(), two), ['Local trade.']);
+  // a list item, a heading or a sentence that starts its own way does not
+  for (const raw of ['Local trade.<br>- Heated seats', 'Local trade.<br>Features:', 'Local trade.<br>Call today.', 'Local trade.<br>Nothing to fix.']) {
+    assert.deepEqual(openingSentences(raw), ['Local trade.'], raw);
+  }
+});
+
+test('the narrative keeps the write-up as before, without its lot-wide text, bullets, awards, labels and lists', () => {
+  const dump = 'Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package.';
+  assert.deepEqual(cleanDescription('Local trade.<br>New brakes.'), ['Local trade.', 'New brakes.']);
+  assert.deepEqual(cleanDescription(`Local trade. ${dump} Floor mats.`), ['Local trade. Floor mats.']);
+  assert.deepEqual(cleanDescription('- Heated seats<br>Awards: Best Buy<br>CARFAX One-Owner.<br>Local trade.'), ['Local trade.']);
 });
 
 test('a lot-wide line after a write-up line that runs on is still found, and the write-up keeps its own words', () => {

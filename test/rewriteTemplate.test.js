@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, ensureVinLine, stripVin, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
 import { vehicle } from './helpers.js';
-import { writeUpParts } from '../extension/src/description.js';
+import { findBoilerplate } from '../extension/src/description.js';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
 const ME = { name: 'Roger', title: 'sales consultant' };
@@ -84,24 +84,23 @@ test('a sparse car still reaches the word minimum, with or without the salespers
 });
 
 test('a wordy write-up and lots of features are trimmed to the limit', () => {
-  const narrative = writeUpParts(
+  const descriptionRaw =
     'This striking 2016 Dodge Challenger SRT Hellcat delivers premium performance wrapped in sophisticated style, with a supercharged engine that makes every drive an event. ' +
-      'Inside, the cabin is comfortable and well appointed with everything you need for a long trip or a quick run into town. ' +
-      'It has been well cared for and shows nicely inside and out.',
-  );
-  const v = vehicle('usedNoCarfax', { features: FEATURES });
-  const text = buildTemplateDescription({ ...ctx(v), narrative });
+    'Inside, the cabin is comfortable and well appointed with everything you need for a long trip or a quick run into town. ' +
+    'It has been well cared for and shows nicely inside and out.';
+  const v = { ...vehicle('usedNoCarfax', { features: FEATURES }), descriptionRaw };
+  const text = buildTemplateDescription(ctx(v));
   const g = runGuardrails(text, ctx(v));
   assert.deepEqual(g.problems, []);
   assert.ok(g.words <= WORD_LIMITS.max, `${g.words} words`);
 });
 
-test('the write-up sentence is used only when it fits, and only from the write-up as description.js reads it', () => {
-  const v = vehicle('usedNormal', { features: FEATURES.slice(0, 4) });
-  const text = buildTemplateDescription({ ...ctx(v), narrative: writeUpParts('Local trade with new tires and brakes.') });
-  assert.match(text, /Local trade with new tires and brakes\./);
-  // a plain string says nothing of whether it starts a sentence on the website, so it is never copied
-  assert.doesNotMatch(buildTemplateDescription({ ...ctx(v), narrative: ['Local trade with new tires and brakes.'] }), /Local trade/);
+test('the write-up line comes from the car\'s own description on the website, without the text the lot shares', () => {
+  const v = { ...vehicle('usedNormal', { features: FEATURES.slice(0, 4) }), descriptionRaw: 'Local trade with new tires and brakes.' };
+  assert.match(buildTemplateDescription(ctx(v)), /^Local trade with new tires and brakes\.$/m);
+  // the same text, found on most of the lot, is not this car's
+  assert.doesNotMatch(buildTemplateDescription({ ...ctx(v), boilerplate: ['Local trade with new tires and brakes.'] }), /Local trade/);
+  assert.doesNotMatch(buildTemplateDescription({ ...ctx(v), boilerplate: new Set(['Local trade with new tires and brakes.']) }), /Local trade/);
 });
 
 test('numbers are normalised before comparing', () => {
@@ -285,7 +284,7 @@ test('the template passes its own word count whatever the features and write-up 
   for (let n = 0; n <= picks.length; n += 1) {
     for (const narrative of [[], ['A clean truck.'], ['A clean truck that drives well.'], ['A clean truck that drives well and has been kept up nicely.']]) {
       const v = { ...vehicle('usedNoCarfax', { features: picks.slice(0, n) }), descriptionRaw: narrative.join(' ') }; // the write-up comes from the website's description
-      const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price, narrative: writeUpParts(v.descriptionRaw) };
+      const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price };
       assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], `${n} features, ${JSON.stringify(narrative)}`);
     }
   }
@@ -656,7 +655,7 @@ test('a denial of accidents is banned in any number, and "first owner" is a one-
   assert.deepEqual(codesAfter('Sold new here to its first owner.', plainCtx({ ...PLAIN(), carfaxOneOwner: true })), []);
   // the template never copies such a sentence from the write-up
   const told = plainCtx({ ...PLAIN(), descriptionRaw: 'No accident on record and its first owner kept it garaged.' });
-  const text = buildTemplateDescription({ ...told, narrative: writeUpParts(told.vehicle.descriptionRaw) });
+  const text = buildTemplateDescription(told);
   assert.doesNotMatch(text, /accident|first owner/);
   assert.deepEqual(runGuardrails(text, told).problems, []);
 });
@@ -835,8 +834,9 @@ test('a name in capitals is written calmly in the description only; one that doe
   }
 });
 
-// Every write-up the reviews of this rule tried, with the write-up line the template gives: the website's whole
-// sentence or sentences, or none (null). Never the second half of a sentence, and never a sentence after one left out.
+// Every write-up the reviews of this rule tried, with the write-up line the template gives: the website's opening
+// whole sentence or sentences, or none (null). Never part of a sentence, and never a sentence after one left out.
+// test/writeUpLine.test.js checks the same over thousands of generated write-ups.
 const WRITE_UP_LINES = {
   // the write-up's first line or paragraph, or the first after a heading, is the only one the line may come from
   'Dealer Comments:\nLocal trade with new brakes and tires.': 'Local trade with new brakes and tires.',
@@ -919,9 +919,52 @@ const WRITE_UP_LINES = {
   'Features:\nHeated Seats\nNavigation\nSunroof': null,
   // a write-up in another language starts its sentences its own way
   '¡Camioneta local con frenos nuevos!': '¡Camioneta local con frenos nuevos!',
+  // a line in lower case after a full stop carries the sentence on: in the website's own text it is read with it,
+  // and after a <br> or a paragraph the sentence before it is not copied
+  'Runs and drives great.\nexcept for the transmission, which slips.': 'Runs and drives great. except for the transmission, which slips.',
+  'Runs and drives great.<br>except for the transmission, which slips.': null,
+  'Comes with the remaining factory powertrain warranty.\nuntil it expired last spring.': 'Comes with the remaining factory powertrain warranty. until it expired last spring.',
+  'Comes with the remaining factory powertrain warranty.<br>until it expired last spring.': null,
+  '<p>This Jeep comes fully loaded.</p><p>except for the navigation and sunroof.</p>': null,
+  'Runs great...\nexcept the transmission slips.': 'Runs great... except the transmission slips.',
+  'Runs great...<br>except the transmission slips.': null,
+  'Local trade. Runs great…<br>except the transmission slips.': 'Local trade.',
+  // so does a line or sentence that starts with a word that takes it back
+  'Comes with the factory warranty.<br>Except the engine.': null,
+  'Local trade. Comes with the factory warranty.<br>Except the engine.': 'Local trade.',
+  'Certified Pre-Owned.<br>NOT!': null,
+  // a full stop or "!" after a capitalised or all-caps word, a number, an ellipsis or a list number ends nothing
+  'Local trade. Equipped with the 8-Speed Auto. Transmission and heated seats.': 'Local trade. Equipped with the 8-Speed Auto. Transmission and heated seats.',
+  'Local trade with new tires. Comes with the Tech. Package and adaptive cruise.': 'Local trade with new tires. Comes with the Tech. Package and adaptive cruise.',
+  'Local trade. This truck was certified by the Auth. Dealer until a $500 repair voided it.': 'Local trade.',
+  'Local trade. Not covered by the DLR. Warranty applies only to new units.': 'Local trade. Not covered by the DLR. Warranty applies only to new units.',
+  'Local trade. This truck does not have the Max. Tow Package.': 'Local trade.',
+  'This SUV is not a Ford Auth.<br>Certified Pre-Owned vehicle.': null,
+  'This SUV is not...<br>Certified Pre-Owned.': null,
+  'Not a Yahoo! Autos Certified vehicle, tax extra.': null,
+  'Built in 2019.<br>Local trade.': null,
+  // so a write-up whose only sentence ends on a name is not copied, and one that goes on is copied with the next sentence
+  'This 2019 Ram 1500 Classic Express Quad Cab pairs the HEMI 5.7L V8 with 4WD and an 8-Speed Automatic.<br>- HEMI 5.7L V8 Engine': null,
+  'This 2019 Ram 1500 Classic Express pairs the HEMI 5.7L V8 with an 8-Speed Automatic. It came in on trade.': 'This 2019 Ram 1500 Classic Express pairs the HEMI 5.7L V8 with an 8-Speed Automatic. It came in on trade.',
+  'This 2019 Ram 1500 Classic Express Quad Cab pairs the HEMI 5.7L V8 with 4WD and an 8-speed automatic.<br>- HEMI 5.7L V8 Engine': 'This 2019 Ram 1500 Classic Express Quad Cab pairs the HEMI 5.7L V8 with 4WD and an 8-speed automatic.',
+  '1. Price excludes tax.<br>2. Local trade.': null,
+  '1. Local trade with new brakes.': null,
+  // a Carfax or arrival label is set aside only when it ends in "." or "!"; a sentence that starts with its words is not copied
+  'Clean CARFAX Not Available On This Unit. Local trade.': null,
+  'Clean Carfax Except One Reported Accident.': null,
+  'CARFAX One-Owner Status Not Verified.': null,
+  'Recent Arrival! Clean CARFAX Not Available. Local trade.': null,
+  'Recent Arrival! Clean CARFAX. Local trade with new brakes.': 'Local trade with new brakes.',
+  'Clean CARFAX.<br>Not available for this unit.': null,
+  'Clean CARFAX. Not available for this unit.': null,
+  'CARFAX One-Owner.\nNot verified.': null,
+  // a question never ends the line: its answer may follow, and "No." ends nothing
+  'Smoker? No.<br>Local trade.': null,
+  'Any rust? No. Frame damage? Yes, repaired.': null,
+  'Smoker? No, never. Local trade.': 'Smoker? No, never.',
 };
 
-test('the write-up line is the opening sentences of the write-up\'s first line or paragraph, whole, up to the first one left out: never part of a sentence, and nothing after', async () => {
+test('the write-up line is the website\'s opening whole sentences, cut only at clear ends, up to the first one left out: never part of a sentence, and nothing after', async () => {
   for (const priceNote of ['', 'Price includes the doc fee; tax and tags extra.']) {
     for (const [raw, line] of Object.entries(WRITE_UP_LINES)) {
       const v = { ...PLAIN(), descriptionRaw: raw, location: '' };
@@ -931,6 +974,29 @@ test('the write-up line is the opening sentences of the write-up\'s first line o
       else assert.match(second, /^Highlights: /, raw);
       assert.deepEqual(r.guardrails.problems, [], raw);
     }
+  }
+});
+
+test('the write-up line never starts after text the lot shares, nor takes it', async () => {
+  // four cars written the same way, each with its own model or item
+  const lot = (each) => ['Escape', 'Edge', 'Explorer', 'Bronco'].map(each);
+  const cases = [
+    [lot((m) => `This vehicle is not a Ford Auth.<br>Certified Pre-Owned ${m}.`), null],
+    [lot((m) => `This vehicle is not a Ford Auth.\nCertified Pre-Owned ${m}.`), null],
+    [lot((m, i) => `The following items are not included with this vehicle.<br>${['Spare key and floor mats.', "Owner's manual.", 'Tonneau cover.', 'Second key fob.'][i]}`), null],
+    [lot((m) => `All prices exclude tax and the documentation fee.<br>Local trade ${m} with new brakes.`), null],
+    [lot((m) => `Local trade ${m} with new brakes. All prices exclude tax and the documentation fee. Clean interior.`), 'Local trade Escape with new brakes.'],
+    [lot((m) => `Local trade ${m} with new brakes.<br>All prices exclude tax and the documentation fee.`), 'Local trade Escape with new brakes.'],
+    // where no car breaks the sentence the lot shares, it is each car's own sentence, copied whole
+    [lot((m) => `This vehicle is not a Ford Auth. Certified Pre-Owned ${m} with new brakes.`), 'This vehicle is not a Ford Auth. Certified Pre-Owned Escape with new brakes.'],
+  ];
+  for (const [raws, line] of cases) {
+    const v = { ...PLAIN(), descriptionRaw: raws[0], location: '' };
+    const r = await generateDescription({ ...plainCtx(v, { priceNote: 'Price includes the doc fee; tax and tags extra.' }), boilerplate: [...findBoilerplate(raws)], settings: {} });
+    const second = r.text.split('\n')[1];
+    if (line) assert.equal(second, line, raws[0]);
+    else assert.match(second, /^Highlights: /, raws[0]);
+    assert.deepEqual(r.guardrails.problems, [], raws[0]);
   }
 });
 

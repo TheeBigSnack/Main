@@ -64,7 +64,8 @@ const DISCLAIMER =
 const EXTRA = {
   [fx.usedNormal.vin]: {
     features: ['4WD', 'Backup Camera', 'Bluetooth', 'Keyless Entry', 'Tow Package', 'Power Windows', 'Cruise Control'],
-    narrative: 'This 2019 Ram 1500 Classic Express Quad Cab pairs the HEMI 5.7L V8 with 4WD and an 8-Speed Automatic.',
+    // it ends on a word in lower case, so the template can tell the sentence is over and copies it (src/description.js openingSentences)
+    narrative: 'This 2019 Ram 1500 Classic Express Quad Cab pairs the HEMI 5.7L V8 with 4WD and an 8-speed automatic.',
   },
 };
 // The fixtures' in-stock dates are the capture's; here each car's date is

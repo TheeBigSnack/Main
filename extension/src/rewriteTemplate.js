@@ -19,22 +19,21 @@
 //     don't make, and no number, in digits or in words, that isn't in the
 //     website's data
 // The template is the final fallback, so it is built to pass its own checks
-// and, when in doubt, to say less. Its write-up line comes only from the
-// write-up's first segment past any heading, and only when that segment
-// starts a sentence on the website (description.js openingSegment): a later
-// segment is never read instead, since one may carry on a sentence the
-// website broke and say the opposite read alone. From it, the line is the
-// opening sentences in order, before any equipment list taken out of it
-// (writeUpParts' lead), at most two and 45 words, stopping at the first one
-// that is unfinished (it does not end in ".", "!" or "?", or ends on an
-// abbreviation) or that the checks would refuse or that is about fees,
-// taxes, tags, title, registration or licence (the price note's to say),
-// and copying nothing after it (storyLine). A sentence is never cut at an
-// abbreviation it knows (description.js splitSentences). With nothing to
-// copy there is no write-up line. When the website's words shout beyond the car's own
-// abbreviations ("SLE", "AWD": they stay as written, and the checks pass
-// over them) it writes them calmly, leaves out a write-up, colour or engine
-// line that still shouts on its own, and counts words as the checks do.
+// and, when in doubt, to say less. Its write-up line is the website's own
+// opening sentences, whole and in order (description.js openingSentences):
+// they start at the write-up's first line past headings and labels, and the
+// text is cut only at a clear sentence end (a single ".", "!" or "?" after a
+// word in lower case that is not an abbreviation, then a capital, a digit or
+// nothing). It takes at most two sentences and 45 words, stops at the first
+// sentence that does not end clearly, holds lot-wide text, is a list of
+// equipment, would fail the checks or is about fees, taxes, tags, title,
+// registration or licence (the price note's to say), copies nothing after
+// it, and never ends on a question or on a sentence the next words carry on
+// (storyLine). With nothing to copy there is no write-up line. When the
+// website's words shout beyond the car's own abbreviations ("SLE", "AWD":
+// they stay as written, and the checks pass over them) it writes them
+// calmly, leaves out a write-up, colour or engine line that still shouts on
+// its own, and counts words as the checks do.
 // test/rewriteTemplate.test.js runs it over every fixture car, as written, in
 // capitals and with refused write-ups. What the tests find can still fail it
 // is the dealership's own Settings (no dealership name, a price note for
@@ -42,7 +41,7 @@
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
-import { splitSegments, splitSentences, openingSegment, finishesSentence } from './description.js';
+import { splitSegments, openingSentences } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -257,25 +256,17 @@ const FEE_WORDS = /\b(?:fees?|tax(?:es)?|tags?|title[ds]?|titling|registration|r
 const narrativeSentenceOk = (sentence, vehicle) =>
   statesNoOtherNumbers(sentence, vehicle) && !FEE_WORDS.test(sentence) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence, ownAbbreviations(vehicle)) && emojiCount(sentence) <= 1;
 
-// The write-up line: the opening sentences of the write-up's opening
-// segment (description.js openingSegment), in order, from its first. It
-// stops at the first sentence that is not finished (it does not end in
-// ".", "!" or "?", or it ends on an abbreviation such as "Mfr." or
-// "approx."), that the checks would refuse (narrativeSentenceOk), or that
-// would take it past two sentences or 45 words, and copies nothing from
-// there on: it never leaves a sentence out and copies the one after it.
-// splitSentences already keeps a sentence whole across an abbreviation
-// ("the original Mfr. Warranty applies") and before a piece in lower case.
+// The write-up line: the website's opening sentences for this car, as
+// description.js openingSentences reads them from its description (the same
+// text the checks read as the website's own words), with the lot-wide text
+// `boilerplate` names. Each is taken only when it fits (at most two sentences
+// and 45 words) and the checks would pass it (narrativeSentenceOk); the first
+// that does not stops the line, and nothing after it is copied.
 const STORY_MAX_SENTENCES = 2;
 const STORY_MAX_WORDS = 45;
-function storyLine(segment, vehicle) {
-  const out = [];
-  for (const sentence of splitSentences(segment)) {
-    if (out.length === STORY_MAX_SENTENCES || !finishesSentence(sentence) || !narrativeSentenceOk(sentence, vehicle)) break;
-    if (wordCount([...out, sentence].join(' ')) > STORY_MAX_WORDS) break;
-    out.push(sentence);
-  }
-  return out.join(' ');
+function storyLine(vehicle, boilerplate) {
+  const fits = (sentence, taken) => taken.length < STORY_MAX_SENTENCES && wordCount([...taken, sentence].join(' ')) <= STORY_MAX_WORDS && narrativeSentenceOk(sentence, vehicle);
+  return openingSentences(vehicle.descriptionRaw, boilerplate, fits).join(' ');
 }
 
 // The website's features a description can name as highlights: each once,
@@ -396,14 +387,14 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   dealer:      { name, city }
  *   salesperson: { name, title }
  *   priceNote:   the dealer's wording about fees, typed in Settings (a suggested sentence is offered from the website's price gap)
- *   narrative:   the car-specific write-up from description.js: writeUpParts' { text, opens, lead } per segment
- *                (plain strings are never copied: whether a string starts a sentence on the website is not known)
+ *   boilerplate: the lot-wide lines and sentences the scan found (description.js findBoilerplate), a Set or an
+ *                array; the write-up line comes from vehicle.descriptionRaw without them (storyLine)
  *   highlights:  the salesperson's pick of the website's features (settleHighlights); null for the usual pick
  *   closingLine: the salesperson's own line from Settings (salesperson.closingLine), used when it passes checkClosingLine
  *   stores:      the salesperson's ticked stores (settings.myStores); a car the website lists at any other store, or
  *                with none or several ticked, is said to be at its own store, never at the dealership in its town
  */
-export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [], highlights = null, stores = [] }) {
+export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', boilerplate = [], highlights = null, stores = [] }) {
   const dealerName = String(dealer.name || '').trim();
   const city = String(dealer.city || '').trim();
   const store = calmName(carStore(v, { stores, dealer }).store);
@@ -417,9 +408,8 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  // the write-up line: the opening sentences of the write-up's opening segment, stopping at the first one that is
-  // unfinished or refused (storyLine); nothing from a later segment
-  const story = storyLine(openingSegment(narrative), v);
+  // the write-up line: the website's opening sentences, whole, up to the first one it cannot copy (storyLine)
+  const story = storyLine(v, new Set(boilerplate || []));
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
