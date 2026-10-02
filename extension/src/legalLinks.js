@@ -23,9 +23,9 @@
 
 export const LEGAL = Object.freeze({
   version: '2026-09-28-draft',
-  termsUrl: 'https://lotsync.example/terms',
-  privacyUrl: 'https://lotsync.example/privacy',
-  rulesUrl: 'https://lotsync.example/posting-rules',
+  termsUrl: 'https://lotcurrent.example/terms',
+  privacyUrl: 'https://lotcurrent.example/privacy',
+  rulesUrl: 'https://lotcurrent.example/posting-rules',
 });
 
 // A placeholder address: not an https address at all, or one under the

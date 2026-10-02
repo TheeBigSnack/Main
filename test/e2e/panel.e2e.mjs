@@ -26,7 +26,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension: it may script the two local mock servers and
 // nothing else (see post.e2e.mjs).
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-'));
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-'));
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -39,7 +39,7 @@ const market = await startMockMarketplace();
 const siteUrl = `http://127.0.0.1:${site.address().port}/used-vehicles/`;
 const origin = new URL(siteUrl).origin;
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-panel-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-panel-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,

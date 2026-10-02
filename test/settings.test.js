@@ -173,10 +173,10 @@ test('the Terms and Privacy acceptance: blank by default, garbage becomes blank,
 
 test('a placeholder legal address is one nobody can read; the Terms step gates only once both documents are hosted', () => {
   // the predicate, against sample addresses (the live constant changes when the site is up)
-  for (const url of ['https://lotsync.example/terms', 'https://www.lotsync.example/privacy/', 'https://LOTSYNC.EXAMPLE', 'https://example', '', null, 'not a url', 'http://lotsync.com/terms', 'ftp://lotsync.com/terms']) {
+  for (const url of ['https://lotcurrent.example/terms', 'https://www.lotcurrent.example/privacy/', 'https://LOTCURRENT.EXAMPLE', 'https://example', '', null, 'not a url', 'http://lotcurrent.com/terms', 'ftp://lotcurrent.com/terms']) {
     assert.equal(isPlaceholderUrl(url), true, `${url} is a placeholder`);
   }
-  for (const url of ['https://lotsync.com/terms', 'https://www.lot-sync.co/privacy', 'https://example.com/terms', 'https://myexample.net/terms']) {
+  for (const url of ['https://lotcurrent.com/terms', 'https://www.fixture.lotcurrent.com/privacy', 'https://example.com/terms', 'https://myexample.net/terms']) {
     assert.equal(isPlaceholderUrl(url), false, `${url} could be hosted`);
   }
   // legalHosted is that predicate over the live addresses, whatever they are today

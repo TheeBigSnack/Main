@@ -359,7 +359,7 @@ test('a final page cannot keep the DRAFT line or a blank in brackets, and drops 
 });
 
 test('--check exits 1 when a file is missing or differs, names it and writes nothing; a run writes all six and --check passes', async () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'lotsync-legal-'));
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-legal-'));
   try {
     for (const rel of [STATUS_FILE, 'site/config.js', 'site/pricing.json', ...PAGES.map((p) => p.source)]) {
       mkdirSync(dirname(join(tmp, rel)), { recursive: true });
@@ -401,7 +401,7 @@ test('--check exits 1 when a file is missing or differs, names it and writes not
     assert.equal((await run([])).code, 0);
     for (const p of PAGES) assert.ok(readFileSync(join(tmp, p.file), 'utf8').includes(`<link rel="canonical" href="${FIXTURE_URL}${p.path}">`), p.file);
     for (const s of REDIRECTS) assert.ok(readFileSync(join(tmp, s.file), 'utf8').includes(`<link rel="canonical" href="${FIXTURE_URL}${s.target}">`), s.file);
-    writeFileSync(join(tmp, 'site/config.js'), config.replace(/demoMailto: '[^']*',/, "demoMailto: 'mailto:demo@lotsync.example',"));
+    writeFileSync(join(tmp, 'site/config.js'), config.replace(/demoMailto: '[^']*',/, "demoMailto: 'mailto:demo@lotcurrent.example',"));
     const refusedConfig = await run([]);
     assert.equal(refusedConfig.code, 1);
     assert.match(refusedConfig.error.join('\n'), /reserved placeholder host/);

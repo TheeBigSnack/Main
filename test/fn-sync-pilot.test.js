@@ -98,33 +98,39 @@ test('an open price item whose website price moves again follows it on the serve
   assert.equal(item().length, 1);
 });
 
-for (const [label, skewMs] of [['30 seconds', 30e3], ['15 minutes', 15 * 60e3]]) {
-  test(`a machine whose clock runs ${label} slow gets every queue post attempt to the server, one sync after each post`, async () => {
-    const { sync, post } = await setUp({ skewMs });
-    for (let n = 1; n <= 4; n++) {
-      post(VIN(n), { queue: true });
-      await sync();
-    }
-    assert.equal(fake.rows('listings').length, 4);
-    assert.deepEqual(fake.rows('post_attempts').map((a) => a.vin).sort(), [VIN(1), VIN(2), VIN(3), VIN(4)], 'every attempt, for the manager view\'s median seconds per post');
-  });
-
-  test(`a machine whose clock runs ${label} slow gets a ticked-off to-do item and the next post to the server`, async () => {
-    const { storage, sync, clock, iso, post } = await setUp({ skewMs });
-    storage.data[K.posted] = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: iso(clock() - 3 * 24 * 3600e3) } };
-    storage.data[K.pilot] = noteFlags(null, priceDiff(VIN(1), 20000, 19000, iso(clock())));
+// Each check runs at two clock offsets. The tests are written out one per
+// line, not made in a loop, so README's count of call sites (test/docs.test.js)
+// is the count npm test prints.
+async function queueAttemptsReachServer(skewMs) {
+  const { sync, post } = await setUp({ skewMs });
+  for (let n = 1; n <= 4; n++) {
+    post(VIN(n), { queue: true });
     await sync();
-    const item = () => fake.rows('todo_items').find((t) => t.vin === VIN(1));
-    assert.equal(item().done_at, null);
-    // the listing is updated and the item ticked off, then another car is posted
-    storage.data[K.pilot] = resolveFlag(storage.data[K.pilot], VIN(1), 'price', { at: iso(clock()), how: 'manual' });
-    post(VIN(2));
-    await sync();
-    assert.ok(item().done_at, 'the item is closed on the server, so the manager view no longer lists it');
-    assert.equal(item().how, 'manual');
-    assert.deepEqual(fake.rows('post_attempts').map((a) => a.vin), [VIN(2)]);
-  });
+  }
+  assert.equal(fake.rows('listings').length, 4);
+  assert.deepEqual(fake.rows('post_attempts').map((a) => a.vin).sort(), [VIN(1), VIN(2), VIN(3), VIN(4)], 'every attempt, for the manager view\'s median seconds per post');
 }
+
+async function tickedItemAndNextPostReachServer(skewMs) {
+  const { storage, sync, clock, iso, post } = await setUp({ skewMs });
+  storage.data[K.posted] = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: iso(clock() - 3 * 24 * 3600e3) } };
+  storage.data[K.pilot] = noteFlags(null, priceDiff(VIN(1), 20000, 19000, iso(clock())));
+  await sync();
+  const item = () => fake.rows('todo_items').find((t) => t.vin === VIN(1));
+  assert.equal(item().done_at, null);
+  // the listing is updated and the item ticked off, then another car is posted
+  storage.data[K.pilot] = resolveFlag(storage.data[K.pilot], VIN(1), 'price', { at: iso(clock()), how: 'manual' });
+  post(VIN(2));
+  await sync();
+  assert.ok(item().done_at, 'the item is closed on the server, so the manager view no longer lists it');
+  assert.equal(item().how, 'manual');
+  assert.deepEqual(fake.rows('post_attempts').map((a) => a.vin), [VIN(2)]);
+}
+
+test('a machine whose clock runs 30 seconds slow gets every queue post attempt to the server, one sync after each post', () => queueAttemptsReachServer(30e3));
+test('a machine whose clock runs 15 minutes slow gets every queue post attempt to the server, one sync after each post', () => queueAttemptsReachServer(15 * 60e3));
+test('a machine whose clock runs 30 seconds slow gets a ticked-off to-do item and the next post to the server', () => tickedItemAndNextPostReachServer(30e3));
+test('a machine whose clock runs 15 minutes slow gets a ticked-off to-do item and the next post to the server', () => tickedItemAndNextPostReachServer(15 * 60e3));
 
 test('a post confirmed while a sync is out goes up with the next sync', async () => {
   let during = null;

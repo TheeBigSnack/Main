@@ -24,7 +24,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension: it may script the two local mock servers and
 // nothing else (the real facebook.com and image host permissions are removed).
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -40,7 +40,7 @@ const siteUrl = `http://127.0.0.1:${site.address().port}/used-vehicles/`;
 const origin = new URL(siteUrl).origin;
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
 // See popup.e2e.mjs about LOTSYNC_E2E_CHANNEL.
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-post-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-post-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,

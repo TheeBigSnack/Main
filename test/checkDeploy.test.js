@@ -18,9 +18,9 @@ const printsNoKeyOrToken = (text, why = '') => {
   assert.equal(text.includes(KEY), false, `the key is printed${why}`);
   assert.equal(text.includes(TOKEN), false, `the token is printed${why}`);
 };
-const SITE = 'https://lotsync.example';
+const SITE = 'https://lotcurrent.example';
 // the hosted manager view: ALLOWED_ORIGINS in the fake below, unless broken.noManagerOrigin
-const MANAGER = 'https://app.lotsync.example';
+const MANAGER = 'https://app.lotcurrent.example';
 
 // A fake Supabase that behaves like a correct deploy, with switches to break it.
 function fakeProject(broken = {}) {
@@ -268,10 +268,10 @@ test('with a publishable key no request carries it after Bearer, so a 401 is a r
 // preflight says nothing about that page. Unset, the run says the page was
 // not checked rather than calling billing ok.
 test('the manager view\'s origin: checked when given, a note when not, a failure when ALLOWED_ORIGINS leaves it out', async () => {
-  assert.equal(pageOrigin('https://app.lotsync.example/'), 'https://app.lotsync.example', 'the address MANAGER_URL holds becomes its origin');
-  assert.equal(pageOrigin('https://app.lotsync.example/billing?x=1'), 'https://app.lotsync.example');
+  assert.equal(pageOrigin('https://app.lotcurrent.example/'), 'https://app.lotcurrent.example', 'the address MANAGER_URL holds becomes its origin');
+  assert.equal(pageOrigin('https://app.lotcurrent.example/billing?x=1'), 'https://app.lotcurrent.example');
   assert.equal(pageOrigin('http://127.0.0.1:8787/'), 'http://127.0.0.1:8787', 'a page on this computer');
-  for (const bad of ['', 'app.lotsync.example', 'http://app.lotsync.example', 'ftp://x.example']) assert.equal(pageOrigin(bad), '', bad);
+  for (const bad of ['', 'app.lotcurrent.example', 'http://app.lotcurrent.example', 'ftp://x.example']) assert.equal(pageOrigin(bad), '', bad);
 
   const sent = [];
   const project = fakeProject();
@@ -284,7 +284,7 @@ test('the manager view\'s origin: checked when given, a note when not, a failure
   const left = (await runChecks({ fetchImpl: fakeProject({ noManagerOrigin: true }), url: URL_, anonKey: KEY, managerOrigin: MANAGER })).find((f) => f.check === MANAGER_CORS_CHECK);
   assert.equal(left.ok, false);
   assert.notEqual(left.warnOnly, true, 'a failure');
-  assert.match(left.detail, /allow-origin none \(is https:\/\/app\.lotsync\.example in ALLOWED_ORIGINS\?\)/);
+  assert.match(left.detail, /allow-origin none \(is https:\/\/app\.lotcurrent\.example in ALLOWED_ORIGINS\?\)/);
 
   const unset = await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, testToken: TOKEN, siteOrigin: SITE, configs });
   const note = unset.find((f) => f.check === MANAGER_CORS_CHECK);
@@ -292,7 +292,7 @@ test('the manager view\'s origin: checked when given, a note when not, a failure
   assert.match(note.detail, /LOTSYNC_MANAGER_ORIGIN/);
   assert.doesNotMatch(report(unset).text, /Every check passed/, 'billing is not called ok without the manager view\'s line');
 
-  const wrong = (await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, managerOrigin: 'app.lotsync.example' })).find((f) => f.check === MANAGER_CORS_CHECK);
+  const wrong = (await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, managerOrigin: 'app.lotcurrent.example' })).find((f) => f.check === MANAGER_CORS_CHECK);
   assert.equal(wrong.ok, false);
   assert.notEqual(wrong.warnOnly, true);
 
@@ -343,7 +343,7 @@ test('billing is judged from the manager view\'s address too: without it the lin
   assert.doesNotMatch(report(skipped).text, /Every check passed/);
   const missing = line(await runChecks({ fetchImpl: fakeProject({ noManagerOrigin: true }), url: URL_, anonKey: KEY, managerOrigin: MANAGER + '/' }));
   assert.deepEqual([missing.ok, Boolean(missing.warnOnly)], [false, false]);
-  assert.match(missing.detail, /allow-origin none \(is https:\/\/app\.lotsync\.example in ALLOWED_ORIGINS\?\)/);
+  assert.match(missing.detail, /allow-origin none \(is https:\/\/app\.lotcurrent\.example in ALLOWED_ORIGINS\?\)/);
   assert.equal(line(await runChecks({ fetchImpl: fakeProject(), url: URL_, anonKey: KEY, managerOrigin: `${MANAGER}/?view=billing` })).ok, true, 'an address with a path is checked as its origin');
   const early = line(await runChecks({ fetchImpl: fakeProject({ notDeployed: ['billing'] }), url: URL_, anonKey: KEY, managerOrigin: MANAGER }));
   assert.deepEqual([early.ok, early.warnOnly], [false, true]);
