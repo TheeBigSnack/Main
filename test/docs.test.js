@@ -374,6 +374,30 @@ test('PILOT.md defines no-permission by the posts that record it', () => {
   assert.match(def, /side panel's own list asks Chrome first and records nothing/, "PILOT.md does not say a side-panel list post records nothing after a no");
 });
 
+// The help said the side panel's own list is for "the website you last
+// scanned", and the data inventory said lastPostOrigin only reopens a post.
+// The panel opens its list on lastPostOrigin when that website is still
+// known (src/panelList.js defaultOrigin), which a post, a set-up, a To do
+// item and the Website menu write and the popup's Scan does not; the most
+// recent scan decides only before the panel has worked on any website.
+test('the help and the data inventory say which website the side panel\'s list opens on', () => {
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /defaultOrigin\(stored\[GLOBAL_KEYS\.sites\], lastPostOrigin\)/, 'the panel no longer opens its list on lastPostOrigin: the help and the data inventory change with it');
+  assert.match(panel, /async function chooseSite\(origin\) \{[\s\S]*?\[GLOBAL_KEYS\.lastPostOrigin\]: origin/, 'the Website menu no longer writes lastPostOrigin');
+  assert.doesNotMatch(read('../extension/popup.js'), /lastPostOrigin/, "the popup now writes lastPostOrigin: say that a scan switches the panel's list");
+  const help = doc('help.md');
+  const para = help.split('\n').find((l) => l.startsWith('**Post the next car from the side panel.**'));
+  assert.ok(para, 'help.md no longer explains the side panel\'s own list');
+  assert.doesNotMatch(para, /list for the website you last scanned/, 'help.md says the panel\'s list follows the last scan; it follows the website the panel last worked on');
+  assert.match(para, /list for the website it last worked on/, 'help.md does not say the list opens on the website the panel last worked on');
+  assert.match(para, /scanning another website in the popup does not switch it/, 'help.md does not say a scan in the popup leaves the panel\'s website alone');
+  const row = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `lastPostOrigin` |'));
+  assert.ok(row, 'the data inventory has no lastPostOrigin row');
+  const [, , why, written] = row.split(' | ');
+  assert.match(why, /Ready to post\*\* list the side panel opens on/, 'the lastPostOrigin row does not say it picks the website of the side panel\'s list');
+  assert.match(written, /\*\*Website\*\* menu/, 'the lastPostOrigin row does not say the Website menu writes it');
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));
