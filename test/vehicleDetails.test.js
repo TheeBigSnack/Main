@@ -368,3 +368,55 @@ test('a car missing from a list the website did not give whole is not called gon
     adapter.getDetails = real;
   }
 });
+
+// The same tab on another list that the website gave only in part (its
+// page 2 failed, or the paging did not move it on): the adapter answers
+// record null with complete false. That is no more final than a car missing
+// from it: the list the last scan read is read too, and only its answer counts.
+test('a car missing from the part of another list the website gave is read from the last scan\'s list before anything is said', async () => {
+  const cars = platformCars(4, { from: 1 });
+  const json = (body) => ({ ok: true, status: 200, contentType: 'application/json', text: JSON.stringify(body), json: body });
+  const service = { kind: 'dealerCom', origin: DEALERCOM_ORIGIN, inventoryUrl: DEALERCOM_LIST, listUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm' };
+  const other = DEALERCOM_LIST.replace('AUTO_USED', 'AUTO_NEW');
+  const site = dealerComSite({ cars });
+  const others = platformCars(2, { from: 40 });
+  site.set(other, json({ pageInfo: { totalCount: 50, pageSize: 35, pageStart: 0 }, inventory: others.map((c) => ({ ...dealerComRecord(c), inventoryType: 'new' })) }));
+  const page = fakePlatformPage({ site, origin: DEALERCOM_ORIGIN, path: '/new-inventory/index.htm', requested: [other], windowExtras: { DDC: {} }, text: 'Website by Dealer.com' });
+  const store = { [SITES_KEY]: { [DEALERCOM_ORIGIN]: { adapter: 'dealerCom', service } } };
+  const adapter = adapterById('dealerCom');
+  const real = adapter.getDetails;
+  // the list reader as the shared inventory reader answers once it says so:
+  // a list it could not read whole gives complete false with record null
+  const cutShort = new Set([other]);
+  adapter.getDetails = async (search, vin, options) => {
+    const r = await real(search, vin, options);
+    return r.ok && !r.record && cutShort.has(options.inventoryUrl) ? { ...r, complete: false } : r;
+  };
+  globalThis.chrome = fakeChrome(page, store);
+  try {
+    const info = store[SITES_KEY][DEALERCOM_ORIGIN];
+    const r = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: cars[1].vin, contains: async () => false });
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.via, 'tab', 'through the same tab, so no website permission is needed');
+    assert.equal(r.vehicle.vin, cars[1].vin);
+    assert.ok(page.fetchCalls.some((c) => c.url.startsWith(DEALERCOM_LIST.split('?')[0]) && c.url.includes('AUTO_USED')), 'the last scan\'s list was read');
+
+    // a car the last scan's whole list does not have either is gone
+    const gone = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: platformCars(1, { from: 90 })[0].vin, contains: async () => false });
+    assert.deepEqual([gone.ok, gone.notFound], [false, true]);
+
+    // when the last scan's list is cut short too, nothing is called gone
+    cutShort.add(DEALERCOM_LIST);
+    const both = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: platformCars(1, { from: 90 })[0].vin, contains: async () => false });
+    assert.deepEqual([both.ok, both.notFound, both.incomplete], [false, undefined, true]);
+    assert.match(both.message, /Couldn't read the website's whole list of cars just now/);
+
+    // with nothing stored for the website, the page's own part-read list says only that
+    delete store[SITES_KEY];
+    const alone = await fetchVehicleDetails(1, cars[1].vin, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([alone.ok, alone.notFound, alone.incomplete], [false, undefined, true]);
+  } finally {
+    adapter.getDetails = real;
+    delete globalThis.chrome;
+  }
+});

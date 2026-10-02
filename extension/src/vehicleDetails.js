@@ -42,7 +42,7 @@ async function readOne(adapter, search, wanted, options) {
   if (!r.ok) return { ok: false, message: r.message || "Couldn't read the dealership website." };
   // a list the website did not give whole can't say a car is gone
   if (!r.record && r.complete === false) {
-    return { ok: false, message: "Couldn't read the website's whole list of cars just now, so this car couldn't be checked. Try again in a minute." };
+    return { ok: false, incomplete: true, message: "Couldn't read the website's whole list of cars just now, so this car couldn't be checked. Try again in a minute." };
   }
   if (!r.record) {
     return { ok: false, notFound: true, message: "This car isn't on the website any more (sold, removed or hidden). Rescan before posting anything." };
@@ -104,10 +104,12 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
   // A page of the website can have loaded another list than the one the
   // last scan read (the new cars, a search filtered for a customer), and the
-  // probe saw that one. A car missing from it is not called gone on its
-  // word: the same tab reads the car once more the way the last scan read
-  // the website, and that answer is the one that counts.
-  if (r.notFound && stored && differentRead(adapter, service, stored)) {
+  // probe saw that one. A car missing from it, or from the part of it the
+  // website gave (a later page failed, the paging did not move that list
+  // on), is not called gone or left unchecked on its word: the same tab
+  // reads the car once more the way the last scan read the website, and
+  // that answer is the one that counts.
+  if ((r.notFound || r.incomplete) && stored && differentRead(adapter, service, stored)) {
     r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url));
   }
   return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
