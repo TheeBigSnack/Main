@@ -4,6 +4,8 @@ import vm from 'node:vm';
 import { recheck, fetchVehicleDetails, fetchVehicleDetailsDirect, readCarForPost } from '../extension/src/vehicleDetails.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
 import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, STANDARD_ORIGIN } from './helpers.js';
+import { SITES_KEY } from '../extension/src/storageKeys.js';
+import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage } from './platformSites.js';
 
 test('the post-time re-check lets a ready car through and nothing else', () => {
   assert.equal(recheck(vehicle('usedNormal'), MY_STORE).ok, true);
@@ -276,4 +278,67 @@ test('a dealer tab that now shows a Facebook page has nothing injected into it: 
   // and a dealer page is still probed in full
   const dealer = await runInPage(fakeDealerPage({ origin: DEALER }), probeSiteInPage);
   assert.equal(dealer.origin, DEALER);
+});
+
+// A dealer tab on another list of the same website (the new cars, a search
+// the salesperson filtered for a customer) loaded only that list, and the
+// probe's list address is that one. A used car missing from it is not sold:
+// the read is made once more through the same tab with the list the last
+// scan of this website read, and only that answer is final.
+test('a dealer tab on another list of the website does not call a used car sold: the last scan\'s list is read too', async () => {
+  const cars = platformCars(4, { from: 1 });
+  const json = (body) => ({ ok: true, status: 200, contentType: 'application/json', text: JSON.stringify(body), json: body });
+  const cases = [
+    {
+      what: 'Dealer.com, the new-car page',
+      origin: DEALERCOM_ORIGIN,
+      adapter: 'dealerCom',
+      service: { kind: 'dealerCom', origin: DEALERCOM_ORIGIN, inventoryUrl: DEALERCOM_LIST, listUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm' },
+      site: dealerComSite({ cars }),
+      other: DEALERCOM_LIST.replace('AUTO_USED', 'AUTO_NEW'),
+      otherBody: (list) => ({ pageInfo: { totalCount: list.length, pageSize: 35, pageStart: 0 }, inventory: list.map((c) => ({ ...dealerComRecord(c), inventoryType: 'new' })) }),
+      path: '/new-inventory/index.htm',
+      extras: { windowExtras: { DDC: {} }, text: 'Website by Dealer.com' },
+    },
+    {
+      what: 'DealerOn, a used search filtered to one make',
+      origin: DEALERON_ORIGIN,
+      adapter: 'dealerOn',
+      service: { kind: 'dealerOn', origin: DEALERON_ORIGIN, inventoryUrl: DEALERON_LIST, listUrl: DEALERON_ORIGIN + '/searchused.aspx' },
+      site: dealerOnSite({ cars }),
+      other: DEALERON_LIST + '&make=Other',
+      otherBody: (list) => ({ DisplayCards: list.map((c) => dealerOnCard(c)), Paging: { PaginationDataModel: { TotalCount: list.length, PageNumber: 1 } } }),
+      path: '/searchused.aspx?make=Other',
+      extras: { text: 'Copyright © 2026 by DealerOn' },
+    },
+  ];
+  for (const k of cases) {
+    const others = platformCars(2, { from: 40 });
+    k.site.set(k.other, json(k.otherBody(others)));
+    const page = fakePlatformPage({ site: k.site, origin: k.origin, path: k.path, requested: [k.other], ...k.extras });
+    const store = { [SITES_KEY]: { [k.origin]: { adapter: k.adapter, service: k.service } } };
+    globalThis.chrome = fakeChrome(page, store);
+    try {
+      const info = store[SITES_KEY][k.origin];
+      const r = await readCarForPost({ tabId: 1, origin: k.origin, info, vin: cars[1].vin, contains: async () => false });
+      assert.equal(r.ok, true, `${k.what}: ${r.message}`);
+      assert.equal(r.via, 'tab', `${k.what}: through the same tab, so no website permission is needed`);
+      assert.equal(r.vehicle.vin, cars[1].vin);
+      assert.ok(page.fetchCalls.some((c) => c.url === k.other) && page.fetchCalls.some((c) => c.url.startsWith(k.service.inventoryUrl.split('?')[0])), `${k.what}: both lists were read`);
+      // a car on the list the page loaded is read from it, with no second read
+      page.fetchCalls.length = 0;
+      const onThisList = await readCarForPost({ tabId: 1, origin: k.origin, info, vin: others[0].vin, contains: async () => false });
+      assert.equal(onThisList.ok, true, `${k.what}: ${onThisList.message}`);
+      assert.ok(page.fetchCalls.every((c) => !c.url.startsWith(k.service.inventoryUrl.split('?')[0]) || c.url.startsWith(k.other)), `${k.what}: the last scan's list is not read for a car the page's list has`);
+      // a car on neither list is gone, as before
+      const gone = await readCarForPost({ tabId: 1, origin: k.origin, info, vin: platformCars(1, { from: 90 })[0].vin, contains: async () => false });
+      assert.deepEqual([gone.ok, gone.notFound], [false, true], k.what);
+      // with nothing stored for the website, the page's own list is all there is
+      delete store[SITES_KEY];
+      const alone = await fetchVehicleDetails(1, cars[1].vin, { origin: k.origin });
+      assert.deepEqual([alone.ok, alone.notFound], [false, true], `${k.what}: no last scan, no second list`);
+    } finally {
+      delete globalThis.chrome;
+    }
+  }
 });

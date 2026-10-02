@@ -96,22 +96,43 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   // What the probe could not see on this page (a car's own page has no
   // inventory list to find) comes from the service the last scan of this
   // website stored, when the same adapter read it; what the probe did see wins.
-  const service = await withStoredService(probe, adapter);
-  const r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
+  const { service, stored } = await withStoredService(probe, adapter);
+  let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
+  // A page of the website can have loaded another list than the one the
+  // last scan read (the new cars, a search filtered for a customer), and the
+  // probe saw that one. A car missing from it is not called gone on its
+  // word: the same tab reads the car once more the way the last scan read
+  // the website, and that answer is the one that counts.
+  if (r.notFound && stored && differentRead(adapter, service, stored)) {
+    r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url));
+  }
   return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
 }
 
+// The service the read uses (the probe's, with what it could not see filled
+// from the last scan's) and the last scan's own, when the same adapter stored one.
 async function withStoredService(probe, adapter) {
   const probed = probe.service || {};
   try {
     const origin = probe.site && probe.site.origin;
     const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
     const stored = origin && sites[origin];
-    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return probed;
+    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return { service: probed, stored: null };
     const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
-    return { ...stored.service, ...seen };
+    return { service: { ...stored.service, ...seen }, stored: stored.service };
   } catch (e) {
-    return probed;
+    return { service: probed, stored: null };
+  }
+}
+
+// Would the last scan's service read the website another way than this one?
+// Told apart by what the adapter's getDetails is given (its scanOptions), so
+// a service whose read is the same is not asked twice.
+function differentRead(adapter, service, stored) {
+  try {
+    return JSON.stringify(adapter.scanOptions(service)) !== JSON.stringify(adapter.scanOptions(stored));
+  } catch (e) {
+    return false;
   }
 }
 
