@@ -231,8 +231,10 @@ test('the dry run looks for each kind of field with the same controls the fill d
 // node's text, a dataset entry), step one with ++ or --, call a method that
 // changes the page, its forms, focus, scroll, address or history, touch
 // classes, styles or the page's storage and cookies, send anything, or call
-// through call, apply, bind, Reflect, eval or Function. Local variables may
-// be assigned; nothing else may. Each line names what it caught.
+// through call, apply, bind, Reflect, eval or Function. Nor may it call a
+// method named in brackets (el['click'](), form[m]()), or assign to a
+// property through destructuring or a for-of or for-in loop. Local variables
+// may be assigned; nothing else may. Each line names what it caught.
 const PAGE_MUTATIONS = [
   /[\w$\])]\s*\.\s*[\w$]+\s*(?:[-+*\/%|&^]|\*\*|\?\?|\|\||&&|<<|>>>?)?=(?![=>])/,
   /[\w$\])]\s*\[[^\]]*\]\s*(?:[-+*\/%|&^]|\*\*|\?\?|\|\||&&|<<|>>>?)?=(?![=>])/,
@@ -242,6 +244,9 @@ const PAGE_MUTATIONS = [
   /\bclassList\b|\.style\b|\bdataset\b|\bhistory\b|\bdocument\.cookie\b|\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b/,
   /\blocation\s*=(?!=)|\bwindow\.(open|stop|print)\s*\(|\b(alert|confirm|prompt|fetch)\s*\(|XMLHttpRequest|WebSocket|EventSource|\bObject\.(assign|defineProperty|defineProperties|setPrototypeOf)\b/,
   /\.call\b|\.apply\b|\.bind\b|\bReflect\b|\bFunction\b|\beval\b|\bimport\s*\(|\bset(Timeout|Interval)\s*\(\s*['"`]/,
+  /[\w$\])]\s*\[[^\]]*\]\s*\(/,
+  /\bfor\s*\(\s*(?:[{[]|[\w$]+\s*(?:\.|\[))/,
+  /(?<!\b(?:const|let|var)\s*[{[][^;]*)[}\]]\s*=(?![=>])/,
 ];
 const pageMutations = (code) => PAGE_MUTATIONS.map((re) => code.match(re)).filter(Boolean).map((m) => m[0].trim());
 
@@ -360,6 +365,11 @@ test('the dry run and the listing reader only read the page: every way to change
     'the cookies': 'const c = document.cookie;',
     'sending a request': "fetch('/x');",
     'a borrowed method': "HTMLElement.prototype.click.call(document.body);",
+    'a method named in brackets': "document.querySelector('button')['click']();",
+    'a method held in a variable': "const f = document.querySelector('form'); const m = 'reset'; f[m]();",
+    'a destructured assignment': "({ v: document.querySelector('input').value } = { v: '1' });",
+    'an array destructured assignment': "[document.querySelector('input').value] = ['1'];",
+    'a for-of loop target': "for (document.querySelector('input').value of ['1']) break;",
   };
   for (const [fn, at] of [['probeFormInPage', '  const found = [];'], ['readListingInPage', "  const body = chunks.join(' ');"]]) {
     assert.equal(src.split(at).length, 2, `${fn} has the planting point once`);
