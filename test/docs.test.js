@@ -247,6 +247,38 @@ test('next-platform.md names the four candidates from adapters/README.md, the cr
   assert.match(n, /\*\*First dealer:\*\* \[dealer name/);
 });
 
+// The memo and the launch checklist once described two adapters, called the
+// DealerOn and Dealer.com readers "an idea the owner has not asked for",
+// quoted adapters/README.md for a server-rendered DealerOn list it no longer
+// describes, and said to write a new adapter "only then" even for a platform
+// that has a reader. They follow ADAPTERS: the memo names every reader's
+// file and says which candidates have one, and the checklist's contract item
+// covers every adapter.
+test('next-platform.md and the launch checklist describe the readers ADAPTERS holds', () => {
+  const n = doc('next-platform.md');
+  const index = read('../extension/adapters/index.js');
+  const files = [...index.matchAll(/^import \w+ from '\.\/(\w+)\.js';$/gm)].map((m) => m[1] + '.js');
+  assert.equal(files.length, ADAPTERS.length, 'extension/adapters/index.js imports its adapters differently: update this test');
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  assert.match(n, new RegExp(`Today Lot Current has ${WORDS[ADAPTERS.length] || ADAPTERS.length} adapters`), `next-platform.md does not count the ${ADAPTERS.length} adapters in ADAPTERS`);
+  for (const f of files) assert.ok(n.includes('`extension/adapters/' + f + '`') || n.includes(f), `next-platform.md does not name ${f}`);
+  const section = (p) => (n.split(new RegExp('^### ' + escapeRe(p) + '$', 'm'))[1] || '').split(/^##+ /m)[0];
+  const built = platformNames();
+  for (const p of ['Dealer.com', 'DealerOn', 'Dealer eProcess', 'DealerFire']) {
+    const reader = section(p).split('\n').find((l) => l.startsWith('- **Reader**:')) || '';
+    if (built.includes(p)) assert.match(reader, /^- \*\*Reader\*\*: built/, `next-platform.md's ${p} section does not say its reader is built`);
+    else assert.match(reader, /^- \*\*Reader\*\*: none yet/, `next-platform.md's ${p} section does not say it has no reader yet`);
+    assert.doesNotMatch(section(p), /has not asked for/, `next-platform.md's ${p} section says the owner has not asked for a reader the owner asked for`);
+  }
+  const adaptersReadme = read('../extension/adapters/README.md');
+  if (!/server-rendered/.test(adaptersReadme)) assert.doesNotMatch(n, /server-rendered/, 'next-platform.md quotes extension/adapters/README.md for a server-rendered list it no longer describes');
+  const steps = (n.split(/^## Verification steps[^\n]*$/m)[1] || '').split(/^## /m)[0];
+  const step5 = steps.split('\n').find((l) => l.startsWith('5. ')) || '';
+  assert.match(step5, /reader already there/, "next-platform.md's step 5 says to write a new adapter even for a platform that has a reader");
+  const contract = doc('launch-checklist.md').split('\n').find((l) => l.includes('**Adapter contract complete**')) || '';
+  assert.match(contract, /every adapter in `ADAPTERS`/, "the launch checklist's adapter contract item does not cover every adapter in ADAPTERS");
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));
