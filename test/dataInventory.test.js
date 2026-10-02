@@ -366,6 +366,24 @@ test('the sync row names every part of the sync payload', () => {
   for (const k of Object.keys(body)) assert.ok(sent.includes('`' + k + '`'), `the sync payload carries ${k}, and the Sync row does not name it`);
 });
 
+// The side panel stamps each post it records with postedWith, a fixed string
+// that names no version, and the popup's Mark posted stamps none; the sync
+// payload leaves it out. The posted row says that, not "which build posted it".
+test('the posted row calls postedWith a fixed marker the side panel sets and the sync leaves out, not a build', () => {
+  const panel = read('extension/sidepanel.js');
+  const stamp = panel.match(/const extra = \{ postedWith: ([^,}]+)/);
+  assert.ok(stamp, 'the side panel no longer stamps postedWith: update the posted row and this test');
+  assert.match(stamp[1], /^'[a-z]+'$/, 'postedWith now carries something other than a fixed word (a version?): say what in the posted row');
+  assert.doesNotMatch(read('extension/popup.js'), /postedWith/, 'the popup now stamps postedWith: update the posted row and this test');
+  const body = syncPayload({ origin: 'https://www.example-motors.test', posted: { '1C4RJFBG5KC000001': { name: 'A', price: 1, postedAt: '2026-01-01T00:00:00.000Z', postedWith: 'x' } }, pilot: null, scan: null, since: null, userId: 'u' });
+  assert.ok(!('postedWith' in body.posted['1C4RJFBG5KC000001']), 'the sync now sends postedWith: update the posted row and this test');
+  const row = inventory.split('\n').find((l) => l.startsWith('| `posted:<origin>` |'));
+  assert.ok(row, 'the inventory has no posted:<origin> row');
+  assert.doesNotMatch(row, /which build posted it/, 'the posted row says postedWith records the build, while it is a fixed word');
+  assert.match(row, /a fixed marker \(`postedWith`\) that the side panel recorded the post \(the popup's Mark posted sets none; it stays in this browser and is never synced\)/);
+  assert.doesNotMatch(read('extension/src/sync.js'), /postedWith \(which build posted it\)/, 'sync.js still calls postedWith the build that posted');
+});
+
 test('the privacy texts say the take-downs and price changes on the person\'s own listings leave the browser as to-do items, with both prices', () => {
   const [MINE, REPRICED, THEIRS] = ['1C4RJFBG5KC000001', '1C4RJFBG5KC000002', '1C4RJFBG5KC000003'];
   const diff = {

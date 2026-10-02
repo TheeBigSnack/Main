@@ -284,9 +284,29 @@ test('every pilot reaches the retention line: its clock starts when the owner ma
   const pilot = read('../PILOT.md');
   assert.match(pilot, /its pilot row with the signed agreement's start date and length/, 'PILOT.md\'s account step starts the clock');
   assert.match(pilot, /record the end in the database that day \(`supabase\/README\.md`, "A pilot ended early"\)/, 'PILOT.md records a stop or an early end');
-  assert.match(pilot, /those records are the CSVs the owner collected and, for a dealership on accounts, its rows in the database/, 'the database rows are pilot records too');
+  assert.match(pilot, /those records are the CSVs the owner collected and the pilot log filled in from them, and, for a dealership on accounts, its rows in the database/, 'the database rows and the pilot log are pilot records too');
   assert.match(read('../docs/launch-checklist.md'), /an early end recorded the day the notice comes/);
   assert.match(read('../docs/production-setup.md'), /make it again with step 5's three statements: the dealership, the manager's invite code, which you keep for the manager, and its pilot row with the signed agreement's start date and length\. If the agreement is not signed yet, run the pilot row the day it is; until then the weekly list of dealerships with no plan/, 'the production steps run the pilot row too, or the no-plan list shows the dealership until they do');
+});
+
+// review: the launch checklist copies each partner's usage_report row into the pipeline sheet every week, but
+// the data inventory did not list the sheet and no deletion step reached it, so a pilot that ended unpaid kept
+// its weekly numbers there past the pilot agreement's 30 days
+test('the pipeline sheet the weekly usage report fills is an owner\'s record in the inventory, and every deletion takes a dealership\'s weekly rows out of it', () => {
+  const checklist = read('../docs/launch-checklist.md');
+  const weekly = checklist.split('\n').find((l) => l.includes('**Run usage_report weekly and keep the partner list.**'));
+  assert.ok(weekly, 'the launch checklist has the weekly usage_report item');
+  if (!/pipeline sheet/.test(weekly)) return; // the rows are kept nowhere outside the database
+  assert.match(weekly, /has its weekly rows taken out of the sheet within the same 30 days as its database records \(pilot agreement section 6\)/, 'the weekly item does not say when a partner\'s rows leave the sheet');
+  const inventory = read('../docs/data-inventory.md');
+  const owners = inventory.slice(inventory.indexOf("\n## The owner's records\n"), inventory.indexOf('\n## Who receives data\n'));
+  assert.ok(owners.length > 40, "docs/data-inventory.md has no \"The owner's records\" section");
+  assert.match(owners, /\*\*The pipeline sheet\*\*[^\n]*`usage_report` row for each week[^\n]*its weekly rows go from the sheet within the same 30 days \(pilot agreement section 6\)/, 'the inventory does not say what the sheet holds and when a dealership\'s rows leave it');
+  const del = readme.slice(readme.indexOf('### Delete: a manager asked'), readme.indexOf('**The retention line.**'));
+  assert.match(del, /\*\*The owner's copies\.\*\* Nothing in the database reaches them either\. Take the dealership's weekly usage rows out of the pipeline sheet/, 'the delete steps leave the dealership\'s rows in the pipeline sheet');
+  const pilot = read('../PILOT.md');
+  assert.match(pilot, /and its weekly usage rows in the pipeline sheet/, 'PILOT.md does not count the sheet\'s rows among the pilot records');
+  assert.match(pilot, /its weekly rows in the pipeline sheet with them/, 'PILOT.md\'s end of a pilot leaves the sheet\'s rows');
 });
 
 // review: asking for a sign-in code creates an account for any address typed, and one that never joined a
@@ -306,4 +326,21 @@ test('accounts that never joined are listed and deleted in the weekly run, and t
   const item = read('../legal/questions-for-attorney.md').split('\n').find((l) => l.startsWith('- **8.5**'));
   assert.match(item, /an account that never joins a dealership or tries to start one holds only that email address, its sign-in times and sessions, and the sign-in log's entries for it \(with the IP address\), and the owner's weekly run now deletes it within a week after it is 30 days old/);
   assert.match(read('../docs/data-inventory.md'), /deleted by the owner's weekly run within a week after it is 30 days old \(`supabase\/README\.md`, "Accounts that never joined"\)/);
+});
+
+// review: PILOT.md's pilot log has a Salesperson column and said to copy a row per week "into this file or a
+// spreadsheet"; a row committed to git outlives the pilot agreement's 30 days, and neither the inventory's
+// owner's records nor PILOT.md's Clearing named the log
+test('the pilot log is an owner\'s record kept out of the repository and deleted with the CSVs', () => {
+  const pilot = read('../PILOT.md');
+  const log = pilot.split('\n').find((l) => l.startsWith('**Pilot log'));
+  assert.ok(log, 'PILOT.md has no pilot log');
+  const table = pilot.slice(pilot.indexOf(log)).split('\n').find((l) => l.startsWith('| Week |'));
+  if (!/Salesperson/.test(table || '')) return; // the log names no one
+  assert.doesNotMatch(log, /(?<!not |never )into this file/, 'PILOT.md still lets the pilot log, which names each salesperson, be committed to git');
+  assert.match(log, /[Cc]opy a row per week into the owner's private pilot spreadsheet, never into this file[^\n]*a row committed to git outlives the 30 days in pilot agreement section 6/);
+  assert.match(pilot, /those records are the CSVs the owner collected and the pilot log filled in from them/, 'PILOT.md\'s Clearing does not count the pilot log among the pilot records');
+  const inventory = read('../docs/data-inventory.md');
+  const owners = inventory.slice(inventory.indexOf("\n## The owner's records\n"), inventory.indexOf('\n## Who receives data\n'));
+  assert.match(owners, /\*\*The pilot log\*\* \(`PILOT\.md`, "During the pilot"\): one row per salesperson per week, with their name[^\n]*never in this repository[^\n]*Deleted with the CSVs, within 30 days of the pilot's end unless the dealer subscribes/, 'the inventory\'s owner\'s records do not list the pilot log');
 });

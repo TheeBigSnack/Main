@@ -91,6 +91,29 @@ test('the Web Store privacy answers justify every manifest permission in their o
   for (const p of manifest.optional_host_permissions) assert.match(table, new RegExp(`^\\| Optional host \`${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\` \\|`, 'm'), `"${p}" is marked optional`);
 });
 
+// What a salesperson reads next to Chrome's install prompt names the hosts
+// that prompt shows, as Chrome shows them, and nothing else: the static image
+// host belongs to one website platform, so calling it "the dealership's photo
+// host" is wrong for every other dealership, and dropping it from the
+// manifest at the store release (store/listing.md) must change these lines too.
+test('the install steps name exactly the hosts Chrome shows at install, and no text calls the static image host the dealership\'s', () => {
+  const shown = manifest.host_permissions.map((p) => p.replace(/^https:\/\//, '').replace(/\/\*$/, '')).sort();
+  for (const rel of ['../README.md', '../docs/help.md', '../marketing/onboarding-store.md']) {
+    const lines = read(rel).split('\n').filter((l) => /Chrome (?:will say|says) the extension can read and change data on|At install, Chrome shows what the extension can read/.test(l));
+    assert.ok(lines.length, `${rel} no longer says what Chrome shows at install`);
+    for (const l of lines) {
+      const prompt = l.split(/\. |; /).find((s) => /can read and change data on|what the extension can read/.test(s));
+      const named = [...new Set([...prompt.matchAll(/\b(?:[a-z0-9-]+\.)+(?:com|inc|gov|org|net)(?:\/[a-z]+)?/g)].map((m) => m[0]))].sort();
+      assert.deepEqual(named, shown, `${rel}: the install prompt line names ${named.join(', ') || 'no host'}, but Chrome shows ${shown.join(', ')}`);
+    }
+  }
+  for (const rel of ['../README.md', '../docs/help.md', '../marketing/onboarding-store.md', '../legal/chrome-web-store-privacy.md', '../store/listing.md']) {
+    assert.doesNotMatch(read(rel), /the dealer(?:ship's)? (?:photo|image) host/, `${rel} calls the manifest's static image host the dealership's own`);
+    // one Dealer Inspire website has been checked (extension/adapters/README.md: "photo host seen so far"), so no text says every one uses it
+    assert.doesNotMatch(read(rel), /(?:that|which) Dealer Inspire (?:dealership )?websites use/, `${rel} says every Dealer Inspire website keeps its photos on the static image host, which only the websites checked so far do`);
+  }
+});
+
 // Each widening since the first build, where it was decided, and the
 // CHANGELOG section that recorded it. The test reads that section, so a
 // pointer here that names the wrong release fails instead of sending the

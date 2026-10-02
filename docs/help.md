@@ -19,7 +19,7 @@ Something not covered here? See `docs/support.md` for how to reach support and w
 4. Click **Load unpacked** and choose the folder that contains `manifest.json`.
 5. Click the puzzle-piece icon in Chrome's toolbar and pin **Lot Current**.
 
-Chrome says the extension can read and change data on `www.facebook.com/marketplace` and on the dealer photo host. That is what filling the form and attaching the car's photos needs. It does not read your Facebook password, cookies or messages.
+Chrome says the extension can read and change data on `www.facebook.com/marketplace` and on `vehicle-images.carscommerce.inc`, the Cars Commerce photo server used by the Dealer Inspire websites checked so far. That is what filling the form and attaching the car's photos needs; a website that keeps its photos on another server gets Chrome's own prompt for that server the first time you fill a form or download photos for one of its cars ("When Chrome asks for a permission", below). It does not read your Facebook password, cookies or messages.
 
 ### Update
 
@@ -170,7 +170,7 @@ Your profile follows you. Your name, role, closing line and listing defaults fol
 
 The panel lists it under **Couldn't fill**, with the value Lot Current wanted to enter, the reason (what the form showed), and similar controls it saw on the page.
 
-1. **Copy the report.** On that screen, the list itself is the report. For a fuller one, go back to the review screen and click **Open the form and check fields only (nothing filled)**, then **Copy report** on the result. Then click **Copy problem report** under **Report a problem** in **Settings**: it copies the version, the website, the last scan and the last fill's field names (no names, cars or links) for the same message.
+1. **Copy the report.** On that screen, the list itself is the report. For a fuller one, go back to the review screen and click **Open the form and check fields only (nothing filled)**, then **Copy report** on the result (read it before you send it: it holds the form page's address and title and the names of the controls on that page, which can include Facebook's own menus). Then click **Copy problem report** under **Report a problem** in **Settings**: it copies the version, the website, the last scan and the last fill's field names (no names, cars or links) for the same message.
 2. **Send it** to support (`docs/support.md` says where and what else to include). Each fix is one line in the form map and comes back in the next zip.
 3. **Fill it by hand.** Click **Copy** next to the value, paste it into the field on Facebook, and check the field before you publish. **Needs a click** means the value is in but the form wants a click to confirm it; click it.
 
@@ -200,7 +200,7 @@ Chrome only asks because you clicked something in Lot Current, and each prompt n
 - **Post**, **Post the next N** or **Rescan the website** in the side panel's own list, when the dealership website is not open in a tab: the same permission, so the panel can re-check the car or rescan without the tab. If you already allowed automatic rescans, Chrome does not ask again. Decline and the panel says "Not allowed, so Lot Current can't read [website] from the side panel"; open the website's used inventory page and post from the popup there instead, or click **Allow reading [website]** to be asked again.
 - **Check with NHTSA (free government decoder)** in the side panel: permission to reach `vpic.nhtsa.dot.gov` for the VIN decode. Decline and the VIN is simply not checked online.
 - **Photos from a server** in the side panel: permission to download a car's photos from the server they sit on, when it is not the photo host Chrome showed at install. Chrome asks when you click **Open the Marketplace form** (or **Fill it in now**, **Fill again** or **Download photos**) for the first car with photos there, one prompt for all of that car's servers. Lot Current only asks for the servers that car's own photos are on, only over https, and never for Facebook. Decline and the form still fills; those photos are not attached, and **Allow photos from [server]** asks again.
-- At install, Chrome shows what the extension can read: `www.facebook.com/marketplace` and the dealer photo host.
+- At install, Chrome shows what the extension can read: `www.facebook.com/marketplace` and `vehicle-images.carscommerce.inc` (the Cars Commerce photo server used by the Dealer Inspire websites checked so far; any other photo server is asked for as above).
 
 Lot Current never asks for your Facebook password, cookies or tokens, in Chrome's prompts or anywhere else.
 

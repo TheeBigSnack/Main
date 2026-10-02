@@ -329,8 +329,8 @@ function ownership(r, userId) {
 }
 
 // A server row as a registry entry. Only the keys markPosted() would set
-// are written; postedWith (which build posted it) is kept from the local
-// entry when there is one.
+// are written; postedWith (a fixed marker that the side panel recorded the
+// post; never synced) is kept from the local entry when there is one.
 function entryFromRow(r, prev = {}, userId = '') {
   return {
     name: text(r.name, 80) || text(prev.name, 80),

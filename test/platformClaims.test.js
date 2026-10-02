@@ -60,3 +60,30 @@ test('a reader counts as checked only when it says so, and no reader its own fil
   }
   assert.equal(isCheckedLive(ADAPTERS.find((x) => x.PLATFORM.id === 'dealerInspire')), true, 'Dealer Inspire is the reader checked on a live site');
 });
+
+// The Chrome Web Store listing is the most public claim, and its test
+// instructions go to Google's reviewer: they name a reader as working only
+// when it is checked on a real website, and point the reviewer at the page
+// the owner picks, never at "any" website of an unchecked kind.
+test('the store listing names an unchecked reader only after the caveat, and never sends the reviewer to any website of its kind', () => {
+  const listing = read('../store/listing.md');
+  const needs = listing.split('\n').find((l) => l.startsWith('- A dealership website Lot Current can read'));
+  assert.ok(needs, 'store/listing.md lost its "What it needs" line on websites');
+  const at = needs.indexOf('Also tries, not yet checked on a real dealership website:');
+  const before = at === -1 ? needs : needs.slice(0, at);
+  const after = at === -1 ? '' : needs.slice(at);
+  const words = (a) => (a.PLATFORM.id === 'schemaOrg' ? 'schema.org' : a.PLATFORM.name);
+  for (const a of ADAPTERS) {
+    if (isCheckedLive(a)) {
+      assert.ok(before.includes(words(a)), `${a.PLATFORM.name} is checked and is named before the caveat`);
+    } else {
+      assert.ok(!before.includes(words(a)), `store/listing.md names ${a.PLATFORM.name} among the websites it reads without the caveat`);
+      assert.ok(after.includes(words(a)), `store/listing.md does not name ${a.PLATFORM.name} after the caveat`);
+    }
+  }
+  assert.match(after, /tested only on sample websites/);
+  const start = listing.indexOf('## Test instructions');
+  const steps = listing.slice(start, listing.indexOf('\n## ', start + 1));
+  assert.doesNotMatch(steps, /\bany (?:dealership )?website\b[^\n]*?\bworks\b/i, 'the reviewer is told any website of an unchecked kind works');
+  assert.match(steps, /tested only on sample websites so far/, 'the reviewer is not told the other readers are unchecked');
+});

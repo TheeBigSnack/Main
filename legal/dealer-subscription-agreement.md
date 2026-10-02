@@ -14,7 +14,7 @@ The Dealer confirms that it owns or controls its website(s) listed in Schedule A
 
 ## 3. Authorisation for staff to post
 
-The Dealer authorises the Users it designates (Schedule B, or as managed in the Service) to post the Dealer's pre-owned vehicles on Marketplace from those Users' own Facebook accounts, identifying the Dealer in every listing. The Dealer is responsible for choosing Users, for their conduct, for removing access when they leave, and for its own policies on employees' use of personal accounts. [Attorney: see item 7.]
+The Dealer authorises the Users it designates (Schedule B, or as managed in the Service) to post the Dealer's pre-owned vehicles on Marketplace from those Users' own Facebook accounts, identifying the Dealer in every listing. The Dealer is responsible for choosing Users, for their conduct, for removing access when they leave, and for its own policies on employees' use of personal accounts. Removing a User from the Dealer's account in the Service ends that person's syncing with the Dealer's records, their view of those records in the manager view and their use of the description writer through the Dealer's account; it does not stop the extension on that person's computer, which needs no account to read the Dealer's public website and prepare a listing, and keeps the dealership name and role that person saved in it. [Attorney: see item 7.]
 
 ## 4. Dealer responsibilities
 

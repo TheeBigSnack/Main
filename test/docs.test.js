@@ -619,6 +619,22 @@ test('store/listing.md gives the site, the support inbox and the legal addresses
   assert.ok(listing.includes(`Privacy policy URL: \`${LEGAL.privacyUrl}\``), 'the privacy answers give another privacy policy URL than legalLinks.js');
 });
 
+// Set-up reads the website and finishes with one more read, which saves the
+// snapshot, and the popup's button reads "Rescan website" once a snapshot is
+// saved. The Web Store reviewer's steps say the list is already there after
+// set-up, not to click a "Scan website" button the popup no longer shows.
+test('the store reviewer\'s steps say set-up has already read the website, and name the button the popup shows then', () => {
+  const wizard = read('../extension/wizard.js');
+  const finish = wizard.slice(wizard.indexOf('async function finish('));
+  assert.match(finish, /^async function finish\([^]*?const ok = await runScan\(ctx\);/, 'set-up no longer ends with a read: update store/listing.md step 2 and this test');
+  assert.match(wizard, /chrome\.storage\.local\.set\(\{ \[k\.snapshot\]: kept/, 'set-up\'s read no longer saves the snapshot: update store/listing.md step 2 and this test');
+  assert.match(read('../extension/popup.js'), /\$\('scan'\)\.textContent = state\.snapshot \? 'Rescan website' : 'Scan website';/, 'the popup\'s scan button has another label: update store/listing.md step 2 and this test');
+  const step = read('../store/listing.md').split('\n').find((l) => l.startsWith('2. Click the Lot Current icon in the toolbar.'));
+  assert.ok(step, 'store/listing.md lost the reviewer\'s set-up step');
+  assert.doesNotMatch(step, /click Scan website/i, 'the reviewer is told to click Scan website, which the popup shows only before a scan is saved');
+  assert.match(step, /Set-up reads the website and ends with one more read[^.]*the Ready to post tab already lists the pre-owned cars at that store \(Rescan website, at the top of the popup, reads the website again\)/);
+});
+
 // Every Markdown or script file outside the docs and the history that holds
 // the website's support address is named on support.md's inbox line, so a
 // change of address reaches all of them (the Terms and the onboarding email
@@ -998,6 +1014,43 @@ test('while the committed account config names a project, no text says the shipp
   const setUp = read('../README.md').split('\n').find((l) => l.includes('**Set up Lot Current**'));
   assert.ok(setUp, 'README no longer walks through set-up');
   assert.match(setUp, /sign in to your dealership's Lot Current account[^.]*\*\*Skip for now\*\*/, 'README\'s set-up steps leave out the Account step the shipped build shows');
+  // The Web Store answers and the support page say what is sent when the
+  // person signs in, not that sending waits for accounts to be set up: the
+  // build already offers sign-in, and asking for a code sends the email.
+  for (const rel of ['../legal/chrome-web-store-privacy.md', '../store/listing.md']) {
+    assert.doesNotMatch(read(rel), /once Lot Current accounts are set up/i, `${rel} still says the sign-in data waits for accounts to be set up`);
+    assert.match(read(rel), /when (?:the user signs|they sign) in to a Lot Current account, the email address/, `${rel} does not say the sign-in email is sent when the person signs in`);
+  }
+  const support = read('../site-src/pages/support.html');
+  assert.doesNotMatch(support, /Until then nothing leaves your browser/, 'the support page says nothing leaves the browser while every build offers sign-in');
+  assert.match(support, /sends nothing to Lot Current's database until you ask for a sign-in code/, 'the support page does not say when the extension first sends to Lot Current\'s database');
+});
+
+// review: README said each salesperson's scans, settings and posted list are
+// "kept only in their own browser", two lines under the Account bullet that
+// says the posted list syncs. The profile always goes to Chrome's synced
+// storage (src/settings.js saveProfile), and while the person is signed in
+// their posted list, post timings, to-do items and scan counts sync to the
+// dealership's account (src/sync.js). No text a person reads says the data
+// stays in the browser alone, and the ones that say where it is kept name
+// both, and the button that removes the synced profile.
+test('no text says the data stays only in the browser: the profile follows the Chrome sign-in, and a signed-in person\'s posted list and numbers sync', () => {
+  const settingsSrc = read('../extension/src/settings.js');
+  assert.match(settingsSrc.slice(settingsSrc.indexOf('export async function saveProfile(')), /chrome\.storage\.sync/, 'the profile is no longer kept in Chrome sync: say where it is in these texts and in this test');
+  const LOCAL_ONLY = /\b(?:kept|stays?|stored|held) only (?:in|on) (?:your|their|the) (?:own )?(?:browser|computer)|nothing (?:leaves|goes beyond) (?:your|their|the) browser/i;
+  for (const rel of ['../README.md', '../PILOT.md', '../docs/help.md', '../docs/support.md', '../docs/data-inventory.md', '../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../site-src/pages/support.html', '../site-src/pages/faq.html', '../site-src/pages/home.html', '../marketing/onboarding-emails.md', '../marketing/onboarding-store.md', '../store/listing.md']) {
+    const hit = read(rel).match(LOCAL_ONLY);
+    assert.equal(hit && hit[0], null, `${rel} says "${hit && hit[0]}", but the profile follows the Chrome sign-in${accountsConfigured() ? " and a signed-in person's posted list and numbers sync to the dealership's account" : ''}`);
+  }
+  const line = read('../README.md').split('\n').find((l) => l.startsWith("Each salesperson's scans, settings, posted list and numbers are kept in their own browser, separately per website."));
+  assert.ok(line, "README no longer says where each salesperson's scans, settings and posted list are kept");
+  assert.match(line, /the profile \(above\) is in Chrome's synced storage, so it follows their Chrome sign-in/, "README's storage line does not say the profile follows the Chrome sign-in");
+  if (accountsConfigured()) {
+    assert.match(line, /while they are signed in to a Lot Current account their posted list, post timings, to-do items and each scan's counts also sync to the dealership's account/, "README's storage line does not say what syncs to the dealership's account");
+  }
+  // Clear everything for this website does not reach the synced profile (legal/privacy-policy.md, Retention)
+  const support = read('../site-src/pages/support.html').split('\n').filter((l) => /stays in your browser/.test(l));
+  for (const l of support) assert.match(l, /<b>Clear everything for this website<\/b> removes it\. Your profile \([^)]*closing line[^)]*\) is also kept by Chrome's sync under your Google account, and Settings, <b>Forget my synced profile<\/b> removes it\./, 'the support page says Clear everything removes what the extension keeps, but the synced profile needs Forget my synced profile');
 });
 
 // "It didn't post" ends the post attempt the click on Post opened, as
