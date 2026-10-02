@@ -235,6 +235,16 @@ test('docs/support.md: the copy of a person\'s own data reads every table that c
   assert.match(recipe, /from public\.invites i\b[^;]*where '<user id>' in \(i\.created_by, i\.used_by\)/, 'the codes they made or used');
   assert.match(recipe, /from auth\.users where id = '<user id>'/, 'their account');
   assert.match(support, /it leaves out their invite misses, sign-up attempts and demo requests/, 'what export_dealership leaves out');
+  // review: the Stripe events that carry the person's email (forget_person counts them, the policy names the
+  // billing contact's details among what we hold) were left out; matched on the whole quoted address, so a longer
+  // address that ends with theirs does not bring back someone else's events, and never billing_events_of(), which
+  // returns the whole dealership's
+  assert.match(body('forget_person'), /from public\.billing_events e where position\(lower\(their_email\) in lower\(e\.payload::text\)\) > 0/, 'forget_person no longer counts the events carrying the email: the copy changes with it');
+  assert.match(recipe, /select received_at, type, payload from public\.billing_events where position\(lower\('"' \|\| '<their email>' \|\| '"'\) in lower\(payload::text\)\) > 0;/, 'the copy leaves out the Stripe events that carry their email, or matches part of an address');
+  assert.doesNotMatch(recipe, /billing_events_of\(/, 'billing_events_of() returns the whole dealership\'s events, not the person\'s');
+  const copy = support.slice(start, support.indexOf('\n- Log each request', start));
+  assert.match(copy, /the Stripe events that carry their email/, 'the description of the copy does not name the billing events');
+  assert.match(copy, /still check that each event it returns names them/, 'the owner is not told to check each event');
 });
 
 // review: the attorney was told forget_person keeps "two things", and the README called every colleague's
