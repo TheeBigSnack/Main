@@ -52,7 +52,7 @@
     <section class="hero" aria-labelledby="hero-h">
       <div class="wrap narrow">
         <h1 id="hero-h">Your used cars on Facebook Marketplace, from your website, in seconds.</h1>
-        <p class="lead">Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish. It also tells you the same day when a car sells or its price changes.</p>
+        <p class="lead">Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish. With automatic rescans allowed and Chrome open, it also tells you the same day when a car sells or its price changes.</p>
         <!-- The Start a free pilot links stay hidden, here and under Pricing, until config.js names the manager view
              (signupUrl): site.js then shows them, with the pilot's length from pricing.json. -->
         <div class="actions">
@@ -120,7 +120,7 @@
           <li>
             <figure>
               <img src="./screenshots/05-pilot.png" alt="The popup's Numbers tab: how many cars were posted through Lot Current and the median time per post, the form fields with nothing to fix by hand, and the Download CSV button." width="1280" height="800" loading="lazy">
-              <figcaption><b>The numbers you can share with your manager: kept in your browser, and in your dealership's account while you are signed in.</b> Time per post, fields that could not be filled, how long sold cars stayed listed. <span class="from">Sandbox with sample data.</span></figcaption>
+              <figcaption><b>The numbers you can share with your manager: kept in your browser, and in your dealership's account while you are signed in.</b> Time per post, how long sold cars stayed listed, and the fields that could not be filled, which stay in your browser. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
         </ul>
@@ -133,7 +133,7 @@
         <ul class="cards">
           <li class="card">
             <h3>Pre-owned only</h3>
-            <p>Three separate signs on your website have to agree a car is pre-owned before it can be posted. A demo or loaner flag always means no.</p>
+            <p>Lot Current compares three signs on your website: the inventory type and the condition words in the car's web address and title. Before a car can be posted, at least two must say pre-owned, or one must and the website must link a Carfax report, and none may say new. A demo or loaner flag always means no.</p>
           </li>
           <li class="card">
             <h3>Photos included</h3>
@@ -164,11 +164,11 @@
             <p>Before posting, the VIN's format, model year and manufacturer are compared with what the website says, and any difference is flagged.</p>
           </li>
           <li class="card">
-            <h3>A daily cap you set</h3>
-            <p>Your dealership sets how many posts a day each salesperson may make. It is a safety setting, not a guarantee of anything from Facebook.</p>
+            <h3>A daily cap you choose</h3>
+            <p>Your dealership chooses how many posts a day each salesperson may make, and each salesperson enters that number in their own Settings. It is a safety setting, not a guarantee of anything from Facebook.</p>
           </li>
         </ul>
-        <p>Once the manager view opens, managers will see the same numbers for the whole store: <a href="./for-managers/">what managers see</a>.</p>
+        <p>Once the manager view opens, managers will see the post and to-do numbers for the whole store: <a href="./for-managers/">what managers see</a>.</p>
       </div>
     </section>
 
@@ -193,6 +193,8 @@
     <section id="pricing" aria-labelledby="pricing-h">
       <div class="wrap narrow">
         <h2 id="pricing-h">Pricing</h2>
+        <!-- Each data-pricing number is written in by npm run site-pages from marketing/pricing.json, and site.js
+             writes it again from site/pricing.json: never type a price here. -->
         <p><b>Planned pricing:</b> <span data-pricing="perRooftopMonthly">$149</span> per rooftop per month, with <span data-pricing="includedSalespeople">five</span> salespeople included, <span data-pricing="extraSalespersonMonthly">$20</span> a month for each extra salesperson, and a <span data-pricing="pilotDays">30</span>-day free pilot first. These are planned prices, confirmed with you before any paid subscription starts. <a href="./pricing/">The pricing page</a> has the founding-dealer price and the details of the free pilot.</p>
         <div class="actions">
           <a class="button" href="#demo">Request a demo</a>

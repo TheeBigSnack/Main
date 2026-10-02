@@ -71,7 +71,7 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
   assert.doesNotMatch(what, /does not act while the User is away/, 'the Terms say Lot Current does nothing while the User is away');
   assert.match(what, /never acts on Facebook while the User is away/);
   assert.match(what, /If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open/);
-  assert.match(what, /while the User is signed in, sends the results to the dealership's records/);
+  assert.match(what, /while the User is signed in to a Lot Current account, sends that rescan's results to the dealership's records/);
 });
 
 // Each function the extension runs in a Facebook tab, and the words the
@@ -82,7 +82,8 @@ const FACEBOOK_FUNCS = {
   attachPhotosInPage: /attach(?:es)? the car's photos/,
   probeFormInPage: /check fields only, (?:to )?lists? that form's fields without filling them/,
   fillPriceInPage: /fill(?:s)? the new price on the listing's edit form/,
-  readListingInPage: /reads? every 1\.5 seconds the Marketplace page[^|]*Your listings page when no (?:listing )?link was saved[^|]*title, (?:the )?prices/,
+  // store/listing.md says 'repeatedly': the listing copy carries no timing figures (test/honesty.js)
+  readListingInPage: /reads? (?:every 1\.5 seconds|repeatedly) the Marketplace page[^|]*Your listings page when no (?:listing )?link was saved[^|]*title, (?:the )?prices/,
 };
 
 test('the Facebook host justification and the privacy texts name every read Lot Current makes on a Facebook page, the Your listings page among them', () => {

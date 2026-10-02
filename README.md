@@ -84,13 +84,13 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 ## How the pre-owned check works
 
-Three separate signs on the dealer website have to agree the car is pre-owned:
+Lot Current compares three signs on the dealer website:
 
 1. the inventory type from the dealer's system (Used / Certified Used / New)
 2. the condition word in the car's web address (`/inventory/used-2019-...` vs `/inventory/new-2027-...`)
 3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
 
-A demo or loaner flag means "sold as new"; if the website also calls the car pre-owned and nowhere new, it goes to **Needs a look** instead. A trailer, RV, powersport vehicle or boat goes to **Needs a look** too (Lot Current fills in only the car/truck and motorcycle forms), unless it is skipped as new. A car the website lists as damaged or refurbished goes to **Needs a look**, unless it is already skipped as new: a demo or loaner flag, or a new sign with no pre-owned one, decides first. A Carfax report counts as a supporting sign, but a missing one never blocks a car. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
+To pass, at least two of them must say pre-owned, or one must and the car's page must link a Carfax report, and none may say new; a car with only one sign and no Carfax report goes to **Needs a look**. A demo or loaner flag means "sold as new"; if the website also calls the car pre-owned and nowhere new, it goes to **Needs a look** instead. A trailer, RV, powersport vehicle or boat goes to **Needs a look** too (Lot Current fills in only the car/truck and motorcycle forms), unless it is skipped as new. A car the website lists as damaged or refurbished goes to **Needs a look**, unless it is already skipped as new: a demo or loaner flag, or a new sign with no pre-owned one, decides first. A Carfax report counts as a supporting sign, but a missing one never blocks a car whose signs agree. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to **Needs a look**. A pre-owned car is **ready to post** only if it has photos, a price, is on the lot, isn't sale-pending, and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.
 
 ## Limits
 
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1250 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1270 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
@@ -162,7 +162,7 @@ Website: `site/` is the Lot Current website as served, one committed HTML file p
 | `extension/wizard.js`, `upkeep.js` | The wizard steps; the To do follow-through (open the listing, fill the new price, notice the change) |
 | `extension/adapters/` | One file per dealer-website platform behind a small interface; `dealerInspire.js` reads the lot in pages, de-duplicates by VIN, double-checks missing VINs and makes the direct service call the background rescan uses |
 | `extension/src/scanRunner.js`, `rescanSchedule.js` | The scan pipeline shared by popup, wizard and service worker; when rescans are due and what the badge says |
-| `extension/background.js` | Downloads photos; rescans every known website every 3 hours and keeps the badge current |
+| `extension/background.js` | Downloads photos; rescans every website with automatic rescans on every 3 hours while Chrome is open, and keeps the badge current |
 | `backend/` | The standalone rewrite service (its Anthropic API key in its own ignored `backend/.env`; the accounts' `rewrite` function keeps its own as a Supabase function secret; never in the extension) |
 | `supabase/` | The accounts: schema with row-level security, the `rewrite`, `sync`, `billing` and `lead` Edge Functions, SQL tests (`supabase/README.md`) |
 | `manager/`, `site/`, `demo/` | The manager view, the website (its pages written by `scripts/site-pages.mjs` and `scripts/legal-pages.mjs` from `site-src/` and `legal/`; `docs/website.md`) and the in-browser test drive; static pages, sample-data modes, their own tests |

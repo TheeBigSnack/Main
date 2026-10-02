@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
 import { copyProblems } from './copyGuards.js';
-import { honestyProblems, offPricing } from './honesty.js';
+import { honestyProblems, offPricing, TIME_PER_POST } from './honesty.js';
 import { stripComments } from './helpers.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -68,6 +68,11 @@ test('no claim we have not measured, and nothing that sounds like Meta approval'
     const doc = read('../marketing/' + rel);
     assert.deepEqual(copyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], rel);
     assert.deepEqual(honestyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], `marketing/${rel}`);
+    // the internal positioning too: its numbers are measured or labelled a guess, and no fill time has been measured
+    for (const re of TIME_PER_POST) {
+      const hit = doc.match(re);
+      assert.equal(hit, null, `marketing/${rel} gives a time per post nobody has measured: "${hit && hit[0]}" (legal/trademark-note.md, Marketing claims)`);
+    }
   }
 });
 
@@ -275,4 +280,72 @@ test('the store email says every salesperson ticks the posting rules before post
   assert.doesNotMatch(sentence, /during set-up and ticks/, 'set-up can be skipped: say where else the tick is asked for');
   const panel = read('../extension/sidepanel.js');
   assert.match(panel, /if \(!state\.settings\.rulesReadAt\) \{[^}]*state\.step = 'rules';/, 'the side panel no longer stops a post until the posting rules are ticked: change the email');
+});
+
+// review: the manager was told "Nothing from the pilot is lost: each pilot salesperson's posted list and
+// numbers sync into the account the first time they sign in", while every salesperson was sent to the Web
+// Store. The manifest has no "key", so the store copy has its own extension id and its own storage: it
+// starts empty, and a pilot that ran without accounts left its listings only in the pilot copy.
+test('the store-install emails carry the pilot salespeople\'s listings across from the pilot copy, since the store copy starts empty', () => {
+  const manifest = JSON.parse(read('../extension/manifest.json'));
+  const store = read('../marketing/onboarding-store.md');
+  assert.doesNotMatch(store, /nothing (from the pilot )?is lost|sync into the account the first time they sign in/i, 'a promise the store install does not keep');
+  if (manifest.key) return; // a fixed id would share one storage between the zip and the store copy
+  const manager = store.split('\n').find((l) => l.startsWith('**1. The account.**'));
+  assert.ok(manager, 'the manager email has its account paragraph');
+  assert.match(manager, /starts empty/, 'the manager is told the store copy starts empty');
+  assert.match(manager, /before installing from the store, they sign in and join the account in the copy they used during the pilot/, 'and what each pilot salesperson does first');
+  const salesperson = store.slice(store.indexOf('## To each salesperson'), store.indexOf('## Day 7'));
+  const before = salesperson.split('\n').find((l) => /Only for a salesperson who was in the pilot/.test(l)) || '';
+  assert.ok(before && salesperson.indexOf(before) < salesperson.indexOf('**1. Install'), 'the salesperson email has the pilot step before the install step');
+  assert.match(before, /in that pilot copy[^.]*\*\*Settings\*\*[^.]*\*\*Account\*\* sign in and join/, 'the pilot step signs in and joins in the pilot copy');
+  assert.match(before, /Keep the pilot copy until \*\*My listings\*\* in the new copy shows your pilot cars/, 'and keeps it until the new copy shows them');
+  // the labels it names are the popup's
+  const popup = read('../extension/popup.js');
+  for (const label of ['My listings', 'Settings', 'Account']) assert.ok(popup.includes(label), `"${label}" is no longer a label in popup.js: update onboarding-store.md and this test together`);
+  assert.ok(read('../extension/src/accountFlow.js').includes('Accounts are not set up yet'), 'the pilot step quotes the Account section of a copy without accounts');
+});
+
+// review: the demo script had "a Facebook account signed in (yours, or the manager's salesperson's with their
+// OK)" on the presenter's laptop, and a branch where a salesperson clicks Publish there. Support never touches a
+// salesperson's Facebook account (docs/support.md) and the posting rules say each person posts from their own
+// account only. The demo runs on the presenter's own account, is never published, and a real listing is the
+// salesperson's own, on their own computer.
+test('the demo script signs in only the presenter\'s own Facebook account and never publishes', () => {
+  const demo = read('../marketing/demo-script.md');
+  const setup = demo.split('\n').find((l) => l.startsWith('For a used car manager'));
+  assert.ok(setup, 'the demo script lost its set-up line');
+  assert.match(setup, /your own Facebook account signed in/, 'the presenter signs in their own account');
+  assert.match(setup, /Never sign anyone else's Facebook account in on your laptop/, 'and never anyone else\'s');
+  assert.doesNotMatch(demo, /salesperson's with their OK|or the (manager's )?salesperson's\)|sign(ed|s)? in as (them|the salesperson|a salesperson)|their (Facebook )?(login|password)/i, 'someone else\'s account on the presenter\'s laptop');
+  assert.doesNotMatch(demo, /have the salesperson click Publish|unless they want real posts|whether the demo post gets published/i, 'a real listing during the demo');
+  assert.match(demo, /The demo post is never published/, 'the demo publishes nothing');
+  for (const line of demo.split('\n').filter((l) => /real listing/i.test(l))) {
+    assert.match(line, /their own computer/, `a real listing is made on the salesperson's own computer: ${line.slice(0, 80)}`);
+    assert.match(line, /their own (Facebook )?account/, `in their own Facebook account: ${line.slice(0, 80)}`);
+  }
+  // the support rule the script follows
+  assert.match(read('../docs/support.md'), /Never touch a salesperson's Facebook account/, 'docs/support.md no longer says support never touches a salesperson\'s account: check the demo script against it');
+});
+
+// review: the sales sheet said "no contract", while a subscription is the Dealer Subscription Agreement the
+// dealer signs (and the store email opens "Thanks for signing"). What is true is that it runs month to month
+// and either side can end it at the end of a paid month; the copy says that instead.
+test('no customer-facing text says "no contract" while the subscription is a signed agreement, and the sales sheet says month to month', () => {
+  const agreement = legal('dealer-subscription-agreement.md');
+  assert.match(agreement, /^# Dealer Subscription Agreement/m);
+  assert.match(agreement, /^Signed:/m, 'the subscription agreement is still signed: copy cannot say there is no contract');
+  const noContract = /\bno(?:-|\s+)contracts?\b|\bcontract-free\b|without (?:a|any) contract|nothing to sign/i;
+  const files = [
+    ...CUSTOMER_FACING.map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../site-src/pages/', import.meta.url)).filter((f) => f.endsWith('.html') && f !== 'legal.html').map((f) => `../site-src/pages/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+  ];
+  for (const rel of files) {
+    const hit = read(rel).match(noContract);
+    assert.equal(hit, null, `${rel.slice(3)} says "${hit && hit[0]}", but a subscription is a signed agreement`);
+  }
+  // the term the agreement sets, in the sheet's own words
+  assert.match(agreement, /Month to month from the effective date\. Either party may terminate on notice effective at the end of the current paid month\./, 'the agreement\'s term changed: change the sales sheet with it');
+  assert.match(read('../marketing/sales-sheet.md'), /month to month: you can cancel at any time, effective at the end of the paid month\./);
 });

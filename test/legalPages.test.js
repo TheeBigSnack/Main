@@ -86,7 +86,12 @@ test('while the status says draft, every page opens with the banner and its titl
     assert.equal(title, fullTitle(entry, status.draft));
     if (status.draft) {
       assert.ok(first && first[1].startsWith('<p class="draft">'), `${entry.file}: the banner is the first thing in the page's main content`);
-      assert.match(textOf(first[1]), /^Draft under attorney review\. Not in effect/, `${entry.file}: the banner says draft and not in effect`);
+      if (entry.source === 'legal/posting-rules.md') {
+        // the extension already asks every salesperson to follow the posting rules: their page says that, not "applies to no one"
+        assert.match(textOf(first[1]), /^Draft under attorney review\. The wording may change\. Lot Current already shows these rules at set-up and before a salesperson's first post, and asks every salesperson to follow them\.$/, `${entry.file}: the banner says draft, and that the extension asks salespeople to follow the rules`);
+      } else {
+        assert.match(textOf(first[1]), /^Draft under attorney review\. Not in effect/, `${entry.file}: the banner says draft and not in effect`);
+      }
       assert.equal(title, `${entry.title} (draft) | Lot Current`, `${entry.file}: the title says draft`);
       assert.equal(html.match(/<meta property="og:title" content="([^"]*)">/)[1], `${entry.title} (draft)`);
     } else {
@@ -362,7 +367,7 @@ test('a final page cannot keep the DRAFT line or a blank in brackets, and drops 
 test('--check exits 1 when a file is missing or differs, names it and writes nothing; a run writes all six and --check passes', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-legal-'));
   try {
-    for (const rel of [STATUS_FILE, 'site/config.js', 'site/pricing.json', ...PAGES.map((p) => p.source)]) {
+    for (const rel of [STATUS_FILE, 'site/config.js', 'marketing/pricing.json', ...PAGES.map((p) => p.source)]) {
       mkdirSync(dirname(join(tmp, rel)), { recursive: true });
       cpSync(join(root, rel), join(tmp, rel));
     }
@@ -462,4 +467,23 @@ test('legalLinks.js names real pages only once legal-status.json says the texts 
   // and on what is committed
   assert.deepEqual(linkProblems(LEGAL, status.draft), [], `extension/src/legalLinks.js and ${STATUS_FILE} disagree`);
   if (status.draft) assert.equal(legalHosted(), false, 'while the texts are drafts nobody can accept them');
+});
+
+// review: the posting rules page said "Not in effect: nothing on this page applies to anyone yet", and the
+// legal index said nothing on any of the three pages applies to anyone, while set-up and the side panel show
+// the same rules and ask every salesperson to tick "I have read the posting rules and will follow them".
+test('while the extension asks salespeople to follow the posting rules, no page says the rules apply to no one', () => {
+  const wizard = read('extension/wizard.js');
+  const panel = read('extension/sidepanel.js');
+  const asks = /I have read the posting rules and will follow them/.test(wizard) || /state\.step = 'rules'/.test(panel);
+  assert.ok(asks, 'the extension no longer asks salespeople to follow the posting rules: the banner and the legal index can change');
+  const rules = read('site/legal/posting-rules/index.html');
+  assert.doesNotMatch(textOf(rules), /applies to anyone|not in effect/i, 'the posting rules page says the rules apply to no one');
+  const index = textOf(read('site/legal/index.html'));
+  assert.doesNotMatch(index, /Nothing on those pages applies to anyone|All three are drafts under attorney review and not in effect/, 'the legal index says all three pages apply to no one');
+  if (status.draft) {
+    assert.match(index, /The Terms of Service and the Privacy Policy are not in effect yet/, 'the index keeps the two texts that are not in effect');
+    assert.match(index, /Lot Current already shows them at set-up and before a salesperson's first post, and asks every salesperson to follow them/);
+    for (const entry of PAGES.filter((p) => p.source !== 'legal/posting-rules.md')) assert.match(textOf(read(entry.file)), /Not in effect: nothing on this page applies to anyone yet/, `${entry.file} keeps its not-in-effect banner`);
+  }
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Writes the website's pages (site/) from the page fragments in
-// site-src/pages/, site/config.js, site/pricing.json and
+// site-src/pages/, site/config.js, marketing/pricing.json and
 // legal/legal-status.json, and the files a site needs next to them:
 //
 //   site-src/pages/home.html          -> site/index.html
@@ -12,7 +12,13 @@
 //   site-src/pages/legal.html         -> site/legal/index.html
 //   site-src/pages/not-found.html     -> site/404.html
 //   (always)                          -> site/robots.txt, site/llms.txt
+//   marketing/pricing.json            -> site/pricing.json (the public fields only)
 //   (only once config.js has siteUrl) -> site/sitemap.xml, site/CNAME
+//
+// site/pricing.json is served to anyone who asks (site.js reads it on the
+// home and pricing pages), so it carries only the numbers the pages show
+// (SITE_PRICING_FIELDS), never marketing/pricing.json's reasoning, what
+// would change the price, or its notes.
 //
 // The three legal documents (site/legal/<name>/index.html) and the redirect
 // stubs at their old addresses are written by scripts/legal-pages.mjs, which
@@ -40,7 +46,11 @@
 // which GitHub Pages serves at any depth), siteUrl, demoOpen, demoEndpoint,
 // demoMailto, demoMailtoAddress, supportEmail, signupUrl and legalDraft.
 // Every internal address in a fragment goes through root, so a page works
-// at any depth and on any host.
+// at any depth and on any host. A price, count or length is a
+// <span data-pricing="key"></span>: the generator writes its text from
+// marketing/pricing.json (PRICING_FORMAT, the same words site.js writes), so
+// the fragment never types a number, and a key the pricing does not have
+// stops the run.
 //
 // Everything that needs the site's absolute address (canonical, og:url,
 // og:image, the sitemap, the robots.txt Sitemap line, CNAME, the JSON-LD
@@ -66,6 +76,48 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
 export const CONFIG_FILE = 'site/config.js';
 export const PRICING_FILE = 'site/pricing.json';
+export const MARKETING_PRICING_FILE = 'marketing/pricing.json';
+// What site/pricing.json carries: what site.js fills (data-pricing, the
+// founding term, the pilot's length on the sign-up links) and what the
+// generator reads (hypothesis, currency, the rooftop price for an Offer).
+export const SITE_PRICING_FIELDS = Object.freeze(['hypothesis', 'asOf', 'currency', 'perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'pilotDays', 'foundingDealerMonthly', 'foundingDealerMonths', 'foundingDealerCount']);
+export const sitePricing = (pricing) => Object.fromEntries(SITE_PRICING_FIELDS.filter((k) => pricing && Object.hasOwn(pricing, k)).map((k) => [k, pricing[k]]));
+export const pricingJson = (pricing) => JSON.stringify(sitePricing(pricing), null, 2) + '\n';
+
+// How each data-pricing number is written into the page, word for word as
+// site.js's FORMAT writes it (test/siteGenerator.test.js runs both on the same
+// numbers). The page carries the number as text, so a visitor without
+// JavaScript, or whose pricing.json fetch failed, reads the config's number,
+// and a changed marketing/pricing.json makes --check fail until the pages are
+// written again. A key not listed is written as plain text.
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const asMoney = (n) => '$' + Number(n).toLocaleString('en-US');
+const asWord = (n) => (Number.isInteger(n) && n >= 0 && n <= 10 ? NUMBER_WORDS[n] : String(n));
+export const PRICING_FORMAT = Object.freeze({
+  perRooftopMonthly: asMoney,
+  extraSalespersonMonthly: asMoney,
+  foundingDealerMonthly: asMoney,
+  includedSalespeople: asWord,
+  foundingDealerCount: asWord,
+  pilotDays: String,
+  foundingDealerTerm: (p) => (p.foundingDealerMonths === 12 ? 'first year' : `first ${p.foundingDealerMonths} months`),
+});
+
+/** The text of a data-pricing span for key, from the public pricing; throws when the pricing has no such number. */
+export function pricingText(key, pricing) {
+  const p = pricing || {};
+  if (key === 'foundingDealerTerm') {
+    if (!Number.isInteger(p.foundingDealerMonths)) throw new Error(`data-pricing="${key}" needs foundingDealerMonths in ${MARKETING_PRICING_FILE}`);
+    return PRICING_FORMAT.foundingDealerTerm(p);
+  }
+  if (p[key] === undefined || p[key] === null) throw new Error(`data-pricing="${key}" names a number ${MARKETING_PRICING_FILE} does not have (or ${PRICING_FILE} does not carry: SITE_PRICING_FIELDS)`);
+  return Object.hasOwn(PRICING_FORMAT, key) ? PRICING_FORMAT[key](p[key]) : String(p[key]);
+}
+
+/** Writes every <span data-pricing="key">…</span>'s text from the pricing, whatever the fragment had there. */
+export function fillPricing(html, pricing) {
+  return String(html).replace(/(<span\b[^>]*\bdata-pricing="([^"]*)"[^>]*>)[^<]*(<\/span>)/g, (all, open, key, close) => open + escapeHtml(pricingText(key, pricing)) + close);
+}
 export const STATUS_FILE = 'legal/legal-status.json';
 
 export const SITE_NAME = 'Lot Current';
@@ -186,12 +238,12 @@ export const REDIRECTS = Object.freeze([
 ]);
 
 // The files under site/ that are neither a page of the map nor a stub: the
-// ones kept by hand (the config, the pricing copy, the stylesheet, the
+// ones kept by hand (the config, the stylesheet, the
 // script, the mark), the favicons scripts/favicons.mjs draws from the mark,
 // and the index of the share images scripts/social-images.mjs draws (one
 // site/social/<slug>.png per page with a social heading). Screenshots
 // (scripts/screenshots.mjs) belong to the site while a page shows them.
-export const KEPT_FILES = Object.freeze([CONFIG_FILE, PRICING_FILE, 'site/site.css', 'site/site.js', 'site/favicon.svg']);
+export const KEPT_FILES = Object.freeze([CONFIG_FILE, 'site/site.css', 'site/site.js', 'site/favicon.svg']);
 export const FAVICON_FILES = Object.freeze(['site/favicon-32.png', 'site/apple-touch-icon.png', 'site/favicon.ico']);
 export const SOCIAL_INDEX = 'site/social/images.json';
 export const socialFile = (page) => `site/social/${page.slug}.png`;
@@ -468,12 +520,29 @@ function organizationNode(ctx) {
 }
 
 /**
+ * The Offer for a confirmed price: pricing.json's per-rooftop monthly price,
+ * with the unit and the billing period a reader needs, so it never reads as
+ * a one-off price for the software. Nothing in it is not in pricing.json.
+ */
+export function offerFor(pricing) {
+  const price = pricing.perRooftopMonthly;
+  const priceCurrency = pricing.currency;
+  return {
+    '@type': 'Offer', price, priceCurrency,
+    priceSpecification: { '@type': 'UnitPriceSpecification', price, priceCurrency, unitText: 'per rooftop per month', billingDuration: 'P1M' },
+  };
+}
+
+/**
  * The page's JSON-LD graph, or null on the 404 page: home carries
  * Organization (LocalBusiness once config.js has the business), WebSite and
  * SoftwareApplication; every page with a crumb a BreadcrumbList; the FAQ page
  * a FAQPage built from its article.qa items. Addresses only when siteUrl is
- * set; a price only when pricing.json is no longer a hypothesis; never a
- * rating, review, phone, address or opening hours that is not in config.js.
+ * set; a price only when pricing.json is no longer a hypothesis (offerFor:
+ * per rooftop per month); never a rating, review, phone, address or opening
+ * hours that is not in config.js. Without a rating or review, Google's Rich
+ * Results Test reports the SoftwareApplication as not eligible for a rich
+ * result; that is by design (docs/website.md), not a fault to fix with one.
  */
 export function jsonLdFor(page, ctx, bodyHtml = '') {
   const { site, pricing } = ctx;
@@ -486,7 +555,7 @@ export function jsonLdFor(page, ctx, bodyHtml = '') {
     const app = { '@type': 'SoftwareApplication', name: SITE_NAME, applicationCategory: 'BusinessApplication', operatingSystem: 'Chrome', description: page.description };
     if (site.siteUrl) app.url = site.siteUrl;
     if (pricing && pricing.hypothesis === false && typeof pricing.perRooftopMonthly === 'number' && typeof pricing.currency === 'string') {
-      app.offers = { '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency };
+      app.offers = offerFor(pricing);
     }
     nodes.push(app);
   }
@@ -731,7 +800,8 @@ export function readStatus(text) {
 }
 
 /**
- * The inputs under a repository root: config.js (validated), pricing.json
+ * The inputs under a repository root: config.js (validated), the public
+ * fields of marketing/pricing.json (sitePricing)
  * and the draft flag. ctx.dir is that root; the per-page root is added by
  * buildSite. config.js is imported fresh each time its file changes.
  */
@@ -747,11 +817,11 @@ export async function readContext(root = ROOT) {
   assertClean(configText, CONFIG_FILE);
   let pricing;
   try {
-    pricing = JSON.parse(readFileSync(join(root, PRICING_FILE), 'utf8'));
+    pricing = sitePricing(JSON.parse(readFileSync(join(root, MARKETING_PRICING_FILE), 'utf8')));
   } catch (e) {
-    throw new Error(`${PRICING_FILE} could not be read (${e.message})`);
+    throw new Error(`${MARKETING_PRICING_FILE} could not be read (${e.message})`);
   }
-  if (!pricing || typeof pricing.hypothesis !== 'boolean') throw new Error(`${PRICING_FILE} needs "hypothesis": true or false`);
+  if (typeof pricing.hypothesis !== 'boolean') throw new Error(`${MARKETING_PRICING_FILE} needs "hypothesis": true or false`);
   const { draft } = readStatus(readFileSync(join(root, STATUS_FILE), 'utf8'));
   return { dir: root, site, pricing, legalDraft: draft };
 }
@@ -774,7 +844,7 @@ export function templateVars(page, ctx) {
 
 /** One fragment page as a whole document; throws when it cannot be written. */
 export function renderFragmentPage(page, fragment, ctx) {
-  const body = render(fragment, templateVars(page, ctx));
+  const body = fillPricing(render(fragment, templateVars(page, ctx)), ctx.pricing);
   const h1s = (body.match(/<h1\b/g) || []).length;
   if (h1s !== 1) throw new Error(`${page.source} has ${h1s} <h1> elements; exactly one`);
   const html = renderPage(page, body, { ...ctx, root: rootFor(page) });
@@ -808,6 +878,7 @@ export function buildSite(ctx) {
   }
   files.push({ file: 'site/robots.txt', content: robotsTxt(ctx.site) });
   files.push({ file: 'site/llms.txt', content: llmsTxt(ctx.site, ctx.legalDraft) });
+  files.push({ file: PRICING_FILE, content: pricingJson(ctx.pricing) });
   const remove = [];
   if (ctx.site.siteUrl) {
     files.push({ file: 'site/sitemap.xml', content: sitemapXml(ctx.site, ctx.legalDraft) });
@@ -876,7 +947,7 @@ export function writeSite(ctx) {
 }
 
 export const USAGE = [
-  'Usage: npm run site-pages              write the pages, robots.txt, llms.txt (and sitemap.xml, CNAME once siteUrl is set)',
+  'Usage: npm run site-pages              write the pages, robots.txt, llms.txt, pricing.json (and sitemap.xml, CNAME once siteUrl is set)',
   '       node scripts/site-pages.mjs --check',
   '                                       write nothing; exit 1 when an output is missing, differs, or exists although it must not,',
   '                                       or a file under site/ is none of the site\'s (no generator writes it, it is not kept',
@@ -884,6 +955,7 @@ export const USAGE = [
   '',
   ...FRAGMENT_PAGES.map((p) => `  ${p.source.padEnd(32)}-> ${p.file}`),
   '  (always)                        -> site/robots.txt, site/llms.txt',
+  '  marketing/pricing.json          -> site/pricing.json (only the numbers the pages show)',
   '  (once config.js has siteUrl)    -> site/sitemap.xml, site/CNAME',
   '',
   'site/config.js holds the one address and the inboxes (siteUrl, demoEndpoint,',
@@ -911,7 +983,7 @@ export async function main(argv, io = { log: (s) => console.log(s), error: (s) =
       const stray = strayFiles(ctx);
       for (const s of stale) io.error(`${s}: run npm run site-pages`);
       for (const file of stray) io.error(strayAdvice(file));
-      if (!stale.length && !stray.length) io.log('The website pages match site-src/, site/config.js, site/pricing.json and legal/legal-status.json.');
+      if (!stale.length && !stray.length) io.log('The website pages match site-src/, site/config.js, marketing/pricing.json and legal/legal-status.json.');
       return stale.length || stray.length ? 1 : 0;
     }
     for (const line of writeSite(ctx)) io.log(line);

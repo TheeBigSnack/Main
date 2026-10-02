@@ -391,7 +391,12 @@ test('the structured data on every page parses, names schema.org as its vocabula
       assert.equal(app.applicationCategory, 'BusinessApplication');
       assert.equal(app.operatingSystem, 'Chrome');
       assert.equal(app.description, p.description);
-      if (pricing.hypothesis === false) assert.deepEqual(app.offers, { '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency }, 'the offer is pricing.json\'s');
+      if (pricing.hypothesis === false) {
+        assert.deepEqual(app.offers, {
+          '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency,
+          priceSpecification: { '@type': 'UnitPriceSpecification', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency, unitText: 'per rooftop per month', billingDuration: 'P1M' },
+        }, 'the offer is pricing.json\'s, per rooftop per month');
+      }
       else assert.equal(app.offers, undefined);
       if (SITE.siteUrl) for (const n of [org, web, app]) assert.equal(n.url, businessFilled && n === org && SITE.business.url ? SITE.business.url : SITE.siteUrl, `${n['@type']}.url`);
     }
@@ -627,7 +632,8 @@ function pageHonesty(html) {
 }
 
 test('the prices on every page are pricing.json\'s, through data-pricing spans with fallback text, and no other figure', () => {
-  assert.deepEqual(pricing, JSON.parse(read('marketing/pricing.json')), 'site/pricing.json equals marketing/pricing.json');
+  const marketing = JSON.parse(read('marketing/pricing.json'));
+  for (const [k, v] of Object.entries(pricing)) assert.deepEqual(v, marketing[k], `site/pricing.json's ${k} is marketing/pricing.json's`);
   for (const p of PAGES) {
     const html = htmlOf(p);
     const text = visibleText(p);
