@@ -53,9 +53,9 @@ Then, unprompted: "Meta's terms prohibit automated access without permission. A 
 
 ## 9:00 The pilot
 
-"Thirty days, free, two or three of your salespeople, your sign-off on a one-page pilot agreement. We look at the numbers together each week. At the end they're yours either way."
+"Thirty days, free, for the salespeople you name in a one-page pilot agreement, with your sign-off. We look at the numbers together each week. At the end they're yours either way."
 
-Leave the sales sheet. Ask who the two or three salespeople would be and when they could start.
+Leave the sales sheet. Ask which salespeople would take part and when they could start.
 
 ## If something goes wrong
 

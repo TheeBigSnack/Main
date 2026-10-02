@@ -31,7 +31,7 @@ Meta's Terms prohibit accessing its products by automated means without permissi
 
 ## The pilot
 
-30 days, free, for 2 or 3 of your salespeople, with your used car manager's sign-off. We record how long each post takes, which fields the tool couldn't fill, and how long sold cars stayed listed, and we go over them with you every week. No customer data is collected. At the end, the numbers are yours, whether you continue or not.
+30 days, free, for the salespeople named in your pilot agreement, with your used car manager's sign-off. We record how long each post takes, which fields the tool couldn't fill, and how long sold cars stayed listed, and we go over them with you every week. No customer data is collected. At the end, the numbers are yours, whether you continue or not.
 
 ## Price
 

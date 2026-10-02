@@ -514,3 +514,30 @@ test('the site never puts the form fields that could not be filled in the manage
   if (/dealership's account/.test(caption)) assert.match(caption, /fields that could not be filled, which stay in your browser/, 'the caption says the fields stay in the browser');
   assert.doesNotMatch(text, /managers will see the same numbers for the whole store/, 'managers see the post and to-do numbers, not the form fields');
 });
+
+// review: the website, the sales sheet and the demo script offered the free pilot "for 2 or 3 of your
+// salespeople", the first pilot's own size, while the pilot agreement leaves the number for the parties to fill
+// in and the manager view's Billing card offers the pilot with the plan's included seats. The copy says the
+// pilot is for the salespeople named in the pilot agreement, and gives no headcount of its own.
+test('the free pilot is offered for the salespeople named in the pilot agreement, with no headcount of the copy\'s own', () => {
+  const agreement = read('../legal/pilot-agreement.md');
+  assert.match(agreement, /^\| Number of designated salespeople \| \[ \] \|$/m, 'the pilot agreement now fixes how many salespeople a pilot has: say that number in the copy and change this test');
+  assert.match(agreement, /The salespeople are named at the signature block/, 'the agreement names the salespeople');
+  const N = '(?:\\d+|two|three|four|five|six|seven|eight|nine|ten)';
+  const headcount = new RegExp(`\\bfor ${N}(?: or ${N})? (?:of your )?salespeople\\b|\\b${N} or ${N} (?:of your )?salespeople\\b|\\bwho the ${N}(?: or ${N})? salespeople\\b`, 'i');
+  const files = [
+    ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
+    ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+  ];
+  for (const rel of files) {
+    // a bracket is the sender's to fill in for one dealership ("[two or three] salespeople")
+    const said = stripTags(read(rel)).replace(/\[[^\]]*\]/g, '[ ]');
+    const hit = said.match(headcount);
+    assert.equal(hit, null, `${rel.slice(3)} offers the pilot to a fixed number of salespeople: "${hit && hit[0]}"`);
+  }
+  const pilot = stripTags(pricingPage).match(/The free pilot (.*?)Request a demo/);
+  assert.ok(pilot, 'the pricing page has its free pilot section');
+  assert.match(pilot[1], /free, for the salespeople named in your pilot agreement/);
+  assert.match(read('../marketing/sales-sheet.md'), /free, for the salespeople named in your pilot agreement/);
+});
