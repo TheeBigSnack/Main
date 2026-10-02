@@ -6,7 +6,7 @@ Last updated: [date]. These Terms are between [Lot Current entity name] ("Lot Cu
 
 ## 1. What Lot Current is
 
-Lot Current is browser software and related services that read a dealership's own website inventory, help a User prepare a Facebook Marketplace vehicle listing, and report inventory changes. Lot Current fills in forms and opens pages. **The User publishes, edits and removes every listing personally.** Lot Current does not publish, edit or delete listings on the User's behalf and does not act while the User is away.
+Lot Current is browser software and related services that read a dealership's own website inventory, help a User prepare a Facebook Marketplace vehicle listing, and report inventory changes. Lot Current fills in forms and opens pages. **The User publishes, edits and removes every listing personally.** Lot Current does not publish, edit or delete listings on the User's behalf and does nothing on Facebook while the User is away. With automatic rescans allowed, it re-reads the dealership's website every 3 hours while Chrome is open, reports the changes it finds and, while the User is signed in to a Lot Current account, sends that rescan's results to the Customer's account.
 
 Lot Current is not affiliated with, endorsed by or partnered with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only to name the third-party service on which Users post.
 

@@ -462,3 +462,28 @@ test('the FAQ says what Lot Current reads and keeps from Facebook pages, as the 
   const faq = ld['@graph'].find((n) => n['@type'] === 'FAQPage');
   assert.equal(faq.mainEntity.find((e) => e.name === 'What does it read?').acceptedAnswer.text, reads);
 });
+
+// review: How it works said "a person is at the keyboard for every one" of its four steps, and the Terms
+// said Lot Current "does not act while the User is away", while background.js rescans an allowed website
+// every 3 hours with nobody there and, for a signed-in salesperson, syncs the results. The texts now say a
+// person does every step that touches Facebook, and name the rescan and its upload.
+test('How it works and the Terms keep "while you are away" to Facebook, and name the unattended rescan', () => {
+  const bg = read('../extension/background.js');
+  const rescan = bg.slice(bg.indexOf('async function runRescan'), bg.indexOf('async function rescanDueSites'));
+  assert.match(bg, /chrome\.alarms\.create\(RESCAN_ALARM/, 'background.js no longer schedules the rescan: these texts can change');
+  assert.match(rescan, /\bsyncSite\(/, 'the background rescan no longer syncs: these texts can change');
+  const how = stripTags(howPage);
+  assert.doesNotMatch(how, /at the keyboard for every/i, 'the 3-hourly rescan runs with nobody at the keyboard');
+  assert.match(how, /A person does every step that touches Facebook/);
+  const step = stripTags((howPage.match(/<section aria-labelledby="honest-h">[\s\S]*?<\/section>/) || [''])[0]);
+  assert.match(step, /every 3 hours while Chrome is open, with nobody at the keyboard/, 'step four says the rescan runs unattended');
+  assert.match(step, /while you are signed in to a Lot Current account it also sends that rescan's results/, 'and what a signed-in rescan sends');
+  assert.match(step, /it never touches Facebook then/);
+  const terms = read('../legal/terms-of-service.md');
+  const s1 = terms.slice(terms.indexOf('## 1.'), terms.indexOf('## 2.'));
+  assert.doesNotMatch(s1, /does not act while the User is away/, 'the Terms say Lot Current does nothing while the User is away; the rescan runs then');
+  assert.match(s1, /does nothing on Facebook while the User is away/);
+  assert.match(s1, /re-reads the dealership's website every 3 hours while Chrome is open[^.]*signed in to a Lot Current account, sends that rescan's results/, 'the Terms name the rescan and its upload');
+  const page = stripTags(read('../site/legal/terms/index.html'));
+  assert.match(page, /does nothing on Facebook while the User is away/, 'npm run legal-pages wrote the Terms page from the Markdown');
+});
