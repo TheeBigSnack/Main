@@ -295,3 +295,28 @@ test('while the agreements differ on governing law or on what makes up the whole
   }
   if (onNotice && !noticesClause) assert.match(item, /none of the three says how notice is given/, 'question 11.1 does not say no agreement says how notice is given');
 });
+
+// Schedule A prices the extra seats a dealership buys at signing, and nothing
+// in the Subscription Agreement or the Terms says how seats change during the
+// term. The software never changes a subscription's seats (the manager view
+// warns and says to ask; the Billing Portal cannot change a subscription; a
+// second Checkout is refused), so a seat is added by hand on a manager's
+// request, and whether it is prorated is the owner's choice, not yet made.
+// While the agreement is silent, the attorney is asked how to say it.
+test('while the subscription agreement says nothing about seats added during the term, the attorney is asked how it should, and the question says the software never adds one', () => {
+  // the code: nothing in Lot Current adds a seat or changes what a dealership pays
+  assert.match(read('manager/data.js'), /export const SEATS_NOT_ADDED = 'Lot Current never adds seats or changes what you pay on its own/, 'the manager view no longer says Lot Current never adds seats: update question 11.2 and this test');
+  assert.match(read('scripts/stripe-setup-lib.mjs'), /subscription_update: \{ enabled: false \}/, 'the Billing Portal can now change a subscription: update question 11.2 and this test');
+  assert.match(read('supabase/functions/_shared/billing.mjs'), /already has a subscription[^']*to change seats, ask your Lot Current contact/, 'a running subscription can now change seats through Checkout: update question 11.2 and this test');
+
+  const dsa = read('legal/dealer-subscription-agreement.md');
+  const fees = section(dsa, '## 5. Fees') + section(dsa, '## Schedule A: rooftops, websites and fees');
+  if (/seats?[^.]*(?:added|prorat|next billing period|during the term)/i.test(fees)) return; // the agreement now says it: drop question 11.2 with this test
+  const q11 = section(read('legal/questions-for-attorney.md'), '## 11. Where the agreements disagree or say nothing');
+  const item = q11.split('\n').find((l) => l.startsWith('- **11.2**'));
+  assert.ok(item, 'questions-for-attorney.md 11 does not ask how seats change during the term');
+  assert.match(item, /Nothing in either says how seats change during the term/);
+  assert.match(item, /The software never adds a seat or changes what a dealership pays on its own/);
+  assert.match(item, /a seat is added only when a manager asks and Lot Current changes the subscription by hand in Stripe/);
+  assert.match(item, /prorated from the day it is added or only from the next billing period is the owner's commercial choice, not yet made/);
+});
