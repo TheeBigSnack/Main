@@ -408,6 +408,64 @@ test('every file of the extension reaches a page only through the known injected
   for (const [what, [file, src]] of Object.entries(planted)) assert.ok(injectionProblems(file, src).length, `${what} is caught`);
 });
 
+// Every function those files inject runs in the page with nothing around it:
+// Chrome sends only the function's own text. A constant or helper lifted out
+// of fillFormInPage to the top of fillForm.js passes every other unit test
+// and throws a ReferenceError on the real form. So no injected function may
+// import, or name anything declared at its module's top level (the same
+// check test/adapters.test.js runs on each adapter's probe and search).
+const stripCode = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`\\])\/\/[^\n]*$/gm, '$1')
+  .replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g, '""');
+const JS_WORDS = new Set('async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield true false null undefined'.split(' '));
+function moduleScopeNames(src) {
+  const names = new Set();
+  for (const m of stripCode(src).matchAll(/^(?:export\s+)?(?:async\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]);
+  for (const m of src.matchAll(/^import\s+(?:([A-Za-z_$][\w$]*)\s*,?\s*)?(?:\{([^}]*)\})?/gm)) {
+    if (m[1]) names.add(m[1]);
+    if (m[2]) for (const part of m[2].split(',')) { const n = part.trim().split(/\s+as\s+/).pop(); if (n) names.add(n); }
+  }
+  return names;
+}
+function selfContainmentProblems(moduleSrc, fnSrc, name) {
+  const code = stripCode(fnSrc);
+  const problems = [];
+  if (/\bimport\b|\brequire\s*\(/.test(code)) problems.push(`${name} imports`);
+  const outside = moduleScopeNames(moduleSrc);
+  const reached = new Set();
+  for (const m of code.matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) if (!JS_WORDS.has(m[0]) && m[0] !== name && outside.has(m[0])) reached.add(m[0]);
+  if (reached.size) problems.push(`${name} reaches outside its own body for ${[...reached].join(', ')}`);
+  return problems;
+}
+
+test('every function the extension injects into a page is self-contained: no import, nothing from its module around it', async () => {
+  let checked = 0;
+  for (const [file, allowed] of Object.entries(INJECTORS)) {
+    for (const [from, names] of Object.entries(allowed)) {
+      const url = new URL(from, new URL('../extension/' + file, import.meta.url));
+      const moduleSrc = readFileSync(url, 'utf8');
+      const mod = await import(url);
+      for (const name of names) {
+        assert.equal(typeof mod[name], 'function', `${from} exports ${name}`);
+        assert.deepEqual(selfContainmentProblems(moduleSrc, String(mod[name]), name), [], `${from} ${name}`);
+        checked += 1;
+      }
+    }
+  }
+  assert.equal(checked, 6, 'the five fillForm.js functions and the neutral site probe');
+  // the check itself
+  const fillSrc = readFileSync(new URL('../extension/facebook/fillForm.js', import.meta.url), 'utf8');
+  const { fillFormInPage, readListingInPage } = await import('../extension/facebook/fillForm.js');
+  const lifted = (fn, line) => String(fn).replace('{', `{\n  ${line}`);
+  const planted = {
+    'a constant lifted to the top of the module': [fillSrc + '\nconst FILL_HINT = 1;\n', lifted(fillFormInPage, 'void FILL_HINT;')],
+    'a helper lifted to the top of the module': [fillSrc + '\nexport function norm2(s) { return s; }\n', lifted(readListingInPage, "norm2('x');")],
+    'another injected function called from inside': [fillSrc, lifted(fillFormInPage, 'probeFormInPage(map);')],
+    'an import': [fillSrc, lifted(fillFormInPage, "const m = await import('./formMap.js');")],
+  };
+  for (const [what, [moduleSrc, fnSrc]] of Object.entries(planted)) assert.ok(selfContainmentProblems(moduleSrc, fnSrc, 'fillFormInPage').length, `${what} is caught`);
+});
+
 // The other way onto a page needs no code at all: the manifest. A content
 // script (or files a page may load, or a page allowed to message the
 // extension) would run on every Marketplace page the salesperson opens, with
