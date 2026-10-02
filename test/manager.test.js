@@ -250,6 +250,41 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.equal(csvFileName(NOW, { dealer: 'Example Motors', timeZone: 'UTC' }), 'lot-current-manager-example-motors-2026-11-16.csv');
 });
 
+// The website's /for-managers/ page tells a dealership what the manager view's
+// CSV carries. Every column of every table in the CSV is either a count, a
+// time or a status word, or a detail about a car, a person, a price or a
+// link, and each of those details must be named on the page next to its
+// "Never buyers, messages ..." line (the page once said only the numbers and
+// left out the VINs, the names and the prices). A new column has to be put in
+// one list or the other.
+test('the managers page names every car, person, price and link detail the CSV carries', () => {
+  const d = mockData(NOW);
+  const csv = managerCsv(d, { now: NOW, dealer: d.dealership.name, origin: d.dealership.website_origin, timeZone: 'UTC' });
+  const blocks = csv.split('\r\n\r\n').map((b) => b.split('\r\n'));
+  const defs = blocks.findIndex((b) => b[0] === 'Definitions');
+  assert.ok(defs > 0, 'the CSV has its Definitions block');
+  const columns = new Set(blocks.slice(defs + 1).filter((b) => b.length > 1).flatMap((b) => b[1].split(',')));
+  assert.ok(columns.has('VIN') && columns.has('Salesperson'), [...columns].join(', '));
+  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason']);
+  const DETAILS = {
+    Car: /\bthe car's name\b/,
+    VIN: /\bVIN\b/,
+    Salesperson: /\bwho posted it\b/,
+    Price: /\beach listing's price\b/,
+    'Price from': /\bthe website's old and new price\b/,
+    'Price to': /\bthe website's old and new price\b/,
+    'Listing link': /\blisting link\b/,
+  };
+  const page = read('site-src/pages/for-managers.html');
+  const said = page.split('\n').find((l) => l.includes('Never buyers, messages'));
+  assert.ok(said, 'site-src/pages/for-managers.html no longer has its "Never buyers, messages" line');
+  for (const col of columns) {
+    if (NUMBERS.has(col)) continue;
+    assert.ok(DETAILS[col], `the manager CSV has a "${col}" column: add it to NUMBERS or DETAILS here, and say it on /for-managers/ if it is a detail`);
+    assert.match(said, DETAILS[col], `/for-managers/ does not say the CSV carries the "${col}" column`);
+  }
+});
+
 // ---------- the Billing card ----------
 
 const inDays = (days) => new Date(Date.parse(NOW) + days * DAY_MS).toISOString();
