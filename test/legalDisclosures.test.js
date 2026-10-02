@@ -161,3 +161,23 @@ test('every screenshot rule keeps Facebook\'s logo, wordmark and brand colour ou
   const shot3 = shots.split('\n').find((l) => l.startsWith('| `3-form.png` |'));
   assert.match(shot3, /Crop below Facebook's top bar/);
 });
+
+test('the privacy texts say Anthropic\'s servers fetch and look at the colour-guess photos, not only receive their addresses', () => {
+  // the code: the photos go to Anthropic as image links, which its servers fetch
+  for (const rel of ['supabase/functions/rewrite/index.ts', 'backend/server.js']) {
+    assert.match(read(rel), /type: 'image', source: \{ type: 'url', url \}/, `${rel} no longer sends the photos as links Anthropic fetches: update the texts and this test`);
+  }
+  const policy = read('legal/privacy-policy.md');
+  const request = policy.split('\n').find((l) => l.startsWith('| Rewrite requests'));
+  assert.match(request, /for a colour guess, up to four of the car's photo addresses, from which Anthropic's servers fetch those photos to look at them/);
+  const processor = policy.split('\n').find((l) => l.startsWith('- **Anthropic**'));
+  assert.match(processor, /from which its servers fetch those photos to look at them/);
+  const sends = read('legal/chrome-web-store-privacy.md').split('\n').find((l) => l.startsWith('| Only with the description writer turned on'));
+  assert.match(sends, /Anthropic's servers fetch the photos from those addresses/);
+  assert.match(section(read('legal/terms-of-service.md'), '## 9. Privacy'), /for a colour guess, up to four of the car's photo addresses, from which Anthropic's servers fetch those photos/);
+  // the data inventory's short version agrees with its own "Exactly what reaches Anthropic"
+  const inventory = read('docs/data-inventory.md');
+  assert.match(inventory, /^- \*\*Anthropic\*\* receives[^\n]*from which its servers fetch those photos/m);
+  const never = inventory.split('\n').find((l) => l.startsWith('- **Never kept or sent anywhere:**'));
+  assert.match(never, /the photos themselves \([^)]*the up to four photos Anthropic's servers fetch from their addresses for a colour guess/, 'the inventory says the photos are never sent anywhere, and Anthropic fetches them for a colour guess');
+});

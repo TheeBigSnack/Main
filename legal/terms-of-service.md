@@ -42,7 +42,7 @@ Lot Current and its software are ours. Dealership data stays the Customer's. The
 
 ## 9. Privacy
 
-Our Privacy Policy explains what we collect and why. In short: dealership and user account details, the posted-listing registry (VIN, listing link, prices, times, who posted), post timings and to-do items, scan counts, billing standing, and, only with the description writer on, the car's facts and the sign-off sent to Anthropic for a draft. No Facebook credentials, messages or buyer data.
+Our Privacy Policy explains what we collect and why. In short: dealership and user account details, the posted-listing registry (VIN, listing link, prices, times, who posted), post timings and to-do items, scan counts, billing standing, and, only with the description writer on, the car's facts and the sign-off sent to Anthropic for a draft and, for a colour guess, up to four of the car's photo addresses, from which Anthropic's servers fetch those photos. No Facebook credentials, messages or buyer data.
 
 ## 10. Disclaimer of warranties
 
