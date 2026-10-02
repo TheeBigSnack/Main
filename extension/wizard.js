@@ -8,7 +8,7 @@
 // not part of it (src/account.js keeps it).
 
 import { performScan, rememberSite } from './src/scanRunner.js';
-import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis } from './src/settings.js';
+import { withDefaults, saveProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { shortLocation, storeNames, matchStore } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -208,9 +208,11 @@ export function wizardHtml() {
         ${nav(true, m.next)}`;
     }
     case 'address':
+      // a website that gives no dealership name: the step says so, and Next waits for one (every description names it)
       return `${progress}<h3>The store's address</h3>
         <p class="hint" id="wizAddressHint">${esc(addressHint(wiz.site && wiz.site.address))}</p>
         <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" /></label>
+        ${dealerNameMissing(s.dealer) ? `<div class="banner bad" id="wizNoDealer" role="alert">${esc(NO_DEALER_NAME)}</div>` : ''}
         <label class="block">City <input type="text" id="wizCity" value="${esc(s.dealer.city)}" /></label>
         <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="e.g. OH" /></label>
         <label class="block">ZIP <input type="text" id="wizZip" value="${esc(s.dealer.zip)}" placeholder="e.g. 43215" inputmode="numeric" /></label>
@@ -401,6 +403,12 @@ export async function handleWizardClick(id, ctx) {
   switch (id) {
     case 'wizNext': {
       readInputs();
+      if (wiz.step === 'address' && dealerNameMissing(wiz.settings && wiz.settings.dealer)) {
+        ctx.render(); // the step's banner says why; the typed address stays
+        const box = document.getElementById('wizDealer');
+        if (box) box.focus();
+        return true;
+      }
       const list = steps();
       wiz.step = list[Math.min(stepIndex() + 1, list.length - 1)];
       if (wiz.step === 'account') await loadAccount(); // signed in or out in Settings since

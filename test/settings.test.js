@@ -225,3 +225,61 @@ test("the Ready list's order and the new-arrival window are this website's setti
   assert.equal(seeded.readySort, 'newest');
   assert.equal(seeded.newDays, 7);
 });
+
+// ---------- Settings, Save: says when no dealership name is set ----------
+import { readFileSync } from 'node:fs';
+import { NO_DEALER_NAME, dealerNameMissing } from '../extension/src/settings.js';
+import { checkClosingLine, cleanClosingLine } from '../extension/src/rewriteTemplate.js';
+import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
+import { MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from '../extension/src/readyList.js';
+
+// popup.js onSettingsSubmit, as written, with the page around it stubbed: the form's fields, storage and the note by the Save button.
+async function saveSettings({ fields, settings = null, siteName = '', origin = 'https://www.example-motors.test' }) {
+  const src = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  const start = src.indexOf('async function onSettingsSubmit(');
+  assert.ok(start >= 0, 'onSettingsSubmit is defined');
+  const state = { origin, siteName, settings, snapshot: null, site: null };
+  const saved = [];
+  const note = { textContent: '' };
+  const said = [];
+  class FormData {
+    get(k) { return k in fields ? fields[k] : null; }
+    getAll(k) { return k in fields ? [].concat(fields[k]) : []; }
+    has(k) { return k in fields; }
+  }
+  const scope = {
+    state, FormData, document: { activeElement: null },
+    accountAction: () => { throw new Error('no account button was pressed'); },
+    render: () => {}, setStatus: (text, kind) => said.push([text, kind]),
+    checkClosingLine, cleanClosingLine, withDefaults, chooseBasis, DEFAULT_SALESPERSON_TITLE, DEFAULT_DAILY_CAP, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS,
+    legalHosted: () => false, acceptLegal: () => ({}), chrome: {}, rescanOrigins: () => [],
+    save: async (name) => { saved.push([name, state.settings]); return true; },
+    setSiteAuto: async () => {},
+    $: (id) => (id === 'saved' ? note : null),
+    NO_DEALER_NAME, dealerNameMissing,
+  };
+  const submit = new Function(...Object.keys(scope), `${src.slice(start, src.indexOf('\n}\n', start) + 2)}\nreturn onSettingsSubmit;`)(...Object.values(scope));
+  await submit({ target: { id: 'settings', querySelector: () => null }, preventDefault: () => {} });
+  return { saved, note: note.textContent, said };
+}
+
+test('Settings saves with no dealership name but says so: nothing can be posted until one is typed', async () => {
+  const fields = { salespersonName: 'Sam', salespersonTitle: 'sales consultant', closingLine: '', dealerName: '', dealerCity: 'Springfield', dealerState: 'oh', dealerZip: '43215', priceNote: '', dailyCap: '10', newDays: '7' };
+  // a website that gives no name, and nobody typed one: the rest is saved, and the note says what is missing
+  const blank = await saveSettings({ fields });
+  assert.equal(blank.saved.length, 1, 'the other settings are kept');
+  assert.equal(blank.saved[0][1].salesperson.name, 'Sam');
+  assert.equal(blank.saved[0][1].dealer.name, '');
+  assert.equal(blank.note, `Saved. Click Rescan website to apply. ${NO_DEALER_NAME}`);
+  // typed in Settings, or read from the website: nothing to say
+  assert.equal((await saveSettings({ fields: { ...fields, dealerName: 'Example Motors' } })).note, 'Saved. Click Rescan website to apply.');
+  const fromSite = await saveSettings({ fields, siteName: 'Example Motors' });
+  assert.equal(fromSite.saved[0][1].dealer.name, 'Example Motors');
+  assert.equal(fromSite.note, 'Saved. Click Rescan website to apply.');
+  // a box cleared by mistake keeps the name already set
+  const kept = await saveSettings({ fields, settings: withDefaults({ dealer: { name: 'Example Motors' } }) });
+  assert.equal(kept.saved[0][1].dealer.name, 'Example Motors');
+  assert.equal(kept.note, 'Saved. Click Rescan website to apply.');
+  // with no dealership website open there is no dealership to name yet
+  assert.equal((await saveSettings({ fields, origin: null })).note, 'Saved. Click Rescan website to apply.');
+});

@@ -2,7 +2,7 @@ import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingWebsitePrice } from './src/rescan.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
@@ -1352,6 +1352,8 @@ async function onSettingsSubmit(ev) {
     state.settings.autoRescan = false;
     message = 'Saved, but automatic rescans need one scan of this website first.';
   }
+  // the other settings are kept either way; the side panel opens no form until the name is set
+  if (state.origin && dealerNameMissing(state.settings.dealer)) message += ` ${NO_DEALER_NAME}`;
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
   await setSiteAuto(state.settings.autoRescan);
   const note = $('saved');

@@ -11,6 +11,13 @@ export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 // A closing line is checked by words (src/rewriteTemplate.js); this only stops a pasted page being kept.
 export const CLOSING_LINE_MAX_CHARS = 300;
 
+// Every description names the dealership. The name comes from the website
+// (src/scan.js) or a person; a website that gives none leaves it blank until
+// someone types it. The wizard's address step does not go on without it,
+// Settings says so on Save, and the side panel opens no form until it is set.
+export const NO_DEALER_NAME = 'No dealership name is set: type it in Dealership name. Every description names the dealership, so nothing can be posted until it is.';
+export const dealerNameMissing = (dealer) => !String((dealer && dealer.name) || '').trim();
+
 // The usual gap between the main price and the lower second price a website
 // shows (on some sites that is the doc fee), taken from what most cars agree
 // on. It is only ever a suggestion: what the gap means is for the dealer to
