@@ -73,3 +73,46 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
   assert.match(what, /If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open/);
   assert.match(what, /while the User is signed in, sends the results to the dealership's records/);
 });
+
+// Each function the extension runs in a Facebook tab, and the words the
+// Facebook host justification uses for it. A new one fails here until the
+// justification says what it does.
+const FACEBOOK_FUNCS = {
+  fillFormInPage: /fill(?:s)? the vehicle listing form/i,
+  attachPhotosInPage: /attach(?:es)? the car's photos/,
+  probeFormInPage: /check fields only, (?:to )?lists? that form's fields without filling them/,
+  fillPriceInPage: /fill(?:s)? the new price on the listing's edit form/,
+  readListingInPage: /reads? every 1\.5 seconds the Marketplace page[^|]*Your listings page when no (?:listing )?link was saved[^|]*title, (?:the )?prices/,
+};
+
+test('the Facebook host justification and the privacy texts name every read Lot Current makes on a Facebook page, the Your listings page among them', () => {
+  // the code: the functions run in the tab Lot Current opened for a post or a to-do item
+  const injected = new Set();
+  for (const rel of ['extension/sidepanel.js', 'extension/upkeep.js', 'extension/popup.js', 'extension/background.js']) {
+    for (const m of read(rel).matchAll(/executeScript\(\{ target: \{ tabId: (?:state\.fbTabId|up\.tabId) \}, func: (\w+)/g)) injected.add(m[1]);
+  }
+  assert.deepEqual([...injected].sort(), Object.keys(FACEBOOK_FUNCS).sort(), 'a function now runs in a Facebook tab that the justification does not describe, or one is gone: update FACEBOOK_FUNCS and the texts');
+  const upkeep = read('extension/upkeep.js');
+  assert.match(upkeep, /const url = up\.listingUrl \|\| map\.yourListingsUrl;/, 'a to-do item no longer falls back to Your listings: update the texts and this test');
+  assert.match(upkeep, /setInterval\(\(\) => poll\(ctx\)[^\n]*, 1500\)/, 'the to-do read is no longer every 1.5 seconds: update the texts and this test');
+
+  const store = rowText(read('legal/chrome-web-store-privacy.md'), 'Host `https://www.facebook.com/marketplace/*`');
+  const listing = rowText(read('store/listing.md'), '`https://www.facebook.com/marketplace/*`');
+  for (const [where, row] of [['legal/chrome-web-store-privacy.md', store], ['store/listing.md', listing]]) {
+    for (const [func, words] of Object.entries(FACEBOOK_FUNCS)) assert.match(row, words, `${where}: the Facebook host row does not say what ${func} does`);
+    assert.doesNotMatch(row, /No other Facebook pages? (?:is|are) read/, `${where}: the Facebook host row says no other page is read while a to-do item reads the listing or Your listings page`);
+    assert.match(row, /sent nowhere/);
+  }
+  const content = read('legal/chrome-web-store-privacy.md').split('\n').find((l) => l.startsWith('- Website content:'));
+  assert.match(content, /title, prices and sold or unavailable sign of the Marketplace page/, 'the Website content answer leaves out the listing read');
+  assert.match(content, /Your listings page/);
+  assert.match(read('store/listing.md'), /website content, yes \([^)]*title, prices and sold sign of the listing page or Your listings page/);
+
+  // the privacy policy, the data inventory and the FAQ a salesperson reads
+  const policy = read('legal/privacy-policy.md').split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
+  assert.match(policy, /title, prices and sold status shown on the Marketplace page in the tab Lot Current opened for it \(the listing, or Marketplace's Your listings page when no listing link was saved\)/);
+  assert.match(rowText(read('docs/data-inventory.md'), 'Watch the tab and read a listing (`facebook/detectPost.js`, `readListingInPage`)'), /every 1\.5 seconds the title, prices and sold or unavailable sign[^|]*Your listings page when no listing link was saved/);
+  const faq = read('site-src/pages/faq.html');
+  const reads = faq.slice(faq.indexOf('<h3>What does it read?</h3>'), faq.indexOf('</article>', faq.indexOf('<h3>What does it read?</h3>')));
+  assert.match(reads, /When you open a to-do item, it reads the Marketplace page it opened for it \(the listing, or your Your listings page when no listing link was saved\) for the title, prices and a sold sign/);
+});
