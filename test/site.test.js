@@ -412,6 +412,15 @@ test('no customer-facing page says nothing leaves the browser, and the support p
     const where = stripTags(faqPage).match(/Where is my data\? (.*?) What about my Facebook password\?/);
     assert.ok(where, 'the FAQ has its Where is my data? answer');
     assert.match(where[1], /rewrite service[^.]*on to Anthropic's API/, 'the FAQ\'s Where is my data? names Anthropic as the privacy policy does');
+    // and what goes there, as the policy lists it: the dealership's name and city, the price note and, for a
+    // colour guess, up to four photo addresses; never the VIN or the price
+    for (const [page, said] of [['the support page', privacy], ['the FAQ\'s Where is my data?', where[1]]]) {
+      if (/the dealership's name and city/.test(policy)) assert.match(said, /the dealership's name and city/, `${page} says the dealership's name and city go to the rewrite service`);
+      if (/the price note/.test(policy)) assert.match(said, /the price note/, `${page} says the price note goes to the rewrite service`);
+      if (/up to four photo addresses/.test(policy)) assert.match(said, /up to four of the car's photo addresses/, `${page} says photo addresses go on to Anthropic for a colour guess`);
+      if (/The VIN and the price are not among the fields sent/.test(policy)) assert.match(said, /not its VIN or price/, `${page} says the VIN and the price are not sent`);
+      if (/NHTSA/.test(policy)) assert.match(said, /VIN goes to NHTSA only when you click Check with NHTSA/, `${page} says a VIN goes to NHTSA on a click`);
+    }
   }
   assert.doesNotMatch(privacy, /Clear everything for this website removes it\b/, 'Clear everything for this website does not remove the synced profile');
 });
