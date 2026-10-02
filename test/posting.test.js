@@ -226,14 +226,33 @@ test('the dry run looks for each kind of field with the same controls the fill d
 // (test/e2e/mock-marketplace.mjs) puts decoy Next, Post, Save draft, Update,
 // Delete and Mark as sold controls beside its Publish button and the flows
 // assert that no fill ever touched one.
+// What a read-only function in the page may not do: assign to anything
+// reached through a dot or brackets (a box's value, a checkbox's checked, a
+// node's text, a dataset entry), step one with ++ or --, call a method that
+// changes the page, its forms, focus, scroll, address or history, touch
+// classes, styles or the page's storage and cookies, send anything, or call
+// through call, apply, bind, Reflect, eval or Function. Local variables may
+// be assigned; nothing else may. Each line names what it caught.
+const PAGE_MUTATIONS = [
+  /[\w$\])]\s*\.\s*[\w$]+\s*(?:[-+*\/%|&^]|\*\*|\?\?|\|\||&&|<<|>>>?)?=(?![=>])/,
+  /[\w$\])]\s*\[[^\]]*\]\s*(?:[-+*\/%|&^]|\*\*|\?\?|\|\||&&|<<|>>>?)?=(?![=>])/,
+  /(\+\+|--)\s*[\w$]+\s*[.[]|[\w$\])]\s*\.\s*[\w$]+\s*(\+\+|--)/,
+  /\.\s*(click|focus|blur|submit|requestSubmit|dispatchEvent|reset)\b/,
+  /\.\s*(remove|append|prepend|appendChild|removeChild|replaceChild|replaceWith|replaceChildren|insertBefore|insertAdjacent\w*|before|after|setAttribute\w*|removeAttribute\w*|toggleAttribute|attachShadow|select|setSelectionRange|setRangeText|setCustomValidity|stepUp|stepDown|showPicker|showModal|show|close|open|togglePopover|showPopover|hidePopover|requestFullscreen|scrollIntoView\w*|scrollTo|scrollBy|write|writeln|execCommand|addEventListener|pushState|replaceState|assign|reload|add|toggle|setProperty|removeProperty|setPointerCapture|postMessage|sendBeacon)\s*\(/,
+  /\bclassList\b|\.style\b|\bdataset\b|\bhistory\b|\bdocument\.cookie\b|\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b/,
+  /\blocation\s*=(?!=)|\bwindow\.(open|stop|print)\s*\(|\b(alert|confirm|prompt|fetch)\s*\(|XMLHttpRequest|WebSocket|EventSource|\bObject\.(assign|defineProperty|defineProperties|setPrototypeOf)\b/,
+  /\.call\b|\.apply\b|\.bind\b|\bReflect\b|\bFunction\b|\beval\b|\bimport\s*\(|\bset(Timeout|Interval)\s*\(\s*['"`]/,
+];
+const pageMutations = (code) => PAGE_MUTATIONS.map((re) => code.match(re)).filter(Boolean).map((m) => m[0].trim());
+
 function fillCodeProblems(src) {
   const problems = [];
   const fail = (bad, why) => { if (bad) problems.push(why); };
   // the read-only probe and the listing reader must not act on the page at all
   const probe = src.slice(src.indexOf('function probeFormInPage'), src.indexOf('function fillPriceInPage'));
-  fail(probe.length < 100 || /\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(probe), 'probeFormInPage must be read-only');
+  fail(probe.length < 100 || pageMutations(probe).length > 0, 'probeFormInPage must be read-only');
   const reader = src.slice(src.indexOf('function readListingInPage'), src.indexOf('function attachPhotosInPage'));
-  fail(reader.length < 100 || /\.click\b|dispatchEvent|\.focus\(\)|\.value\s*=/.test(reader), 'readListingInPage must be read-only');
+  fail(reader.length < 100 || pageMutations(reader).length > 0, 'readListingInPage must be read-only');
   // the price filler touches one box and never clicks
   const pricer = src.slice(src.indexOf('function fillPriceInPage'), src.indexOf('function readListingInPage'));
   fail(pricer.length < 100 || /\.click\b/.test(pricer), 'fillPriceInPage must not click');
@@ -303,6 +322,52 @@ test('the fill code never submits a form, and clicks or presses keys only where 
     'an editing command': "document.execCommand('delete');",
   };
   for (const [what, code] of Object.entries(planted)) assert.ok(fillCodeProblems(plant(code)).length, `${what} is caught`);
+});
+
+// The dry run's probe and upkeep's listing reader run on the person's own
+// form and live listing: each is held to the read-only check above, and the
+// check itself catches each way to change the page planted in either one.
+test('the dry run and the listing reader only read the page: every way to change it is caught', () => {
+  const src = read('../extension/facebook/fillForm.js');
+  for (const [fn, next] of [['probeFormInPage', 'fillPriceInPage'], ['readListingInPage', 'attachPhotosInPage']]) {
+    const body = src.slice(src.indexOf(`function ${fn}`), src.indexOf(`function ${next}`));
+    assert.ok(body.length > 100, `${fn} is found`);
+    assert.deepEqual(pageMutations(body), [], `${fn} only reads`);
+  }
+  const plants = {
+    'ticking every checkbox': "for (const c of document.querySelectorAll('input[type=checkbox]')) c.checked = true;",
+    'resetting the form': "for (const f of document.querySelectorAll('form')) f.reset();",
+    'removing a node': "document.querySelector('form').remove();",
+    'removing a child': 'document.body.removeChild(document.body.firstChild);',
+    'rewriting text': "document.body.textContent = '';",
+    'setting a value': "document.querySelector('input').value = '1';",
+    'adding to a value': "document.querySelector('input').value += '9';",
+    'setting a value by name': "document.querySelector('input')['value'] = '2';",
+    'stepping an index': "document.querySelector('select').selectedIndex++;",
+    'a dataset entry': "document.body.dataset.seen = '1';",
+    'an attribute': "document.querySelector('input').setAttribute('value', '3');",
+    'a class': "document.body.classList.add('x');",
+    'a style': "document.body.style.display = 'none';",
+    'Object.assign': "Object.assign(document.querySelector('input'), { value: '1' });",
+    'a click': "document.querySelector('button').click();",
+    'a stored click': "const c = document.querySelector('button').click; c();",
+    'focus': "document.querySelector('input').focus();",
+    'an event': "document.body.dispatchEvent(new Event('input'));",
+    'scrolling': "document.body.scrollIntoView();",
+    'going elsewhere': "location.assign('/');",
+    'going elsewhere by assignment': "window.location = '/';",
+    'history': 'history.back();',
+    'the cookies': 'const c = document.cookie;',
+    'sending a request': "fetch('/x');",
+    'a borrowed method': "HTMLElement.prototype.click.call(document.body);",
+  };
+  for (const [fn, at] of [['probeFormInPage', '  const found = [];'], ['readListingInPage', "  const body = chunks.join(' ');"]]) {
+    assert.equal(src.split(at).length, 2, `${fn} has the planting point once`);
+    for (const [what, code] of Object.entries(plants)) {
+      const planted = src.replace(at, `${at}\n  ${code}`);
+      assert.ok(fillCodeProblems(planted).includes(`${fn} must be read-only`), `${what} in ${fn} is caught`);
+    }
+  }
 });
 
 test('bodyOf finds a helper whole, braces in strings and comments and all', () => {
