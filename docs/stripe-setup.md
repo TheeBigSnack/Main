@@ -8,7 +8,7 @@ Who does what: steps marked **[owner]** need the owner's own account, browser or
 
 ## What you need first
 
-- The Supabase project, with its database and functions deployed by the Supabase workflow (`docs/production-setup.md` steps 1 to 3). Billing can be prepared before that (steps 1 to 3 below); the webhook and the deploy wait for the project. No `supabase` command line is needed: every deploy to the production project goes through that workflow.
+- The Supabase project, with its database and functions deployed (`docs/production-setup.md` steps 1 to 3). The production project has both: its first eight migrations and all four functions, `billing` among them, were deployed outside the Supabase workflow before its first run, so the billing function is there without any of its Stripe secrets, and answers with what is missing until step 5 sets them and redeploys it from this repository. No `supabase` command line is needed: every deploy to the production project goes through that workflow.
 - The address the manager view will be served from (for example `https://app.lotcurrent.com`). Stripe sends a manager back there after paying.
 - Node 22 or later and this repository on your machine, as for `npm test`.
 

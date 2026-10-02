@@ -831,3 +831,26 @@ test('texts about the daily cap say each salesperson enters the dealership\'s nu
     assert.match(capSection, /[Ss]igned in\b[^.]*count[^.]*other computers/, 'the help doc says the cap counts only this browser\'s posts, but a signed-in count also takes the account\'s');
   }
 });
+
+// The production project got its first eight migrations and all four
+// functions outside the Supabase workflow, before that workflow's first run
+// (supabase/README.md records the migrations): the setup guides say so, and
+// none still writes a done deploy as one to come. The workflow keeps its
+// "FAIL on purpose" rule for a brand-new project, so the guide says those
+// lines are real on production.
+test('the setup guides say production already has its database and all four functions', () => {
+  assert.match(read('../supabase/README.md'), /The production project has applied `0001_schema\.sql` to `0008_usage\.sql`/, 'supabase/README.md no longer records what production applied: change the guides with it');
+  const setup = read('../docs/production-setup.md');
+  const step3 = setup.slice(setup.indexOf('## Step 3.'), setup.indexOf('## Step 4.'));
+  assert.match(step3, /\*\*Where production stands\.\*\*[^\n]*up to `0008_usage\.sql` and all four functions \(`rewrite`, `sync`, `billing` and `lead`\)/, 'production-setup step 3 does not say what production already has');
+  assert.doesNotMatch(step3, /^\s*After plan and database the outside check prints some `FAIL` lines on purpose/m, 'production-setup step 3 calls a FAIL after plan or database expected on production');
+  assert.match(step3, /Production is past that[^.]*read any `FAIL` on a plan or database run there as a real one/, 'production-setup step 3 does not say a FAIL on production is real');
+  const stale = [
+    ['../docs/website.md', /`lead` function is not deployed/],
+    ['../docs/stripe-setup.md', /the webhook and the deploy wait for the project/],
+    ['../docs/launch-checklist.md', /the first deploy happens when the website pull request is merged|what is left is the deploy\b/],
+    ['../supabase/README.md', /arrive with the UI wiring/],
+    ['../.github/workflows/supabase.yml', /billing and lead come later/],
+  ];
+  for (const [rel, re] of stale) assert.doesNotMatch(read(rel), re, `${rel} still writes a deploy that is done as one to come`);
+});

@@ -33,7 +33,7 @@ What is here:
 | `tests/local-shim.sql` | Lets the migrations and the test run on a plain Postgres with no Supabase. It grants what Supabase grants by default (execute on functions, all on tables and sequences), so a missing revoke fails a test. |
 | `tests/port-check.mjs` | Checks the two `_shared` copies against their originals in Node. |
 
-On the extension side, `extension/src/account.js` (sign-in, the session, invite codes) and `extension/src/sync.js` (what goes up, how the answer is merged) are pure and unit-tested; the Settings fields and the buttons that call them arrive with the UI wiring.
+On the extension side, `extension/src/account.js` (sign-in, the session, invite codes) and `extension/src/sync.js` (what goes up, how the answer is merged) are pure and unit-tested; `extension/src/accountFlow.js` wires them to Settings' **Account** section and set-up's **Your account** step, and the service worker's sync after each scan and recorded change.
 
 ## What to create, once
 
