@@ -207,3 +207,20 @@ test('while the subscription agreement promises a move to an official inventory 
   const q3 = section(read('legal/questions-for-attorney.md'), '## 3. Reading dealer websites\' inventory search');
   assert.match(q3, /Should section 2 bind Lot Current to switch/, 'questions-for-attorney.md 3 does not ask whether the feed promise should bind Lot Current');
 });
+
+test('while the published texts say they apply to no one and the pilot agreement says they apply, pilot salespeople stay signed out and the attorney is asked which text binds', async () => {
+  const draft = JSON.parse(read('legal/legal-status.json')).draft === true;
+  const { DRAFT_BANNER } = await import('../scripts/legal-pages.mjs');
+  const s1 = section(read('legal/pilot-agreement.md'), '## 1. The pilot');
+  const applies = /The Terms of Service, Privacy Policy[^.]*apply during the Pilot/.test(s1);
+  if (!draft || !/nothing on this page applies to anyone yet/.test(DRAFT_BANNER) || !applies) return; // the two texts no longer disagree
+  // the code: the shipped build offers sign-in, which sends the salesperson's details to the account service
+  const { accountsConfigured } = await import('../extension/src/accountConfig.js');
+  if (!accountsConfigured()) return;
+  const pilot = read('PILOT.md');
+  const before = pilot.slice(pilot.indexOf('### Before every pilot'), pilot.indexOf('## During the pilot'));
+  assert.match(before, /^- \[ \] \*\*No sign-in while the texts are drafts\.\*\*[^\n]*Until the attorney answers `legal\/questions-for-attorney\.md` 10\.2, each salesperson clicks \*\*Skip for now\*\* at set-up's Account step and does not sign in/m, 'PILOT.md lets pilot salespeople sign in while the texts the pilot agreement applies say they apply to no one');
+  assert.match(pilot, /A second dealership runs on the Milestone 4 accounts[^\n]*once the Terms and Privacy Policy are final or the attorney has answered `legal\/questions-for-attorney\.md` 10\.2/, 'the second dealership\'s pilot runs on accounts before the texts are settled');
+  const q10 = section(read('legal/questions-for-attorney.md'), '## 10. The Pilot Agreement\'s list of what is recorded');
+  assert.match(q10, /^- \*\*10\.2\*\* Section 1 says the Terms of Service and the Privacy Policy apply during the Pilot, but the website publishes both as drafts marked "Not in effect/m, 'the attorney is not asked which text binds during a pilot signed before the texts are final');
+});
