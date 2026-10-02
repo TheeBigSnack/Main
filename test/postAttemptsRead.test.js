@@ -102,6 +102,20 @@ test('the narrowing migration has a number of its own, after the ones other chan
   assert.deepEqual(numbers.filter((n, i) => numbers.indexOf(n) !== i), [], 'two migrations share a number');
 });
 
+// 0010's header corrects comments in earlier files. It is not applied in
+// production yet, so its note on who reads post attempts says what is true
+// once 0011 has run as well: 0002's member-wide read is replaced, and the
+// privacy texts say a salesperson sees only their own.
+test('0010\'s note on 0002\'s post-attempt policy says 0011 replaces it, never that every member reads them', () => {
+  const header = read('../supabase/migrations/0010_backend_review_fixes.sql').split('\n').filter((l) => l.startsWith('--')).join('\n');
+  const from = header.indexOf('0002_rls.sql, post_attempts');
+  const to = header.indexOf('0002_rls.sql, todo_items');
+  assert.ok(from > 0 && to > from, '0010 keeps its note on 0002\'s post_attempts policies');
+  const note = header.slice(from, to).replace(/\n--\s*/g, ' ');
+  assert.match(note, /0011_ui_post_attempts_read\.sql replaces that policy: a salesperson reads their own attempts and a manager all of the dealership's/);
+  assert.doesNotMatch(note, /privacy texts say so|shows anyone signed in/, 'nothing says every member reads them today');
+});
+
 test('the attorney questions number each section once, in order, and the pilot records point at their question', () => {
   const questions = read('../legal/questions-for-attorney.md');
   const sections = [...questions.matchAll(/^## (\d+)\. /gm)].map((m) => Number(m[1]));

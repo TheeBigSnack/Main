@@ -32,12 +32,12 @@
 --     the dealership (fixing a link, marking a take-down after the
 --     salesperson left), but the manager view has no such action yet: it
 --     lists a former member's listed cars for the manager to chase.
---   0002_rls.sql, post_attempts: every member reads all of the
---     dealership's, not only a manager. The manager view's per-salesperson
---     table shows anyone signed in to the dealership each colleague's posts
---     and seconds per post, and the privacy texts say so. A salesperson
---     records only their own attempts; a manager can correct any; only
---     managers delete.
+--   0002_rls.sql, post_attempts: its select policy lets every member read
+--     all of the dealership's, not only a manager.
+--     0011_ui_post_attempts_read.sql replaces that policy: a salesperson
+--     reads their own attempts and a manager all of the dealership's, as
+--     the privacy texts say. A salesperson records only their own attempts;
+--     a manager can correct any; only managers delete.
 --   0002_rls.sql, todo_items: the policies let any member add or close an
 --     item, but today only the poster's own extension does either (its
 --     rescan flags the salesperson's own listings, extension/src/pilot.js

@@ -745,8 +745,9 @@ const FIELD_LABELS = Object.fromEntries(FORM_MAP.fields.map((f) => [f.key, f.lab
 const secs = (s) => (typeof s === 'number' ? `${s} s` : '—');
 const hrs = (h) => (typeof h === 'number' ? `${h} h` : '—');
 
-// The Numbers tab: what the pilot agreement lets Lot Current record, for the
-// weekly check-in and the manager: time per post, fields that could not be
+// The Numbers tab: the usage numbers Lot Current records from the first post
+// (src/pilot.js; for a pilot, legal/pilot-agreement.md section 2 names them),
+// for the weekly check-in and the manager: time per post, fields that could not be
 // filled, how long sold cars and price changes stayed on the salesperson's
 // listings. Kept in this browser, per website; Download CSV is how it leaves,
 // and with accounts the posts and the to-do items also sync (src/sync.js).
