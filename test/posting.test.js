@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { capStatus, postsToday, DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { markPosted } from '../extension/src/rescan.js';
+import { buildListingData } from '../extension/src/listingData.js';
 import { FORM_MAP, DEV_OVERRIDE_KEYS, applyOverrides } from '../extension/facebook/formMap.js';
 import { ADAPTERS } from '../extension/adapters/index.js';
 import { snapshot, fixtures } from './helpers.js';
@@ -48,18 +49,105 @@ test('the posted registry can carry the listing link and who posted, without bre
 const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const read = (rel) => stripComments(readFileSync(new URL(rel, import.meta.url), 'utf8'));
 
-test('the form map has no selector, name or option that could reach Publish, Update, Delete or Mark as sold', () => {
+// The form map is held to a list of what it may contain, not to a list of
+// words it may not: its top-level keys exactly, each field's keys, kinds and
+// listing values, and then every pattern the finder compiles from a field
+// (its name patterns, and its label, which the finder tries as a second
+// chance) and every option wording it chooses from, run against the action
+// buttons Facebook draws around a listing, in the languages the form comes
+// in. A pattern that fits "Next", "Update" or "Publicar" would hand the fill
+// code one of those buttons.
+const FORM_MAP_KEYS = ['version', 'verifiedAgainstFacebook', 'createUrl', 'listingUrlPattern', 'afterPublishPatterns', 'yourListingsUrl', 'settleMs', 'recheckMs', 'fileInput', 'photoLimitDefault', 'photoLimitTextPatterns', 'fields', 'neverFill'];
+const FIELD_KEYS = ['key', 'label', 'kind', 'name', 'options', 'optional'];
+const FIELD_KINDS = ['text', 'textarea', 'typeahead', 'choice', 'checkbox', 'either'];
+const LISTING_FIELDS = Object.keys(buildListingData({}).fields);
+const ACTION_WORDINGS = [
+  'Publish', 'Publish listing', 'Publicar', 'Publicar anuncio', 'Next', 'Next step', 'Siguiente', 'Update', 'Update listing', 'Actualizar',
+  'Post', 'Post listing', 'Save draft', 'Save', 'Guardar borrador', 'Guardar', 'Delete', 'Delete listing', 'Eliminar', 'Eliminar publicación',
+  'Mark as sold', 'Mark as available', 'Marcar como vendido', 'Submit', 'Enviar', 'Share', 'Compartir', 'Boost listing', 'Renew listing',
+  'Continue', 'Continuar', 'Done', 'Listo', 'Confirm', 'Confirmar', 'Send', 'List item', 'Sell', 'Vender',
+];
+// Action verbs that no part of a field (pattern, label, option) may hold as a word.
+const ACTION_WORDS = /\b(publish\w*|publicar|update\w*|actualizar|delete\w*|eliminar|sold|vendido|submit\w*|enviar|next|siguiente|post|posting|draft|borrador|share|compartir|boost|renew|confirm\w*|confirmar|send)\b/i;
+const normWords = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function formMapProblems(map) {
+  const problems = [];
+  const keys = Object.keys(map);
+  if (JSON.stringify(keys) !== JSON.stringify(FORM_MAP_KEYS)) problems.push(`top-level keys are ${keys.join(', ')}`);
+  if (!/^input\[type="file"\]$/.test(map.fileInput)) problems.push(`fileInput is ${map.fileInput}`);
+  const seen = new Set();
+  for (const f of [...(map.fields || []), ...(map.neverFill || []).map((n) => ({ ...n, never: true }))]) {
+    const where = f.never ? `neverFill ${f.key || '?'}` : `field ${f.key}`;
+    if (!f.never) {
+      for (const k of Object.keys(f)) if (!FIELD_KEYS.includes(k)) problems.push(`${where} has a key ${k}`);
+      if (!LISTING_FIELDS.includes(f.key)) problems.push(`${where} is not a listing value (listingData.js)`);
+      if (seen.has(f.key)) problems.push(`${where} appears twice`);
+      seen.add(f.key);
+      if (!FIELD_KINDS.includes(f.kind)) problems.push(`${where} has kind ${f.kind}`);
+    }
+    // what the finder compiles: each name pattern, and the label as a whole-word second chance
+    const res = [];
+    for (const p of Array.isArray(f.name) ? f.name : [f.name]) {
+      try { res.push([p, new RegExp(p, 'i')]); } catch (e) { problems.push(`${where} has a pattern that does not compile: ${p}`); }
+    }
+    if (!f.never && typeof f.label === 'string') res.push([`label ${f.label}`, new RegExp('\\b' + escapeRe(f.label) + '\\b', 'i')]);
+    if (f.never) continue; // a fenced-off name may well name an action: it keeps the finder away from it
+    for (const [src, re] of res) {
+      for (const action of ACTION_WORDINGS) if (re.test(normWords(action))) problems.push(`${where}: ${src} fits "${action}"`);
+      if (ACTION_WORDS.test(src)) problems.push(`${where}: ${src} names an action`);
+    }
+    // an option is chosen by its wording: equal, a prefix, or a whole word of what the popup shows
+    for (const wordings of Object.values(f.options || {})) {
+      for (const w of wordings) {
+        const nw = normWords(w);
+        if (ACTION_WORDS.test(nw)) problems.push(`${where}: option "${w}" names an action`);
+        const inside = new RegExp('(^|[^a-z0-9])' + escapeRe(nw) + '($|[^a-z0-9])');
+        for (const action of ACTION_WORDINGS) {
+          const na = normWords(action);
+          if (na.startsWith(nw) || inside.test(na)) problems.push(`${where}: option "${w}" fits "${action}"`);
+        }
+      }
+    }
+  }
+  // and the tripwire on every string anywhere in the map
   const strings = [];
   (function walk(x) {
     if (typeof x === 'string') strings.push(x.toLowerCase());
     else if (Array.isArray(x)) x.forEach(walk);
     else if (x && typeof x === 'object') Object.values(x).forEach(walk);
-  })(FORM_MAP);
-  for (const word of ['publish', 'submit', 'delete', 'sold', 'update listing', 'post listing', 'button[type']) {
-    assert.ok(!strings.some((s) => s.includes(word)), `formMap has a value mentioning "${word}"`);
+  })(map);
+  for (const word of ['publish', 'publicar', 'submit', 'delete', 'sold', 'update', 'button', 'aria-label']) {
+    if (strings.some((s) => s.includes(word))) problems.push(`a value mentions "${word}"`);
   }
-  assert.ok(!FORM_MAP.fields.some((f) => /publish|submit|delete|sold/i.test(f.key + f.label)));
-  assert.ok(!Object.keys(FORM_MAP).some((k) => /selector|button/i.test(k) && k !== 'fileInput'), 'no button selectors at all');
+  return problems;
+}
+
+test('the form map holds only known keys and fields, and nothing in it fits Publish, Next, Update, Delete or Mark as sold in any language the form comes in', () => {
+  assert.deepEqual(formMapProblems(FORM_MAP), []);
+  // the check itself: each way an action could get into the map is caught
+  const field = (patch) => ({ ...FORM_MAP, fields: [...FORM_MAP.fields, patch] });
+  const price = FORM_MAP.fields.find((f) => f.key === 'price');
+  const withPrice = (patch) => ({ ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === price ? { ...f, ...patch } : f)) });
+  const choice = FORM_MAP.fields.find((f) => f.key === 'bodyStyle');
+  const planted = {
+    'a field for the Next button': field({ key: 'confirm', label: 'Next', kind: 'choice', name: ['^next\\b', '^update\\b', '^publicar\\b'] }),
+    'a top-level selector': { ...FORM_MAP, nextStep: '[aria-label="Next"]' },
+    'a top-level finder': { ...FORM_MAP, finish: { name: ['^(p.blish|publicar|update|post|next)\\b'] } },
+    'an extra pattern that fits Update': withPrice({ name: ['^price\\b', '^update\\b'] }),
+    'a pattern written to dodge words': withPrice({ name: ['^price\\b', '^p.bli'] }),
+    'a Spanish Publish': withPrice({ name: ['^price\\b', '^pub'] }),
+    'a label that names an action': withPrice({ label: 'Update' }),
+    'a pattern that fits anything': withPrice({ name: ['.*'] }),
+    'an option wording that is an action': { ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === choice ? { ...f, options: { ...f.options, SUV: ['SUV', 'Mark as sold'] } } : f)) },
+    'an option that is the start of an action': { ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === choice ? { ...f, options: { ...f.options, SUV: ['Sig'] } } : f)) },
+    'a field key the listing never fills': field({ key: 'action', label: 'Vehicle type extra', kind: 'text', name: ['^zzz\\b'] }),
+    'a field with an extra key': withPrice({ selector: '#price' }),
+    'a field of an unknown kind': withPrice({ kind: 'button' }),
+    'a file input that is a button': { ...FORM_MAP, fileInput: 'button' },
+  };
+  for (const [what, map] of Object.entries(planted)) assert.ok(formMapProblems(map).length, `${what} is caught`);
 });
 
 test('the test hook can only move addresses and timings, never the fields the fill code may touch', () => {

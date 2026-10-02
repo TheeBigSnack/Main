@@ -12,6 +12,10 @@
 //
 // There is deliberately NO entry for Publish, Update, Delete or Mark as sold.
 // The fill code can only touch the fields listed here (non-negotiable #1).
+// test/posting.test.js holds this map to its known top-level keys and to
+// fields that are listing values, and runs every name pattern, label and
+// option wording against the action buttons (Publish, Next, Update, Delete,
+// Mark as sold, in English and Spanish): a new key or field starts there.
 //
 // Each field:
 //   key      the value in listingData.js's `fields`
