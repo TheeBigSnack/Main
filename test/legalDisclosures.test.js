@@ -138,3 +138,26 @@ test('no text says Facebook gets nothing before Publish: the fill types into Fac
     assert.match(text, says, `${rel} does not say what Facebook's own page may send before Publish`);
   }
 });
+
+test('every screenshot rule keeps Facebook\'s logo, wordmark and brand colour out of the store images, the real form\'s included', () => {
+  // the rule the others follow: no Meta, Facebook or Marketplace logos or brand colours in screenshots or the store listing
+  const rule = read('legal/trademark-note.md').split('\n').find((l) => l.includes('Never use the Facebook, Marketplace or Meta logos'));
+  assert.match(rule, /brand colours/);
+  assert.match(rule, /screenshots/);
+  assert.match(rule, /the Chrome Web Store listing/);
+
+  const shots = read('store/screenshots.md');
+  const listing = read('store/listing.md');
+  const listingShots = listing.slice(listing.indexOf('## Screenshots'), listing.indexOf('\n## ', listing.indexOf('## Screenshots') + 1));
+  const notes = section(read('legal/chrome-web-store-privacy.md'), '## Notes for the listing text');
+  for (const [where, text] of [['store/screenshots.md', shots], ['store/listing.md Screenshots', listingShots], ['legal/chrome-web-store-privacy.md notes', notes]]) {
+    assert.doesNotMatch(text, /beyond what the page itself shows/, `${where} lets the real page's logo or colour into a store image`);
+    assert.match(text, /logo/, `${where} says nothing about Facebook's logo`);
+    assert.match(text, /wordmark/, `${where} says nothing about Facebook's wordmark`);
+    assert.match(text, /below Facebook's top bar/, `${where} does not say a capture of the real form is cropped below Facebook's top bar`);
+    assert.match(text, /Facebook-blue button|button or mark in Facebook's blue/, `${where} does not say Facebook's blue is covered`);
+  }
+  // the shot of the real form says it too
+  const shot3 = shots.split('\n').find((l) => l.startsWith('| `3-form.png` |'));
+  assert.match(shot3, /Crop below Facebook's top bar/);
+});

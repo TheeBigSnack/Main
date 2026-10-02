@@ -72,4 +72,4 @@ None. All code ships in the extension package; the optional rewrite service retu
 
 ## Notes for the listing text
 
-Use "Facebook" and "Marketplace" only as plain names. No Meta logos or brand colours in icons or screenshots. State "Not affiliated with Meta Platforms, Inc." in the description. Screenshots must not show real customer data or a real person's Facebook account; use the mock form or blurred fields.
+Use "Facebook" and "Marketplace" only as plain names. No Facebook or Meta logos, wordmarks or brand colours in icons or screenshots: a capture of the real Marketplace form is cropped below Facebook's top bar, and any logo, wordmark or Facebook-blue button left in the frame is covered with a solid box (`store/screenshots.md`). State "Not affiliated with Meta Platforms, Inc." in the description. Screenshots must not show real customer data or a real person's Facebook account; use the mock form or blurred fields.
