@@ -262,3 +262,36 @@ test('the Web Store answers name every place that turns automatic rescans on: se
   assert.ok(tester, 'store/listing.md no longer has its tester step about background rescans');
   assert.match(tester, /in the set-up wizard or in Settings/, 'the reviewer\'s tester step says only set-up turns automatic rescans on');
 });
+
+// The Terms name Pennsylvania law while the Subscription and Pilot Agreements
+// leave the state blank; the Subscription Agreement's whole-agreement list
+// takes in the Privacy Policy and the Terms' list does not; and the sections
+// that end an agreement "on notice" say nowhere how notice is given. While any
+// of that holds, the attorney is asked to make the three agree.
+test('while the agreements differ on governing law or on what makes up the whole agreement, or none says how notice is given, the attorney is asked to settle it', () => {
+  const tos = section(read('legal/terms-of-service.md'), '## 13. Changes, termination, general');
+  const dsa = section(read('legal/dealer-subscription-agreement.md'), '## 9. General');
+  const pilot = section(read('legal/pilot-agreement.md'), '## 7. General');
+  const namesPennsylvania = /governed by the laws of the Commonwealth of Pennsylvania/.test(tos);
+  const blankState = [dsa, pilot].filter((t) => /The law of \[state\] governs/.test(t)).length;
+  const lawDiffers = namesPennsylvania && blankState > 0;
+  const privacyInWhole = (t) => /Privacy Policy[^.]*are the whole agreement/.test(t);
+  const wholeDiffers = privacyInWhole(dsa) !== privacyInWhole(tos);
+  const all = ['legal/terms-of-service.md', 'legal/dealer-subscription-agreement.md', 'legal/pilot-agreement.md'].map(read).join('\n');
+  const onNotice = /\bon notice\b/.test(all);
+  const noticesClause = /\bnotices?\b[^.\n]*\b(?:given|sent|delivered|served) (?:by|to|at)\b/i.test(all);
+  if (!lawDiffers && !wholeDiffers && !(onNotice && !noticesClause)) return; // the three agree: drop question 11.1 with this test
+  const q11 = section(read('legal/questions-for-attorney.md'), '## 11. Where the agreements disagree or say nothing');
+  const item = q11.split('\n').find((l) => l.startsWith('- **11.1**'));
+  assert.ok(item, 'questions-for-attorney.md 11 does not ask the attorney to make the agreements agree');
+  if (lawDiffers) {
+    assert.match(item, /Terms of Service section 13 names Pennsylvania law/, 'question 11.1 does not say the Terms already name Pennsylvania');
+    assert.match(item, /leaves the state as "\[state\]"/, 'question 11.1 does not say the other agreements leave the state blank');
+    assert.match(item, /Should the three name one governing law and venue/);
+  }
+  if (wholeDiffers) {
+    assert.match(item, /adds the Privacy Policy to its whole-agreement list/, 'question 11.1 does not say the whole-agreement lists differ');
+    assert.match(item, /should the Privacy Policy be in every whole-agreement list or in none/);
+  }
+  if (onNotice && !noticesClause) assert.match(item, /none of the three says how notice is given/, 'question 11.1 does not say no agreement says how notice is given');
+});
