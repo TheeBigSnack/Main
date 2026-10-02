@@ -21,9 +21,9 @@
 //
 // Beside Publish sit decoys of the other action controls Facebook draws
 // around a listing (Next, Post, Save draft, Update, Delete, Mark as sold),
-// each as a submit button of the form and as a role=button element, plus a
-// menu button and an expandable button that the fill code's dropdown finder
-// does consider. Nothing may ever touch them: every pointer, mouse, click or
+// each as a submit button of the form and as a role=button element, plus
+// menu buttons and expandable buttons that the fill code's dropdown finder
+// does consider (two of them named Next and Save draft). Nothing may ever touch them: every pointer, mouse, click or
 // key event that reaches one, any submit event of the form and any
 // form.submit() (the form posts to /form-submitted) is recorded, and GET
 // /actions lists what was. The flows assert that list stays empty.
@@ -134,6 +134,8 @@ function page(lang) {
     ${DECOYS.map((d) => `<button data-decoy="${d} (button)">${t(d)}</button> <div role="button" tabindex="0" data-decoy="${d} (role=button)">${t(d)}</div>`).join('\n    ')}
     <div role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" data-decoy="More options (menu button)">${t('More options')}</div>
     <button type="button" aria-expanded="false" data-decoy="Publish options (expandable)">${t('Publish options')}</button>
+    <div role="button" tabindex="0" aria-expanded="false" data-decoy="Next (expandable)">${t('Next')}</div>
+    <button type="button" aria-haspopup="menu" aria-expanded="false" data-decoy="Save draft (menu button)">${t('Save draft')}</button>
   </div>
 </form>
 <script>
