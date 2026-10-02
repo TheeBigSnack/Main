@@ -1,13 +1,13 @@
 # The 10-minute demo
 
-For a used car manager, at their desk, on their own website. One laptop with Chrome, the Lot Current extension loaded, the store's used inventory page open, and a Facebook account signed in (yours, or the manager's salesperson's with their OK). Aim for nine minutes and leave one for questions.
+For a used car manager, at their desk, on their own website. One laptop with Chrome, the Lot Current extension loaded, the store's used inventory page open, and your own Facebook account signed in. Never sign anyone else's Facebook account in on your laptop, a salesperson's included, even with their OK. Aim for nine minutes and leave one for questions.
 
 ## Before you walk in
 
 - Reload the extension (chrome://extensions → Reload) and scan the store's website once so the first scan in the demo is a rescan and shows a To do list.
 - Delete any saved drafts on Facebook (Marketplace → Your listings → Drafts). A restored draft during the demo is recoverable but distracting.
 - Pick the car you will post: pre-owned, at this store, with photos and a price, and with a real write-up on the website if possible. Have a second one in mind.
-- Decide with the manager beforehand whether the demo post gets published. Default: **no**. You close the Facebook tab without publishing and nothing is recorded. If they want a real listing, one of their salespeople clicks Publish, not you.
+- The demo post is never published. You close the Facebook tab without publishing and nothing is recorded. If the manager wants to see a real listing, a salesperson makes it later on their own computer, signed in to their own Facebook account, and clicks Publish themselves; not you, and not on your laptop.
 - Settings: name, role, store ticked, address filled from the website, defaults Clean / Very good, cap 10.
 - On a group website, know the group's other rooftops before you start: their cars show under **Other stores**, not Ready to post.
 
@@ -31,13 +31,13 @@ Show, in order: the fresh re-check on the website; the description with the VIN 
 
 Click **Open the Marketplace form**. Watch it fill. Point at the panel's **Filled in** list: "That's what the form shows, read back after filling, not what we sent."
 
-Then either close the Facebook tab and click **It didn't post** ("nothing was posted or recorded"), or have the salesperson click Publish and show **My listings** with the link.
+Then close the Facebook tab and click **It didn't post** ("nothing was posted or recorded"). Say: "A real listing is the salesperson's: on their own computer, in their own account, they check it and click Publish."
 
 Say: "Lot Current never clicks Publish. There's no code for it, and a test that fails if any appears."
 
 ## 5:00 Several at once
 
-Ready to post: tick three cars. Show **Select the next N** and the daily cap in the toolbar ("a safety setting you control; 10 by default"). Click **Post 3 cars** and show the queue bar in the side panel, then **Stop queue**. Don't run it in the demo unless they want real posts.
+Ready to post: tick three cars. Show **Select the next N** and the daily cap in the toolbar ("a safety setting you control; 10 by default"). Click **Post 3 cars** and show the queue bar in the side panel, then **Stop queue**. Don't run it in the demo: the demo publishes nothing.
 
 ## 6:00 When a car sells
 

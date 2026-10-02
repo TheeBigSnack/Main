@@ -300,3 +300,25 @@ test('the store-install emails carry the pilot salespeople\'s listings across fr
   for (const label of ['My listings', 'Settings', 'Account']) assert.ok(popup.includes(label), `"${label}" is no longer a label in popup.js: update onboarding-store.md and this test together`);
   assert.ok(read('../extension/src/accountFlow.js').includes('Accounts are not set up yet'), 'the pilot step quotes the Account section of a copy without accounts');
 });
+
+// review: the demo script had "a Facebook account signed in (yours, or the manager's salesperson's with their
+// OK)" on the presenter's laptop, and a branch where a salesperson clicks Publish there. Support never touches a
+// salesperson's Facebook account (docs/support.md) and the posting rules say each person posts from their own
+// account only. The demo runs on the presenter's own account, is never published, and a real listing is the
+// salesperson's own, on their own computer.
+test('the demo script signs in only the presenter\'s own Facebook account and never publishes', () => {
+  const demo = read('../marketing/demo-script.md');
+  const setup = demo.split('\n').find((l) => l.startsWith('For a used car manager'));
+  assert.ok(setup, 'the demo script lost its set-up line');
+  assert.match(setup, /your own Facebook account signed in/, 'the presenter signs in their own account');
+  assert.match(setup, /Never sign anyone else's Facebook account in on your laptop/, 'and never anyone else\'s');
+  assert.doesNotMatch(demo, /salesperson's with their OK|or the (manager's )?salesperson's\)|sign(ed|s)? in as (them|the salesperson|a salesperson)|their (Facebook )?(login|password)/i, 'someone else\'s account on the presenter\'s laptop');
+  assert.doesNotMatch(demo, /have the salesperson click Publish|unless they want real posts|whether the demo post gets published/i, 'a real listing during the demo');
+  assert.match(demo, /The demo post is never published/, 'the demo publishes nothing');
+  for (const line of demo.split('\n').filter((l) => /real listing/i.test(l))) {
+    assert.match(line, /their own computer/, `a real listing is made on the salesperson's own computer: ${line.slice(0, 80)}`);
+    assert.match(line, /their own (Facebook )?account/, `in their own Facebook account: ${line.slice(0, 80)}`);
+  }
+  // the support rule the script follows
+  assert.match(read('../docs/support.md'), /Never touch a salesperson's Facebook account/, 'docs/support.md no longer says support never touches a salesperson\'s account: check the demo script against it');
+});
