@@ -78,7 +78,7 @@ test('the service is only called when switched on with an address', async () => 
   assert.equal(calls, 0);
 });
 
-test('only facts leave the browser: no VIN, no Facebook data', () => {
+test('only facts leave the browser: no VIN or price field, no Facebook data', () => {
   const v = vehicle('usedNormal');
   const f = rewriteFacts({ vehicle: v, dealer: DEALER, salesperson: ME, priceNote: NOTE, narrative: ['x'] });
   assert.ok(!('vin' in f));
@@ -87,6 +87,24 @@ test('only facts leave the browser: no VIN, no Facebook data', () => {
   assert.equal(f.carfaxOneOwner, true);
   assert.deepEqual(f.dealer, { name: DEALER.name, city: 'Waynesburg' });
   assert.deepEqual(f.salesperson, ME);
+});
+
+test('the website\'s write-up goes to the service as the website wrote it, a VIN, price or phone number in it included', async () => {
+  // what docs/data-inventory.md and the privacy texts say: the VIN and the price are not among the fields,
+  // and the description's own sentences go as the website wrote them; the boilerplate is the only thing taken out
+  const v = vehicle('usedNormal', { description: `Local trade with new tires. VIN: ${vehicle('usedNormal').vin}. Internet price $27,163. Call Dana at 555-201-3344.<br>${DISCLAIMER}` });
+  let body = null;
+  const fetchImpl = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ ok: true, text: '' }) };
+  };
+  const r = await generateDescription(args({ vehicle: v, settings: on, fetchImpl }));
+  assert.ok(body, 'the service was called');
+  assert.ok(!('vin' in body) && !('price' in body), 'no VIN or price field');
+  assert.deepEqual(body.narrative, r.narrative, 'the write-up the template read, unchanged');
+  const sent = body.narrative.join(' ');
+  for (const part of [v.vin, '$27,163', '555-201-3344', 'Local trade with new tires.']) assert.ok(sent.includes(part), `${part} goes as written`);
+  assert.ok(!sent.includes('Documentation fee'), 'the lot-wide boilerplate does not');
 });
 
 test('the service system prompt names no real person or dealer', () => {

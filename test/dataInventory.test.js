@@ -321,6 +321,16 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   assert.deepEqual(sorted(listed), sorted(sent), 'the fields the extension sends are not the fields docs/data-inventory.md lists');
 });
 
+test('the rewrite services\' READMEs and the facts code say the write-up goes as the website wrote it, and never that no VIN can reach the service', () => {
+  // the facts carry no VIN or price field, but the website's own write-up goes as written and can hold either
+  for (const rel of ['backend/README.md', 'supabase/README.md', 'extension/src/rewriter.js']) {
+    const text = read(rel).replace(/\n\/\/ /g, ' ');
+    assert.doesNotMatch(text, /\bno VIN\b(?! or price field)/i, `${rel} says no VIN reaches the service; a VIN in the website's write-up does`);
+    assert.match(text, /`narrative` is the website description's own sentences as the website wrote them, so a VIN, a price or a phone number the dealership wrote there/, `${rel} does not say the write-up goes as written`);
+  }
+  assert.match(inventory, /`narrative` is the website's own wording, so whatever the dealership wrote in a car's description goes as it wrote it\./);
+});
+
 test('a colour guess sends the photo addresses, the colour words and the origin, nothing else; Anthropic gets the first two', async () => {
   let body = null;
   const fetchImpl = async (url, init) => {

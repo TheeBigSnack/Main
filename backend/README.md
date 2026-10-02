@@ -54,4 +54,4 @@ To share it, run it on any small Node host (Railway, Fly.io, Render, a VPS) with
 
 ## What it stores
 
-`usage.json` (a running cost total for the month; `USAGE_FILE` names another file) and nothing else. It logs one line per request with the car's year, make and model. No VIN, no Facebook data and no salesperson data reach this service beyond the sign-off name and title that go into the description.
+`usage.json` (a running cost total for the month; `USAGE_FILE` names another file) and nothing else. It logs one line per request with the car's year, make and model. A request has no VIN or price field, no Facebook data and no salesperson data beyond the sign-off name and title that go into the description. Its `narrative` is the website description's own sentences as the website wrote them, so a VIN, a price or a phone number the dealership wrote there reaches this service with them.

@@ -39,10 +39,12 @@ export async function guessColorsWithBackend({ endpoint, key = '', photos, optio
 
 // Exactly what leaves the browser: facts about the car and the dealer (plus
 // the dealer website's origin, added by generateDescription, so the service
-// knows which store the car belongs to). No VIN, no Facebook data, nothing
-// about the salesperson beyond the sign-off (their closing line is added to
-// the draft here, like the VIN). When the salesperson picked the highlights,
-// those are the features the service sees.
+// knows which store the car belongs to). No VIN or price field, no Facebook
+// data, nothing about the salesperson beyond the sign-off (their closing line
+// is added to the draft here, like the VIN). `narrative` is the website
+// description's own sentences as the website wrote them, so a VIN, a price
+// or a phone number the dealership wrote there goes with them. When the
+// salesperson picked the highlights, those are the features the service sees.
 export function rewriteFacts({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [], highlights = null }) {
   return {
     year: v.year, make: v.make, model: v.model, trim: v.trim, mileage: v.mileage, stock: v.stock,
