@@ -3,12 +3,19 @@
 // Fields are found by role and accessible name (label text, aria-label,
 // placeholder), never by generated class names.
 //
-// STATUS: NOT YET VERIFIED against the live form. This map was written from
-// public knowledge of the "Create vehicle listing" form (September 2026) and
-// has been proven only against test/e2e/mock-marketplace.mjs, which names its
-// fields the same way. The first run on the real form (see README, "Try it on
-// one real car") will show which `name` patterns need adjusting: every field
-// that can't be found is listed in the side panel with a copy button.
+// STATUS: the create-listing fields below were checked on the live form.
+// This map was written from public knowledge of the "Create vehicle listing"
+// form (September 2026), then live runs on 2026-09-27 (single cars and a
+// queue) filled every field with nothing under "Couldn't fill"
+// (verifiedAgainstFacebook below). That is a record of a date, not a
+// guarantee: Facebook can change its page at any time, and every field that
+// can't be found is listed in the side panel with a copy button, so re-check
+// this map after any "Couldn't fill" (README, "Try it on one real car").
+// Not checked live: yourListingsUrl and photoLimitDefault (each marked NOT
+// VERIFIED where it is), and the listing's edit page, where upkeep finds the
+// Price box by the price field's name below.
+// test/e2e/mock-marketplace.mjs names its fields the same way, so the fill
+// code is proven against it in every end-to-end flow.
 //
 // There is deliberately NO entry for Publish, Update, Delete or Mark as sold.
 // The fill code can only touch the fields listed here (non-negotiable #1).

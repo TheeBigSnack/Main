@@ -4,6 +4,7 @@ import { classifyUrl, onCreatePage, isNewListingFromForm, showsPostedCar, watchF
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { readListingInPage } from '../extension/facebook/fillForm.js';
+import { readFileSync } from 'node:fs';
 
 test('a listing address means it posted; the "your listings" page probably does; anything else is nothing', () => {
   assert.deepEqual(classifyUrl('https://www.facebook.com/marketplace/item/1234567890/', FORM_MAP), { status: 'listing', url: 'https://www.facebook.com/marketplace/item/1234567890/', id: '1234567890' });
@@ -78,6 +79,31 @@ function fakeTabs(firstUrl) {
   };
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+// What the map's own header, the mock form's header and the README say about
+// the map must match it: the header and the README once still said the map
+// was never checked on the live form after the live runs, and the mock once
+// called condition and title status fields "the extension must never touch"
+// while the map fills both from the dealership's defaults.
+test('the form map, its mock and the README say what the map was checked against and what it fills', () => {
+  const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+  const map = read('../extension/facebook/formMap.js');
+  const prose = (src) => src.replace(/^\s*\/\/ ?/gm, '').replace(/\s+/g, ' ');
+  const header = prose(map.slice(0, map.indexOf('export const FORM_MAP')));
+  const day = String(FORM_MAP.verifiedAgainstFacebook).match(/\d{4}-\d{2}-\d{2}/);
+  assert.ok(day, 'the live check is a dated record');
+  assert.ok(header.includes(day[0]), 'the header names the day of the live runs the map records');
+  assert.doesNotMatch(header, /not (?:yet )?verified against the live form|proven only against/i, 'the header still says the map was never checked live');
+  assert.match(header, /not a guarantee/i);
+  const readme = read('../README.md');
+  assert.doesNotMatch(readme, /form map needs a live check/i, 'the README still says the form map was never checked live');
+  // a field the mock calls off limits is not one the map fills
+  const mock = read('./e2e/mock-marketplace.mjs');
+  const mockHeader = prose(mock.slice(0, mock.indexOf('import ')));
+  const fenced = [...mockHeader.matchAll(/never (?:touch|fill)[^.]*?\(([^)]*)\)/gi)].flatMap((m) => m[1].split(/,|\band\b/).map((w) => w.trim().toLowerCase()).filter(Boolean));
+  const filled = FORM_MAP.fields.map((f) => f.label.toLowerCase());
+  for (const name of fenced) assert.ok(!filled.some((label) => label.includes(name)), `the mock's header calls "${name}" off limits, but the map fills it`);
+});
 
 test('a listing address counts as coming from the form only when the tab moved to it straight from the create page', async () => {
   const ITEM = 'https://www.facebook.com/marketplace/item/1234567890/';

@@ -15,9 +15,11 @@
 //     clicking another dropdown just closes the open one;
 //   - the price box reformats what you type ("27163" -> "27,163").
 // It mixes control types (custom comboboxes, native selects, inputs, a
-// textarea, a file input) plus the two fields the extension must never touch
-// (condition, title status). Only a person clicks Publish; the server counts
-// those clicks so the test can prove it.
+// textarea, a file input, a checkbox). Condition and title status are on it
+// too: the website can't tell those, so the extension fills them from the
+// dealership's defaults in Settings, the side panel shows them as such, and
+// the person checks them before clicking Publish. Only a person clicks
+// Publish; the server counts those clicks so the test can prove it.
 //
 // Beside Publish sit decoys of the other action controls Facebook draws
 // around a listing (Next, Post, Save draft, Update, Delete, Mark as sold),
