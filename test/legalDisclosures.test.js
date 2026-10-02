@@ -116,3 +116,25 @@ test('the Facebook host justification and the privacy texts name every read Lot 
   const reads = faq.slice(faq.indexOf('<h3>What does it read?</h3>'), faq.indexOf('</article>', faq.indexOf('<h3>What does it read?</h3>')));
   assert.match(reads, /When you open a to-do item, it reads the Marketplace page it opened for it \(the listing, or your Your listings page when no listing link was saved\) for the title, prices and a sold sign/);
 });
+
+test('no text says Facebook gets nothing before Publish: the fill types into Facebook\'s own suggestion boxes and hands it the photos', () => {
+  // the code: Location (and Make and Model) are suggestion boxes typed into, and the photos are put on the form's file input
+  const map = read('extension/facebook/formMap.js');
+  assert.match(map, /key: 'location', label: 'Location', kind: 'typeahead'/, 'Location is no longer a suggestion box: update the texts and this test');
+  const fill = read('extension/facebook/fillForm.js');
+  const attach = fill.slice(fill.indexOf('export async function attachPhotosInPage'));
+  assert.match(attach, /input\.files = dt\.files;[\s\S]*?input\.dispatchEvent\(new Event\('change'/, 'the photos are no longer handed to the form\'s file input: update the texts and this test');
+
+  const NOTHING = /sends nothing to Facebook|Nothing goes to Facebook|Facebook receives them only when|What Facebook receives then/;
+  const texts = {
+    'legal/privacy-policy.md': /Facebook's own page may send some of what is filled in to Facebook before the User publishes[^.]*suggestion box such as Location[^.]*attached photos; and Facebook may keep an unfinished listing as a draft/,
+    'legal/chrome-web-store-privacy.md': /Facebook's own page may send some of what is filled in to Facebook before the user publishes[^.]*suggestion box such as Location[^.]*attached photos\), and Facebook may keep an unfinished listing as a draft/,
+    'docs/data-inventory.md': /Facebook's own page may send some of that to Facebook before the person publishes[^|]*suggestion box such as Location[^|]*attached photos/,
+    'legal/questions-for-attorney.md': /Facebook's own page may send some of what goes into its boxes to Facebook as it goes in[^.]*Location[^.]*attached photos, before the user publishes/,
+  };
+  for (const [rel, says] of Object.entries(texts)) {
+    const text = read(rel);
+    assert.doesNotMatch(text, NOTHING, `${rel} says Facebook gets nothing until Publish`);
+    assert.match(text, says, `${rel} does not say what Facebook's own page may send before Publish`);
+  }
+});
