@@ -84,7 +84,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 
 ## How the pre-owned check works
 
-Three separate signs on the dealer website have to agree the car is pre-owned:
+Lot Current reads three separate signs on the dealer website. A car can pass as pre-owned only when none of them calls it new and either two call it pre-owned, or one does and the car has a Carfax report link (the other checks below still apply):
 
 1. the inventory type from the dealer's system (Used / Certified Used / New)
 2. the condition word in the car's web address (`/inventory/used-2019-...` vs `/inventory/new-2027-...`)
