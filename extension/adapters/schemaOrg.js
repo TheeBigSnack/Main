@@ -934,6 +934,10 @@ async function carFromPage(site, vin, href) {
  * options.url (the address the last scan kept, which the side panel passes
  * through vehicleDetails.fetchVehicleDetails) when known, else the page the
  * list links to for this VIN. record null when the website no longer has the car.
+ * A list read that stopped before its end (MAX_LIST_PAGES pages, a next link
+ * off the website or back to a page already read, a page cut at
+ * PAGE_TEXT_LIMIT), the same ways the scan calls a list not clean, adds
+ * complete: false, so a car on the unread part is never called gone.
  */
 export async function getDetails(search, vin, options = {}) {
   const wanted = String(vin || '').toUpperCase();
@@ -957,11 +961,14 @@ export async function getDetails(search, vin, options = {}) {
       : { ok: false, message: "Lot Current doesn't know where this car's page is. Scan the website again, then post." };
   }
   const visited = new Set();
+  let whole = false;
+  let cut = false;
   for (let at = start.href, n = 0; n < MAX_LIST_PAGES; n += 1) {
     visited.add(pageKey(at));
     const got = await site.read(at);
     const page = pageOf(got);
     if (page.kind !== 'html') return { ok: false, message: `Couldn't read the inventory page (${page.message || `HTTP ${page.status}`}).` };
+    if (page.truncated) cut = true;
     const listedNode = page.parsed.vehicles.find((x) => nodeVin(x) === wanted) || null;
     const listPage = got.finalUrl;
     const link = (listedNode && onSite(firstText(listedNode.url), listPage, origin)) || page.parsed.facts.links.map((h) => onSite(h, null, origin)).find((u) => u && vinInAddress(u.href) === wanted) || null;
@@ -972,11 +979,15 @@ export async function getDetails(search, vin, options = {}) {
       if (!listedNode) return done(null);
     }
     if (listedNode) return done(listRecord({ node: listedNode, page: listPage, facts: page.parsed.facts }, link ? link.href : listPage, false));
-    const next = page.parsed.facts.next ? onSite(page.parsed.facts.next, null, origin) : null;
-    if (!next || visited.has(pageKey(next.href))) break;
+    if (!page.parsed.facts.next) {
+      whole = !cut; // the list ended where it says it ends
+      break;
+    }
+    const next = onSite(page.parsed.facts.next, null, origin);
+    if (!next || visited.has(pageKey(next.href))) break; // off the website, or back to a page already read
     at = next.href;
   }
-  return done(null);
+  return whole ? done(null) : { ...done(null), complete: false };
 }
 
 // ---------- photos ----------
