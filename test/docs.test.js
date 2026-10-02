@@ -478,4 +478,7 @@ test('the help says the daily cap counts your posts from all your computers when
   assert.match(section, /counts your own posts on this website today: the ones recorded in this browser or, when you are signed in to a Lot Current account[^.]*all your computers/);
   assert.match(section, /A colleague's posts never count toward yours\./);
   assert.match(section, /safety setting, not a guarantee/);
+  // unmarking a car never hands a post back (cap.js: nothing takes an entry off the day's log)
+  assert.doesNotMatch(help, /takes that post back off the count/);
+  assert.match(section, /Unmarking a car \(clicking \*\*Posted ✓\*\*\) does not take it off the count either/);
 });

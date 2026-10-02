@@ -35,24 +35,27 @@ export function serverPostsToday(serverCount, now = new Date()) {
 
 // The posts this salesperson recorded on this computer today, for one
 // website (postLog:<origin>: a list of { vin, at }), kept apart from the
-// posted list. Taking a listing down removes the car from the posted list,
-// but the post was still made today: the log keeps it, so a take-down never
-// hands a post back (the sync function counts the same way). Each write
-// keeps only the day's entries.
+// posted list. Taking a listing down or unmarking the car removes it from
+// the posted list, but the post was still recorded today: the log keeps it,
+// so neither hands a post back (the sync function counts taken-down posts
+// the same way). Nothing takes an entry off. Each write keeps only the
+// day's entries.
 const sameDay = (at, now) => {
   const d = new Date(at);
   return !Number.isNaN(d.getTime()) && localDay(d) === localDay(now);
 };
 const entries = (log) => (Array.isArray(log) ? log.filter((e) => e && typeof e.vin === 'string' && typeof e.at === 'string') : []);
 
-export function logPost(log, vin, at, now = new Date(at)) {
-  return [...entries(log).filter((e) => sameDay(e.at, now)), { vin, at }];
-}
-
-// Unmarking a car (a mark made by mistake) takes that one post back off the
-// log, found by its car and its time.
-export function unlogPost(log, vin, at) {
-  return entries(log).filter((e) => !(e.vin === vin && e.at === at));
+//
+// A post recorded through the side panel is always a new post: one car
+// posted, taken down and posted again the same day is two. The popup's Mark
+// posted records a listing already live (`alreadyLive`): a car already on
+// today's log was recorded today and unmarked since, and marking it again is
+// the same listing, so the log stays as it is and the post counts once.
+export function logPost(log, vin, at, now = new Date(at), { alreadyLive = false } = {}) {
+  const today = entries(log).filter((e) => sameDay(e.at, now));
+  if (alreadyLive && today.some((e) => e.vin === vin)) return today;
+  return [...today, { vin, at }];
 }
 
 export function loggedToday(log, now = new Date()) {
@@ -75,7 +78,7 @@ export function draftsToday(drafts, { posted = {}, log = [], now = new Date() } 
 // The day's standing: the largest of three counts of this person's posts
 // today, since each is a count of real posts. The posted list knows the
 // cars still listed; `options.log` (the log above) also knows the ones
-// taken down since; `options.serverCount` (the count above) knows the ones
+// taken down or unmarked since; `options.serverCount` (the count above) knows the ones
 // synced from anywhere, minus what has not gone up yet. To that come the
 // forms saved as drafts today (`options.drafts`, draftsToday above), which
 // the result also names as `drafts` when there are any. The fourth argument

@@ -26,7 +26,7 @@ export const SITE_KEY_NAMES = Object.freeze({
   flow: 'postFlow',
   pilot: 'pilot',
   sync: 'sync', // the sync state for this website (src/sync.js, Milestone 4): since, dealership id, role, the plan state, today's server-side post count
-  postLog: 'postLog', // today's posts recorded on this computer, take-downs included, for the daily cap (src/cap.js logPost)
+  postLog: 'postLog', // today's posts recorded on this computer, take-downs and unmarks included, for the daily cap (src/cap.js logPost)
 });
 
 // { settings: 'settings:<origin>', queue: 'postQueue:<origin>', ... }: every

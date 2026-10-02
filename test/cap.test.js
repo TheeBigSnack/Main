@@ -103,13 +103,15 @@ test('the server\'s count of today\'s posts raises the cap\'s count when it is h
 
 // A take-down removes the car from the posted list, but the post was made
 // today: the day's log (postLog:<origin>, src/cap.js logPost) keeps counting
-// it, as the sync function's count does. Unmarking a mistaken mark takes its
-// own entry off.
-import { logPost, unlogPost, loggedToday } from '../extension/src/cap.js';
+// it, as the sync function's count does. Unmarking does the same: the cap is
+// a safety setting, and Posted ✓ clicked at the cap must not bring the Post
+// buttons back. Marking the unmarked car posted again counts it once.
+import { logPost, loggedToday } from '../extension/src/cap.js';
+import * as capModule from '../extension/src/cap.js';
 import { markTakenDown } from '../extension/src/rescan.js';
 import { readFileSync } from 'node:fs';
 
-test('a listing taken down the same day still counts against the day\'s cap; an unmarked mistake does not', () => {
+test('a listing taken down or unmarked the same day still counts against the day\'s cap', () => {
   let posted = {};
   let log = [];
   for (let i = 0; i < 10; i += 1) {
@@ -125,13 +127,19 @@ test('a listing taken down the same day still counts against the day\'s cap; an 
   assert.equal(postsToday(posted, now), 9, 'the posted list forgets it');
   assert.deepEqual(capStatus(posted, 10, now, { log }), { used: 10, cap: 10, remaining: 0, reached: true }, 'the cap does not hand the post back');
   assert.equal(capStatus(posted, 10, now).used, 9, 'without the log it would (the old count)');
-  // a car marked by mistake and unmarked: that one entry leaves the log
-  const wrong = 'TESTVIN000000004X';
-  const at = posted[wrong].postedAt;
-  posted = markTakenDown(posted, wrong);
-  log = unlogPost(log, wrong, at);
-  assert.equal(capStatus(posted, 10, now, { log }).used, 9);
-  assert.equal(unlogPost(log, wrong, today(59)).length, log.length, 'only the entry with that car and time');
+  // at the cap, a car unmarked (Posted ✓ clicked): the posted list forgets it, the log does not, and the cap stays reached
+  const unmarked = 'TESTVIN000000004X';
+  posted = markTakenDown(posted, unmarked);
+  assert.equal(postsToday(posted, now), 8);
+  assert.deepEqual(capStatus(posted, 10, now, { log }), { used: 10, cap: 10, remaining: 0, reached: true }, 'unmarking does not hand the post back');
+  assert.equal(capModule.unlogPost, undefined, 'nothing takes a post off the day\'s log');
+  // marked posted again the same day (Mark posted, a listing already live): the same post, counted once
+  const again = logPost(log, unmarked, today(50), now, { alreadyLive: true });
+  assert.deepEqual(again, log);
+  posted = markPosted(posted, { vin: unmarked, name: 'Car 4', price: 10004 }, 'website', today(50));
+  assert.deepEqual(capStatus(posted, 10, now, { log: again }), { used: 10, cap: 10, remaining: 0, reached: true });
+  // a car not yet on today's log is a new post, Mark posted or not
+  assert.equal(logPost(log, 'TESTVIN000000099X', today(51), now, { alreadyLive: true }).length, 11);
   // the server's count still raises it, and the largest count wins
   const day = { from: new Date(2026, 8, 26).toISOString(), to: new Date(2026, 8, 27).toISOString() };
   assert.equal(capStatus(posted, 20, now, { log, serverCount: { count: 12, ...day } }).used, 12);
@@ -144,9 +152,10 @@ test('the day\'s log keeps only that day, and ignores anything that is not an en
   assert.equal(loggedToday(log, now), 2);
   assert.equal(loggedToday(log, new Date(2026, 8, 27, 9, 0)), 0, 'tomorrow starts at nothing');
   for (const bad of [null, undefined, {}, 'log', [{ at: today(0) }]]) assert.equal(loggedToday(bad, now), 0);
-  assert.deepEqual(unlogPost(null, 'A', today(1)), []);
-  // two posts of the same car in one day (posted, taken down, posted again) are two posts
+  // two posts of the same car in one day through the side panel (posted, taken down, posted again) are two posts
   assert.equal(loggedToday(logPost(logPost([], 'A', today(1)), 'A', today(30)), now), 2);
+  // Mark posted of a car on yesterday's log only is a post today
+  assert.deepEqual(logPost([{ vin: 'A', at: yesterday }], 'A', today(3), now, { alreadyLive: true }), [{ vin: 'A', at: today(3) }]);
 });
 
 test('only recording a post writes the day\'s log; take-downs never touch it, and the cap reads it in the popup and the side panel', () => {
@@ -154,14 +163,15 @@ test('only recording a post writes the day\'s log; take-downs never touch it, an
   const panel = src('sidepanel.js');
   const popup = src('popup.js');
   assert.match(panel, /updateKey\(siteKeys\(origin\)\.postLog, \(log\) => logPost\(log, vehicle\.vin, now\)/, 'the side panel logs the post it records');
-  assert.match(popup, /update\('postLog', \(log\) => logPost\(log, vin, at\)\)/, 'Mark posted logs it');
-  assert.match(popup, /update\('postLog', \(log\) => \(Array\.isArray\(log\) \? unlogPost\(log, vin, at\)/, 'unmarking takes its own entry off');
+  assert.match(popup, /update\('postLog', \(log\) => logPost\(log, vin, at, undefined, \{ alreadyLive: true \}\)\)/, 'Mark posted logs it, once for a car marked again');
+  const unpost = popup.slice(popup.indexOf("case 'unpost': {"), popup.indexOf("case 'takenDown':"));
+  assert.ok(unpost.length > 50 && !/postLog|unlogPost/.test(unpost), 'unmarking leaves the day\'s log alone');
   for (const s of [panel, popup]) assert.match(s, /capStatus\(state\.posted, state\.settings\??\.dailyCap, new Date\(\), \{ log: state\.postLog, serverCount:[^}]*, drafts: state\.drafts \}\)/, 'the cap counts the day\'s drafts in the popup and the side panel');
   // the take-down paths: upkeep's finish, and the popup's Taken down
   assert.doesNotMatch(src('upkeep.js'), /postLog/);
   const takenDown = popup.slice(popup.indexOf("case 'takenDown':"), popup.indexOf("case 'priceUpdated':"));
   assert.ok(takenDown.length > 50 && !/postLog/.test(takenDown));
-  assert.equal((popup.match(/update\('postLog'/g) || []).length, 2);
+  assert.equal((popup.match(/update\('postLog'/g) || []).length, 1, 'only Mark posted writes the log in the popup');
 });
 
 // Saved as draft, next car ends a car's form without publishing it, so a
@@ -192,7 +202,9 @@ test('forms saved as drafts today count toward the daily cap, once, until they a
   assert.deepEqual(capStatus(posted, 10, now, { log, drafts: one }), { used: 1, cap: 10, remaining: 9, reached: false });
   // taken down the same day: the log still has the post, and the draft is not counted again
   assert.equal(capStatus({}, 10, now, { log, drafts: one }).used, 1);
-  // unmarked by mistake: the draft is back on the count
+  // unmarked: the log still has the post, and the draft is not counted again
+  assert.deepEqual(capStatus({}, 10, now, { log, drafts: one }), { used: 1, cap: 10, remaining: 9, reached: false });
+  // with no log (a log that could not be written), the draft is back on the count
   assert.equal(capStatus({}, 10, now, { log: [], drafts: one }).used, 1);
   assert.equal(capCount(capStatus({}, 10, now, { log: [], drafts: one })), '1 of 10 today, one of them saved as a draft');
 

@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
-import { capStatus, capCount, logPost, unlogPost, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, capCount, logPost, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
@@ -34,7 +34,7 @@ const state = {
   snapshot: null, // last saved scan
   diff: null, // to-do list from the last scan
   posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }
-  postLog: [], // today's posts recorded on this computer, those taken down since included: the cap counts them (src/cap.js)
+  postLog: [], // today's posts recorded on this computer, those taken down or unmarked since included: the cap counts them (src/cap.js)
   settings: null, // see src/settings.js
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [],
@@ -362,7 +362,7 @@ function empty(text) {
 // draft: the draft's pill shows the price it was filled with, and says so
 // when the website's price moved or the car is not ready any more.
 function postButton(vin, { canPost = true } = {}) {
-  if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark">Posted ✓</button>`;
+  if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
   if (state.drafts[vin]) {
     const pill = draftPill(state.drafts[vin], state.snapshot?.vehicles?.[vin], { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
@@ -957,7 +957,7 @@ async function onPanelClick(ev) {
       // a listing published from a draft shows the draft's price: that is what is recorded (src/drafts.js)
       const draft = state.drafts[vin] || null;
       if (!(await update('posted', (p) => (draft ? markDraftPosted(p || {}, entry, draft, basis, at) : markPosted(p || {}, entry, basis, at))))) break;
-      await update('postLog', (log) => logPost(log, vin, at)); // the day's log for the cap, which a take-down leaves alone
+      await update('postLog', (log) => logPost(log, vin, at, undefined, { alreadyLive: true })); // the day's log for the cap, which a take-down or an unmark leaves alone; a car unmarked today and marked again counts once
       if (!draft) break;
       const gap = draftPriceUpdate(draft, entry, basis);
       if (gap) {
@@ -1096,13 +1096,9 @@ async function onPanelClick(ev) {
       break;
     }
     case 'unpost': {
-      // a mark taken back was a mistake: it leaves the day's log too (a take-down does not)
-      let at = null;
-      const unmarked = await update('posted', (p) => {
-        at = (p && p[vin] && p[vin].postedAt) || null;
-        return markTakenDown(p || {}, vin);
-      });
-      if (unmarked && at) await update('postLog', (log) => (Array.isArray(log) ? unlogPost(log, vin, at) : undefined));
+      // the car leaves the posted list; the day's log keeps the post, as for a
+      // take-down, so unmarking never hands a post back under the daily cap
+      await update('posted', (p) => markTakenDown(p || {}, vin));
       notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })); // fire-and-forget: the redraw must not wait for the pilot bookkeeping
       break;
     }
