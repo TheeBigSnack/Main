@@ -8,7 +8,7 @@
 |---|---|---|
 | `/` | `site/index.html` | `site-src/pages/home.html` |
 | `/how-it-works/` | `site/how-it-works/index.html` | `site-src/pages/how-it-works.html` |
-| `/pricing/` | `site/pricing/index.html` | `site-src/pages/pricing.html` (the prices from `site/pricing.json`, which `npm run site-pages` writes from `marketing/pricing.json` with only the numbers the pages show, never its reasoning or notes) |
+| `/pricing/` | `site/pricing/index.html` | `site-src/pages/pricing.html` (the prices written into the page from `marketing/pricing.json` by `npm run site-pages`, which also writes `site/pricing.json` with only the numbers the pages show, never its reasoning or notes, for `site.js` to fill them in again) |
 | `/faq/` | `site/faq/index.html` | `site-src/pages/faq.html` |
 | `/for-managers/` | `site/for-managers/index.html` | `site-src/pages/for-managers.html` |
 | `/support/` | `site/support/index.html` | `site-src/pages/support.html` |

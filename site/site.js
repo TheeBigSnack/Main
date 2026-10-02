@@ -3,8 +3,9 @@
 // writes next to this file), send the demo request
 // form, and show the Start a free pilot links once config.js names the
 // manager view. Every page works with this file switched off; the pricing
-// numbers are already in the HTML as fallback text. The home page and the
-// pricing page load it; <html data-root> says where site/ is from the page.
+// numbers are already in the HTML as text, which npm run site-pages writes
+// from the same numbers in the same words. The home page and the pricing page
+// load it; <html data-root> says where site/ is from the page.
 
 import { SITE } from './config.js';
 
@@ -16,7 +17,9 @@ const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'e
 const money = (n) => '$' + Number(n).toLocaleString('en-US');
 const word = (n) => (Number.isInteger(n) && n >= 0 && n <= 10 ? WORDS[n] : String(n));
 
-// How each data-pricing key is shown. Keys not listed are shown as plain text.
+// How each data-pricing key is shown, word for word as PRICING_FORMAT in
+// scripts/site-pages.mjs writes it into the page (test/siteGenerator.test.js
+// runs both). Keys not listed are shown as plain text.
 const FORMAT = {
   perRooftopMonthly: money,
   extraSalespersonMonthly: money,

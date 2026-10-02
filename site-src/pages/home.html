@@ -143,7 +143,9 @@
     <section id="pricing" aria-labelledby="pricing-h">
       <div class="wrap narrow">
         <h2 id="pricing-h">Pricing</h2>
-        <p><b>Planned pricing:</b> <span data-pricing="perRooftopMonthly">$149</span> per rooftop per month, with <span data-pricing="includedSalespeople">five</span> salespeople included, <span data-pricing="extraSalespersonMonthly">$20</span> a month for each extra salesperson, and a <span data-pricing="pilotDays">30</span>-day free pilot first. These are planned prices, confirmed with you before any paid subscription starts. <a href="{{root}}pricing/">The pricing page</a> has the founding-dealer price and the details of the free pilot.</p>
+        <!-- Each data-pricing number is written in by npm run site-pages from marketing/pricing.json, and site.js
+             writes it again from site/pricing.json: never type a price here. -->
+        <p><b>Planned pricing:</b> <span data-pricing="perRooftopMonthly"></span> per rooftop per month, with <span data-pricing="includedSalespeople"></span> salespeople included, <span data-pricing="extraSalespersonMonthly"></span> a month for each extra salesperson, and a <span data-pricing="pilotDays"></span>-day free pilot first. These are planned prices, confirmed with you before any paid subscription starts. <a href="{{root}}pricing/">The pricing page</a> has the founding-dealer price and the details of the free pilot.</p>
         <div class="actions">
           <a class="button" href="#demo">Request a demo</a>
           <a class="button alt" data-signup hidden>Start a free pilot</a>

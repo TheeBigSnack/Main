@@ -46,7 +46,11 @@
 // which GitHub Pages serves at any depth), siteUrl, demoOpen, demoEndpoint,
 // demoMailto, demoMailtoAddress, supportEmail, signupUrl and legalDraft.
 // Every internal address in a fragment goes through root, so a page works
-// at any depth and on any host.
+// at any depth and on any host. A price, count or length is a
+// <span data-pricing="key"></span>: the generator writes its text from
+// marketing/pricing.json (PRICING_FORMAT, the same words site.js writes), so
+// the fragment never types a number, and a key the pricing does not have
+// stops the run.
 //
 // Everything that needs the site's absolute address (canonical, og:url,
 // og:image, the sitemap, the robots.txt Sitemap line, CNAME, the JSON-LD
@@ -79,6 +83,41 @@ export const MARKETING_PRICING_FILE = 'marketing/pricing.json';
 export const SITE_PRICING_FIELDS = Object.freeze(['hypothesis', 'asOf', 'currency', 'perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'pilotDays', 'foundingDealerMonthly', 'foundingDealerMonths', 'foundingDealerCount']);
 export const sitePricing = (pricing) => Object.fromEntries(SITE_PRICING_FIELDS.filter((k) => pricing && Object.hasOwn(pricing, k)).map((k) => [k, pricing[k]]));
 export const pricingJson = (pricing) => JSON.stringify(sitePricing(pricing), null, 2) + '\n';
+
+// How each data-pricing number is written into the page, word for word as
+// site.js's FORMAT writes it (test/siteGenerator.test.js runs both on the same
+// numbers). The page carries the number as text, so a visitor without
+// JavaScript, or whose pricing.json fetch failed, reads the config's number,
+// and a changed marketing/pricing.json makes --check fail until the pages are
+// written again. A key not listed is written as plain text.
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const asMoney = (n) => '$' + Number(n).toLocaleString('en-US');
+const asWord = (n) => (Number.isInteger(n) && n >= 0 && n <= 10 ? NUMBER_WORDS[n] : String(n));
+export const PRICING_FORMAT = Object.freeze({
+  perRooftopMonthly: asMoney,
+  extraSalespersonMonthly: asMoney,
+  foundingDealerMonthly: asMoney,
+  includedSalespeople: asWord,
+  foundingDealerCount: asWord,
+  pilotDays: String,
+  foundingDealerTerm: (p) => (p.foundingDealerMonths === 12 ? 'first year' : `first ${p.foundingDealerMonths} months`),
+});
+
+/** The text of a data-pricing span for key, from the public pricing; throws when the pricing has no such number. */
+export function pricingText(key, pricing) {
+  const p = pricing || {};
+  if (key === 'foundingDealerTerm') {
+    if (!Number.isInteger(p.foundingDealerMonths)) throw new Error(`data-pricing="${key}" needs foundingDealerMonths in ${MARKETING_PRICING_FILE}`);
+    return PRICING_FORMAT.foundingDealerTerm(p);
+  }
+  if (p[key] === undefined || p[key] === null) throw new Error(`data-pricing="${key}" names a number ${MARKETING_PRICING_FILE} does not have (or ${PRICING_FILE} does not carry: SITE_PRICING_FIELDS)`);
+  return Object.hasOwn(PRICING_FORMAT, key) ? PRICING_FORMAT[key](p[key]) : String(p[key]);
+}
+
+/** Writes every <span data-pricing="key">…</span>'s text from the pricing, whatever the fragment had there. */
+export function fillPricing(html, pricing) {
+  return String(html).replace(/(<span\b[^>]*\bdata-pricing="([^"]*)"[^>]*>)[^<]*(<\/span>)/g, (all, open, key, close) => open + escapeHtml(pricingText(key, pricing)) + close);
+}
 export const STATUS_FILE = 'legal/legal-status.json';
 
 export const SITE_NAME = 'Lot Current';
@@ -788,7 +827,7 @@ export function templateVars(page, ctx) {
 
 /** One fragment page as a whole document; throws when it cannot be written. */
 export function renderFragmentPage(page, fragment, ctx) {
-  const body = render(fragment, templateVars(page, ctx));
+  const body = fillPricing(render(fragment, templateVars(page, ctx)), ctx.pricing);
   const h1s = (body.match(/<h1\b/g) || []).length;
   if (h1s !== 1) throw new Error(`${page.source} has ${h1s} <h1> elements; exactly one`);
   const html = renderPage(page, body, { ...ctx, root: rootFor(page) });

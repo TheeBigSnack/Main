@@ -20,6 +20,7 @@ import {
   robotsTxt, sitemapXml, llmsTxt, listedPages, cnameTxt, isPlaceholderHost, validateSite, validatePages, siteUrlReport, templateVars, renderFragmentPage,
   readContext, buildSite, staleFiles, writeSite, assertClean, main,
   strayFiles, strayAdvice, KEPT_FILES, FAVICON_FILES, SOCIAL_INDEX, socialFile,
+  PRICING_FORMAT, pricingText, fillPricing,
 } from '../scripts/site-pages.mjs';
 import { FILES as FAVICONS, SOURCE as FAVICON_SOURCE } from '../scripts/favicons.mjs';
 import { DIR as SOCIAL_DIR, IMAGES_JSON } from '../scripts/social-images.mjs';
@@ -29,6 +30,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
 const pricing = JSON.parse(read(PRICING_FILE));
 const legalDraft = JSON.parse(read(STATUS_FILE)).draft;
+const money = (n) => '$' + Number(n).toLocaleString('en-US');
 
 // A fixture host for the tests only: not one of the reserved placeholder
 // names (which the generator refuses), and never written anywhere but here.
@@ -616,6 +618,85 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     assert.ok(writeSite(ctx).every((l) => l.startsWith('wrote ')));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// review: the numbers a visitor reads without JavaScript were typed into the fragments by hand, so after a change
+// to marketing/pricing.json and a run, --check said "The website pages match ... marketing/pricing.json" while the
+// pages still showed the old price and pilot length (site.js fills them only when it runs and its fetch works).
+test('the generator writes every data-pricing number from marketing/pricing.json: a changed price fails --check, and a run writes the new numbers', async () => {
+  // the fragments type no number of their own
+  for (const p of FRAGMENT_PAGES) {
+    for (const m of read(p.source).matchAll(/data-pricing="([^"]+)">([^<]*)</g)) assert.equal(m[2], '', `${p.source}: data-pricing="${m[1]}" has its own text "${m[2]}"; the generator writes it from the pricing`);
+  }
+  // the committed pages carry the config's numbers in the config's words
+  for (const p of FRAGMENT_PAGES) {
+    for (const m of read(p.file).matchAll(/data-pricing="([^"]+)">([^<]*)</g)) assert.equal(m[2], pricingText(m[1], pricing), `${p.file}: data-pricing="${m[1]}"`);
+  }
+  assert.equal(fillPricing('<p><span data-pricing="perRooftopMonthly">$1</span> and <span class="x" data-pricing="foundingDealerTerm"></span></p>', { perRooftopMonthly: 1499, foundingDealerMonths: 6 }),
+    '<p><span data-pricing="perRooftopMonthly">$1,499</span> and <span class="x" data-pricing="foundingDealerTerm">first 6 months</span></p>');
+  assert.throws(() => fillPricing('<span data-pricing="annualMonthly"></span>', pricing), /data-pricing="annualMonthly" names a number/, 'a key the pricing does not have stops the run');
+  assert.throws(() => fillPricing('<span data-pricing="foundingDealerTerm"></span>', { ...pricing, foundingDealerMonths: undefined }), /foundingDealerMonths/);
+  assert.equal(fillPricing('<p>No numbers here.</p>', undefined), '<p>No numbers here.</p>', 'a page without a span needs no pricing');
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-pricing-'));
+  try {
+    for (const rel of [CONFIG_FILE, MARKETING_PRICING_FILE, STATUS_FILE]) {
+      mkdirSync(join(tmp, rel, '..'), { recursive: true });
+      cpSync(join(root, rel), join(tmp, rel));
+    }
+    cpSync(join(root, 'site-src'), join(tmp, 'site-src'), { recursive: true });
+    let errors = [];
+    const io = { log: () => {}, error: (s) => errors.push(s) };
+    assert.equal(await main([], io, tmp), 0);
+    assert.equal(await main(['--check'], io, tmp), 0);
+    const changed = { ...JSON.parse(read(MARKETING_PRICING_FILE)), perRooftopMonthly: 199, includedSalespeople: 7, pilotDays: 14, foundingDealerMonths: 6 };
+    writeFileSync(join(tmp, MARKETING_PRICING_FILE), JSON.stringify(changed, null, 2) + '\n');
+    errors = [];
+    assert.equal(await main(['--check'], io, tmp), 1, 'a changed price fails --check');
+    for (const file of ['site/index.html', 'site/pricing/index.html', PRICING_FILE]) {
+      assert.ok(errors.includes(`${file} is not what the sources make: run npm run site-pages`), `--check names ${file}: ${errors.join('; ')}`);
+    }
+    assert.equal(await main([], io, tmp), 0);
+    assert.equal(await main(['--check'], io, tmp), 0);
+    const spans = (file) => Object.fromEntries([...readFileSync(join(tmp, file), 'utf8').matchAll(/data-pricing="([^"]+)">([^<]*)</g)].map((m) => [m[1], m[2]]));
+    assert.deepEqual(spans('site/pricing/index.html'), {
+      perRooftopMonthly: '$199', includedSalespeople: 'seven', extraSalespersonMonthly: money(changed.extraSalespersonMonthly), pilotDays: '14',
+      foundingDealerCount: PRICING_FORMAT.foundingDealerCount(changed.foundingDealerCount), foundingDealerMonthly: money(changed.foundingDealerMonthly), foundingDealerTerm: 'first 6 months',
+    });
+    assert.deepEqual(spans('site/index.html'), { perRooftopMonthly: '$199', includedSalespeople: 'seven', extraSalespersonMonthly: money(changed.extraSalespersonMonthly), pilotDays: '14' });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// site.js writes the numbers again once it has read pricing.json; it must write the words the page already shows.
+test('site.js writes each pricing number in the generator\'s words, so nothing on the page changes when it runs', async () => {
+  const src = read('site/site.js');
+  const configImport = "import { SITE } from './config.js';";
+  assert.ok(src.includes(configImport), 'site.js takes its addresses from config.js');
+  const keys = [...new Set([...Object.keys(PRICING_FORMAT), 'annualMonthsCharged'])];
+  const other = { ...pricing, perRooftopMonthly: 1499, includedSalespeople: 12, extraSalespersonMonthly: 25, pilotDays: 14, foundingDealerCount: 3, foundingDealerMonthly: 1099, foundingDealerMonths: 6, annualMonthsCharged: 10 };
+  let run = 0;
+  for (const numbers of [{ ...pricing, annualMonthsCharged: 10 }, other]) {
+    const els = keys.map((k) => ({ dataset: { pricing: k }, textContent: '' }));
+    const stubs = {
+      document: { documentElement: { dataset: { root: './' } }, querySelectorAll: (sel) => (sel === '[data-pricing]' ? els : []), getElementById: () => null },
+      fetch: async (url) => (url === './pricing.json' ? { ok: true, json: async () => numbers } : { ok: false, status: 404 }),
+    };
+    const saved = Object.fromEntries(Object.keys(stubs).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+    Object.assign(globalThis, stubs);
+    try {
+      run += 1;
+      const code = src.replace(configImport, `const SITE = ${JSON.stringify(base)};`) + `\n// run ${run}\n`;
+      await import('data:text/javascript,' + encodeURIComponent(code));
+      for (let i = 0; i < 5; i += 1) await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      for (const [k, d] of Object.entries(saved)) {
+        if (d) Object.defineProperty(globalThis, k, d);
+        else delete globalThis[k];
+      }
+    }
+    for (const el of els) assert.equal(el.textContent, pricingText(el.dataset.pricing, numbers), `data-pricing="${el.dataset.pricing}" with ${JSON.stringify(numbers[el.dataset.pricing] ?? numbers.foundingDealerMonths)}`);
   }
 });
 
