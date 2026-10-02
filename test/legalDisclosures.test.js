@@ -57,3 +57,19 @@ test('the attorney\'s automated-means question says how the form is typed into a
   const inventory = rowText(read('docs/data-inventory.md'), 'Fill the Marketplace form (`facebook/fillForm.js`)');
   assert.match(inventory, /in a queue the person started, each car that passes every check, without another click/);
 });
+
+test('the Terms say what Lot Current does with nobody at the computer: the rescan the User allowed and its upload, never Facebook', () => {
+  // the code: an alarm rescans the websites the person allowed and, signed in, syncs the result
+  const bg = read('extension/background.js');
+  const rescan = bg.slice(bg.indexOf('async function runRescan'), bg.indexOf('async function rescanDueSites'));
+  assert.ok(rescan.length > 100 && /\bsyncSite\(/.test(rescan), 'the background rescan no longer syncs: update the Terms and this test');
+  assert.match(bg, /chrome\.alarms\.create\(RESCAN_ALARM, \{ periodInMinutes: RESCAN_PERIOD_MINUTES/);
+  assert.match(read('extension/src/rescanSchedule.js'), /RESCAN_PERIOD_MINUTES = 180;/, 'the rescan is no longer every 3 hours: update the Terms and this test');
+  assert.match(bg, /if \(!info\.auto\) continue;/, 'the rescan no longer waits for the person\'s allowing it: update the Terms and this test');
+
+  const what = section(read('legal/terms-of-service.md'), '## 1. What Lot Current is');
+  assert.doesNotMatch(what, /does not act while the User is away/, 'the Terms say Lot Current does nothing while the User is away');
+  assert.match(what, /never acts on Facebook while the User is away/);
+  assert.match(what, /If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open/);
+  assert.match(what, /while the User is signed in, sends the results to the dealership's records/);
+});
