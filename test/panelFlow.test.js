@@ -18,7 +18,8 @@ import { updateKey } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData } from '../extension/src/listingData.js';
 import { recheck } from '../extension/src/vehicleDetails.js';
-import { basisPrice } from '../extension/src/rescan.js';
+import { basisPrice, snapshotEntry } from '../extension/src/rescan.js';
+import { assessVehicle } from '../extension/src/classify.js';
 import { draftRecord } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
@@ -1737,12 +1738,27 @@ test('a scan since the read that no longer lists the car has it read again befor
     assert.ok(o.calls.includes(`readCarForPost ${v.vin} tab 41`), `${step}: read again`);
     assert.ok(o.calls.includes('block: not-on-website'), `${step}: ${o.calls.join(' | ')}`);
   }
-  // the scan still lists the car, or it is older than the read: no read
+  // the scan still lists the car as it was read, or it is older than the read: no read
   for (const [what, snapshotTakenAt, listed] of [['still listed', now, true], ['an older scan', new Date(Date.now() - 3600 * 1000).toISOString(), false], ['no scan time', null, false]]) {
     const o = formOpener({ description, readAt: minuteAgo });
-    Object.assign(o.state, { snapshotTakenAt, snapshotVehicles: listed ? { [v.vin]: { name: v.name } } : {} });
+    Object.assign(o.state, { snapshotTakenAt, snapshotVehicles: listed ? { [v.vin]: snapshotEntry(v, assessVehicle(v, {})) } : {} });
     await o.fns.openForm();
     assert.deepEqual(opened(o.calls), ['tabs.create', `runFill: ${description}`], what);
+  }
+  // the newer scan lists the car at another price, status or type: read again, and the read decides
+  const changes = [
+    ['a lower price', { price: v.price - 1000 }],
+    ['another second price', { priceBeforeFees: (v.priceBeforeFees || v.price) - 500 }],
+    ['sale pending', { status: 'pend-sale' }],
+    ['in transit', { availability: 'In-Transit' }],
+    ['retyped new', { type: 'New' }],
+  ];
+  for (const [what, change] of changes) {
+    const o = formOpener({ description, readAt: minuteAgo, read: gone });
+    Object.assign(o.state, { snapshotTakenAt: now, snapshotVehicles: { [v.vin]: { ...snapshotEntry(v, assessVehicle(v, {})), ...change } } });
+    await o.fns.openForm();
+    assert.deepEqual(opened(o.calls), [], `${what}: nothing opened`);
+    assert.ok(o.calls.includes(`readCarForPost ${v.vin} tab 41`), `${what}: read again`);
   }
 });
 

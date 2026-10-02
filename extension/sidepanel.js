@@ -402,11 +402,18 @@ function takeCar(car) {
 
 // No time recorded (a post saved before reads were timed) counts as old, and
 // so does a read that a scan since then contradicts: the car is not in it
-// (sold, or taken off the website meanwhile). The read again decides.
+// (sold, or taken off the website meanwhile), or it is there with another
+// price, second price, status, availability or inventory type than the read
+// gave. The read again decides.
 function readIsOld() {
   const readAt = Date.parse(state.readAt || '');
   if (!(Date.now() - readAt < READ_MAX_AGE_MS)) return true;
-  return Date.parse(state.snapshotTakenAt || '') > readAt && !(state.snapshotVehicles || {})[state.vin];
+  if (!(Date.parse(state.snapshotTakenAt || '') > readAt)) return false;
+  const listed = (state.snapshotVehicles || {})[state.vin];
+  if (!listed) return true;
+  const v = state.vehicle || {};
+  const same = (a, b) => (a ?? null) === (b ?? null);
+  return !(same(listed.price, v.price) && same(listed.priceBeforeFees, v.priceBeforeFees) && same(listed.status, v.status) && same(listed.availability, v.availability) && same(listed.type, v.inventoryType));
 }
 
 // What the form would get from the car as it stands: every field but the
