@@ -207,19 +207,32 @@ function firstWord(t, words) {
   return best;
 }
 
+// What separates the colors of a two-tone name ("Diesel Gray/Black",
+// "Ebony w/Red Accents", "Black and Tan"): the first color is the main one.
+const TWO_TONE = /[/\\&+,;(]|\b(?:with|and|on|over)\b/;
+
 // The first color word wins, a list word or a shade name alike: "Diesel
 // Gray/Black" -> Gray; "Ebony w/Red Accents" -> Black, read from "ebony" and
 // shown as a reading; "Titanium" -> ''. A shade name straight before a list
 // word names the same color twice ("Ivory White", "Onyx Black"): the list
-// word the website states is taken.
+// word the website states is taken. A name that runs a second, different
+// color into the first with nothing between them ("Black Forest Green",
+// "White Gold", "Charcoal Black") keeps the first, shown as a reading: the
+// paint may be the second color.
 export function readColor(text) {
   const t = String(text || '').toLowerCase();
   if (!t.trim()) return reading('');
   const stated = firstWord(t, COLOR_WORDS);
   const shade = firstWord(t, SHADE_WORDS);
-  if (!shade) return reading(stated ? stated.canonical : '');
-  if (stated && stated.index < shade.index) return reading(stated.canonical);
-  if (stated && /^\s*$/.test(t.slice(shade.index + shade.word.length, stated.index))) return reading(stated.canonical);
+  const first = (w) => {
+    const rest = t.slice(w.index + w.word.length);
+    const cut = TWO_TONE.exec(rest);
+    const other = firstWord(cut ? rest.slice(0, cut.index) : rest, [...COLOR_WORDS, ...SHADE_WORDS].filter(([, c]) => c !== w.canonical));
+    return other ? reading(w.canonical, `${said(text)}, which names two colors (${w.word}, ${other.word}); read as ${w.canonical}, the first; check it on the form`) : reading(w.canonical);
+  };
+  if (!shade) return stated ? first(stated) : reading('');
+  if (stated && stated.index < shade.index) return first(stated);
+  if (stated && /^\s*$/.test(t.slice(shade.index + shade.word.length, stated.index))) return first(stated);
   return reading(shade.canonical, `${said(text)}; ${shade.word} is read as ${shade.canonical}; check it on the form`);
 }
 

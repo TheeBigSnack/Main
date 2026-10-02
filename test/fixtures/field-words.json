@@ -127,7 +127,20 @@
     { "website": "Pewter/Black", "expect": "Gray", "reading": true },
     { "website": "Pewter Metallic", "expect": "Gray", "reading": true },
     { "website": "Onyx Black", "expect": "Black", "reading": false },
-    { "website": "Black/Pewter", "expect": "Black", "reading": false }
+    { "website": "Black/Pewter", "expect": "Black", "reading": false },
+    { "website": "Black Forest Green", "expect": "Black", "reading": true },
+    { "website": "White Gold Metallic", "expect": "White", "reading": true },
+    { "website": "Silver Green Metallic", "expect": "Silver", "reading": true },
+    { "website": "Charcoal Black", "expect": "Charcoal", "reading": true },
+    { "website": "Black Pewter Metallic", "expect": "Black", "reading": true },
+    { "website": "Ivory White Gold", "expect": "White", "reading": true },
+    { "website": "Black Cherry Pearl", "expect": "Black", "reading": false },
+    { "website": "Black Onyx", "expect": "Black", "reading": false },
+    { "website": "Gray Grey", "expect": "Gray", "reading": false },
+    { "website": "Black and Tan", "expect": "Black", "reading": false },
+    { "website": "Black with Red Stitching", "expect": "Black", "reading": false },
+    { "website": "Black, Red Accents", "expect": "Black", "reading": false },
+    { "website": "Black & Gray", "expect": "Black", "reading": false }
   ],
   "vehicleKind": [
     { "bodyType": "Trailer", "make": "Sample Trailers", "expect": "trailer" },

@@ -217,6 +217,7 @@ test('the queue holds a car at review when anything besides the dealership defau
     'body style from the page address': vehicle('usedNormal', { body_details: { type: 'Cars' } }),
     'a shade name (Sepia)': vehicle('usedNormal', { styles: { interior_color: 'Sepia' } }),
     'a shade name (Pewter Metallic)': vehicle('usedNormal', { styles: { exterior_color: 'Pewter Metallic' } }),
+    'two colors run together (Black Forest Green)': vehicle('usedNormal', { styles: { exterior_color: 'Black Forest Green' } }),
     "an electric car's single speed": vehicle('usedNormal', { mechanical: { fuel_type: 'Electric', transmission: '1-Speed' } }),
     'a mild hybrid': vehicle('certified'),
   };
