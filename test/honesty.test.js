@@ -86,6 +86,13 @@ const CUSTOMER_CLAIMS = [
   'Listings filled in under 30 seconds.',
   'Each post takes about fifteen seconds.',
   'Ten-second listings, every time.',
+  // a figure in seconds anywhere in the sentence, not only after a fill, post or list word
+  'Your used cars on Facebook Marketplace, from your website, in 10 seconds.',
+  'From your website, in 10 seconds. You click Publish.',
+  'A car on Marketplace in about ten seconds.',
+  'The form is ready in about ten seconds.',
+  'Listed in about 10 sec.',
+  'Thirty seconds a car.',
 ];
 
 // Lines today's copy uses, which must stay allowed.
@@ -110,6 +117,7 @@ const HONEST = [
   "Chrome's sync storage keeps the profile under the User's own Google account.",
   'Your used cars on Facebook Marketplace, from your website, in seconds.',
   "The median seconds per post is the time from Post to It's posted, their own review and Publish click included.",
+  'Facebook sometimes puts a saved draft back onto a new listing form a few seconds after it opens.',
   'Enter the six-digit code from the email; it works for one hour.',
 ];
 

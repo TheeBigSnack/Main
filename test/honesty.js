@@ -90,13 +90,13 @@ export const NUMBERS = [
 // legal/trademark-note.md (Marketing claims) allows a claim about time per
 // post only from measured pilot data with written permission to cite it, so a
 // figure comes back only with that measurement and a deliberate change here.
-// "In seconds", with no figure, is not caught.
+// Any figure in seconds is refused, wherever it stands in the sentence ("from
+// your website, in 10 seconds", "ready in about ten seconds", "10 sec", "a
+// ten-second post"): the only seconds customer copy could quote is a time per
+// post. "In seconds" and "a few seconds", with no figure, are not caught.
 const SECONDS = String.raw`(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|forty-five|fifty|sixty|ninety)`;
-const NEAR = String.raw`(?:about|around|roughly|just|only|under|less than|as little as)`;
 export const TIME_PER_POST = [
-  new RegExp(String.raw`\b(?:fill(?:s|ed|ing)?|post(?:s|ed|ing)?|list(?:s|ed|ing)?|listings?)\b[^.]{0,80}\b(?:in|within|under)\s+(?:${NEAR}\s+)?${SECONDS}[ -]seconds?\b`, 'i'),
-  new RegExp(String.raw`\b(?:takes?|took|taking)\s+(?:${NEAR}\s+)?${SECONDS}[ -]seconds?\b`, 'i'),
-  new RegExp(String.raw`\b${SECONDS}-second (?:posts?|fills?|listings?)\b`, 'i'),
+  new RegExp(String.raw`\b${SECONDS}(?:\s+|-)(?:seconds?|secs?)\b`, 'i'),
 ];
 
 // What customer-facing copy may not say either (the positioning names some
