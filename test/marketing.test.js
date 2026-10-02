@@ -327,3 +327,25 @@ test('the demo script signs in only the presenter\'s own Facebook account and ne
   // the support rule the script follows
   assert.match(read('../docs/support.md'), /Never touch a salesperson's Facebook account/, 'docs/support.md no longer says support never touches a salesperson\'s account: check the demo script against it');
 });
+
+// review: the sales sheet said "no contract", while a subscription is the Dealer Subscription Agreement the
+// dealer signs (and the store email opens "Thanks for signing"). What is true is that it runs month to month
+// and either side can end it at the end of a paid month; the copy says that instead.
+test('no customer-facing text says "no contract" while the subscription is a signed agreement, and the sales sheet says month to month', () => {
+  const agreement = legal('dealer-subscription-agreement.md');
+  assert.match(agreement, /^# Dealer Subscription Agreement/m);
+  assert.match(agreement, /^Signed:/m, 'the subscription agreement is still signed: copy cannot say there is no contract');
+  const noContract = /\bno(?:-|\s+)contracts?\b|\bcontract-free\b|without (?:a|any) contract|nothing to sign/i;
+  const files = [
+    ...CUSTOMER_FACING.map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../site-src/pages/', import.meta.url)).filter((f) => f.endsWith('.html') && f !== 'legal.html').map((f) => `../site-src/pages/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+  ];
+  for (const rel of files) {
+    const hit = read(rel).match(noContract);
+    assert.equal(hit, null, `${rel.slice(3)} says "${hit && hit[0]}", but a subscription is a signed agreement`);
+  }
+  // the term the agreement sets, in the sheet's own words
+  assert.match(agreement, /Month to month from the effective date\. Either party may terminate on notice effective at the end of the current paid month\./, 'the agreement\'s term changed: change the sales sheet with it');
+  assert.match(read('../marketing/sales-sheet.md'), /month to month: you can cancel at any time, effective at the end of the paid month\./);
+});

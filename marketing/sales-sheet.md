@@ -35,7 +35,7 @@ Meta's Terms prohibit accessing its products by automated means without permissi
 
 ## Price
 
-Planned at **$149 per rooftop per month**, five salespeople included, $20 a month for each extra salesperson, no contract. The first five stores that join as founding dealers pay **$99** a month for their first year. Pricing is confirmed before any paid subscription starts.
+Planned at **$149 per rooftop per month**, five salespeople included, $20 a month for each extra salesperson, month to month: you can cancel at any time, effective at the end of the paid month. The first five stores that join as founding dealers pay **$99** a month for their first year. Pricing is confirmed before any paid subscription starts.
 
 ---
 
