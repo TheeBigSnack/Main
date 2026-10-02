@@ -649,3 +649,39 @@ test('For managers says the free pilot starts with no card, and only Subscribe a
   assert.match(page, /start the free pilot here, with no card/, 'For managers says the pilot needs no card');
   assert.match(page, /Subscribe and Manage billing open Stripe's own pages for the card and the invoices/);
 });
+
+// review: the demo form's fields were drawn with --line (#e2e5e1 on white, #2f3531 on #161917: 1.27:1 and
+// 1.41:1) on a fill the same as the page, so the border was the only edge a field had, and it was well under
+// the 3:1 WCAG 1.4.11 asks of a control's boundary. Fields now use their own --field-line token; --line still
+// draws the decorative rules. This reads site.css in both schemes and measures every field border it sets.
+test('the website\'s form fields have an edge with at least 3:1 contrast against the page, light and dark', () => {
+  const block = (src) => Object.fromEntries([...src.matchAll(/(--[a-z-]+):\s*(#[0-9a-f]{6})\b/gi)].map((m) => [m[1], m[2].toLowerCase()]));
+  const light = block(css.slice(css.indexOf(':root {'), css.indexOf('}', css.indexOf(':root {'))));
+  const darkAt = css.indexOf(':root {', css.indexOf('prefers-color-scheme: dark'));
+  const dark = { ...light, ...block(css.slice(darkAt, css.indexOf('}', darkAt))) };
+  const lum = (hex) => {
+    const f = (i) => { const v = parseInt(hex.slice(i, i + 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(1) + 0.7152 * f(3) + 0.0722 * f(5);
+  };
+  const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+  // every rule whose selector names a form field and that sets a border colour (focus states aside: they add the accent)
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .map((m) => ({ selector: m[1].trim(), body: m[2] }))
+    .filter((r) => /(^|[\s,>+~(])(input|textarea|select)\b/.test(r.selector) && !/:focus/.test(r.selector) && /\bborder(-color)?\s*:/.test(r.body));
+  assert.ok(rules.length >= 1, 'site.css styles the form fields\' borders');
+  for (const r of rules) {
+    const token = (r.body.match(/\bborder(?:-color)?\s*:[^;]*var\((--[a-z-]+)\)/) || [])[1];
+    assert.ok(token, `${r.selector}: the border colour is a token`);
+    const fill = (r.body.match(/\bbackground(?:-color)?\s*:\s*var\((--[a-z-]+)\)/) || [, '--bg'])[1];
+    for (const [scheme, t] of [['light', light], ['dark', dark]]) {
+      assert.ok(t[token] && t[fill], `${r.selector}: ${token} and ${fill} are set in the ${scheme} scheme`);
+      // the field's fill is the page's own colour here, so its border is its only edge
+      if (ratio(t[fill], t['--bg']) >= 3) continue;
+      const got = ratio(t[token], t['--bg']);
+      assert.ok(got >= 3, `${r.selector}: the ${scheme} field border ${token} ${t[token]} on ${t['--bg']} is ${got.toFixed(2)}:1, under 3:1`);
+    }
+  }
+  // the a11y check measures the same thing on the rendered pages
+  const a11y = read('../scripts/a11y.mjs');
+  assert.match(a11y, /a form field's edge is below WCAG 3:1/, 'npm run test:a11y checks field borders too');
+});
