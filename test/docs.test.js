@@ -773,3 +773,29 @@ test('every text that explains It didn\'t post says the attempt is recorded as n
   }
   assert.ok(seen >= 4, 'README, the help doc, the demo script and PILOT.md no longer explain It didn\'t post');
 });
+
+// PILOT.md is the runbook, in a public repository; the pilot log's rows name a
+// dealer's salespeople and their results, which the pilot agreement keeps
+// confidential and unpublished (sections 3 and 4) and has deleted within 30
+// days of the end (section 6), which git history cannot do. So the runbook
+// sends the log and the CSVs to the owner's private spreadsheet, its table
+// stays an empty template, and git ignores the CSVs both downloads save.
+test('the pilot log and the pilot CSVs stay out of the repository', async () => {
+  const pilot = read('../PILOT.md');
+  assert.doesNotMatch(pilot, /into this file or a spreadsheet|in the log above/i, 'PILOT.md tells the owner to put the pilot results in this repository');
+  assert.match(pilot, /private pilot spreadsheet, never into this file/, 'PILOT.md no longer says the pilot log is kept outside the repository');
+  const header = pilot.split('\n').findIndex((l) => l.startsWith('| Week | Salesperson |'));
+  assert.ok(header > 0, 'PILOT.md has no pilot log template');
+  for (const row of pilot.split('\n').slice(header + 2).filter((l) => l.startsWith('|'))) {
+    const cells = row.split('|').slice(2, -1);
+    assert.ok(cells.every((c) => c.trim() === ''), `PILOT.md's pilot log template holds results: "${row.trim()}"`);
+  }
+  assert.doesNotMatch(pilot, /\b(?=[A-HJ-NPR-Z0-9]{17}\b)(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{17}\b/, 'PILOT.md holds a VIN');
+  const { pilotFileName } = await import('../extension/src/pilot.js');
+  const { csvFileName } = await import('../manager/data.js');
+  const globs = read('../.gitignore').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const ignored = (name) => globs.some((g) => new RegExp('^' + g.split('*').map(escapeRe).join('[^/]*') + '$').test(name));
+  for (const name of [pilotFileName('2026-10-01T15:00:00Z', { site: 'https://dealer.test', salesperson: 'Pat' }), csvFileName('2026-10-01T15:00:00Z', { dealer: 'Any Motors' })]) {
+    assert.ok(ignored(name), `.gitignore does not keep ${name} out of the repository`);
+  }
+});
