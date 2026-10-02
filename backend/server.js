@@ -188,14 +188,26 @@ async function guessColors(photos, options, clock) {
   return { ok: true, exterior: pick(j.exterior), interior: pick(j.interior), confidence: ['high', 'medium', 'low'].includes(j.confidence) ? j.confidence : 'low', model: response.model, costUsd: Number(cost.toFixed(5)) };
 }
 
-function readBody(req, limit) {
+// The request body as text, up to `limit` bytes. A longer body is read to
+// its end and thrown away, so the caller gets a 413 answer instead of a reset
+// connection; only one that goes on past `cutAt` bytes has its connection
+// cut (`cut`: there is nobody left to answer).
+class TooLarge extends Error {
+  constructor(cut) {
+    super('request too large');
+    this.cut = cut;
+  }
+}
+function readBody(req, limit, cutAt = limit * 16) {
   return new Promise((resolve, reject) => {
-    let data = '';
+    const chunks = [];
+    let bytes = 0;
     req.on('data', (chunk) => {
-      data += chunk;
-      if (data.length > limit) { reject(new Error('request too large')); req.destroy(); }
+      bytes += chunk.length;
+      if (bytes > cutAt) { req.destroy(); reject(new TooLarge(true)); return; }
+      if (bytes <= limit) chunks.push(chunk);
     });
-    req.on('end', () => resolve(data));
+    req.on('end', () => (bytes > limit ? reject(new TooLarge(false)) : resolve(Buffer.concat(chunks).toString('utf8'))));
     req.on('error', reject);
   });
 }
@@ -227,6 +239,7 @@ const server = http.createServer(async (req, res) => {
   try {
     body = JSON.parse(await readBody(req, 64 * 1024));
   } catch (e) {
+    if (e instanceof TooLarge) return e.cut ? undefined : send(413, { ok: false, error: e.message });
     return send(400, { ok: false, error: 'bad JSON: ' + e.message });
   }
 

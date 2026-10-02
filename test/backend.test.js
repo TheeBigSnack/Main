@@ -11,7 +11,7 @@ import { createServer } from 'node:net';
 import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rewriteFacts, REWRITE_TIMEOUT_MS } from '../extension/src/rewriter.js';
+import { rewriteFacts, rewriteWithBackend, REWRITE_TIMEOUT_MS } from '../extension/src/rewriter.js';
 
 const SERVER = new URL('../backend/server.js', import.meta.url).pathname;
 const REGISTER = new URL('./backend/register.mjs', import.meta.url).href;
@@ -155,5 +155,27 @@ test('backend: one deadline under the extension\'s wait: a slow call is stopped 
     assert.equal((await json(await left.call('/health', { method: 'GET' }))).body.requests, 0);
   } finally {
     await left.stop();
+  }
+});
+
+test('backend: a body over the size limit is answered with 413 "request too large", not a reset connection, and the service carries on', async () => {
+  const s = await start();
+  try {
+    // just over the 64 KB limit, and a megabyte: read to the end, thrown away, answered
+    for (const size of [70 * 1024, 1_000_000]) {
+      const r = await json(await s.call('/rewrite', { body: { ...FACTS, narrative: ['x'.repeat(size)] } }));
+      assert.deepEqual(r, { status: 413, body: { ok: false, error: 'request too large' } }, `${size} bytes`);
+    }
+    assert.deepEqual(s.calls(), [], 'nothing too large reaches Claude');
+    // the extension shows the service's own words for it
+    const note = await rewriteWithBackend({ endpoint: s.base, key: KEY, facts: { ...FACTS, narrative: ['x'.repeat(70 * 1024)] } });
+    assert.deepEqual([note.ok, note.error], [false, 'request too large']);
+    // a body that never stops is cut off past 16 times the limit
+    await assert.rejects(s.call('/rewrite', { body: { ...FACTS, narrative: ['x'.repeat(2_000_000)] } }));
+    // and the next request is served as usual
+    const ok = await json(await s.call('/rewrite', { body: FACTS }));
+    assert.deepEqual([ok.status, ok.body.ok], [200, true]);
+  } finally {
+    await s.stop();
   }
 });
