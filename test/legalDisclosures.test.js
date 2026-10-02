@@ -197,3 +197,13 @@ test('the subscription agreement says what removing a User does and does not do,
   const q7 = section(read('legal/questions-for-attorney.md'), '## 7. Employees posting from personal accounts');
   assert.match(q7, /Should the Dealer's responsibility for a person's conduct end at removal/, 'the attorney is not asked whether the Dealer\'s responsibility ends at removal');
 });
+
+test('while the subscription agreement promises a move to an official inventory feed, the attorney is asked whether it should bind Lot Current', () => {
+  const s2 = section(read('legal/dealer-subscription-agreement.md'), '## 2. Authorisation to read the Dealer\'s website inventory');
+  if (!/will move to an official inventory feed/.test(s2)) return;
+  // the code: every reader is a website reader; none takes a feed the dealer or its provider supplies
+  const index = read('extension/adapters/index.js');
+  assert.doesNotMatch(index, /feed/i, 'an adapter for an inventory feed exists: say what it reads in dealer-subscription-agreement.md 2 and this test');
+  const q3 = section(read('legal/questions-for-attorney.md'), '## 3. Reading dealer websites\' inventory search');
+  assert.match(q3, /Should section 2 bind Lot Current to switch/, 'questions-for-attorney.md 3 does not ask whether the feed promise should bind Lot Current');
+});

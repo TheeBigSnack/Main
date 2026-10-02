@@ -22,6 +22,7 @@ Context: Lot Current is a Chrome extension that reads a car dealership's own web
 
 - Lot Current reads the same inventory search service the dealer's website uses (Cars Commerce, behind Dealer Inspire sites), from the dealer's own tab, with the dealer's written authorisation (Dealer Subscription Agreement section 2). Please review the Dealer Inspire / Cars Commerce website terms and any API terms for restrictions on this, and advise what the dealer's authorisation needs to say.
 - Is it enough that the dealer authorises it, given the data is the dealer's own inventory published on its own site? What changes when we move to official inventory feeds later?
+- Dealer Subscription Agreement section 2 says "Lot Current will move to an official inventory feed when the Dealer or its provider makes one available." Today Lot Current reads only dealership websites: no reader for an official feed is built or planned, and a provider's feed may be a paid product. Should section 2 bind Lot Current to switch, say only that Lot Current will discuss switching in good faith, or leave feeds out? The owner decides whether to commit to it; until then the sentence stands as drafted.
 
 ## 4. Advertising law for Marketplace posts
 
