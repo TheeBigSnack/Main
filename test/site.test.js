@@ -576,3 +576,19 @@ test('every page and marketing text that promises the 3-hour rescan or the same-
   // the condition is real: background.js rescans only the websites whose rescans are on
   assert.match(read('../extension/background.js'), /if \(!info\.auto\) continue;/, 'background.js no longer skips a website whose automatic rescans are off: these texts can drop the condition');
 });
+
+// review: For managers said "Start the free pilot, Subscribe and Manage billing open Stripe's own pages for the card
+// and the invoices". Start the free pilot calls the database's start_pilot() and opens no page; only Subscribe and
+// Manage billing go to Stripe (manager/manager.js), and the manager view says no card is asked for (manager/data.js).
+test('For managers says the free pilot starts with no card, and only Subscribe and Manage billing open Stripe\'s pages', async () => {
+  const { BILLING_BUTTONS } = await import('../manager/data.js');
+  assert.match(BILLING_BUTTONS.pilot.does, /no card is asked for/, 'the manager view now asks for a card to start the pilot: change For managers with it');
+  const manager = read('../manager/manager.js');
+  const pilot = manager.slice(manager.indexOf("if (kind === 'pilot')"), manager.indexOf("const route = kind === 'portal'"));
+  assert.match(pilot, /rpc\('start_pilot'/, 'Start the free pilot calls start_pilot()');
+  assert.doesNotMatch(pilot, /location\.assign|billing\/checkout|callFunction/, 'Start the free pilot now opens a page: change For managers with it');
+  const page = stripTags(read('../site/for-managers/index.html'));
+  assert.doesNotMatch(page, /Start the free pilot\s*,\s*Subscribe and Manage billing open Stripe/i, 'For managers says Start the free pilot opens Stripe\'s pages');
+  assert.match(page, /start the free pilot here, with no card/, 'For managers says the pilot needs no card');
+  assert.match(page, /Subscribe and Manage billing open Stripe's own pages for the card and the invoices/);
+});
