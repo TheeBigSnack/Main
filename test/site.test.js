@@ -18,6 +18,7 @@ import { SITE } from '../site/config.js';
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing } from './honesty.js';
 import { checkPreOwned } from '../extension/src/classify.js';
+import { profileFrom } from '../extension/src/settings.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const html = read('../site/index.html');
@@ -684,4 +685,48 @@ test('the website\'s form fields have an edge with at least 3:1 contrast against
   // the a11y check measures the same thing on the rendered pages
   const a11y = read('../scripts/a11y.mjs');
   assert.match(a11y, /a form field's edge is below WCAG 3:1/, 'npm run test:a11y checks field borders too');
+});
+
+// review: the FAQ's Where is my data? (also sent to search engines as FAQPage data) said only "your name, role
+// and listing defaults follow your Chrome sign-in", and the support page listed five fields. profileFrom
+// (extension/src/settings.js) puts much more in Chrome's sync storage: the dealership's name and town, its
+// stores, price basis, price note and daily cap, the rewrite-service address, the Terms acceptance and the
+// website it was saved on. Clear everything for this website leaves it; Forget my synced profile removes it.
+// Each part of the profile, in the words the two pages use for it:
+const PROFILE_PARTS = {
+  origin: /the website it was saved on/,
+  salesperson: /\bname\b[^)]*\brole\b[^)]*closing line/,
+  dealer: /the dealership's name, town, state and ZIP/,
+  myStores: /\bstores\b/,
+  basis: /price basis/,
+  priceNote: /price note/,
+  dailyCap: /daily cap/,
+  defaults: /listing defaults/,
+  rewrite: /rewrite-service address/,
+  legal: /Terms acceptance/,
+  savedAt: null, // when it was saved: a timestamp of the profile itself
+};
+test('the FAQ and the support page name every part of the profile Chrome syncs, and the button that removes it', () => {
+  const profile = profileFrom({}, 'https://www.example-dealer.test');
+  assert.deepEqual(Object.keys(profile).sort(), Object.keys(PROFILE_PARTS).sort(), 'the synced profile changed: update the FAQ, the support page and PROFILE_PARTS');
+  assert.deepEqual(Object.keys(profile.salesperson).sort(), ['closingLine', 'name', 'title'], 'the salesperson part of the profile changed: update the two pages');
+  assert.deepEqual(Object.keys(profile.dealer).sort(), ['city', 'name', 'state', 'zip'], 'the dealership part of the profile changed: update the two pages');
+  const where = stripTags(faqPage).match(/Where is my data\? (.*?) What about my Facebook password\?/);
+  assert.ok(where, 'the FAQ has its Where is my data? answer');
+  const support = stripTags(read('../site/support/index.html'));
+  const privacy = support.slice(support.indexOf('Privacy requests'), support.indexOf('What support never does'));
+  for (const [page, said] of [['the FAQ\'s Where is my data?', where[1]], ['the support page\'s Privacy requests', privacy]]) {
+    const list = (said.match(/Your profile \(([^)]*)\)/) || [])[1];
+    assert.ok(list, `${page} lists what is in the profile`);
+    for (const [key, words] of Object.entries(PROFILE_PARTS)) {
+      if (words) assert.match(list, words, `${page}: the profile list leaves out ${key}`);
+    }
+    assert.match(said, /Chrome's sync storage|its sync storage/, `${page} says where the profile is kept`);
+    assert.match(said, /Forget my synced profile/, `${page} names the button that removes it`);
+  }
+  assert.match(where[1], /Forget my synced profile in Settings removes it from there; Clear everything for this website does not\./, 'the FAQ says which button removes the profile, and that Clear everything for this website does not');
+  // the FAQPage data search engines read is the same answer
+  const ld = JSON.parse(faqPage.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  const answer = ld['@graph'].find((n) => n['@type'] === 'FAQPage').mainEntity.find((e) => e.name === 'Where is my data?').acceptedAnswer.text;
+  assert.match(answer, /Your profile \([^)]*the website it was saved on[^)]*\) also follows your Chrome sign-in/, 'npm run site-pages wrote the FAQPage answer from the page');
 });
