@@ -348,6 +348,20 @@ test('a colour guess sends the photo addresses, the colour words and the origin,
   assert.match(help, /for a colour guess, up to four photo addresses and the list of colour words, sent to the rewrite service with your dealership website's address/, 'docs/help.md: what leaves the browser for a draft or a colour guess');
 });
 
+// A guessed colour reaches the published listing's colour field (never its
+// description), so the attorney is asked about it, as the guess works today.
+test('the attorney is asked about the colour guessed from the photos, as the side panel uses it', () => {
+  const ai = questions.slice(questions.indexOf('## 5. AI-written descriptions'), questions.indexOf('## 6.'));
+  const asked = ai.split('\n').find((l) => /^- Colours guessed from photos\./.test(l));
+  assert.ok(asked, 'questions-for-attorney.md section 5 does not ask about the colour guessed from the photos');
+  assert.match(asked, /up to four of the car's photos/);
+  assert.match(asked, /in the form's colour fields only, never in the description/);
+  assert.match(asked, /with the model's confidence/);
+  assert.match(asked, /\?/);
+  const readme = read('README.md');
+  assert.match(readme, /used on the form's color field only, never in the description/, 'README no longer says where the colour guess goes');
+});
+
 test('the sync row names every part of the sync payload', () => {
   const body = syncPayload({ origin: 'https://www.example-motors.test', posted: {}, pilot: null, scan: null, since: null, userId: 'u' });
   const t = tables(section(inventory, '## What leaves the browser'))[0];
