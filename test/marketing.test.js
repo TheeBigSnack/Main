@@ -276,3 +276,27 @@ test('the store email says every salesperson ticks the posting rules before post
   const panel = read('../extension/sidepanel.js');
   assert.match(panel, /if \(!state\.settings\.rulesReadAt\) \{[^}]*state\.step = 'rules';/, 'the side panel no longer stops a post until the posting rules are ticked: change the email');
 });
+
+// review: the manager was told "Nothing from the pilot is lost: each pilot salesperson's posted list and
+// numbers sync into the account the first time they sign in", while every salesperson was sent to the Web
+// Store. The manifest has no "key", so the store copy has its own extension id and its own storage: it
+// starts empty, and a pilot that ran without accounts left its listings only in the pilot copy.
+test('the store-install emails carry the pilot salespeople\'s listings across from the pilot copy, since the store copy starts empty', () => {
+  const manifest = JSON.parse(read('../extension/manifest.json'));
+  const store = read('../marketing/onboarding-store.md');
+  assert.doesNotMatch(store, /nothing (from the pilot )?is lost|sync into the account the first time they sign in/i, 'a promise the store install does not keep');
+  if (manifest.key) return; // a fixed id would share one storage between the zip and the store copy
+  const manager = store.split('\n').find((l) => l.startsWith('**1. The account.**'));
+  assert.ok(manager, 'the manager email has its account paragraph');
+  assert.match(manager, /starts empty/, 'the manager is told the store copy starts empty');
+  assert.match(manager, /before installing from the store, they sign in and join the account in the copy they used during the pilot/, 'and what each pilot salesperson does first');
+  const salesperson = store.slice(store.indexOf('## To each salesperson'), store.indexOf('## Day 7'));
+  const before = salesperson.split('\n').find((l) => /Only for a salesperson who was in the pilot/.test(l)) || '';
+  assert.ok(before && salesperson.indexOf(before) < salesperson.indexOf('**1. Install'), 'the salesperson email has the pilot step before the install step');
+  assert.match(before, /in that pilot copy[^.]*\*\*Settings\*\*[^.]*\*\*Account\*\* sign in and join/, 'the pilot step signs in and joins in the pilot copy');
+  assert.match(before, /Keep the pilot copy until \*\*My listings\*\* in the new copy shows your pilot cars/, 'and keeps it until the new copy shows them');
+  // the labels it names are the popup's
+  const popup = read('../extension/popup.js');
+  for (const label of ['My listings', 'Settings', 'Account']) assert.ok(popup.includes(label), `"${label}" is no longer a label in popup.js: update onboarding-store.md and this test together`);
+  assert.ok(read('../extension/src/accountFlow.js').includes('Accounts are not set up yet'), 'the pilot step quotes the Account section of a copy without accounts');
+});
