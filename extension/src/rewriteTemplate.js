@@ -16,17 +16,20 @@
 //     care, new parts or condition that the website's own words for this car
 //     (or the dealer's price note) don't make, and no number, in digits or
 //     in words, that isn't in the website's data
-// The template is the final fallback, so it is built to pass its own checks
-// whatever the website writes: it leaves out a write-up sentence the checks
-// would refuse, calms website words in capitals, and counts words as the
-// checks do (test/rewriteTemplate.test.js runs it over every fixture car).
-// Only the dealership's own Settings can still fail it (no dealership name,
-// a price note for another fee, a name typed in capitals), and the side
-// panel says which.
+// The template is the final fallback, so it is built to pass its own checks:
+// it copies only write-up sentences that end as sentences and that the
+// checks would accept, writes the website's words calmly when they shout
+// (the car's own abbreviations, such as "SLE" or "AWD", stay as written, and
+// the checks pass over them), leaves out a write-up, colour or engine line
+// that still shouts on its own, and counts words as the checks do.
+// test/rewriteTemplate.test.js runs it over every fixture car, as written, in
+// capitals and with refused write-ups. What the tests find can still fail it
+// is the dealership's own Settings (no dealership name, a price note for
+// another fee, a name typed in capitals), and the side panel says which.
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
-import { splitSegments } from './description.js';
+import { splitSegments, splitSentences } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -222,7 +225,12 @@ const statesNoOtherNumbers = (text, vehicle) => !priceAndMileageProblems(text, {
 // that shout, or more than one emoji (two sentences at most are copied, so
 // the text stays within the emoji the checks allow).
 const narrativeSentenceOk = (sentence, vehicle) =>
-  statesNoOtherNumbers(sentence, vehicle) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence) && emojiCount(sentence) <= 1;
+  statesNoOtherNumbers(sentence, vehicle) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence, ownAbbreviations(vehicle)) && emojiCount(sentence) <= 1;
+
+// A write-up sentence reads as one when it ends as a sentence does. A
+// heading ("Vehicle Highlights", "Dealer Comments:"), the car's title or a
+// line the website cut short never does, so it is never copied as the write-up.
+const ENDS_SENTENCE = /[.!?]["'\u2019\u201d)]*$/;
 
 // The website's features a description can name as highlights: each once,
 // short enough to read in a list (40 characters or less), stating no price,
@@ -334,10 +342,9 @@ function stripClosing(text, line) {
   return String(text || '').replace(closingPattern(c), ' ');
 }
 
-function firstSentences(text, maxSentences, maxWords, keep = () => true) {
-  const sentences = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean).filter(keep);
+function firstSentences(sentences, maxSentences, maxWords, keep = () => true) {
   const out = [];
-  for (const s of sentences.slice(0, maxSentences)) {
+  for (const s of sentences.filter(keep).slice(0, maxSentences)) {
     if (wordCount([...out, s].join(' ')) > maxWords) break;
     out.push(s);
   }
@@ -352,7 +359,7 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   dealer:      { name, city }
  *   salesperson: { name, title }
  *   priceNote:   the dealer's wording about fees, typed in Settings (a suggested sentence is offered from the website's price gap)
- *   narrative:   car-specific sentences from description.js (cleanDescription)
+ *   narrative:   the car-specific write-up from description.js (cleanDescription), one string per segment
  *   highlights:  the salesperson's pick of the website's features (settleHighlights); null for the usual pick
  *   closingLine: the salesperson's own line from Settings (salesperson.closingLine), used when it passes checkClosingLine
  *   stores:      the salesperson's ticked stores (settings.myStores); a car the website lists at any other store, or
@@ -372,8 +379,10 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  // the write-up's first sentences, leaving out any that state a price, a price change or another mileage
-  const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45, (sentence) => narrativeSentenceOk(sentence, v)) : '';
+  // the write-up's first sentences, in the website's order: only sentences that end as a sentence does (never a
+  // heading, a title or a line cut short), leaving out any that state a price, a price change or another mileage
+  const sentences = (Array.isArray(narrative) ? narrative : []).flatMap((segment) => splitSentences(segment));
+  const story = firstSentences(sentences, 2, 45, (sentence) => ENDS_SENTENCE.test(sentence) && narrativeSentenceOk(sentence, v));
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
@@ -411,16 +420,18 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
 
   // A website that writes in capitals ("2015 JEEP GRAND CHEROKEE LIMITED",
   // "HEATED SEATS, NAVIGATION SYSTEM") would make the text shout, which the
-  // checks refuse: its words are then calmed (calmWords), in the
-  // description only; the form's fields keep the website's spelling. A
-  // write-up, colour or engine line that still shouts is left out.
-  if (shouting(render())) for (const b of blocks) if (b.site) b.text = calmWords(b.text);
+  // checks refuse: when the website's own words shout, they are calmed
+  // (calmWords), in the description only; the form's fields keep the
+  // website's spelling. The car's own abbreviations ("SLE EXT CAB", "AWD")
+  // stay as written; the checks pass over them (ownAbbreviations). A
+  // write-up, colour or engine line that still shouts on its own is left
+  // out; a line that does not is kept, since leaving it out could not help.
+  const own = ownAbbreviations(v);
+  const siteWords = blocks.filter((b) => b.site).map((b) => b.text).join('\n');
+  if (shouting(siteWords)) for (const b of blocks) if (b.site) b.text = calmWords(b.text);
+  for (const b of blocks) if (b.keep === 'optional' && b.site && shouting(b.text, own)) on.delete(b.id);
   for (const id of ['narrative', 'mech', 'colors', 'cta']) {
     if (words() <= WORD_LIMITS.max) break;
-    on.delete(id);
-  }
-  for (const id of ['narrative', 'mech', 'colors']) {
-    if (!shouting(render())) break;
     on.delete(id);
   }
   for (const b of blocks.filter((b) => b.keep === 'filler')) {
@@ -449,17 +460,47 @@ function calmWords(text, min = 4) {
   return String(text || '').replace(new RegExp(`\\b[A-Z]{${min},}\\b`, 'g'), (w) => (/[AEIOUY]/.test(w) ? w[0] + w.slice(1).toLowerCase() : w));
 }
 
-function shouting(text) {
+// Three words in capitals in a row, or one long one. A word in `passOver`
+// (the car's own abbreviations) neither counts nor breaks a run.
+const NOTHING = new Set();
+function shouting(text, passOver = NOTHING) {
   const tokens = String(text || '').split(/\s+/);
   let run = 0;
   for (const tok of tokens) {
     const word = tok.replace(/[^A-Za-z]/g, '');
     const caps = word.length >= 3 && word === word.toUpperCase() && !/\d/.test(tok);
+    if (caps && passOver.has(word)) continue;
     if (word.length >= 10 && caps) return true;
     run = caps ? run + 1 : 0;
     if (run >= 3) return true;
   }
   return false;
+}
+
+// The car's own abbreviations, as the website writes them for this car: a
+// word in capitals whose letters come in runs of three or fewer, or with no
+// vowel ("SLE EXT CAB", "AMG GLE", "CR-V EX-L", "AWD", "BLK/GRY", "GMC",
+// "CDJR"), in its name, equipment, colours, features, stock number or store.
+// Written that way they name the car; they are not shouting, so the shouting
+// check passes over them. A longer word in capitals ("GRAND", "HEATED")
+// still counts: the template writes those calmly, and a draft that copies
+// them as the website writes them shouts.
+export function ownAbbreviations(vehicle = {}) {
+  const v = vehicle || {};
+  const bits = [
+    v.name, v.make, v.model, v.trim, v.engine, v.transmission, v.drivetrain, v.exteriorColor, v.interiorColor,
+    v.bodyType, v.fuelType, v.stock, v.location, ...(Array.isArray(v.features) ? v.features : []),
+  ];
+  const out = new Set();
+  for (const bit of bits) {
+    if (typeof bit !== 'string') continue;
+    for (const tok of bit.split(/\s+/)) {
+      const runs = tok.match(/[A-Za-z]+/g) || [];
+      const word = runs.join('');
+      if (word.length >= 3 && word === word.toUpperCase() && runs.every((r) => r.length <= 3 || !/[AEIOUY]/.test(r))) out.add(word);
+    }
+  }
+  return out;
 }
 
 function emojiCount(text) {
@@ -680,7 +721,8 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   if (role && !t.replace(/\s+/g, ' ').toLowerCase().includes(role.toLowerCase())) {
     problems.push({ code: 'no-role', text: `Doesn't give your role ("${role}"); the sign-off says it` });
   }
-  if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
+  // the car's own abbreviations as the website writes them ("SLE EXT CAB", "AWD, ABS, USB") are its name, not shouting
+  if (shouting(t, ownAbbreviations(vehicle))) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
   if (emojiCount(t) > 3) problems.push({ code: 'emoji', text: 'Too many emoji' });
   if (hasClosing) for (const p of checkClosingLine(closing).problems) if (!problems.some((q) => q.text === p.text)) problems.push(p);
   return { ok: problems.length === 0, problems, words };

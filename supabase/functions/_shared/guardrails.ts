@@ -238,17 +238,45 @@ function priceAndMileageProblems(text: string, { vehicle = {}, priceNote = '', p
   return problems;
 }
 
-function shouting(text: unknown): boolean {
+// Three words in capitals in a row, or one long one. A word in `passOver`
+// (the car's own abbreviations) neither counts nor breaks a run.
+function shouting(text: unknown, passOver: Set<string> = new Set()): boolean {
   const tokens = String(text || '').split(/\s+/);
   let run = 0;
   for (const tok of tokens) {
     const word = tok.replace(/[^A-Za-z]/g, '');
     const caps = word.length >= 3 && word === word.toUpperCase() && !/\d/.test(tok);
+    if (caps && passOver.has(word)) continue;
     if (word.length >= 10 && caps) return true;
     run = caps ? run + 1 : 0;
     if (run >= 3) return true;
   }
   return false;
+}
+
+// The car's own abbreviations, as the website writes them for this car: a
+// word in capitals whose letters come in runs of three or fewer, or with no
+// vowel ("SLE EXT CAB", "AMG GLE", "CR-V EX-L", "AWD", "BLK/GRY", "GMC",
+// "CDJR"), in its name, equipment, colours, features, stock number or store.
+// Written that way they name the car; they are not shouting, so the shouting
+// check passes over them. A longer word in capitals ("GRAND", "HEATED")
+// still counts.
+export function ownAbbreviations(vehicle: GuardrailVehicle = {}): Set<string> {
+  const v = vehicle || {};
+  const bits: unknown[] = [
+    v.name, v.make, v.model, v.trim, v.engine, v.transmission, v.drivetrain, v.exteriorColor, v.interiorColor,
+    v.bodyType, v.fuelType, v.stock, v.location, ...(Array.isArray(v.features) ? v.features : []),
+  ];
+  const out = new Set<string>();
+  for (const bit of bits) {
+    if (typeof bit !== 'string') continue;
+    for (const tok of bit.split(/\s+/)) {
+      const runs = tok.match(/[A-Za-z]+/g) || [];
+      const word = runs.join('');
+      if (word.length >= 3 && word === word.toUpperCase() && runs.every((r) => r.length <= 3 || !/[AEIOUY]/.test(r))) out.add(word);
+    }
+  }
+  return out;
 }
 
 function emojiCount(text: unknown): number {
@@ -464,7 +492,8 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   if (role && !t.replace(/\s+/g, ' ').toLowerCase().includes(role.toLowerCase())) {
     problems.push({ code: 'no-role', text: `Doesn't give your role ("${role}"); the sign-off says it` });
   }
-  if (shouting(t)) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
+  // the car's own abbreviations as the website writes them ("SLE EXT CAB", "AWD, ABS, USB") are its name, not shouting
+  if (shouting(t, ownAbbreviations(vehicle))) problems.push({ code: 'all-caps', text: 'Has ALL CAPS shouting' });
   if (emojiCount(t) > 3) problems.push({ code: 'emoji', text: 'Too many emoji' });
   return { ok: problems.length === 0, problems, words };
 }

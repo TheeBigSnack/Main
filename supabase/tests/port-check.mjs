@@ -13,9 +13,9 @@
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';
 import { buildRewritePrompt as jsPrompt } from '../../backend/rewritePrompt.js';
-import { runGuardrails as tsGuardrails, BANNED_PHRASES, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled } from '../functions/_shared/guardrails.ts';
+import { runGuardrails as tsGuardrails, BANNED_PHRASES, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn } from '../functions/_shared/guardrails.ts';
 import { buildRewritePrompt as tsPrompt, SYSTEM_PROMPT } from '../functions/_shared/rewritePrompt.ts';
-import { BANNED_PHRASES as JS_BANNED, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled } from '../../extension/src/rewriteTemplate.js';
+import { BANNED_PHRASES as JS_BANNED, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn } from '../../extension/src/rewriteTemplate.js';
 import { SYSTEM_PROMPT as JS_SYSTEM } from '../../backend/rewritePrompt.js';
 
 const vehicle = {
@@ -53,6 +53,8 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with new tires and new brakes, plus a new battery and new brakes; it runs great.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, no accident on record, never had an accident, sold new to its first owner.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, pre-owned and on the lot at Example Certified Motors Route 19.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 GMC Sierra 2500HD SLE EXT CAB with AWD, ABS, USB and a CR-V EX-L AWD next to it.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 GMC SIERRA SLE EXT CAB, GREAT SLE TRUCK FOR YOU.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -65,6 +67,7 @@ const contexts = [
   { vehicle: { ...vehicle, descriptionRaw: 'Local trade with new <b>tires</b>.<br>Runs\n <strong>great</strong>.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: '<p>Clean interior</p><p>Runs great with new</p><div>brakes.</div>\r\nSmoke-free.<li>Inspected</li>' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, location: 'Example Certified Motors Route 19' }, dealer, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, make: 'GMC', model: 'SIERRA 2500HD', trim: 'SLE EXT CAB', features: [...vehicle.features, 'AWD', 'ABS', 'USB'], interiorColor: 'BLK/GRY', location: 'SAMPLE CDJR' }, dealer, priceNote: '', price: 28995 },
   {},
 ];
 
@@ -78,6 +81,7 @@ for (const text of texts) {
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
 assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part)]));
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
+for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);
 assert.deepEqual({ ...WORD_LIMITS }, { ...JS_LIMITS });
 
 const facts = {

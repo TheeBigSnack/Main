@@ -22,23 +22,43 @@
 // A website separates the parts of a description in different ways: line
 // breaks (<br>), paragraphs, divisions or list items, or plain line breaks
 // in the text itself (a schema.org or inventory-feed description). Each of
-// those ends a segment; other markup is set aside. A plain line break that
-// only wraps a sentence (the line before leaves it open and the next one
-// carries on in lower case) joins the two lines again.
+// those ends a line; other markup is set aside.
 const BLOCK_BREAK = /<\/?(?:br|p|div|li|ul|ol|h[1-6]|tr|td|th|dt|dd|section|article|blockquote)\b[^>]*>/i;
 const OPEN_SENTENCE = /[^.!?:;)"'\u201d]$/;
 const plain = (s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 
-export function splitSegments(raw) {
+// The description's lines as the website lays them out: one list of lines
+// per paragraph, division or list item, split at its plain line breaks.
+function linesOf(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return [];
+  return raw.split(BLOCK_BREAK).map((block) => block.split(/\r\n|\r|\n/).map(plain).filter(Boolean)).filter((lines) => lines.length);
+}
+
+// A plain line break that only wraps a sentence: the line before leaves the
+// sentence open, and either the next line carries on in lower case or the
+// line before stops on a comma, a dash or a word in lower case ("comes with
+// the", "new"), whatever the next line starts with ("Michelin", "3.6L"). A
+// heading or a title stops on neither ("Dealer Comments:", "Vehicle
+// Highlights", "2019 Jeep Grand Cherokee Limited"), so it keeps its own line,
+// and a list item ("- Heated seats") never joins the line before it.
+const wraps = (before, next) =>
+  OPEN_SENTENCE.test(before) && !/^[-\u2022*]\s/.test(next) && (/^[a-z]/.test(next) || /(?:[,\u2013\u2014-]|\b[a-z][a-z'\u2019]*)$/.test(before));
+
+// The description's segments: its lines, with each wrapped line joined to the
+// one before it. `keep` gives what is kept of each line ('' leaves it out)
+// before lines are joined, so a lot-wide line between two lines of a car's
+// own write-up never ends up inside it.
+export function splitSegments(raw, keep = (line) => line) {
   const out = [];
-  for (const block of raw.split(BLOCK_BREAK)) {
-    const lines = [];
-    for (const line of block.split(/\r\n|\r|\n/).map(plain).filter(Boolean)) {
-      if (lines.length && OPEN_SENTENCE.test(lines[lines.length - 1]) && /^[a-z]/.test(line)) lines[lines.length - 1] += ` ${line}`;
-      else lines.push(line);
+  for (const lines of linesOf(raw)) {
+    const segs = [];
+    for (const line of lines) {
+      const text = keep(line);
+      if (!text) continue;
+      if (segs.length && wraps(segs[segs.length - 1], text)) segs[segs.length - 1] += ` ${text}`;
+      else segs.push(text);
     }
-    out.push(...lines);
+    out.push(...segs);
   }
   return out;
 }
@@ -58,19 +78,22 @@ export const MIN_BOILERPLATE_COUNT = 3;
 
 // A segment that repeats across a large share of the current lot's
 // descriptions is boilerplate (a disclaimer, a legal paragraph), not
-// anything specific to one car. So is a sentence that repeats that way, so a
-// disclaimer the website runs on from a car's own write-up, with no break
-// between them, is found too. Default threshold matches the brief: ~30%,
-// with MIN_BOILERPLATE_COUNT as the floor for both. Both are re-derived from
-// each website's own lot on every scan; nothing about one lot is kept.
+// anything specific to one car. So is a line or a sentence that repeats that
+// way, so a disclaimer the website runs on from a car's own write-up, with no
+// break between them or after a line that wraps, is found too. Default
+// threshold matches the brief: ~30%, with MIN_BOILERPLATE_COUNT as the floor
+// for all of them. Both are re-derived from each website's own lot on every
+// scan; nothing about one lot is kept.
 export function findBoilerplate(allDescriptions, threshold = 0.3, minCount = MIN_BOILERPLATE_COUNT) {
   const counts = new Map();
   const total = Array.isArray(allDescriptions) ? allDescriptions.length : 0;
   for (const raw of allDescriptions || []) {
     const seen = new Set();
-    for (const seg of splitSegments(raw)) {
-      seen.add(seg);
-      for (const sentence of splitSentences(seg)) seen.add(sentence);
+    // each line as the website lays it out, each segment once wrapped lines
+    // are joined, and the sentences of both
+    for (const text of [...linesOf(raw).flat(), ...splitSegments(raw)]) {
+      seen.add(text);
+      for (const sentence of splitSentences(text)) seen.add(sentence);
     }
     for (const text of seen) counts.set(text, (counts.get(text) || 0) + 1);
   }
@@ -93,10 +116,14 @@ function looksLikeBullet(segment) {
 }
 
 // A raw equipment dump has no real sentences, just a long comma list of
-// feature/option names pulled from the options field.
+// feature/option names pulled from the options field. A list the website
+// breaks into short "sentences" ("Heated Seats, Navigation, Sunroof.") is one
+// too: three or more items, each a name of three words or fewer.
 function looksLikeEquipmentDump(text) {
   const commas = text.split(',').length - 1;
-  return commas >= 6;
+  if (commas >= 6) return true;
+  const items = text.replace(/[.!?]+$/, '').split(/\s*,\s*(?:and\s+|&\s+)?/);
+  return items.length >= 3 && items.every((item) => /^[A-Z0-9]/.test(item) && item.split(/\s+/).length <= 3);
 }
 
 // Returns the car-specific narrative left after boilerplate, award blurbs,
@@ -105,12 +132,14 @@ function looksLikeEquipmentDump(text) {
 // and the rest of the segment kept as written.
 export function cleanDescription(raw, boilerplate = new Set()) {
   const kept = [];
-  for (const seg of splitSegments(raw)) {
+  // a lot-wide line, or a lot-wide sentence in a line, goes before wrapped lines are joined
+  const own = (line) => (boilerplate.has(line) ? '' : splitSentences(line).filter((s) => !boilerplate.has(s)).join(' '));
+  for (const seg of splitSegments(raw, own)) {
     if (boilerplate.has(seg)) continue;
     if (AWARDS_PREFIX.test(seg)) continue;
     if (looksLikeBullet(seg)) continue;
-    const own = splitSentences(seg).filter((s) => !boilerplate.has(s)).join(' ');
-    const stripped = own.replace(CARFAX_PREFIX, '').trim();
+    const carText = splitSentences(seg).filter((s) => !boilerplate.has(s)).join(' ');
+    const stripped = carText.replace(CARFAX_PREFIX, '').trim();
     const text = splitSentences(stripped).filter((s) => !looksLikeEquipmentDump(s)).join(' ');
     if (text) kept.push(text);
   }

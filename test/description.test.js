@@ -121,6 +121,30 @@ test('paragraphs and wrapped lines are read as the website shows them', () => {
   assert.deepEqual(splitSegments('Local trade with new\nbrakes and tires.\n- Heated seats'), ['Local trade with new brakes and tires.', '- Heated seats']);
 });
 
+test('a line the website wraps joins the one before it, whatever the next line starts with; a heading keeps its own line', () => {
+  // the line before stops mid-sentence: on a word in lower case, a comma or a dash
+  assert.deepEqual(splitSegments('Local trade with new\nMichelin tires and fresh brakes.'), ['Local trade with new Michelin tires and fresh brakes.']);
+  assert.deepEqual(splitSegments('This SUV comes with the\n3.6L V6 and a tow package.'), ['This SUV comes with the 3.6L V6 and a tow package.']);
+  assert.deepEqual(splitSegments('Comes with heated seats,\nNavigation and a sunroof.'), ['Comes with heated seats, Navigation and a sunroof.']);
+  // a heading, a title or a finished sentence ends its line
+  assert.deepEqual(splitSegments('Dealer Comments:\nLocal trade with new brakes and tires.'), ['Dealer Comments:', 'Local trade with new brakes and tires.']);
+  assert.deepEqual(splitSegments('Vehicle Highlights\nLocal trade with new brakes and tires.'), ['Vehicle Highlights', 'Local trade with new brakes and tires.']);
+  assert.deepEqual(splitSegments('2019 Jeep Grand Cherokee Limited\nLocal trade.'), ['2019 Jeep Grand Cherokee Limited', 'Local trade.']);
+  // a list item is never joined to the line before it
+  assert.deepEqual(splitSegments('Great truck with\n- Heated seats'), ['Great truck with', '- Heated seats']);
+});
+
+test('a lot-wide line after a write-up line that runs on is still found, and the write-up keeps its own words', () => {
+  const open = WRITE_UPS.map((car) => car.replace(/\.$/, ''));
+  const lot = open.map((car) => `${car}\n${NOTE}`);
+  const found = findBoilerplate(lot);
+  assert.ok(found.has(NOTE));
+  assert.deepEqual(cleanDescription(lot[0], found), [open[0]]);
+  // the same when the lot-wide line is wrapped over two lines of its own
+  const wrapped = open.map((car) => `${car}\nAll prices exclude tax and the\ndocumentation fee.`);
+  assert.deepEqual(cleanDescription(wrapped[0], findBoilerplate(wrapped)), [open[0]]);
+});
+
 test('an equipment list or a lot-wide sentence inside a paragraph takes only itself out', () => {
   const dump = 'Heated Seats, Navigation, Sunroof, Remote Start, Bluetooth, Backup Camera, Tow Package.';
   assert.deepEqual(cleanDescription(`Local trade with new brakes. ${dump}`), ['Local trade with new brakes.']);
@@ -130,6 +154,11 @@ test('an equipment list or a lot-wide sentence inside a paragraph takes only its
   assert.deepEqual(cleanDescription(lot[0], findBoilerplate(lot)), [WRITE_UPS[0]]);
   // the floor still holds: on a 2-car lot nothing is lot-wide, sentence or segment
   assert.equal(findBoilerplate(lot.slice(0, 2)).size, 0);
+  // a list the website breaks into short "sentences" is a list, however it is cut
+  assert.deepEqual(cleanDescription('CARFAX One-Owner. Heated Seats, Navigation, Sunroof. Remote Start, Bluetooth, Backup Camera. Tow Package, Leather, and Alloy Wheels.'), []);
+  assert.deepEqual(cleanDescription('Local trade with new brakes. Heated Seats, Navigation, Sunroof.'), ['Local trade with new brakes.']);
+  // a sentence that names features among its own words is the write-up
+  assert.deepEqual(cleanDescription('It has leather, a sunroof, and navigation.'), ['It has leather, a sunroof, and navigation.']);
 });
 
 test('non-text input is handled', () => {

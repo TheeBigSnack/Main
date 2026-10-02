@@ -661,6 +661,8 @@ test('the template passes its own checks for every fixture car, however the webs
     'in capitals': (v) => ({ ...v, make: upper(v.make), model: upper(v.model), trim: upper(v.trim), engine: upper(v.engine), transmission: upper(v.transmission), exteriorColor: upper(v.exteriorColor), interiorColor: upper(v.interiorColor), features: [...(v.features || []), ...FEATURES].map(upper) }),
     'a write-up the checks refuse': (v) => ({ ...v, carfaxOneOwner: false, descriptionRaw: 'One owner, clean title, no accidents.\nONE OWNER TRADE, SERVICED HERE SINCE NEW.' }),
     'a write-up in capitals and emoji': (v) => ({ ...v, descriptionRaw: '🔥🔥 Hot one! LOCAL TRADE WITH NEW BRAKES AND TIRES. GREAT TRUCK! 😀😀 Room for everyone.' }),
+    'abbreviations in capitals': (v) => ({ ...v, trim: 'SLE EXT CAB', interiorColor: 'BLK/GRY', features: [...(v.features || []), 'AWD', 'ABS', 'USB'] }),
+    'a heading and wrapped lines': (v) => ({ ...v, descriptionRaw: 'Dealer Comments:\nLocal trade with new\nMichelin tires and fresh brakes.\nFeatures:\nHeated Seats\nSunroof' }),
   };
   const dealers = [{ name: 'Ace Auto', city: 'Troy' }, { name: 'Example Chrysler Dodge Jeep Ram of Springfield', city: 'Springfield' }];
   const people = [{ title: 'sales consultant' }, { name: 'Alexandra', title: 'sales and leasing consultant' }];
@@ -691,4 +693,74 @@ test('a name in capitals is written calmly in the description only; one that doe
     const t = buildTemplateDescription({ ...plainCtx({ ...PLAIN(), make, model, trim }) });
     assert.match(t, new RegExp(`^2019 ${make} ${model} ${trim} with`, 'm'), `${make} ${model} ${trim}`);
   }
+});
+
+test('the write-up line is the write-up: never a heading, a title or a line the website cut short', async () => {
+  const story = {
+    'Dealer Comments:\nLocal trade with new brakes and tires.': 'Local trade with new brakes and tires.',
+    '<p><strong>Vehicle Highlights</strong></p><p>Local trade with new brakes and tires.</p>': 'Local trade with new brakes and tires.',
+    '2019 Ram 1500 Classic Express\nLocal trade with new brakes and tires.': 'Local trade with new brakes and tires.',
+    'Local trade with new\nMichelin tires and fresh brakes.': 'Local trade with new Michelin tires and fresh brakes.',
+    'This truck comes with the\n8.4-inch touchscreen and a tow package.': 'This truck comes with the 8.4-inch touchscreen and a tow package.',
+    // two finished lines are two sentences of the write-up, as one line of the description
+    'Line one of the write-up.\n\tLine two, after a raw line break and a tab.': 'Line one of the write-up. Line two, after a raw line break and a tab.',
+    // a heading and a list with no sentence in it give no write-up line at all
+    'Features:\nHeated Seats\nNavigation\nSunroof': null,
+  };
+  for (const [raw, line] of Object.entries(story)) {
+    const v = { ...PLAIN(), descriptionRaw: raw, location: '' };
+    const r = await generateDescription({ ...plainCtx(v), settings: {} });
+    const second = r.text.split('\n')[1];
+    if (line) assert.equal(second, line, raw);
+    else assert.match(second, /^Highlights: /, raw);
+    assert.deepEqual(r.guardrails.problems, [], raw);
+  }
+});
+
+test("the car's own abbreviations are its name, not shouting: the template keeps every line and passes", async () => {
+  const cars = {
+    'a trim of three-letter words': { make: 'GMC', model: 'SIERRA 2500HD', trim: 'SLE EXT CAB' },
+    'a model and trim of abbreviations': { make: 'Mercedes-Benz', model: 'GLE', trim: 'AMG GLE 43 4MATIC' },
+    'abbreviations with a hyphen': { make: 'Honda', model: 'CR-V', trim: 'EX-L AWD' },
+    'features that are abbreviations': { features: ['AWD', 'ABS', 'USB', 'Heated Seats'] },
+    'colours the website abbreviates': { exteriorColor: 'BLK', interiorColor: 'BLK/GRY CLOTH' },
+  };
+  for (const [what, change] of Object.entries(cars)) {
+    const v = { ...PLAIN(), descriptionRaw: 'Local trade with new brakes.', exteriorColor: 'Blue', interiorColor: 'Black', engine: '5.7L V8', location: '', ...change };
+    const c = plainCtx(v);
+    const r = await generateDescription({ ...c, settings: {} });
+    assert.deepEqual(r.guardrails.problems, [], `${what}:\n${r.text}`);
+    assert.match(r.text, /^Local trade with new brakes\.$/m, what);
+    assert.match(r.text, /exterior, .* interior\.$/m, what);
+    assert.match(r.text, /^5\.7L V8, 8-Speed Automatic, 4WD\.$/m, what);
+    // passing over the car's own words never breaks a run of shouting around them
+    assert.ok(runGuardrails(`${r.text}\nGREAT ${v.trim.split(' ')[0].toUpperCase()} TRUCK FOR YOU.`, c).problems.some((p) => p.code === 'all-caps'), what);
+  }
+  // a longer word in capitals still counts: a draft that copies the website's capitals shouts, and the template writes them calmly
+  const v = { ...PLAIN(), location: '', features: ['HEATED FRONT SEATS', 'NAVIGATION SYSTEM', 'AWD'] };
+  const t = buildTemplateDescription(plainCtx(v));
+  assert.match(t, /Highlights: Navigation System, Heated Front Seats, AWD\./);
+  assert.deepEqual(runGuardrails(t, plainCtx(v)).problems, []);
+  assert.deepEqual(runGuardrails(t.replace('Navigation System, Heated Front Seats', 'NAVIGATION SYSTEM, HEATED FRONT SEATS'), plainCtx(v)).problems.map((p) => p.code), ['all-caps']);
+});
+
+test('a line is left out for shouting only when it shouts itself, and the website\'s words are calmed only when they shout', async () => {
+  // a dealership name typed in capitals (Settings) shouts; the website's write-up, colours and engine have nothing to do with it and stay as written
+  const v = { ...PLAIN(), descriptionRaw: 'Local trade with new brakes.', location: '' };
+  const c = plainCtx(v, { dealer: { name: 'ACE AUTO MALL', city: 'Troy' } });
+  const r = await generateDescription({ ...c, settings: {} });
+  assert.deepEqual(r.guardrails.problems.map((p) => p.code), ['all-caps']);
+  assert.match(r.text, /^Local trade with new brakes\.$/m);
+  assert.match(r.text, /^Blue exterior, Diesel Gray\/Black interior\.$/m);
+  assert.match(r.text, /^HEMI 5\.7L V8 Multi Displacement VVT, 8-Speed Automatic, 4WD\.$/m);
+  // a write-up whose two sentences shout only together is left out
+  const w = { ...PLAIN(), descriptionRaw: 'Comes with the big SLT TOW. PKG AND more.', location: '' };
+  const rw = await generateDescription({ ...plainCtx(w), settings: {} });
+  assert.doesNotMatch(rw.text, /TOW/);
+  assert.deepEqual(rw.guardrails.problems, []);
+  // a trim in capitals that shouts only with the write-up after it is calmed
+  const k = { ...PLAIN(), model: 'F-150', make: 'Ford', trim: 'KING RANCH', mileage: null, descriptionRaw: 'BIG truck with the tow package.', location: '' };
+  const rk = await generateDescription({ ...plainCtx(k), settings: {} });
+  assert.match(rk.text, /^2019 Ford F-150 King Ranch\.\nBIG truck with the tow package\.$/m);
+  assert.deepEqual(rk.guardrails.problems, []);
 });
