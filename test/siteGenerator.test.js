@@ -320,7 +320,11 @@ test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (Local
   assert.ok(!('offers' in live[2]));
   // a confirmed price: the Offer from pricing.json, nothing invented
   const paid = jsonLdFor(page('home'), ctxOf({}, { pricing: { ...pricing, hypothesis: false } }))['@graph'][2];
-  assert.deepEqual(paid.offers, { '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency });
+  // per rooftop per month, as the pricing page says, never a bare price that reads as a one-off
+  assert.deepEqual(paid.offers, {
+    '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency,
+    priceSpecification: { '@type': 'UnitPriceSpecification', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency, unitText: 'per rooftop per month', billingDuration: 'P1M' },
+  });
   // the business filled in: LocalBusiness replaces Organization, with only the fields given
   const local = jsonLdFor(page('home'), ctxOf({ business: BUSINESS }))['@graph'][0];
   assert.deepEqual(local, {

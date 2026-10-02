@@ -520,12 +520,29 @@ function organizationNode(ctx) {
 }
 
 /**
+ * The Offer for a confirmed price: pricing.json's per-rooftop monthly price,
+ * with the unit and the billing period a reader needs, so it never reads as
+ * a one-off price for the software. Nothing in it is not in pricing.json.
+ */
+export function offerFor(pricing) {
+  const price = pricing.perRooftopMonthly;
+  const priceCurrency = pricing.currency;
+  return {
+    '@type': 'Offer', price, priceCurrency,
+    priceSpecification: { '@type': 'UnitPriceSpecification', price, priceCurrency, unitText: 'per rooftop per month', billingDuration: 'P1M' },
+  };
+}
+
+/**
  * The page's JSON-LD graph, or null on the 404 page: home carries
  * Organization (LocalBusiness once config.js has the business), WebSite and
  * SoftwareApplication; every page with a crumb a BreadcrumbList; the FAQ page
  * a FAQPage built from its article.qa items. Addresses only when siteUrl is
- * set; a price only when pricing.json is no longer a hypothesis; never a
- * rating, review, phone, address or opening hours that is not in config.js.
+ * set; a price only when pricing.json is no longer a hypothesis (offerFor:
+ * per rooftop per month); never a rating, review, phone, address or opening
+ * hours that is not in config.js. Without a rating or review, Google's Rich
+ * Results Test reports the SoftwareApplication as not eligible for a rich
+ * result; that is by design (docs/website.md), not a fault to fix with one.
  */
 export function jsonLdFor(page, ctx, bodyHtml = '') {
   const { site, pricing } = ctx;
@@ -538,7 +555,7 @@ export function jsonLdFor(page, ctx, bodyHtml = '') {
     const app = { '@type': 'SoftwareApplication', name: SITE_NAME, applicationCategory: 'BusinessApplication', operatingSystem: 'Chrome', description: page.description };
     if (site.siteUrl) app.url = site.siteUrl;
     if (pricing && pricing.hypothesis === false && typeof pricing.perRooftopMonthly === 'number' && typeof pricing.currency === 'string') {
-      app.offers = { '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency };
+      app.offers = offerFor(pricing);
     }
     nodes.push(app);
   }

@@ -391,7 +391,12 @@ test('the structured data on every page parses, names schema.org as its vocabula
       assert.equal(app.applicationCategory, 'BusinessApplication');
       assert.equal(app.operatingSystem, 'Chrome');
       assert.equal(app.description, p.description);
-      if (pricing.hypothesis === false) assert.deepEqual(app.offers, { '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency }, 'the offer is pricing.json\'s');
+      if (pricing.hypothesis === false) {
+        assert.deepEqual(app.offers, {
+          '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency,
+          priceSpecification: { '@type': 'UnitPriceSpecification', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency, unitText: 'per rooftop per month', billingDuration: 'P1M' },
+        }, 'the offer is pricing.json\'s, per rooftop per month');
+      }
       else assert.equal(app.offers, undefined);
       if (SITE.siteUrl) for (const n of [org, web, app]) assert.equal(n.url, businessFilled && n === org && SITE.business.url ? SITE.business.url : SITE.siteUrl, `${n['@type']}.url`);
     }
