@@ -57,7 +57,7 @@ Put them on the environment, not under the repository's own Secrets: a repositor
 
 The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, from the repository's **Actions** tab or by Claude through GitHub. It refuses to start unless the committed config files name the project in `SUPABASE_PROJECT_REF`, and it ends every run with `npm run check-deploy`.
 
-1. **plan**: shows the eight migrations it would apply. Changes nothing.
+1. **plan**: shows the migrations in `supabase/migrations` the project has not applied yet. Changes nothing.
 2. **database**: applies them.
 
    After plan and database the outside check prints some `FAIL` lines on purpose (no tables yet, then no functions yet); the run stays green. From functions on, a `FAIL` turns the run red.

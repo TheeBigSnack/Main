@@ -1,4 +1,4 @@
--- Lot Current: who reads the post attempts (0009_ui_post_attempts_read.sql),
+-- Lot Current: who reads the post attempts (0011_ui_post_attempts_read.sql),
 -- in the shape of rls.sql: people straight in auth.users, the JWT claims set
 -- the way PostgREST sets them, DO blocks that raise on anything wrong,
 -- everything in one transaction rolled back at the end. psql exits non-zero

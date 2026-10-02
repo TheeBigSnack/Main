@@ -1,6 +1,6 @@
 // Who reads the post attempts (time per post) in the dealership's account:
 // the salesperson who made them and the dealership's managers, not every
-// member (supabase/migrations/0009_ui_post_attempts_read.sql; the database
+// member (supabase/migrations/0011_ui_post_attempts_read.sql; the database
 // check is supabase/tests/attempts.sql). The migrations are read in order,
 // so the policy that is left is the one a fresh build and the deployed
 // project both end with; and the texts that say who sees them say the same.
@@ -61,15 +61,57 @@ test('the texts say a person\'s post attempts are seen by them and the managers,
 
   const inventory = read('../docs/data-inventory.md');
   const row = inventory.split('\n').find((l) => l.startsWith('| `post_attempts` |'));
-  assert.match(row, /\| The salesperson who made them and the dealership's managers \(`0009_ui_post_attempts_read\.sql`; before it, every member\);/);
+  assert.match(row, /\| The salesperson who made them and the dealership's managers \(`0011_ui_post_attempts_read\.sql`; before it, every member\);/);
   assert.doesNotMatch(inventory, /post attempts, to-do items and scan counts sync to the dealership's rows in the database, where every member of that dealership can read them\./);
 
   assert.match(termsSummary(true), /only you and your managers see your post timings\./);
   assert.match(read('../docs/help.md'), /only you and your managers see your post timings/);
-  assert.match(read('../legal/questions-for-attorney.md'), /the post attempts and to-do items go to the dealership's database, where its managers see them/);
 
-  // the manager view tells a salesperson whose seconds they are looking at
+  // the attorney's Web Store question and the website's FAQ say the same,
+  // to-do items and all: every member reads those, not only the managers
+  const item = read('../legal/questions-for-attorney.md').split('\n').find((l) => l.startsWith('- **8.4**'));
+  assert.match(item, /the post attempts and to-do items go to the dealership's database, where the person's post attempts are read by them and the dealership's managers, and the to-do items by every member of the dealership\./);
+  assert.doesNotMatch(item, /where its managers see them/, '8.4 says only the managers see the to-do items, which every member reads');
+  for (const faq of [read('../site-src/pages/faq.html'), read('../site/faq/index.html')]) {
+    assert.match(faq, /where everyone signed in at your dealership sees your posted list, to-do items and scan counts, and only you and your managers see your post timings;/);
+    assert.doesNotMatch(faq, /where your manager sees them/);
+  }
+});
+
+test('the manager view says whose seconds per post it shows, and never calls a manager a salesperson', () => {
   const manager = read('../manager/manager.js');
-  assert.match(manager, /const OWN_SECONDS_ONLY = 'As a salesperson you see only your own seconds per post, so the Everyone median is yours too; your managers see everyone\\'s\.';/);
-  assert.match(manager, /\$\{myRole\(\) === 'manager' \? '' : ` \$\{OWN_SECONDS_ONLY\}`\}<\/p>`;/);
+  const start = manager.indexOf('const OWN_SECONDS_ONLY = ');
+  const end = manager.indexOf('\n', manager.indexOf('const secondsNote = '));
+  assert.ok(start > 0 && end > start, 'manager.js keeps the note in OWN_SECONDS_ONLY, SECONDS_BY_ROLE and secondsNote');
+  const secondsNote = new Function(`${manager.slice(start, end)}\nreturn secondsNote;`)();
+  assert.equal(secondsNote('manager'), '', 'a manager reads every attempt: no note');
+  assert.equal(secondsNote('salesperson'), " As a salesperson you see only your own seconds per post, so the Everyone median is yours too; your managers see everyone's.");
+  // the role could not be read (memberships unreadable, no billing role): the
+  // reader may be a manager, so the note names both roles
+  assert.equal(secondsNote(''), " A salesperson sees only their own seconds per post here, and a manager everyone's.");
+  assert.match(manager, /included\.\$\{secondsNote\(myRole\(\)\)\}<\/p>`;/, 'the table\'s hint carries the note for the reader\'s role');
+});
+
+test('the narrowing migration has a number of its own, after the ones other changes took', () => {
+  // Supabase keeps its record of applied migrations by number, so two files
+  // with one number cannot both be applied and recorded; 0009
+  // (subscriptions.cancel_at) and 0010 (the backend review fixes) are taken
+  // by other changes, so this one is 0011
+  assert.ok(MIGRATIONS.includes('0011_ui_post_attempts_read.sql'), MIGRATIONS.join(', '));
+  const numbers = MIGRATIONS.map((f) => f.slice(0, 4));
+  assert.deepEqual(numbers.filter((n, i) => numbers.indexOf(n) !== i), [], 'two migrations share a number');
+});
+
+test('the attorney questions number each section once, in order, and the pilot records point at their question', () => {
+  const questions = read('../legal/questions-for-attorney.md');
+  const sections = [...questions.matchAll(/^## (\d+)\. /gm)].map((m) => Number(m[1]));
+  assert.deepEqual(sections, [...sections].sort((a, b) => a - b), 'sections out of order');
+  assert.equal(new Set(sections).size, sections.length, `a section number is used twice: ${sections.join(', ')}`);
+  const cited = read('../extension/src/pilot.js').match(/legal\/questions-for-attorney\.md (\d+)\.(\d+)/);
+  assert.ok(cited, 'src/pilot.js names the question on the pilot agreement\'s list');
+  const item = questions.split('\n').find((l) => l.startsWith(`- **${cited[1]}.${cited[2]}**`));
+  assert.ok(item, `question ${cited[1]}.${cited[2]} is not in questions-for-attorney.md`);
+  assert.match(item, /^- \*\*\d+\.\d+\*\* Pilot Agreement section 2 lists what the Dealer lets Lot Current record/);
+  const heading = questions.slice(0, questions.indexOf(item)).match(/^## (\d+)\. .*$/gm).pop();
+  assert.ok(heading.startsWith(`## ${cited[1]}. `), `question ${cited[1]}.${cited[2]} sits under "${heading}"`);
 });

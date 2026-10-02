@@ -18,6 +18,9 @@
 -- A change made after the project applied 0001 to 0008, so it is a file of
 -- its own: it replaces 0002's select policy and leaves that file as it was
 -- deployed. A fresh build applies 0002 and then this, and ends the same.
+-- It is numbered 0011 because 0009 and 0010 are taken by other changes.
+-- Where an earlier file's comment says every member of a dealership reads
+-- its post attempts, that describes 0002's policy, which this file replaces.
 
 drop policy if exists "members read their dealership's post attempts" on public.post_attempts;
 drop policy if exists "salespeople read their own post attempts, managers all of their dealership's" on public.post_attempts;

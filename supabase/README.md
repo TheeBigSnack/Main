@@ -19,7 +19,7 @@ What is here:
 | `migrations/0005_leads.sql` | `demo_requests`, the landing page's demo requests; no API role reads it. |
 | `migrations/0007_signup.sql` | Self-serve sign-up: `signup_settings` (the switch, off until you open it, and two limits), `signup_attempts`, `website_origin_of` and `create_dealership`; no API role reads either table (below, "Self-serve sign-up"). |
 | `migrations/0008_usage.sql` | The owner's usage report, `usage_report(since)`: one row per dealership with its plan and activity; no API role may call it (below, "Usage report"). |
-| `migrations/0009_ui_post_attempts_read.sql` | Post attempts (time per post) are read by the salesperson who made them and the dealership's managers, no longer by every member; replaces 0002's select policy. |
+| `migrations/0011_ui_post_attempts_read.sql` | Post attempts (time per post) are read by the salesperson who made them and the dealership's managers, no longer by every member; replaces 0002's select policy. |
 | `functions/lead/` | `/lead`: the landing page's demo form, anonymous, behind its origin, a honeypot and rate limits. |
 | `functions/rewrite/` | The rewrite service (replaces `backend/`): `/rewrite` and `/color` behind sign-in, a rate limit and a monthly cost cap. |
 | `functions/sync/` | `/sync`: the posted registry and the pilot numbers up, the dealership's current state down. |
@@ -190,7 +190,7 @@ psql -v ON_ERROR_STOP=1 -d lotsync_test \
   -f supabase/migrations/0006_privacy.sql \
   -f supabase/migrations/0007_signup.sql \
   -f supabase/migrations/0008_usage.sql \
-  -f supabase/migrations/0009_ui_post_attempts_read.sql \
+  -f supabase/migrations/0011_ui_post_attempts_read.sql \
   -f supabase/tests/rls.sql \
   -f supabase/tests/billing.sql \
   -f supabase/tests/privacy.sql \

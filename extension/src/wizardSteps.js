@@ -41,7 +41,7 @@ export const LATER = Object.freeze({
 // and scan counts go to the dealership's account (src/sync.js syncPayload),
 // so the summary says so in the words Settings' Saved data uses, and who
 // sees what there (every member the posted list and the to-do items; the
-// person and the managers their post timings: 0009_ui_post_attempts_read.sql);
+// person and the managers their post timings: 0011_ui_post_attempts_read.sql);
 // it never says the data stays in the browser alone.
 export function termsSummary(configured = false) {
   const synced = configured

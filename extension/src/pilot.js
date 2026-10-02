@@ -9,7 +9,7 @@
 //     listing: from the scan that flagged it to the moment Lot Current saw the
 //     change on the listing or the person ticked the item off.
 // Each record also carries what identifies it, which section 2's list does
-// not spell out (legal/questions-for-attorney.md 9.1) and the privacy
+// not spell out (legal/questions-for-attorney.md 10.1) and the privacy
 // policy's Usage numbers row does: the car's VIN and name, a post attempt the
 // salesperson's name from Settings, its queue flag and the reason it stopped,
 // a price change the website's old and new price (test/pilotDisclosure.test.js
