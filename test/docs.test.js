@@ -673,6 +673,29 @@ test('while accounts are configured, no text says the posted list stays only in 
   }
 });
 
+// Two rewrite services read an Anthropic API key: the standalone backend/
+// (backend/.env) and the accounts' rewrite function (a function secret).
+// supabase/README.md once called the function secret "the only place it
+// exists" while README called backend/ the place the key lives, so a session
+// could remove one as a rule breach, or a rotation miss the other. The texts
+// that say where the key lives name both, and none calls one the only place.
+test('the texts that say where the Anthropic API key lives name both rewrite services', () => {
+  assert.match(read('../backend/server.js'), /process\.env\.ANTHROPIC_API_KEY/, 'backend/ no longer reads a key: these texts can name one place');
+  assert.match(read('../supabase/functions/rewrite/index.ts'), /env\('ANTHROPIC_API_KEY'\)/, 'the rewrite function no longer reads a key: these texts can name one place');
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  for (const f of ['../README.md', '../supabase/README.md', '../backend/README.md', ...md('docs')]) {
+    for (const line of read(f).split('\n').filter((l) => /ANTHROPIC_API_KEY|Anthropic API key/.test(l))) {
+      assert.doesNotMatch(line, /\bonly place\b|\bkey lives here\b/i, `${f.slice(3)}: "${line.trim().slice(0, 120)}" gives one place for the key, but both backend/ and the rewrite function hold one`);
+    }
+  }
+  const secret = read('../supabase/README.md').split('\n').find((l) => l.startsWith('| `ANTHROPIC_API_KEY` |'));
+  assert.ok(secret, 'supabase/README.md no longer lists ANTHROPIC_API_KEY among the function secrets');
+  assert.match(secret, /backend\/\.env/, "supabase/README.md's ANTHROPIC_API_KEY row does not name backend/.env");
+  const backendRow = read('../README.md').split('\n').find((l) => l.startsWith('| `backend/` |'));
+  assert.ok(backendRow, "README's file table has no backend/ row");
+  assert.match(backendRow, /function secret/, "README's backend/ row does not say the rewrite function keeps its own key");
+});
+
 // Clear the numbers keeps the to-do items still open (src/pilot.js
 // clearNumbers): the texts that say what it deletes say what it keeps.
 test('every text that says what Clear the numbers deletes says the to-do items still open stay', () => {

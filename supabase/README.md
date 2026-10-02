@@ -146,7 +146,7 @@ Then, under Authentication, Sign In / Providers, Email, check that the email OTP
 
 | Name | Where | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | function secret | The Anthropic API key. The only place it exists. Without it `/rewrite` answers 500 and the extension uses its template. |
+| `ANTHROPIC_API_KEY` | function secret | The Anthropic API key, for the `rewrite` function. It lives only on the server side: here as a function secret and, for the standalone `backend/` service when someone runs one, in that folder's own ignored `backend/.env`; never in the extension or in git. If both hold a key, rotate both together. Without it `/rewrite` answers 500 and the extension uses its template. |
 | `REWRITE_MODEL` | function secret | The model for both endpoints. Default `claude-haiku-4-5`; `claude-sonnet-5` for better prose at a higher price. |
 | `MONTHLY_COST_CAP_USD` | function secret | Per dealership per calendar month (UTC), summed from `rewrite_usage`. Default 25. At the cap `/rewrite` and `/color` answer 429 with a plain sentence until the month turns. |
 | `RATE_LIMIT_PER_MINUTE` | function secret | Calls per signed-in user per minute. Default 20. Counted in each function instance's memory, so with several instances a burst can exceed it by that factor; it is a brake, not a ledger. |

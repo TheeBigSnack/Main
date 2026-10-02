@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1217 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1218 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
@@ -163,7 +163,7 @@ Website: `site/` is the Lot Current website as served, one committed HTML file p
 | `extension/adapters/` | One file per dealer-website platform behind a small interface; `dealerInspire.js` reads the lot in pages, de-duplicates by VIN, double-checks missing VINs and makes the direct service call the background rescan uses |
 | `extension/src/scanRunner.js`, `rescanSchedule.js` | The scan pipeline shared by popup, wizard and service worker; when rescans are due and what the badge says |
 | `extension/background.js` | Downloads photos; rescans every known website every 3 hours and keeps the badge current |
-| `backend/` | The rewrite service (Anthropic API key lives here, never in the extension) |
+| `backend/` | The standalone rewrite service (its Anthropic API key in its own ignored `backend/.env`; the accounts' `rewrite` function keeps its own as a Supabase function secret; never in the extension) |
 | `supabase/` | The accounts: schema with row-level security, the `rewrite`, `sync` and `billing` Edge Functions, SQL tests (`supabase/README.md`) |
 | `manager/`, `site/`, `demo/` | The manager view, the website (its pages written by `scripts/site-pages.mjs` and `scripts/legal-pages.mjs` from `site-src/` and `legal/`; `docs/website.md`) and the in-browser test drive; static pages, sample-data modes, their own tests |
 | `test/fixtures/records.json` | Real records from the Waynesburg site, one per edge case |
