@@ -159,6 +159,36 @@ test('a Claude draft that drops the salesperson\'s role falls back to the templa
   assert.equal(fine.source, 'claude', fine.note);
 });
 
+// Drafts a rewrite could write that only look honest: each number is one the
+// website has, but in the wrong place (the model's "1500" as the mileage, the
+// year as a price), or the words are wrong (a number spelled out, care the
+// website never mentions, no role, a seller who is not the dealership). Every
+// one falls back to the template, and the note says why.
+test('a Claude draft with a wrong number, an invented fact, no role or a private-seller pose falls back to the template', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const dana = { name: 'Dana', title: 'sales consultant' };
+  const base = args({ dealer: example, salesperson: dana, priceNote: '' }); // the 2019 Ram 1500 Classic, 20,986 miles, posted at 27,163
+  const template = (await generateDescription(base)).text;
+  const signoff = "I'm Dana, sales consultant at Example Motors.";
+  assert.ok(template.includes('with 20,986 miles') && template.includes(signoff) && /^Pre-owned and on the lot at .*$/m.test(template), template);
+  const drafts = {
+    '1,500 miles (the model\'s number)': [template.replace('20,986 miles', '1,500 miles'), /Says 1,500 miles, but the website shows 20,986 miles/],
+    '$2,019 (the year)': [template.replace('Highlights:', 'Priced at just $2,019 this week.\nHighlights:'), /Says \$2,019, but this listing's price is \$27,163/],
+    'a mileage in words': [template.replace('with 20,986 miles', 'with only twelve thousand miles'), /"twelve thousand" isn't in the website's data/],
+    'care the website never mentions': [template.replace('Highlights:', 'Garage kept, non-smoker, full service records.\nHighlights:'), /Says "Garage kept"/],
+    'no role': [template.replace(signoff, 'Ask for Dana at Example Motors.'), /Doesn't give your role \("sales consultant"\)/],
+    'the owner\'s seller, no role': [template.replace(/^Pre-owned and on the lot at .*\n/m, '').replace(signoff, "I'm Dana. Selling this truck for the owner, text me. Message me directly, not the dealership."), /Doesn't give your role/],
+    'the owner\'s seller, role kept': [template.replace(/^Pre-owned and on the lot at .*\n/m, '').replace(signoff, `${signoff} Selling this truck for the owner, text me. Message me directly, not the dealership.`), /Says "not the dealership"/],
+  };
+  for (const [what, [draft, why]] of Object.entries(drafts)) {
+    assert.notEqual(draft, template, what);
+    const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: draft }) });
+    assert.equal(r.source, 'template', what);
+    assert.match(r.note, why, what);
+    assert.equal(r.text, template, what);
+  }
+});
+
 test('a Claude draft that drops the dealership\'s price note falls back to the template, which carries it', async () => {
   const example = { name: 'Example Motors', city: 'Springfield' };
   const note = 'Price is before the $490 doc fee; tax and tags extra.';

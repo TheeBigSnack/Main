@@ -99,6 +99,11 @@ export const BANNED_PHRASES: readonly string[] = Object.freeze([
   // posing as a private seller
   'private seller', 'private sale', 'private party', 'by owner', 'fsbo', 'not a dealer', 'not a dealership',
   'selling it myself', 'i am the owner', "i'm the owner", 'i\u2019m the owner', 'selling my', 'my personal', 'my truck', 'my car', 'my suv', 'my daily driver',
+  //   steering the buyer away from the dealership, or selling for someone else
+  'not the dealership', 'not the dealer', 'not through the dealership', 'not through the dealer', 'not at the dealership', 'skip the dealership', 'skip the dealer',
+  'for the owner', 'on behalf of the owner', 'for a friend', 'for my friend', 'reason for selling',
+  //   the car as the writer's own
+  "i've owned", 'i\u2019ve owned', 'i have owned', 'my own truck', 'my own car', 'my own vehicle', 'my vehicle', 'my jeep', 'my van',
   // protected characteristics have no place in a car ad
   'christian', 'muslim', 'jewish', 'hindu', 'catholic', 'religious', 'hispanic', 'latino', 'immigrant', 'citizens only',
   'disabled', 'handicapped', 'elderly', 'seniors only', 'for men', 'for women', 'for ladies', 'family only', 'no kids',

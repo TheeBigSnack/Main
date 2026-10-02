@@ -409,6 +409,24 @@ test('private-seller wording is refused in the closing line, in the template and
     'This is my Jeep, I am the owner.',
     "I'm the owner, ask me anything.",
     'I\u2019m the owner, ask me anything.',
+    // steering the buyer away from the dealership, or selling for someone else
+    'Message me directly, not the dealership.',
+    'Deal with me, not through the dealership.',
+    'Call me, not the dealer.',
+    'Skip the dealership and text me.',
+    'Selling this truck for the owner.',
+    'Listed on behalf of the owner.',
+    'Selling it for a friend, message me.',
+    'Reason for selling: I bought a new one.',
+    'Come see me, not at the dealership.',
+    // the car as the writer's own
+    "I've owned this truck since new.",
+    'I\u2019ve owned it since new.',
+    'I have owned it for years.',
+    'This was my own truck.',
+    'My Jeep is ready for you.',
+    'My van, ready for you.',
+    'My vehicle is ready.',
   ];
   for (const line of posing) {
     assert.ok(checkClosingLine(line).problems.some((p) => p.code === 'closing-banned'), `closing line: ${line}`);
@@ -421,7 +439,7 @@ test('private-seller wording is refused in the closing line, in the template and
     assert.match(draft.note, /failed a check/);
   }
   // the salesperson's own first-person words still pass
-  for (const line of ['Ask for me by name when you come in.', "I'll walk you around it myself.", 'Text me and I will set up a test drive.', 'Ask about our owner loyalty offers.']) {
+  for (const line of ['Ask for me by name when you come in.', "I'll walk you around it myself.", 'Text me and I will set up a test drive.', 'Ask about our owner loyalty offers.', 'Message me directly and I will get right back to you.', 'Text me directly any time.', 'Ask the dealership for me by name.']) {
     assert.deepEqual(checkClosingLine(line).problems, [], line);
   }
 });
