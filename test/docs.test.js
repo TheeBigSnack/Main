@@ -752,6 +752,11 @@ test('while the committed account config names a project, no text says the shipp
   }
   assert.match(read('../docs/production-setup.md'), /\*\*From then on every build offers sign-in\.\*\*[^\n]*no build goes to a pilot tester before then/);
   assert.match(doc('launch-checklist.md'), /\*\*No tester build before sign-in works\.\*\*/);
+  // the shipped build's set-up has the Account step, so README's walk through set-up names it and its way past
+  assert.ok(wizardSteps(accountsConfigured()).includes('account'), 'the shipped set-up has no Account step: README can drop it');
+  const setUp = read('../README.md').split('\n').find((l) => l.includes('**Set up Lot Current**'));
+  assert.ok(setUp, 'README no longer walks through set-up');
+  assert.match(setUp, /sign in to your dealership's Lot Current account[^.]*\*\*Skip for now\*\*/, 'README\'s set-up steps leave out the Account step the shipped build shows');
 });
 
 // "It didn't post" ends the post attempt the click on Post opened, as
