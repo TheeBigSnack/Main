@@ -24,6 +24,7 @@ import { honestyProblems } from './honesty.js';
 import { ADAPTERS, platformNames, unsupportedSiteMessage } from '../extension/adapters/index.js';
 import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
+import { FORM_MAP } from '../extension/facebook/formMap.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -694,6 +695,29 @@ test('the texts that say where the Anthropic API key lives name both rewrite ser
   const backendRow = read('../README.md').split('\n').find((l) => l.startsWith('| `backend/` |'));
   assert.ok(backendRow, "README's file table has no backend/ row");
   assert.match(backendRow, /function secret/, "README's backend/ row does not say the rewrite function keeps its own key");
+});
+
+// PLAN.md's status went stale on three facts the code states: it said no
+// Supabase project existed while extension/src/accountConfig.js named one,
+// that formMap.js was verified only against the mock while the map records
+// its live runs, and that the second platform waited for a dealer while
+// ADAPTERS already carried the DealerOn and Dealer.com readers.
+test('PLAN.md\'s status agrees with the account config, the form map and the adapters', () => {
+  const plan = read('../PLAN.md');
+  if (accountsConfigured()) {
+    assert.doesNotMatch(plan, /No project exists yet/, 'PLAN.md says no Supabase project exists, but extension/src/accountConfig.js names one');
+    const m4 = plan.split('\n').find((l) => l.startsWith('| M4 '));
+    assert.ok(m4, "PLAN.md's status table has no M4 row");
+    assert.match(m4, /accountConfig\.js/, "PLAN.md's M4 row does not say where the project is named");
+  }
+  if (/\blive\b/.test(String(FORM_MAP.verifiedAgainstFacebook || ''))) {
+    assert.doesNotMatch(plan, /verified only against the mock/, `PLAN.md says formMap.js has met only the mock, but the map says "${FORM_MAP.verifiedAgainstFacebook}"`);
+  }
+  const m6 = plan.split('\n').find((l) => l.startsWith('- M6:'));
+  assert.ok(m6, 'PLAN.md\'s "Wider use" list has no M6 line');
+  for (const name of platformNames().filter((n) => n !== 'Dealer Inspire' && !/^Standard/.test(n))) {
+    assert.ok(m6.includes(name), `PLAN.md's M6 line does not say a reader for ${name} exists`);
+  }
 });
 
 // Clear the numbers keeps the to-do items still open (src/pilot.js
