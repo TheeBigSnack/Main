@@ -59,7 +59,7 @@ Six live runs on Sept 27, 2026 shaped the fill code: Facebook draws dropdown lis
 
 ## Settings
 
-- **You**: name and role, used in every description's sign-off ("I'm [name], [role] at [dealership]"; at the pilot store that reads "I'm Roger, sales consultant at Ron Lewis CDJR Waynesburg"). Posing as a private seller isn't allowed.
+- **You**: name and role, used in every description's sign-off ("I'm [name], [role] at [dealership]"). Posing as a private seller isn't allowed.
 - **Your store**: only cars at ticked stores count as ready.
 - **Dealership**: name, city, state, ZIP. The scan fills these from the store's address on the website itself (its structured data), so normally there is nothing to type; what you type wins. Marketplace's location box suggests every town with the same name (many towns share a name across states; the pilot's Waynesburg exists in Ohio and Kentucky too), and Lot Current only accepts a suggestion in your state.
 - **Your profile follows you.** Your name, role and listing defaults follow you anywhere; the dealership part (name, address, price basis, price note and daily cap) belongs to that dealership's website and does not travel to another site. Both are kept in Chrome's synced storage, so they come back after clearing a website's data or reloading the extension, and appear on any computer where you're signed in to Chrome. A Lot Current account shared with your manager is Milestone 4.
@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1221 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1222 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

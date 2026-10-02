@@ -305,6 +305,20 @@ test('supabase/README.md counts the functions there are and says the project add
   for (const f of fns) assert.ok(row.includes('`' + f + '`'), `README's supabase/ row does not name the ${f} function`);
 });
 
+// README's Settings section once gave the sign-off "at the pilot store" with a
+// person's first name, one the handoff notes say was guessed from a commit
+// identity. A person's name is a dealer-specific value (CLAUDE.md): the
+// sign-off is shown with brackets, as the template builds it
+// (src/rewriteTemplate.js), and README names no such person anywhere.
+test('README shows the description sign-off with brackets and names no guessed person', () => {
+  const readme = read('../README.md');
+  const you = readme.split('\n').find((l) => l.startsWith('- **You**:'));
+  assert.ok(you, 'README no longer explains the You settings');
+  assert.match(you, /"I'm \[name\], \[role\] at \[dealership\]"/, "README's You line does not show the sign-off with its brackets");
+  assert.doesNotMatch(you, /I'm (?!\[)/, "README's You line signs off with a person's name instead of the bracket");
+  assert.doesNotMatch(readme, /\bRoger\b/, 'README names a person whose name was only guessed from a git email');
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));
