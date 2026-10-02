@@ -47,20 +47,28 @@ const wraps = (before, next) =>
 // The description's segments: its lines, with each wrapped line joined to the
 // one before it. `keep` gives what is kept of each line ('' leaves it out)
 // before lines are joined, so a lot-wide line between two lines of a car's
-// own write-up never ends up inside it.
-export function splitSegments(raw, keep = (line) => line) {
+// own write-up never ends up inside it. Each segment carries `before`, the
+// line the website shows right before it (null for the first), whether or
+// not that line was kept.
+function segmentsOf(raw, keep = (line) => line) {
   const out = [];
+  let lastLine = null;
   for (const lines of linesOf(raw)) {
-    const segs = [];
+    let seg = null;
     for (const line of lines) {
       const text = keep(line);
-      if (!text) continue;
-      if (segs.length && wraps(segs[segs.length - 1], text)) segs[segs.length - 1] += ` ${text}`;
-      else segs.push(text);
+      if (text) {
+        if (seg && wraps(seg.text, text)) seg.text += ` ${text}`;
+        else out.push((seg = { text, before: lastLine }));
+      }
+      lastLine = line;
     }
-    out.push(...segs);
   }
   return out;
+}
+
+export function splitSegments(raw, keep = (line) => line) {
+  return segmentsOf(raw, keep).map((seg) => seg.text);
 }
 
 // The sentences of one segment, split where the template splits them.
@@ -129,22 +137,66 @@ function looksLikeEquipmentDump(text) {
   return items.length >= 3 && items.every((item) => /^[A-Z0-9]/.test(item) && item.split(/\s+/).length <= 3 && !SENTENCE_WORD.test(item));
 }
 
-// Returns the car-specific narrative left after boilerplate, award blurbs,
-// feature bullets and raw equipment dumps are removed: one string per
+// A piece of text that ends as a sentence does, and one that starts as a
+// sentence does: its first letter or digit is a capital or a digit, with
+// nothing before it but quotes, brackets or emoji. A piece that starts in
+// lower case ("warranty of any kind.", "brakes and tires.") carries on a
+// sentence begun before it.
+export const ENDS_SENTENCE = /[.!?]["'\u2019\u201d)]*$/;
+export const STARTS_SENTENCE = /^[\s"'\u2018\u201c([\p{Extended_Pictographic}\ufe0f\u200d]*[\p{Lu}\p{N}]/u;
+
+// A segment starts a sentence on the website when it comes first, or the
+// line right before it ended a sentence or is a heading that ends in a colon
+// ("Dealer Comments:"), and it starts as a sentence does. Any other segment
+// may carry on a sentence the website broke across a line break, a
+// paragraph or a list item ("...is not a Jeep" + "Certified Pre-Owned
+// vehicle."), and read alone it can say the opposite of the website; so may
+// the one after a heading or a title with no colon ("Vehicle Highlights").
+const startsAfter = (before) => before === null || ENDS_SENTENCE.test(before) || /:$/.test(before);
+
+// The car-specific narrative left after boilerplate, award blurbs, feature
+// bullets and raw equipment dumps are removed: one { text, opens } per
 // segment, with any lot-wide sentence or equipment list inside it taken out
-// and the rest of the segment kept as written.
-export function cleanDescription(raw, boilerplate = new Set()) {
+// and the rest of the segment kept as written. `opens` is whether the
+// segment starts a sentence on the website, judged against the line the
+// website shows right before it, even one left out here.
+export function writeUpParts(raw, boilerplate = new Set()) {
   const kept = [];
   // a lot-wide line, or a lot-wide sentence in a line, goes before wrapped lines are joined
   const own = (line) => (boilerplate.has(line) ? '' : splitSentences(line).filter((s) => !boilerplate.has(s)).join(' '));
-  for (const seg of splitSegments(raw, own)) {
+  for (const { text: seg, before } of segmentsOf(raw, own)) {
+    const opens = startsAfter(before) && STARTS_SENTENCE.test(seg);
     if (boilerplate.has(seg)) continue;
     if (AWARDS_PREFIX.test(seg)) continue;
     if (looksLikeBullet(seg)) continue;
     const carText = splitSentences(seg).filter((s) => !boilerplate.has(s)).join(' ');
     const stripped = carText.replace(CARFAX_PREFIX, '').trim();
     const text = splitSentences(stripped).filter((s) => !looksLikeEquipmentDump(s)).join(' ');
-    if (text) kept.push(text);
+    if (text) kept.push({ text, opens: opens && STARTS_SENTENCE.test(text) });
   }
   return kept;
+}
+
+// The narrative as plain strings, one per segment (what the rewrite service
+// is sent and the side panel keeps).
+export function cleanDescription(raw, boilerplate = new Set()) {
+  return writeUpParts(raw, boilerplate).map((p) => p.text);
+}
+
+// The one segment the template's write-up line may come from: the first
+// that starts a sentence on the website and holds a finished sentence. A
+// segment that does not start a sentence is never it, and no later segment
+// is added to it; with no such segment there is none (''). Takes
+// writeUpParts' { text, opens }, or plain strings read as the website's
+// segments in order, each judged against the one before it.
+export function openingSegment(parts) {
+  let before = null;
+  for (const part of Array.isArray(parts) ? parts : []) {
+    const plainText = typeof part === 'string';
+    const text = plainText ? part : String((part && part.text) || '');
+    const opens = plainText ? startsAfter(before) && STARTS_SENTENCE.test(text) : Boolean(part && part.opens);
+    before = text;
+    if (opens && splitSentences(text).some((s) => ENDS_SENTENCE.test(s))) return text;
+  }
+  return '';
 }

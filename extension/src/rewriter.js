@@ -6,7 +6,7 @@
 // template is used.
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
-import { cleanDescription } from './description.js';
+import { writeUpParts } from './description.js';
 import { buildTemplateDescription, runGuardrails, ensureVinLine, ensureClosingLine, usableClosingLine, settleHighlights } from './rewriteTemplate.js';
 import { carStore } from './listingData.js';
 
@@ -90,11 +90,13 @@ export async function rewriteWithBackend({ endpoint, key = '', facts, fetchImpl 
  * @returns {{ text, source: 'template'|'claude', model?, guardrails, narrative, note? }}
  */
 export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, fetchImpl }) {
-  const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
+  // the write-up's segments, each with whether it starts a sentence on the website (the template reads that)
+  const parts = writeUpParts(vehicle.descriptionRaw, new Set(boilerplate));
+  const narrative = parts.map((p) => p.text);
   const closingLine = usableClosingLine(salesperson.closingLine);
   const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine };
   const stores = Array.isArray(settings.myStores) ? settings.myStores : [];
-  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative, highlights, stores });
+  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative: parts, highlights, stores });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };
   const rw = settings.rewrite || {};
   if (!rw.enabled || !rw.endpoint) return fallback;

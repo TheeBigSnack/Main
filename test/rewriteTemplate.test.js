@@ -656,7 +656,7 @@ test('a write-up with markup inside a claim still backs the template that copies
   }
 });
 
-test('a write-up in paragraphs backs a claim in its second paragraph, as the template reads it', async () => {
+test('a write-up in paragraphs backs a claim in its second paragraph, each paragraph read on its own', async () => {
   // "<p>Clean interior</p><p>Runs great...</p>" is two paragraphs, never "Clean interiorRuns great"
   for (const raw of ['<p>Clean interior</p><p>Runs great and drives smooth.</p>', '<div>Clean interior</div><div>Runs great and drives smooth.</div>', '<ul><li>Clean interior</li><li>Runs great and drives smooth.</li></ul>']) {
     const v = { ...PLAIN(), descriptionRaw: raw };
@@ -820,15 +820,38 @@ test('a name in capitals is written calmly in the description only; one that doe
   }
 });
 
-test('the write-up line is the write-up: never a heading, a title or a line the website cut short', async () => {
+test('the write-up line comes from one segment of the write-up, the first that starts a sentence on the website: never one that carries on a sentence, and nothing from a later one', async () => {
   const story = {
+    // a heading that ends in a colon: the write-up after it starts a sentence
     'Dealer Comments:\nLocal trade with new brakes and tires.': 'Local trade with new brakes and tires.',
-    '<p><strong>Vehicle Highlights</strong></p><p>Local trade with new brakes and tires.</p>': 'Local trade with new brakes and tires.',
-    '2019 Ram 1500 Classic Express\nLocal trade with new brakes and tires.': 'Local trade with new brakes and tires.',
+    'Dealer Comments:<br>Local trade with new brakes and tires.': 'Local trade with new brakes and tires.',
+    // a plain line break after a word in lower case, a comma or a dash wraps a sentence, which is read whole
     'Local trade with new\nMichelin tires and fresh brakes.': 'Local trade with new Michelin tires and fresh brakes.',
     'This truck comes with the\n8.4-inch touchscreen and a tow package.': 'This truck comes with the 8.4-inch touchscreen and a tow package.',
-    // two finished lines are two sentences of the write-up, as one line of the description
-    'Line one of the write-up.\n\tLine two, after a raw line break and a tab.': 'Line one of the write-up. Line two, after a raw line break and a tab.',
+    // so a heading on a line of its own that stops on a word in lower case, with no colon, is read as the start of that sentence
+    'Dealer comments\nLocal trade with new brakes and tires.': 'Dealer comments Local trade with new brakes and tires.',
+    // a segment that carries on a sentence the website broke is never copied, whatever it starts with: read alone
+    // it can say the opposite of the website ("...is not a Jeep" + "Certified Pre-Owned vehicle.")
+    'Please note this vehicle is not a Jeep\nCertified Pre-Owned vehicle.': null,
+    'Please note this vehicle is not a Jeep<br>Certified Pre-Owned vehicle.': null,
+    'This vehicle does not come with a<br>warranty of any kind.': null,
+    'Please note this vehicle is not a<br>certified pre-owned vehicle.': null,
+    'This one is not part of the Mopar\nCertified program.': null,
+    'This Limited has a new set of Michelin\nDefender tires and fresh brakes.': null,
+    'Local trade, serviced here with the 3.6L\nV6 and a new battery.': null,
+    'Local trade with new<br>brakes and tires.': null,
+    // after a heading or a title with no colon, the next segment might carry on from it, so it is not copied either
+    '<p><strong>Vehicle Highlights</strong></p><p>Local trade with new brakes and tires.</p>': null,
+    '2019 Ram 1500 Classic Express\nLocal trade with new brakes and tires.': null,
+    // the finished sentences before a sentence the website broke, and nothing of that sentence
+    'Sold as is. It does not include the Uconnect\nNavigation package.': 'Sold as is.',
+    'Local trade. The previous owner removed the Mopar\nTow package and hitch.': 'Local trade.',
+    // one segment only: a later line or paragraph is never added to it
+    'Line one of the write-up.\n\tLine two, after a raw line break and a tab.': 'Line one of the write-up.',
+    'Local trade with new brakes.<br>Price does not include dealer documentation fee, tax or tags.': 'Local trade with new brakes.',
+    'Local trade with new brakes.<br><br>Vehicle subject to prior sale. See dealer for details.': 'Local trade with new brakes.',
+    // a piece that starts in lower case belongs to the sentence before it, so a sentence copied is never cut at an abbreviation
+    'Comes with the tow pkg. and a bed liner. Clean interior.': 'Comes with the tow pkg. and a bed liner. Clean interior.',
     // a heading and a list with no sentence in it give no write-up line at all
     'Features:\nHeated Seats\nNavigation\nSunroof': null,
   };
@@ -838,6 +861,26 @@ test('the write-up line is the write-up: never a heading, a title or a line the 
     const second = r.text.split('\n')[1];
     if (line) assert.equal(second, line, raw);
     else assert.match(second, /^Highlights: /, raw);
+    assert.deepEqual(r.guardrails.problems, [], raw);
+  }
+});
+
+test('the template never copies what the write-up says about fees, taxes or tags: the price note says that', async () => {
+  // on a lot of one or two cars the lot-wide check finds no disclaimer, and the write-up's own fee line would contradict the note
+  const priceNote = 'Price includes the doc fee; tax and tags extra.';
+  const story = {
+    'Local trade with new brakes.<br>Price does not include dealer documentation fee, tax or tags.': 'Local trade with new brakes.',
+    'Local trade with new brakes. Price does not include dealer documentation fee, tax or tags.': 'Local trade with new brakes.',
+    'Dealer Comments:<br>Price does not include dealer documentation fee, tax or tags.': null,
+    'Price excludes taxes and registration. Local trade with new brakes.': 'Local trade with new brakes.',
+  };
+  for (const [raw, line] of Object.entries(story)) {
+    const v = { ...PLAIN(), descriptionRaw: raw, location: '' };
+    const r = await generateDescription({ ...plainCtx(v, { priceNote }), boilerplate: [], settings: {} });
+    const second = r.text.split('\n')[1];
+    if (line) assert.equal(second, line, raw);
+    else assert.match(second, /^Highlights: /, raw);
+    assert.equal(r.text.match(/\b(?:fee|tax|tags)\b/gi).length, 3, `only the price note speaks of fees: ${raw}`);
     assert.deepEqual(r.guardrails.problems, [], raw);
   }
 });
@@ -861,6 +904,11 @@ test("the car's own abbreviations are its name, not shouting: the template keeps
     // passing over the car's own words never breaks a run of shouting around them
     assert.ok(runGuardrails(`${r.text}\nGREAT ${v.trim.split(' ')[0].toUpperCase()} TRUCK FOR YOU.`, c).problems.some((p) => p.code === 'all-caps'), what);
   }
+  // the car's own abbreviations never make the website's other words count as shouting, so nothing is calmed for them
+  const own = { ...PLAIN(), location: '', features: ['AWD', 'ABS', 'USB', 'Heated Seats'], engine: 'HEMI 5.7L V8 DOHC' };
+  const kept = buildTemplateDescription(plainCtx(own));
+  assert.match(kept, /^HEMI 5\.7L V8 DOHC, 8-Speed Automatic, 4WD\.$/m);
+  assert.deepEqual(runGuardrails(kept, plainCtx(own)).problems, []);
   // a longer word in capitals still counts: a draft that copies the website's capitals shouts, and the template writes them calmly
   const v = { ...PLAIN(), location: '', features: ['HEATED FRONT SEATS', 'NAVIGATION SYSTEM', 'AWD'] };
   const t = buildTemplateDescription(plainCtx(v));

@@ -18,12 +18,19 @@
 //     the website's own words for this car (or the dealer's price note)
 //     don't make, and no number, in digits or in words, that isn't in the
 //     website's data
-// The template is the final fallback, so it is built to pass its own checks:
-// it copies only write-up sentences that end as sentences and that the
-// checks would accept, writes the website's words calmly when they shout
-// (the car's own abbreviations, such as "SLE" or "AWD", stay as written, and
-// the checks pass over them), leaves out a write-up, colour or engine line
-// that still shouts on its own, and counts words as the checks do.
+// The template is the final fallback, so it is built to pass its own checks
+// and, when in doubt, to say less. Its write-up line is at most two finished
+// sentences from one segment of the write-up: the first segment that starts
+// a sentence on the website and holds a finished one (description.js
+// openingSegment). A segment that may carry on a sentence (one after a line
+// that did not end a sentence or a heading with a colon, or one that starts
+// in lower case) is never copied, nothing from a later segment is added,
+// and with no such segment there is no write-up line. Only sentences the
+// checks would accept, and none about fees, taxes or tags (the price note's
+// to say), are copied. When the website's words shout beyond the car's own
+// abbreviations ("SLE", "AWD": they stay as written, and the checks pass
+// over them) it writes them calmly, leaves out a write-up, colour or engine
+// line that still shouts on its own, and counts words as the checks do.
 // test/rewriteTemplate.test.js runs it over every fixture car, as written, in
 // capitals and with refused write-ups. What the tests find can still fail it
 // is the dealership's own Settings (no dealership name, a price note for
@@ -31,7 +38,7 @@
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
-import { splitSegments, splitSentences } from './description.js';
+import { splitSegments, splitSentences, openingSegment, ENDS_SENTENCE, STARTS_SENTENCE } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -231,18 +238,32 @@ function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = n
 // may copy: no price at all (the price is the listing's own field), no
 // price change, and no mileage other than the website's.
 const statesNoOtherNumbers = (text, vehicle) => !priceAndMileageProblems(text, { vehicle }).length;
+// Fees, taxes and tags are the dealer's price note's to state (Settings, in
+// every description it applies to): a write-up sentence about them is never
+// copied, so a disclaimer the lot-wide check could not catch (on a lot of one
+// or two cars) never contradicts the note.
+const FEE_WORDS = /\b(?:fees?|tax(?:es)?|tags?|registration)\b/i;
+
 // A write-up sentence the template may copy: that, and nothing the checks
 // would refuse in the template's own text, a banned phrase ("no accidents",
 // "private sale"), "one owner" without the Carfax one-owner flag, capitals
 // that shout, or more than one emoji (two sentences at most are copied, so
 // the text stays within the emoji the checks allow).
 const narrativeSentenceOk = (sentence, vehicle) =>
-  statesNoOtherNumbers(sentence, vehicle) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence, ownAbbreviations(vehicle)) && emojiCount(sentence) <= 1;
+  statesNoOtherNumbers(sentence, vehicle) && !FEE_WORDS.test(sentence) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence, ownAbbreviations(vehicle)) && emojiCount(sentence) <= 1;
 
-// A write-up sentence reads as one when it ends as a sentence does. A
-// heading ("Vehicle Highlights", "Dealer Comments:"), the car's title or a
-// line the website cut short never does, so it is never copied as the write-up.
-const ENDS_SENTENCE = /[.!?]["'\u2019\u201d)]*$/;
+// The sentences of the write-up's opening segment, as the template reads
+// them: a piece that starts in lower case belongs to the sentence before it
+// ("Comes with approx. two keys." is one sentence, never "Comes with
+// approx."), so every sentence copied starts as a sentence does.
+function openingSentences(segment) {
+  const out = [];
+  for (const piece of splitSentences(segment)) {
+    if (out.length && !STARTS_SENTENCE.test(piece)) out[out.length - 1] += ` ${piece}`;
+    else out.push(piece);
+  }
+  return out;
+}
 
 // The website's features a description can name as highlights: each once,
 // short enough to read in a list (40 characters or less), stating no price,
@@ -371,7 +392,8 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   dealer:      { name, city }
  *   salesperson: { name, title }
  *   priceNote:   the dealer's wording about fees, typed in Settings (a suggested sentence is offered from the website's price gap)
- *   narrative:   the car-specific write-up from description.js (cleanDescription), one string per segment
+ *   narrative:   the car-specific write-up from description.js: writeUpParts' { text, opens } per segment, or plain
+ *                strings (cleanDescription) read as the website's segments in order
  *   highlights:  the salesperson's pick of the website's features (settleHighlights); null for the usual pick
  *   closingLine: the salesperson's own line from Settings (salesperson.closingLine), used when it passes checkClosingLine
  *   stores:      the salesperson's ticked stores (settings.myStores); a car the website lists at any other store, or
@@ -391,10 +413,10 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  // the write-up's first sentences, in the website's order: only sentences that end as a sentence does (never a
-  // heading, a title or a line cut short), leaving out any that state a price, a price change or another mileage
-  const sentences = (Array.isArray(narrative) ? narrative : []).flatMap((segment) => splitSentences(segment));
-  const story = firstSentences(sentences, 2, 45, (sentence) => ENDS_SENTENCE.test(sentence) && narrativeSentenceOk(sentence, v));
+  // the write-up line: the first two finished sentences of one segment of the write-up, the first that starts a
+  // sentence on the website and holds a finished one (openingSegment), leaving out any the checks would refuse;
+  // never a segment that carries on an unfinished sentence, and nothing from a later segment
+  const story = firstSentences(openingSentences(openingSegment(narrative)), 2, 45, (sentence) => ENDS_SENTENCE.test(sentence) && narrativeSentenceOk(sentence, v));
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
@@ -435,12 +457,13 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   // checks refuse: when the website's own words shout, they are calmed
   // (calmWords), in the description only; the form's fields keep the
   // website's spelling. The car's own abbreviations ("SLE EXT CAB", "AWD")
-  // stay as written; the checks pass over them (ownAbbreviations). A
+  // stay as written; the checks pass over them (ownAbbreviations), and so
+  // does this test, so they never get the website's other words calmed. A
   // write-up, colour or engine line that still shouts on its own is left
   // out; a line that does not is kept, since leaving it out could not help.
   const own = ownAbbreviations(v);
   const siteWords = blocks.filter((b) => b.site).map((b) => b.text).join('\n');
-  if (shouting(siteWords)) for (const b of blocks) if (b.site) b.text = calmWords(b.text);
+  if (shouting(siteWords, own)) for (const b of blocks) if (b.site) b.text = calmWords(b.text);
   for (const b of blocks) if (b.keep === 'optional' && b.site && shouting(b.text, own)) on.delete(b.id);
   for (const id of ['narrative', 'mech', 'colors', 'cta']) {
     if (words() <= WORD_LIMITS.max) break;
