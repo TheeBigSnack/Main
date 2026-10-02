@@ -85,9 +85,23 @@ export const NUMBERS = [
   /\bsav(e|es|ed|ing) ([\w'’-]+ ){0,2}(up to |over |about |nearly |around )?\d+\s*(hours?|hrs?|minutes?|mins?)\b/i,
 ];
 
+// A time per post in seconds. No fill time has been measured (the live runs
+// recorded none; the Numbers tab's CSV records it now), and
+// legal/trademark-note.md (Marketing claims) allows a claim about time per
+// post only from measured pilot data with written permission to cite it, so a
+// figure comes back only with that measurement and a deliberate change here.
+// "In seconds", with no figure, is not caught.
+const SECONDS = String.raw`(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|forty-five|fifty|sixty|ninety)`;
+const NEAR = String.raw`(?:about|around|roughly|just|only|under|less than|as little as)`;
+export const TIME_PER_POST = [
+  new RegExp(String.raw`\b(?:fill(?:s|ed|ing)?|post(?:s|ed|ing)?|list(?:s|ed|ing)?|listings?)\b[^.]{0,80}\b(?:in|within|under)\s+(?:${NEAR}\s+)?${SECONDS}[ -]seconds?\b`, 'i'),
+  new RegExp(String.raw`\b(?:takes?|took|taking)\s+(?:${NEAR}\s+)?${SECONDS}[ -]seconds?\b`, 'i'),
+  new RegExp(String.raw`\b${SECONDS}-second (?:posts?|fills?|listings?)\b`, 'i'),
+];
+
 // What customer-facing copy may not say either (the positioning names some
 // of these so we know what to avoid).
-export const NOT_TO_CUSTOMERS = [/testimonial/i, /\bbots?\b/i, ...SAFETY, ...NUMBERS];
+export const NOT_TO_CUSTOMERS = [/testimonial/i, /\bbots?\b/i, ...SAFETY, ...NUMBERS, ...TIME_PER_POST];
 
 // "Not a guarantee" and its close cousins are the honest line; any other
 // "guarantee" is a promise we can't make. The negation must be a whole word

@@ -43,7 +43,7 @@ Two things I will keep saying: Lot Current never clicks Publish, and it never as
 
 Hi [name],
 
-[Manager] has put Lot Current on for everyone at [dealership]. It fills in a Facebook Marketplace listing from the website in about ten seconds; you check it and click Publish yourself. Here is the whole set-up.
+[Manager] has put Lot Current on for everyone at [dealership]. It fills in a Facebook Marketplace listing from the website in seconds; you check it and click Publish yourself. Here is the whole set-up.
 
 [Only for a salesperson who was in the pilot:] **Before you install: bring your pilot listings across (5 minutes).** The copy from the Chrome Web Store starts empty; it cannot see what the copy you used in the pilot kept. So first, in that pilot copy, open [dealership used inventory URL], click the Lot Current icon, then **Settings**, and under **Account** sign in and join the store as in step 3 below. [If that Account section says accounts are not set up yet, first unzip the attached zip over the same folder and click the reload icon on chrome://extensions, as for any update.] When the Account section shows a last sync time, your posted list, post timings and to-do items are in the store's account. Then do the steps below; in step 3 you only sign in, with the same email: you have already joined, so skip the invite code. Keep the pilot copy until **My listings** in the new copy shows your pilot cars, then remove it on chrome://extensions so only one copy is running.
 

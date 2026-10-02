@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
 import { copyProblems } from './copyGuards.js';
-import { honestyProblems, offPricing } from './honesty.js';
+import { honestyProblems, offPricing, TIME_PER_POST } from './honesty.js';
 import { stripComments } from './helpers.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -68,6 +68,11 @@ test('no claim we have not measured, and nothing that sounds like Meta approval'
     const doc = read('../marketing/' + rel);
     assert.deepEqual(copyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], rel);
     assert.deepEqual(honestyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], `marketing/${rel}`);
+    // the internal positioning too: its numbers are measured or labelled a guess, and no fill time has been measured
+    for (const re of TIME_PER_POST) {
+      const hit = doc.match(re);
+      assert.equal(hit, null, `marketing/${rel} gives a time per post nobody has measured: "${hit && hit[0]}" (legal/trademark-note.md, Marketing claims)`);
+    }
   }
 });
 

@@ -80,6 +80,12 @@ const CUSTOMER_CLAIMS = [
   'Cut posting time by 90%.',
   '50% less time posting.',
   'Get 50 more leads a month.',
+  // a time per post nobody measured (legal/trademark-note.md, Marketing claims)
+  'Lot Current fills in a Facebook Marketplace vehicle listing from your own website inventory in about ten seconds.',
+  'Post a car to Marketplace in 10 seconds.',
+  'Listings filled in under 30 seconds.',
+  'Each post takes about fifteen seconds.',
+  'Ten-second listings, every time.',
 ];
 
 // Lines today's copy uses, which must stay allowed.
@@ -102,6 +108,9 @@ const HONEST = [
   'Rescans run every 3 hours while Chrome is open to keep your to-do count current.',
   'If that line says more than 6 hours ago on a working day, nobody had it on.',
   "Chrome's sync storage keeps the profile under the User's own Google account.",
+  'Your used cars on Facebook Marketplace, from your website, in seconds.',
+  "The median seconds per post is the time from Post to It's posted, their own review and Publish click included.",
+  'Enter the six-digit code from the email; it works for one hour.',
 ];
 
 test('every affiliation or approval claim fails, in any document', () => {

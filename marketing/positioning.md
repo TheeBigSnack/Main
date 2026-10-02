@@ -19,7 +19,7 @@ Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here i
 
 A Chrome extension. It reads the dealership's own website inventory, lets only pre-owned cars through, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and re-reads the website every 3 hours to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
 
-**One line:** Lot Current fills in the Marketplace listing from your website in about ten seconds. You click Publish, and it tells you the same day when a car sells or its price changes.
+**One line:** Lot Current fills in the Marketplace listing from your website in seconds. You click Publish, and it tells you the same day when a car sells or its price changes.
 
 ## Why it is different (the angle: careful and accurate)
 
@@ -48,7 +48,7 @@ Don't say (until the attorney answers the questions in `legal/questions-for-atto
 - Anything that sounds like Meta approval, partnership or compliance.
 - "Safe", "allowed", "compliant", or any promise about what will happen to a salesperson's account. The honest line: having a person click Publish is the safest design available, not a guarantee.
 - A slogan built on the word "bot" (asked in the attorney questions).
-- Any number we did not measure: time saved per week, more leads, more sales.
+- Any number we did not measure: seconds per post, time saved per week, more leads, more sales. No fill time has been measured yet; the Numbers tab's CSV records the seconds from Post to the form opened and to the form filled, and a figure from it goes into copy only with the store's written permission (pilot agreement section 3, `legal/trademark-note.md`).
 
 ## Proof we can build honestly during the pilot
 
