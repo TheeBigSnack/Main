@@ -1429,7 +1429,7 @@ function viewIdle() {
     </div>
     <div class="toolbar listControls"><label class="control grow"><span class="sr">Search</span><input type="search" id="panelSearch" value="${esc(state.listFilter)}" placeholder="Search: stock number, last 6 of the VIN, year, make or model" autocomplete="off" spellcheck="false" /></label></div>
     <div id="panelList">${queueOfferHtml(list, cap)}${listBodyHtml(list, cap)}</div>
-    <p class="hint">Post re-checks the car on the website first, so a car that sold or changed since the last scan is stopped. You check every form and click Publish yourself.</p>
+    <p class="hint" id="panelListHint">Post re-checks the car on the website first: a car that sold, is now listed as new or is no longer ready to post is stopped, and a price that changed since the last scan is posted as the website shows it now. You check every form and click Publish yourself.</p>
   </section>${notAffiliated}`;
 }
 

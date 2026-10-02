@@ -182,6 +182,10 @@ try {
 
   // ---- 4. The Wagoneer's price dropped: posted at the website's price now, not the scan's ----
   // (first started and stopped at review: Stop this post goes back to the list, nothing opened)
+  // The list's own hint says so: a changed price is posted as the website shows it, not stopped.
+  const listHint = await panel.textContent('#panelListHint');
+  assert.match(listHint, /a price that changed since the last scan is posted as the website shows it now/, 'the list says a new price is posted, not stopped');
+  assert.doesNotMatch(listHint, /changed since the last scan is stopped/, 'the list no longer says every changed car is stopped');
   await panel.click(`button[data-post-vin="${WAGONEER}"]`);
   await panel.waitForSelector('#stopPost', { timeout: 20000 });
   const tabsBeforeStop = context.pages().length;
