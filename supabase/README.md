@@ -1,10 +1,14 @@
 # Lot Current on Supabase: accounts, sync and the rewrite service (Milestone 4)
 
 This folder is everything the owner deploys to give a dealership shared
-accounts: sign-in by magic link, one database per Lot Current with a row-level
-wall between dealerships, and two small server functions. Nothing in it runs
-until the owner creates a Supabase project and pushes it; the extension works
-without it as before (everything stays in the browser).
+accounts: sign-in with no password, by a six-digit code emailed to the
+salesperson (the manager view uses the link in the same email), one database
+per Lot Current with a row-level wall between dealerships, and four server
+functions: `sync`, `rewrite`, `billing` and `lead`. The production project is
+named in `extension/src/accountConfig.js` and `manager/config.js` (`npm run
+set-project`, step 6 below); it has the first eight migrations and all four
+functions, and `docs/production-setup.md` gives what is left. The extension
+works without signing in as before (everything stays in the browser).
 
 What is here:
 
@@ -155,12 +159,12 @@ Then, under Authentication, Sign In / Providers, Email, check that the email OTP
 
 ## How the extension is configured
 
-A Settings section for the account (arriving with the UI wiring) takes the **project URL** and the **anon key** from step 1; both are safe to type into every salesperson's extension. Then:
+The project URL and the publishable (or anon) key from step 1 are built into the extension and the manager view, not typed in: `npm run set-project -- <project URL> <key>` writes them into `extension/src/accountConfig.js` and `manager/config.js` (step 6; done for production). So every copy of the extension talks to that one project, and Settings has no field for an address or a key. Then:
 
-1. **Sign in**: the salesperson enters their email and gets a link and a code. The session (a token, its refresh token, expiry, the user's id and email) is kept in `chrome.storage.local` under `account`, never in Chrome's synced storage; it stays on that computer. No password anywhere.
+1. **Sign in**: in set-up's **Your account** step or under **Settings**, **Account**, the salesperson enters their email and types the six-digit code from the email Supabase sends (the same email carries the link the manager view uses). The session (a token, its refresh token, expiry, the user's id and email) is kept in `chrome.storage.local` under `account`, never in Chrome's synced storage; it stays on that computer. No password anywhere.
 2. **Join the dealership**: they enter the invite code once (`redeemInvite`). The answer carries the dealership's name and website origin, which the extension stores next to its per-website settings.
 3. **Sync**: after a scan, a post, a price update or a take-down, the extension POSTs `syncPayload(...)` to `.../functions/v1/sync` with the session's token and merges the answer (`mergeRegistry`, `mergeFlags`). Two salespeople then see the same posted registry, and the manager page sees both.
-4. **Description writer**: in Settings, the rewrite service address becomes `https://<ref>.supabase.co/functions/v1/rewrite` and the key field is the session's token (the UI wiring fills it from the session; the shared `REWRITE_KEY` of `backend/` is gone). `extension/src/rewriter.js` already calls `<address>/rewrite` and `<address>/color` with `Authorization: Bearer <key>`.
+4. **Description writer**: on sign-in, the rewrite service address in Settings becomes the account's own function, `https://<ref>.supabase.co/functions/v1/rewrite` (`rewriteEndpointFor` in `extension/src/accountFlow.js`); whether it is used stays the person's choice. While that is the address, Settings shows no key field: the side panel sends the session's access token as the key (`rewriteKeyFor`) and never stores it in the settings or the synced profile, and a key typed for a self-hosted `backend/` is kept and sent only to that address. `extension/src/rewriter.js` calls `<address>/rewrite` and `<address>/color` with `Authorization: Bearer <key>`.
 
 ## The two functions
 

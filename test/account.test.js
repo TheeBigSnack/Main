@@ -55,7 +55,10 @@ test('signInWithMagicLink posts the email to /auth/v1/otp with the anon key (a r
 
   const none = fakeFetch([]);
   assert.match((await signInWithMagicLink('not an email', { url: URL_, anonKey: ANON, fetchImpl: none.fetchImpl })).error, /valid email/);
-  assert.match((await signInWithMagicLink('a@b.co', { url: '', anonKey: '', fetchImpl: none.fetchImpl })).error, /not set up/);
+  const unset = (await signInWithMagicLink('a@b.co', { url: '', anonKey: '', fetchImpl: none.fetchImpl })).error;
+  assert.match(unset, /not set up/);
+  // the address and key are built in (src/accountConfig.js, npm run set-project): Settings has no field for them
+  assert.doesNotMatch(unset, /Settings/, 'the message sends the person to a Settings field that does not exist');
   assert.equal(none.calls.length, 0);
 });
 

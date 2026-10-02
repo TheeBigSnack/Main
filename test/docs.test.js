@@ -279,6 +279,32 @@ test('next-platform.md and the launch checklist describe the readers ADAPTERS ho
   assert.match(contract, /every adapter in `ADAPTERS`/, "the launch checklist's adapter contract item does not cover every adapter in ADAPTERS");
 });
 
+// supabase/README.md's header said "sign-in by magic link" and "two small
+// server functions", and "How the extension is configured" said a Settings
+// section takes the project URL and anon key for every salesperson to type.
+// The extension signs in with an emailed code, supabase/functions holds four
+// functions, and npm run set-project builds the address and key into
+// extension/src/accountConfig.js, which the popup reads; Settings has no
+// field for them.
+test('supabase/README.md counts the functions there are and says the project address is built in, not typed', () => {
+  const r = read('../supabase/README.md');
+  const fns = readdirSync(new URL('../supabase/functions/', import.meta.url), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('_')).map((e) => e.name);
+  assert.ok(fns.length >= 2, 'supabase/functions/ holds fewer functions than expected');
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  const header = r.split('\n## ')[0];
+  assert.match(header, new RegExp(`\\b${WORDS[fns.length] || fns.length}\\s+server\\s+functions`), `supabase/README.md's header does not count the ${fns.length} functions in supabase/functions/`);
+  for (const f of fns) assert.ok(header.includes('`' + f + '`'), `supabase/README.md's header does not name the ${f} function`);
+  assert.doesNotMatch(header, /sign-in\s+by\s+magic\s+link/, "supabase/README.md's header says salespeople sign in by link; the extension asks for the emailed code");
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /import \{[^}]*\bACCOUNT\b[^}]*\} from '\.\/src\/accountConfig\.js'/, 'the popup no longer takes the project from accountConfig.js: this README section must change with it');
+  const configured = (r.split('## How the extension is configured')[1] || '').split('\n## ')[0];
+  assert.ok(configured.length > 100, 'supabase/README.md has no "How the extension is configured" section');
+  assert.doesNotMatch(configured, /type into every salesperson|takes the \*\*project URL\*\*|with the UI wiring/, 'supabase/README.md says salespeople type the project address and key into Settings');
+  assert.match(configured, /npm run set-project/, 'supabase/README.md does not say set-project builds the project address and key in');
+  const row = read('../README.md').split('\n').find((l) => l.startsWith('| `supabase/` |')) || '';
+  for (const f of fns) assert.ok(row.includes('`' + f + '`'), `README's supabase/ row does not name the ${f} function`);
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));
