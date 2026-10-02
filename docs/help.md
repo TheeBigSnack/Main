@@ -222,7 +222,7 @@ To turn it on, your dealership needs the Lot Current rewrite service running and
 
 ## The daily cap
 
-Each salesperson may record a set number of posts a day, 10 by default. Your dealership changes it in **Settings**, **Safety**, **Posts per day, per salesperson**.
+Each salesperson may record a set number of posts a day, 10 by default. Your dealership chooses the number, and each salesperson enters it in their own **Settings**, **Safety**, **Posts per day, per salesperson** (1 to 100), with that website's other dealership settings. The manager view does not set it or show it, so ask your manager which number to use.
 
 - The review screen shows "N of M posts today". At the cap, **Post** buttons and tick boxes go away on Ready to post, **Open the Marketplace form** is disabled, and a queue pauses. The message reads "Daily post cap reached (N of M today). It resets tomorrow; the dealer can change it in Settings."
 - It counts posts recorded in this browser for this website today, including a post you took down later the same day (**Taken down**, or unmarking **Posted ✓**): taking a listing down never gives the slot back. Signed in, it is never lower than your dealership's account's count of your posts today, which includes the ones from your other computers.

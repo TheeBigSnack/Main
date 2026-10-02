@@ -799,3 +799,35 @@ test('the pilot log and the pilot CSVs stay out of the repository', async () => 
     assert.ok(ignored(name), `.gitignore does not keep ${name} out of the repository`);
   }
 });
+
+// The daily cap's only control is the Settings field in each salesperson's
+// own popup, saved with that website's settings; no table, function or
+// manager-view control holds a cap (the server only counts the day's posts).
+// So a text that says the dealership sets the cap also says where it is
+// entered, the help doc says the manager view does not set it, and the
+// install email for a store's salespeople has each of them enter the
+// manager's number. While the cap's count takes the server's count when it is
+// higher (src/cap.js), the help doc says posts from other computers count.
+test('texts about the daily cap say each salesperson enters the dealership\'s number in their own Settings', () => {
+  assert.match(read('../extension/popup.js'), /field\('Posts per day, per salesperson', 'dailyCap'/, 'the cap\'s Settings field moved: these texts must change with it');
+  const server = ['../supabase/functions/sync/index.ts', '../manager/manager.js', '../manager/data.js', ...readdirSync(new URL('../supabase/migrations/', import.meta.url)).map((f) => `../supabase/migrations/${f}`)];
+  for (const rel of server) assert.doesNotMatch(read(rel), /daily_?cap\b|post_cap\b/i, `${rel} holds a cap: the dealership may now set it centrally, so these texts can say so`);
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  for (const rel of ['../README.md', '../store/listing.md', ...md('docs'), ...md('marketing')]) {
+    for (const line of read(rel).split('\n').filter((l) => /daily (post )?cap|posts a day|posts per day/i.test(l))) {
+      if (/\b(dealership|dealer|manager)( can)? (sets?|changes?|controls?)\b|\byou control\b/i.test(line)) {
+        assert.match(line, /Settings/, `${rel}: "${line.trim().slice(0, 120)}" says the dealership sets the cap without saying each salesperson enters it in Settings`);
+      }
+    }
+  }
+  const help = doc('help.md');
+  const capSection = help.slice(help.indexOf('## The daily cap'), help.indexOf('\n## ', help.indexOf('## The daily cap') + 5));
+  assert.match(capSection, /each salesperson enters it in their own \*\*Settings\*\*/, 'the help doc does not say each salesperson enters the cap in their own Settings');
+  assert.match(capSection, /manager view does not set it/, 'the help doc does not say the manager view does not set the cap');
+  const store = read('../marketing/onboarding-store.md');
+  const toSalesperson = store.slice(store.indexOf('## To each salesperson'));
+  assert.match(toSalesperson.slice(0, toSalesperson.indexOf('\n## ', 5)), /\*\*Posts per day, per salesperson\*\* read \[10\]/, 'the install email does not have each salesperson enter the manager\'s cap');
+  if (/Math\.max\(postsToday\([^)]*\), serverPostsToday\(/.test(read('../extension/src/cap.js'))) {
+    assert.match(capSection, /[Ss]igned in\b[^.]*count[^.]*other computers/, 'the help doc says the cap counts only this browser\'s posts, but a signed-in count also takes the account\'s');
+  }
+});
