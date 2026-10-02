@@ -27,6 +27,15 @@
 // key event that reaches one, any submit event of the form and any
 // form.submit() (the form posts to /form-submitted) is recorded, and GET
 // /actions lists what was. The flows assert that list stays empty.
+//
+// The listing pages (item, edit) carry the real Mark as sold, Delete and
+// Update buttons a person clicks during upkeep, and Facebook lands on one
+// after Publish. Every post of those forms is logged in order ("sold 424242",
+// "delete 424242", "save 515151"), whatever listing it names, and GET
+// /listing-actions lists them; GET /listing-state gives every listing as it
+// is now, and INITIAL_LISTINGS as it was. The create flows assert the log
+// stays empty and the listings unchanged; upkeep asserts the log holds
+// exactly the clicks it made as the person.
 
 import http from 'node:http';
 
@@ -272,6 +281,9 @@ const listings = {
   515151: { title: '2022 Jeep Wagoneer Series III', price: 38383, vin: '1C4SJVDT7NS142834', sold: false, deleted: false },
   616161: { title: '2022 Jeep Wagoneer Series II', price: 41500, vin: '1C4SJVBT0NS000616', sold: false, deleted: false },
 };
+export const INITIAL_LISTINGS = Object.freeze(structuredClone(listings));
+// Every Mark as sold, Delete and Update posted to the listing pages, in order.
+const listingActions = [];
 
 // Like Marketplace's Your listings: every listing's name, price and status on one page.
 const yourListingsPage = () => `<!doctype html><html><head><meta charset="utf-8"><title>Your listings (mock)</title></head><body>
@@ -325,12 +337,14 @@ export function startMockMarketplace(port = 0) {
     }
     // ---- the person's published listings, and the actions only they take ----
     const item = /^\/marketplace\/item\/(\d+)\/(sold|delete)$/.exec(url.pathname);
+    if (req.method === 'POST' && item) listingActions.push(`${item[2]} ${item[1]}`);
     if (req.method === 'POST' && item && listings[item[1]]) {
       listings[item[1]][item[2] === 'sold' ? 'sold' : 'deleted'] = true;
       res.writeHead(303, { location: `/marketplace/item/${item[1]}/` });
       return res.end();
     }
     const save = /^\/marketplace\/edit\/(\d+)\/save$/.exec(url.pathname);
+    if (req.method === 'POST' && save) listingActions.push(`save ${save[1]}`);
     if (req.method === 'POST' && save && listings[save[1]]) {
       let raw = '';
       req.on('data', (c) => { raw += c; });
@@ -354,6 +368,10 @@ export function startMockMarketplace(port = 0) {
     if (url.pathname === '/listing-state') {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify(listings));
+    }
+    if (url.pathname === '/listing-actions') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(listingActions));
     }
     const known = /^\/marketplace\/item\/(\d+)\/?$/.exec(url.pathname);
     if (known && listings[known[1]]) {

@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockStandardSite, STANDARD } from './mock-standard-site.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -73,6 +73,9 @@ const requests = async () => JSON.parse(await control('/requests'));
 // mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
 const publishCount = async () => {
   assert.deepEqual(await (await fetch(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  // nor did anything mark a listing sold, delete one or save an edit: Facebook lands on a listing page after Publish
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-actions`)).json(), [], 'nothing may mark sold, delete or update a listing but the person');
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-state`)).json(), INITIAL_LISTINGS, 'every listing is as it was');
   return (await fetch(`${marketOrigin}/publish-count`)).text();
 };
 

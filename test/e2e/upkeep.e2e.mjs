@@ -11,7 +11,11 @@
 // ticked off; the person opens the other unit's listing and marks it sold,
 // and nothing is ticked off there either (its VIN is not this car's); the
 // test opens the car's own listing and clicks Mark as sold, and the panel
-// notices and marks it taken down.
+// notices and marks it taken down. The mock logs every Update, Mark as sold
+// and Delete posted to a listing: before each of the test's clicks as the
+// person the log holds only the clicks it made before, and at the end exactly
+// its three (one Update, two Mark as sold), with every listing in the state
+// those clicks left.
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:upkeep
 
@@ -22,7 +26,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -97,6 +101,8 @@ try {
   }
   const tab = (p, name) => p.locator(`.tabs button[data-view="${name}"]`);
   const listingState = async () => (await dealer.request.get(`${marketOrigin}/listing-state`)).json();
+  // every Update, Mark as sold and Delete posted to a listing, in order (mock-marketplace.mjs)
+  const listingActions = async () => (await dealer.request.get(`${marketOrigin}/listing-actions`)).json();
 
   // ---- 1. Day 1 scan, then day 2: the Ram sells and the Wagoneer drops $1,500 ----
   let popup = await openPopup();
@@ -142,10 +148,13 @@ try {
   await panel.waitForSelector('#priceFilled', { timeout: 20000 });
   assert.equal(await listing.inputValue('#price'), '36883');
   await panel.screenshot({ path: join(shots, 'upkeep-2-price-filled.png') });
+  assert.deepEqual(await listingActions(), [], 'the box is filled and nothing is saved: Update waits for the person');
+  assert.deepEqual(await listingState(), INITIAL_LISTINGS);
   await listing.click('#update'); // the person saves
   await panel.waitForSelector('#upkeepDone', { timeout: 20000 });
   assert.match(await panel.textContent('#upkeepDone'), /now shows \$36,883/);
   assert.equal((await listingState())['515151'].price, 36883);
+  assert.deepEqual(await listingActions(), ['save 515151'], "one Update, the person's");
   await panel.click('#upkeepClose');
 
   popup = await openPopup();
@@ -181,6 +190,7 @@ try {
   await listing2.click('a[href="/marketplace/item/434343/"]');
   await listing2.waitForURL(/\/marketplace\/item\/434343\/$/);
   await panel.waitForFunction(() => /Another car you posted also has 2019 Ram 1500 Classic Express in its name.*VIN, 1C6RR7FT0KS643289, and this page doesn't/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
+  assert.deepEqual(await listingActions(), ['save 515151'], 'nothing was marked sold or deleted on Your listings');
   await listing2.click('text=Mark as sold'); // the person, on the wrong Ram
   await listing2.waitForTimeout(3500);
   assert.equal((await listingState())['434343'].sold, true);
@@ -193,10 +203,12 @@ try {
   // "Sold as-is" in its description must not read as sold.
   await listing2.waitForTimeout(3500);
   assert.ok(await panel.$('#takeDownWaiting'), 'still waiting for the person');
+  assert.deepEqual(await listingActions(), ['save 515151', 'sold 434343'], "only the person's clicks so far");
   await listing2.click('text=Mark as sold'); // the person
   await panel.waitForSelector('#upkeepDone', { timeout: 20000 });
   assert.match(await panel.textContent('#upkeepDone'), /sold or removed/);
   assert.equal((await listingState())['424242'].sold, true);
+  assert.deepEqual(await listingActions(), ['save 515151', 'sold 434343', 'sold 424242'], "one more Mark as sold, the person's");
   await panel.screenshot({ path: join(shots, 'upkeep-3-sold.png') });
   await panel.click('#upkeepClose');
 
@@ -216,6 +228,14 @@ try {
   await popup.close();
   await panel.close();
 
+  // at the end, only the person's three clicks, and every listing as they left it: none deleted, the other Wagoneer untouched
+  assert.deepEqual(await listingActions(), ['save 515151', 'sold 434343', 'sold 424242'], "only the person's clicks, nothing later");
+  assert.deepEqual(await listingState(), {
+    ...INITIAL_LISTINGS,
+    424242: { ...INITIAL_LISTINGS[424242], sold: true },
+    434343: { ...INITIAL_LISTINGS[434343], sold: true },
+    515151: { ...INITIAL_LISTINGS[515151], price: 36883 },
+  });
   assert.deepEqual(errors, [], 'no console errors');
   console.log('Upkeep E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {

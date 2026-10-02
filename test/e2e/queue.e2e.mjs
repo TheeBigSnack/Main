@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -60,6 +60,9 @@ const watch = (p) => {
 // mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
 const publishCount = async (p) => {
   assert.deepEqual(await (await p.request.get(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  // nor did anything mark a listing sold, delete one or save an edit: Facebook lands on a listing page after Publish
+  assert.deepEqual(await (await p.request.get(`${marketOrigin}/listing-actions`)).json(), [], 'nothing may mark sold, delete or update a listing but the person');
+  assert.deepEqual(await (await p.request.get(`${marketOrigin}/listing-state`)).json(), INITIAL_LISTINGS, 'every listing is as it was');
   return (await p.request.get(`${marketOrigin}/publish-count`)).text();
 };
 const RAM = '1C6RR7FT0KS643289';
@@ -259,6 +262,7 @@ try {
   await popup.close();
   await panel.close();
 
+  assert.equal(await publishCount(dealer), '1', 'still only the person\'s one click, and no listing marked sold, deleted or edited since');
   assert.deepEqual(errors, [], 'no console errors');
   console.log('Queue E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {

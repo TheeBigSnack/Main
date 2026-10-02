@@ -695,3 +695,45 @@ test('the background worker and every Facebook file but the fill code never touc
     "export function done(b) { b.focus(); }",
   ]) assert.ok(ACTS_ON_A_PAGE.test(code), code);
 });
+
+// The e2e mock Marketplace's listing pages carry the real Mark as sold,
+// Delete and Update buttons, and Facebook lands on a listing page after
+// Publish. The mock logs every post of those forms, whatever listing it
+// names, and every flow that publishes or does upkeep checks the log: empty
+// for the create flows (with every listing as it was), exactly the test's
+// own clicks for upkeep.
+test('the mock Marketplace logs every Mark as sold, Delete and Update, and the flows check the log', async () => {
+  const { startMockMarketplace, INITIAL_LISTINGS } = await import('./e2e/mock-marketplace.mjs');
+  const server = await startMockMarketplace();
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const json = async (path) => (await fetch(base + path)).json();
+    assert.deepEqual(await json('/listing-actions'), []);
+    assert.deepEqual(await json('/listing-state'), INITIAL_LISTINGS);
+    const post = (path, body) => fetch(base + path, { method: 'POST', body, redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+    await post('/marketplace/item/424242/delete');
+    await post('/marketplace/edit/515151/save', 'price=30000');
+    await post('/marketplace/item/434343/sold');
+    await post('/marketplace/item/999999/sold'); // a listing the mock doesn't have is logged too
+    assert.deepEqual(await json('/listing-actions'), ['delete 424242', 'save 515151', 'sold 434343', 'sold 999999']);
+    assert.deepEqual(await json('/listing-state'), {
+      ...INITIAL_LISTINGS,
+      424242: { ...INITIAL_LISTINGS[424242], deleted: true },
+      434343: { ...INITIAL_LISTINGS[434343], sold: true },
+      515151: { ...INITIAL_LISTINGS[515151], price: 30000 },
+    });
+  } finally {
+    server.close();
+  }
+  const flow = (name) => readFileSync(new URL(`./e2e/${name}.e2e.mjs`, import.meta.url), 'utf8');
+  for (const name of ['post', 'queue', 'panel', 'standard']) {
+    const src = flow(name);
+    assert.match(src, /\/listing-actions`\)\)\.json\(\), \[\], 'nothing may mark sold, delete or update a listing but the person'\);/, `${name}: the log stays empty`);
+    assert.match(src, /\/listing-state`\)\)\.json\(\), INITIAL_LISTINGS, 'every listing is as it was'\);/, `${name}: every listing as it was`);
+    const end = src.slice(src.lastIndexOf("assert.deepEqual(errors, [], 'no console errors');") - 300);
+    assert.match(end, /await publishCount\(\w*\)/, `${name}: the log is checked again at the end, after any late click`);
+  }
+  const upkeep = flow('upkeep');
+  assert.match(upkeep, /listingActions\(\), \[\], 'the box is filled and nothing is saved: Update waits for the person'\);\s*assert\.deepEqual\(await listingState\(\), INITIAL_LISTINGS\);\s*await listing\.click\('#update'\); \/\/ the person saves/);
+  assert.match(upkeep, /listingActions\(\), \['save 515151', 'sold 434343', 'sold 424242'\], "only the person's clicks, nothing later"\);/);
+});
