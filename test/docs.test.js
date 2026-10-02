@@ -1100,3 +1100,22 @@ test('the setup guides say production already has its database and all four func
   ];
   for (const [rel, re] of stale) assert.doesNotMatch(read(rel), re, `${rel} still writes a deploy that is done as one to come`);
 });
+
+// docs/release.md sent the owner to the manager view for the form fields that
+// could not be filled after a release, but those records never leave the
+// salesperson's browser (src/sync.js sends the pilot's posts and flags only;
+// no table has a field column). While that holds, the release guide sends the
+// owner to each person's Numbers tab, and no guide line that names the
+// manager view and the unfilled fields leaves out that they stay in the browser.
+test('the guides keep the fields that could not be filled in each browser, out of the manager view', () => {
+  assert.match(read('../extension/src/sync.js'), /pilot: \{ posts, flags \}/, 'the sync payload changed: if it now sends the fill records, these texts must change with it');
+  const bullet = doc('release.md').split('\n').find((l) => l.startsWith('- **Fields that could not be filled.**')) || '';
+  assert.match(bullet, /not synced/, 'docs/release.md does not say the fields that could not be filled stay in each browser');
+  assert.match(bullet, /\*\*Copy summary\*\*/, 'docs/release.md does not say how the owner gets the fields that could not be filled from each salesperson');
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  for (const rel of ['../README.md', '../PILOT.md', '../supabase/README.md', ...md('docs')]) {
+    for (const line of read(rel).split('\n').filter((l) => /manager view/i.test(l) && /could not be filled|couldn't fill|could not fill/i.test(l))) {
+      assert.match(line, /\bstays? (in (the|that|this) browser|here)\b|never leaves?\b[^.]*\bbrowsers?\b|not synced|not in the database/i, `${rel}: "${line.trim().slice(0, 120)}" puts the fields that could not be filled in the manager view`);
+    }
+  }
+});
