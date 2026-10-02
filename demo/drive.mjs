@@ -2,7 +2,8 @@
 // Chromium, and checks every step: scan, Post, the side panel's re-check and
 // description, the sample Marketplace form filling itself, the person's own
 // click on Publish (this script stands in for the person; the extension never
-// clicks it, and the sample Marketplace counts the clicks to prove it),
+// clicks it, and the sample Marketplace counts the clicks on Publish, Update,
+// Mark as sold and Delete, each checked before and after the person's own),
 // confirm, My listings, the Numbers tab, a queue of two, day 2 on the website,
 // the rescan's To do items, the price update and the take-down through the
 // side panel, the background rescan, and Reset. Then a second pass over the
@@ -66,6 +67,9 @@ async function openPopup() {
   await page.locator('#popupHost').waitFor({ state: 'visible' });
 }
 const publishClicks = () => page.evaluate(() => Number(sessionStorage.getItem('lotSyncSandbox.publishClicks') || 0));
+// every button only a person clicks on the sample Marketplace, as counted there (demo/marketplace/marketplace.js)
+const clicks = () => page.evaluate(() => Object.fromEntries(['publish', 'update', 'markSold', 'delete'].map((k) => [k, Number(sessionStorage.getItem(`lotSyncSandbox.${k}Clicks`) || 0)])));
+const storedListing = (vin) => page.evaluate((v) => Object.values(JSON.parse(sessionStorage.getItem('lotSyncSandbox.listings') || '{}')).find((l) => l.vin === v), vin);
 const badge = () => page.locator('#badge').evaluate((el) => (el.hidden ? '' : el.textContent));
 const text = (loc) => loc.textContent();
 
@@ -260,12 +264,14 @@ try {
   await panel.locator('#priceFilled').waitFor({ timeout: 20000 });
   await page.waitForFunction(() => { const f = document.querySelector('iframe[data-tab-id="5"]'); const box = f && f.contentWindow.document.getElementById('price'); return box && box.value === '18995'; }, null, { timeout: 10000 });
   await shot(page, 'drive-11-price-filled.png');
+  // the box is filled and nothing is saved: Update waits for the person
+  assert.deepEqual(await clicks(), { publish: 2, update: 0, markSold: 0, delete: 0 }, 'the extension clicked nothing on the listing');
+  assert.equal((await storedListing(CIVIC)).price, 19995, 'the listing keeps its old price until the person clicks Update');
   await tab(5).locator('#update').click(); // the person saves
   await panel.locator('#upkeepDone').waitFor({ timeout: 20000 });
   assert.match(await text(panel.locator('#upkeepDone')), /now shows \$18,995/);
-  const listings = await page.evaluate(() => JSON.parse(sessionStorage.getItem('lotSyncSandbox.listings') || '{}'));
-  const civicListing = Object.values(listings).find((l) => l.vin === CIVIC);
-  assert.equal(civicListing.price, 18995, 'the sample listing holds the new price');
+  assert.equal((await storedListing(CIVIC)).price, 18995, 'the sample listing holds the new price');
+  assert.deepEqual(await clicks(), { publish: 2, update: 1, markSold: 0, delete: 0 }, "one click on Update, the person's");
   await panel.locator('#upkeepClose').click();
   await openPopup();
   assert.equal(await text(popupTab('todo').locator('.count')), '1');
@@ -281,9 +287,12 @@ try {
   assert.match(sold.url(), /item\.html\?id=\d+$/);
   await page.waitForTimeout(3500); // "Sold" in a tab, a button and the prose must not count
   assert.equal(await panel.locator('#takeDownWaiting').count(), 1, 'still waiting for the person');
+  assert.deepEqual(await clicks(), { publish: 2, update: 1, markSold: 0, delete: 0 }, 'the extension clicked neither Mark as sold nor Delete');
+  assert.equal((await storedListing(F150)).sold, false);
   await tab(6).locator('text=Mark as sold').click(); // the person
   await panel.locator('#upkeepDone').waitFor({ timeout: 20000 });
   assert.match(await text(panel.locator('#upkeepDone')), /sold or removed/);
+  assert.deepEqual(await clicks(), { publish: 2, update: 1, markSold: 1, delete: 0 }, "one click on Mark as sold, the person's");
   await shot(page, 'drive-12-sold.png');
   await panel.locator('#upkeepClose').click();
   await openPopup();
@@ -302,6 +311,8 @@ try {
   await page.locator('#rescanStatus').filter({ hasText: /Background rescan done/ }).waitFor({ timeout: 20000 });
   assert.match(await text(page.locator('#rescanStatus')), /8 used cars read, 0 to-do items/);
   assert.equal(await publishClicks(), 2, 'still only the person\'s two clicks');
+  assert.deepEqual(await clicks(), { publish: 2, update: 1, markSold: 1, delete: 0 }, "still only the person's clicks");
+  assert.deepEqual([(await storedListing(F150)).deleted, (await storedListing(CIVIC)).sold, (await storedListing(CIVIC)).deleted], [false, false, false], 'nothing else changed on the sample listings');
 
   // ---- 11. Reset: everything back to the start ----
   await page.click('#reset');
@@ -310,6 +321,7 @@ try {
   assert.equal(await text(popup.locator('#scan')), 'Scan website');
   assert.match(await text(popup.locator('.panel')), /click Scan website/);
   assert.equal(await publishClicks(), 0);
+  assert.deepEqual(await clicks(), { publish: 0, update: 0, markSold: 0, delete: 0 }, 'Reset clears every count');
   assert.match(await text(page.locator('#scenario')), /day 1/);
   await shot(page, 'drive-14-reset.png');
 
@@ -429,6 +441,7 @@ try {
   await page.locator('#rescanStatus').filter({ hasText: /Background rescan done/ }).waitFor({ timeout: 30000 });
   assert.match(await text(page.locator('#rescanStatus')), new RegExp(`${trailerKept ? 10 : 9} used cars read, 2 to-do items`));
   assert.equal(await publishClicks(), 1, "still only the person's one click");
+  assert.deepEqual(await clicks(), { publish: 1, update: 0, markSold: 0, delete: 0 }, "still only the person's one click");
 
   // ---- 17. Reset keeps the chosen website; switching back starts over on the first one ----
   await page.click('#reset');

@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="marketplace.css" />
 </head>
 <body>
-  <!-- The edit form: a Price box and an Update button. Lot Current fills the box; a person clicks Update. -->
+  <!-- The edit form: a Price box and an Update button. Lot Current fills the box; a person clicks Update (marketplace.js counts it). -->
   <div class="sample">Sample Marketplace edit form for the Lot Current sandbox. This is not Facebook.</div>
   <header class="mp"><div class="logo">Sample Marketplace</div><nav><a href="selling.html">Your listings</a><a href="create.html">Create listing</a></nav></header>
   <main id="main"></main>
@@ -31,6 +31,7 @@
         </form>`;
       document.getElementById('form').addEventListener('submit', (e) => {
         e.preventDefault();
+        mp.noteClick('update');
         const price = Number(String(document.getElementById('price').value).replace(/\D/g, ''));
         const description = e.target.elements.description.value;
         mp.update(id, price > 0 ? { price, description } : { description });
