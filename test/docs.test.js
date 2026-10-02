@@ -763,3 +763,30 @@ test('while the committed account config names a project, no text says the shipp
   assert.doesNotMatch(support, /Until then nothing leaves your browser/, 'the support page says nothing leaves the browser while every build offers sign-in');
   assert.match(support, /sends nothing to Lot Current's database until you ask for a sign-in code/, 'the support page does not say when the extension first sends to Lot Current\'s database');
 });
+
+// review: README said each salesperson's scans, settings and posted list are
+// "kept only in their own browser", two lines under the Account bullet that
+// says the posted list syncs. The profile always goes to Chrome's synced
+// storage (src/settings.js saveProfile), and while the person is signed in
+// their posted list, post timings, to-do items and scan counts sync to the
+// dealership's account (src/sync.js). No text a person reads says the data
+// stays in the browser alone, and the ones that say where it is kept name
+// both, and the button that removes the synced profile.
+test('no text says the data stays only in the browser: the profile follows the Chrome sign-in, and a signed-in person\'s posted list and numbers sync', () => {
+  const settingsSrc = read('../extension/src/settings.js');
+  assert.match(settingsSrc.slice(settingsSrc.indexOf('export async function saveProfile(')), /chrome\.storage\.sync/, 'the profile is no longer kept in Chrome sync: say where it is in these texts and in this test');
+  const LOCAL_ONLY = /\b(?:kept|stays?|stored|held) only (?:in|on) (?:your|their|the) (?:own )?(?:browser|computer)|nothing (?:leaves|goes beyond) (?:your|their|the) browser/i;
+  for (const rel of ['../README.md', '../PILOT.md', '../docs/help.md', '../docs/support.md', '../docs/data-inventory.md', '../legal/privacy-policy.md', '../legal/chrome-web-store-privacy.md', '../site-src/pages/support.html', '../site-src/pages/faq.html', '../site-src/pages/home.html', '../marketing/onboarding-emails.md', '../marketing/onboarding-store.md', '../store/listing.md']) {
+    const hit = read(rel).match(LOCAL_ONLY);
+    assert.equal(hit && hit[0], null, `${rel} says "${hit && hit[0]}", but the profile follows the Chrome sign-in${accountsConfigured() ? " and a signed-in person's posted list and numbers sync to the dealership's account" : ''}`);
+  }
+  const line = read('../README.md').split('\n').find((l) => l.startsWith("Each salesperson's scans, settings and posted list are kept in their own browser, separately per website."));
+  assert.ok(line, "README no longer says where each salesperson's scans, settings and posted list are kept");
+  assert.match(line, /the profile \(above\) is in Chrome's synced storage, so it follows their Chrome sign-in/, "README's storage line does not say the profile follows the Chrome sign-in");
+  if (accountsConfigured()) {
+    assert.match(line, /while they are signed in to a Lot Current account their posted list, post timings, to-do items and each scan's counts also sync to the dealership's account/, "README's storage line does not say what syncs to the dealership's account");
+  }
+  // Clear everything for this website does not reach the synced profile (legal/privacy-policy.md, Retention)
+  const support = read('../site-src/pages/support.html').split('\n').filter((l) => /stays in your browser/.test(l));
+  for (const l of support) assert.match(l, /<b>Clear everything for this website<\/b> removes it\. Your profile \([^)]*closing line[^)]*\) is also kept by Chrome's sync under your Google account, and Settings, <b>Forget my synced profile<\/b> removes it\./, 'the support page says Clear everything removes what the extension keeps, but the synced profile needs Forget my synced profile');
+});
