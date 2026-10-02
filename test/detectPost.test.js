@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyUrl, onCreatePage, isNewListingFromForm, showsPostedCar, watchForListing, listingLink } from '../extension/facebook/detectPost.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
+import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
+import { readListingInPage } from '../extension/facebook/fillForm.js';
 
 test('a listing address means it posted; the "your listings" page probably does; anything else is nothing', () => {
   assert.deepEqual(classifyUrl('https://www.facebook.com/marketplace/item/1234567890/', FORM_MAP), { status: 'listing', url: 'https://www.facebook.com/marketplace/item/1234567890/', id: '1234567890' });
@@ -131,12 +133,14 @@ test('the create page is the map\'s create address, with any query; a queue reco
 // straight from the form to a listing, of another car. A queue records the
 // post by itself only when the listing page shows the car just published
 // (what readListingInPage saw, asked for the listing's id and this car's
-// name, VIN and filled price).
+// name, VIN and filled price), and never when the create form is still on
+// the page.
 test('a queue takes a listing page as the post only when it shows the car just published', () => {
-  const page = { matchesId: true, sold: false, unavailable: false, matchesVin: false, matchesName: false, matchesPrice: false };
-  // this car's VIN on the page: yes, whatever else
-  assert.equal(showsPostedCar({ ...page, matchesVin: true }, { namesakes: 2 }), true);
-  assert.equal(showsPostedCar({ ...page, matchesVin: true }), true, 'namesakes unknown');
+  const page = { matchesId: true, sold: false, unavailable: false, matchesVin: false, vinInText: false, formOnPage: false, hasPriceBox: false, matchesName: false, matchesPrice: false };
+  // this car's VIN in the page's text: yes, whatever else
+  const vin = { ...page, matchesVin: true, vinInText: true };
+  assert.equal(showsPostedCar(vin, { namesakes: 2 }), true);
+  assert.equal(showsPostedCar(vin), true, 'namesakes unknown');
   // its name and price, with no other posted car of that name: yes; with one, or unknown: the VIN is needed
   const namePrice = { ...page, matchesName: true, matchesPrice: true };
   assert.equal(showsPostedCar(namePrice, { namesakes: 0 }), true);
@@ -148,9 +152,94 @@ test('a queue takes a listing page as the post only when it shows the car just p
   assert.equal(showsPostedCar({ ...page, matchesPrice: true }, { namesakes: 0 }), false);
   // another car's listing opened from a notification
   assert.equal(showsPostedCar(page, { namesakes: 0 }), false);
-  // not that listing's address any more (the tab moved on, or the page is still the form), sold, gone, or nothing read
-  assert.equal(showsPostedCar({ ...page, matchesVin: true, matchesId: false }, { namesakes: 0 }), false);
-  assert.equal(showsPostedCar({ ...page, matchesVin: true, sold: true }, { namesakes: 0 }), false);
-  assert.equal(showsPostedCar({ ...page, matchesVin: true, unavailable: true }, { namesakes: 0 }), false);
+  // not that listing's address any more (the tab moved on), sold, gone, or nothing read
+  assert.equal(showsPostedCar({ ...vin, matchesId: false }, { namesakes: 0 }), false);
+  assert.equal(showsPostedCar({ ...vin, sold: true }, { namesakes: 0 }), false);
+  assert.equal(showsPostedCar({ ...vin, unavailable: true }, { namesakes: 0 }), false);
   for (const nothing of [null, undefined]) assert.equal(showsPostedCar(nothing, { namesakes: 0 }), false);
+  // the create form still on the page (its boxes, its Price box), or a reader that does not say: never, whatever it carries
+  for (const form of [{ formOnPage: true }, { hasPriceBox: true }, { formOnPage: undefined }]) {
+    assert.equal(showsPostedCar({ ...vin, matchesName: true, matchesPrice: true, ...form }, { namesakes: 0 }), false, JSON.stringify(form));
+  }
+  // the VIN only in a box (the form's description), not in the page's text: not by the VIN
+  assert.equal(showsPostedCar({ ...page, matchesVin: true }, { namesakes: 2 }), false);
+});
+
+// fillForm.js's own readListingInPage on small stand-in pages (Facebook's
+// real pages are not verified; these only stand in for the shapes the
+// reader looks at): text nodes in a plain block or a dialog, and boxes with
+// their labels.
+function readPage({ url, title = 'Marketplace', texts = [], dialog = [], boxes = [] }, expect) {
+  const el = (tag, attrs = {}, parent = null) => ({
+    tagName: tag.toUpperCase(), attrs, parentElement: parent, isConnected: true, id: '', value: attrs.value || '',
+    getAttribute(n) { return this.attrs[n] ?? null; },
+    checkVisibility() { return true; },
+    getBoundingClientRect() { return { width: 100, height: 20 }; },
+    closest(sel) {
+      for (let n = this; n; n = n.parentElement) {
+        if (sel === 'label' ? n.tagName === 'LABEL' : (n.attrs.role === 'dialog' || ['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT'].includes(n.tagName))) return n;
+      }
+      return null;
+    },
+  });
+  const body = el('body');
+  const block = el('div', {}, body);
+  const over = el('div', { role: 'dialog' }, body);
+  const nodes = [...texts.map((t) => [t, block]), ...dialog.map((t) => [t, over])];
+  const inputs = boxes.map((b) => el(b.tag || 'input', { 'aria-label': b.label, value: b.value }, block));
+  const saved = { location: globalThis.location, document: globalThis.document, NodeFilter: globalThis.NodeFilter };
+  globalThis.location = { href: url };
+  globalThis.NodeFilter = { SHOW_TEXT: 4 };
+  globalThis.document = {
+    title, body,
+    getElementById: () => null,
+    createTreeWalker: () => { let i = -1; return { nextNode: () => { i += 1; return i < nodes.length ? { nodeValue: nodes[i][0], parentElement: nodes[i][1] } : null; } }; },
+    querySelectorAll: () => inputs,
+  };
+  try {
+    return readListingInPage(FORM_MAP, LISTING_SIGNS, expect);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+}
+
+// The address already names another listing (616161) while the create form
+// is still drawn: a client-side page change that has not redrawn yet, or a
+// listing opened as a dialog over the form. The form's boxes and its preview
+// carry this car's VIN, name and price; the dialog shows the other car, and
+// its text is skipped. Never taken for this car's new listing. The listing
+// itself, a published page with its description as text, is.
+test('the create form still drawn under another listing\'s address is never taken for the car\'s new listing', () => {
+  const VIN = '1C4SJVDT7NS142834';
+  const NAME = '2022 Jeep Wagoneer Series III';
+  const expect = { id: '616161', name: NAME, prices: [38383], vin: VIN };
+  const url = 'https://www.facebook.com/marketplace/item/616161/';
+  const overForm = readPage({
+    url,
+    texts: ['Vehicle for sale', 'Preview', NAME, '$38,383', `Offered by the dealership. VIN ${VIN}`],
+    boxes: [{ label: 'Price', value: '$38,383' }, { label: 'Description', tag: 'textarea', value: `Offered by the dealership. VIN ${VIN}` }, { label: 'VIN', value: VIN }],
+    dialog: ['2022 Jeep Wagoneer Series II', '$41,500', 'Listed by someone else'],
+  }, expect);
+  assert.deepEqual([overForm.matchesId, overForm.matchesVin, overForm.matchesName, overForm.matchesPrice], [true, true, true, true], 'the form carries this car everywhere');
+  assert.deepEqual([overForm.formOnPage, overForm.hasPriceBox], [true, true]);
+  assert.equal(showsPostedCar(overForm, { namesakes: 0 }), false, 'the form is not the listing');
+  // the form with its Price box hidden or gone but its Description box still there: the form all the same
+  const halfDrawn = readPage({ url, texts: [NAME, '$38,383'], boxes: [{ label: 'Description', tag: 'textarea', value: `VIN ${VIN}` }] }, expect);
+  assert.deepEqual([halfDrawn.formOnPage, halfDrawn.hasPriceBox, halfDrawn.vinInText, showsPostedCar(halfDrawn, { namesakes: 0 })], [true, false, false, false]);
+
+  // the new listing, published: its description as text, a box to message the seller at most
+  const listing = readPage({
+    url: 'https://www.facebook.com/marketplace/item/515151/',
+    title: `${NAME} | Marketplace`,
+    texts: [NAME, '$38,383', 'Listed a minute ago', `Offered by the dealership. VIN ${VIN}`],
+    boxes: [{ label: 'Send seller a message', tag: 'textarea', value: 'Hi, is this available?' }],
+  }, { ...expect, id: '515151' });
+  assert.deepEqual([listing.formOnPage, listing.vinInText], [false, true]);
+  assert.equal(showsPostedCar(listing, { namesakes: 3 }), true);
+  // another car's listing, published: not this car
+  const other = readPage({ url, texts: ['2022 Jeep Wagoneer Series II', '$41,500', 'VIN 1C4SJVBT0NS000616'] }, expect);
+  assert.deepEqual([other.formOnPage, other.vinInText, showsPostedCar(other, { namesakes: 0 })], [false, false, false]);
+  // this car's VIN typed into a message box on another listing's page: a box, not the page's text
+  const typed = readPage({ url, texts: ['2022 Jeep Wagoneer Series II', '$41,500'], boxes: [{ label: 'Send seller a message', tag: 'textarea', value: `Is this like ${VIN}?` }] }, expect);
+  assert.deepEqual([typed.matchesVin, typed.vinInText, showsPostedCar(typed, { namesakes: 0 })], [true, false, false]);
 });

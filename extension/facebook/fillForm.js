@@ -753,6 +753,13 @@ export function fillPriceInPage(map, price) {
 // price it is listed at, or the new one), on the page or in the Price box,
 // and its VIN as a whole word (matchesVin), on the page or in one of the
 // page's boxes (the form's VIN box, the description, which carries it).
+// For the queue's check that a page is the listing just published, it also
+// says whether the VIN is in the page's static text (vinInText: a published
+// listing shows its description as text), and whether a visible box one of
+// the map's typed fields is found by is on the page (formOnPage: the create
+// or edit form, which a published listing page never has; the create form
+// still drawn under another listing's address carries the car in its boxes
+// and its preview).
 export function readListingInPage(map, signs, expect) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -820,7 +827,14 @@ export function readListingInPage(map, signs, expect) {
   // what tells two listings of the same name and price apart
   const vin = String(want.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const boxes = [...document.querySelectorAll('input:not([type="hidden"]), textarea, [role="textbox"]')].filter(visible).map((el) => String(el.value || text(el) || ''));
-  const matchesVin = vin.length >= 11 && new RegExp('(^|[^A-Z0-9])' + vin + '($|[^A-Z0-9])').test([document.title, body, ...boxes].join(' ').toUpperCase());
+  const vinRe = vin.length >= 11 ? new RegExp('(^|[^A-Z0-9])' + vin + '($|[^A-Z0-9])') : null;
+  const matchesVin = Boolean(vinRe) && vinRe.test([document.title, body, ...boxes].join(' ').toUpperCase());
+  const vinInText = Boolean(vinRe) && vinRe.test([document.title, body].join(' ').toUpperCase());
+  // the create or edit form: a visible box found by a typed field's name (VIN, Make, Model, Mileage, Price, Location, Description)
+  const fieldNames = (map.fields || []).filter((f) => f.kind === 'text' || f.kind === 'textarea' || f.kind === 'typeahead').flatMap((f) => f.name.map(re)).filter(Boolean);
+  const formOnPage = Boolean(box) || [...document.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"]), textarea, [role="textbox"], [role="combobox"]')]
+    .filter(visible)
+    .some((c) => { const n = accessibleName(c); return fieldNames.some((r) => r.test(n)); });
   return {
     url: location.href,
     title: document.title,
@@ -831,6 +845,8 @@ export function readListingInPage(map, signs, expect) {
     matchesName,
     matchesPrice,
     matchesVin,
+    vinInText,
+    formOnPage,
     hasPriceBox: Boolean(box),
     priceBoxValue,
   };

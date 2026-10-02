@@ -8,8 +8,9 @@
 // with it listed, and the test clicks Open the Marketplace form as the person
 // would. Its form tab then goes straight to another car's listing (as a
 // clicked notification would take it): nothing is recorded, the panel says
-// the page doesn't show this car, and the Listing link box stays empty. For
-// the second car the test presses
+// it couldn't confirm the page shows this car, and the Listing link box
+// stays empty, also once the panel is closed and opened again (it reads the
+// page again and never says it posted). For the second car the test presses
 // "Saved as draft" (as if the person used Facebook's Save draft), and the
 // queue finishes with 1 posted, 1 draft. Then the website drops the draft's
 // car $1,500: the draft's pill says so, and Mark posted records the price
@@ -201,8 +202,28 @@ try {
   // Before publishing, the person follows a link from the form page to another car's listing (a
   // Wagoneer Series II, VIN 1C4SJVBT0NS000616): the tab went straight from the form to a listing
   // not yet recorded, but the page doesn't show this car, so nothing is recorded and the panel asks.
+  // While the page is read, the panel says so, never "Looks like it posted", and offers no link.
+  const NOT_CONFIRMED = /couldn't confirm that it shows 2022 Jeep Wagoneer Series III/;
+  // what the panel shows, every 100 ms, until it has said it is reading the page and then that it
+  // couldn't confirm the page shows this car
+  const watchBanner = async () => {
+    const seen = [];
+    for (let i = 0; i < 400; i += 1) {
+      const now = await panel.evaluate(() => ({ banner: document.querySelector('#detected')?.textContent || '', box: document.querySelector('#listingUrl')?.value ?? null }));
+      seen.push(now);
+      const read = seen.findIndex((v) => /is reading it \(only reading\)/.test(v.banner));
+      if (read >= 0 && seen.slice(read).some((v) => /couldn't confirm/.test(v.banner))) return seen;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`the panel never read the page and said it couldn't confirm it: ${JSON.stringify(seen.slice(-3))}`);
+  };
   await fb2.goto(`${marketOrigin}/marketplace/item/616161/`);
-  await panel.waitForFunction(() => /doesn't show 2022 Jeep Wagoneer Series III/.test(document.querySelector('#detected')?.textContent || ''), null, { timeout: 30000 });
+  const firstLook = await watchBanner();
+  for (const v of firstLook) {
+    assert.doesNotMatch(v.banner, /Looks like it posted/, 'never said to have posted');
+    assert.ok(!v.box, `no link offered while the page is read (${JSON.stringify(v)})`);
+  }
+  assert.match(await panel.textContent('#detected'), NOT_CONFIRMED);
   assert.match(await panel.textContent('#detected'), /\(its VIN, or its name at \$38,383\), so the queue did not record it by itself/);
   assert.match(await panel.textContent('#queueBar'), /Car 2 of 2/);
   assert.match(await panel.textContent('#queueBar'), /1 posted/);
@@ -210,6 +231,17 @@ try {
   const posted2 = await panel.evaluate(async (o) => (await chrome.storage.local.get(`posted:${o}`))[`posted:${o}`], origin);
   assert.deepEqual(Object.keys(posted2), [RAM], 'the Wagoneer is not recorded as posted');
   await panel.screenshot({ path: join(shots, 'queue-2c-not-this-car.png'), fullPage: true });
+  // The panel is closed and opened again with the tab still on that listing: it reads the page
+  // again, and at no point says it posted or offers that listing's address as this car's link.
+  await panel.reload();
+  const again = await watchBanner();
+  for (const v of again) {
+    assert.doesNotMatch(v.banner, /Looks like it posted/, 'reopened: never said to have posted');
+    assert.ok(!v.box, `reopened: no link offered (${JSON.stringify(v)})`);
+  }
+  assert.match(await panel.textContent('#detected'), NOT_CONFIRMED);
+  assert.equal(await panel.inputValue('#listingUrl'), '');
+  assert.deepEqual(Object.keys(await panel.evaluate(async (o) => (await chrome.storage.local.get(`posted:${o}`))[`posted:${o}`], origin)), [RAM]);
 
   // ---- 4. Car 2 is saved as a draft on Facebook (the person's choice), not published ----
   await panel.click('#savedDraft');

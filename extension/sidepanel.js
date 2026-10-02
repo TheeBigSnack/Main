@@ -1068,44 +1068,56 @@ function startWatcher() {
   if (watcher) watcher.cancel();
   watcher = watchForListing({ tabId: state.fbTabId, listingUrlPattern: state.map.listingUrlPattern, afterPublishPatterns: state.map.afterPublishPatterns, createUrl: state.map.createUrl });
   watcher.promise.then((r) => {
-    if (state.step !== 'publish') return;
+    if (state.step !== 'publish') return undefined;
     if (r.status === 'listing' || r.status === 'probably' || r.status === 'closed') {
-      state.detected = r;
       const own = postsWindow();
+      // In a queue, a listing page is read before the panel says anything
+      // about it (confirmIfThisCar): until then it says it is checking, with
+      // the Listing link box empty. The form's tab moving straight from the
+      // form to a new listing that shows this car means the person clicked
+      // Publish: the post is recorded and the next car loads. Any other
+      // listing address in that tab (one browsed to, or one it already
+      // showed when the panel came back) waits for the person's click. A
+      // panel in a second window reads and shows it, but never records it:
+      // two panels that both recorded the post would record it twice.
+      if (state.queueMode && r.status === 'listing') {
+        state.detected = { ...r, checking: true };
+        render();
+        return confirmIfThisCar(state.detected, own && isNewListingFromForm(r, state.posted, state.map));
+      }
+      state.detected = r;
       render();
       if (own) saveFlow(); // the saved post is its own panel's: a second window's late write could land over the next car's
-      // In a queue, the form's tab moving straight from the form to a new
-      // listing that shows this car means the person clicked Publish: record
-      // it and load the next car (confirmIfThisCar). Any other listing address
-      // in that tab (one browsed to, or one it already showed when the panel
-      // came back) waits for the person's click. A panel in a second window
-      // only shows it: two panels that both recorded the post would record it
-      // twice.
-      if (own && state.queueMode && isNewListingFromForm(r, state.posted, state.map)) return confirmIfThisCar(r);
     }
     return undefined;
   });
 }
 
-// The listing page a queue's form tab moved to straight from the form is
-// read (read-only) a few times while it loads, and the post is recorded by
-// itself only when the page is that listing and shows this car: its VIN, or,
-// when no other posted car has its name, its name and the price the form was
-// filled with (showsPostedCar). A notification or a link clicked on the form
-// page also goes straight to a listing, of another car: then the panel asks,
-// and that listing's address stays out of the Listing link box, so It's
-// posted never saves it as this car's link.
+// In a queue, the listing page the form's tab is on is read (read-only) a
+// few times while it loads. Only a page that is that listing and shows this
+// car (its VIN in the page's text, or, when no other posted car has its
+// name, its name and the price the form was filled with; never the form
+// itself: showsPostedCar) is shown as "Looks like it posted" with its address
+// in the Listing link box, and recorded by itself when `record` says the tab
+// came straight from the form to a new listing in the post's own panel. A
+// notification or a link clicked on the form page also goes straight to a
+// listing, of another car: then the panel says it could not confirm the page
+// shows this car and asks, and that listing's address stays out of the
+// Listing link box, so It's posted never saves it as this car's link. The
+// same holds when the panel is opened again or in a second window: the
+// watcher reports the listing again and it is read again.
 const VERIFY_READS = 6;
 const VERIFY_EVERY_MS = 1500;
-async function confirmIfThisCar(r) {
+async function confirmIfThisCar(d, record) {
   const run = flowRun;
   const { vin, vehicle, fbTabId } = state;
-  if (!vehicle) return undefined;
-  const still = () => run === flowRun && state.step === 'publish' && state.vin === vin && state.detected === r;
-  const price = typeof state.price === 'number' && state.price > 0 ? state.price : basisPrice(vehicle, state.settings.basis);
-  const expect = { id: r.id, name: vehicle.name, prices: typeof price === 'number' && price > 0 ? [price] : [], vin };
-  const namesakes = namesakesOf(state.posted, vin, vehicle.name);
-  for (let i = 0; i < VERIFY_READS; i += 1) {
+  const own = postsWindow();
+  const { checking, ...r } = d; // the listing as the watcher reported it
+  const still = () => run === flowRun && state.step === 'publish' && state.vin === vin && state.detected === d;
+  const price = typeof state.price === 'number' && state.price > 0 ? state.price : vehicle ? basisPrice(vehicle, state.settings.basis) : null;
+  const expect = { id: r.id, name: vehicle ? vehicle.name : '', prices: typeof price === 'number' && price > 0 ? [price] : [], vin };
+  const namesakes = vehicle ? namesakesOf(state.posted, vin, vehicle.name) : null;
+  for (let i = 0; vehicle && i < VERIFY_READS; i += 1) {
     if (i) await sleep(VERIFY_EVERY_MS);
     if (!still()) return undefined;
     let seen = null;
@@ -1116,12 +1128,29 @@ async function confirmIfThisCar(r) {
       seen = null; // the page is still loading, or the tab went where Lot Current may not read: read again
     }
     if (!still()) return undefined;
-    if (showsPostedCar(seen, { namesakes })) return confirmPosted();
+    if (showsPostedCar(seen, { namesakes })) {
+      state.detected = { ...r, verified: true };
+      if (record) return confirmPosted();
+      render();
+      if (own) await saveFlow();
+      return undefined;
+    }
   }
-  state.detected = { ...r, unverified: true, name: vehicle.name, price: expect.prices[0] || null };
+  if (!still()) return undefined;
+  state.detected = { ...r, unverified: true, name: expect.name, price: expect.prices[0] || null };
   render();
-  await saveFlow();
+  if (own) await saveFlow();
   return undefined;
+}
+
+// The listing address the panel offers as this car's link (in the Listing
+// link box, and for It's posted with nothing typed). In a queue, only a
+// listing page the panel read and saw this car on (verified); a single post
+// offers the listing address the tab went to, which the person sees there
+// and confirms.
+function offeredLink(d) {
+  if (!d || !d.url || d.unverified || d.checking) return '';
+  return state.queueMode && !d.verified ? '' : d.url;
 }
 
 // Records the post of the car on the form, once: the watcher and a click on
@@ -1146,8 +1175,7 @@ async function confirmPosted() {
   // Facebook often lands after Publish, would open the wrong page from To do
   // and in the manager's view. Another address typed in is not swapped for
   // what the tab showed: the post is recorded with no link, and the panel says so.
-  const shown = state.detected && !state.detected.unverified ? state.detected.url : ''; // an address the queue could not match to this car is never kept unless typed
-  const listingUrl = listingLink(typed || shown, state.map);
+  const listingUrl = listingLink(typed || offeredLink(state.detected), state.map); // an address the queue could not match to this car is never kept unless typed
   const linkNote = typed && !listingUrl
     ? `No listing link was saved for ${nameOf(vin)}: the address in Listing link isn't a Marketplace listing's own address (Your listings, say). Its To do items open Your listings, where you pick the listing.`
     : '';
@@ -1699,8 +1727,12 @@ function viewPublish() {
     : '';
   const d = state.detected;
   let detect = '';
+  const name = esc(d && d.name ? d.name : (state.vehicle && state.vehicle.name) || 'this car');
   if (d && d.unverified) {
-    detect = `<div class="banner warn" id="detected">The Facebook tab went from the form to a listing page that doesn't show ${esc(d.name || 'this car')} (its VIN, or its name${d.price ? ` at ${money(d.price)}` : ''}), so the queue did not record it by itself. If you clicked <b>Publish</b> and it posted, paste its listing link below if you have it and click <b>It's posted, next car</b>.</div>`;
+    detect = `<div class="banner warn" id="detected">The Facebook tab is on a listing page, and Lot Current couldn't confirm that it shows ${name} (its VIN, or its name${d.price ? ` at ${money(d.price)}` : ''}), so the queue did not record it by itself. If you clicked <b>Publish</b> and it posted, paste its listing link below if you have it and click <b>It's posted, next car</b>.</div>`;
+  } else if (d && d.status === 'listing' && state.queueMode && !d.verified) {
+    // being read (confirmIfThisCar), or brought back from before a read: the watcher reports it again and it is read again
+    detect = `<div class="banner info" id="detected">The Facebook tab is on a listing page. Lot Current is reading it (only reading) to see whether it shows ${name}…</div>`;
   } else if (d && (d.status === 'listing' || d.status === 'probably')) {
     detect = `<div class="banner good" id="detected">Looks like it posted${d.url ? '' : ' (the tab moved to Your listings)'}. Confirm below to record it.</div>`;
   } else if (d && d.status === 'closed') {
@@ -1728,7 +1760,7 @@ function viewPublish() {
     <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="attachAgain">${state.photos && (state.photos.attached || state.photos.again) ? 'Attach photos again' : 'Attach photos'}</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
   </section>
   <section>${detect}
-    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && !d.unverified && d.url) || '')}" placeholder="paste the listing's own address if you have it" /></label>
+    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc(offeredLink(d))}" placeholder="paste the listing's own address if you have it" /></label>
     <div class="actions">${outcome}</div>
   </section>`;
 }
