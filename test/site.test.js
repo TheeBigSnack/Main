@@ -541,3 +541,31 @@ test('the free pilot is offered for the salespeople named in the pilot agreement
   assert.match(pilot[1], /free, for the salespeople named in your pilot agreement/);
   assert.match(read('../marketing/sales-sheet.md'), /free, for the salespeople named in your pilot agreement/);
 });
+
+// review: the sales sheet said "Every 3 hours while Chrome is open, Lot Current re-reads your website", and its
+// lead, the pilot offer email, the demo pitch and the home page's lead said it "tells you the same day" when a car
+// sells, with no condition. Automatic rescans are opt-in (set-up offers Allow automatic rescans or Skip for now,
+// and background.js skips a website whose rescans are off), so a salesperson who skipped is flagged only when
+// they rescan by hand. Every sentence that promises the schedule or the same-day flag names the condition.
+test('every page and marketing text that promises the 3-hour rescan or the same-day flag says it needs automatic rescans allowed', () => {
+  const promise = /\bevery (?:3|three|few) hours\b|\b(?:tells?|flagged|flags?) (?:you |them )?the same day\b/i;
+  const condition = /\b(?:automatic )?rescans (?:allowed|on)\b|\bif you allow it\b|\bonly if you allow\b|\bwebsites? (?:the person|you) allow(?:ed)?\b/i;
+  const paragraphs = (rel) => (rel.endsWith('.md')
+    ? read(rel).split('\n')
+    : read(rel).replace(/<head>[\s\S]*?<\/head>/, ' ').split(/<\/(?:p|li|h[1-6]|figcaption|td|th|dd|dt|summary)>/i).map(stripTags));
+  const files = [
+    ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
+    ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+  ];
+  let promises = 0;
+  for (const rel of files) {
+    for (const para of paragraphs(rel).filter((t) => promise.test(t))) {
+      promises += 1;
+      assert.match(para, condition, `${rel.slice(3)}: "${para.trim().slice(0, 120)}..." promises the rescan without saying automatic rescans must be allowed`);
+    }
+  }
+  assert.ok(promises >= 8, `the texts still describe the rescan (${promises} found)`);
+  // the condition is real: background.js rescans only the websites whose rescans are on
+  assert.match(read('../extension/background.js'), /if \(!info\.auto\) continue;/, 'background.js no longer skips a website whose automatic rescans are off: these texts can drop the condition');
+});

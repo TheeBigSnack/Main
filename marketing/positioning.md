@@ -17,9 +17,9 @@ Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here i
 
 ## What Lot Current is
 
-A Chrome extension. It reads the dealership's own website inventory, lets only pre-owned cars through, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and re-reads the website every 3 hours to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
+A Chrome extension. It reads the dealership's own website inventory, lets only pre-owned cars through, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and, with automatic rescans allowed, re-reads the website every 3 hours while Chrome is open to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
 
-**One line:** Lot Current fills in the Marketplace listing from your website in seconds. You click Publish, and it tells you the same day when a car sells or its price changes.
+**One line:** Lot Current fills in the Marketplace listing from your website in seconds. You click Publish, and with automatic rescans on it tells you the same day when a car sells or its price changes.
 
 ## Why it is different (the angle: careful and accurate)
 
@@ -40,7 +40,7 @@ Other tools in this space list at roughly $39 to $1,299 a month as of September 
 Say:
 - "You click Publish. Lot Current never does." (True by construction: there is no code for it and a test that fails if any appears.)
 - "Only pre-owned cars, only at your store, only at the website price."
-- "Sold cars flagged the same day." (While Chrome is open, with rescans on; say that when asked.)
+- "With automatic rescans on, sold cars flagged the same day." (Rescans run every 3 hours while Chrome is open. Say the condition with the claim, not only when asked: a salesperson who skips the rescan permission is flagged only when they rescan by hand.)
 - "On Facebook's live form, with a real dealership's cars, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always". Never name the store or its results without its written permission, pilot agreement section 3.)
 - "Not affiliated with Meta Platforms, Inc."
 

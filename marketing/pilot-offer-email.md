@@ -8,7 +8,7 @@ Short, plain, one ask. Fill in the brackets. Send from your own name; attach not
 
 Hi [name],
 
-I've built a Chrome extension called Lot Current that fills in a Facebook Marketplace vehicle listing from your own website inventory in seconds: photos, price, VIN, description, the lot. The salesperson checks it and clicks Publish themselves, every time. Then it re-reads the website every few hours and tells them the same day when a car sells or the price changes, and opens the listing so they can fix it.
+I've built a Chrome extension called Lot Current that fills in a Facebook Marketplace vehicle listing from your own website inventory in seconds: photos, price, VIN, description, the lot. The salesperson checks it and clicks Publish themselves, every time. Then, with automatic rescans allowed, it re-reads the website every 3 hours while their Chrome is open, tells them the same day when a car sells or the price changes, and gives them a button that opens the listing so they can fix it.
 
 It only lets pre-owned cars at your store through, the price is always the website price, and every description names the dealership. It never clicks Publish and never asks for anyone's Facebook login. In the background it re-reads your website and, while a salesperson is signed in to a Lot Current account, sends the results (their posted list, post records, to-do items and the scan's counts) to your dealership's account; it never touches Facebook on its own.
 
