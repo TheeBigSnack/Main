@@ -537,9 +537,13 @@ test('the site never puts the form fields that could not be filled in the manage
 // pilot is for the salespeople named in the pilot agreement, and gives no headcount of its own.
 test('the free pilot is offered for the salespeople named in the pilot agreement, with no headcount of the copy\'s own', () => {
   const agreement = read('../legal/pilot-agreement.md');
-  assert.match(agreement, /^\| Number of designated salespeople \| \[ \] \|$/m, 'the pilot agreement now fixes how many salespeople a pilot has: say that number in the copy and change this test');
-  assert.match(agreement, /The salespeople are named at the signature block/, 'the agreement names the salespeople');
   const N = '(?:\\d+|two|three|four|five|six|seven|eight|nine|ten)';
+  // the row is a blank for the parties; a note beside the blank is fine, a number in it is a standard headcount
+  const row = agreement.match(/^\| Number of designated salespeople \|([^|\n]*)\|\s*$/m);
+  assert.ok(row, 'the pilot agreement has its Number of designated salespeople row');
+  assert.match(row[1], /^\s*\[ \]/, 'the pilot agreement no longer leaves the number of salespeople blank: say that number in the copy and change this test');
+  assert.doesNotMatch(row[1], new RegExp(`\\b(?:${N}|one|a dozen|up to|at least|at most)\\b`, 'i'), 'the pilot agreement now fixes how many salespeople a pilot has: say that number in the copy and change this test');
+  assert.match(agreement, /The salespeople are named at the signature block/, 'the agreement names the salespeople');
   const headcount = new RegExp(`\\bfor ${N}(?: or ${N})? (?:of your )?salespeople\\b|\\b${N} or ${N} (?:of your )?salespeople\\b|\\bwho the ${N}(?: or ${N})? salespeople\\b`, 'i');
   const files = [
     ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
