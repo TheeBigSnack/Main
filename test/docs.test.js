@@ -398,6 +398,22 @@ test('the help and the data inventory say which website the side panel\'s list o
   assert.match(written, /\*\*Website\*\* menu/, 'the lastPostOrigin row does not say the Website menu writes it');
 });
 
+// help.md's "When the website scan fails" kept naming only Dealer Inspire and
+// the standard-data reader after the DealerOn and Dealer.com readers shipped,
+// so a salesperson at such a store read that their website could not be
+// read. The bullet names every reader adapters/index.js lists, with the
+// sample-websites caveat while any of them is not checked on a real one.
+test('help.md\'s "not one Lot Current can read yet" bullet names every reader the extension has', () => {
+  const bullet = doc('help.md').split('\n').find((l) => l.startsWith('- The website is not one Lot Current can read yet.'));
+  assert.ok(bullet, 'help.md no longer explains a website Lot Current cannot read');
+  for (const a of ADAPTERS) {
+    const name = a.PLATFORM.name;
+    const said = /^Standard vehicle data\b/.test(name) ? /standard vehicle data/i : new RegExp(`\\b${escapeRe(name)}\\b`);
+    assert.match(bullet, said, `help.md's bullet does not name the ${name} reader`);
+  }
+  if (ADAPTERS.some((a) => a.PLATFORM.checkedLive !== true)) assert.match(bullet, /tested only on sample websites/, "help.md's bullet does not say which readers were tested only on sample websites");
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));
