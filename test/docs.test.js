@@ -752,4 +752,14 @@ test('while the committed account config names a project, no text says the shipp
   }
   assert.match(read('../docs/production-setup.md'), /\*\*From then on every build offers sign-in\.\*\*[^\n]*no build goes to a pilot tester before then/);
   assert.match(doc('launch-checklist.md'), /\*\*No tester build before sign-in works\.\*\*/);
+  // The Web Store answers and the support page say what is sent when the
+  // person signs in, not that sending waits for accounts to be set up: the
+  // build already offers sign-in, and asking for a code sends the email.
+  for (const rel of ['../legal/chrome-web-store-privacy.md', '../store/listing.md']) {
+    assert.doesNotMatch(read(rel), /once Lot Current accounts are set up/i, `${rel} still says the sign-in data waits for accounts to be set up`);
+    assert.match(read(rel), /when (?:the user signs|they sign) in to a Lot Current account, the email address/, `${rel} does not say the sign-in email is sent when the person signs in`);
+  }
+  const support = read('../site-src/pages/support.html');
+  assert.doesNotMatch(support, /Until then nothing leaves your browser/, 'the support page says nothing leaves the browser while every build offers sign-in');
+  assert.match(support, /sends nothing to Lot Current's database until you ask for a sign-in code/, 'the support page does not say when the extension first sends to Lot Current\'s database');
 });
