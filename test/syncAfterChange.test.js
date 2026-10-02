@@ -223,7 +223,7 @@ const ctx = { render() {}, map: () => ({}), onClose() {} };
 async function finishUpkeep(kind, local) {
   globalThis.chrome.storage.local = localArea(local);
   messages.length = 0;
-  Object.assign(up, { active: true, origin: ORIGIN, vin: VIN_A, kind, price: kind === 'price' ? 9500 : null, basis: null, listingUrl: '', name: 'Car A', listedPrice: 10000, tabId: null, status: 'waiting', note: '', error: '', fills: 0, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: ORIGIN, vin: VIN_A, kind, price: kind === 'price' ? 9500 : null, listingUrl: '', name: 'Car A', listedPrice: 10000, tabId: null, status: 'waiting', note: '', error: '', fills: 0, baseline: null, offTarget: false });
   assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
   assert.equal(up.status, 'done', up.error);
   return globalThis.chrome.storage.local;

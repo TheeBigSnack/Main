@@ -12,7 +12,7 @@
 // keeps it).
 
 import { performScan, rememberSite } from './src/scanRunner.js';
-import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeWarning } from './src/settings.js';
+import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { shortLocation, storeNames, matchStore } from './src/normalize.js';
@@ -20,7 +20,7 @@ import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
-import { stampBasis } from './src/rescan.js';
+import { withPostedBasis } from './src/rescan.js';
 import { updateKey, storageErrorText, isStorageFull, STORAGE_FULL } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
@@ -112,6 +112,18 @@ async function findDealerTab() {
 
 export const TAB_GONE = "Couldn't reach the dealership tab. Open the used inventory page, click the Lot Current icon and click Continue set-up.";
 
+// Listings posted before the price basis was kept on each one stay on the
+// basis in force until now when set-up changes it: the new setting is for
+// new posts, never a website price change (src/rescan.js withPostedBasis).
+// Stamped before the new basis is saved or read with, so no scan reads them
+// under the new one.
+async function keepPostedBasis(k, stored, nextBasis) {
+  if (!stored) return;
+  const before = withDefaults(stored).basis;
+  if (before === (nextBasis === 'beforeFees' ? 'beforeFees' : 'website')) return;
+  await updateKey(k.posted, (p) => withPostedBasis(p, before));
+}
+
 // What set-up starts from, read just before the first read of the website:
 // this website's own settings when it has them, kept as they are (the
 // dealer's cap, price basis and rescans, the rewrite key), else the person's
@@ -145,9 +157,19 @@ async function runScan(ctx) {
   wiz.error = '';
   ctx.render();
   const k = siteKeys(wiz.origin);
-  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate, k.settings]);
-  wiz.ownListings = Object.values(data[k.posted] || {}).filter((e) => e && typeof e === 'object' && e.mine !== false).length; // the Price step warns before a basis change moves them
-  if (!wiz.settings) await seedSettings(data[k.settings]);
+  const stored = (await chrome.storage.local.get(k.settings))[k.settings];
+  if (!wiz.settings) await seedSettings(stored);
+  // the basis this scan uses (the Price step's, once it has run), before the posted list is read for it
+  try {
+    await keepPostedBasis(k, stored, wiz.settings ? wiz.settings.basis : 'website');
+  } catch (e) {
+    wiz.busy = false;
+    wiz.error = storageErrorText(e); // not stamped: a read now would take the listings' old price for a website change
+    ctx.render();
+    return false;
+  }
+  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate]);
+  wiz.ownListings = Object.values(data[k.posted] || {}).filter((e) => e && typeof e === 'object' && e.mine !== false).length; // the Price step says a change is for new posts
   let r;
   try {
     const tabId = await findDealerTab();
@@ -281,7 +303,7 @@ export function wizardHtml() {
         ? `<label class="block"><input type="radio" name="wizBasis" value="website" ${s.basis !== 'beforeFees' ? 'checked' : ''} /> The website's main price${ex ? ` (e.g. ${money(ex.price)} "${esc(ex.priceLabel)}")` : ''}</label>
         <label class="block"><input type="radio" name="wizBasis" value="beforeFees" ${s.basis === 'beforeFees' ? 'checked' : ''} /> The lower second price the website shows${ex ? ` (e.g. ${money(ex.priceBeforeFees)}; usually the price before the doc fee)` : ''}</label>
         <p class="hint">Some states require the advertised price to include dealer fees. Check with your manager before choosing this. A car with no lower second price is posted at the main price, without the price note.</p>${wiz.ownListings ? `
-        <p class="hint" id="wizBasisWarning">${basisChangeWarning(wiz.ownListings)}</p>` : ''}`
+        <p class="hint" id="wizBasisNote">${basisChangeNote(wiz.ownListings)}</p>` : ''}`
         : `<p>Cars are posted at the website's main price; this website shows no lower second price to choose instead.</p>`;
       const gapNote = ex ? `<p class="hint">On this website the main price is usually ${money(pm.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>` : '';
       return `${progress}<h3>The price to post</h3>
@@ -367,12 +389,7 @@ async function finish(ctx) {
   const settings = withDefaults({ ...wiz.settings, autoRescan: wiz.granted, rulesReadAt: now, legal: legalHosted() && wiz.termsAccepted ? acceptLegal(now) : (wiz.settings && wiz.settings.legal) || undefined }, wiz.site || {});
   wiz.settings = settings;
   const k = siteKeys(wiz.origin);
-  // A price basis changed here from the one this website had: listings that
-  // record no basis were posted under the old one (src/rescan.js stampBasis),
-  // so the rescan below tells the change apart from a website price change.
-  const before = (await chrome.storage.local.get(k.settings))[k.settings];
-  const was = before ? withDefaults(before).basis : null;
-  if (was && was !== settings.basis) await updateKey(k.posted, (p) => stampBasis(p, was));
+  await keepPostedBasis(k, (await chrome.storage.local.get(k.settings))[k.settings], settings.basis);
   await chrome.storage.local.set({ [k.settings]: settings });
   await saveProfile(settings, undefined, wiz.origin);
   // the site registry must agree with the settings even if the final read below fails

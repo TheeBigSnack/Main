@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeWarning, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
+import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
@@ -124,15 +124,19 @@ test('the lower second price is a basis only on a website that shows one; withou
 });
 
 // Settings and set-up's Price step say the same before a change of basis:
-// how many listings the person has here, and that only those whose car
-// shows a lower second price move (a car with none is at the main price
-// under either choice).
-test('the warning before a change of Price to post counts the listings and says only those whose car shows a lower price move', () => {
-  assert.equal(basisChangeWarning(0), '');
-  assert.equal(basisChangeWarning(undefined), '');
-  assert.equal(basisChangeWarning(1), 'You have one posted listing on this website. If its car shows a lower second price, changing the price to post changes its price too: after the next rescan it is listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.');
-  assert.equal(basisChangeWarning(3), 'You have 3 posted listings on this website. Changing the price to post changes the price of each one whose car shows a lower second price: after the next rescan each of those is listed under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.');
-  assert.doesNotMatch(basisChangeWarning(3), /[<>&]/, 'plain text: the popup and the wizard put it in a paragraph as it is');
+// how many listings the person has here, and that the change is for new
+// posts while those listings keep the price they were posted at. Never a
+// price edit to make: the posting rules allow one only when the website
+// changes.
+test('the note before a change of Price to post counts the listings and says they keep the price they were posted at', () => {
+  assert.equal(basisChangeNote(0), '');
+  assert.equal(basisChangeNote(undefined), '');
+  assert.equal(basisChangeNote(1), 'You have one posted listing on this website. A change here is for new posts: that listing keeps the price it was posted at, and rescans keep checking it against the website on that price.');
+  assert.equal(basisChangeNote(3), 'You have 3 posted listings on this website. A change here is for new posts: those listings keep the price they were posted at, and rescans keep checking each one against the website on that price.');
+  for (const n of [1, 3]) {
+    assert.doesNotMatch(basisChangeNote(n), /[<>&]/, 'plain text: the popup and the wizard put it in a paragraph as it is');
+    assert.doesNotMatch(basisChangeNote(n), /edit|To do|Facebook may tell/i, 'never a price edit the website did not make');
+  }
 });
 
 test("the wizard's Price step model: the lower price only on a website that shows one, the gap's wording, and the example's prices only", () => {

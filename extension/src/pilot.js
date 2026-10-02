@@ -169,8 +169,7 @@ export function noteFlags(pilot, diff, { at } = {}) {
   const when = at || diff.takenAt || nowIso();
   const wanted = [];
   for (const t of Array.isArray(diff.takeDown) ? diff.takeDown : []) if (t && t.yours && t.vin) wanted.push({ vin: t.vin, kind: 'takeDown', name: clean(t.name, 80), why: clean(t.why, 40) });
-  // a price to post changed in Settings (why 'basis', src/rescan.js basisOnlyChange) is no website price change
-  for (const u of Array.isArray(diff.priceUpdates) ? diff.priceUpdates : []) if (u && u.yours && u.vin && u.why !== 'basis') wanted.push({ vin: u.vin, kind: 'price', name: clean(u.name, 80), from: u.from, to: u.to });
+  for (const u of Array.isArray(diff.priceUpdates) ? diff.priceUpdates : []) if (u && u.yours && u.vin) wanted.push({ vin: u.vin, kind: 'price', name: clean(u.name, 80), from: u.from, to: u.to });
   const reliable = !diff.unreliable && !(Array.isArray(diff.warnings) && diff.warnings.length);
   const unsettled = new Set((Array.isArray(diff.needsALook) ? diff.needsALook : []).filter((n) => n && n.yours && n.vin).map((n) => n.vin));
   const flags = p.flags.map((f) => {

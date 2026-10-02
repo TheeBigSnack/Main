@@ -149,15 +149,17 @@ export function priceStepModel(entries, basis = 'website') {
 }
 
 // Said before "Price to post" changes (Settings and set-up's Price step),
-// given how many of the person's own listings this website has. Only a
-// listing whose car shows a lower second price moves: a car with none is
-// posted at the main price under either choice. Plain text, no markup.
-export function basisChangeWarning(n) {
+// given how many of the person's own listings this website has: a change is
+// for new posts. A listing already posted keeps the price it was posted at
+// and is still checked against the website on that price (src/rescan.js
+// postedBasis), so the change never asks for a price edit: the posting rules
+// say a listing's price changes only when the website's does
+// (legal/posting-rules.md). Plain text, no markup.
+export function basisChangeNote(n) {
   if (!n) return '';
-  const lead = n === 1
-    ? 'You have one posted listing on this website. If its car shows a lower second price, changing the price to post changes its price too: after the next rescan it is listed'
-    : `You have ${n} posted listings on this website. Changing the price to post changes the price of each one whose car shows a lower second price: after the next rescan each of those is listed`;
-  return `${lead} under To do, "Price to post changed in Settings", for you to edit its price, and the price note in its description, on Facebook. Facebook may tell people who saved a car that its price changed.`;
+  return n === 1
+    ? 'You have one posted listing on this website. A change here is for new posts: that listing keeps the price it was posted at, and rescans keep checking it against the website on that price.'
+    : `You have ${n} posted listings on this website. A change here is for new posts: those listings keep the price they were posted at, and rescans keep checking each one against the website on that price.`;
 }
 
 export async function loadProfile(storage) {

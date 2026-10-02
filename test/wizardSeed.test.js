@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtures, fakeDealerPage, fakeChrome, vehicle, MY_STORE } from './helpers.js';
-import { wiz, wizardHtml, startWizard, handleWizardClick, TAB_GONE } from '../extension/wizard.js';
+import { wiz, wizardHtml, startWizard, handleWizardClick, handleWizardChange, TAB_GONE } from '../extension/wizard.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys, SITES_KEY } from '../extension/src/storageKeys.js';
@@ -209,6 +209,33 @@ test('on a website with no settings and no profile, set-up still starts from the
   assert.equal(s.autoRescan, false);
   assert.equal(s.salesperson.name, '');
   await handleWizardClick('wizQuit', ctx);
+});
+
+// Set-up's Price step is the same choice as Settings' "Price to post", and a
+// change there is for new posts too: a listing already posted keeps the price
+// it was posted at (stamped with the basis in force until now before the new
+// one is saved), so the final read lists no price edit the website did not
+// make. The posting rules allow one only when the website changes.
+test('a price to post changed at set-up\'s Price step is for new posts: a posted listing keeps its price and gets no price item', async () => {
+  const ram = vehicle('usedNormal');
+  const posted = { [ram.vin]: { name: ram.name, price: ram.priceBeforeFees, postedAt: '2026-09-28T15:00:00.000Z' } }; // posted at the lower price, before entries carried a basis
+  const { local } = browser({
+    local: { [k.settings]: structuredClone(STORED), [k.posted]: posted, [SITES_KEY]: { [ORIGIN]: { name: 'Example Motors', auto: true } } },
+    granted: [ORIGIN],
+  });
+  await start();
+  await nextUntil('price');
+  assert.match(html, /id="wizBasisNote">You have one posted listing on this website\. A change here is for new posts: that listing keeps the price it was posted at, and rescans keep checking it against the website on that price\.</);
+  handleWizardChange({ name: 'wizBasis', value: 'website' }); // the website's main price
+  ctx.render();
+  assert.equal(wiz.settings.basis, 'website');
+  await nextUntil('terms');
+  await handleWizardClick('wizFinish', ctx);
+  assert.equal(wiz.step, 'done', wiz.error);
+
+  assert.equal(local[k.settings].basis, 'website', 'new posts take the main price');
+  assert.deepEqual([local[k.posted][ram.vin].price, local[k.posted][ram.vin].basis], [ram.priceBeforeFees, 'beforeFees'], 'the listing keeps its price, recorded as posted at the lower price');
+  assert.deepEqual((local[k.diff].priceUpdates || []).filter((p) => p.vin === ram.vin), [], 'no raise the website did not make');
 });
 
 // ---------- a full storage ----------
