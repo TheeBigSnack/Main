@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { recheck, fetchVehicleDetails, fetchVehicleDetailsDirect, readCarForPost } from '../extension/src/vehicleDetails.js';
-import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, standardSite, standardCars, STANDARD_ORIGIN } from './helpers.js';
+import { probeSiteInPage } from '../extension/src/scan.js';
+import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, STANDARD_ORIGIN } from './helpers.js';
 
 test('the post-time re-check lets a ready car through and nothing else', () => {
   assert.equal(recheck(vehicle('usedNormal'), MY_STORE).ok, true);
@@ -217,4 +219,61 @@ test('readCarForPost: the tab when it shows the website, the direct read only wh
     const undefinedTab = await readCarForPost({ origin: DEALER, info: DI_INFO, vin: fixtures.usedNormal.vin, contains: async () => true });
     assert.equal(undefinedTab.via, 'direct');
   });
+});
+
+// A queue's start tab the salesperson has since moved to Facebook: nothing of
+// Lot Current's is injected into it and nothing of it is read (store/listing.md:
+// no other Facebook page is read), so the car is read the other way.
+function facebookPage(path = '/marketplace/inbox/') {
+  const document = {
+    title: 'Marketplace - Inbox | Facebook',
+    body: { innerText: 'Buyer: can I see it at 12 Oak Street, Springfield, OH 43215 tomorrow?' },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  return vm.createContext({ window: {}, document, location: { origin: 'https://www.facebook.com', hostname: 'www.facebook.com', href: 'https://www.facebook.com' + path }, URL });
+}
+
+test('a dealer tab that now shows a Facebook page has nothing injected into it: the post-time read goes on another way', async () => {
+  const injected = [];
+  const page = facebookPage();
+  const chrome = fakeChrome(page);
+  const inject = chrome.scripting.executeScript;
+  chrome.scripting.executeScript = async (opts) => { injected.push(opts.func.name); return inject(opts); };
+  globalThis.chrome = chrome;
+  const calls = [];
+  try {
+    await withFetch(serviceFetch(allRecords(), calls), async () => {
+      const r = await fetchVehicleDetails(7, fixtures.usedNormal.vin, { origin: DEALER });
+      assert.deepEqual([r.ok, r.tabUnusable], [false, true]);
+      assert.match(r.message, /now shows www\.facebook\.com, not example-dealer\.test/);
+      const read = await readCarForPost({ tabId: 7, origin: DEALER, info: DI_INFO, vin: fixtures.usedNormal.vin, contains: async () => true });
+      assert.deepEqual([read.ok, read.via], [true, 'direct'], 'read straight from the website instead');
+    });
+    assert.deepEqual(injected, [], 'nothing is injected into the Facebook page');
+    assert.equal(calls.length, 1);
+
+    // a tab whose address Chrome does not show is not read either
+    chrome.tabs.get = async (id) => ({ id });
+    const hidden = await fetchVehicleDetails(7, fixtures.usedNormal.vin, { origin: DEALER });
+    assert.deepEqual([hidden.ok, hidden.tabUnusable], [false, true]);
+    assert.match(hidden.message, /no longer shows example-dealer\.test/);
+    chrome.tabs.get = async () => { throw new Error('No tab with id: 7'); };
+    const closed = await fetchVehicleDetails(7, fixtures.usedNormal.vin, { origin: DEALER });
+    assert.match(closed.message, /Couldn't reach the dealership website tab.*No tab with id: 7/);
+    assert.deepEqual(injected, []);
+
+    // no website named (the popup's Scan): the neutral probe itself reads nothing of a Facebook page
+    chrome.tabs.get = async (id) => ({ id, url: page.location.href });
+    const unnamed = await fetchVehicleDetails(7, fixtures.usedNormal.vin);
+    assert.deepEqual([unnamed.ok, unnamed.tabUnusable], [false, true]);
+    assert.deepEqual(injected, ['probeSiteInPage'], 'only the neutral probe, which returns at once');
+    for (const path of ['/marketplace/you/selling/', '/']) assert.equal(await runInPage(facebookPage(path), probeSiteInPage), null);
+    assert.equal(await runInPage(vm.createContext({ ...facebookPage(), location: { origin: 'https://web.facebook.com', hostname: 'web.facebook.com', href: 'https://web.facebook.com/marketplace/' } }), probeSiteInPage), null);
+  } finally {
+    delete globalThis.chrome;
+  }
+  // and a dealer page is still probed in full
+  const dealer = await runInPage(fakeDealerPage({ origin: DEALER }), probeSiteInPage);
+  assert.equal(dealer.origin, DEALER);
 });

@@ -79,10 +79,14 @@ export async function runInPage(page, func, ...args) {
 }
 
 // chrome.scripting.executeScript and chrome.storage.local stand-ins for the
-// scan runner: injections run in the page sandbox, storage is `store`.
+// scan runner: injections run in the page sandbox, storage is `store`, and
+// chrome.tabs.get answers with the page's own address.
 export function fakeChrome(page, store = {}) {
   return {
     store,
+    tabs: {
+      get: async (id) => ({ id, url: page.location && page.location.href }),
+    },
     scripting: {
       executeScript: async ({ func, args = [] }) => [{ result: await runInPage(page, func, ...args) }],
     },

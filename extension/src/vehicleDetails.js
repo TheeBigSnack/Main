@@ -46,16 +46,42 @@ async function readOne(adapter, search, wanted, options) {
   return { ok: true, vehicle: adapter.normalize(r.record), fetchedAt: r.fetchedAt };
 }
 
+// The origin of the page a tab shows, '' when Chrome does not show it (no
+// access to that tab) or it is no web address.
+const tabOrigin = (tab) => {
+  try {
+    return new URL(tab && tab.url).origin;
+  } catch (e) {
+    return '';
+  }
+};
+
 const withUrl = (adapter, service, url) => ({ ...adapter.scanOptions(service), ...(typeof url === 'string' && url ? { url } : {}) });
 
 // `url` is the car's page as the last scan kept it (the snapshot entry's
 // url): an adapter that reads the car from its own page starts there; one
 // that asks an inventory service ignores it. `origin`, when given, is the
-// website the post is for: a tab that now shows another website is not read.
-// A tab that can't be used (closed, another page, another website) answers
-// with `tabUnusable: true`, so readCarForPost can read the car another way.
+// website the post is for: the tab's address is looked at first, and a tab
+// that now shows another website (Facebook included) has nothing injected
+// into it at all; a tab whose address Chrome does not show is not read
+// either. A tab that can't be used (closed, a page no adapter reads, another
+// website) answers with `tabUnusable: true`, so readCarForPost can read the
+// car another way.
 export async function fetchVehicleDetails(tabId, vin, { url = null, origin = null } = {}) {
   const wanted = String(vin || '').toUpperCase();
+  if (origin) {
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch (e) {
+      return { ok: false, tabUnusable: true, message: "Couldn't reach the dealership website tab. Open the used inventory page and click Post again. (" + errText(e) + ')' };
+    }
+    const at = tabOrigin(tab);
+    if (at !== origin) {
+      const shows = /^https?:/.test(at) ? `now shows ${hostOf(at)}, not ${hostOf(origin)}` : `no longer shows ${hostOf(origin)}`;
+      return { ok: false, tabUnusable: true, message: `The dealership tab ${shows}. Open ${hostOf(origin)}'s used inventory page and click Post again.` };
+    }
+  }
   let probe;
   try {
     probe = await probeTab(tabId);
