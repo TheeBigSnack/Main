@@ -335,6 +335,23 @@ test('a text that counts the form fields the field check reports gives FORM_MAP\
   }
 });
 
+// README's website paragraph said siteUrl "stays empty until the owner has
+// the domain" after site/config.js had been given the domain, so the rule it
+// stated was one to put the value back to empty, which would drop the
+// canonical, share and sitemap addresses from the next deploy. The paragraph
+// gives the address config.js holds, or says it is empty.
+test('README\'s website paragraph gives siteUrl as site/config.js holds it', () => {
+  const para = read('../README.md').split('\n').find((l) => l.startsWith('Website: '));
+  assert.ok(para, 'README has no "Website:" paragraph');
+  assert.match(para, /`siteUrl` in `site\/config\.js`/, "README's website paragraph no longer says where the site's address comes from");
+  if (SITE.siteUrl) {
+    assert.ok(para.includes('`' + SITE.siteUrl + '`'), `README's website paragraph does not give siteUrl as site/config.js holds it (${SITE.siteUrl})`);
+    assert.doesNotMatch(para, /stays empty until/, "README says siteUrl stays empty, but site/config.js has it set");
+  } else {
+    assert.match(para, /empty/, "README's website paragraph does not say siteUrl is empty");
+  }
+});
+
 // ---------- the other documents against the code ----------
 
 const manifest = () => JSON.parse(read('../extension/manifest.json'));

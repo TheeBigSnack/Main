@@ -102,7 +102,7 @@ A demo or loaner flag means "sold as new"; if the website also calls the car pre
 ## For development
 
 ```
-npm test              # 1223 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1224 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
@@ -139,7 +139,7 @@ Rewrite service: `backend/README.md`. Rules for every session: `CLAUDE.md`. Plan
 
 Test drive without installing: `npm run demo`, then open http://127.0.0.1:8765/demo/. The real popup, side panel and service worker run against a sample dealership website and a sample Marketplace form inside one page (`demo/`; sample data only, nothing there is Facebook). `npm run test:demo` drives the whole flow in headless Chromium; CI runs it too.
 
-Website: `site/` is the Lot Current website as served, one committed HTML file per page (home, how it works, pricing, FAQ, for managers, support, the legal documents, a custom 404 page), each written by `npm run site-pages` from a fragment under `site-src/pages/` and by `npm run legal-pages` from `legal/*.md`; plain HTML, CSS and one ES module, no build step, nothing loaded from another host. Everything that needs the site's own address comes from `siteUrl` in `site/config.js`, which stays empty until the owner has the domain (the generator reports "siteUrl is not set" until then). Hosting is GitHub Pages through `.github/workflows/pages.yml`. How to turn Pages on, point the domain and fill in the config: `docs/website.md`.
+Website: `site/` is the Lot Current website as served, one committed HTML file per page (home, how it works, pricing, FAQ, for managers, support, the legal documents, a custom 404 page), each written by `npm run site-pages` from a fragment under `site-src/pages/` and by `npm run legal-pages` from `legal/*.md`; plain HTML, CSS and one ES module, no build step, nothing loaded from another host. Everything that needs the site's own address comes from `siteUrl` in `site/config.js`, which is `https://lotcurrent.com`: the canonical, share and sitemap addresses and the `CNAME` file all name it, so it stays set (with it empty, the generator writes none of them and reports "siteUrl is not set"). Hosting is GitHub Pages through `.github/workflows/pages.yml`. How to turn Pages on, point the domain and fill in the config: `docs/website.md`.
 
 | File | What it does |
 |---|---|
