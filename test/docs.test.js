@@ -25,6 +25,7 @@ import { ADAPTERS, platformNames, unsupportedSiteMessage } from '../extension/ad
 import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
+import { runGuardrails } from '../extension/src/rewriteTemplate.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
@@ -1315,4 +1316,44 @@ test('the help says what a no to Chrome from the side panel\'s list does: nothin
   assert.match(help, /If you say no, nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button/);
   assert.match(help, /Decline and nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button again to be asked again/);
   for (const line of help.split('\n').filter((l) => /Allow reading \[website\]/.test(l))) assert.match(line, /stopped at (the|its) re-check/, `help.md ties Allow reading to a stopped post: ${line.slice(0, 80)}`);
+});
+
+// The help said a price "with or without $" and a mileage "however it is
+// written" must match, and that one owner "is said only when" the Carfax flag
+// is set, while the checks read set forms: a price written out in words, or
+// after a word they don't know ("Get it for 15,350" where 15,350 is also the
+// stock number), passes. The help and README say which forms are read, every
+// form they quote is caught, and the caveat covers prices and one owner too.
+test('the help and README say which ways of writing a price, a mileage or one owner the checks read, and each example is caught', () => {
+  const vehicle = { year: 2019, make: 'Jeep', model: 'Cherokee', trim: 'Latitude', mileage: 41250, price: 26500, priceBeforeFees: 25995, vin: '1C4PJMCB5KD100001', features: [], descriptionRaw: 'Was 28,995 with 38,000 miles.', carfaxOneOwner: false };
+  const ctx = { vehicle, dealer: { name: 'Example Motors', city: 'Springfield' }, salesperson: { name: 'Pat', title: 'Sales Consultant' }, price: 26500 };
+  const codes = (said) => runGuardrails(`The 2019 Jeep Cherokee Latitude. ${said} I'm Pat, Sales Consultant at Example Motors.`, ctx).problems.map((p) => p.code);
+  const line = doc('help.md').split('\n').find((l) => l.includes('The checks line:'));
+  const readme = read('../README.md').split('\n').find((l) => l.startsWith('- **Description writer**'));
+  assert.ok(line && readme);
+  const caught = {
+    'price-mismatch': ['$28,995', 'Internet price: 28,995', 'Save 1,500', '1,500 down', '1500 off', '1,500 dollars'],
+    'mileage-mismatch': ['38,000 original miles', 'Mileage: 38,000', '38k on the clock'],
+    'one-owner': ['one owner', 'single owner', 'the only owner', 'one adult owner', 'one careful, loving owner', 'owned by one retired teacher', 'one damage-free owner'],
+    'price-change': ['Reduced from 31,995'],
+  };
+  for (const [code, examples] of Object.entries(caught)) {
+    for (const ex of examples) {
+      assert.ok(line.includes(`"${ex}"`), `help.md no longer quotes "${ex}"; update this list`);
+      assert.ok(codes(ex + '.').includes(code), `"${ex}" is not caught as ${code}`);
+    }
+  }
+  assert.ok(codes('Only 28,995!').includes('unknown-number'), 'a bare write-up amount is caught');
+  for (const text of [line, readme]) {
+    assert.doesNotMatch(text, /with or without "\$"|however it is written|One owner is said only when/, 'a check is described as catching every wording');
+    assert.match(text, /a price written with "\$", after a price word or before a money word/);
+    assert.match(text, /a mileage written in one of the usual ways/);
+    assert.match(text, /go by set words and number forms, so [^:]*can still pass: read (?:the description|every draft) through before you publish/);
+  }
+  assert.match(line, /Wording that says one owner \([^)]*\) fails unless the Carfax one-owner flag is set/);
+  assert.match(line, /a price, a mileage, one owner or any other claim worded in a way they don't know \(such as a price written out in words\) can still pass/);
+  // what the caveat names: a price in words, and a price after a word the checks don't know, pass
+  const stock = { ...ctx, vehicle: { ...vehicle, stock: '15350' } };
+  assert.equal(runGuardrails('The 2019 Jeep Cherokee Latitude. Twenty-five thousand nine hundred ninety-five dollars. I\'m Pat, Sales Consultant at Example Motors.', ctx).problems.filter((p) => /price|number/.test(p.code)).length, 0);
+  assert.equal(runGuardrails('The 2019 Jeep Cherokee Latitude. Get it for 15,350. I\'m Pat, Sales Consultant at Example Motors.', stock).problems.filter((p) => /price|number/.test(p.code)).length, 0);
 });
