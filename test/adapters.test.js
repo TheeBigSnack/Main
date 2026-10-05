@@ -693,6 +693,29 @@ test('schemaOrg probe: a list of cars, one car\'s page, a page that links to the
   assert.deepEqual(await on('/used/', { html: micro }), { ...SERVICE, listUrl: O + '/used/' }, 'microdata counts as vehicle data');
 });
 
+test('schemaOrg probe: a filtered list, a trade-in page or a page about one model is never taken for the used list', async () => {
+  const site = standardSite({ cars: LOT });
+  const cards = LOT.map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ');
+  const on = (path, title, extra) => runInPage(fakeStandardPage({ site, path, html: `<!doctype html><html><head><title>${title}</title></head><body>${cards} ${extra}</body></html>` }), schemaOrg.probeInPage);
+  const listAt = async (...args) => (await on(...args)).listUrl;
+  // a list titled for used cars at an address without a used word keeps itself over a filtered used link
+  assert.equal(await listAt('/inventory/', 'Used Vehicles for Sale | Sample Motors', '<a href="/used-cars/?make=Jeep">Used Jeep</a>'), O + '/inventory/', 'a used link filtered by make');
+  assert.equal(await listAt('/inventory/', 'Used Vehicles for Sale | Sample Motors', '<a href="/inventory/?condition=used&amp;make=Jeep">Used Jeep</a>'), O + '/inventory/', 'a used query with a make added');
+  // a list of new and used cars, with no link to the used list: itself, never a trade-in page or one model's page
+  assert.equal(await listAt('/inventory/', 'New and Used Cars for Sale | Sample Motors', '<a href="/sell-your-used-car/">Sell us your car</a>'), O + '/inventory/', 'a trade-in page');
+  assert.equal(await listAt('/inventory/', 'New and Used Cars for Sale | Sample Motors', '<a href="/value-your-used-car/">What is my car worth?</a>'), O + '/inventory/', 'a value page');
+  assert.equal(await listAt('/inventory/', 'New and Used Cars for Sale | Sample Motors', '<a href="/used-jeep-wrangler/">Used Jeep Wrangler near you</a>'), O + '/inventory/', 'a page about one model');
+  // a used list named for its town is still the used list, and a trade-in page beside it is not
+  assert.equal(await listAt('/search/', 'Used Inventory | Sample Motors | New &amp; Used Dealer', '<a href="/used-cars-sampletown/">Used Car Inventory</a> <a href="/sell-your-used-car/">Sell us your car</a>'), O + '/used-cars-sampletown/');
+  // a used link whose query selects only used cars, or whose words say "Used", is still taken
+  assert.equal(await listAt('/', 'Sample Motors', '<a href="/inventory/?condition=used">Inventory</a> <a href="/used-cars/?make=Jeep">Jeep</a>'), O + '/inventory/?condition=used');
+  assert.equal(await listAt('/cars/', 'Pre-Owned Vehicles | Sample Motors', '<a href="/cars/used/">Used</a>'), O + '/cars/used/');
+  // on a car's page, a link to one model's used cars is not the list: none is known yet
+  const carPage = site.get(O + LOT[0].path).text.replace(/<a [^>]*href="\/used-vehicles\/"[^>]*>[\s\S]*?<\/a>/g, '').replace('</body>', '<a href="/used-honda-civic/">More used Honda Civic</a></body>');
+  const onCar = await runInPage(fakeStandardPage({ site, path: LOT[0].path, html: carPage }), schemaOrg.probeInPage);
+  assert.equal(onCar.listUrl, null);
+});
+
 test('schemaOrg in-page search: one GET on this website the way the page fetches, anything else refused before a request', async () => {
   const site = standardSite({ cars: LOT });
   const page = fakeStandardPage({ site });

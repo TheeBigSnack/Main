@@ -67,21 +67,24 @@ export const REQUEST_TIMEOUT_MS = 30000;
 // page. The list to scan is, in order: the page it ran on when its own
 // address reads as used inventory; the used inventory page it links to when
 // that link reads as the whole used list (its words say so, "Used", "Shop
-// pre-owned", or its address is only inventory words, "/used-vehicles/",
-// "/inventory/?condition=used"); the page it ran on when its title names
-// used cars and not new ones ("Used Vehicles for Sale" at "/inventory/",
-// the list of a lot that sells only used cars) and it is not the site's
-// home page (a home page titled "New & Used Cars" with a few featured cars
-// is not the used list); any other link with a used word in its address
-// (a trade-in page, "/sell-your-used-car/", a page about one model,
-// "/used-jeep-wrangler/", or about certified cars or one body style only);
-// else the page it ran on. The shortest link of each kind. On a used list
+// pre-owned", or its address is only inventory words with no query but one
+// that selects used cars, "/used-vehicles/", "/inventory/?condition=used");
+// the page it ran on when its title names used cars and not new ones ("Used
+// Vehicles for Sale" at "/inventory/", the list of a lot that sells only
+// used cars) and it is not the site's home page (a home page titled "New &
+// Used Cars" with a few featured cars is not the used list); a link with a
+// used word and an inventory word in its address and no other filter
+// ("/used-cars-<town>/"); else the page it ran on. The shortest link of each
+// kind. A link that filters the list ("/used-cars/?make=Jeep"), is about one
+// model ("/used-jeep-wrangler/"), certified cars or one body style only, or
+// is for selling, trading in or valuing a car ("/sell-your-used-car/") is
+// never the list. On a used list
 // opened past its first page, or sorted or filtered, it is the same list
 // with fewer of those parameters when the page links to it (its "Used"
 // link, its first page), so a scan reads the whole list; a parameter is
 // never removed by its name, so one that selects used inventory stays. On a
 // car's page it is the used inventory page it links to, the same way (null
-// when it links to none).
+// when it links to none that reads as the whole used list).
 export function probeInPage() {
   // Facebook is where listings go, never a website to read. The popup never
   // offers a scan there; this probe refuses too, because any page with car
@@ -133,9 +136,29 @@ export function probeInPage() {
   };
   const LIST_WORDS = new Set(['used', 'pre', 'owned', 'preowned', 'inventory', 'vehicles', 'vehicle', 'cars', 'car', 'autos', 'auto', 'search', 'searchused', 'usedcars', 'usedvehicles', 'usedinventory', 'all', 'for', 'sale', 'forsale', 'shop', 'browse', 'view', 'index', 'default', 'htm', 'html', 'aspx', 'asp', 'php', 'jsp', 'cfm']);
   const usedText = /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i;
+  // A query that selects nothing but used inventory ("?condition=used",
+  // "?type=Pre-Owned"), or none. Any other value (a make, a price, a sort,
+  // a page number) narrows or orders the list.
+  const usedQuery = (u) => [...u.searchParams.entries()].every(([k, v]) => {
+    const words = String(v || k).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    return words.length > 0 && words.every((w) => LIST_WORDS.has(w));
+  });
+  // A page for selling or trading a car in, or for its value: never the list.
+  const sellWords = /(?:^|[^a-z])(?:sell|selling|trade|trades|tradein|trade-in|value|valuation|apprais[a-z]*|we-?buy|instant-?offer|cash-?offer|kbb)(?:[^a-z]|$)/;
+  const inventoryWord = /(?:^|[^a-z])(?:inventory|vehicles?|cars?|autos?)(?:[^a-z]|$)/;
   // 0: its words say used inventory; 1: its address is only inventory
-  // words; 2: any other address with a used word in it, or the home page.
-  const usedRank = (u, text) => (!pathWords(u).length ? 2 : usedText.test(text) ? 0 : pathWords(u).every((words) => words.every((w) => LIST_WORDS.has(w))) ? 1 : 2);
+  // words, with no query but one that selects used cars; 2: an address with
+  // a used word and an inventory word ("/used-cars-<town>/"), unfiltered;
+  // 3: any other (one model, one body style, certified cars only, a filtered
+  // list, the home page), never taken over the page itself.
+  const usedRank = (u, text) => {
+    const path = pathWords(u);
+    if (!path.length) return 3;
+    if (usedText.test(text)) return 0;
+    if (!usedQuery(u)) return 3;
+    if (path.every((words) => words.every((w) => LIST_WORDS.has(w)))) return 1;
+    return inventoryWord.test(path.map((words) => words.join('-')).join('/')) || inventoryWord.test(String(text || '').toLowerCase()) ? 2 : 3;
+  };
   const samePage = (href) => {
     try {
       const u = new URL(href, pageAddress);
@@ -197,7 +220,7 @@ export function probeInPage() {
       if (!wholeList || count < wholeList.count || (count === wholeList.count && u.href.length < wholeList.href.length)) wholeList = { href: u.href, count };
     }
     if (vinShaped(readable(u)) || carShaped(u)) carLinks.add(u.href);
-    else if (usedWords.test(readable(u)) || usedText.test(String(a.textContent || ''))) {
+    else if ((usedWords.test(readable(u)) || usedText.test(String(a.textContent || ''))) && !sellWords.test(readable(u)) && !sellWords.test(String(a.textContent || '').toLowerCase())) {
       const rank = usedRank(u, String(a.textContent || ''));
       if (rank < usedLinkRank || (rank === usedLinkRank && u.href.length < usedLink.length)) {
         usedLink = u.href;
@@ -212,11 +235,12 @@ export function probeInPage() {
     || (own.length === 1 && Boolean(own[0].vin));
   const aList = !onePage && (carLinks.size >= 2 || nodes.length > 0 || micro > 0);
   if (!onePage && !aList) return null;
-  if (onePage) return { kind: 'schemaOrg', origin: site, listUrl: usedLink || null };
+  const usedList = usedLink && usedLinkRank < 3 ? usedLink : '';
+  if (onePage) return { kind: 'schemaOrg', origin: site, listUrl: usedList || null };
   if (usedWords.test(readable(here))) return { kind: 'schemaOrg', origin: site, listUrl: wholeList ? wholeList.href : pageAddress };
-  if (usedLink && usedLinkRank < 2) return { kind: 'schemaOrg', origin: site, listUrl: usedLink };
+  if (usedList && usedLinkRank < 2) return { kind: 'schemaOrg', origin: site, listUrl: usedList };
   if (usedTitle && !atRoot) return { kind: 'schemaOrg', origin: site, listUrl: pageAddress };
-  return { kind: 'schemaOrg', origin: site, listUrl: usedLink || pageAddress };
+  return { kind: 'schemaOrg', origin: site, listUrl: usedList || pageAddress };
 }
 
 // One GET of a page on this website, made the way the page's own fetch makes
