@@ -373,3 +373,135 @@ export function strippedSourceFiles() {
   for (const dir of ['extension/', 'backend/', 'manager/', 'site/', 'supabase/functions/', 'demo/']) walk(dir);
   return out;
 }
+
+// ---------- reading code: the self-containment and fill-code guards ----------
+// test/adapters.test.js and test/posting.test.js check, with these, that a
+// function Chrome copies into a page reaches nothing declared around it
+// (moduleScopeNames, freeIdentifiers), and test/posting.test.js reads the
+// fill code's calls with callArguments. One copy, so the two guards cannot
+// drift apart.
+
+// Strings become "", except what a template literal interpolates: the code
+// inside each ${...} is kept (scanned the same way, so a string or template
+// inside it is handled too), since a name used there is reached like any other.
+export function stripStrings(src) {
+  const n = src.length;
+  const quoted = (q, j) => { // index after the closing quote (a quote string never spans lines)
+    for (j += 1; j < n && src[j] !== q && src[j] !== '\n'; j += 1) if (src[j] === '\\') j += 1;
+    return j + 1;
+  };
+  const code = (j, inInterpolation) => { // [code with strings stripped, index of the closing brace or the end]
+    let out = '';
+    let depth = 0;
+    while (j < n) {
+      const c = src[j];
+      if (c === "'" || c === '"') { out += '""'; j = quoted(c, j); continue; }
+      if (c === '`') {
+        out += '""';
+        for (j += 1; j < n && src[j] !== '`'; j += 1) {
+          if (src[j] === '\\') { j += 1; continue; }
+          if (src[j] === '$' && src[j + 1] === '{') { const [inner, end] = code(j + 2, true); out += ' (' + inner + ') '; j = end; }
+        }
+        j += 1;
+        continue;
+      }
+      if (c === '{') depth += 1;
+      if (c === '}') { if (inInterpolation && depth === 0) return [out, j]; depth -= 1; }
+      out += c;
+      j += 1;
+    }
+    return [out, j];
+  };
+  return code(0, false)[0];
+}
+export const JS_KEYWORDS = new Set('async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield true false null undefined'.split(' '));
+
+// Every name declared at the top level of a module file: what an injected
+// function must not reach for. The import lines give the imported names
+// (default, { named }, * as namespace). Every other top-level name is left to
+// the JavaScript parser itself, so a declaration of several names, a
+// destructured one, a function or a class is never missed: the file with its
+// import and export words taken out compiles as a strict script, and adding
+// `let NAME;` to it is a syntax error exactly when NAME is already declared
+// at the top. Nothing in the file runs.
+export function moduleScopeNames(src) {
+  const imported = new Set();
+  for (const m of src.matchAll(/^import\s+([^'"]*?)\s*from\s*['"]/gm)) {
+    const clause = m[1];
+    const named = clause.match(/\{([^}]*)\}/);
+    if (named) for (const part of named[1].split(',')) { const n = part.trim().split(/\s+as\s+/).pop(); if (n) imported.add(n); }
+    const rest = clause.replace(/\{[^}]*\}/, '');
+    const namespace = rest.match(/\*\s*as\s+([A-Za-z_$][\w$]*)/);
+    if (namespace) imported.add(namespace[1]);
+    const byDefault = rest.match(/^\s*([A-Za-z_$][\w$]*)/);
+    if (byDefault) imported.add(byDefault[1]);
+  }
+  const script = "'use strict';\n" + src
+    .replace(/^import\s[^'"]*['"][^'"\n]*['"]\s*;?/gm, '')
+    .replace(/^export\s*\{[^}]*\}(?:\s*from\s*['"][^'"\n]*['"])?\s*;?/gm, '')
+    .replace(/^export\s*\*[^'"\n]*['"][^'"\n]*['"]\s*;?/gm, '')
+    .replace(/^export\s+default\s+(?=(?:async\s+)?function\b\s*\*?\s*[A-Za-z_$]|class\s+(?!extends\b)[A-Za-z_$])/gm, '')
+    .replace(/^export\s+default\s+/gm, 'void ')
+    .replace(/^export\s+/gm, '');
+  try {
+    new vm.Script(script);
+  } catch (e) {
+    throw new Error(`the self-containment check cannot read this file's top-level names: ${e.message}`);
+  }
+  const seen = new Map();
+  const declared = (name) => {
+    if (!/^[A-Za-z_$][\w$]*$/.test(name)) return false;
+    if (!seen.has(name)) {
+      let clash = false;
+      try {
+        new vm.Script(`${script}\nlet ${name};`);
+      } catch (e) {
+        clash = e.name === 'SyntaxError' && /already been declared/.test(e.message);
+      }
+      seen.set(name, clash);
+    }
+    return seen.get(name);
+  };
+  return { has: (name) => imported.has(name) || declared(name) };
+}
+
+// Identifiers a function body uses that are not property names.
+export function freeIdentifiers(fnSrc, ownName) {
+  const code = stripStrings(stripComments(fnSrc, { trailing: true }));
+  const out = new Set();
+  for (const m of code.matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) if (!JS_KEYWORDS.has(m[0]) && m[0] !== ownName) out.add(m[0]);
+  return out;
+}
+
+// The arguments of every call to `name(` in src (a free call or a method
+// call such as h.key(...), not a function of that name being defined), each call's list split at its
+// top-level commas, every argument trimmed. Parentheses, brackets, braces,
+// strings and template literals are balanced, so
+// key(control.closest('[role="button"]'), ' ') gives
+// ["control.closest('[role=\"button\"]')", "' '"].
+export function callArguments(src, name) {
+  const out = [];
+  for (const m of src.matchAll(new RegExp(`(?<![\\w$])(?<!\\bfunction\\s+)${name}\\s*\\(`, 'g'))) {
+    const args = [];
+    let depth = 0;
+    let from = m.index + m[0].length;
+    for (let i = from; i < src.length; i++) {
+      const c = src[i];
+      if (c === "'" || c === '"' || c === '`') {
+        for (i += 1; i < src.length && src[i] !== c; i++) if (src[i] === '\\') i += 1;
+        continue;
+      }
+      if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if ((c === ')' || c === ']' || c === '}') && depth > 0) depth -= 1;
+      else if (c === ')') {
+        args.push(src.slice(from, i).trim());
+        out.push(args.length === 1 && args[0] === '' ? [] : args);
+        break;
+      } else if (c === ',' && depth === 0) {
+        args.push(src.slice(from, i).trim());
+        from = i + 1;
+      }
+    }
+  }
+  return out;
+}

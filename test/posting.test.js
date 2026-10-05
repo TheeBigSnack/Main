@@ -7,7 +7,7 @@ import { buildListingData } from '../extension/src/listingData.js';
 import { FORM_MAP, DEV_OVERRIDE_KEYS, applyOverrides } from '../extension/facebook/formMap.js';
 import { ADAPTERS } from '../extension/adapters/index.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
-import { snapshot, fixtures, stripComments, commentStripperBlindSpots, strippedSourceFiles } from './helpers.js';
+import { snapshot, fixtures, stripComments, commentStripperBlindSpots, strippedSourceFiles, moduleScopeNames, freeIdentifiers, stripStrings, callArguments } from './helpers.js';
 
 const VIN = fixtures.usedNormal.vin;
 
@@ -73,6 +73,14 @@ const ACTION_WORDINGS = [
 // Action verbs that no part of a field (pattern, label, option) may hold as a word.
 const ACTION_WORDS = /\b(publish\w*|publicar|update\w*|actualizar|delete\w*|eliminar|sold|vendido|submit\w*|enviar|next|siguiente|post|posting|draft|borrador|share|compartir|boost|renew|confirm\w*|confirmar|send)\b/i;
 const normWords = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+// The fits the option model allows, each by name. "Car" is the vehicle
+// type's last wording, tried only after "Car/Truck", "Car/truck" and "Car or
+// truck" found nothing, and after no option equals "car" or starts with it.
+// It sits inside "Publicar" (Publish in Spanish) and "Marcar como vendido"
+// (Mark as sold): buttons on the form and on a published listing, while
+// pickOption reads only the option and menu item roles (fillForm.js OPTIONS,
+// held to that below) of the list that opened from the vehicle type field.
+const OPTION_FITS_ALLOWED = { car: ['publicar', 'publicar anuncio', 'marcar como vendido'] };
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function formMapProblems(map) {
@@ -101,15 +109,16 @@ function formMapProblems(map) {
       for (const action of ACTION_WORDINGS) if (re.test(normWords(action))) problems.push(`${where}: ${src} fits "${action}"`);
       if (ACTION_WORDS.test(src)) problems.push(`${where}: ${src} names an action`);
     }
-    // an option is chosen by its wording: equal, a prefix, or a whole word of what the popup shows
+    // an option is chosen by its wording as fillForm.js pickOption does:
+    // equal, then a prefix, then anywhere inside what the popup shows
+    // (includes), so a wording fits every action wording that holds it
     for (const wordings of Object.values(f.options || {})) {
       for (const w of wordings) {
         const nw = normWords(w);
         if (ACTION_WORDS.test(nw)) problems.push(`${where}: option "${w}" names an action`);
-        const inside = new RegExp('(^|[^a-z0-9])' + escapeRe(nw) + '($|[^a-z0-9])');
         for (const action of ACTION_WORDINGS) {
           const na = normWords(action);
-          if (na.startsWith(nw) || inside.test(na)) problems.push(`${where}: option "${w}" fits "${action}"`);
+          if (na.includes(nw) && !(OPTION_FITS_ALLOWED[nw] || []).includes(na)) problems.push(`${where}: option "${w}" fits "${action}"`);
         }
       }
     }
@@ -129,6 +138,12 @@ function formMapProblems(map) {
 
 test('the form map holds only known keys and fields, and nothing in it fits Publish, Next, Update, Delete or Mark as sold in any language the form comes in', () => {
   assert.deepEqual(formMapProblems(FORM_MAP), []);
+  // the premise of the one allowed fit: pickOption reads options and menu items only, never a button,
+  // and "Car" is the vehicle type's last wording
+  const fill = read('../extension/facebook/fillForm.js');
+  assert.match(fill, /const OPTIONS = '\[role="option"\], \[role="menuitem"\], \[role="menuitemradio"\], \[role="menuitemcheckbox"\]';/);
+  assert.match(fill, /let i = labels\.findIndex\(\(t\) => t === w\);\n\s*if \(i === -1\) i = labels\.findIndex\(\(t\) => t\.startsWith\(w\)\);\n\s*if \(i === -1\) i = labels\.findIndex\(\(t\) => t\.includes\(w\)\);/, 'pickOption: equal, then a prefix, then anywhere inside, as the model says');
+  assert.deepEqual(FORM_MAP.fields.find((f) => f.key === 'vehicleType').options.car_truck.slice(-1), ['Car']);
   // the check itself: each way an action could get into the map is caught
   const field = (patch) => ({ ...FORM_MAP, fields: [...FORM_MAP.fields, patch] });
   const price = FORM_MAP.fields.find((f) => f.key === 'price');
@@ -145,6 +160,9 @@ test('the form map holds only known keys and fields, and nothing in it fits Publ
     'a pattern that fits anything': withPrice({ name: ['.*'] }),
     'an option wording that is an action': { ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === choice ? { ...f, options: { ...f.options, SUV: ['SUV', 'Mark as sold'] } } : f)) },
     'an option that is the start of an action': { ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === choice ? { ...f, options: { ...f.options, SUV: ['Sig'] } } : f)) },
+    'an option inside Update': { ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === choice ? { ...f, options: { ...f.options, SUV: ['pdate'] } } : f)) },
+    'an option inside Publicar': { ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === choice ? { ...f, options: { ...f.options, SUV: ['ublicar'] } } : f)) },
+    'the allowed Car fit on another field': { ...FORM_MAP, fields: FORM_MAP.fields.map((f) => (f === choice ? { ...f, options: { ...f.options, SUV: ['car como'] } } : f)) },
     'a field key the listing never fills': field({ key: 'action', label: 'Vehicle type extra', kind: 'text', name: ['^zzz\\b'] }),
     'a field with an extra key': withPrice({ selector: '#price' }),
     'a field of an unknown kind': withPrice({ kind: 'button' }),
@@ -295,7 +313,9 @@ function fillCodeProblems(src) {
   for (const [ctor, count] of [['MouseEvent', 1], ['PointerEvent', 1], ['KeyboardEvent', 1]]) fail((src.match(new RegExp(`new ${ctor}\\(`, 'g')) || []).length !== count, `only the ${ctor} helper builds a ${ctor}`);
   fail(/new (?!(Mouse|Pointer|Keyboard)Event\(type\b|Event\('(input|change)'|InputEvent\('input')\w*Event\b/.test(src), 'fillForm.js builds only pointer, mouse, key, input and change events');
   fail(/dispatchEvent\((?!new (Mouse|Pointer|Keyboard|Input)?Event\()/.test(src), 'fillForm.js dispatches only events it builds in place');
-  const calls = (s, fn) => [...s.matchAll(new RegExp(`\\b${fn}\\(([^,()]+),\\s*([^)]*)\\)`, 'g'))].map((m) => m[2].trim());
+  // each call's second argument, read with its parentheses balanced (callArguments): a first argument
+  // with a call in it, such as key(control.closest('[role="button"]'), ' '), is read like any other
+  const calls = (s, fn) => callArguments(s, fn).map((args) => args.slice(1).join(', '));
   for (const t of calls(src, 'mouse')) fail(!["'mousedown'", "'mouseup'"].includes(t), `mouse(…, ${t})`);
   for (const t of calls(src, 'pointer')) fail(!["'pointerdown'", "'pointerup'"].includes(t), `pointer(…, ${t})`);
   // keys: Escape and ArrowDown anywhere, Space only on the checkbox, a typed character only in typeText's box
@@ -307,6 +327,13 @@ function fillCodeProblems(src) {
   for (const k of calls(src.replace(checkbox, '').replace(typing, ''), 'key')) fail(!["'Escape'", "'ArrowDown'"].includes(k), `fillForm.js presses ${k} outside setCheckbox and typeText`);
   return problems;
 }
+
+test('callArguments reads each call with its parentheses, brackets, braces and strings balanced', () => {
+  assert.deepEqual(callArguments(`key(control.closest('[role="button"]'), ' ');`, 'key'), [[`control.closest('[role="button"]')`, "' '"]]);
+  assert.deepEqual(callArguments("key([...a].find((b) => /x/.test(b, 1)), 'Escape', btn)", 'key'), [['[...a].find((b) => /x/.test(b, 1))', "'Escape'", 'btn']]);
+  assert.deepEqual(callArguments("mouse({ a: 1, b: [2, 3] }, 'mouseup'); h.mouse(el, ',)')", 'mouse'), [['{ a: 1, b: [2, 3] }', "'mouseup'"], ['el', "',)'"]]);
+  assert.deepEqual(callArguments('function key(el, k) {} keyboard(1); monkey(2); key()', 'key'), [[]]);
+});
 
 test('the fill code never submits a form, and clicks or presses keys only where its helpers say', () => {
   const src = read('../extension/facebook/fillForm.js');
@@ -325,6 +352,11 @@ test('the fill code never submits a form, and clicks or presses keys only where 
     'a stored event': "const ev = new MouseEvent(type, {}); btn.dispatchEvent(ev);",
     'a click event under another name': 'mouse(btn, kind);',
     'a pointer event of another kind': "pointer(btn, 'pointercancel');",
+    'Space on a button found by a call': "key(control.closest('[role=\\\"button\\\"]'), ' ');",
+    'Space on a button picked from a list': "key([...document.querySelectorAll('[role=\\\"button\\\"]')].find((b) => /next/i.test(b.textContent)), ' ');",
+    'a mouse event on a button found by a call': "mouse(document.querySelector('[role=button]').closest('div'), kind);",
+    'a key with a third argument': "key(el, 'Escape', btn);",
+    'Space through an object holding the helper': "const h = { key }; h.key(btn, ' ');",
     'Reflect.apply': 'Reflect.apply(HTMLElement.prototype.focus, btn, []);',
     'a borrowed method': 'btn.focus.apply(btn);',
     'an editing command': "document.execCommand('delete');",
@@ -499,27 +531,16 @@ test('every file of the extension reaches a page only through the known injected
 // and throws a ReferenceError on the real form. So no injected function may
 // import, or name anything declared at its module's top level (the same
 // check test/adapters.test.js runs on each adapter's probe and search).
-const stripCode = (src) => src
-  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`\\])\/\/[^\n]*$/gm, '$1')
-  .replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g, '""');
-const JS_WORDS = new Set('async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield true false null undefined'.split(' '));
-function moduleScopeNames(src) {
-  const names = new Set();
-  for (const m of stripCode(src).matchAll(/^(?:export\s+)?(?:async\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]);
-  for (const m of src.matchAll(/^import\s+(?:([A-Za-z_$][\w$]*)\s*,?\s*)?(?:\{([^}]*)\})?/gm)) {
-    if (m[1]) names.add(m[1]);
-    if (m[2]) for (const part of m[2].split(',')) { const n = part.trim().split(/\s+as\s+/).pop(); if (n) names.add(n); }
-  }
-  return names;
-}
+// The names a module declares at its top level and the names a function
+// body reaches come from test/helpers.js (moduleScopeNames, freeIdentifiers),
+// the readers test/adapters.test.js uses on the adapters: every declarator of
+// a declaration, destructured names and imports of every kind are seen.
 function selfContainmentProblems(moduleSrc, fnSrc, name) {
-  const code = stripCode(fnSrc);
   const problems = [];
-  if (/\bimport\b|\brequire\s*\(/.test(code)) problems.push(`${name} imports`);
+  if (/\bimport\b|\brequire\s*\(/.test(stripStrings(stripComments(fnSrc, { trailing: true })))) problems.push(`${name} imports`);
   const outside = moduleScopeNames(moduleSrc);
-  const reached = new Set();
-  for (const m of code.matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) if (!JS_WORDS.has(m[0]) && m[0] !== name && outside.has(m[0])) reached.add(m[0]);
-  if (reached.size) problems.push(`${name} reaches outside its own body for ${[...reached].join(', ')}`);
+  const reached = [...freeIdentifiers(fnSrc, name)].filter((id) => outside.has(id));
+  if (reached.length) problems.push(`${name} reaches outside its own body for ${reached.join(', ')}`);
   return problems;
 }
 
@@ -547,8 +568,16 @@ test('every function the extension injects into a page is self-contained: no imp
     'a helper lifted to the top of the module': [fillSrc + '\nexport function norm2(s) { return s; }\n', lifted(readListingInPage, "norm2('x');")],
     'another injected function called from inside': [fillSrc, lifted(fillFormInPage, 'probeFormInPage(map);')],
     'an import': [fillSrc, lifted(fillFormInPage, "const m = await import('./formMap.js');")],
+    'the second name of a declaration': [fillSrc + '\nconst FIRST = 1, SECOND_HINT = 2;\n', lifted(fillFormInPage, 'void SECOND_HINT;')],
+    'a destructured name': [fillSrc + '\nconst { DESTRUCTURED_HINT } = globalThis;\n', lifted(fillFormInPage, 'void DESTRUCTURED_HINT;')],
+    'a name used inside a template literal': [fillSrc + '\nconst TEMPLATE_HINT = 1;\n', lifted(fillFormInPage, 'const t = `${TEMPLATE_HINT}`;')],
   };
   for (const [what, [moduleSrc, fnSrc]] of Object.entries(planted)) assert.ok(selfContainmentProblems(moduleSrc, fnSrc, 'fillFormInPage').length, `${what} is caught`);
+  // a planted name is caught by that name, not only by something else in the function
+  for (const [what, [moduleSrc, fnSrc]] of Object.entries(planted)) {
+    const hint = (fnSrc.match(/\b[A-Z]+_HINT\b/) || [])[0];
+    if (hint) assert.match(selfContainmentProblems(moduleSrc, fnSrc, 'fillFormInPage').join(' '), new RegExp(`\\b${hint}\\b`), `${what}: ${hint} is named`);
+  }
 });
 
 // The other way onto a page needs no code at all: the manifest. A content
