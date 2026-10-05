@@ -780,6 +780,14 @@ test('help, README and the onboarding emails say the address comes from the webs
   for (const rel of ['../README.md', '../docs/help.md', '../marketing/onboarding-emails.md', '../marketing/onboarding-store.md']) {
     assert.doesNotMatch(read(rel), /already filled from the website/i, `${rel} promises the address is always filled from the website`);
   }
+  // README's set-up step and its Dealership setting said "(read from the website)" and "normally there is nothing to type"
+  const readme = read('../README.md');
+  const setup = readme.split('\n').find((l) => l.includes('**Set up Lot Current**'));
+  assert.ok(setup, "README's Use section describes set-up");
+  assert.doesNotMatch(readme, /address \(read from the website\)|normally there is nothing to type/, 'README promises the address is always read from the website');
+  assert.match(setup, /the store's address \(filled from the website when it shows one; type any part it leaves blank\)/, "README's set-up step does not say a missing part of the address is typed");
+  const dealership = readme.split('\n').find((l) => l.startsWith('- **Dealership**:'));
+  assert.match(dealership, /when it shows one, and leaves blank any part it does not give for you to type/, "README's Dealership setting does not say a missing part is typed");
 });
 
 // node --test runs every test( and it( call site once; none of the files
