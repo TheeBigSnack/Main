@@ -446,7 +446,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   const today = localDayRange(new Date(NOW));
   assert.deepEqual(body.today, today, 'the caller\'s local day goes up, for the server\'s count of their posts in it');
   assert.deepEqual(Object.keys(body.posted), [VIN_A]);
-  assert.deepEqual(body.posted[VIN_A], { name: '2019 Ram 1500', price: 28995, postedAt: T(0), salesperson: 'Alex' }, 'postedWith stays in the browser');
+  assert.deepEqual(body.posted[VIN_A], { name: '2019 Ram 1500', price: 28995, basis: 'website', postedAt: T(0), salesperson: 'Alex' }, 'postedWith stays in the browser; the price basis goes up');
   assert.equal(body.pilot.posts.length, 1);
   assert.equal(body.pilot.flags.length, 1);
   assert.deepEqual(body.scan, { takenAt: T(5), cars: 2, ready: 1, takeDownCount: 0, priceUpdateCount: 1 }, 'the stored scan\'s counts when none are passed');

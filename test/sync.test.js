@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, UPLOAD_MARGIN_MS, FUTURE_SKEW_MS, flagsAwaitingSync, clearNumbersKeepingUnsynced, notSharedFrom } from '../extension/src/sync.js';
-import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
+import { markPosted, markPriceUpdated, markTakenDown, diffScans } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
 const T = (min, sec = 0) => new Date(Date.UTC(2026, 10, 16, 9, min, sec)).toISOString(); // Nov 16 2026 09:mm:ss
@@ -34,9 +34,9 @@ test('toServerRows: a registry entry becomes one listing row, the caller\'s, wit
   assert.equal(listings.length, 2, 'the colleague\'s entry, the garbage and the entry without a time are left out');
   assert.deepEqual(listings[0], {
     dealership_id: D, user_id: U1, vin: VIN_A, name: '2019 Ram 1500', price: 28995, posted_at: T(0),
-    listing_url: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', updated_at: T(5), status: 'listed', taken_down_at: null, listed_before: false,
+    listing_url: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', updated_at: T(5), status: 'listed', taken_down_at: null, listed_before: false, basis: null,
   });
-  assert.deepEqual(listings[1], { dealership_id: D, user_id: U1, vin: VIN_B, name: '2020 Jeep', price: null, posted_at: T(1), listing_url: null, salesperson: null, updated_at: null, status: 'listed', taken_down_at: null, listed_before: false });
+  assert.deepEqual(listings[1], { dealership_id: D, user_id: U1, vin: VIN_B, name: '2020 Jeep', price: null, posted_at: T(1), listing_url: null, salesperson: null, updated_at: null, status: 'listed', taken_down_at: null, listed_before: false, basis: null });
   assert.deepEqual(postAttempts, []);
   assert.deepEqual(todoItems, []);
   // an http link is not a listing link
@@ -239,19 +239,49 @@ test('mergeRegistry: a change stamped more than FUTURE_SKEW_MS ahead of the serv
   assert.deepEqual([fine[VIN_A].price, fine[VIN_A].updatedAt], [19000, near]);
 });
 
-// The price basis a listing was posted with (rescan.js markPosted) is kept
-// on this machine only: a basis switch in Settings is not a price change.
-test('mergeRegistry: the price basis stays on the same post, is not carried to another post of the car, and never goes up', () => {
+// The price basis a listing was posted with (rescan.js markPosted) travels
+// with it: a basis switch in Settings is not a price change on any of the
+// salesperson's computers. The server writes it on insert and into a row
+// that has none (supabase/functions/sync, migration 0013).
+test('mergeRegistry: the price basis goes up with the post, comes down with it, and a row without one leaves the local one', () => {
   const local = markPosted({}, { vin: VIN_A, name: 'A', price: 19000, priceBeforeFees: 18500 }, 'beforeFees', T(0));
   assert.equal(local[VIN_A].basis, 'beforeFees');
+  assert.equal(syncPayload({ posted: local }).posted[VIN_A].basis, 'beforeFees');
+  assert.equal(toServerRows({ posted: local, dealershipId: D, userId: U1 }).listings[0].basis, 'beforeFees');
+  // nothing but the two bases ever goes up
+  assert.equal('basis' in syncPayload({ posted: { [VIN_A]: { ...local[VIN_A], basis: 'sticker' } } }).posted[VIN_A], false);
+  assert.equal(toServerRows({ posted: { [VIN_A]: { ...local[VIN_A], basis: 'sticker' } }, dealershipId: D, userId: U1 }).listings[0].basis, null);
+  // the same post: a row without one (an older build posted it) leaves the local one; a row with one is the record
   const same = mergeRegistry(local, [row(VIN_A, { price: 18000, updated_at: T(12) })]);
-  assert.equal(same[VIN_A].price, 18000);
-  assert.equal(same[VIN_A].basis, 'beforeFees', 'the same post: its basis stays');
-  const other = mergeRegistry(local, [row(VIN_A, { posted_at: T(6), price: 19000 })]);
-  assert.equal(other[VIN_A].postedAt, T(6));
-  assert.equal(other[VIN_A].basis, undefined, 'another post: the next rescan reads its basis from its price (rescan.js postedBasis)');
-  assert.equal('basis' in syncPayload({ posted: local }).posted[VIN_A], false);
-  assert.equal('basis' in toServerRows({ posted: local, dealershipId: D, userId: U1 }).listings[0], false);
+  assert.deepEqual([same[VIN_A].price, same[VIN_A].basis], [18000, 'beforeFees']);
+  assert.equal(mergeRegistry({ [VIN_A]: { name: 'A', price: 18500, postedAt: T(0) } }, [row(VIN_A, { price: 18500, basis: 'beforeFees' })])[VIN_A].basis, 'beforeFees');
+  // another post of the car: its own row's basis, or none when the row has none
+  assert.equal(mergeRegistry(local, [row(VIN_A, { posted_at: T(6), price: 19000 })])[VIN_A].basis, undefined, 'the next rescan reads it from the price (rescan.js postedBasis)');
+  assert.equal(mergeRegistry(local, [row(VIN_A, { posted_at: T(6), price: 19000, basis: 'website' })])[VIN_A].basis, 'website');
+  // a post only on the server comes with its basis; an unknown value is no basis
+  assert.equal(mergeRegistry({}, [row(VIN_B, { user_id: U1, basis: 'beforeFees' })], { userId: U1 })[VIN_B].basis, 'beforeFees');
+  assert.equal('basis' in mergeRegistry({}, [row(VIN_B, { user_id: U1, basis: 'sticker' })], { userId: U1 })[VIN_B], false);
+});
+
+// The case the server's copy is for: posted at the lower second price on one
+// computer, brought by sync to the salesperson's other computer, whose
+// setting is the main price; the website then drops the price by $500 on
+// both. The listing is asked for the $500 drop on the price it carries,
+// whatever the computer's setting, and even when no scan ever showed the
+// listed price (so it could not be read off the website).
+test('a listing synced from another computer is compared on the price it was posted at, after a setting switch and a real drop', () => {
+  const car = { vin: VIN_A, name: 'A', price: 27163, priceBeforeFees: 26673 };
+  const posted = markPosted({}, car, 'beforeFees', T(0));
+  const elsewhere = mergeRegistry({}, { listings: toServerRows({ posted, dealershipId: D, userId: U1 }).listings.map((r) => ({ ...r, id: 'x' })) }, { userId: U1 });
+  assert.deepEqual([elsewhere[VIN_A].price, elsewhere[VIN_A].basis], [26673, 'beforeFees']);
+  const snap = (price, priceBeforeFees) => ({ vehicles: { [VIN_A]: { vin: VIN_A, name: 'A', price, priceBeforeFees, decision: 'ready' } } });
+  const dropped = snap(26663, 26173);
+  const d = diffScans(dropped, dropped, { posted: elsewhere, basis: 'website', confirm: { checked: [], notFound: [] } });
+  assert.deepEqual(d.priceUpdates.map((u) => [u.from, u.to, u.change]), [[26673, 26173, -500]]);
+  // without the basis the server now keeps, that computer had only its setting to go by
+  const { basis, ...bare } = elsewhere[VIN_A];
+  assert.equal(basis, 'beforeFees');
+  assert.deepEqual(diffScans(dropped, dropped, { posted: { [VIN_A]: bare }, basis: 'website', confirm: { checked: [], notFound: [] } }).priceUpdates.map((u) => u.change), [-10]);
 });
 
 test('mergeRegistry: a missing link, name or salesperson is filled from the server; the newer post of a car re-posted elsewhere replaces the old one', () => {

@@ -41,7 +41,7 @@ const USERS = {
   [TOKEN.u3]: { id: U3, email: 'kim@other-motors.test' },
   [TOKEN.u4]: { id: U4, email: 'new@example.test' },
 };
-const LISTING_COLUMNS = ['created_at', 'dealership_id', 'id', 'listed_before', 'listing_url', 'name', 'posted_at', 'price', 'salesperson', 'status', 'taken_down_at', 'updated_at', 'user_id', 'vin'];
+const LISTING_COLUMNS = ['basis', 'created_at', 'dealership_id', 'id', 'listed_before', 'listing_url', 'name', 'posted_at', 'price', 'salesperson', 'status', 'taken_down_at', 'updated_at', 'user_id', 'vin'];
 const VIN = (n) => `TESTVIN0000000${String(n).padStart(3, '0')}`;
 const at = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 
@@ -474,6 +474,31 @@ test('sync: a listing marked as made by hand before that day is stored as such a
   assert.equal(again.body.postsToday, 1);
   assert.equal(fake.rows('listings').find((l) => l.vin === VIN(1)).listed_before, false);
   assert.equal(fake.rows('listings').find((l) => l.vin === VIN(2)).listed_before, true);
+});
+
+// Which of the website's two prices a listing was posted at (migration 0013)
+// is kept with it and comes back with the registry, so the salesperson's
+// other computers compare it with the website on that same price. It is
+// written on insert, and later only into a row that has none.
+test('sync: a listing keeps the price basis it was posted at: written on insert or into a row without one, never over one, and sent back', async () => {
+  const hourAgo = at(-60);
+  const recent = at(-5);
+  world({ rows: { listings: [listing({ vin: VIN(1), posted_at: hourAgo }), listing({ vin: VIN(2), posted_at: hourAgo, basis: 'website' })] } });
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1, { posted: {
+    [VIN(1)]: { postedAt: hourAgo, basis: 'beforeFees' }, // a row an older build wrote without one
+    [VIN(2)]: { postedAt: hourAgo, basis: 'beforeFees' }, // one that has one already
+    [VIN(3)]: { name: 'New', price: 26673, postedAt: recent, basis: 'beforeFees' },
+    [VIN(4)]: { name: 'Odd', price: 1, postedAt: recent, basis: 'sticker' },
+  } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const basisOf = (n) => fake.rows('listings').find((l) => l.vin === VIN(n)).basis;
+  assert.deepEqual([1, 2, 3, 4].map(basisOf), ['beforeFees', 'website', 'beforeFees', null]);
+  assert.deepEqual([1, 2, 3, 4].map((n) => r.body.listings.find((l) => l.vin === VIN(n)).basis), ['beforeFees', 'website', 'beforeFees', null], 'the answer carries it');
+  // an upload from a build that sends none never clears it
+  const later = await sync(handler, TOKEN.u1, { posted: { [VIN(3)]: { name: 'New', price: 26173, postedAt: recent, updatedAt: at(-1) } } });
+  assert.equal(later.status, 200, JSON.stringify(later.body));
+  assert.deepEqual([basisOf(3), fake.rows('listings').find((l) => l.vin === VIN(3)).price], ['beforeFees', 26173]);
 });
 
 test('sync: to-do items: a new flag goes in, an upload closes an open one, a closed one is never reopened, an open price flag takes the new prices', async () => {

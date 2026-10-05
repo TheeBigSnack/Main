@@ -39,6 +39,9 @@
 //     upload), so the per-salesperson daily cap
 //     (extension/src/cap.js) can take the larger of its local count and
 //     the server's. No `today`, or one that is not a day, gives null;
+//   - a listing's price basis (basis, migration 0013: which of the
+//     website's two prices it was posted at) is written on insert, and
+//     later only into a row that has none, never over one already there;
 //   - a listing row of another user, or one already taken down, is never
 //     changed by an upload (a stale machine cannot relist a sold car);
 //   - the caller's listed rows whose key (VIN@postedAt) is in `known` (the
@@ -90,6 +93,7 @@ interface ListingRow {
   status: 'listed';
   taken_down_at: null;
   listed_before: boolean;
+  basis: 'website' | 'beforeFees' | null;
 }
 
 interface AttemptRow {
@@ -183,6 +187,7 @@ function listingRows(posted: unknown, dealershipId: string, userId: string): Lis
       status: 'listed',
       taken_down_at: null,
       listed_before: e.listedBefore === true,
+      basis: e.basis === 'website' || e.basis === 'beforeFees' ? e.basis : null,
     });
   }
   return out;
@@ -415,7 +420,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // 1. the registry: new posts go in, unless another member has the VIN
     //    up; the caller's own listed rows take a newer price or a link they
     //    were missing; other users' rows and taken-down rows are left alone
-    const existing = incoming.length ? await selectByVin(client, 'listings', 'id, user_id, vin, posted_at, name, price, listing_url, salesperson, updated_at, status', dealershipId, incoming.map((r) => r.vin)) : [];
+    const existing = incoming.length ? await selectByVin(client, 'listings', 'id, user_id, vin, posted_at, name, price, listing_url, salesperson, updated_at, status, basis', dealershipId, incoming.map((r) => r.vin)) : [];
     const byPost = new Map<string, Row>(); // vin@ms(posted_at) -> the row
     const listedByOthers = new Set<string>(); // VINs another member currently has up
     for (const r of existing) {
@@ -444,6 +449,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!have.listing_url && row.listing_url) patch.listing_url = row.listing_url;
       if (!have.name && row.name) patch.name = row.name;
       if (!have.salesperson && row.salesperson) patch.salesperson = row.salesperson;
+      if (!have.basis && row.basis) patch.basis = row.basis; // the price the listing was posted at: into a row that has none, never over one
       if (Object.keys(patch).length) {
         must(await client.from('listings').update(patch).eq('id', String(have.id)), 'could not update a listing');
         counts.listingsUpdated += 1;
