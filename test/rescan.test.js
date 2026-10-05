@@ -418,6 +418,7 @@ function myListings(posted, vehicles, basis) {
     notShared: () => null,
     notSharedText: String,
     viewColleagues: () => '',
+    openListing: () => '', // the Open listing link (popup.test.js checks it)
   };
   const viewMine = new Function(...Object.keys(scope), `${src.slice(start, src.indexOf('\n}\n', start) + 2)}\nreturn viewMine;`)(...Object.values(scope));
   viewMine({ mine: Object.entries(posted).map(([vin, p]) => ({ vin, ...p, now: vehicles[vin] || null })) });
