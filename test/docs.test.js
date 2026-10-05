@@ -1218,6 +1218,27 @@ test('the help keeps Start the free pilot apart from the two buttons that open S
   assert.match(billing, /\*\*Start the free pilot\*\* \(no card\), and \*\*Subscribe\*\* and \*\*Manage billing\*\* \(Stripe's own pages/);
 });
 
+// The functions on the production project were deployed by hand, before the
+// Supabase workflow's first run, and production-setup's step 3 says verify
+// has not compared them with the repository yet. stripe-setup and the
+// website notes still stated what those deployed functions answer as fact.
+// A line that says a function is deployed on production and what it answers
+// says that holds for the repository's code, and names verify.
+test('the guides say what a deployed function answers only as what the repository\'s code does, until verify compares them', () => {
+  const setup = read('../docs/production-setup.md');
+  assert.match(setup, /\*\*verify\*\*: compares production with the repository/, 'production-setup no longer has a verify mode: check these lines');
+  const ANSWERS = /\b(?:answers with what is missing|refuses every request)\b/;
+  const DEPLOYED = /\b(?:is|were) deployed (?:on the production project|outside the Supabase workflow)\b/;
+  let seen = 0;
+  for (const rel of ['../docs/stripe-setup.md', '../docs/website.md']) {
+    for (const line of read(rel).split('\n').filter((l) => DEPLOYED.test(l) && ANSWERS.test(l))) {
+      seen += 1;
+      assert.match(line, /[Ii]f what was deployed is this repository's code \(`docs\/production-setup\.md` step 3's \*\*verify\*\* compares the two\)/, `${rel.slice(3)}: "${line.trim().slice(0, 100)}..." states what the deployed function answers as fact`);
+    }
+  }
+  assert.equal(seen, 2, 'stripe-setup and website.md each say what a deployed function answers');
+});
+
 // README's Account item once sent readers to "steps 3 to 6: the functions, ..."
 // as what must go live before a sign-in completes, after production-setup's
 // step 3 said all four functions were up, and its storage line called two
