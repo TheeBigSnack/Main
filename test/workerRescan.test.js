@@ -102,3 +102,45 @@ test('a rescan keeps the to-do items the salesperson ticked off while it ran, an
     globalThis.fetch = realFetch;
   }
 });
+
+// A listing with no price basis (brought by a sync) gets the one the
+// rescan reads (src/scanRunner.js keepSeenBasis), from the last saved scan
+// (the one this rescan replaces), then this one; a scan taken before the
+// listing was posted is not read (src/rescan.js scanCar).
+test('a rescan records the price basis the last saved scan shows for a listing with none, unless that scan was taken before the listing was posted', async () => {
+  for (const key of Object.keys(store)) delete store[key];
+  const [kept, cut, other] = standardCars(3);
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = schemaOrg.scanOptions(SERVICE);
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars: [kept, cut, other] })), site, settings, options });
+  // the last saved scan, taken on Jan 2nd, showed a second price $500 below each car's main price
+  const last = structuredClone(day1.snapshot);
+  last.takenAt = '2020-01-02T12:00:00.000Z';
+  for (const car of [kept, cut]) last.vehicles[car.vin].priceBeforeFees = car.price - 500;
+  const posted = {
+    // posted at the main price before that scan
+    [kept.vin]: { name: 'Kept car', price: kept.price, postedAt: '2020-01-01T12:00:00.000Z' },
+    // the website then cut $500, and the car was posted on another computer at the new main price after that scan
+    [cut.vin]: { name: 'Cut car', price: cut.price - 500, postedAt: '2020-01-03T12:00:00.000Z' },
+  };
+  Object.assign(store, {
+    [SITES_KEY]: { [O]: { name: 'Sample Motors', adapter: 'schemaOrg', service: SERVICE, site, auto: true } },
+    [k.settings]: settings, [k.snapshot]: last, [k.posted]: posted, [k.diff]: day1.diff, [k.boilerplate]: day1.boilerplate,
+  });
+  const search = fakeSiteSearch(standardSite({ cars: [kept, { ...cut, price: cut.price - 500 }, other] }));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const got = await search({ url });
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+  };
+  try {
+    const r = await runRescan(O, { reason: 'alarm' });
+    assert.equal(r.ok, true, r.error);
+    assert.equal(store[k.posted][kept.vin].basis, 'website', 'read off the last saved scan: the main price');
+    assert.equal(store[k.posted][cut.vin].basis, undefined, 'that scan predates the post, and this one shows one price only: nothing to record');
+    assert.deepEqual(store[k.diff].priceUpdates.filter((u) => u.yours), [], 'both listings match the website');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

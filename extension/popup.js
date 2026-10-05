@@ -1609,7 +1609,7 @@ async function onSettingsSubmit(ev) {
   // withPostedBasis). Stamped before the new basis is saved, so a background
   // rescan in between never reads them under the new one; nothing is saved
   // when the stamp could not be written.
-  if (basisChanged && !(await update('posted', (p) => withPostedBasis(p, prev.basis, state.snapshot?.vehicles)))) { render(); return; }
+  if (basisChanged && !(await update('posted', (p) => withPostedBasis(p, prev.basis, state.snapshot)))) { render(); return; }
   // the other settings are kept either way; the side panel opens no form until the name is set
   if (state.origin && dealerNameMissing(state.settings.dealer)) message += ` ${NO_DEALER_NAME}`;
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting

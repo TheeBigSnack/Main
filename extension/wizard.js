@@ -114,15 +114,16 @@ export const TAB_GONE = "Couldn't reach the dealership tab. Open the used invent
 
 // Listings posted before the price basis was kept on each one stay on the
 // basis their price is on in the last scan, else the one in force until now,
-// when set-up changes it: the new setting is for new posts, never a website
-// price change (src/rescan.js withPostedBasis). Stamped before the new basis
+// when set-up changes it (one that got its price after that scan is left
+// for the next scan to read): the new setting is for new posts, never a
+// website price change (src/rescan.js withPostedBasis). Stamped before the new basis
 // is saved or read with, so no scan reads them under the new one.
 async function keepPostedBasis(k, stored, nextBasis) {
   if (!stored) return;
   const before = withDefaults(stored).basis;
   if (before === (nextBasis === 'beforeFees' ? 'beforeFees' : 'website')) return;
   const snapshot = (await chrome.storage.local.get(k.snapshot))[k.snapshot];
-  await updateKey(k.posted, (p) => withPostedBasis(p, before, snapshot && snapshot.vehicles));
+  await updateKey(k.posted, (p) => withPostedBasis(p, before, snapshot));
 }
 
 // What set-up starts from, read just before the first read of the website:

@@ -427,6 +427,45 @@ test('a basis read off a scan is kept on the entry: a real drop never grows by t
   assert.deepEqual(both.OTHER, { price: 1, basis: 'website' });
 });
 
+// A scan taken before a listing got its price (this computer's last scan,
+// when the car was posted or its price updated on another computer and came
+// by sync) shows the website as it was then. After a website price cut, the
+// price the listing was given can equal the other price on that scan: read
+// off it and kept on the entry, the cut would be asked for again on every
+// scan. Only scans taken once the listing had its price (updatedAt, else
+// postedAt) are read, by the rescan, by the scan that records the basis and
+// by a change of Price to post.
+test('a scan from before a listing got its price never decides its basis: a website cut made before the post is not asked for again', () => {
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const shows = (day, price, lower) => repriced(snapshot(LOT, MY_STORE, at(day)), VIN.ram, price, lower);
+  // this computer's last scan: $1,000 between the two prices; the website then cuts $1,000,
+  // and the car is posted on another computer at the new main price; it arrives by sync with no basis
+  const last = shows(1, 27163, 26163);
+  const synced = { [VIN.ram]: { name: 'Ram', price: 26163, postedAt: at(2) } };
+  let posted = synced;
+  let prev = last;
+  for (const day of [3, 4, 5]) {
+    const scan = shows(day, 26163, 25163);
+    assert.deepEqual(moves(diffScans(prev, scan, { posted, confirm: confirmed(), basis: 'website' })), [], `scan of day ${day}: the website made no change since the post`);
+    posted = withSeenBasis(posted, prev, scan) || posted;
+    prev = scan;
+  }
+  assert.equal(posted[VIN.ram].basis, 'website', 'read off the first scan taken after the post');
+  // the same for a listing whose price was updated on another computer after this computer's last scan
+  const updated = { [VIN.ram]: { name: 'Ram', price: 26163, postedAt: '2026-09-20T09:00:00.000Z', updatedAt: at(2) } };
+  assert.deepEqual(moves(diffScans(last, shows(3, 26163, 25163), { posted: updated, confirm: confirmed(), basis: 'website' })), []);
+  assert.equal(withSeenBasis(updated, last, shows(3, 26163, 25163))[VIN.ram].basis, 'website');
+  // a scan from before is never read, even when it is the only one that matches: nothing is recorded
+  assert.equal(withSeenBasis(synced, last, shows(3, 26663, 25663)), undefined);
+  // a change of Price to post before the next scan leaves such a listing for that scan to read
+  assert.equal(withPostedBasis(synced, 'website', last), undefined);
+  assert.deepEqual(moves(diffScans(last, shows(3, 26163, 25163), { posted: synced, confirm: confirmed(), basis: 'beforeFees' })), []);
+  // a scan taken once the listing had its price is read as before, by each of them
+  assert.equal(withPostedBasis(synced, 'beforeFees', shows(2, 26163, 25163))[VIN.ram].basis, 'website');
+  assert.equal(withPostedBasis({ [VIN.ram]: { name: 'Ram', price: 26163, postedAt: '2026-09-20T09:00:00.000Z' } }, 'website', last)[VIN.ram].basis, 'beforeFees');
+  assert.equal(withSeenBasis(synced, shows(2, 26163, 25163), shows(3, 26663, 25663))[VIN.ram].basis, 'website', 'the oldest scan since the post decides');
+});
+
 // Every place that saves a scan records the basis it read (scanRunner.js
 // keepSeenBasis): the popup's Scan, set-up's read and the background rescan.
 test('the popup, set-up and the background rescan each record the basis a scan reads', async () => {

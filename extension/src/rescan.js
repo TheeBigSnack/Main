@@ -47,8 +47,9 @@ export const PRICE_BASES = Object.freeze(['website', 'beforeFees']);
 // entry with none (posted before the basis was recorded, or brought by a
 // sync: the server doesn't keep it) carries the basis whose website price
 // equals its own price on the scans in `seen` (oldest first: the last scan,
-// then this one). When both bases give the car that price, or neither does,
-// or no scan is given, the current setting (`basis`) stands.
+// then this one; only scans taken once the listing had its price, scanCar).
+// When both bases give the car that price, or neither does, or no scan is
+// given, the current setting (`basis`) stands.
 export function postedBasis(entry, basis = 'website', seen = []) {
   const own = entry && entry.basis;
   if (PRICE_BASES.includes(own)) return own;
@@ -71,23 +72,62 @@ function seenBasis(entry, seen) {
   return null;
 }
 
+// A time as milliseconds, or null when it isn't one.
+function msOf(x) {
+  const t = typeof x === 'string' && x ? Date.parse(x) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+// When a posted listing got the price it carries: its last price update
+// (updatedAt), else its post (postedAt); null when it carries neither.
+function pricedAt(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  return msOf(entry.updatedAt) ?? msOf(entry.postedAt);
+}
+
+// Whether a scan was taken before a listing got its price: false when
+// either time is unknown.
+function scanBefore(entry, snap) {
+  const priced = pricedAt(entry);
+  const taken = snap && typeof snap === 'object' ? msOf(snap.takenAt) : null;
+  return priced !== null && taken !== null && taken < priced;
+}
+
+// A car as a scan shows it, for reading a listing's basis (seenBasis): only
+// a scan taken once the listing had its price can say which website price it
+// was given. A scan from before (this computer's last scan, when the car was
+// posted or its price updated on another computer and the listing came by
+// sync) shows the website as it was then: after a website price cut, the
+// price the listing was given can equal the other price on that scan, and
+// that reading, kept on the entry (withSeenBasis), would ask for the cut
+// again on every scan (rule 4). null for such a scan, for a scan with no
+// time when the listing has one, and for a car the scan doesn't hold. A
+// listing that carries no time at all can be read off any scan.
+function scanCar(entry, snap, vin) {
+  const car = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles[vin] : null;
+  if (!car) return null;
+  const priced = pricedAt(entry);
+  if (priced === null) return car;
+  const taken = msOf(snap.takenAt);
+  return taken !== null && taken >= priced ? car : null;
+}
+
 // The posted list with the basis a scan reads off each entry without one
-// (seenBasis, from the last scan and this one, as diffScans reads it)
-// recorded on that entry, so the reading outlives the website's price: once
-// the website moves the price so that neither basis gives the listed one, an
-// entry with no basis would fall back to the current setting, and a switch
-// of Price to post would show up as part of a price change (rule 4). Entries
-// a scan can't settle (both bases give the price, or neither does) are left
-// as they are. undefined when nothing is recorded, so nothing is written.
+// (seenBasis, from the last scan and this one, as diffScans reads it: only
+// scans taken once the listing had its price, scanCar) recorded on that
+// entry, so the reading outlives the website's price: once the website moves
+// the price so that neither basis gives the listed one, an entry with no
+// basis would fall back to the current setting, and a switch of Price to
+// post would show up as part of a price change (rule 4). Entries a scan
+// can't settle (both bases give the price, or neither does, or no scan since
+// the listing got its price holds the car) are left as they are. undefined
+// when nothing is recorded, so nothing is written.
 export function withSeenBasis(posted, previous, current) {
   if (!posted || typeof posted !== 'object') return undefined;
-  const carsOf = (snap) => (snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles : {});
-  const before = carsOf(previous);
-  const now = carsOf(current);
   let changed = false;
   const next = {};
   for (const [vin, e] of Object.entries(posted)) {
-    const read = e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) ? seenBasis(e, [before[vin], now[vin]]) : null;
+    const read = e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) ? seenBasis(e, [scanCar(e, previous, vin), scanCar(e, current, vin)]) : null;
     if (read) {
       next[vin] = { ...e, basis: read };
       changed = true;
@@ -107,17 +147,19 @@ export function listingWebsitePrice(entry, now, basis = 'website', seen = [now])
 
 // The posted list with a basis stamped on every entry posted before the
 // basis was recorded per entry, as the setting changes: the basis its price
-// is on in the last scan (`vehicles`, the snapshot's cars by VIN; postedBasis),
-// else the basis in force until now (`basis`, the setting being changed).
-// undefined when every entry already has one, so nothing is written.
-export function withPostedBasis(posted, basis, vehicles = {}) {
+// is on in the last scan (`snapshot`; postedBasis), else the basis in force
+// until now (`basis`, the setting being changed). An entry that got its
+// price after that scan was taken (posted or updated on another computer and
+// brought by sync since) is left as it is: the scan shows the website as it
+// was before (scanCar), and the next scan reads the entry's basis
+// (withSeenBasis). undefined when nothing is stamped, so nothing is written.
+export function withPostedBasis(posted, basis, snapshot = null) {
   if (!posted || typeof posted !== 'object') return undefined;
-  const cars = vehicles && typeof vehicles === 'object' ? vehicles : {};
   let changed = false;
   const next = {};
   for (const [vin, e] of Object.entries(posted)) {
-    if (e && typeof e === 'object' && !PRICE_BASES.includes(e.basis)) {
-      next[vin] = { ...e, basis: postedBasis(e, basis, [cars[vin]]) };
+    if (e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) && !scanBefore(e, snapshot)) {
+      next[vin] = { ...e, basis: postedBasis(e, basis, [scanCar(e, snapshot, vin)]) };
       changed = true;
     } else next[vin] = e;
   }
@@ -300,8 +342,9 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     const before = prevVehicles[vin];
     const mine = yours(vin);
     // a posted car on the basis its listing was posted at (postedBasis; an
-    // entry with none reads it off the last scan, then this one)
-    const nowPrice = mine ? listingWebsitePrice(posted[vin], now, basis, [before, now]) : basisPrice(now, basis);
+    // entry with none reads it off the last scan, then this one, each only
+    // when taken once the listing had its price: scanCar)
+    const nowPrice = mine ? listingWebsitePrice(posted[vin], now, basis, [scanCar(posted[vin], prev, vin), scanCar(posted[vin], curr, vin)]) : basisPrice(now, basis);
 
     // A posted car the website marks sold or sale-pending, or no longer
     // calls pre-owned, is raised on every scan while it is still marked
