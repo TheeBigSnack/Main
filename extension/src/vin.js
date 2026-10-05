@@ -83,20 +83,23 @@ export function modelYearReadings(vin, { lightVehicle = true } = {}) {
 // Each row lists plain prefixes, and the longest prefix that matches wins,
 // whatever the row order: a plant code such as 3CZ (Honda, Mexico) or 1YV
 // (Mazda, AutoAlliance) is never read as the shorter 3C (Stellantis) or 1Y
-// (General Motors). A plant that builds for more than one maker lists every
-// make it builds (KNM: Renault Samsung, which built the Nissan Rogue; 3MY:
-// Mazda de Mexico, which built the Toyota Yaris sedan and the Scion iA; JF1:
-// Subaru, which builds the Toyota 86 and the Scion FR-S).
+// (General Motors), and 1NX (NUMMI, which built the Toyota Corolla) never as
+// Nissan's 1N. A plant that builds for more than one maker lists every make
+// it builds (KNM: Renault Samsung, which built the Nissan Rogue; 3MY: Mazda
+// de Mexico, which built the Toyota Yaris sedan and the Scion iA; JF1:
+// Subaru, which builds the Toyota 86 and the Scion FR-S; 3N63M: Nissan
+// Mexico's NV200 sold as the Chevrolet City Express).
 export const MANUFACTURERS = Object.freeze([
   [['1HD', '5HD'], 'Harley-Davidson', ['harley-davidson', 'harley davidson', 'harley']],
   [['5NP', '5NM', 'KMH', 'KMT', 'KM8', 'KNA', 'KND', '5XY', '5XX', '3KP', 'KMU', '5NT'], 'Hyundai Motor Group', ['hyundai', 'kia', 'genesis']],
   [['KNM'], 'Renault Samsung', ['nissan', 'renault']],
+  [['3N63M'], 'Nissan', ['nissan', 'chevrolet']],
   [['1N', '3N', 'JN', '5N1', '5N3'], 'Nissan', ['nissan', 'infiniti', 'datsun']],
   [['1C', '2C', '3C', '1B', '2B', '3B', '1A', '1J', '1P', '2P', '3P', 'ZFA', 'ZAR', 'ZAC'], 'Stellantis', ['chrysler', 'dodge', 'jeep', 'ram', 'fiat', 'alfa romeo', 'plymouth', 'eagle']],
   [['1F', '2F', '3F', '1L', '5L', '1ZV', '1M'], 'Ford', ['ford', 'lincoln', 'mercury']],
   [['1G', '2G', '3G', '1Y', '5Y4', 'W06', '2CN', '2CK', '2CT'], 'General Motors', ['chevrolet', 'chevy', 'gmc', 'buick', 'cadillac', 'pontiac', 'saturn', 'hummer', 'oldsmobile', 'saab']],
   [['1H', '2H', '19X', '19U', '5FN', '5FP', '5FR', '5J6', '5J8', '7FA', 'JH', 'SHH', 'SHS', '3CZ', '3HG', '2HN', '2HK', '2HG'], 'Honda', ['honda', 'acura']],
-  [['4T', '5T', 'JT', '2T', '3TM', '3TY', 'JTD', 'JTH', 'JTJ', 'JTE', 'JTN', '5YF', '58A'], 'Toyota', ['toyota', 'lexus', 'scion', 'subaru']],
+  [['4T', '5T', 'JT', '2T', '3TM', '3TY', 'JTD', 'JTH', 'JTJ', 'JTE', 'JTN', '5YF', '58A', '1NX'], 'Toyota', ['toyota', 'lexus', 'scion', 'subaru']],
   [['JF', '4S'], 'Subaru', ['subaru', 'toyota', 'scion']],
   [['JM', '3MZ', '1YV', '4F', '7MZ', 'JM1', 'JM3'], 'Mazda', ['mazda']],
   [['3MY'], 'Mazda', ['mazda', 'toyota', 'scion']],
@@ -118,10 +121,12 @@ export const MANUFACTURERS = Object.freeze([
 ]);
 
 // VINs from makers of motorcycles and powersport vehicles, never a car or
-// light truck: the groups below, and Suzuki's motorcycle code JS1 (its other
-// codes build cars and SUVs too).
+// light truck: the groups below, and the motorcycle codes of makers whose
+// other codes build cars and SUVs too (Suzuki's JS1; Honda's JH2, from
+// Japan, and 1HF, from Ohio).
 const CYCLE_MAKERS = new Set(['Harley-Davidson', 'Yamaha', 'Kawasaki', 'Ducati', 'Indian', 'Triumph', 'Piaggio', 'BMW Motorrad']);
-const cycleVin = (vin, maker) => Boolean(maker && CYCLE_MAKERS.has(maker.group)) || vin.startsWith('JS1');
+const CYCLE_CODES = ['JS1', 'JH2', '1HF'];
+const cycleVin = (vin, maker) => Boolean(maker && CYCLE_MAKERS.has(maker.group)) || CYCLE_CODES.some((code) => vin.startsWith(code));
 
 export function manufacturerFromVin(vin) {
   const v = normalizeVin(vin);

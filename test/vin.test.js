@@ -66,6 +66,33 @@ test('a plant code is read by its longest prefix: common cars built where anothe
   assert.equal(localVinCheck({ vin: '3CZRU6H55GM700001', make: 'Jeep', year: 2016 }).ok, false);
 });
 
+test('a Corolla built by NUMMI and a City Express built by Nissan agree with their make; Honda motorcycle codes read the motorcycle year', () => {
+  const valid = (vin) => vin.slice(0, 8) + vinCheckDigit(vin) + vin.slice(9);
+  const corolla = localVinCheck({ vin: '1NXBR32E75Z500001', make: 'Toyota', year: 2005 });
+  assert.equal(corolla.ok, true, corolla.problems.map((p) => p.detail).join('; '));
+  assert.equal(corolla.manufacturer, 'Toyota', "NUMMI's 1NX is not Nissan's 1N");
+  assert.equal(localVinCheck({ vin: '1NXBR32E75Z500001', make: 'Nissan', year: 2005 }).ok, false);
+  const cityExpress = localVinCheck({ vin: valid('3N63M0YN5FK700001'), make: 'Chevrolet', year: 2015, bodyType: 'Van' });
+  assert.equal(cityExpress.ok, true, cityExpress.problems.map((p) => p.detail).join('; '));
+  assert.equal(localVinCheck({ vin: valid('3N63M0YN5FK700001'), make: 'Nissan', year: 2015, bodyType: 'Van' }).ok, true);
+  assert.equal(localVinCheck({ vin: valid('3N63M0YN5FK700001'), make: 'Ford', year: 2015, bodyType: 'Van' }).ok, false);
+  // Nissan's own codes stay Nissan's
+  assert.equal(localVinCheck({ vin: valid('1N4AL3AP5JC100001'), make: 'Toyota', year: 2018 }).ok, false);
+  // a Honda motorcycle whose body style says nothing of a motorcycle, from Japan (JH2) or Ohio (1HF)
+  const year = (vehicle) => localVinCheck(vehicle).checks.find((c) => c.code === 'year');
+  for (const vehicle of [
+    { vin: valid('JH2PC40J0DK000001'), make: 'Honda', year: 2013, bodyType: '' },
+    { vin: valid('JH2PC40J0DK000001'), make: 'Honda', year: 2013, bodyType: 'Cruiser' },
+    { vin: valid('1HFSC5200EA000001'), make: 'Honda', year: 2014, bodyType: 'Touring' },
+  ]) {
+    const r = localVinCheck(vehicle);
+    assert.equal(r.ok, true, `${vehicle.vin}: ${r.problems.map((p) => p.detail).join('; ')}`);
+    assert.equal(year(vehicle).detail, `${vehicle.year}, website agrees`);
+  }
+  // Honda's car codes keep the car rule for position 7
+  assert.equal(year({ vin: valid('2HGFC2F50GH000001'), make: 'Honda', year: 1986, bodyType: 'Sedan' }).detail, 'VIN says 2016, the website says 1986');
+});
+
 test('no prefix in the manufacturer table is hidden by another row', () => {
   const owner = new Map();
   for (const [prefixes, group] of MANUFACTURERS) {
