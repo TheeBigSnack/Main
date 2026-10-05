@@ -652,17 +652,40 @@ test('a description without the dealership\'s price note fails the checks; the t
 
 test('a banned phrase in the dealership\'s own price note is named as the note\'s, to change in Settings', () => {
   const v = vehicle('usedNormal', { features: FEATURES });
-  const note = 'Plus tax, title and registration, which go to the state, not the dealer.';
+  const note = 'Priced to sell, plus tax, title and registration.';
   const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: note, price: v.price };
   const text = buildTemplateDescription(c);
   assert.ok(text.includes(note));
   // still refused (the note goes into every description), but no edit or Reset to template can fix it, so the reason says where it can be
-  assert.deepEqual(runGuardrails(text, c).problems, [{ code: 'banned-phrase', text: 'Your dealership\'s price note says "not the dealer"; change the note in Settings' }]);
+  assert.deepEqual(runGuardrails(text, c).problems, [{ code: 'banned-phrase', text: 'Your dealership\'s price note says "priced to sell"; change the note in Settings' }]);
   // the same words in the description itself are the description's
-  assert.deepEqual(runGuardrails(`${text}\nText me, not the dealer.`, c).problems.map((p) => p.text), ['Says "not the dealer"']);
+  assert.deepEqual(runGuardrails(`${text}\nText me, not the dealer.`, c).problems.map((p) => p.text), ['Your dealership\'s price note says "priced to sell"; change the note in Settings', 'Says "not the dealer"']);
   // a note without them: nothing to say
   const fine = { ...c, priceNote: 'Plus tax, title and registration, which go to the state.' };
   assert.deepEqual(runGuardrails(buildTemplateDescription(fine), fine).problems, []);
+});
+
+test('the dealership\'s own fee wording, its front desk and its owner are not private-seller wording', () => {
+  const v = vehicle('usedNormal', { features: FEATURES });
+  // a price note that says where the fees go passes, and goes into every description
+  for (const note of ['Plus tax, title and registration, which go to the state, not the dealer.', 'Taxes and fees are paid to the county, not the dealership.']) {
+    const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: note, price: v.price };
+    const text = buildTemplateDescription(c);
+    assert.ok(text.includes(note), note);
+    assert.deepEqual(runGuardrails(text, c).problems, [], note);
+  }
+  // the salesperson's own closing line: the dealership's owner, or its front desk
+  for (const line of ["I'm the owner of this dealership, text me.", 'I am the owner of the store, ask for me.', 'I\u2019m the owner of our dealership.', "Ask for me, not the dealer's front desk.", 'Text me, not the dealership\u2019s main line.']) {
+    assert.deepEqual(checkClosingLine(line).problems, [], line);
+    assert.equal(usableClosingLine(line), line);
+  }
+  // still refused: steering the buyer away from the dealership, or the car as the writer's own
+  for (const line of ['Text me, not the dealer.', 'Message me directly, not the dealership.', "I'm the owner.", "I'm the owner of this truck, text me.", 'I am the owner, text me.', 'Plus tax and title. Text me, not the dealer.']) {
+    assert.ok(checkClosingLine(line).problems.some((p) => p.code === 'closing-banned'), line);
+  }
+  // and in a description, beside a price note with the fee wording in it
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: 'Plus tax, title and registration, which go to the state, not the dealer.', price: v.price };
+  assert.deepEqual(runGuardrails(`${buildTemplateDescription(c)}\nText me, not the dealer.`, c).problems.map((p) => p.text), ['Says "not the dealer"']);
 });
 
 // ---------- claims only the website can make ----------

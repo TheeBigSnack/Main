@@ -13,9 +13,9 @@
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';
 import { buildRewritePrompt as jsPrompt } from '../../backend/rewritePrompt.js';
-import { runGuardrails as tsGuardrails, BANNED_PHRASES, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn } from '../functions/_shared/guardrails.ts';
+import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn } from '../functions/_shared/guardrails.ts';
 import { buildRewritePrompt as tsPrompt, SYSTEM_PROMPT } from '../functions/_shared/rewritePrompt.ts';
-import { BANNED_PHRASES as JS_BANNED, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn } from '../../extension/src/rewriteTemplate.js';
+import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn } from '../../extension/src/rewriteTemplate.js';
 import { SYSTEM_PROMPT as JS_SYSTEM } from '../../backend/rewritePrompt.js';
 
 const vehicle = {
@@ -70,6 +70,8 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, sold as-is with no warranty; financing subject to credit approval. It does not come with any warranty: none. Rust-free, damage-free, clean Carfax, runs great, no rust (no dents).') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Never driven in winter, never smoked in, no pets. Example Motors is a locally owned dealership.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. It does not come with a warranty.') + '\nVIN TESTVIN0000000001.',
+  sixty("2019 Ram 1500 Big Horn. Ask for me, not the dealer's front desk. I'm the owner of this dealership. I am the owner of the store. Taxes and fees go to the state, not the dealership.") + '\nVIN TESTVIN0000000001.',
+  sixty("2019 Ram 1500 Big Horn. Text me, not the dealer. I\u2019m the owner of this truck. I'm the owner. Message me, not the dealership's competitors; not the dealership.") + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. The warranty is not included.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn (no warranty).') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. One careful, loving owner. One very careful adult owner. Owned by one retired teacher.') + '\nVIN TESTVIN0000000001.',
@@ -110,6 +112,7 @@ for (const text of texts) {
   }
 }
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
+assert.deepEqual(JSON.parse(JSON.stringify(BANNED_UNLESS)), JSON.parse(JSON.stringify(JS_UNLESS)));
 assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]));
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);

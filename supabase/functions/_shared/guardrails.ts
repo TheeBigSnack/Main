@@ -120,6 +120,24 @@ export const BANNED_PHRASES: readonly string[] = Object.freeze([
   'gay', 'lesbian', 'transgender', 'ethnic',
 ]);
 
+// Wording a banned phrase is part of that says something else, so the
+// phrase is not banned there: the dealership's own fee wording ("tax, title
+// and registration, which go to the state, not the dealer"), the
+// dealership's own desk or number ("Ask for me, not the dealer's front
+// desk"), and the dealership's owner ("I'm the owner of this dealership").
+// For each phrase: what comes before it in its sentence, or right after it,
+// when it is fine. Still banned: "Text me, not the dealer.", "I'm the owner.",
+// "I'm the owner of this truck".
+const FEE_EARLIER = "\\b(?:tax(?:es)?|title|registration|tags|plates|fees?)\\b[^.!?;\\n]*";
+const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|dealer|store|business|company|lot)\\b";
+export const BANNED_UNLESS: Readonly<Record<string, Readonly<{ before?: string; after?: string }>>> = Object.freeze({
+  'not the dealership': Object.freeze({ before: FEE_EARLIER, after: "['\u2019]s\\b" }),
+  'not the dealer': Object.freeze({ before: FEE_EARLIER, after: "['\u2019]s\\b" }),
+  'i am the owner': Object.freeze({ after: THE_BUSINESS }),
+  "i'm the owner": Object.freeze({ after: THE_BUSINESS }),
+  'i\u2019m the owner': Object.freeze({ after: THE_BUSINESS }),
+});
+
 export function wordCount(text: unknown): number {
   return String(text || '').trim().split(/\s+/).filter(Boolean).length;
 }
@@ -345,7 +363,10 @@ function emojiCount(text: unknown): number {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const oneLine = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim();
-const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/[\s-]+/g, '[\\s-]+') + '\\b', 'i')]);
+const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => {
+  const unless: { before?: string; after?: string } = BANNED_UNLESS[p] || {};
+  return [p, new RegExp((unless.before ? `(?<!${unless.before})` : '') + '\\b' + escapeRe(p).replace(/[\s-]+/g, '[\\s-]+') + '\\b' + (unless.after ? `(?!${unless.after})` : ''), 'i')];
+});
 // "one owner", "1-owner", "single-owner", "one careful owner", "one
 // careful, loving owner", "one very careful adult owner" (up to three words
 // between, a comma after any but the last), "only one previous owner", "its
