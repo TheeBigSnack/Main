@@ -1111,6 +1111,44 @@ test('Fill again leaves the photos on the form as they are; Attach photos again 
   assert.doesNotMatch(kept, /twice/);
 });
 
+// Attach photos again warns that each photo may now be on the form twice
+// only once it has attached some: not while the first batch is still on its
+// way, and not when it attached none (the tab had left the form, say). Run
+// with runFill, attachPhotos and photosHtml as written.
+test('Attach photos again warns about doubles only for photos it actually attached again', async () => {
+  const shows = (p) => compile('photosHtml', { state: p.state, blockedPatterns: () => [], esc: (x) => String(x), patternCovers: () => false, patternHost: (x) => x, allowButton: () => '' })();
+  // two photos attached; then the tab goes to a listing, and Attach photos again attaches none
+  const moved = formTabPanel({ photos: 2 });
+  const first = moved.fns.runFill({ opened: true });
+  await moved.next();
+  await first;
+  assert.equal(moved.state.photos.attached, 2);
+  moved.tabs[77] = 'https://www.facebook.com/marketplace/item/999/';
+  const none = moved.fns.attachPhotos(null, { again: true });
+  await moved.tick();
+  assert.doesNotMatch(shows(moved), /photosAgain|twice/, 'nothing sent yet: no doubles');
+  await moved.next();
+  await none;
+  assert.deepEqual([moved.state.photos.attached, moved.state.photos.done], [0, true]);
+  const after = shows(moved);
+  assert.match(after, /0 of 2 attached/);
+  assert.doesNotMatch(after, /photosAgain|twice/, 'none attached again: no doubles to warn about');
+  assert.match(after, /no longer shows this car's Marketplace form/, 'the reason is said');
+  // some attached again before the run stopped: the warning names how many
+  const part = formTabPanel({ photos: 6 });
+  const firstPart = part.fns.runFill({ opened: true });
+  await part.next();
+  await part.next();
+  await firstPart;
+  const partly = part.fns.attachPhotos(null, { again: true });
+  await part.next(); // four attached again
+  part.tabs[77] = 'https://www.facebook.com/marketplace/item/999/';
+  await part.next(); // the tab left the form: the last two are not
+  await partly;
+  assert.equal(part.state.photos.attached, 4);
+  assert.match(shows(part), /4 photos were attached again\. If the form still had the ones attached before, those are on it twice now: remove the extra copies on Facebook before you publish\./);
+});
+
 // Fill again and Attach photos again on a form left open (overnight, say):
 // the car is read again first when its last read is old, so the form is
 // never filled again, nor given photos, from the old read; and a double click

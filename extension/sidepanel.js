@@ -1849,9 +1849,15 @@ function photosHtml() {
   if (!p) return '<div id="photos">Preparing photos…</div>';
   const limitNote = p.total > p.limit ? ` (the form takes ${p.limit}${p.verified ? '' : ', unverified'}; the first ${p.limit} were used)` : '';
   let html = `<div id="photos" class="${p.done ? 'done' : ''}">${p.attached} of ${Math.min(p.total, p.limit)} attached${p.done ? '' : '…'}${limitNote}</div>`;
-  // The count is what Lot Current sent to the form, not what the form holds now.
-  if (p.again) html += '<div class="banner warn" id="photosAgain">Every photo was attached again. If the form still had the ones attached before, each is on it twice now: remove the extra copies on Facebook before you publish.</div>';
-  else if (p.done && p.attached) html += '<p class="hint" id="photosKept"><b>Fill again</b> fills the fields only and leaves these photos on the form. If the form lost them (the page reloaded, or you discarded a draft), click <b>Attach photos again</b>.</p>';
+  // The count is what Lot Current sent to the form, not what the form holds
+  // now. The doubles warning is about photos this run actually attached:
+  // none yet (or none at all: the tab left the form, say) means no doubles.
+  if (p.again) {
+    const all = p.done && p.attached >= Math.min(p.total, p.limit);
+    const what = all ? 'Every photo was attached again. If the form still had the ones attached before, each is on it twice now'
+      : `${p.attached} ${p.attached === 1 ? 'photo was' : 'photos were'} attached again. If the form still had the ones attached before, ${p.attached === 1 ? 'it is' : 'those are'} on it twice now`;
+    if (p.attached > 0) html += `<div class="banner warn" id="photosAgain">${what}: remove the extra copies on Facebook before you publish.</div>`;
+  } else if (p.done && p.attached) html += '<p class="hint" id="photosKept"><b>Fill again</b> fills the fields only and leaves these photos on the form. If the form lost them (the page reloaded, or you discarded a draft), click <b>Attach photos again</b>.</p>';
   const blocked = blockedPatterns();
   const onFacebook = p.failed.filter((f) => f.facebook).length;
   const others = p.failed.filter((f) => !f.facebook && !blocked.some((b) => patternCovers(b, f.url))).length;
