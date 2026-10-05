@@ -786,6 +786,10 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     [NO_STOP, `${NO_STOP}\n\u2013 so deal direct with the salesperson.`], [NO_STOP, `${NO_STOP}\n, so deal direct with the salesperson.`],
     [NO_STOP, `${NO_STOP}\n...so deal direct with the salesperson.`], [NO_STOP, `${NO_STOP}\n\u2026 so deal direct with the salesperson.`],
     [NO_STOP, `${NO_STOP}\n(so deal direct with the salesperson)`], [NO_STOP, `${NO_STOP}\n- so deal direct with the salesperson.`],
+    // past a line with no letter (a bare bullet, an emoji, an opening bracket) to the first letter after it
+    [FEES, `${FEES}\n\u2022 \nso deal direct with the salesperson.`], [FEES, `${FEES}\n*\nso deal direct with the salesperson.`],
+    [FEES, `${FEES}\n\u{1F697}\nso deal direct with the salesperson.`], [FEES, `${FEES} (\nso deal direct with the salesperson.)`],
+    [NO_STOP, `${NO_STOP}\n\u{1F697}\nso deal direct with the salesperson.`], [NO_STOP, `${NO_STOP}\n\u2014 so deal direct with the salesperson.`],
   ]) {
     const c = withNote(note);
     const template = buildTemplateDescription(c);
@@ -808,6 +812,7 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     [FEES, `${FEES}\n\u{1F697} Come see it today!`], [FEES, `${FEES}\n\u201cAsk me anything.\u201d`], [FEES, `${FEES} (Message me any time.)`],
     [FEES, `${FEES}\n- Heated seats`], [FEES, `${FEES}\n\u2022 Heated seats`], [NO_STOP, `${NO_STOP}\n\u{1F697} Come see it today!`],
     [NO_STOP, `${NO_STOP}\n- Heated seats`], [NO_STOP, `${NO_STOP}\n"Ask me anything."`], [FEES, `Deal direct with the salesperson etc. ${FEES}`],
+    [FEES, `${FEES}\n* Heated seats`], [FEES, `${FEES}\n\u2014 Heated seats`], [FEES, `${FEES}\n\u{1F697}\nCome see it today!`],
   ]) {
     const c = withNote(note);
     assert.deepEqual(runGuardrails(buildTemplateDescription(c).replace(note, own), c).problems, [], own);
@@ -817,6 +822,14 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     const rest = buildTemplateDescription(c).replace(`${note}\n`, '');
     assert.deepEqual(runGuardrails(`${note}\n${rest}`, c).problems, [], `${note} first`);
     assert.deepEqual(runGuardrails(`${rest}\n${note}`, c).problems, [], `${note} last`);
+  }
+  // "vs" or "cf" at the end of a stock number is no "vs." or "cf.": a car with no VIN, whose stock line sits right before the note, passes
+  for (const stock of ['U1234VS', '23-CF', 'P5521-VS', 'A1VIZ']) {
+    const sparse = { ...vehicle('usedNormal'), vin: '', stock, features: [], engine: '', transmission: '', drivetrain: '', exteriorColor: '', interiorColor: '', carfaxUrl: '' };
+    const c = { ...withNote(FEES), vehicle: sparse, price: sparse.price };
+    const text = buildTemplateDescription(c);
+    assert.match(text, new RegExp(`${stock}\\.\\n${FEES}`), text);
+    assert.deepEqual(runGuardrails(text, c).problems.filter((p) => !/^too-/.test(p.code)), [], stock);
   }
   // a steer in the note, before where the fees go or anywhere in its sentence, is the note's to change
   for (const note of [

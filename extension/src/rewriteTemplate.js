@@ -448,7 +448,7 @@ const sentenceCase = (s) => s.replace(/[\p{L}\p{N}]/u, (c) => (c.toUpperCase().l
 // no name, the title starts it, so a title the note's sentence check would
 // read as carrying the note on (one that starts with a comma, a dot, a dash
 // with no space after it or a letter with no capital) is said as "I'm the
-// <title>" instead, and the template always passes its own checks. The
+// <title>" instead, so the sign-off never fails the note's check. The
 // rewrite prompts ask for the same line (backend/rewritePrompt.js).
 export function signOffLine(person, title, dealerName) {
   const at = dealerName ? ` at ${dealerName}` : '';
@@ -772,19 +772,19 @@ const NOTE_CLOSERS = "['\"\u2019\u201d)\\]]*";
 const NOTE_OPENS = new RegExp(`(?<=(^|[.!?]${NOTE_CLOSERS})(\\s*))`, 'y');
 const NOTE_ENDS = new RegExp(`((?:[^\\S\\n]*[.!?]+)?)${NOTE_CLOSERS}(\\s*)`, 'y');
 const NOTE_OWN_STOP = new RegExp(`[.!?]${NOTE_CLOSERS}$`);
-const NOT_A_STOP = new RegExp(`(?:^|[^\\p{L}])(?:e\\.g|i\\.e|vs|cf|viz)\\.${NOTE_CLOSERS}\\s*$`, 'iu');
+const NOT_A_STOP = new RegExp(`(?:^|[\\s(\\[{"'\u2018\u201c])(?:e\\.g|i\\.e|vs|cf|viz)\\.${NOTE_CLOSERS}\\s*$`, 'iu');
 // What follows a sentence's end starts a sentence of its own unless it
 // carries that one on: it starts with a mark that joins (a comma, semicolon,
 // colon, dot or ellipsis, dash, "&", "+", "/" or a closing bracket), or its
-// first letter, past any opening bracket, quote or emoji on its line, is in
-// lower case ("(so deal direct ...)"). At the start of a line, a bullet ("- ",
-// "• ", "* ") may come first.
+// first letter, past any opening bracket, quote, emoji or line with no letter,
+// is in lower case ("(so deal direct ...)"). At the start of a line, a bullet
+// ("- ", "* ", "• ", "– ", "— ") may come first.
 const CARRIES_ON = /^[,;:.\u2026&+/)\]}\-\u2010-\u2015]/;
 const LINE_BULLET = /^[-*\u2022\u2013\u2014][^\S\n]+(?=\S)/;
 function startsOwnSentence(rest, onNewLine) {
   const r = onNewLine ? rest.replace(LINE_BULLET, '') : rest;
   if (CARRIES_ON.test(r)) return false;
-  const first = r.split('\n')[0].match(/[\p{L}\p{N}]/u);
+  const first = r.match(/[\p{L}\p{N}]/u);
   return !first || !/\p{Ll}/u.test(first[0]);
 }
 function withoutOwnSentenceNote(text, note) {
@@ -798,7 +798,7 @@ function withoutOwnSentenceNote(text, note) {
   for (const m of t.matchAll(new RegExp(escapeRe(said).replace(/ /g, '\\s+'), 'gi'))) {
     const end = m.index + m[0].length;
     const before = at(NOTE_OPENS, m.index);
-    const opens = Boolean(before) && (before[1] === '' || before[2] !== '') && !NOT_A_STOP.test(t.slice(Math.max(0, m.index - 16), m.index))
+    const opens = Boolean(before) && (before[1] === '' || before[2] !== '') && !NOT_A_STOP.test(t.slice(0, m.index))
       && (!lower(m[0]) || (lower(said) && (before[1] === '' || before[2].includes('\n'))));
     const after = opens ? at(NOTE_ENDS, end) : null;
     const next = after ? end + after[0].length : -1;
