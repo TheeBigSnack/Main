@@ -1354,7 +1354,8 @@ export async function scan(search, options = {}) {
   // of whose addresses gave it, one of them failing and none of a kind that
   // gives cars answering, keeps its last reading and makes the scan not
   // complete; while the reading goes on it counts towards MAX_FAILED_IN_A_ROW
-  // unless another of its addresses answered. A car some of whose addresses
+  // unless the link that failed is not of a kind that gives cars and another
+  // of its addresses answered. A car some of whose addresses
   // were left unread, none of the others its page, keeps its last reading
   // and makes the scan not complete.
   let stopped = null;
