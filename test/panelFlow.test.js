@@ -2025,6 +2025,67 @@ test('Open the Marketplace form and Check fields are off while the description b
   assert.deepEqual([buttons.openForm.disabled, buttons.checkForm.disabled], [false, false], 'a style warning (too short) leaves them on');
 });
 
+// A dealership name typed in Settings (the popup) while the review screen is
+// open reaches the panel through adoptChanges. The checks run again with it:
+// a template written before the name is written again, so it names the
+// dealership and the buttons come on; an edited description keeps its text,
+// and its checks line and buttons follow the new settings.
+test('a dealership name added in Settings while the review is open brings the form buttons back, the template written again with it', async () => {
+  const v = vehicle('usedNormal');
+  const PAT = { name: 'Pat', title: 'sales consultant' };
+  const origin = 'https://www.example-dealer.test';
+  const k = { settings: 'settings:' + origin };
+  const unnamed = { ...DEALER, name: '' };
+  const template = (dealer) => buildTemplateDescription({ vehicle: v, dealer, salesperson: PAT });
+  const setup = (description, source) => {
+    const state = { origin, step: 'review', vin: v.vin, vehicle: v, price: v.price, description, descriptionSource: source, note: '', settings: { dealer: unnamed, salesperson: PAT, rewrite: { enabled: false } } };
+    const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: '', price: state.price, closingLine: '' });
+    state.guardrails = runGuardrails(description, ctx());
+    const box = { value: description };
+    const els = { openForm: { disabled: true }, checkForm: { disabled: true }, description: box, checks: { outerHTML: '' }, noDealer: { removed: false, remove() { this.removed = true; } } };
+    const calls = [];
+    const fns = compileMany(['adoptChanges', 'reviewAfterSettings', 'setFormButtons'], {
+      state, flowRun: 1, GLOBAL_KEYS: { sites: 'sites' }, siteKeys: () => k, isOwnEcho: () => false,
+      withDefaults: (s) => ({ ...s }), dailyCap: () => ({ reached: false, used: 0, cap: 10 }), capHtml: () => '', queueBar: () => '',
+      $: (id) => els[id] || null, runGuardrails, ruleProblems, ctx, checksHtml: (g) => (ruleProblems(g).length ? 'bad' : 'ok'),
+      generate: async ({ useClaude }) => { calls.push(`generate ${useClaude}`); state.description = template(state.settings.dealer); state.descriptionSource = 'template'; state.guardrails = runGuardrails(state.description, ctx()); },
+      render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'), setStatus: never('setStatus'), postUnderWay: () => true,
+      defaultOrigin: never('defaultOrigin'), loadSaved: never('loadSaved'),
+    }, [...BLOCKER_CONSTS, 'INPUT_STEPS', 'OWN_VIEW_STEPS']);
+    return { state, els, calls, fns };
+  };
+  const nameAdded = (state) => ({ [k.settings]: { newValue: { ...state.settings, dealer: DEALER } } });
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  // the template, written while no name was set: written again with the name, drawn again, and nothing left to fix
+  const t = setup(template(unnamed), 'template');
+  assert.ok(ruleProblems(t.state.guardrails).length > 0, 'without a name the template breaks the dealership rule');
+  t.fns.adoptChanges(nameAdded(t.state));
+  await settle();
+  assert.deepEqual(t.calls, ['generate false', 'render', 'saveFlow']);
+  assert.ok(t.state.description.includes(DEALER.name), 'the description names the dealership');
+  assert.deepEqual(ruleProblems(t.state.guardrails), [], 'its checks pass, so the buttons are drawn on');
+
+  // a description the person edited: kept as it is; the checks run again, and the buttons and banner follow
+  const own = template(unnamed).replace(/^/, `Ask me at ${DEALER.name}. `);
+  const e = setup(own, 'edited');
+  e.fns.adoptChanges(nameAdded(e.state));
+  await settle();
+  assert.deepEqual(e.calls, [], 'not written again, not redrawn');
+  assert.equal(e.els.description.value, own);
+  assert.deepEqual(ruleProblems(e.state.guardrails), [], 'checked again with the name: it names the dealership');
+  assert.deepEqual([e.els.openForm.disabled, e.els.checkForm.disabled], [false, false], 'Open the Marketplace form and Check fields come on');
+  assert.equal(e.els.checks.outerHTML, 'ok', 'the checks line is drawn again');
+  assert.ok(e.els.noDealer.removed, 'the banner asking for a name goes');
+
+  // an edited text that still doesn't name the dealership: the buttons stay off, for the reason the checks line now gives
+  const bare = setup(template(unnamed), 'edited');
+  bare.fns.adoptChanges(nameAdded(bare.state));
+  await settle();
+  assert.deepEqual([bare.els.openForm.disabled, bare.els.checkForm.disabled], [true, true]);
+  assert.equal(bare.els.checks.outerHTML, 'bad');
+});
+
 // A scan that lands after the car was read and no longer lists it (the
 // worker's rescan, the popup's Scan, a colleague's sale) contradicts the read
 // even inside READ_MAX_AGE_MS: Open the Marketplace form and Fill it in now

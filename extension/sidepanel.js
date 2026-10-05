@@ -2464,9 +2464,11 @@ function adoptChanges(changes) {
   }
   take(k.sync, 'syncState', null); // the server's count of today's posts feeds the cap line
   take(k.takenDown, 'takenDown', null); // a post taken down still counts toward the cap
+  let settingsChanged = false;
   if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
     state.settings = withDefaults(changes[k.settings].newValue, { name: state.siteName });
     touched = true;
+    settingsChanged = true;
   }
   if (changed(k.queue)) {
     const next = changes[k.queue].newValue ?? null;
@@ -2493,10 +2495,33 @@ function adoptChanges(changes) {
     capLine.outerHTML = capHtml(cap);
     setFormButtons(cap);
   }
-  // a name added in Settings: the banner asking for one goes (a description
-  // written before it still has to name the dealership: fillBlocker)
+  if (settingsChanged && state.step === 'review') reviewAfterSettings();
+}
+
+// Settings saved while the review screen is open (a dealership name added
+// in the popup, say): a description that is still the template as written
+// is written again from them, so it names the dealership it could not name
+// before, and the review is drawn again. One the person edited, or a
+// rewrite draft, stays as it is: its checks run again with the new settings
+// (fillBlocker still asks it to name the dealership), and the checks line,
+// the form buttons and the banner asking for a name follow them.
+async function reviewAfterSettings() {
+  const run = flowRun;
+  const box = $('description');
+  if (state.descriptionSource === 'template' && (!box || box.value === state.description)) {
+    await generate({ useClaude: false });
+    if (run === flowRun && state.step === 'review') {
+      render();
+      saveFlow();
+    }
+    return;
+  }
+  state.guardrails = runGuardrails(box ? box.value : state.description, ctx());
+  const old = $('checks');
+  if (old) old.outerHTML = checksHtml(state.guardrails);
+  setFormButtons();
   const noDealer = $('noDealer');
-  if (noDealer && state.step === 'review' && dealerNamed()) noDealer.remove();
+  if (noDealer && dealerNamed()) noDealer.remove();
 }
 
 async function init() {
