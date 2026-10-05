@@ -167,7 +167,7 @@ test('verify compares production with the repository, and nothing it runs can wr
   for (const st of steps.filter((x) => WRITES.test(runText(x)))) {
     assert.ok(["inputs.step == 'database'", "inputs.step == 'functions'"].includes(ifOf(st)), `${st.split('\n')[0]} writes and must run for database or functions only`);
   }
-  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \] \|\| \[ "\$STEP" = verify \]; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'every step that reads the database needs its password');
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \] \|\| \[ "\$STEP" = verify \]; then\n\s+if \[ "\$HAS_DB_PASSWORD" != true \]/, 'every step that reads the database needs its password');
 });
 
 // The pinned CLI (2.117.0), without --use-api and with Docker running, as on a
@@ -210,7 +210,7 @@ test('the functions step deploys nothing while production has a migration to app
   assert.ok(check > 0, 'the deploy step asks db push what it would apply');
   assert.ok(check < deploy.indexOf('supabase functions deploy'), 'before deploying anything');
   assert.match(deploy.slice(check), /if ! grep -q 'Remote database is up to date' "\$RUNNER_TEMP\/push-plan\.txt"; then\n[^\n]*::error::[^\n]*\n\s+exit 1\n\s+fi\n\s+for f in \$FUNCTIONS; do supabase functions deploy/);
-  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \]( \|\| \[ "\$STEP" = verify \])?; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'every step that reads the database needs its password');
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \]( \|\| \[ "\$STEP" = verify \])?; then\n\s+if \[ "\$HAS_DB_PASSWORD" != true \]/, 'every step that reads the database needs its password');
   assert.match(read('docs/production-setup.md'), /\*\*functions\*\* checks: it deploys nothing while a migration is still to be applied\./);
 });
 
@@ -387,8 +387,9 @@ test('docs/stripe-setup.md deploys billing through the Supabase workflow, never 
 // A secret in a job's env reaches every step of the job, the third-party
 // actions included (supabase/setup-cli runs at a movable tag), and every
 // script that runs there. Each deploy secret goes only to the steps that use
-// it: the supabase command's steps, the deploy that runs wrangler, and the
-// check that the settings exist.
+// it: the supabase command's steps and the deploy that runs wrangler. The
+// check that the settings exist runs the repository's own code, so it
+// learns only whether each secret is set.
 test('the deploy secrets reach only the steps that use them, never an action or the outside checks', () => {
   const jobEnv = (yml) => (yml.match(/^ {4}env:\n((?: {6}.+\n)+)/m) || [, ''])[1];
   const value = /\$\{\{ secrets\.[A-Z_]+ \}\}/;
@@ -407,8 +408,16 @@ test('the deploy secrets reach only the steps that use them, never an action or 
     assert.match(st, /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD \}\}/, st.split('\n')[0]);
   }
   for (const st of steps.filter((x) => value.test(x))) {
-    assert.ok(cli.includes(st) || st.startsWith('name: The settings are there'), `${st.split('\n')[0]} gets a secret it does not use`);
+    assert.ok(cli.includes(st), `${st.split('\n')[0]} gets a secret it does not use`);
   }
+  // the settings check runs the repository's own code (accountConfig.js): it learns only whether each secret is set
+  const settings = steps.find((st) => st.startsWith('name: The settings are there'));
+  assert.ok(settings, 'the settings check');
+  assert.doesNotMatch(settings, value, 'the settings check gets no secret\'s value');
+  assert.match(settings, /HAS_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN != '' \}\}/);
+  assert.match(settings, /HAS_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD != '' \}\}/);
+  assert.match(runText(settings), /if \[ "\$HAS_ACCESS_TOKEN" != true \]; then echo "::error::the secret SUPABASE_ACCESS_TOKEN is not set"; exit 1; fi/);
+  assert.match(runText(settings), /if \[ "\$HAS_DB_PASSWORD" != true \]; then echo "::error::the secret SUPABASE_DB_PASSWORD is not set"; exit 1; fi/);
   assert.doesNotMatch(steps.at(-1), /secrets\./, 'check-deploy runs without the token');
   const mine = manager.split(/\n      - /).slice(1);
   const holders = mine.filter((st) => value.test(st));
