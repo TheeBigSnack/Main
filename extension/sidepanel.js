@@ -186,27 +186,38 @@ const saveQueue = async () => {
 // reopened panel builds it from formMap.js again (resumeFlow), so nothing
 // saved can change what the fill code may touch, and a map fixed in a newer
 // version applies to a post saved before the update.
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'priceBasis', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'relist', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt'];
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'priceBasis', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'relist', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'saveId'];
 
 // One post is saved per website. A save never replaces the post saved there
 // when that one is under way in another window's side panel (liveElsewhere),
-// unless it is that very post (the same car, saved as that window's: a second
-// window's panel showing it). Then nothing is written, and it resolves that
-// post ({ where, vin, name }) so a post just starting or about to open its
-// form gives way (startFlow, openForm); otherwise it resolves null. The check
-// and the write run under the saved post's lock, so of two panels saving at
-// once, the second sees the first's post.
+// unless it is that very post as it stands: the same car, saved as that
+// window's, and not saved again since this panel last read or saved it (a
+// second window's panel showing it). Each save marks the post with a new
+// saveId, so a copy shown in a second window that the first window's panel
+// has saved since (it opened the car's form, say) is out of date, and
+// nothing that copy saves replaces the post. Then nothing is written,
+// and it resolves that post ({ where, vin, name }) so a post just starting
+// or about to open its form gives way (startFlow, openForm); otherwise it
+// resolves null. The check and the write run under the saved post's lock, so
+// of two panels saving at once, the second sees the first's post.
 async function saveFlow() {
   if (!state.origin) return null;
   const origin = state.origin;
+  const run = flowRun;
   const flow = {};
   for (const f of FLOW_FIELDS) flow[f] = state[f];
   let other = null;
   try {
     await updateKey(siteKeys(origin).flow, async (saved) => {
-      const samePost = Boolean(saved) && saved.vin === flow.vin && saved.windowId === flow.windowId;
+      // the save this panel last read or made of its post: read under the
+      // lock, so a save that waited for this panel's previous one counts it
+      const known = run === flowRun ? state.saveId : flow.saveId;
+      const samePost = Boolean(saved) && saved.vin === flow.vin && saved.windowId === flow.windowId && (saved.saveId || null) === (known || null);
       other = samePost ? null : await liveElsewhere(saved);
-      return other ? undefined : flow;
+      if (other) return undefined;
+      flow.saveId = crypto.randomUUID(); // never one an earlier save had, even of a post removed and started again
+      if (run === flowRun) state.saveId = flow.saveId;
+      return flow;
     }, flowStorage(origin));
   } catch (e) {
     setStatus(storageErrorText(e), 'error'); // the quota, most likely; the post goes on from what the panel holds
@@ -244,7 +255,7 @@ async function clearFlow({ keepSaved = false } = {}) {
   if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, opening: false, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, listingTyped: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, listingTyped: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, saveId: null, map: FORM_MAP,
   });
   return run;
 }
@@ -602,7 +613,7 @@ async function startFlow(req) {
   // one gives way.
   const taken = await saveFlow();
   if (dropped()) return undefined;
-  if (taken) return giveWay(taken);
+  if (taken) return giveWay(taken, { began: false });
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
   if (dropped()) return undefined;
 
@@ -2186,9 +2197,13 @@ function elsewhereText(other, vin) {
 
 // This panel's post gives way to `other`, a post from the same website that
 // another window's side panel saved first (saveFlow): that saved post stays
-// as it is, this panel's post is dropped, and the panel says why.
-async function giveWay(other) {
+// as it is, this panel's post is dropped, and the panel says why. began:
+// whether this panel began an attempt for its car in the pilot numbers; one
+// that gives way before it began ends none, so the other panel's attempt for
+// the same car stays open (clearFlow ends the open attempt of state.vin).
+async function giveWay(other, { began = true } = {}) {
   const vin = state.vin;
+  if (!began) state.vin = null;
   await clearFlow({ keepSaved: true });
   setStatus(elsewhereText(other, vin), 'error');
   return render();

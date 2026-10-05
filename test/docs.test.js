@@ -1406,10 +1406,15 @@ test('the help says one post from a website goes at a time across Chrome windows
   const panel = read('../extension/sidepanel.js');
   // startFlow checks the website's saved post for any car, and saves its own from the start of the check
   assert.match(panel, /const elsewhere = await postElsewhere\(req\.origin\);/, 'startFlow looks at the website\'s saved post, whatever its car');
-  assert.match(panel, /state\.step = 'checking';[\s\S]{0,700}?const taken = await saveFlow\(\);[\s\S]{0,80}?if \(taken\) return giveWay\(taken\);/, 'the post is saved as the check begins, and gives way to one saved first');
+  assert.match(panel, /state\.step = 'checking';[\s\S]{0,700}?const taken = await saveFlow\(\);[\s\S]{0,80}?if \(taken\) return giveWay\(taken[,)]/, 'the post is saved as the check begins, and gives way to one saved first');
   assert.match(panel, /One post from a website goes at a time, so none starts here/, 'what the panel says for another car');
   const help = doc('help.md');
   assert.doesNotMatch(help, /A side panel never opens a second form for a car whose post is under way in another window's side panel/);
   assert.match(help, /One post from a website goes at a time across Chrome windows\. While the side panel in one window has a post under way from a website \(a car being checked or reviewed there with that panel open, or a car whose Marketplace form is open there\), the side panel in another window starts no post from that website, for that car or another, and opens no second form/);
-  assert.match(help, /Finish or stop it in that window, or close the side panel there, then try again\./);
+  assert.doesNotMatch(help, /Finish or stop it in that window, or close the side panel there, then try again\./, 'closing that side panel frees nothing while the form\'s tab is open (liveElsewhere)');
+  assert.match(panel, /if \(form && typeof saved\.fbTabId === 'number'\) \{[\s\S]{0,200}?chrome\.tabs\.get\(saved\.fbTabId\)/, 'an open form\'s tab keeps the post under way with that window\'s side panel closed');
+  assert.match(help, /For a car being checked or reviewed there, finish or stop it in that window, or close the side panel there, then try again\. A car whose Marketplace form is open there has to be finished there first \(closing that side panel is not enough while the form's tab is open\)/);
+  // a copy in a second window replaces the post only while it is the post as it stands (saveId)
+  assert.match(panel, /const samePost = [^;]*\(saved\.saveId \|\| null\) === \(known \|\| null\);/, 'saveFlow lets a copy save only while it is the post as it stands');
+  assert.match(help, /A side panel opened in a second window while a post was under way shows that post as it stood then\. Once the first window's side panel has changed it \(text typed there, or its form opened\), nothing done in the second window's copy is saved over it, and that copy opens no form, while the first window's side panel or that form stays open\./);
 });
