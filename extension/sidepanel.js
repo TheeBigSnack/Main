@@ -1641,10 +1641,13 @@ function assumptionsHtml() {
   return html;
 }
 
+// The price is named by the basis it was read on (priceBasis): Settings
+// saved while the post waits change new posts, not this car's price or its
+// label. A post saved before the basis was kept goes by the setting.
 function carCard() {
   const v = state.vehicle;
   const mainText = `website's main price${v.priceLabel ? ', "' + esc(v.priceLabel) + '"' : ''}`;
-  const basis = state.settings.basis === 'beforeFees'
+  const basis = (state.priceBasis || state.settings.basis) === 'beforeFees'
     ? (state.noteApplies === false ? `${mainText}; this car shows no lower second price, so the price note is left out` : 'the lower second price the website shows')
     : mainText;
   return `<section class="car" id="vehicle">
