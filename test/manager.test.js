@@ -390,7 +390,7 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.match(lines[lines.indexOf('Sold cars still listed') + 2], /^2026-11-15 09:00,2021 Jeep Grand Cherokee Limited,SAMPLE00000000002,Alex,30,https:/);
   assert.equal(after('Price changes not yet updated'), 'Flagged,Car,VIN,Salesperson,Hours open,Price from,Price to,Listing link');
   assert.match(lines[lines.indexOf('Price changes not yet updated') + 2], /,21495,20995,/);
-  assert.equal(after('Listings'), 'Posted,Salesperson,Car,VIN,Price,Status,Taken down,Listing link');
+  assert.equal(after('Listings'), 'Posted,Salesperson,Car,VIN,Price,Status,Taken down,Listing link,Listed by hand before (Posted is when it was marked)');
   assert.equal(lines.filter((l) => /,(listed|taken down),/.test(l)).length, 8, 'every listing is a row');
   assert.equal(after('To-do items'), 'Flagged,Kind,Car,VIN,Salesperson,Done,How,Hours,Price from,Price to');
   assert.equal(after('Post attempts'), 'Post started,Salesperson,Car,VIN,Outcome,Seconds,In a queue,Reason');
@@ -421,7 +421,7 @@ test('the managers page names every car, person, price and link detail the CSV c
   assert.ok(notOnTeam && notOnTeam[1].startsWith('Posted,'), "a manager's download has the table of cars listed by people no longer on the team");
   const columns = new Set(blocks.slice(defs + 1).filter((b) => b.length > 1).flatMap((b) => b[1].split(',')));
   assert.ok(columns.has('VIN') && columns.has('Salesperson') && columns.has('Hours listed'), [...columns].join(', '));
-  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Hours listed', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason']);
+  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Hours listed', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason', 'Listed by hand before (Posted is when it was marked)']);
   const DETAILS = {
     Car: /\bthe car's name\b/,
     VIN: /\bVIN\b/,
@@ -1377,6 +1377,32 @@ test('gettingStarted step 3: any listing of this dealership, taken down or not',
   assert.equal(started({ listings: [listing('s1', 5), listing('s2', 6)] }).steps[2].line, '2 cars posted and synced so far.');
   assert.equal(started({ listings: [{ ...listing('s1', 5), dealership_id: 'd-2' }] }).steps[2].done, false, 'another dealership\'s row');
   assert.match(started().steps[2].line, /^No car yet\./);
+});
+
+// A listing marked as made by hand before that day (listed_before) is not a
+// post: summarize leaves it out of posted this week, and the Getting started
+// card agreed with it only in part. Before, 2 salespeople marking 6 old
+// listings each read "12 cars posted and synced so far" and "2 salespeople
+// posted in the past 7 days" beside a posted this week of 0.
+test('gettingStarted: listings marked as made by hand before that day are no car posted and nobody posting, as posted this week says', () => {
+  const people = [member('m1', 'manager'), member('s1', 'salesperson'), member('s2', 'salesperson')];
+  const marked = ['s1', 's2'].flatMap((who) => Array.from({ length: 6 }, (_, i) => listing(who, 1 + i, { vin: `VHAND${who}${i}`, listed_before: true })));
+  const g = started({ memberships: people, listings: marked });
+  assert.equal(summarize({ listings: marked, memberships: people, now: NOW }).totals.postedThisWeek, 0, 'posted this week');
+  assert.deepEqual([g.steps[2].done, g.steps[2].line], [false, 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs. 12 listings marked as made by hand before they were marked posted are not counted.']);
+  assert.deepEqual([g.steps[3].done, g.steps[3].line], [false, 'No salesperson has posted in the past 7 days.']);
+  // one real post beside them: one car, one salesperson
+  const one = started({ memberships: people, listings: [...marked.slice(0, 1), listing('s2', 3)] });
+  assert.equal(one.steps[2].line, '1 car posted and synced so far. 1 listing marked as made by hand before it was marked posted is not counted.');
+  assert.equal(one.steps[3].line, 'One salesperson posted in the past 7 days; this step needs 2.');
+  // a row with listed_before false, or none, is a post
+  assert.equal(started({ memberships: people, listings: [listing('s1', 2, { listed_before: false }), listing('s2', 2)] }).steps[3].done, true);
+  // the CSV's Listings table flags them: their Posted time is when they were marked
+  const csv = managerCsv({ listings: [marked[0], listing('s2', 3)], memberships: people }, { role: 'manager', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const at = csv.indexOf('Listings');
+  assert.match(csv[at + 1], /,Listed by hand before \(Posted is when it was marked\)$/);
+  assert.deepEqual(csv.slice(at + 2, at + 4).map((l) => l.split(',').pop()), ['yes', ''], 'newest first: the listing marked an hour ago, then the post made 3 hours ago');
+  assert.match(read('docs/help.md'), /\*\*First car posted and synced\*\* \(any car a signed-in salesperson posted; a listing marked posted as \*\*Before today\*\* is not counted/);
 });
 
 test('gettingStarted step 4: two different salespeople with a post in the past 7 days; a manager\'s own posts do not count', () => {
