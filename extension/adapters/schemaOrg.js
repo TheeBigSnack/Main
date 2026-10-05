@@ -1289,9 +1289,13 @@ export async function scan(search, options = {}) {
   // kind of address (addressPattern) gives cars is learned as the scan goes,
   // from the last scan's pages first, and that kind is tried first; a kind
   // that twice gave no car and never one is not tried again in this scan.
-  // A page that fails ends the car's turn. A car some of whose addresses
-  // were left unread, none of the others its page, keeps its last reading
-  // and makes the scan not complete.
+  // A page of a kind that has given cars that fails ends the car's turn;
+  // any other link that fails is passed over for the car's next address, and
+  // a car found at one of them is not a failure. A car none of whose
+  // addresses gave it, one of them failing, keeps its last reading, makes
+  // the scan not complete and counts towards MAX_FAILED_IN_A_ROW. A car some
+  // of whose addresses were left unread, none of the others its page, keeps
+  // its last reading and makes the scan not complete.
   let stopped = null;
   let readErrors = 0;
   let failedInARow = 0;
@@ -1343,8 +1347,14 @@ export async function scan(search, options = {}) {
           files += 1;
           noCar(href);
         } else {
-          error = page; // a website failing is asked for nothing more about this car
-          break;
+          if (!error) error = page;
+          // the lot's own kind of car page failing is the website failing:
+          // nothing more is asked about this car
+          if (gave.get(addressPattern(href))) break;
+          // any other link that fails (a finance form that sends Lot Current
+          // to a lender's website, a report link, a 500 or JSON from a form)
+          // may not be the car's page: its next address is read
+          noCar(href);
         }
       } else {
         const node = carOnPage(page.parsed.vehicles, { vin: item.vin, pageUrl: got.finalUrl });
@@ -1458,7 +1468,7 @@ async function carFromPage(site, vin, href) {
   const got = await site.read(href);
   const page = pageOf(got, vin);
   if (page.kind === 'gone') return { gone: true };
-  if (page.kind === 'blocked') return { error: page.message.replace(/, so the scan stopped.*$/, '.') };
+  if (page.kind === 'blocked') return { error: page.message.replace(/, so the scan stopped.*$/, '.'), blocked: true };
   if (page.kind !== 'html') return { error: `Couldn't read the car's page on the website (${page.message}).`, file: Boolean(page.file) };
   const node = page.parsed.vehicles.find((n) => nodeVin(n) === vin);
   if (node) return { record: { node, url: got.finalUrl, facts: factsForCar(page.parsed.facts, { urls: [got.finalUrl, href], vin }) } };
@@ -1537,16 +1547,21 @@ export async function getDetails(search, vin, options = {}) {
     // The car's page among the links with its VIN, a form or a file with
     // its VIN in the query not taken for it (oneAddressPerCar): those with
     // the VIN in their path first, then in the list's order, until one
-    // shows the car. A file is passed over; a page that fails ends the
-    // search with its error, since the car's own page may be the one failing.
+    // shows the car. A file is passed over, and so is a link that fails (a
+    // report link that sends Lot Current to another website, a form's 500):
+    // when no link shows the car, the first failure is the answer, since the
+    // car's own page may be the one failing. A refusal stops at once.
     const withVin = page.parsed.facts.links.map((h) => onSite(h, null, origin)).filter((u) => u && !fileAddress(u.href) && vinInAddress(u.href) === wanted);
     const ordered = [...withVin.filter((u) => vinInPath(u.href) === wanted), ...withVin.filter((u) => vinInPath(u.href) !== wanted)];
     const links = ordered.slice(0, MAX_ADDRESSES_PER_CAR);
+    let failed = null;
     for (const link of links) {
       const r = await carFromPage(site, wanted, link.href);
       if (r.record) return done(r.record);
-      if (r.error && !r.file) return { ok: false, message: r.error };
+      if (r.blocked) return { ok: false, message: r.error };
+      if (r.error && !r.file && !failed) failed = r.error;
     }
+    if (failed) return { ok: false, message: failed };
     // links left unread may hold its page: never "gone" on that
     if (ordered.length > links.length && !listedNode) return { ok: false, message: "Couldn't tell which of this car's links on the website is its page. Scan the website again, then post." };
     if (links.length && !listedNode) return done(null);

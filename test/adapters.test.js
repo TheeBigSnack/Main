@@ -1179,6 +1179,73 @@ test('schemaOrg scan: a car whose kept address is a form or a file is read at it
   assert.deepEqual(post.calls, [LIST, `${O}/finance/apply/?vin=${cars[1].vin}`, `${O}/window-sticker/?vin=${cars[1].vin}`, O + cars[1].path]);
 });
 
+test('schemaOrg scan: a link with a car\'s VIN that fails (another website, a 500, JSON) is passed over for its next address, not counted as the website failing', async () => {
+  const cars = standardCars(6).map((c) => ({ ...c, path: `/vehicle-details/?vin=${c.vin}` }));
+  const isCarPage = (u) => u.includes('/vehicle-details/');
+  // each card links `linkOf(c)` before (or, for a report link with the VIN in its path, after) the car's own page
+  const withLink = (linkOf, answer, { after = false } = {}) => {
+    const m = standardSite({ cars, listData: false });
+    for (const [at, a] of m) {
+      if (!at.startsWith(LIST)) continue;
+      let text = a.text;
+      for (const c of cars) {
+        const own = `<a href="${c.path.replace(/&/g, '&amp;')}">`;
+        const link = `<a href="${linkOf(c)}">More</a>`;
+        text = after ? text.replace(`?vin=${c.vin}">Carfax</a>`, `?vin=${c.vin}">Carfax</a> ${link}`) : text.replace(own, link + ' ' + own);
+      }
+      m.set(at, { ...a, text });
+    }
+    for (const c of cars) m.set(O + linkOf(c), answer(c));
+    return m;
+  };
+  const form = (c) => `/finance/apply/?vin=${c.vin}`;
+  const report = (c) => `/history-report/${c.vin}/`;
+  const lender = (c) => html('<html><body>Apply</body></html>', { finalUrl: 'https://lender.example/apply?vin=' + c.vin, redirected: true });
+  for (const [label, linkOf, answer, after] of [
+    ['a form that sends Lot Current to a lender\'s website', form, lender, false],
+    ['a form that answers HTTP 500', form, () => httpError(500, 'error'), false],
+    ['a form that answers JSON', form, () => ({ ok: true, status: 200, contentType: 'application/json', text: '{"ok":true}' }), false],
+    ['a report link with the VIN in its path that leaves the website', report, lender, true],
+  ]) {
+    const search = fakeSiteSearch(withLink(linkOf, answer, { after }));
+    const res = await schemaOrg.scan(search, schemaOrg.scanOptions(SERVICE));
+    assert.deepEqual([res.ok, res.total, res.complete, res.records.length], [true, 6, true, 6], `${label}: ${res.message}`);
+    assert.deepEqual(res.records.map((r) => r.url).sort(), cars.map((c) => O + c.path).sort(), `${label}: each car read from its own page`);
+    assert.ok(search.calls.filter((u) => !isCarPage(u) && !u.startsWith(LIST)).length <= CONCURRENCY * 2, `${label}: the failing links are read only until the lot's kind of car page is known (${search.calls})`);
+    // at post time, without the address the last scan kept: the failing link is passed over too
+    const post = fakeSiteSearch(withLink(linkOf, answer, { after }));
+    const d = await schemaOrg.getDetails(post, cars[2].vin, schemaOrg.scanOptions(SERVICE));
+    assert.equal(d.ok, true, `${label}: ${d.message}`);
+    assert.equal(schemaOrg.normalize(d.record).vin, cars[2].vin, label);
+  }
+  // when the car's own page fails too, the car is not read and never called gone; the scan is not complete
+  const both = withLink(form, () => httpError(500, 'error'));
+  both.set(O + cars[3].path, httpError(500, 'error'));
+  const res = await schemaOrg.scan(fakeSiteSearch(both), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([res.ok, res.total, res.complete, res.records.length], [true, 6, false, 5], res.message);
+  const d = await schemaOrg.getDetails(fakeSiteSearch(both), cars[3].vin, schemaOrg.scanOptions(SERVICE));
+  assert.equal(d.ok, false, 'a failing page is never "gone"');
+  assert.match(d.message, /HTTP 500/);
+  // a website failing everywhere still stops after MAX_FAILED_IN_A_ROW cars
+  const down = withLink(form, () => httpError(500, 'error'));
+  for (const c of cars) down.set(O + c.path, httpError(500, 'error'));
+  const downSearch = fakeSiteSearch(down);
+  const stopped = await schemaOrg.scan(downSearch, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([stopped.ok, stopped.error], [false, 'failing']);
+  assert.ok(downSearch.calls.filter((u) => !u.startsWith(LIST)).length <= 2 * (MAX_FAILED_IN_A_ROW + CONCURRENCY - 1), `${downSearch.calls.length} requests`);
+  // a refusal on such a link stops at once, in the scan and at post time
+  const refused = withLink(form, () => httpError(429, 'slow down'));
+  const refusedSearch = fakeSiteSearch(refused);
+  const r429 = await schemaOrg.scan(refusedSearch, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([r429.ok, r429.error], [false, 'blocked']);
+  assert.ok(refusedSearch.calls.filter(isCarPage).length <= CONCURRENCY - 1, 'nothing more is asked for after a refusal');
+  const post429 = fakeSiteSearch(refused);
+  const d429 = await schemaOrg.getDetails(post429, cars[2].vin, schemaOrg.scanOptions(SERVICE));
+  assert.equal(d429.ok, false);
+  assert.match(d429.message, /HTTP 429/);
+  assert.deepEqual(post429.calls.filter(isCarPage), [], 'the car\'s page is not asked for after the refusal');
+});
+
 test('schemaOrg scan: a car page that answers plain text is a page that failed, not a file that is no car', async () => {
   const cars = standardCars(6);
   const m = standardSite({ cars, listData: false });
