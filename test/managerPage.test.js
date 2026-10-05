@@ -11,6 +11,7 @@ import { mkdtempSync, copyFileSync, writeFileSync, rmSync, readFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { FUTURE_SKEW_MS } from '../manager/data.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PROJECT = 'https://abcdefgh.supabase.co';
@@ -315,6 +316,41 @@ test('loadLive reads every row past the API\'s 1,000-row cap: the oldest open ta
   assert.ok(todoReads.length >= 2, 'more than one request');
   assert.ok(todoReads.every((q) => q.range), 'each request asks for a range');
   assert.deepEqual(todoReads[0].order.at(-1), ['id', true], 'the order ends on a unique column, so pages neither overlap nor skip');
+});
+
+// ---------- scans stamped ahead of the clock ----------
+
+// The page reads the newest 50 scans. A machine whose clock ran ahead can
+// have stored scans stamped in the future (before /sync refused them), and
+// summarize() leaves those out of the Last scan line; the read itself has to
+// leave them out too, or 50 of them fill the read and the real scans never
+// arrive.
+test('50 scans stamped in the future do not crowd the real last scan out of the 50-row read', async () => {
+  const D = 'd1';
+  const NOW = Date.now();
+  const at = (hoursAgo) => new Date(NOW - hoursAgo * 3600 * 1000).toISOString();
+  const future = Array.from({ length: 50 }, (_, i) => ({ id: `f${String(i).padStart(2, '0')}`, dealership_id: D, taken_at: at(-24 - i), cars: 999, ready: 999, take_down_count: 9, price_update_count: 9 }));
+  const client = fakeClient({
+    session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } },
+    tables: {
+      dealerships: [{ id: D, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+      memberships: [{ user_id: 'u-manager', dealership_id: D, role: 'manager', name: 'Jamie' }],
+      listings: [],
+      todo_items: [],
+      post_attempts: [],
+      scan_summaries: [...future, { id: 's1', dealership_id: D, taken_at: at(1), cars: 42, ready: 37, take_down_count: 0, price_update_count: 1 }],
+    },
+  });
+  const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
+  const html = main(page);
+  assert.match(html, /Last scan [^<]*: 42 cars on the website, 37 ready to post, 0 to take down, 1 price change/, 'the real scan an hour ago is the last scan');
+  assert.doesNotMatch(html, /999 cars/);
+  assert.doesNotMatch(html, /No scan is recorded yet/);
+  const scanRead = client.requests.find((q) => q.table === 'scan_summaries');
+  assert.equal(scanRead.limit, 50);
+  assert.equal(scanRead.lte.length, 1, 'the read stops at now plus the clock margin');
+  assert.equal(scanRead.lte[0][0], 'taken_at');
+  assert.ok(Math.abs(Date.parse(scanRead.lte[0][1]) - (NOW + FUTURE_SKEW_MS)) < 60 * 1000, scanRead.lte[0][1]);
 });
 
 // ---------- what the page says when nothing is flagged ----------
