@@ -171,7 +171,7 @@ test('stripe setup: a live key is refused without --live, and a missing key is a
   const none = await runSetup({ key: '', pricing, fetchImpl: s.fetchImpl });
   assert.equal(none.ok, false);
   assert.equal(s.calls.length, 0);
-  const allowed = await runSetup({ key: 'sk_live_abc', live: true, pricing: { ...pricing, hypothesis: false, confirmedOn: '2026-12-01' }, fetchImpl: s.fetchImpl });
+  const allowed = await runSetup({ key: 'sk_live_abc', live: true, pricing: { ...pricing, hypothesis: false, confirmedOn: '2026-12-01' }, fetchImpl: s.fetchImpl, now: Date.parse('2026-12-01T09:00:00Z') });
   assert.equal(allowed.mode, 'live');
   assert.ok(s.calls.length > 0);
 });
@@ -184,19 +184,34 @@ test('stripe setup: live mode is refused while pricing.json is still a hypothesi
   // (the committed file is refused the same way while it says "hypothesis": true; test/marketing.test.js holds
   // when it may say false)
   // and while it says "hypothesis": false without the date of the dealer's written agreement, or with a date that is not one
+  // or a date after today (the agreement has not happened yet); the refusal names what is missing
   const { confirmedOn: _date, ...numbers } = pricing;
-  const guesses = [{ ...numbers, hypothesis: true }, { ...numbers, hypothesis: undefined }, { ...numbers, hypothesis: 'false' }, { ...numbers, hypothesis: true, confirmedOn: '2026-12-01' },
-    { ...numbers, hypothesis: false }, { ...numbers, hypothesis: false, confirmedOn: '' }, { ...numbers, hypothesis: false, confirmedOn: 'soon' }, { ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }];
-  if (pricing.hypothesis !== false) guesses.unshift(pricing);
-  for (const guess of guesses) {
+  const now = Date.parse('2026-10-05T12:00:00Z');
+  const flag = /^it still says "hypothesis": true/;
+  const noDate = /^it says "hypothesis": false but has no "confirmedOn" date/;
+  const notADate = /^its "confirmedOn" \(.*\) is not a real date written YYYY-MM-DD/;
+  const later = /^its "confirmedOn" \(2026-10-06\) is after today \(2026-10-05\)/;
+  const guesses = [[{ ...numbers, hypothesis: true }, flag], [{ ...numbers, hypothesis: undefined }, flag], [{ ...numbers, hypothesis: 'false' }, flag], [{ ...numbers, hypothesis: true, confirmedOn: '2026-10-01' }, flag],
+    [{ ...numbers, hypothesis: false }, noDate], [{ ...numbers, hypothesis: false, confirmedOn: '' }, noDate], [{ ...numbers, hypothesis: false, confirmedOn: 'soon' }, notADate],
+    [{ ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }, notADate], [{ ...numbers, hypothesis: false, confirmedOn: 20261001 }, notADate], [{ ...numbers, hypothesis: false, confirmedOn: '2026-10-06' }, later]];
+  if (pricing.hypothesis !== false) guesses.unshift([pricing, flag]);
+  for (const [guess, why] of guesses) {
     const s = fakeStripe();
-    const r = await runSetup({ key: 'sk_live_abc', live: true, apply: true, pricing: guess, fetchImpl: s.fetchImpl, webhookUrl: REF });
+    const r = await runSetup({ key: 'sk_live_abc', live: true, apply: true, pricing: guess, fetchImpl: s.fetchImpl, webhookUrl: REF, now });
     assert.equal(r.ok, false, JSON.stringify([guess.hypothesis, guess.confirmedOn]));
     assert.equal(s.calls.length, 0, 'nothing read or created in live mode');
     assert.deepEqual(r.secrets, {});
     const refused = r.lines.find((l) => l.check === 'marketing/pricing.json');
     assert.ok(refused && !refused.ok && !refused.note, 'a failure, not a note');
-    assert.match(refused.detail, /"hypothesis": true[\s\S]*docs\/launch-checklist\.md, "Pricing confirmed"/);
+    assert.match(refused.detail, why, JSON.stringify([guess.hypothesis, guess.confirmedOn]));
+    assert.match(refused.detail, /nothing was read or changed in live mode[\s\S]*docs\/launch-checklist\.md, "Pricing confirmed"/);
+  }
+  // a dealer's agreement dated today or before: live mode goes ahead
+  for (const day of ['2026-10-05', '2026-09-30']) {
+    const s = fakeStripe();
+    const r = await runSetup({ key: 'sk_live_abc', live: true, pricing: { ...numbers, hypothesis: false, confirmedOn: day }, fetchImpl: s.fetchImpl, now });
+    assert.equal(r.lines.find((l) => l.check === 'marketing/pricing.json'), undefined, day);
+    assert.ok(s.calls.length > 0, day);
   }
   const s = fakeStripe();
   const test = await runSetup({ key: KEY, apply: true, pricing, fetchImpl: s.fetchImpl, webhookUrl: REF });
