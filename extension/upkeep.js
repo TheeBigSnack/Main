@@ -245,8 +245,11 @@ async function finish(ctx, how) {
       if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true }));
     }
     await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
-    // pilot numbers: how long the item stayed open, and whether Lot Current saw the change itself
-    await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, price ? 'price' : 'takeDown', { how }));
+    // pilot numbers: how long the item stayed open, and whether Lot Current
+    // saw the change itself; a take-down closes the car's price item too, as
+    // it leaves the diff with it (the popup's Taken down does the same), so
+    // no price item stays open for a car that is down
+    await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, price ? 'price' : null, { how }));
     await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook']));
   } catch (e) {
     up.error = storageErrorText(e);

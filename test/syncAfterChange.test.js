@@ -255,6 +255,23 @@ test('a take-down or price update recorded in the side panel asks the worker to 
 // mergeFlags drops that flag). So a flag that cannot be saved (storage full)
 // is shown, the item stays, nothing syncs, and I updated it / I took it down
 // closes it once there is room.
+// A car flagged both sold and at a new price leaves the diff on both lists
+// when it is taken down, so both its flags close, as the popup's Taken down
+// closes them: a price flag left open would later close as cleared, or go up
+// as an open item for a car that is down.
+test('I took it down in the side panel closes the car\'s price item along with its take-down', async () => {
+  const pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'Car A', yours: true, why: 'gone' }], priceUpdates: [{ vin: VIN_A, name: 'Car A', yours: true, from: 10000, to: 9500 }, { vin: VIN_B, name: 'Car B', yours: true, from: 20000, to: 19000 }], warnings: [] }, { at: '2026-10-01T09:00:00.000Z' });
+  const area = await finishUpkeep('takeDown', {
+    [k.posted]: { [VIN_A]: { name: 'Car A', price: 10000, postedAt: '2026-10-01T08:00:00.000Z' }, [VIN_B]: { name: 'Car B', price: 20000, postedAt: '2026-10-01T08:00:00.000Z' } },
+    [k.diff]: { takeDown: [{ vin: VIN_A, name: 'Car A' }], priceUpdates: [{ vin: VIN_A, name: 'Car A', from: 10000, to: 9500 }, { vin: VIN_B, name: 'Car B', from: 20000, to: 19000 }] },
+    [k.pilot]: pilot,
+  });
+  const flags = area.data[k.pilot].flags;
+  assert.deepEqual(flags.filter((f) => f.vin === VIN_A).map((f) => [f.kind, Boolean(f.doneAt), f.how]).sort(), [['price', true, 'manual'], ['takeDown', true, 'manual']], 'both of car A\'s items close');
+  assert.deepEqual(area.data[k.diff].priceUpdates.map((x) => x.vin), [VIN_B], 'as both leave the diff');
+  assert.deepEqual(flags.filter((f) => f.vin === VIN_B).map((f) => [f.kind, f.doneAt]), [['price', undefined]], 'another car\'s item stays open');
+});
+
 test('upkeep whose to-do flag cannot be saved says why, leaves the item to do and syncs nothing; the same click closes it once there is room', async () => {
   for (const kind of ['takeDown', 'price']) {
     const flagKind = kind === 'price' ? 'price' : 'takeDown';
