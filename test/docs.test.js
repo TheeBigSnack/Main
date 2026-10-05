@@ -1172,6 +1172,35 @@ test('no text says the data stays only in the browser: the profile follows the C
   for (const l of support) assert.match(l, /<b>Clear everything for this website<\/b> removes it\. Your profile \([^)]*closing line[^)]*\) is also kept by Chrome's sync under your Google account, and Settings, <b>Forget my synced profile<\/b> removes it\./, 'the support page says Clear everything removes what the extension keeps, but the synced profile needs Forget my synced profile');
 });
 
+// README's Account item once sent readers to "steps 3 to 6: the functions, ..."
+// as what must go live before a sign-in completes, after production-setup's
+// step 3 said all four functions were up, and its storage line called two
+// things the only ones that go further, leaving out the description writer.
+// The range it names covers exactly the steps its list names, by heading, and
+// lists the functions only while step 3 says they are not up.
+test('README points at the set-up steps still open, and its storage line names the description writer', () => {
+  const setup = read('../docs/production-setup.md');
+  const headings = Object.fromEntries([...setup.matchAll(/^## Step (\d+)\. ([^[\n]*)/gm)].map((m) => [Number(m[1]), m[2].trim()]));
+  const account = read('../README.md').split('\n').find((l) => l.startsWith('- **Account**'));
+  assert.ok(account, 'README no longer has its Account item');
+  const m = account.match(/`docs\/production-setup\.md` steps (\d+) to (\d+): ([^;)]*)/);
+  assert.ok(m, "README's Account item no longer names the production-setup steps a sign-in waits for");
+  const [from, to] = [Number(m[1]), Number(m[2])];
+  const NAMED = { 'the sign-in settings': /^Sign-in settings/, 'the sign-in email sender': /^The sign-in email sender/, 'the manager view': /^The manager view/, 'the first dealership': /^The first dealership/, 'the functions': /\bthe functions\b/ };
+  const items = m[3].split(/, | and /).map((x) => x.trim()).filter(Boolean);
+  for (const item of items) {
+    assert.ok(NAMED[item], `README names "${item}": add it to this test's map`);
+    const step = Object.entries(headings).find(([, h]) => NAMED[item].test(h));
+    assert.ok(step, `docs/production-setup.md has no step for "${item}"`);
+    assert.ok(Number(step[0]) >= from && Number(step[0]) <= to, `README puts "${item}" in steps ${from} to ${to}, and it is step ${step[0]}`);
+  }
+  for (let n = from; n <= to; n++) assert.ok(items.some((item) => NAMED[item].test(headings[n] || '')), `README's steps ${from} to ${to} include step ${n} (${headings[n]}) without naming it`);
+  if (/already has the database[^.]*all four functions/.test(setup)) assert.ok(!items.includes('the functions'), 'production-setup says the functions are up, and README still lists them as what a sign-in waits for');
+  const storage = read('../README.md').split('\n').find((l) => l.startsWith("Each salesperson's scans, settings, posted list and numbers are kept in their own browser"));
+  assert.doesNotMatch(storage, /\bTwo things also go further\b/, "README's storage line calls two things the only ones that leave the browser");
+  assert.match(storage, /description writer[^.]*rewrite service/, "README's storage line leaves out what the description writer sends");
+});
+
 // review: the privacy texts, README, help and set-up's Terms summary said "each scan's (time and) counts" sync,
 // while each sync sends one scan's counts, the newest stored one, and a scan judged a website hiccup sends none
 // (src/accountFlow.js scanFromStored).
