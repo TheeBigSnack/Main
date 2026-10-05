@@ -605,8 +605,8 @@ export const MAX_INVENTORY_PAGES = 30;
 // with a fixed gap between page reads the check stays short.
 export const MAX_CONFIRM_PAGES = 12;
 // Missing cars' pages failing in a row (a 500, an answer from another
-// website) before the check stops for this scan: a website having a bad
-// day is not read further, and the rest wait unconfirmed.
+// website, a timeout) before the check stops for this scan: a website
+// having a bad day is not read further, and the rest wait unconfirmed.
 export const MAX_FAILED_IN_A_ROW = 3;
 
 // The longest fixed gap one scan keeps between two car-page reads. A website
@@ -749,13 +749,14 @@ export async function scanInventory(search, options, platform) {
   // "sold" banner, or a car only hidden from the list), and a car with no
   // known page or past this scan's limit, is left unconfirmed: the rescan
   // lists it as missing but not confirmed gone. A page that fails on its own
-  // (a server error, an answer from another website) leaves only that car
-  // unconfirmed, listed in confirm.unchecked with the reason; after
-  // MAX_FAILED_IN_A_ROW such pages in a row the check stops and the rest
-  // wait for the next scan. A refusal (401, 403, 429, 503) or a request that
-  // fails outright sets confirm.error, and the rescan then marks nothing gone.
+  // (a server error, an answer from another website, a request that fails
+  // outright, as a page redirecting to another website does in the browser)
+  // leaves only that car unconfirmed, listed in confirm.unchecked with the
+  // reason; after MAX_FAILED_IN_A_ROW such pages in a row the check stops
+  // and the rest wait. A refusal (401, 403, 429, 503) sets confirm.error,
+  // and the rescan then marks nothing gone.
   const confirm = { checked: [], notFound: [], error: null };
-  const unchecked = [];
+  const unchecked = {};
   const pageOf = (vin) => {
     const href = confirmUrls && confirmUrls[vin];
     try {
@@ -808,8 +809,9 @@ export async function scanInventory(search, options, platform) {
       pagesRead += 1;
       answer = await call(url.href);
     } catch (e) {
-      confirm.error = String((e && e.message) || e);
-      break;
+      failedInARow += 1;
+      unchecked[vin] = 'the request failed: ' + String((e && e.message) || e);
+      continue;
     }
     if (answer && REFUSED[answer.status]) {
       confirm.error = `the page of ${vin}: ${problemWith(answer, origin)}`;
@@ -823,9 +825,9 @@ export async function scanInventory(search, options, platform) {
       continue; // anything else readable is not a clear "gone"
     }
     failedInARow += 1;
-    unchecked.push({ vin, reason: problemWith(answer, origin) || 'no answer' });
+    unchecked[vin] = problemWith(answer, origin) || 'no answer';
   }
-  if (unchecked.length) confirm.unchecked = unchecked;
+  if (Object.keys(unchecked).length) confirm.unchecked = unchecked;
 
   return { ok: true, fetchedAt: new Date().toISOString(), total: total ?? byVin.size, complete, requests, records: [...byVin.values()], confirm };
 }

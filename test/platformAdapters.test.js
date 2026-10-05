@@ -388,8 +388,8 @@ test('a car missing from the list is gone only when its own page answers 404 or 
   const res2 = await dealerCom.scan(platformSearch(site), { ...dealerCom.scanOptions(comService), confirmVins: [sold.vin, broken.vin], confirmUrls: { ...confirmUrls, [broken.vin]: DEALERCOM_ORIGIN + dealerComPath(broken) } });
   assert.equal(res2.confirm.error, null, 'one failing car page leaves that car unconfirmed, not every car');
   assert.deepEqual(res2.confirm.notFound, [sold.vin]);
-  assert.deepEqual(res2.confirm.unchecked.map((u) => u.vin), [broken.vin]);
-  assert.match(res2.confirm.unchecked[0].reason, /500/);
+  assert.deepEqual(Object.keys(res2.confirm.unchecked), [broken.vin]);
+  assert.match(res2.confirm.unchecked[broken.vin], /500/);
   // through the rescan: the sold car is taken down, the others wait as "not confirmed gone"
   const settings = withDefaults({});
   const siteInfo = { origin: DEALERCOM_ORIGIN, host: 'www.sample-dealercom.test', name: 'Sample Chevrolet', title: '', adapter: 'dealerCom' };
@@ -730,9 +730,9 @@ test('a missing car whose page fails on its own stays unconfirmed by itself; the
   assert.equal(res.confirm.error, null, 'a 502 and an answer from another website are about those two cars only');
   assert.deepEqual(res.confirm.notFound, [sold.vin, later.vin], 'the car after the failing pages is still checked');
   assert.deepEqual(res.confirm.checked, [sold.vin, later.vin]);
-  assert.deepEqual(res.confirm.unchecked.map((u) => u.vin), [broken.vin, offsite.vin]);
-  assert.match(res.confirm.unchecked[0].reason, /502/);
-  assert.match(res.confirm.unchecked[1].reason, /elsewhere\.test/);
+  assert.deepEqual(Object.keys(res.confirm.unchecked), [broken.vin, offsite.vin]);
+  assert.match(res.confirm.unchecked[broken.vin], /502/);
+  assert.match(res.confirm.unchecked[offsite.vin], /elsewhere\.test/);
   // through the rescan: the two sold cars are taken down, the other two wait
   const settings = withDefaults({});
   const siteInfo = { origin: DEALERON_ORIGIN, host: 'www.sample-dealeron.test', name: 'Sample Motors', title: '', adapter: 'dealerOn' };
@@ -743,7 +743,7 @@ test('a missing car whose page fails on its own stays unconfirmed by itself; the
   assert.ok(!second.diff.warnings.some((w) => /Couldn't double-check/.test(w)), second.diff.warnings.join(' | '));
 });
 
-test('a refusal or a request that fails outright still withholds every sold result; failing pages in a row stop the check', async () => {
+test('a refusal still withholds every sold result; a request that fails outright is that car\'s alone; failing pages in a row stop the check', async () => {
   const cars = platformCars(2);
   const [a, b, c, d] = platformCars(4, { from: 80 });
   const urls = Object.fromEntries([a, b, c, d].map((x) => [x.vin, DEALERON_ORIGIN + dealerOnPath(x)]));
@@ -756,9 +756,12 @@ test('a refusal or a request that fails outright still withholds every sold resu
   assert.match(refused.confirm.error, /403/);
   assert.ok(!refusedSearch.calls.includes(urls[c.vin]), 'nothing more is read after a refusal');
 
+  // a page redirecting to another website makes the browser's fetch fail (no CORS answer there)
   const base = platformSearch(dealerOnSite({ cars, gone: [a, b, c, d] }));
-  const thrown = await dealerOn.scan(async (r) => { if (r.url === urls[b.vin]) throw new Error('the request timed out'); return base(r); }, options);
-  assert.match(thrown.confirm.error, /timed out/);
+  const thrown = await dealerOn.scan(async (r) => { if (r.url === urls[b.vin]) throw new TypeError('Failed to fetch'); return base(r); }, options);
+  assert.equal(thrown.confirm.error, null);
+  assert.deepEqual(thrown.confirm.unchecked, { [b.vin]: 'the request failed: Failed to fetch' });
+  assert.deepEqual(thrown.confirm.notFound, [a.vin, c.vin, d.vin], 'the other cars are still checked and marked gone');
 
   const failing = dealerOnSite({ cars, gone: [d] });
   for (const x of [a, b, c]) failing.set(urls[x.vin], answerWith(500));
@@ -766,7 +769,7 @@ test('a refusal or a request that fails outright still withholds every sold resu
   const bad = await dealerOn.scan(failingSearch, options);
   assert.equal(MAX_FAILED_IN_A_ROW, 3);
   assert.equal(bad.confirm.error, null);
-  assert.deepEqual(bad.confirm.unchecked.map((u) => u.vin), [a.vin, b.vin, c.vin]);
+  assert.deepEqual(Object.keys(bad.confirm.unchecked), [a.vin, b.vin, c.vin]);
   assert.ok(!failingSearch.calls.includes(urls[d.vin]), 'after three failing pages in a row the rest wait for the next scan');
   assert.deepEqual(bad.confirm.notFound, []);
 
