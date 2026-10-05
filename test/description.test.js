@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitSegments, splitSentences, findBoilerplate, cleanDescription, endsAtAbbreviation, STARTS_SENTENCE, MIN_BOILERPLATE_COUNT } from '../extension/src/description.js';
+import { splitSegments, splitSentences, findBoilerplate, cleanDescription, endsAtAbbreviation, STARTS_SENTENCE, MIN_BOILERPLATE_COUNT, withoutLotWide } from '../extension/src/description.js';
 
 // Text captured from the live Waynesburg site on 2026-09-26 (the equipment
 // dump is abridged; the real one runs to 30+ items).
@@ -300,4 +300,19 @@ test('the lines are read as the page shows them: entities decoded, invisible for
 test('non-text input is handled', () => {
   assert.deepEqual(cleanDescription(undefined), []);
   assert.deepEqual(cleanDescription(42), []);
+});
+
+test('the write-up without its lot-wide text: each line the scan found is cut out wherever it stands, and a segment left empty goes', () => {
+  const lot = ['All loans are subject to bank approval.', 'We are a locally owned dealership.'];
+  assert.deepEqual(withoutLotWide('Local trade with new tires. All loans are subject to bank approval.<br>We are a locally owned dealership.', lot), ['Local trade with new tires.']);
+  // inside a segment, between other sentences, and more than once
+  assert.deepEqual(withoutLotWide('One owner. We are a locally owned dealership. Runs great. We are a locally owned dealership.', lot), ['One owner. Runs great.']);
+  // only where it stands between spaces: a line that is part of a longer word is not cut
+  assert.deepEqual(withoutLotWide('Xall loans are subject to bank approval.', ['all loans are subject to bank approval.']), ['Xall loans are subject to bank approval.']);
+  // the longest line first, so a shorter one inside it never leaves half of it behind
+  assert.deepEqual(withoutLotWide('Financing for all credit types. Runs great.', ['Financing for all credit types.', 'all credit types.']), ['Runs great.']);
+  // with no lot-wide text known, the segments as splitSegments gives them
+  assert.deepEqual(withoutLotWide('Runs great.<br>Clean inside.'), ['Runs great.', 'Clean inside.']);
+  assert.deepEqual(withoutLotWide('Runs great.', new Set(['', '  ', null])), ['Runs great.']);
+  assert.deepEqual(withoutLotWide(null, lot), []);
 });

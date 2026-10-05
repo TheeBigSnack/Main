@@ -66,6 +66,12 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, only 2,019 dollars down, save 1,500 today, 1500 bucks off, driven by a 5.7L V8, never driven in winter, came in on trade from a local customer, full airbag coverage.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, 1,000 down, get 1500 off, 2,500 cash back, a rebate of 3,500, discount of 4,000, 4,500 in savings, an off-road 1500 off the lot.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Save 1,500 today.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with a full warranty. Financing available for all credit types, everyone gets approved fast.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, sold as-is with no warranty; financing subject to credit approval. It does not come with any warranty: none. Rust-free, damage-free, clean Carfax, runs great, no rust (no dents).') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Never driven in winter, never smoked in, no pets. Example Motors is a locally owned dealership.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. It does not come with a warranty.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. The warranty is not included.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn (no warranty).') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. One careful, loving owner. One very careful adult owner. Owned by one retired teacher.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Owned by a single careful driver, owned by one family since new, driven by a diesel mechanic, driven by a twin-turbo engine, One-Touch Windows, Owner\'s Manual, a single zone owner\'s manual.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, a local trade with new tires and new brakes, plus new wipers and a new engine, new Michelin tires, new front rotors, new tires and shocks, new tires, struts, two new batteries.') + '\nVIN TESTVIN0000000001.',
@@ -88,6 +94,8 @@ const contexts = [
   { vehicle: { ...vehicle, carfaxOneOwner: true, descriptionRaw: 'One adult owner, garage kept.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, carfaxOneOwner: true, descriptionRaw: 'One careful, loving owner. Owned by a retired teacher.' }, dealer, priceNote: '', price: 28995 },
   { vehicle, dealer, priceNote: 'Plus tax, title and registration, which go to the state, not the dealer.', price: 28995 },
+  { vehicle: { ...vehicle, descriptionRaw: 'Sold as-is, no warranty. Carfax shows one accident reported. All loans are subject to bank approval. No rust. Driven by its previous owner. We are a locally owned dealership.' }, dealer, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, descriptionRaw: 'Comes with the rest of the factory warranty. Clean Carfax. Financing for all credit types. Runs great. Non-smoker.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, features: [...vehicle.features, 'ABS Brakes', 'Remote Engine Start', 'Variable Intermittent Wipers'], descriptionRaw: 'Local trade with new tires.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks and a new battery.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Reduced from 31,995 to 28,995. Only 28.9k! Miles: 38,000. With 38,000 on it. Call 555-555-0100. Since 1985. Tows 7,500 lbs.' }, dealer, priceNote: '', price: 27995 },
@@ -102,7 +110,7 @@ for (const text of texts) {
   }
 }
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
-assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part)]));
+assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]));
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);
 assert.deepEqual({ ...WORD_LIMITS }, { ...JS_LIMITS });

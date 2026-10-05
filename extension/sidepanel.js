@@ -232,7 +232,8 @@ function setStatus(text, kind = '') {
 // second price and this car has none (the main price is used), the note
 // would be untrue for it, so it is left out and the car card says so.
 const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
-const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
+// the scan's lot-wide text goes too: a disclaimer every car carries backs no claim about this one
+const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine), boilerplate: state.boilerplate });
 
 // Every description names the dealership (rule 5): with no dealership name
 // set, no description can, so the form is not opened until one is.

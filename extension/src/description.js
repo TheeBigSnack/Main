@@ -159,6 +159,29 @@ export function splitSegments(raw) {
   return segmentsOf(raw).map((seg) => seg.text);
 }
 
+// The description's segments with the lot-wide text the scan found taken
+// out: what the website says about this car, not what it says about every
+// car (a bank-approval or as-is disclaimer, "We are a locally owned
+// dealership."). Lot-wide text is cut out wherever it stands between
+// spaces, the longest first, and a segment left with nothing goes. The
+// checks read this as the website's own words for the car
+// (rewriteTemplate.js claimSource).
+export function withoutLotWide(raw, boilerplate = NONE) {
+  const parts = [...boilerplate].filter((p) => typeof p === 'string' && p.trim() !== '').sort((a, b) => b.length - a.length);
+  const out = [];
+  for (const segment of splitSegments(raw)) {
+    let text = segment;
+    for (const part of parts) {
+      for (let i = text.indexOf(part); i >= 0; i = text.indexOf(part, i + 1)) {
+        if ((i === 0 || /\s/.test(text[i - 1])) && (i + part.length === text.length || /\s/.test(text[i + part.length]))) text = `${text.slice(0, i)} ${text.slice(i + part.length)}`;
+      }
+    }
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text) out.push(text);
+  }
+  return out;
+}
+
 // The absolute floor under the share: a share alone misbehaves on a tiny
 // lot (with 3 cars, any sentence in one car is already 33%, and a 2-car lot
 // would lose every sentence the two share). A segment is boilerplate only

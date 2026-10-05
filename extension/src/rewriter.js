@@ -94,7 +94,7 @@ export async function generateDescription({ vehicle, dealer = {}, salesperson = 
   // service gets it; the template writes from the car's listed facts and never copies it
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
   const closingLine = usableClosingLine(salesperson.closingLine);
-  const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine };
+  const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine, boilerplate }; // the lot-wide text backs no claim about this car
   const stores = Array.isArray(settings.myStores) ? settings.myStores : [];
   const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, highlights, stores });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };

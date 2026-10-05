@@ -40,7 +40,7 @@
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
-import { splitSegments } from './description.js';
+import { splitSegments, withoutLotWide } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -568,8 +568,16 @@ const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of
 // comes from the website's own words for this car (its write-up, features
 // and the rest of its record) or the dealer's price note, never from the
 // writer. Each kind of claim is found by its words, and passes when words
-// of the same kind are in those sources (new parts: the same part, too);
-// certified also passes when the website lists the car as certified. The
+// of the same kind, said the same way, are in those sources: a claim that
+// the thing is there ("a full warranty", "one accident reported", "runs
+// great") needs the sources to say it is there, and one that it is not ("no
+// warranty", "never smoked in", "clean Carfax", "rust-free", "sold as-is")
+// needs them to say it is not, so "Sold as-is, no warranty." never backs "a
+// full warranty", nor "subject to bank approval" "everyone gets approved"
+// (new parts: the sources must say that part is new); certified also passes
+// when the website lists the car as certified. Text the whole lot shares (a
+// disclaimer, "We are a locally owned dealership.") is not the website's
+// words for this car, so it backs nothing. The
 // dealership's name, its city and the salesperson's role are not claims
 // about the car and are set aside first, as are banned phrases and the
 // words of one-owner wording (each flagged on its own; what the wording says
@@ -579,34 +587,40 @@ const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of
 const PARTS = "tires?|tyres?|brakes?|rotors?|pads|battery|batteries|wipers?|shocks?|struts?|exhaust|alternator|starter|clutch|timing (?:belt|chain)|water pump|engine|motor|transmission|paint|parts";
 export const CLAIM_KINDS = Object.freeze([
   { what: 'certification', re: /\b(?:certified|cpo)\b/i },
-  { what: 'a warranty or guarantee', re: /\b(?:warrant(?:y|ies|eed)|guarantee[ds]?|(?<!air[\s-]?bags?[\s-])coverage|protection plans?|service contracts?)\b/i },
-  { what: 'financing or credit', re: /\b(?:financ\w*|credit|approv\w*|loans?|lenders?|apr|down[\s-]payments?|monthly payments?|per month|lease\w*|buy[\s-]here)\b/i },
+  { what: 'a warranty or guarantee', re: /\b(?:warrant(?:y|ies|eed)|guarantee[ds]?|(?<!air[\s-]?bags?[\s-])coverage|protection plans?|service contracts?|as[\s-]is)\b/i },
+  { what: 'financing', re: /\b(?:financ\w*|loans?|lenders?|apr|down[\s-]payments?|monthly payments?|per month|lease\w*|buy[\s-]here)\b/i },
+  // credit and approval, apart from financing: "subject to bank approval" or "with approved credit" says approval is not given, so it never backs "everyone gets approved" or "all credit types"
+  { what: 'credit or approval', re: /\b(?:credit|approv\w*)\b/i, hedge: /\b(?:subject to\b[^.!?;\n]{0,40}\b(?:approval|credit)|(?:with|on|upon) approved credit|upon (?:credit |lender |bank )?approval|if (?:you(?:'re| are) )?approved|approval (?:is )?required)\b/i },
   { what: 'accident, damage or title history', re: /\b(?:accidents?|collisions?|wreck(?:s|ed)?|damaged?|flood\w*|salvage|rebuilt|titles?|clean (?:carfax|autocheck|history|record|report))\b/i },
   { what: 'smoking or pets', re: /\b(?:non[\s-]?smok\w*|smok(?:er|ers|ing|ed)|smoke[\s-]?free|pet[\s-]?free|no pets)\b/i },
   { what: 'service history, inspection or upkeep', re: /\b(?:inspect\w*|serviced|service (?:history|records?)|records|maintenance|maintained|oil changes?|tune[\s-]?up|reconditioned|(?:fully|freshly|just|professionally|recently) detailed|garage[\s-]kept|garaged|well[\s-](?:kept|cared)|taken care of)\b/i },
   { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:(?:set of|[\\w-]+)\\s+){0,2}?(${PARTS})\\b`, 'i'), part: true },
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
   // who had it and how it was used ("one owner" has its own check, against the Carfax flag; "Pre-owned" is not a claim)
-  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned(?![\s-]+(?:and|&)[\s-]+operated)|driven (?:by(?!\s+(?:(?:a|an|the|its)\s+)?(?:\d|v-?\d|hemi\b|ecoboost|duramax|cummins|power[\s-]?stroke|pentastar|vortec|(?:[\w.-]+\s+){0,3}(?:engines?|motors?|powertrains?|v-?\d+)(?![\w-])))|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
+  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned(?![\s-]+(?:(?:and|&)[\s-]+operated|dealer\w*|business|company|store|shop)\b)|driven (?:by(?!\s+(?:(?:a|an|the|its)\s+)?(?:\d|v-?\d|hemi\b|ecoboost|duramax|cummins|power[\s-]?stroke|pentastar|vortec|(?:[\w.-]+\s+){0,3}(?:engines?|motors?|powertrains?|v-?\d+)(?![\w-])))|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
   { what: 'where it came from', re: /\b(?:local(?:ly)? trade[ds]?|traded in locally|(?:came|taken|took) in on trade|on trade from|trade[\s-]in from|lease returns?|off[\s-]lease)\b/i },
   { what: 'its keys', re: /\b(?:(?:both|spare|extra|second|two|2|three|3|(?:sets?|pairs?) of) (?:keys|key[\s-]?fobs|fobs|remotes)|(?:spare|extra|second) (?:key|key[\s-]?fob|fob|remote))\b/i },
 ]);
 
 // The write-up as the website shows it (description.js splitSegments):
 // split at its line breaks, paragraphs and list items, markup set aside,
-// entities decoded, spacing made plain. A claim a draft makes from "new
-// <b>tires</b>" is then found in its own source.
-function writeUpText(raw) {
+// entities decoded, spacing made plain, and without the lot-wide text the
+// scan found (description.js withoutLotWide). A claim a draft makes from
+// "new <b>tires</b>" is then found in its own source, and one only a
+// disclaimer every car carries makes is not.
+function writeUpText(raw, boilerplate) {
   if (typeof raw !== 'string') return raw;
-  return splitSegments(raw).join('\n');
+  return withoutLotWide(raw, lotWideLines(boilerplate)).join('\n');
 }
+// the scan's lot-wide lines, as a list or a set; anything else is none
+const lotWideLines = (b) => (Array.isArray(b) || b instanceof Set ? [...b] : []);
 
 // The website's own words for this car, where its claims may come from.
-function claimSource({ vehicle = {}, priceNote = '' }) {
+function claimSource({ vehicle = {}, priceNote = '', boilerplate = [] }) {
   const v = vehicle;
   const bits = [
     v.year, v.make, v.model, v.trim, v.name, v.engine, v.transmission, v.drivetrain, v.exteriorColor, v.interiorColor,
-    v.bodyType, v.fuelType, writeUpText(v.descriptionRaw), ...(Array.isArray(v.features) ? v.features : []), priceNote,
+    v.bodyType, v.fuelType, writeUpText(v.descriptionRaw, boilerplate), ...(Array.isArray(v.features) ? v.features : []), priceNote,
   ];
   return bits.filter((b) => b !== null && b !== undefined).map((b) => oneLine(b)).join('\n');
 }
@@ -654,6 +668,33 @@ function newPartsSaid(text, re, more) {
   return out;
 }
 
+// Whether a claim says the thing is not there: its own words deny it ("no
+// pets", "non-smoker", "never driven", "rust-free", "clean Carfax", "as-is"),
+// a denying word comes up to four words before it in its clause ("no
+// warranty", "does not come with a warranty", "without any accidents",
+// "no warranty or guarantee"), it is followed by one ("warranty: none",
+// "warranty not included", "damage-free", "warranty expired"), or, for
+// credit and approval, its sentence makes approval a condition ("subject to
+// bank approval").
+const DENIES_ITSELF = /^(?:no|non|never|zero)\b|^non[\s-]?|[\s-]free$|^clean\b|^as[\s-]is$/i;
+const DENYING_WORD = /^(?:no|not|never|without|none|nor|zero|cannot|lacks?|lacking|excludes?|excluding|except|\w+n['\u2019]t)$/i;
+const DENIED_AFTER = /^(?:none|not|n\/a|expired|void(?:ed)?|excluded|unavailable|\w+n['\u2019]t)$/i;
+function denies(text, at, said, kind) {
+  if (DENIES_ITSELF.test(said)) return true;
+  const before = text.slice(Math.max(0, at - 80), at).split(/[.,;:!?\n]|\b(?:and|but|however|although|though|while)\b/i).pop();
+  const word = (w) => w.replace(/^[^\w]+|[^\w'\u2019]+$/g, '');
+  if (before.split(/\s+/).map(word).filter(Boolean).slice(-4).some((w) => DENYING_WORD.test(w))) return true;
+  const after = text.slice(at + said.length, at + said.length + 40);
+  if (/^[\s-]*free\b/i.test(after)) return true;
+  if (after.split(/[.,;!?\n]|\b(?:and|but|or)\b/i)[0].split(/[\s:]+/).map(word).filter(Boolean).slice(0, 2).some((w) => DENIED_AFTER.test(w))) return true;
+  if (!kind.hedge) return false;
+  const start = Math.max(text.lastIndexOf('.', at), text.lastIndexOf('!', at), text.lastIndexOf('?', at), text.lastIndexOf(';', at), text.lastIndexOf('\n', at)) + 1;
+  const end = text.slice(at).search(/[.!?;\n]/);
+  return kind.hedge.test(text.slice(start, end < 0 ? text.length : at + end));
+}
+// Each claim of a kind in a text, with whether it says the thing is not there.
+const mentions = (text, kind) => [...String(text).matchAll(new RegExp(kind.re.source, 'gi'))].map((m) => ({ said: m[0], denied: denies(String(text), m.index, m[0], kind) }));
+
 // Every claim in the text, not only the first of each kind: one part the
 // website says is new ("new tires") never covers another the text adds
 // ("new brakes"), and a part the website only names ("ABS Brakes", "Remote
@@ -661,6 +702,7 @@ function newPartsSaid(text, re, more) {
 // make is said once; each new part they don't say is new is said once.
 function claimProblems(text, ctx) {
   const source = claimSource(ctx);
+  const lotWide = lotWideText(ctx);
   const problems = [];
   for (const kind of CLAIM_KINDS) {
     if (kind.what === 'certification' && listedCertified(ctx.vehicle)) continue;
@@ -675,11 +717,25 @@ function claimProblems(text, ctx) {
       }
       continue;
     }
-    if (kind.re.test(source)) continue;
-    const m = new RegExp(kind.re.source, 'i').exec(String(text));
-    if (m) problems.push({ code: 'unsupported-claim', text: `Says "${m[0]}", but the website says nothing about ${kind.what} for this car` });
+    // the website says it is there, that it is not, or both: a claim of either kind needs the website to say the same
+    const sourced = new Set(mentions(source, kind).map((x) => x.denied));
+    const m = mentions(text, kind).find((x) => !sourced.has(x.denied));
+    if (!m) continue;
+    let why = `the website says nothing about ${kind.what} for this car`;
+    if (sourced.size) why = `the website does not say the same about ${kind.what} for this car`;
+    else if (mentions(lotWide, kind).length) why = `the website mentions ${kind.what} only in text it shows with every car, never about this car`;
+    problems.push({ code: 'unsupported-claim', text: `Says "${m.said}", but ${why}` });
   }
   return problems;
+}
+
+// The lot-wide text this car's write-up carries, which backs no claim (claimSource
+// leaves it out); a problem names it, so the salesperson sees why the
+// website's "Financing for all credit types" under every car is not enough.
+function lotWideText({ vehicle = {}, boilerplate = [] }) {
+  if (typeof vehicle.descriptionRaw !== 'string') return '';
+  const raw = splitSegments(vehicle.descriptionRaw).join('\n');
+  return lotWideLines(boilerplate).filter((p) => typeof p === 'string' && p.trim() !== '' && raw.includes(p)).join('\n');
 }
 
 // One-owner wording on a one-owner car. The Carfax flag gives the count of
@@ -779,7 +835,7 @@ export const STYLE_PROBLEMS = Object.freeze(['too-short', 'too-long', 'all-caps'
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
  */
-export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null, closingLine = '' } = {}) {
+export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null, closingLine = '', boilerplate = [] } = {}) {
   const t = String(text || '');
   // the closing line is the salesperson's, checked on its own (checkClosingLine) wherever the text carries it
   const closing = cleanClosingLine(closingLine);
@@ -797,7 +853,8 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
   const role = roleOf(salesperson);
   const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]);
-  const sourceWords = claimSource({ vehicle, priceNote });
+  // the website's own words for the car, without the text its whole lot shares (boilerplate: the scan's lot-wide lines)
+  const sourceWords = claimSource({ vehicle, priceNote, boilerplate });
   const spelled = new Set();
   for (const q of spelledQuantities(aboutCar)) {
     const words = oneLine(q.words).toLowerCase();
@@ -844,7 +901,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   }
   // a banned phrase is said once, as banned, not again as a claim; one owner is held to the Carfax flag above, not again as owner history, but what the wording says about the owner is still checked
   const claimText = withoutOneOwner(BANNED_RE.reduce((s, [, re]) => s.replace(new RegExp(re.source, 'gi'), ' '), aboutCar));
-  problems.push(...claimProblems(claimText, { vehicle, priceNote }));
+  problems.push(...claimProblems(claimText, { vehicle, priceNote, boilerplate }));
   if (vehicle.carfaxOneOwner) problems.push(...ownerStoryProblems(aboutCar, sourceWords));
   // the dealership is always named: with no name set there is nothing to name it by
   const dealerName = String(dealer.name || '').trim();

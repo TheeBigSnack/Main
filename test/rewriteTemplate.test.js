@@ -719,7 +719,9 @@ test('a draft that invents warranty, financing, certification, history, care, ne
   }
   assert.deepEqual(said('Comes with a warranty and financing for all credit.'), [
     'Says "warranty", but the website says nothing about a warranty or guarantee for this car',
-    'Says "financing", but the website says nothing about financing or credit for this car',
+    'Says "financing", but the website says nothing about financing for this car',
+    // "for all credit" is said apart from financing: it is a claim about who is approved
+    'Says "credit", but the website says nothing about credit or approval for this car',
   ]);
   assert.deepEqual(said('Clean Carfax, never smoked in, new tires and brakes.'), [
     'Says "Clean Carfax", but the website says nothing about accident, damage or title history for this car',
@@ -839,6 +841,42 @@ test('a denial of accidents is banned in any number, and "first owner" is a one-
   const text = buildTemplateDescription(told);
   assert.doesNotMatch(text, /accident|first owner/);
   assert.deepEqual(runGuardrails(text, told).problems, []);
+});
+
+test('a claim passes only when the website says it the same way, and text every car on the lot carries backs none', async () => {
+  const said = (sentence, c) => runGuardrails(`${buildTemplateDescription(c)}\n${sentence}`, c).problems.filter((p) => p.code === 'unsupported-claim').map((p) => p.text);
+  // "no warranty" never backs "a full warranty", an accident on the report never backs "Clean Carfax", nor bank approval "everyone gets approved"
+  const asIs = plainCtx({ ...PLAIN(), descriptionRaw: 'Sold as-is, no warranty. Carfax shows one accident reported. All loans are subject to bank approval.' });
+  assert.deepEqual(runGuardrails(buildTemplateDescription(asIs), asIs).problems, [], 'the template passes');
+  assert.deepEqual(said('Comes with a full warranty.', asIs), ['Says "warranty", but the website does not say the same about a warranty or guarantee for this car']);
+  assert.deepEqual(said('Warranty included.', asIs), ['Says "Warranty", but the website does not say the same about a warranty or guarantee for this car']);
+  assert.deepEqual(said('Clean Carfax.', asIs), ['Says "Clean Carfax", but the website does not say the same about accident, damage or title history for this car']);
+  assert.deepEqual(said('Financing available for all credit types, everyone gets approved fast.', asIs), ['Says "credit", but the website does not say the same about credit or approval for this car']);
+  // said the way the website says it, in other words
+  for (const sentence of ['Sold as-is with no warranty.', 'It does not come with a warranty.', 'The warranty is not included.', 'Financing available, subject to credit approval.', 'Carfax shows an accident.']) assert.deepEqual(said(sentence, asIs), [], sentence);
+  // and the other way: a website that says the car has a warranty, a clean report and an owner who drove it backs no denial
+  const backed = plainCtx({ ...PLAIN(), descriptionRaw: 'Comes with the rest of the factory warranty. Clean Carfax. Driven by its previous owner on mostly highway miles.' });
+  assert.deepEqual(said('No warranty, sold as-is.', backed), ['Says "warranty", but the website does not say the same about a warranty or guarantee for this car']);
+  assert.deepEqual(said('Never driven in winter.', backed), ['Says "Never driven", but the website does not say the same about its owners or how it was driven for this car']);
+  for (const sentence of ['The rest of the factory warranty comes with it.', 'A clean Carfax.', 'Its previous owner drove it on highway miles.']) assert.deepEqual(said(sentence, backed), [], sentence);
+  // text every car on the lot carries (the scan's lot-wide lines) is not the website's words for this car: it backs no claim, and the problem says why
+  const v = { ...PLAIN(), descriptionRaw: 'Rides on 20-inch wheels.<br>Financing for all credit types.<br>We are a locally owned dealership.' };
+  const lot = ['Financing for all credit types.', 'We are a locally owned dealership.'];
+  assert.deepEqual(said('Financing for all credit types.', plainCtx(v)), [], 'without the lot-wide lines it reads as the car\'s own');
+  assert.deepEqual(said('Financing for all credit types.', plainCtx(v, { boilerplate: lot })), [
+    'Says "Financing", but the website mentions financing only in text it shows with every car, never about this car',
+    'Says "credit", but the website mentions credit or approval only in text it shows with every car, never about this car',
+  ]);
+  // the dealership's "locally owned" is about the business and never backs an owner story
+  assert.deepEqual(said('Driven by a retired teacher, mostly highway miles.', plainCtx(v)), ['Says "Driven by", but the website says nothing about its owners or how it was driven for this car']);
+  // a rewrite-service draft is checked against the same words: the lot-wide lines go to its checks too
+  const c = plainCtx(v);
+  const text = buildTemplateDescription(c);
+  const service = { settings: { myStores: [v.location], rewrite: { enabled: true, endpoint: 'http://localhost:8787' } }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, text: `${text}\nFinancing for all credit types.` }) }) };
+  assert.equal((await generateDescription({ ...c, ...service })).source, 'claude', 'with no lot-wide lines known, the write-up backs it');
+  const refused = await generateDescription({ ...c, boilerplate: lot, ...service });
+  assert.equal(refused.source, 'template');
+  assert.match(refused.note, /failed a check/);
 });
 
 test('a write-up with markup inside a claim still backs a draft that makes it', async () => {
