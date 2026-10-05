@@ -174,6 +174,7 @@ function startFlowWith({ posted, queue, rulesReadAt = '2026-09-30T12:00:00.000Z'
     refreshGranted: never('refreshGranted'),
     pilotNote: never('pilotNote'),
     readCarForPost: never('readCarForPost'),
+    postElsewhere: async () => '', elsewhereText: never('elsewhereText'),
   });
   return { calls, state, run: () => startFlow({ origin: state.origin, vin: 'aaa', dealerTabId: null, queue }) };
 }
@@ -386,6 +387,7 @@ async function reviewWith(takenDown, { queue = true } = {}) {
     generate: async () => { state.guardrails = { ok: true }; },
     relistNotice, canAutoOpen,
     openForm: async () => calls.push('openForm'),
+    postElsewhere: async () => '', elsewhereText: never('elsewhereText'),
   });
   await startFlow({ origin: state.origin, vin: 'aaa', dealerTabId: null, queue });
   return { state, calls };
@@ -481,7 +483,9 @@ const FLOW_FIELDS = new Function(`return ${/const FLOW_FIELDS = (\[[^\]]*\]);/.e
 // are stubs that record they ran. autoOpen: what canAutoOpen says (a queued
 // car that passes every check opens its form by itself); gen: the stand-in
 // for writing the description, given the state.
-function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, car = vehicle('usedNormal'), also = [], autoOpen = false, gen = null, tabLoad = null, stored = {}, extra = {} }) {
+// panels: the windows whose side panel is open (chrome.runtime.getContexts);
+// tabs: the windows of the tabs that are open, by tab id (chrome.tabs.get).
+function formOpener({ description, step = 'review', readAt = new Date().toISOString(), read = null, car = vehicle('usedNormal'), also = [], autoOpen = false, gen = null, tabLoad = null, stored = {}, extra = {}, panels = [], tabs = {} }) {
   const v = car;
   const calls = [];
   const forms = []; // each Marketplace tab opened: the car it was opened for, and the post the panel was on
@@ -521,7 +525,14 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
     pickedPhotos: () => [],
     render: () => calls.push('render:' + state.step), saveFlow: async () => {}, pilotNote: async () => {}, notePostStep: () => {},
     GLOBAL_KEYS: { devOverrides: 'devOverrides', postRequest: 'postRequest' }, FORM_MAP, applyOverrides: (m) => m,
-    chrome: { storage: { local: { get: async () => ({ ...stored }), remove: async () => {} } }, tabs: { create: async () => { calls.push('tabs.create'); forms.push(`${state.vehicle ? state.vehicle.vin : '(no car)'} while vin=${state.vin}`); return { id: 77 }; } } },
+    chrome: {
+      storage: { local: { get: async () => ({ ...stored }), remove: async () => {} } },
+      tabs: {
+        create: async () => { calls.push('tabs.create'); forms.push(`${state.vehicle ? state.vehicle.vin : '(no car)'} while vin=${state.vin}`); return { id: 77 }; },
+        get: async (id) => { if (!(id in tabs)) throw new Error(`No tab with id: ${id}.`); return { id, windowId: tabs[id] }; },
+      },
+      runtime: { getContexts: async ({ contextTypes, windowIds }) => (contextTypes.includes('SIDE_PANEL') ? panels.filter((w) => !windowIds || windowIds.includes(w)).map((windowId) => ({ contextType: 'SIDE_PANEL', windowId })) : []) },
+    },
     waitForTabLoad: async (id) => (tabLoad ? tabLoad(id) : undefined), sleep: async () => {},
     runFill: async () => calls.push(`runFill: ${state.listing ? state.listing.fields.description : '(no listing)'}`),
     runProbe: async () => calls.push('runProbe'),
@@ -529,6 +540,7 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
       calls.push(`readCarForPost ${req.vin} tab ${req.tabId}`);
       return (read || never('readCarForPost'))(req);
     },
+    panelWindowId: null, postElsewhere: async () => '', elsewhereText: never('elsewhereText'),
     ...extra,
   }, BLOCKER_CONSTS);
   return { state, calls, fns, v, forms, box };
@@ -2869,4 +2881,120 @@ test('a colour guessed from the photos goes on the form, never into the descript
   const click = src.slice(src.indexOf("case 'guessColors':"), src.indexOf('case ', src.indexOf("case 'guessColors':") + 5));
   assert.ok(click.includes('maybeGuessColors(true)'), 'the click asks for a guess');
   assert.doesNotMatch(click, /\bgenerate\(/, 'the click does not write the description again');
+});
+
+// Chrome runs one side panel per window. A post brought back at review in
+// another window's panel (the panel closed in the first window and opened in
+// a second, or Chrome restarted and the window numbers changed) opens its
+// form in this panel's window, and this panel then records it by itself
+// (postsWindow), as the queue's next cars are. Run with sidepanel.js's own
+// openForm and postsWindow.
+test('a post brought back at review in another window opens its form in this panel\'s window, and this panel records it', async () => {
+  const description = buildTemplateDescription({ vehicle: vehicle('usedNormal'), dealer: DEALER, salesperson: PAT_SC });
+  for (const [savedWindow, panelWindowId] of [[1, 2], [1234, 1], [null, 2], [1, null]]) {
+    const saved = [];
+    const o = formOpener({ description, extra: { panelWindowId, saveFlow: async () => { saved.push([o.state.step, o.state.windowId]); } } });
+    o.state.windowId = savedWindow;
+    await o.fns.openForm();
+    const want = panelWindowId || savedWindow;
+    assert.deepEqual(o.forms.length, 1, `saved in window ${savedWindow}, opened in window ${panelWindowId}: the form opens`);
+    assert.equal(o.state.windowId, want, `saved in window ${savedWindow}, opened in window ${panelWindowId}: the post is this panel's`);
+    assert.deepEqual(saved[0], ['filling', want], 'saved as this window\'s before the form opens');
+    const postsWindow = compile('postsWindow', { state: o.state, panelWindowId });
+    assert.equal(postsWindow(), true, 'this panel records it by itself');
+  }
+});
+
+// A side panel in a second window never opens a second form for a car whose
+// post is under way in another window's side panel: one being checked or
+// reviewed there with that window's side panel open, or one whose form is
+// open there (its tab still in that window). Post next car, Continue in the
+// side panel or the panel's own list (startFlow) and Open the Marketplace
+// form (openForm) stop and say so. A post left in a window whose side panel
+// is closed, and with no form open, is this panel's to take over.
+test('a second window\'s side panel opens no second form for a car whose post is under way in another window', async () => {
+  const ORIGIN = 'https://www.example-motors.test';
+  const FORM_STEPS = new Function(`return ${/const FORM_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)();
+  const flowKey = 'postFlow:' + ORIGIN;
+  const elsewhereFor = ({ flow, panelWindowId = 2, panels = [], tabs = {} }) => compileMany(['postElsewhere'], {
+    panelWindowId, LIVE_STEPS, FORM_STEPS,
+    siteKeys: (o) => ({ flow: 'postFlow:' + o }),
+    chrome: {
+      storage: { local: { get: async () => (flow ? { [flowKey]: flow } : {}) } },
+      runtime: { getContexts: async ({ windowIds }) => panels.filter((w) => windowIds.includes(w)).map((windowId) => ({ contextType: 'SIDE_PANEL', windowId })) },
+      tabs: { get: async (id) => { if (!(id in tabs)) throw new Error('No tab'); return { id, windowId: tabs[id] }; } },
+    },
+  }).postElsewhere;
+  const A = { vin: 'AAA', windowId: 1, fbTabId: 77 };
+  for (const [what, setup, want] of [
+    ['A\'s form open in window 1, its panel open there', { flow: { ...A, step: 'publish' }, panels: [1], tabs: { 77: 1 } }, 'form'],
+    ['A\'s form open in window 1, its panel closed', { flow: { ...A, step: 'publish' }, tabs: { 77: 1 } }, 'form'],
+    ['A\'s form being opened in window 1', { flow: { ...A, step: 'filling', fbTabId: null }, panels: [1] }, 'form'],
+    ['A\'s dry-run form open in window 1', { flow: { ...A, step: 'probe' }, tabs: { 77: 1 } }, 'form'],
+    ['A at review in window 1, its panel open there', { flow: { ...A, step: 'review' }, panels: [1] }, 'review'],
+    ['A being checked in window 1, its panel open there', { flow: { ...A, step: 'checking' }, panels: [1] }, 'review'],
+    ['A at review in window 1, its panel closed', { flow: { ...A, step: 'review' } }, ''],
+    ['A at review in window 1, another window\'s panel open', { flow: { ...A, step: 'review' }, panels: [3] }, ''],
+    ['A\'s form tab closed, window 1\'s panel closed', { flow: { ...A, step: 'publish' } }, ''],
+    ['A\'s form tab moved to another window, window 1\'s panel closed', { flow: { ...A, step: 'publish' }, tabs: { 77: 3 } }, ''],
+    ['A posted and done in window 1', { flow: { ...A, step: 'done' }, panels: [1] }, ''],
+    ['A stopped in window 1', { flow: { ...A, step: 'blocked' }, panels: [1] }, ''],
+    ['A in this window', { flow: { ...A, windowId: 2, step: 'publish' }, panels: [2], tabs: { 77: 2 } }, ''],
+    ['another car in window 1', { flow: { ...A, vin: 'BBB', step: 'publish' }, panels: [1], tabs: { 77: 1 } }, ''],
+    ['no post saved', { flow: null, panels: [1] }, ''],
+    ['a post saved with no window', { flow: { ...A, windowId: null, step: 'publish' }, panels: [1], tabs: { 77: 1 } }, ''],
+    ['this panel can\'t tell its window', { flow: { ...A, step: 'publish' }, panelWindowId: null, panels: [1], tabs: { 77: 1 } }, ''],
+  ]) {
+    assert.equal(await elsewhereFor(setup)(ORIGIN, 'AAA'), want, what);
+  }
+  // a Chrome that can't list its side panels: an open form's tab still tells
+  const noList = compileMany(['postElsewhere'], {
+    panelWindowId: 2, LIVE_STEPS, FORM_STEPS, siteKeys: (o) => ({ flow: 'postFlow:' + o }),
+    chrome: { storage: { local: { get: async () => ({ [flowKey]: { ...A, step: 'publish' } }) } }, runtime: {}, tabs: { get: async (id) => ({ id, windowId: 1 }) } },
+  }).postElsewhere;
+  assert.equal(await noList(ORIGIN, 'AAA'), 'form');
+
+  // Post next car, Continue in the side panel or the list's Post: A is not started here, and window 1's saved post stays
+  const calls = [];
+  const state = { origin: ORIGIN, posted: {}, settings: { rulesReadAt: '2026-09-30T12:00:00.000Z' }, snapshotVehicles: { AAA: { name: '2020 Make Model' } }, vin: null, step: 'idle' };
+  const { startFlow } = compileMany(['startFlow', 'postElsewhere', 'elsewhereText'], {
+    state, panelWindowId: 2, LIVE_STEPS, FORM_STEPS, siteKeys: (o) => ({ flow: 'postFlow:' + o }),
+    chrome: {
+      storage: { local: { get: async () => ({ [flowKey]: { ...A, step: 'publish' } }), remove: async (k) => calls.push('remove ' + k) } },
+      runtime: { getContexts: async () => [{ contextType: 'SIDE_PANEL', windowId: 1 }] },
+      tabs: { get: async (id) => ({ id, windowId: 1 }) },
+    },
+    GLOBAL_KEYS: { postRequest: 'postRequest' }, flowRun: 0,
+    endUpkeep: never('endUpkeep'), clearFlow: never('clearFlow'), loadSaved: never('loadSaved'),
+    nameOf: (vin) => state.snapshotVehicles[vin].name,
+    setStatus: (text, kind) => calls.push(`status(${kind}): ${text}`), render: () => calls.push('render'),
+  });
+  await startFlow({ origin: ORIGIN, vin: 'aaa', dealerTabId: null, windowId: 2, queue: true });
+  assert.deepEqual(calls.slice(0, 1), ['remove postRequest'], 'the request is used up');
+  assert.match(calls[1], /^status\(error\): 2020 Make Model's Marketplace form is already open from the side panel in another Chrome window, so no second form opens here\. Finish it there/);
+  assert.equal(calls[2], 'render');
+  assert.deepEqual([state.vin, state.step], [null, 'idle'], 'this panel stays as it was');
+
+  // Open the Marketplace form on a review this panel holds, after window 1's panel opened A's form (or while A is at review there)
+  const description = buildTemplateDescription({ vehicle: vehicle('usedNormal'), dealer: DEALER, salesperson: PAT_SC });
+  for (const [savedStep, panels, tabs, said] of [
+    ['filling', [1], {}, /Marketplace form is already open from the side panel in another Chrome window/],
+    ['publish', [], { 88: 1 }, /Marketplace form is already open from the side panel in another Chrome window/],
+    ['review', [1], {}, /is already being posted from the side panel in another Chrome window, so no second form opens here\. Finish or stop it there, or close the side panel in that window/],
+  ]) {
+    const v = vehicle('usedNormal');
+    const o = formOpener({ description, car: v, also: ['postElsewhere', 'elsewhereText'], panels, tabs, stored: { ['postFlow:https://www.example-motors.test']: { vin: v.vin, windowId: 1, step: savedStep, fbTabId: 88 } }, extra: { panelWindowId: 2 } });
+    o.state.windowId = 1;
+    await o.fns.openForm();
+    assert.deepEqual(o.forms, [], `${savedStep} in window 1: no second form`);
+    assert.ok(o.calls.some((c) => said.test(c)), `${savedStep} in window 1: the panel says so (${o.calls.join(' | ')})`);
+    assert.deepEqual([o.state.step, o.state.windowId, o.state.opening], ['review', 1, false], `${savedStep} in window 1: the review stays as it was`);
+  }
+  // the same post, its panel closed in window 1 and no form open there: this panel takes it over and opens the one form
+  const v = vehicle('usedNormal');
+  const o = formOpener({ description, car: v, also: ['postElsewhere', 'elsewhereText'], panels: [], stored: { ['postFlow:https://www.example-motors.test']: { vin: v.vin, windowId: 1, step: 'review' } }, extra: { panelWindowId: 2 } });
+  o.state.windowId = 1;
+  await o.fns.openForm();
+  assert.equal(o.forms.length, 1);
+  assert.equal(o.state.windowId, 2);
 });

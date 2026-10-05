@@ -529,6 +529,12 @@ async function stopPosted() {
 
 async function startFlow(req) {
   await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
+  // the car's post is under way in another window's side panel: it is not started (and its saved post not removed) here
+  const elsewhere = await postElsewhere(req.origin, String(req.vin || '').toUpperCase());
+  if (elsewhere) {
+    setStatus(elsewhereText(nameOf(String(req.vin || '').toUpperCase()), elsewhere), 'error');
+    return render();
+  }
   endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
   // This post's number: another post started, Stop queue, Skip or Back
   // changes it, and this one then stops at its next step (flowRun).
@@ -894,12 +900,24 @@ async function openForm({ probeOnly = false } = {}) {
     }
     if (descriptionStopped()) return undefined;
     if (!(await carStillCurrent()) || dropped()) return undefined;
+    // its post went on in another window's side panel meanwhile (that panel opened the form, say): no second form
+    const elsewhere = await postElsewhere(state.origin, state.vin);
+    if (dropped()) return undefined;
+    if (elsewhere) {
+      setStatus(elsewhereText(state.vehicle ? state.vehicle.name : nameOf(state.vin), elsewhere), 'error');
+      return undefined;
+    }
   } finally {
     // released before the step below moves on, with no wait in between; a
     // post dropped meanwhile leaves it to clearFlow, so the next car's own
     // open (a queue's, as soon as its car is read) is not turned away by this one
     if (!dropped()) state.opening = false;
   }
+  // The form opens in this panel's window, so the post is this panel's from
+  // now on (postsWindow): a post brought back here from another window, or
+  // from before Chrome restarted, is recorded by itself here, and saved as
+  // this window's before the form opens.
+  state.windowId = panelWindowId || state.windowId;
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
   state.listingTyped = null; // a new form: nothing typed for it yet
   state.step = 'filling';
@@ -2022,6 +2040,48 @@ function formOpen() {
   return Boolean(state.vin) && FORM_STEPS.includes(state.step);
 }
 const finishFirstText = (button) => `Finish or stop the current post (${state.vehicle ? state.vehicle.name : nameOf(state.vin)}) first: its Marketplace form is open. Then click ${button} again.`;
+
+// Chrome runs one side panel per window, and each can start a post. A car
+// whose post is under way in another window's side panel (being checked or
+// reviewed there, with that panel open; or with its Marketplace form open,
+// that form's tab still in that window) gets no second form from this one:
+// startFlow and openForm stop and say so (elsewhereText). It is read from the
+// post saved for the website: 'form', 'review', or '' when the post is this
+// window's, another car's, over, or left in a window whose side panel is
+// closed (this panel may then take it over), and when Chrome can't say which
+// window either is.
+async function postElsewhere(origin, vin) {
+  if (panelWindowId === null || !origin || !vin) return '';
+  let saved = null;
+  try {
+    const k = siteKeys(origin).flow;
+    saved = (await chrome.storage.local.get(k))[k];
+  } catch (e) {
+    return '';
+  }
+  if (!saved || saved.vin !== vin || !saved.windowId || saved.windowId === panelWindowId || !LIVE_STEPS.includes(saved.step)) return '';
+  const form = FORM_STEPS.includes(saved.step);
+  try {
+    const panels = await chrome.runtime.getContexts({ contextTypes: ['SIDE_PANEL'], windowIds: [saved.windowId] });
+    if (panels && panels.length) return form ? 'form' : 'review';
+  } catch (e) {
+    // this Chrome can't list its side panels: the open form's tab still tells
+  }
+  if (form && typeof saved.fbTabId === 'number') {
+    try {
+      const tab = await chrome.tabs.get(saved.fbTabId);
+      if (tab && tab.windowId === saved.windowId) return 'form';
+    } catch (e) {
+      // the form's tab is gone
+    }
+  }
+  return '';
+}
+function elsewhereText(name, where) {
+  return where === 'form'
+    ? `${name}'s Marketplace form is already open from the side panel in another Chrome window, so no second form opens here. Finish it there; opening the side panel in that window brings the post back.`
+    : `${name} is already being posted from the side panel in another Chrome window, so no second form opens here. Finish or stop it there, or close the side panel in that window, then try again here.`;
+}
 
 // A post request from the popup (Post, or Continue in the side panel). A
 // request for the car already under way (being checked, reviewed, filled or

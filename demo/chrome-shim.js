@@ -20,6 +20,8 @@
 //                                              work as in Chrome; rejects when nothing listens (as Chrome does)
 //   chrome.runtime.getManifest / getURL / id   the real manifest.json, read once by the sandbox page
 //   chrome.runtime.onInstalled / onStartup     fired once by the sandbox page after the service worker frame loads
+//   chrome.runtime.getContexts                 the one window's side panel, always docked (STUB: no other window,
+//                                              popup or worker context is listed)
 //   chrome.scripting.executeScript             runs `func` INSIDE the browser-pane tab's window (same origin):
 //                                              document, window and location in it are that page's; the result
 //                                              comes back structured-cloned; files: [] is not supported
@@ -336,6 +338,12 @@
           for (const a of args) if (typeof a === 'function') cb = a;
           return promised(() => hub.sendMessage(frame, message), cb);
         },
+        // The sandbox has one window (id 1), and its side panel is always docked.
+        getContexts: (filter, cb) => promised(() => {
+          const f = filter || {};
+          const all = [{ contextType: 'SIDE_PANEL', contextId: 'sandbox-side-panel', tabId: -1, windowId: 1, frameId: -1, documentId: 'sandbox-side-panel', documentUrl: hub.extensionBase ? new URL('sidepanel.html', hub.extensionBase).href : 'sidepanel.html', documentOrigin: '', incognito: false }];
+          return all.filter((c) => (!Array.isArray(f.contextTypes) || f.contextTypes.includes(c.contextType)) && (!Array.isArray(f.windowIds) || f.windowIds.includes(c.windowId)));
+        }, typeof filter === 'function' ? filter : cb),
         onMessage: event('runtime.onMessage'),
         onInstalled: event('runtime.onInstalled'),
         onStartup: event('runtime.onStartup'),
