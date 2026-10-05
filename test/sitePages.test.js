@@ -818,4 +818,37 @@ test('the browser checks cover every page: npm run test:site and npm run test:a1
   const website = read('docs/website.md');
   assert.doesNotMatch(website, /before every merge/, 'no merge waits for npm run test:site');
   assert.match(website, /`npm run test:site` checks the same things against the committed files in a browser: CI's `demo` job runs it on every push and pull request, but neither a merge nor the deploy waits for it/);
+  // and when that job does not reach it: it waits for the unit job, and test:site is its last step, so a failed
+  // sandbox drive or accessibility walk leaves the site unchecked
+  const demoAt = ci.indexOf('\n  demo:');
+  const demoEnd = ci.slice(demoAt + 1).search(/\n  [a-z][\w-]*:\n/);
+  const demoJob = demoEnd < 0 ? ci.slice(demoAt) : ci.slice(demoAt, demoAt + 1 + demoEnd);
+  assert.ok(demoAt > 0, 'CI has a demo job');
+  assert.match(demoJob, /^ {4}needs: unit$/m, 'the demo job no longer waits for the unit tests: change docs/website.md with it');
+  const order = ['run: node demo/drive.mjs', 'run: npm run test:a11y', 'run: npm run test:site'].map((s) => demoJob.indexOf(s));
+  assert.ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2], 'test:site no longer runs after the sandbox drive and the accessibility walk: change docs/website.md with it');
+  assert.match(website, /The job starts only once CI's unit tests pass, and runs `test:site` last, after the sandbox drive and `npm run test:a11y`: when either of those fails, `test:site` does not run at all/);
+});
+
+// review: docs/website.md said to "set that secret and this value to the function's address" and to "set
+// `demoEndpoint` and the function's `LEAD_ORIGINS` secret to `siteUrl`": read either way, one of the two ends
+// up wrong, and the lead function refuses every request whose Origin is not in LEAD_ORIGINS. It also called the
+// later steps "Later, when they exist" after the function was deployed, and gave only half of why Google calls
+// the SoftwareApplication ineligible for a rich result (no rating or review, and no Offer while prices are a guess).
+test('docs/website.md sets LEAD_ORIGINS to siteUrl and demoEndpoint to the function\'s address, and nothing else is stale', () => {
+  const website = read('docs/website.md');
+  const lead = read('supabase/functions/lead/index.ts');
+  assert.match(lead, /LEAD_ORIGINS/, 'the lead function no longer reads LEAD_ORIGINS: change docs/website.md with it');
+  assert.doesNotMatch(website, /set that secret and this value to the function's address/);
+  assert.doesNotMatch(website, /set `demoEndpoint` and the function's `LEAD_ORIGINS` secret to `siteUrl`/);
+  // the prose (the config table's demoEndpoint row names the address in its own column)
+  const prose = website.split('\n').filter((l) => !l.startsWith('|')).join('\n');
+  const sets = prose.split(/(?<=[.;)])\s+/).filter((s) => /\bset\b/.test(s) && /demoEndpoint/.test(s) && /LEAD_ORIGINS/.test(s));
+  assert.ok(sets.length >= 2, 'the guide still says how to send the form through the lead function');
+  for (const s of sets) {
+    assert.match(s, /`LEAD_ORIGINS` secret to `siteUrl`/, s);
+    assert.match(s, /`demoEndpoint` to the function's address/, s);
+  }
+  assert.doesNotMatch(website, /Later, when they exist/);
+  assert.match(website, /no rating or review, and, while `pricing\.json` is a hypothesis, no Offer either/);
 });
