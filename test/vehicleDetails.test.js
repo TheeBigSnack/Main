@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { recheck, fetchVehicleDetails, fetchVehicleDetailsDirect, readCarForPost } from '../extension/src/vehicleDetails.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
-import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, standardCarPage, STANDARD_ORIGIN } from './helpers.js';
+import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, standardCarPage, standardListPage, fakeStandardPage, STANDARD_ORIGIN } from './helpers.js';
 import { SITES_KEY } from '../extension/src/storageKeys.js';
 import { adapterById } from '../extension/adapters/index.js';
 import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage, answerWith } from './platformSites.js';
@@ -208,6 +208,41 @@ test('the post-time read knows the last scan\'s car pages, so another car\'s til
   } finally {
     delete globalThis.chrome;
   }
+});
+
+test('the post-time read through the dealer tab knows the last scan\'s car pages too, on its first read and on its second, the way the last scan read the website', async () => {
+  const O = STANDARD_ORIGIN;
+  // a lot whose car addresses neither carry a VIN nor read like a car page
+  const cars = standardCars(6).map((c, i) => ({ ...c, path: `/vdp/${7000 + i}/` }));
+  const site = standardSite({ cars, perPage: 10 });
+  const tiles = `<aside><div class="tile"><a href="${cars[1].path}">${cars[1].year} ${cars[1].make}</a> <span>$15,000</span></div><div class="tile"><a href="${cars[2].path}">${cars[2].year} ${cars[2].make}</a> <span>$16,000</span></div></aside>`;
+  // the page now says $14,000; its markup still says $15,000, the price on the other car's tile
+  site.set(O + cars[0].path, { ok: true, status: 200, contentType: 'text/html', text: standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', tiles + '<a href="/used-vehicles/">') });
+  const whole = site.get(O + '/used-vehicles/');
+  const snapshot = { vehicles: Object.fromEntries(cars.map((c) => [c.vin, { url: O + c.path, price: c.price }])) };
+  const read = async ({ second, known }) => {
+    // second: the tab shows a list without the car, and the last scan read another list that has it
+    site.set(O + '/used-vehicles/', second ? { ok: true, status: 200, contentType: 'text/html', text: standardListPage(cars.slice(3, 5)) } : whole);
+    site.set(O + '/pre-owned/', whole);
+    const page = fakeStandardPage({ site, path: '/used-vehicles/' });
+    const store = { [SITES_KEY]: { [O]: { adapter: 'schemaOrg', service: { kind: 'schemaOrg', origin: O, listUrl: O + (second ? '/pre-owned/' : '/used-vehicles/') } } } };
+    if (known) store['snapshot:' + O] = snapshot;
+    globalThis.chrome = fakeChrome(page, store);
+    try {
+      const r = await fetchVehicleDetails(1, cars[0].vin, { origin: O, ...(second ? {} : { url: O + cars[0].path }) });
+      assert.equal(r.ok, true, r.message);
+      return { price: r.vehicle.price, fetched: page.fetchCalls.map((c) => c.url.replace(O, '')) };
+    } finally {
+      delete globalThis.chrome;
+    }
+  };
+  const first = await read({ second: false, known: true });
+  assert.deepEqual(first, { price: null, fetched: ['/vdp/7000/'] }, 'the first read, from the car\'s known page');
+  const again = await read({ second: true, known: true });
+  assert.deepEqual(again, { price: null, fetched: ['/used-vehicles/', '/pre-owned/', '/vdp/7000/'] }, 'the second read, from the last scan\'s list');
+  // without the last scan's car pages, nothing tells the tile's link from a link to anything else
+  assert.equal((await read({ second: false, known: false })).price, 15000);
+  assert.equal((await read({ second: true, known: false })).price, 15000);
 });
 
 test('readCarForPost: the tab when it shows the website, the direct read only when the tab can\'t be used', async () => {

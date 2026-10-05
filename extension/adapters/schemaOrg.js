@@ -646,17 +646,22 @@ const isFileType = (contentType) => /^\s*(?:application\/(?:pdf|octet-stream|zip
 // A bot check reads as a stop; anything that isn't a web page as an error
 // (file: true when it is a file, isFileType).
 // Its text is cut into cards by car with what the scan knows of this
-// website's car pages by then (carKeys, siteReader's cars).
-function pageOf(outcome) {
+// website's car pages by then (carKeys, siteReader's cars), and with the
+// car the caller reads it for (vin: its own page's car, whatever address
+// its markup gives), so it is read once for each car asked about.
+function pageOf(outcome, vin = '') {
   if (outcome.kind !== 'page') return outcome;
-  if (!outcome.read) {
-    if (!isHtmlAnswer(outcome.contentType, outcome.text)) outcome.read = { kind: 'error', message: `not a web page (${outcome.contentType || 'no type'})`, file: isFileType(outcome.contentType) };
-    else {
-      const parsed = parseVehiclePage(outcome.text, outcome.finalUrl, { carKey: carKeys(outcome.finalUrl, outcome.cars) });
-      outcome.read = isBotCheck(parsed) ? { kind: 'blocked', message: STOPPED.check } : { kind: 'html', parsed, truncated: outcome.text.length >= PAGE_TEXT_LIMIT };
-    }
+  if (!isHtmlAnswer(outcome.contentType, outcome.text)) {
+    if (!outcome.read) outcome.read = { kind: 'error', message: `not a web page (${outcome.contentType || 'no type'})`, file: isFileType(outcome.contentType) };
+    return outcome.read;
   }
-  return outcome.read;
+  if (!outcome.reads) outcome.reads = new Map();
+  const forCar = typeof vin === 'string' ? vin.toUpperCase() : '';
+  if (!outcome.reads.has(forCar)) {
+    const parsed = parseVehiclePage(outcome.text, outcome.finalUrl, { carKey: carKeys(outcome.finalUrl, outcome.cars, forCar) });
+    outcome.reads.set(forCar, isBotCheck(parsed) ? { kind: 'blocked', message: STOPPED.check } : { kind: 'html', parsed, truncated: outcome.text.length >= PAGE_TEXT_LIMIT });
+  }
+  return outcome.reads.get(forCar);
 }
 
 // Every page read once per scan: the requests are counted, and a page asked
@@ -715,21 +720,22 @@ async function twoAtATime(items, work) {
 // it is one of those addresses with a query added ("?srp=1", "?print=1"),
 // for a car whose own address has no query, so a lot whose car pages differ
 // only by their query is never read as one car; or when it reads like a car
-// page, new or used (readsLikeAnyCar). On one car's own page, such an
-// address that names that car (its model year, make and model all in its
-// words: "See all 2016 Honda Civic", another address of this same car) goes
-// to no car, so the car's own price box is never cut out; any other one is
-// another car's, so its tile never passes for this car's text, whether or
-// not this website's car addresses carry their VIN. On a page that is no one
-// car's own (a list), a VIN-less address that reads like a car page goes to
-// a car only when it has the shape of this lot's car addresses (cars.shape,
-// the addresses the list linked to, else those of the cars this page's
-// markup names): a card's "More like this" search
+// page, new or used (readsLikeAnyCar). On one car's own page (the car the
+// page is read for, `vin`, else the car its markup puts at this address),
+// such an address that names no car but that one (namesOnlyThisCar: "See
+// all 2016 Honda Civic", "Shop new 2027 Honda Civic", another address of
+// this same car) goes to no car, so the car's own price box is not cut out;
+// any other one is another car's, so its tile does not pass for this car's
+// text, whether or not this website's car addresses carry their VIN. On a
+// page that is no one car's own (a list), a VIN-less address that reads
+// like a car page goes to a car only when it has the shape of this lot's
+// car addresses (cars.shape, the addresses the list linked to, else those
+// of the cars this page's markup names): a card's "More like this" search
 // ("/used-vehicles/2016-honda-civic/") does not split it, and on a lot
 // whose car addresses carry their VIN no VIN-less one is a car. Without a
 // shape it is a car unless this page's own address carries a VIN. Keys:
 // "vin:" and the VIN, else the page's key.
-function carKeys(pageUrl, cars) {
+function carKeys(pageUrl, cars, vin = '') {
   const known = cars && cars.known instanceof Map ? cars.known : null;
   return (vehicles) => {
     const origin = originOf(pageUrl);
@@ -743,7 +749,7 @@ function carKeys(pageUrl, cars) {
     }
     const shape = (cars && cars.shape) || learnCarAddressShape([...named.keys()]);
     const vinPages = shape ? shape.vin : Boolean(vinInAddress(pageUrl));
-    const own = ownNode(nodes, pageUrl);
+    const own = (vin && nodes.find((n) => nodeVin(n) === vin)) || ownNode(nodes, pageUrl);
     const ownCar = own ? normalizeVehicle(own, { url: pageUrl }) : null;
     const carOf = (href) => {
       const vins = vinsInAddress(href);
@@ -758,7 +764,7 @@ function carKeys(pageUrl, cars) {
         if (known && known.has(plain)) return known.get(plain);
       }
       if (!readsLikeAnyCar(href)) return null;
-      if (own) return namesCar(href, ownCar) ? null : key;
+      if (own) return namesOnlyThisCar(href, ownCar) ? null : key;
       if (shape) return matchesCarAddressShape(href, shape) ? key : null;
       return vinPages ? null : key;
     };
@@ -775,14 +781,46 @@ function carKeys(pageUrl, cars) {
   };
 }
 
-// Does an address name this car: its model year, make and model all among
-// the address's words ("/used-vehicles/2016-honda-civic/" for a 2016 Honda
-// Civic EX)? A car without all three is named by no address.
+// Does an address name no car but this one? Every word of it is one of this
+// car's own (its make, or the short name people use for it, its model,
+// trim, body style, drive or stock number, also run together: "f150" for an
+// F-150, "crv" for a CR-V), a model year, or a word of the website's
+// inventory and search pages ("used", "vehicles", "shop", "sedan", "awd").
+// So "See all 2016 Honda Civic", "Shop new 2027 Honda Civic", a breadcrumb
+// to "2016 Chevy" and another address of this same car ("/used/2016-honda-
+// civic-sm1000/") name only this car, and an address with any other word
+// ("/used/2017-toyota-camry-sm1001/", "/used/2016-honda-civic-sm1001/")
+// names another. Two cars of one model whose addresses carry no stock
+// number or other word of their own can't be told apart this way.
 const wordsOf = (value) => String(value || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-function namesCar(href, car) {
-  if (!car || !car.year || !car.make || !car.model) return false;
-  const have = new Set(wordsOf(addressText(href)));
-  return [String(car.year), ...wordsOf(car.make), ...wordsOf(car.model)].every((w) => have.has(w));
+const MAKE_NAMES = new Map([['chevrolet', ['chevy']], ['volkswagen', ['vw']], ['mercedesbenz', ['mb']]]);
+const SEARCH_WORDS = new Set([
+  'used', 'new', 'pre', 'owned', 'preowned', 'certified', 'cpo', 'inventory', 'vehicle', 'vehicles', 'car', 'cars', 'auto', 'autos', 'truck', 'trucks', 'suv', 'suvs', 'van', 'vans',
+  'for', 'sale', 'forsale', 'search', 'all', 'shop', 'browse', 'view', 'see', 'more', 'similar', 'like', 'results', 'listing', 'listings', 'srp', 'vdp', 'detail', 'details', 'stock',
+  'make', 'makes', 'model', 'models', 'year', 'years', 'trim', 'trims', 'body', 'type', 'style', 'condition', 'en', 'es', 'index', 'html', 'htm', 'php', 'asp', 'aspx', 'jsp',
+  'sedan', 'sedans', 'coupe', 'coupes', 'hatchback', 'hatchbacks', 'hatch', 'wagon', 'wagons', 'convertible', 'convertibles', 'crossover', 'crossovers', 'minivan', 'minivans', 'pickup', 'pickups',
+  'cab', 'crew', 'crewcab', 'extended', 'double', 'quad', 'supercrew', 'supercab', 'crewmax', 'door', 'doors', '2dr', '4dr', 'awd', 'fwd', 'rwd', '4wd', '2wd', '4x4', '4x2',
+]);
+const MODEL_YEAR_WORD = /^(?:19[5-9][0-9]|20[0-9][0-9])$/;
+function namesOnlyThisCar(href, car) {
+  if (!car) return false;
+  const mine = new Set();
+  for (const value of [car.make, car.model, car.trim, car.bodyType, car.drivetrain, car.stock]) {
+    const w = wordsOf(value);
+    for (const x of w) mine.add(x);
+    if (w.length > 1) mine.add(w.join(''));
+  }
+  for (const short of MAKE_NAMES.get(wordsOf(car.make).join('')) || []) mine.add(short);
+  const words = wordsOf(addressText(href));
+  for (let i = 0; i < words.length;) {
+    let step = 0;
+    // the longest run of words from here that is one word of this car's ("f-150"), else one word the address may hold anyway
+    for (let j = Math.min(words.length, i + 4); j > i && !step; j -= 1) if (mine.has(words.slice(i, j).join(''))) step = j - i;
+    if (!step && (SEARCH_WORDS.has(words[i]) || MODEL_YEAR_WORD.test(words[i]))) step = 1;
+    if (!step) return false;
+    i += step;
+  }
+  return true;
 }
 
 // The car whose own page this is, from its markup: the node with a VIN at
@@ -956,7 +994,7 @@ function pageProblem(message) {
 }
 async function confirmOne(site, vin, href) {
   const got = await site.read(href);
-  const page = pageOf(got);
+  const page = pageOf(got, vin);
   if (page.kind === 'gone') return { gone: true };
   if (page.kind === 'blocked') return { refused: page.message.replace(/, so the scan stopped.*$/, '') };
   if (page.kind === 'error') return { unchecked: pageProblem(page.message) };
@@ -1010,7 +1048,7 @@ async function confirmMissing(site, { vins, urls, records, origin, evidence, sam
   if (!confirm.error && items.some((i) => i.verdict && i.verdict.unsure) && !evidence.ownNode) {
     // Does this website's car page carry its car's data? One car still on the list says.
     const sample = samples.find(Boolean);
-    const got = sample ? pageOf(await site.read(sample.href)) : null;
+    const got = sample ? pageOf(await site.read(sample.href), sample.vin) : null;
     if (got && got.kind === 'html' && got.parsed.vehicles.some((n) => nodeVin(n) === sample.vin)) evidence.ownNode = true;
     else if (got && got.kind === 'blocked') confirm.error = got.message.replace(/, so the scan stopped.*$/, '');
     else {
@@ -1294,7 +1332,7 @@ export async function scan(search, options = {}) {
       }
       read += 1;
       const got = await site.read(href);
-      const page = pageOf(got);
+      const page = pageOf(got, item.vin);
       if (page.kind === 'blocked') {
         stopped = { error: 'blocked', message: page.message };
         return false;
@@ -1418,7 +1456,7 @@ export function normalize(record) {
 // that marks up only other cars says nothing about this one.
 async function carFromPage(site, vin, href) {
   const got = await site.read(href);
-  const page = pageOf(got);
+  const page = pageOf(got, vin);
   if (page.kind === 'gone') return { gone: true };
   if (page.kind === 'blocked') return { error: page.message.replace(/, so the scan stopped.*$/, '.') };
   if (page.kind !== 'html') return { error: `Couldn't read the car's page on the website (${page.message}).`, file: Boolean(page.file) };

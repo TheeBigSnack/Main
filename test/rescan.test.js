@@ -761,6 +761,59 @@ test('a website read from its pages: another car\'s tile at the old price is not
   assert.equal(schemaOrg.normalize(one.record).price, null, 'post time');
 });
 
+test('a website read from its pages: another car\'s tile at the old price is not this car\'s price when the car\'s markup gives another address of its page, since the page is read for that car', async () => {
+  const cars = standardCars(6);
+  const c = cars[0];
+  const posted = markPosted({}, { vin: c.vin, name: 'posted car', price: c.price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  const tileOf = (o, amount) => `<div class="tile"><a href="/used/${o.year}-${o.make}-${o.model}-${o.stock}/">${o.year} ${o.make}</a> <span>${amount}</span></div>`.toLowerCase();
+  const aside = `<aside>${tileOf(cars[1], '$15,000')}${tileOf(cars[2], '$17,000')}</aside>`;
+  const markupAt = {
+    'with http:// for https://': STANDARD_ORIGIN.replace('https:', 'http:') + c.path,
+    'at the car\'s stock number': `${STANDARD_ORIGIN}/inventory/${c.stock}/`,
+  };
+  for (const [name, url] of Object.entries(markupAt)) {
+    const site = standardSite({ cars, perPage: 10 });
+    const html = standardCarPage(c).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', aside + '<a href="/used-vehicles/">').replace(`"url":"${STANDARD_ORIGIN}${c.path}"`, `"url":"${url}"`);
+    assert.ok(html.includes(`"url":"${url}"`), name);
+    site.set(STANDARD_ORIGIN + c.path, htmlAnswer(html));
+    const out = await rescanOf(site, first.snapshot, posted);
+    assert.equal(out.snapshot.vehicles[c.vin].price, null, name);
+    assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[c.vin, 'Website no longer shows a price (the page does not show this price)']], name);
+    const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
+    assert.equal(schemaOrg.normalize(one.record).price, null, `post time: ${name}`);
+  }
+});
+
+test('a website read from its pages: on a lot whose car addresses carry the VIN, a car\'s own price stays its own when its price box links a search for its model in other words (F150 for F-150, Chevy for Chevrolet, a model without its body style, a new-car search)', async () => {
+  const base = standardCars(4);
+  const variants = {
+    'F150 for an F-150': { patch: (c) => ({ ...c, make: 'Ford', model: 'F-150', trim: 'XLT' }), href: (c) => `/used-vehicles/${c.year}-ford-f150/` },
+    'a model without its body style': { patch: (c) => ({ ...c, model: 'Civic Sedan' }), href: (c) => `/used-vehicles/${c.year}-honda-civic/` },
+    'Chevy for Chevrolet': { patch: (c) => ({ ...c, make: 'Chevrolet', model: 'Equinox', trim: 'LT' }), href: (c) => `/used-vehicles/${c.year}-chevy-equinox/` },
+    'a search for the new model': { patch: (c) => c, href: () => '/new-vehicles/2027-honda-civic/' },
+    'a breadcrumb to its year and make': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda/` },
+  };
+  for (const [name, v] of Object.entries(variants)) {
+    const cars = base.slice();
+    cars[0] = v.patch(cars[0]);
+    const c = cars[0];
+    const site = standardSite({ cars, perPage: 10 });
+    // its title in a bar of its own, so the price box and the link sit in a block without it
+    site.set(STANDARD_ORIGIN + c.path, htmlAnswer(standardCarPage(c).replace(/(<h1>[^<]*<\/h1>)<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, (all, h1, price, miles) => `<div class="bar">${h1}</div><div class="main"><div class="price-box"><p>Our price ${price}</p><p>${miles}</p><a href="${v.href(c)}">See all</a></div></div>`)));
+    const out = await rescanOf(site, null);
+    assert.equal(out.vehicles.find((x) => x.vin === c.vin).price, c.price, `scan: ${name}`);
+    const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
+    assert.equal(schemaOrg.normalize(one.record).price, c.price, `post time: ${name}`);
+  }
+  // a link that names another car in the same place still takes the block with it: no price, never the wrong one
+  const cars = base.slice();
+  const c = cars[0];
+  const site = standardSite({ cars, perPage: 10 });
+  site.set(STANDARD_ORIGIN + c.path, htmlAnswer(standardCarPage(c).replace(/(<h1>[^<]*<\/h1>)<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, (all, h1, price, miles) => `<div class="bar">${h1}</div><div class="main"><div class="price-box"><p>Our price ${price}</p><p>${miles}</p><a href="/used/${c.year}-honda-civic-sm9999/">Next vehicle</a></div></div>`)));
+  assert.equal((await rescanOf(site, null)).vehicles.find((x) => x.vin === c.vin).price, null, 'another car\'s address');
+});
+
 test('a website read from its pages: on a lot whose car addresses neither carry a VIN nor read like a car page, another car\'s tile at the old price is not this car\'s price at post time either, once the last scan\'s car pages are known', async () => {
   const cars = standardCars(6).map((c, i) => ({ ...c, path: `/vdp/${7000 + i}/` }));
   const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
@@ -842,7 +895,15 @@ test('a website read from its pages: a car\'s own price stays its own beside one
   const posted = markPosted({}, { vin: c.vin, name: 'posted car', price: c.price });
   const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
   const split = `<div class="tile"><div class="photo"><a href="${o.path}"><img alt=""></a><span>Low miles</span></div><div class="info"><span>$15,000</span></div></div>`;
-  for (const [name, tile] of [['the tile\'s amount in its link', similar('$15,000')], ['the tile\'s amount outside the element around its link', split]]) {
+  const head = (beside) => `<div class="tile"><div class="head"><a href="${o.path}">${o.year} ${o.make} ${o.model}</a> <span>${beside}</span></div><div class="info"><span>$15,000</span></div></div>`;
+  const loose = `<div class="head"><a href="${o.path}">${o.year} ${o.make} ${o.model}</a> <span>Save $500</span></div><div class="info"><span>$15,000</span></div>`;
+  for (const [name, tile] of [
+    ['the tile\'s amount in its link', similar('$15,000')],
+    ['the tile\'s amount outside the element around its link', split],
+    ['a saving beside the tile\'s link, its amount beside that', head('Save $500')],
+    ['a payment beside the tile\'s link, its amount beside that', head('Est. $299/mo')],
+    ['the tile\'s pieces loose beside the price box', loose],
+  ]) {
     const stale = await read(page('$14,000', tile), first.snapshot, posted);
     assert.equal(stale.out.snapshot.vehicles[c.vin].price, null, name);
     assert.deepEqual(stale.out.diff.needsALook.map((n) => [n.vin, n.text]), [[c.vin, 'Website no longer shows a price (the page does not show this price)']], name);

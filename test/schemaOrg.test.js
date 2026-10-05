@@ -629,9 +629,22 @@ test('price: beside one other car\'s tile, the car\'s own price box is its own w
   assert.equal(own(box('$15,500') + similar('$15,500')), 'Home Used 2021 Kia Sorento LX Call us');
   // the tile shows no amount of its own: the whole block is the tile's
   assert.equal(own(box('$14,000') + similar('')), 'Home Used 2021 Kia Sorento LX Call us');
-  // the tile's price sits outside the smallest element around its link: the whole block is the tile's
+  // the tile's price sits outside the smallest element around its link: the tile is the element that holds its price too
   const split = `<div class="tile"><div class="photo"><a href="${link}"><img alt=""></a><span>Low miles</span></div><div class="info"><span>$15,000</span></div></div>`;
-  assert.equal(own(box('$14,000') + split), 'Home Used 2021 Kia Sorento LX Call us');
+  assert.equal(own(box('$14,000') + split), 'Home Used 2021 Kia Sorento LX Our price $14,000 20,000 miles Check availability Get financing Call us');
+  assert.equal(tile(box('$14,000') + split), 'Low miles $15,000');
+  // ... also when the element around its link shows another amount (a saving, a payment): the tile is never cut smaller than the element holding its price
+  for (const beside of ['<span>Save $500</span>', '<span>Est. $299/mo</span>']) {
+    const wrapped = `<div class="tile"><div class="head"><a href="${link}">2018 Honda Accord</a> ${beside}</div><div class="info"><span>$15,000</span></div></div>`;
+    assert.equal(own(box('$14,000') + wrapped), 'Home Used 2021 Kia Sorento LX Our price $14,000 20,000 miles Check availability Get financing Call us', beside);
+    assert.match(tile(box('$14,000') + wrapped), /\$15,000/, beside);
+    // a tile with no wrapper of its own, its pieces loose beside the price box: the whole block is the tile's
+    const loose = `<div class="head"><a href="${link}">2018 Honda Accord</a> ${beside}</div><div class="info"><span>$15,000</span></div>`;
+    assert.equal(own(box('$14,000') + loose), 'Home Used 2021 Kia Sorento LX Call us', `loose: ${beside}`);
+    assert.equal(own(box('Call for price') + loose), 'Home Used 2021 Kia Sorento LX Call us', `loose, no price of its own: ${beside}`);
+  }
+  // the tile's pieces loose beside the price box, one showing a price: two places show amounts, so the whole block is the tile's
+  assert.equal(own(box('$14,000') + `<div class="head"><a href="${link}">2018 Honda Accord</a> <span>$16,000</span></div><div class="info"><span>$15,000</span></div>`), 'Home Used 2021 Kia Sorento LX Call us');
   // two other cars' tiles: each tile is its own card, as before
   const B = '1FMSAMPL0HU000103';
   const two = `<div class="similar"><a href="${link}">2018 Honda Accord $15,500</a><a href="/inventory/used-${B.toLowerCase()}/">2017 Ford Escape $16,000</a></div>`;
