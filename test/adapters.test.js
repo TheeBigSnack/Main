@@ -1288,6 +1288,38 @@ test('schemaOrg scan: car pages without vehicle data first on the list never sto
   assert.ok(!known.calls.includes(`${O}/finance/apply/?vin=${cars[6].vin}`), 'its form is not read');
 });
 
+test('schemaOrg scan: when only forms carry the VIN and none of them gave a car, the scan never says it read the whole lot', async () => {
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const leadForm = html('<!doctype html><html><head><title>Get pre-approved</title></head><body><form><input name="name"></form></body></html>');
+  // car pages without a VIN in their address; each card links a pre-approval form with the VIN in its query
+  const cars = standardCars(6).map((c) => ({ ...c, path: `/inventory/used-${c.year}-${c.make}-${c.model}-${c.stock}/`.toLowerCase() }));
+  const lot = (listData) => {
+    const m = standardSite({ cars, listData });
+    for (const [at, a] of m) {
+      if (!at.startsWith(LIST)) continue;
+      let text = a.text;
+      for (const c of cars) text = text.replace(`<a href="${c.path}">`, `<a href="/finance/apply/?vin=${c.vin}">Get pre-approved</a> <a href="${c.path}">`);
+      m.set(at, { ...a, text });
+    }
+    for (const c of cars) m.set(`${O}/finance/apply/?vin=${c.vin}`, leadForm);
+    return m;
+  };
+  const res = await schemaOrg.scan(fakeSiteSearch(lot(false)), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([res.ok, res.total, res.records.length, res.complete], [true, 6, 0, false], 'no car read: not complete');
+  assert.equal(incompleteWarning(res), 'The website returned 0 of 6 cars.');
+  const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(lot(false)), site, settings: withDefaults({}, site), options: schemaOrg.scanOptions(SERVICE) });
+  assert.equal(out.diff.warnings[0], 'The website returned 0 of 6 cars.', 'the scan says so first on To do');
+  // with the list's data the cars are read as before, and the read is complete
+  const withData = await schemaOrg.scan(fakeSiteSearch(lot(true)), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([withData.ok, withData.total, withData.records.length, withData.complete], [true, 6, 6, true]);
+  // a lot whose car pages carry the VIN in the query, beside "More like this" searches that read like car pages, is still complete
+  const byQuery = cars.map((c) => ({ ...c, path: `/vehicle-details/?vin=${c.vin}` }));
+  const searches = standardSite({ cars: byQuery, listData: false });
+  for (const [at, a] of searches) if (at.startsWith(LIST)) searches.set(at, { ...a, text: a.text.replace('</body>', '<a href="/used-vehicles/2016-honda-civic/">More like this</a> <a href="/used-vehicles/2019-ford-f-150/">More like this</a></body>') });
+  const plain = await schemaOrg.scan(fakeSiteSearch(searches), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([plain.ok, plain.total, plain.records.length, plain.complete], [true, 6, 6, true], plain.message);
+});
+
 test('schemaOrg scan: a car page that answers plain text is a page that failed, not a file that is no car', async () => {
   const cars = standardCars(6);
   const m = standardSite({ cars, listData: false });

@@ -1306,6 +1306,8 @@ export async function scan(search, options = {}) {
   let failedInARow = 0;
   let notCarPages = 0;
   let untried = 0; // cars left with addresses not read, none of those read being their page
+  let carsFound = 0; // cars found at their own page this scan
+  let noneShown = 0; // cars whose pages read showed no car, and neither does the list's data
   const pagesRead = new Set();
   const evidence = { ownNode: false };
   const gave = new Map(); // address kind -> cars its pages gave
@@ -1378,6 +1380,7 @@ export async function scan(search, options = {}) {
     }
     if (found) {
       failedInARow = 0;
+      carsFound += 1;
       if (item.vin) pagesRead.add(item.vin);
       evidence.ownNode = true;
       item.href = found.href;
@@ -1407,6 +1410,7 @@ export async function scan(search, options = {}) {
       if (item.vin) pagesRead.add(item.vin);
       if (item.listedCar && item.listedCar.vin) item.record = listRecord(item.listedCar, item.href, true); // the page doesn't mark the car up; the list does
       else if (html.page.truncated) readErrors += 1;
+      else noneShown += 1;
       return true;
     }
     if (files && !item.listedCar && !(item.vin && lastSeen[item.vin])) {
@@ -1443,9 +1447,13 @@ export async function scan(search, options = {}) {
   // Files with a VIN in their address that are no car's page leave the
   // learned shape of this lot's car addresses in doubt, so a link that read
   // like a car page but was left out for not having that shape may be one.
-  const shapeInDoubt = notCarPages > 0 && shapeLeftOut > 0;
-  const complete = listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt;
-  const out = { ok: true, fetchedAt: new Date().toISOString(), total: cars.size - notCarPages, complete, requests: site.requests, records: [...records.values()], confirm };
+  // So do links with a VIN none of which gave a car, only web pages without
+  // one (forms that carry the VIN where the car pages don't).
+  const shapeInDoubt = shapeLeftOut > 0 && (notCarPages > 0 || (carsFound === 0 && noneShown > 0));
+  const total = cars.size - notCarPages;
+  // a lot that counted cars and gave none is never a complete read of it
+  const complete = listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !(total > 0 && records.size === 0);
+  const out = { ok: true, fetchedAt: new Date().toISOString(), total, complete, requests: site.requests, records: [...records.values()], confirm };
   if (unread.size) out.unread = [...unread];
   const readCars = [...pagesRead].filter((vin) => records.has(vin));
   if (readCars.length) out.pagesRead = readCars;
