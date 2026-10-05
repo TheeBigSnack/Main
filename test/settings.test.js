@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
+import { locationQuery } from '../extension/src/listingData.js';
+import { buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { vehicle, WAYNESBURG } from './helpers.js';
 
 test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () => {
@@ -10,7 +12,7 @@ test('v0.1 settings ({ myStores, basis }) keep working and gain defaults', () =>
   assert.deepEqual(s.myStores, [WAYNESBURG]);
   assert.equal(s.basis, 'beforeFees');
   assert.deepEqual(s.salesperson, { name: '', title: 'sales consultant', closingLine: '' });
-  assert.deepEqual(s.dealer, { name: 'Ron Lewis CDJR Waynesburg', city: 'Waynesburg', state: '', zip: '' });
+  assert.deepEqual(s.dealer, { name: 'Ron Lewis CDJR Waynesburg', city: '', state: '', zip: '' }, 'no address on the website: the city is left for a person to type');
   assert.equal(s.priceNote, '');
   assert.equal(s.dailyCap, 10);
   assert.deepEqual(s.rewrite, { enabled: false, endpoint: '', key: '' });
@@ -29,6 +31,26 @@ test("the website's own address fills blank city, state and ZIP but never overri
   const partial = withDefaults({ dealer: { city: 'Waynesburg' } }, site);
   assert.deepEqual(partial.dealer, { name: WAYNESBURG, city: 'Waynesburg', state: 'PA', zip: '15370' });
   assert.equal(defaultSettings(site, []).dealer.zip, '15370');
+});
+
+test('the city is never guessed from a store name, and a city a person clears stays clear unless the website gives one', () => {
+  // A store name is a label (normalize.js shortLocation), not a town: whole, or a fragment like
+  // 'Superstore', it would read "on the lot at X in <store name>" and be typed into Marketplace's location box.
+  for (const store of ['Smith Chevrolet Buick GMC', 'Jones Toyota Superstore', 'Example Auto Mall', 'Smith Chevrolet of Dayton']) {
+    const s = withDefaults({ myStores: [store] }, { name: store });
+    assert.equal(s.dealer.city, '', store);
+    assert.equal(locationQuery(s.dealer), '', `${store}: nothing to type into the location box`);
+    assert.equal(defaultSettings({ name: store }, [{ location: store }]).dealer.city, '', `${store}: first-run defaults`);
+  }
+  // the wizard and Settings save a blank City box through withDefaults: it stays blank
+  assert.equal(withDefaults({ myStores: ['Example Auto Mall'], dealer: { city: '', state: 'OH' } }, { name: 'Example Auto Mall' }).dealer.city, '');
+  // the website's own address still fills a blank city
+  const site = { name: 'Example Auto Mall', address: { city: 'Springfield', state: 'OH', zip: '', source: 'page text' } };
+  assert.equal(withDefaults({ myStores: ['Example Auto Mall'], dealer: { city: '' } }, site).dealer.city, 'Springfield');
+  // with no city the description names the dealership alone
+  const s = withDefaults({ myStores: ['Example Auto Mall'] }, { name: 'Example Auto Mall' });
+  const text = buildTemplateDescription({ vehicle: { year: 2020, make: 'Ford', model: 'F-150', mileage: 1000, location: 'Example Auto Mall' }, dealer: s.dealer, salesperson: { name: 'Pat' }, stores: s.myStores });
+  assert.match(text, /^Pre-owned and on the lot at Example Auto Mall\.$/m);
 });
 
 test('bad input becomes safe defaults', () => {
@@ -165,7 +187,7 @@ test('first-run defaults: the store matching the site name; the price note is on
   const s = defaultSettings(site, lot);
   assert.deepEqual(s.myStores, [WAYNESBURG]);
   assert.equal(s.dealer.name, WAYNESBURG);
-  assert.equal(s.dealer.city, 'Waynesburg');
+  assert.equal(s.dealer.city, '', 'the site gives no address here, so the city is not guessed from the store name');
   assert.equal(s.priceNote, '', 'a person decides what the price gap means');
   assert.match(suggestedPriceNote(feeGap(lot).gap, s.basis), /\$490 doc fee/);
 });
@@ -233,4 +255,66 @@ test("the Ready list's order and the new-arrival window are this website's setti
   const seeded = settingsFromProfile(p, { origin: 'https://www.example-dealer.test' });
   assert.equal(seeded.readySort, 'newest');
   assert.equal(seeded.newDays, 7);
+});
+
+// ---------- Settings, Save: says when no dealership name is set ----------
+import { readFileSync } from 'node:fs';
+import { NO_DEALER_NAME, dealerNameMissing } from '../extension/src/settings.js';
+import { checkClosingLine, cleanClosingLine } from '../extension/src/rewriteTemplate.js';
+import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
+import { MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from '../extension/src/readyList.js';
+
+// popup.js onSettingsSubmit, as written, with the page around it stubbed: the form's fields, storage and the note by the Save button.
+async function saveSettings({ fields, settings = null, siteName = '', origin = 'https://www.example-motors.test' }) {
+  const src = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  const start = src.indexOf('async function onSettingsSubmit(');
+  assert.ok(start >= 0, 'onSettingsSubmit is defined');
+  // the website's own name comes with its last scan (popup.js knownSite)
+  const state = { origin, siteName, settings, snapshot: siteName ? { site: { name: siteName }, vehicles: {} } : null, site: null };
+  const saved = [];
+  const note = { textContent: '' };
+  const said = [];
+  class FormData {
+    get(k) { return k in fields ? fields[k] : null; }
+    getAll(k) { return k in fields ? [].concat(fields[k]) : []; }
+    has(k) { return k in fields; }
+  }
+  const scope = {
+    state, FormData, document: { activeElement: null },
+    accountAction: () => { throw new Error('no account button was pressed'); },
+    render: () => {}, setStatus: (text, kind) => said.push([text, kind]),
+    checkClosingLine, cleanClosingLine, withDefaults, chooseBasis, DEFAULT_SALESPERSON_TITLE, DEFAULT_DAILY_CAP, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS,
+    legalHosted: () => false, acceptLegal: () => ({}), chrome: {}, rescanOrigins: () => [],
+    save: async (name) => { saved.push([name, state.settings]); return true; },
+    setSiteAuto: async () => {},
+    $: (id) => (id === 'saved' ? note : null),
+    NO_DEALER_NAME, dealerNameMissing,
+    knownSite: () => state.snapshot?.site || {}, NO_SITE_TEXT: 'no website open',
+    saveProfile: async () => {}, ownListings: () => 0, update: async () => true, askChrome: async () => false,
+  };
+  const submit = new Function(...Object.keys(scope), `${src.slice(start, src.indexOf('\n}\n', start) + 2)}\nreturn onSettingsSubmit;`)(...Object.values(scope));
+  await submit({ target: { id: 'settings', querySelector: () => null }, preventDefault: () => {} });
+  return { saved, note: note.textContent, said };
+}
+
+test('Settings saves with no dealership name but says so: nothing can be posted until one is typed', async () => {
+  const fields = { salespersonName: 'Sam', salespersonTitle: 'sales consultant', closingLine: '', dealerName: '', dealerCity: 'Springfield', dealerState: 'oh', dealerZip: '43215', priceNote: '', dailyCap: '10', newDays: '7' };
+  // a website that gives no name, and nobody typed one: the rest is saved, and the note says what is missing
+  const blank = await saveSettings({ fields });
+  assert.equal(blank.saved.length, 1, 'the other settings are kept');
+  assert.equal(blank.saved[0][1].salesperson.name, 'Sam');
+  assert.equal(blank.saved[0][1].dealer.name, '');
+  assert.equal(blank.note, `Saved. Click Rescan website to apply. ${NO_DEALER_NAME}`);
+  // typed in Settings, or read from the website: nothing to say
+  assert.equal((await saveSettings({ fields: { ...fields, dealerName: 'Example Motors' } })).note, 'Saved. Click Rescan website to apply.');
+  const fromSite = await saveSettings({ fields, siteName: 'Example Motors' });
+  assert.equal(fromSite.saved[0][1].dealer.name, 'Example Motors');
+  assert.equal(fromSite.note, 'Saved. Click Rescan website to apply.');
+  // a box cleared by mistake keeps the name already set
+  const kept = await saveSettings({ fields, settings: withDefaults({ dealer: { name: 'Example Motors' } }) });
+  assert.equal(kept.saved[0][1].dealer.name, 'Example Motors');
+  assert.equal(kept.note, 'Saved. Click Rescan website to apply.');
+  // with no dealership website open nothing is saved (settings belong to a website), and there is no dealership to name yet
+  const none = await saveSettings({ fields, origin: null });
+  assert.deepEqual([none.saved, none.note, none.said], [[], '', [['no website open', 'error']]]);
 });

@@ -138,7 +138,7 @@ try {
   const draft = await panel.inputValue('#description');
   assert.match(draft, /^2019 Ram 1500 Classic Express with 20,986 miles\./);
   assert.match(draft, /One owner according to the Carfax report\./);
-  assert.match(draft, /pairs the HEMI 5\.7L V8/, "the car's own write-up is kept");
+  assert.doesNotMatch(draft, /pairs the HEMI 5\.7L V8/, "the template never copies the car's own write-up");
   assert.doesNotMatch(draft, /Documentation fee/, 'the lot-wide disclaimer is stripped');
   assert.match(draft, /Price includes the \$490 doc fee; tax and tags extra\./);
   assert.match(draft, /I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\./);
@@ -353,6 +353,12 @@ try {
   await panelEs.goto(extUrl('sidepanel.html'));
   await panelEs.waitForSelector('#openForm', { timeout: 20000 });
   assert.match(await panelEs.textContent('#vehicle'), /2022 Jeep Wagoneer Series III/);
+  // the Wagoneer is at another store: its description names that store, never this dealership's town,
+  // and the location (the dealership's address) is listed for the person to check on the form
+  const draftEs = await panelEs.inputValue('#description');
+  assert.match(draftEs, /^Pre-owned and on the lot at [^\n]*Cranberry\.$/m);
+  assert.doesNotMatch(draftEs, /in Waynesburg/);
+  assert.match(await panelEs.textContent('#assumed'), /Location[\s\S]*the website lists this car at [^\n]*Cranberry, so check the location on the form/);
   const [fbEs] = await Promise.all([context.waitForEvent('page'), panelEs.click('#checkForm')]);
   watch(fbEs);
   await panelEs.waitForSelector('#probeResults', { timeout: 30000 });

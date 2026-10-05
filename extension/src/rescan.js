@@ -37,28 +37,55 @@ export function basisPrice(v, basis = 'website') {
   return main;
 }
 
-// The basis a posted listing's price was taken on: recorded on the entry
-// when it was posted (markPosted), or stamped on an older entry when the
-// setting changed (withPostedBasis); else the current setting. A listing is
-// always compared with the website on its own basis, so changing the setting
-// is never read as a website price change.
-export function postedBasis(entry, basis = 'website') {
+export const PRICE_BASES = Object.freeze(['website', 'beforeFees']);
+
+// The basis a posted listing's price was taken on, so its price is compared
+// with the website's price on that same basis: the dealer switching Settings
+// (Price to post) never makes a price change the website didn't make (rule
+// 4). It is recorded on the entry when it was posted (markPosted), or
+// stamped on an older entry when the setting changed (withPostedBasis). An
+// entry with none (posted before the basis was recorded, or brought by a
+// sync: the server doesn't keep it) carries the basis whose website price
+// equals its own price on the scans in `seen` (oldest first: the last scan,
+// then this one). When both bases give the car that price, or neither does,
+// or no scan is given, the current setting (`basis`) stands.
+export function postedBasis(entry, basis = 'website', seen = []) {
   const own = entry && entry.basis;
-  if (own === 'website' || own === 'beforeFees') return own;
-  return basis === 'beforeFees' ? 'beforeFees' : 'website';
+  if (PRICE_BASES.includes(own)) return own;
+  const setting = basis === 'beforeFees' ? 'beforeFees' : 'website';
+  const price = entry && typeof entry.price === 'number' ? entry.price : null;
+  if (price === null) return setting;
+  for (const v of Array.isArray(seen) ? seen : []) {
+    if (!v) continue;
+    const matches = PRICE_BASES.filter((b) => basisPrice(v, b) === price);
+    if (matches.length === 1) return matches[0];
+    if (matches.length) return setting;
+  }
+  return setting;
 }
 
-// The posted list with the basis in force until now (the setting being
-// changed) stamped on every entry posted before the basis was recorded per
-// entry; undefined when every entry already has one, so nothing is written.
-export function withPostedBasis(posted, basis) {
+// The website's price now for a posted listing, on the basis the listing
+// carries (postedBasis): what Update price and My listings compare with the
+// listed price, and what Updated records, so a switch of Price to post never
+// reads as a price change in either place. `seen`: the scans the basis of an
+// entry without one is read from, oldest first (by default this one).
+export function listingWebsitePrice(entry, now, basis = 'website', seen = [now]) {
+  return basisPrice(now, postedBasis(entry, basis, seen));
+}
+
+// The posted list with a basis stamped on every entry posted before the
+// basis was recorded per entry, as the setting changes: the basis its price
+// is on in the last scan (`vehicles`, the snapshot's cars by VIN; postedBasis),
+// else the basis in force until now (`basis`, the setting being changed).
+// undefined when every entry already has one, so nothing is written.
+export function withPostedBasis(posted, basis, vehicles = {}) {
   if (!posted || typeof posted !== 'object') return undefined;
-  const stamp = basis === 'beforeFees' ? 'beforeFees' : 'website';
+  const cars = vehicles && typeof vehicles === 'object' ? vehicles : {};
   let changed = false;
   const next = {};
   for (const [vin, e] of Object.entries(posted)) {
-    if (e && typeof e === 'object' && e.basis !== 'website' && e.basis !== 'beforeFees') {
-      next[vin] = { ...e, basis: stamp };
+    if (e && typeof e === 'object' && !PRICE_BASES.includes(e.basis)) {
+      next[vin] = { ...e, basis: postedBasis(e, basis, [cars[vin]]) };
       changed = true;
     } else next[vin] = e;
   }
@@ -176,7 +203,7 @@ function whatGotReady(before, now) {
  * @param {object|null} prev  previous snapshot (null on the first scan)
  * @param {object} curr       this scan's snapshot
  * @param {object} options
- *   posted:  { [vin]: { price, postedAt, name, mine? } } cars the salesperson posted;
+ *   posted:  { [vin]: { price, basis?, postedAt, name, mine? } } cars the salesperson posted;
  *            an entry with `mine: false` is a colleague's (merged in by sync):
  *            its car shows in the lists but is never "yours"
  *   confirm: { checked: [vin], notFound: [vin], error?: string, unchecked?: { [vin]: reason } }
@@ -240,8 +267,9 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   for (const [vin, now] of Object.entries(currVehicles)) {
     const before = prevVehicles[vin];
     const mine = yours(vin);
-    // a posted car on the basis its listing was posted at (postedBasis)
-    const nowPrice = basisPrice(now, mine ? postedBasis(posted[vin], basis) : basis);
+    // a posted car on the basis its listing was posted at (postedBasis; an
+    // entry with none reads it off the last scan, then this one)
+    const nowPrice = mine ? listingWebsitePrice(posted[vin], now, basis, [before, now]) : basisPrice(now, basis);
 
     // A posted car the website marks sold or sale-pending, or no longer
     // calls pre-owned, is raised on every scan while it is still marked
@@ -257,8 +285,8 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
       out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, text: now.reason });
     }
 
-    // Price: posted cars compare with the price on the Marketplace listing,
-    // everything else with the last scan.
+    // Price: posted cars compare with the price on the Marketplace listing
+    // (on its own basis, postedBasis), everything else with the last scan.
     const was = mine ? posted[vin].price : before ? basisPrice(before, basis) : undefined;
     if (was !== undefined) {
       if (was && !nowPrice) {
@@ -312,10 +340,12 @@ export function settleDiff(diff, posted) {
 
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
 // `extra` can carry the listing link and who posted (listingUrl, salesperson).
+// The entry records the price basis it was posted with (postedBasis).
 export function markPosted(posted, entry, basis = 'website', now = new Date().toISOString(), extra = {}) {
   return { ...posted, [entry.vin]: { name: entry.name, price: basisPrice(entry, basis), basis: postedBasis(null, basis), postedAt: now, ...extra } };
 }
 
+// The listing's new price, on the basis it carries (the to-do item's `to`).
 export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {
   if (!posted[vin]) return posted;
   return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now } };

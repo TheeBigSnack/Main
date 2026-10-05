@@ -12,7 +12,7 @@
 // keeps it).
 
 import { performScan, rememberSite } from './src/scanRunner.js';
-import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote } from './src/settings.js';
+import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { shortLocation, storeNames, matchStore } from './src/normalize.js';
@@ -25,7 +25,7 @@ import { updateKey, storageErrorText, isStorageFull, STORAGE_FULL } from './src/
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING } from './src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint } from './src/wizardSteps.js';
 
 const steps = () => wizardSteps(accountsConfigured());
 // The Account step's own state: what was typed and answered, never a token.
@@ -113,15 +113,16 @@ async function findDealerTab() {
 export const TAB_GONE = "Couldn't reach the dealership tab. Open the used inventory page, click the Lot Current icon and click Continue set-up.";
 
 // Listings posted before the price basis was kept on each one stay on the
-// basis in force until now when set-up changes it: the new setting is for
-// new posts, never a website price change (src/rescan.js withPostedBasis).
-// Stamped before the new basis is saved or read with, so no scan reads them
-// under the new one.
+// basis their price is on in the last scan, else the one in force until now,
+// when set-up changes it: the new setting is for new posts, never a website
+// price change (src/rescan.js withPostedBasis). Stamped before the new basis
+// is saved or read with, so no scan reads them under the new one.
 async function keepPostedBasis(k, stored, nextBasis) {
   if (!stored) return;
   const before = withDefaults(stored).basis;
   if (before === (nextBasis === 'beforeFees' ? 'beforeFees' : 'website')) return;
-  await updateKey(k.posted, (p) => withPostedBasis(p, before));
+  const snapshot = (await chrome.storage.local.get(k.snapshot))[k.snapshot];
+  await updateKey(k.posted, (p) => withPostedBasis(p, before, snapshot && snapshot.vehicles));
 }
 
 // What set-up starts from, read just before the first read of the website:
@@ -248,7 +249,7 @@ export function wizardHtml() {
         : !byMatch ? (ticked.length ? 'The website lists these stores; your earlier choice is ticked.' : 'The website lists these stores. None is ticked: tick yours.')
         : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
-        <p class="hint">Only cars at your store count as ready to post.${hint ? ' ' + hint : ''}</p>
+        <p class="hint">Only cars at the stores you tick count as ready to post; with none ticked, every store's cars count.${hint ? ' ' + hint : ''}</p>
         ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${s.myStores.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st, stores))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}
         ${nav()}`;
     }
@@ -285,9 +286,11 @@ export function wizardHtml() {
         ${nav(true, m.next)}`;
     }
     case 'address':
+      // a website that gives no dealership name: the step says so, and Next waits for one (every description names it)
       return `${progress}<h3>The store's address</h3>
-        <p class="hint">Read from the website${wiz.site && wiz.site.address && wiz.site.address.source ? ` (${esc(wiz.site.address.source)})` : ''}. Marketplace asks for a location; the ZIP is what gets typed.</p>
+        <p class="hint" id="wizAddressHint">${esc(addressHint(wiz.site && wiz.site.address))}</p>
         <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" /></label>
+        ${dealerNameMissing(s.dealer) ? `<div class="banner bad" id="wizNoDealer" role="alert">${esc(NO_DEALER_NAME)}</div>` : ''}
         <label class="block">City <input type="text" id="wizCity" value="${esc(s.dealer.city)}" /></label>
         <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="e.g. OH" /></label>
         <label class="block">ZIP <input type="text" id="wizZip" value="${esc(s.dealer.zip)}" placeholder="e.g. 43215" inputmode="numeric" /></label>
@@ -500,6 +503,12 @@ async function wizardClick(id, ctx) {
   switch (id) {
     case 'wizNext': {
       readInputs();
+      if (wiz.step === 'address' && dealerNameMissing(wiz.settings && wiz.settings.dealer)) {
+        ctx.render(); // the step's banner says why; the typed address stays
+        const box = document.getElementById('wizDealer');
+        if (box) box.focus();
+        return true;
+      }
       wiz.error = ''; // moving on: the last step's error no longer applies
       const list = steps();
       wiz.step = list[Math.min(stepIndex() + 1, list.length - 1)];

@@ -334,7 +334,10 @@ function ownership(r, userId) {
 
 // A server row as a registry entry. Only the keys markPosted() would set
 // are written; postedWith (a fixed marker that the side panel recorded the
-// post; never synced) is kept from the local entry when there is one.
+// post; never synced) is kept from the local entry when there is one. The
+// price basis is not on the server: the next rescan reads it from the
+// entry's price (rescan.js postedBasis), and the same post merged below
+// keeps the one recorded here.
 function entryFromRow(r, prev = {}, userId = '') {
   return {
     name: text(r.name, 80) || text(prev.name, 80),

@@ -239,6 +239,21 @@ test('mergeRegistry: a change stamped more than FUTURE_SKEW_MS ahead of the serv
   assert.deepEqual([fine[VIN_A].price, fine[VIN_A].updatedAt], [19000, near]);
 });
 
+// The price basis a listing was posted with (rescan.js markPosted) is kept
+// on this machine only: a basis switch in Settings is not a price change.
+test('mergeRegistry: the price basis stays on the same post, is not carried to another post of the car, and never goes up', () => {
+  const local = markPosted({}, { vin: VIN_A, name: 'A', price: 19000, priceBeforeFees: 18500 }, 'beforeFees', T(0));
+  assert.equal(local[VIN_A].basis, 'beforeFees');
+  const same = mergeRegistry(local, [row(VIN_A, { price: 18000, updated_at: T(12) })]);
+  assert.equal(same[VIN_A].price, 18000);
+  assert.equal(same[VIN_A].basis, 'beforeFees', 'the same post: its basis stays');
+  const other = mergeRegistry(local, [row(VIN_A, { posted_at: T(6), price: 19000 })]);
+  assert.equal(other[VIN_A].postedAt, T(6));
+  assert.equal(other[VIN_A].basis, undefined, 'another post: the next rescan reads its basis from its price (rescan.js postedBasis)');
+  assert.equal('basis' in syncPayload({ posted: local }).posted[VIN_A], false);
+  assert.equal('basis' in toServerRows({ posted: local, dealershipId: D, userId: U1 }).listings[0], false);
+});
+
 test('mergeRegistry: a missing link, name or salesperson is filled from the server; the newer post of a car re-posted elsewhere replaces the old one', () => {
   const local = { [VIN_A]: { name: '', price: 1, postedAt: T(0), postedWith: '0.4.0' } };
   const filled = mergeRegistry(local, [row(VIN_A, { listing_url: 'https://www.facebook.com/marketplace/item/9/', user_id: U1 })]);

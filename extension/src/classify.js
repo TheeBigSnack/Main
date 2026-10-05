@@ -5,9 +5,13 @@
 //     1. the inventory type from the dealer's system ("Used", "Certified Used", "New")
 //     2. the condition word in the vehicle page address ("used-2019-...", "new-2027-...")
 //     3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
-//   Demo and loaner flags always win: those units are sold as new.
-//   A Carfax report link counts as a supporting sign of pre-owned, but a missing
-//   one never blocks a car (7 of 124 used cars on the test site have none).
+//   Demo and loaner flags always win: those units are sold as new. So does a
+//   demo or loaner word after the model year in the car's own title, trim or
+//   page address (unitWordAfterYear).
+//   A Carfax report link counts as a supporting sign of pre-owned: a car two
+//   signs call pre-owned needs none (7 of 124 used cars on the test site have
+//   none), but a car with only one pre-owned sign needs the link, or it goes
+//   to "needs a look".
 //   Mileage is never used to call a car used: the test site has "New" units
 //   with 3,000-29,000 miles (demos/loaners that aren't flagged as such).
 //   When the signs disagree, or look off, the car goes to "needs a look".
@@ -60,6 +64,72 @@ export function titleConditionWords(title) {
   return m && m[1] ? m[1] : null;
 }
 
+// Demo and loaner words after the model year. The condition words above are
+// read only before the year (model names such as "New Beetle" come after
+// it), but a website may name a demo or a loaner after the model: "2024 Jeep
+// Grand Cherokee Limited Demo", ".../2024-jeep-grand-cherokee-demo-<vin>/".
+// The car's words are read: its title from the model year on, its trim, and
+// its page address from the model year on. "Courtesy" counts only as
+// "courtesy car", "courtesy vehicle" or "courtesy loaner", and only in the
+// title's part with the model year: on its own it is a common word in
+// dealership names, and a page title's later parts (after " | " or " - ")
+// often hold the dealership's name ("... Limited | Courtesy Motors"). Those
+// later parts are still read for demo, demonstrator and loaner, which no
+// dealership name uses ("... Limited - Demo", "... | Service Loaner").
+const UNIT_WORD = /\b(demo(?:nstrator)?|(?:service )?loaner|courtesy (?:car|vehicle|loaner))s?\b/i;
+const UNIT_WORD_LATER = /\b(demo(?:nstrator)?|(?:service )?loaner)s?\b/i;
+const YEAR_WORD = /^(?:19|20)\d{2}$/;
+const TITLE_PARTS = /\s+[|–—-]\s+/;
+const wordsOf = (text) => String(text || '').split(/[^a-z0-9]+/i).filter(Boolean);
+
+// { car, later }: the words after the model year in the title's part that
+// has it (or the first part, with no year), and the parts that follow it.
+function titleCarWords(title) {
+  if (typeof title !== 'string' || !title.trim()) return { car: '', later: '' };
+  const parts = title.split(TITLE_PARTS);
+  const at = Math.max(0, parts.findIndex((p) => wordsOf(p).some((w) => YEAR_WORD.test(w))));
+  const m = /\b(?:19|20)\d{2}\b/.exec(parts[at]);
+  return { car: m ? parts[at].slice(m.index + m[0].length) : parts[at], later: parts.slice(at + 1).join(' | ') };
+}
+
+function addressCarWords(url) {
+  if (typeof url !== 'string' || !url.trim()) return '';
+  let parsed;
+  try {
+    parsed = new URL(url.trim(), 'https://address.invalid/');
+  } catch {
+    return '';
+  }
+  const route = /^#!?\//.test(parsed.hash) ? parsed.hash.replace(/^#!?/, '') : '';
+  const segments = (parsed.pathname + route).split('/').filter(Boolean).map((s) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  });
+  const at = segments.findIndex((s) => wordsOf(s).some((w) => YEAR_WORD.test(w)));
+  if (at === -1) return wordsOf(segments[segments.length - 1]).join(' ');
+  const first = wordsOf(segments[at]);
+  return [...first.slice(first.findIndex((w) => YEAR_WORD.test(w)) + 1), ...segments.slice(at + 1).flatMap(wordsOf)].join(' ');
+}
+
+// { where, word } for the first demo or loaner word after the model year, or null.
+export function unitWordAfterYear(v = {}) {
+  const title = titleCarWords(v.siteTitle);
+  const sources = [
+    ['title', title.car, UNIT_WORD],
+    ['title', title.later, UNIT_WORD_LATER],
+    ['trim', typeof v.trim === 'string' ? v.trim : '', UNIT_WORD],
+    ['web address', addressCarWords(v.url), UNIT_WORD],
+  ];
+  for (const [where, text, words] of sources) {
+    const m = words.exec(text);
+    if (m) return { where, word: m[1] };
+  }
+  return null;
+}
+
 function describe(checks) {
   return checks.map((c) => `${c.label} says ${c.says}`).join(', ');
 }
@@ -77,10 +147,13 @@ export function checkPreOwned(v) {
   const isNew = saying('new');
   const notes = [];
 
-  if (v.isDemo || v.isLoaner || saying('demo').length) {
-    const what = v.isLoaner ? 'loaner' : 'demo';
+  const unit = unitWordAfterYear(v);
+  if (v.isDemo || v.isLoaner || saying('demo').length || unit) {
+    const what = v.isLoaner || (!v.isDemo && unit && !/demo/i.test(unit.word)) ? 'loaner' : 'demo';
+    if (unit) notes.push(`The website's ${unit.where} says "${unit.word}".`);
     if (preOwned.length && !isNew.length) {
-      return { verdict: 'review', reason: `Listed as pre-owned but also flagged as a ${what}. Demos and loaners are usually sold as new, so check before posting.`, checks, notes };
+      const flagged = v.isDemo || v.isLoaner || saying('demo').length ? `also flagged as a ${what}` : `its ${unit.where} says "${unit.word}"`;
+      return { verdict: 'review', reason: `Listed as pre-owned but ${flagged}. Demos and loaners are usually sold as new, so check before posting.`, checks, notes };
     }
     return { verdict: 'new', reason: `${what === 'demo' ? 'Demo' : 'Loaner'} unit, sold as new, so it can't go on Marketplace.`, checks, notes };
   }

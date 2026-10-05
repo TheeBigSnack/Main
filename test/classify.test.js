@@ -145,6 +145,49 @@ test('listed as used but flagged demo: needs a look; flagged demo and new: skipp
   assert.equal(assess('usedNormal', { extra_fields: { title: 'Demo 2019 Ram 1500 Classic Express' } }).decision, DECISION.REVIEW);
 });
 
+test('a demo or loaner named after the model year is never Ready: in the title, the trim or the page address', () => {
+  const vin = '1C4RJFBG0RC000001';
+  const used = {
+    vin, year: 2024, make: 'Jeep', model: 'Grand Cherokee', trim: 'Limited', inventoryType: 'Used', readableType: null, isDemo: false, isLoaner: false,
+    siteTitle: 'Used 2024 Jeep Grand Cherokee Limited', url: `https://www.example-dealer.test/used/2024-jeep-grand-cherokee-limited-${vin.toLowerCase()}/`, urlConditionWord: 'used',
+    carfaxUrl: 'https://www.carfax.com/x', mileage: 3120, price: 40000, photoCount: 10, availability: 'In-Stock',
+  };
+  const ready = assessVehicle(used, {});
+  assert.equal(ready.decision, DECISION.READY, 'the plain used car is ready');
+  const held = {
+    'Demo after the year in the title': { siteTitle: '2024 Jeep Grand Cherokee Limited Demo' },
+    'Service Loaner after the year in the title': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Service Loaner' },
+    'Demonstrator before the page title\'s dealership part': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Demonstrator | Example Motors' },
+    'Courtesy vehicle in the title': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Courtesy Vehicle' },
+    'Demo after a " - " in the title': { siteTitle: '2024 Jeep Grand Cherokee Limited - Demo' },
+    'Service Loaner after a " - " in the title': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited - Service Loaner' },
+    'Demo Unit after a " | " in the title': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited | Demo Unit' },
+    'Loaner between the car and the dealership': { siteTitle: 'Used 2024 Jeep Grand Cherokee Limited | Loaner | Example Motors' },
+    'Demo after a separator in a title with no model year': { siteTitle: 'Jeep Grand Cherokee Limited - Demo' },
+    'Loaner in the trim': { trim: 'Limited Loaner' },
+    'demo in the page address after the year': { url: `https://www.example-dealer.test/used/2024-jeep-grand-cherokee-limited-demo-${vin.toLowerCase()}/` },
+    'loaner in a later part of the page address': { url: `https://www.example-dealer.test/used/2024-jeep-grand-cherokee/loaner/${vin.toLowerCase()}` },
+    'demo in an address with no model year': { url: `https://www.example-dealer.test/vehicle/jeep-grand-cherokee-limited-demo-${vin.toLowerCase()}` },
+  };
+  for (const [what, patch] of Object.entries(held)) {
+    const a = assessVehicle({ ...used, ...patch }, {});
+    assert.equal(a.decision, DECISION.REVIEW, what);
+    assert.match(a.reason, /Demos and loaners are usually sold as new/, what);
+    assert.ok(a.notes.some((n) => /^The website's (title|trim|web address) says "/.test(n)), `${what}: the website's words are shown`);
+  }
+  assert.match(assessVehicle({ ...used, siteTitle: '2024 Jeep Grand Cherokee Limited Demo' }, {}).reason, /its title says "Demo"/);
+  // with nothing saying used, the word alone makes it a demo: skipped, as a flagged demo is
+  const bare = assessVehicle({ ...used, inventoryType: null, urlConditionWord: null, siteTitle: '2024 Jeep Grand Cherokee Limited Loaner', url: null }, {});
+  assert.equal(bare.decision, DECISION.SKIP);
+  assert.match(bare.reason, /^Loaner unit, sold as new/);
+  // a dealership's name is never read as a demo or loaner word
+  for (const siteTitle of ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Chrysler Dodge Jeep Ram', 'Used 2024 Jeep Grand Cherokee Limited - Courtesy Motors', 'Used 2024 Jeep Grand Cherokee Limited – Courtesy Cars of Springfield']) {
+    assert.equal(assessVehicle({ ...used, siteTitle }, {}).decision, DECISION.READY, siteTitle);
+  }
+  // nor a word that only contains one
+  assert.equal(assessVehicle({ ...used, siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Demolition Package' }, {}).decision, DECISION.READY);
+});
+
 test('new car with a Carfax link is still skipped, with a note to fix its type', () => {
   const a = assess('newNormal', { history_report: { carfax_url: 'https://www.carfax.com/vehiclehistory/ar20/x' } });
   assert.equal(a.decision, DECISION.SKIP);
@@ -289,4 +332,27 @@ test('regression: every Dealer Inspire record and every sandbox car is decided e
   // the baseline covers every decision the gate can make
   const decisions = new Set(Object.values(before).map((c) => (typeof c === 'string' ? c : c.decision)));
   assert.deepEqual([...decisions].sort(), ['not-ready', 'ready', 'review', 'skip']);
+});
+
+// ---------- what the field notes and the README say about the gate ----------
+
+import { checkPreOwned } from '../extension/src/classify.js';
+
+test('the field notes and the README describe the gate as it decides: its signs in its order, and Carfax backing a lone sign', () => {
+  const fields = readFileSync(new URL('../extension/src/vehicle.js', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const car = { inventoryType: 'Used', urlConditionWord: 'used', siteTitle: 'Used 2021 Example Sedan', readableType: null, carfaxUrl: null, mileage: 34567 };
+  // the signs are numbered in the order the gate reads them
+  const order = checkPreOwned(car).checks.map((c) => c.key);
+  const sign = (field) => Number(new RegExp(`'${field}', //[^\\n]*?sign (\\d)`).exec(fields)[1]);
+  assert.deepEqual({ type: sign('inventoryType'), url: sign('urlConditionWord'), title: sign('siteTitle') }, { type: order.indexOf('type') + 1, url: order.indexOf('url') + 1, title: order.indexOf('title') + 1 });
+  // two signs pass with no Carfax link; one sign needs it
+  assert.equal(checkPreOwned({ ...car, siteTitle: '2021 Example Sedan' }).verdict, 'pre-owned');
+  assert.equal(checkPreOwned({ ...car, siteTitle: '2021 Example Sedan', urlConditionWord: null }).verdict, 'review');
+  assert.equal(checkPreOwned({ ...car, siteTitle: '2021 Example Sedan', urlConditionWord: null, carfaxUrl: 'https://www.carfax.com/x' }).verdict, 'pre-owned');
+  // and the notes say so: not "three signs must agree", not "no report = needs a look" on its own, not "never blocks"
+  assert.doesNotMatch(fields, /three signs must agree/);
+  assert.match(fields, /'carfaxUrl', \/\/ the pre-owned gate: backs up a lone pre-owned sign/);
+  assert.doesNotMatch(readme, /a missing one never blocks a car/);
+  assert.match(readme, /a car with only one pre-owned sign [^.]*needs the report, or it goes to \*\*Needs a look\*\*/);
 });

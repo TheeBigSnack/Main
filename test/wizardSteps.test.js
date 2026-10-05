@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
@@ -156,6 +156,25 @@ test('wizard.js: the step list from wizardSteps, the sign-in functions and messa
   assert.match(fin, /if \(accountsConfigured\(\) && \(await loadSession\(chrome\.storage\.local\)\)\) chrome\.runtime\.sendMessage\(\{ type: 'syncNow', origin: wiz\.origin \}\)\.catch\(\(\) => \{\}\);/);
 });
 
+test('the address step calls read from the website only what the website gave, and asks for the rest', () => {
+  const TAIL = 'Marketplace asks for a location; the ZIP is what gets typed.';
+  const none = `No address was found on the website: type the store's city, state and ZIP. ${TAIL}`;
+  // the scan found no address (src/scan.js leaves source '' and every part blank)
+  assert.equal(addressHint({ street: '', city: '', state: '', zip: '', phone: '', source: '' }), none);
+  assert.equal(addressHint(undefined), none, 'no site read yet');
+  assert.equal(addressHint(null), none);
+  assert.doesNotMatch(addressHint({ source: '' }), /Read from the website/);
+  // all of it read
+  assert.equal(addressHint({ city: 'Springfield', state: 'OH', zip: '43215', source: 'structured data' }), `Read from the website (structured data). ${TAIL}`);
+  // structured data with a ZIP and no city: the missing part is named, not filled in
+  assert.equal(addressHint({ city: '', state: '', zip: '43215', source: 'structured data' }), `Read from the website (structured data). It gives no city or state: type them. ${TAIL}`);
+  assert.equal(addressHint({ city: 'Springfield', state: 'OH', zip: '', source: 'structured data' }), `Read from the website (structured data). It gives no ZIP: type it. ${TAIL}`);
+  // wizard.js draws this hint, not a fixed "Read from the website"
+  const wizard = read('../extension/wizard.js');
+  assert.match(wizard, /addressHint\(wiz\.site && wiz\.site\.address\)/);
+  assert.doesNotMatch(wizard, />Read from the website/);
+});
+
 test('HANDOFF.md 5.7 lists the wizard steps with the Account step in its place', () => {
   const heading = read('../HANDOFF.md').match(/^### 5\.7 .*steps `([^`]+)`/m);
   assert.ok(heading, 'HANDOFF.md 5.7 lists the steps');
@@ -212,4 +231,72 @@ test('the Terms step\'s note while the documents are drafts says only the accept
   assert.match(note, /accept them in Settings \(Terms and privacy\); your acceptance is recorded then\./);
   assert.match(note, /The usage numbers above are recorded from your first post\./);
   assert.match(termsSummary(false), /records the usage numbers for the pilot/, '"above" points at the summary\'s usage numbers');
+});
+
+// ---------- the address step needs the dealership's name ----------
+import { withDefaults, NO_DEALER_NAME, dealerNameMissing } from '../extension/src/settings.js';
+
+// A top-level function of wizard.js, as written, compiled with the given names in scope.
+function wizardFn(name, scope) {
+  const src = read('../extension/wizard.js');
+  const start = src.search(new RegExp(`(async )?function ${name}\\(`));
+  assert.ok(start >= 0, `${name} is defined`);
+  const text = src.slice(start, src.indexOf('\n}\n', start) + 2);
+  return new Function(...Object.keys(scope), `${text}\nreturn ${name};`)(...Object.values(scope));
+}
+
+test('the address step says when no dealership name is set, and Next goes on only once one is typed', async () => {
+  assert.equal(dealerNameMissing({ name: '' }), true);
+  assert.equal(dealerNameMissing({ name: '   ' }), true);
+  assert.equal(dealerNameMissing({}), true);
+  assert.equal(dealerNameMissing(undefined), true);
+  assert.equal(dealerNameMissing({ name: 'Example Motors' }), false);
+  assert.equal(NO_DEALER_NAME, 'No dealership name is set: type it in Dealership name. Every description names the dealership, so nothing can be posted until it is.');
+
+  // a website that gives no name (src/scan.js reads none), and one that does
+  const unnamed = { name: '', address: { city: 'Springfield', state: 'OH', zip: '43215', source: 'structured data' } };
+  const named = { ...unnamed, name: 'Example Motors' };
+  const list = TODAY;
+  const draw = (site) => {
+    const wiz = { step: 'address', site, settings: null, scan: { siteName: site.name }, error: '' };
+    const esc = (x) => String(x ?? '');
+    const html = wizardFn('wizardHtml', { wiz, withDefaults, esc, steps: () => list, stepIndex: () => list.indexOf(wiz.step), addressHint, nav: () => '<nav>', dealerNameMissing, NO_DEALER_NAME })();
+    return html;
+  };
+  assert.ok(draw(unnamed).includes(`<div class="banner bad" id="wizNoDealer" role="alert">${NO_DEALER_NAME}</div>`), 'the step says so');
+  assert.ok(!draw(named).includes('wizNoDealer'), 'nothing to say when the website gives the name');
+
+  // Next: with the name still blank the step stays and the name box gets the caret; once typed, set-up goes on
+  const next = async (typed) => {
+    const wiz = { active: true, step: 'address', site: unnamed, settings: null };
+    const focused = [];
+    let rendered = 0;
+    let persisted = 0;
+    const click = wizardFn('wizardClick', { // handleWizardClick's switch (the wrapper only turns a storage error into the step's message)
+      wiz,
+      readInputs: () => { wiz.settings = withDefaults({ dealer: { name: typed, city: 'Springfield', state: 'OH', zip: '43215' } }, wiz.site); },
+      steps: () => list,
+      stepIndex: () => list.indexOf(wiz.step),
+      loadAccount: async () => {},
+      persist: async () => { persisted += 1; },
+      runScan: async () => { throw new Error('no scan from the address step'); },
+      document: { getElementById: (id) => ({ focus: () => focused.push(id) }) },
+      dealerNameMissing,
+    });
+    const handled = await click('wizNext', { render: () => { rendered += 1; }, setStatus: () => {}, onClose: () => {} });
+    return { handled, step: wiz.step, focused, rendered, persisted, dealer: wiz.settings.dealer };
+  };
+  for (const typed of ['', '   ']) {
+    const r = await next(typed);
+    assert.equal(r.handled, true);
+    assert.equal(r.step, 'address', `"${typed}": set-up waits for a name`);
+    assert.deepEqual(r.focused, ['wizDealer']);
+    assert.equal(r.rendered, 1, 'drawn again, with the banner');
+    assert.equal(r.dealer.city, 'Springfield', 'what was typed is kept');
+  }
+  const r = await next('Example Motors');
+  assert.equal(r.step, 'price', 'with a name set-up goes on');
+  assert.equal(r.dealer.name, 'Example Motors');
+  assert.deepEqual(r.focused, []);
+  assert.equal(r.persisted, 1);
 });

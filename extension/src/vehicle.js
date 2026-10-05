@@ -15,15 +15,15 @@ export const VEHICLE_FIELDS = Object.freeze([
   'trim', // the listing form, the description writer (rewriteTemplate.js)
   'name', // "year make model trim": every list, the posted registry (rescan.js markPosted), the description
 
-  // --- the pre-owned gate (classify.js checkPreOwned): three signs must agree ---
+  // --- the pre-owned gate (classify.js checkPreOwned): three signs are compared; two that say pre-owned, or one backed by a Carfax link, pass ---
   'inventoryType', // "Used" / "Certified Used" / "New" (the schema.org reader adds "Damaged" / "Refurbished", which the gate sends to Needs a look): sign 1; the rescan flags a retype
-  'siteTitle', // the website's own title for the car ("Pre-Owned 2019 ..."): sign 2 (titleConditionWords); branded-title words (listingData.js)
-  'readableType', // "Pre-Owned" / "Certified Pre-Owned" / "New": backs up sign 2 when the title has no condition word
+  'siteTitle', // the website's own title for the car ("Pre-Owned 2019 ..."): sign 3 (titleConditionWords); branded-title words (listingData.js)
+  'readableType', // "Pre-Owned" / "Certified Pre-Owned" / "New": backs up sign 3 when the title has no condition word
   'url', // the car's page on the website: the popup, the panel and upkeep link to it; the rescan keeps it
-  'urlConditionWord', // the condition word in that address ("used", "certified used", "new"): sign 3
+  'urlConditionWord', // the condition word in that address ("used", "certified used", "new"): sign 2
   'isDemo', // true blocks posting (classify.js)
   'isLoaner', // true blocks posting (classify.js)
-  'carfaxUrl', // the ready check (no report = needs a look) and the Carfax line in the description
+  'carfaxUrl', // the pre-owned gate: backs up a lone pre-owned sign (one sign and no report = needs a look; not needed when two signs agree); a note on a car the website calls new; the Carfax line in the description
   'carfaxOneOwner', // "one owner" is written only when this is true (rewriteTemplate.js guardrails)
   'mileage', // number or null: zero/odd miles = needs a look (classify.js); the listing form; the description
 

@@ -70,6 +70,8 @@ const LABELS = [
   'Rescan the website',
   'Post the next',
   'Allow reading',
+  'Fix before the form can be filled',
+  'Worth fixing (the form can still be filled)',
 ];
 
 test('the four launch-kit files exist and are not stubs', () => {
@@ -764,8 +766,40 @@ test('the e2e flows agree: test/e2e files, package.json scripts, the CI matrix, 
   assert.equal(readme[1], WORDS[files.length] || String(files.length), 'README.md\'s count of e2e flows');
 });
 
+// The settings never guess a town from a store name (src/settings.js
+// withDefaults): the dealership's city, state and ZIP come from the website's
+// own address or from a person. The texts a salesperson or dealer reads say
+// so, instead of promising an address that is always already filled in.
+test('help, README and the onboarding emails say the address comes from the website only when it shows one', () => {
+  assert.equal(withDefaults({ myStores: ['Example Auto Mall'] }, { name: 'Example Auto Mall' }).dealer.city, '', 'the city is never guessed from a store name');
+  const step = doc('help.md').split('\n').find((l) => l.includes("**The store's address**"));
+  assert.ok(step, "docs/help.md describes the wizard's address step");
+  assert.match(step, /when it shows one/, 'docs/help.md does not say the address is read only when the website shows one');
+  assert.match(step, /never guesses a town/, 'docs/help.md does not say a missing town is asked for, not guessed');
+  for (const rel of ['../README.md', '../docs/help.md', '../marketing/onboarding-emails.md', '../marketing/onboarding-store.md']) {
+    assert.doesNotMatch(read(rel), /already filled from the website/i, `${rel} promises the address is always filled from the website`);
+  }
+});
+
 // node --test runs every test( and it( call site once; none of the files
 // makes tests in a loop, so the count of call sites is the count npm test prints.
+test('the docs say the template writes the description from the car\'s listed facts and does not copy the website\'s write-up', () => {
+  // the template once copied the website's opening sentences, and the help kept saying so after the code stopped
+  const COPIES = [/write-up line/i, /opening sentences/i, /write-up is kept/i, /\bcop(?:y|ies|ied)\b[^.]{0,40}\bsentences\b/i, /real write-up on the website/i];
+  const SAYS_NOT = /\b(?:does not copy|not copied from) (?:the website's |its )write-up\b/;
+  const telling = ['../docs/help.md', '../README.md', '../store/listing.md', '../site-src/pages/home.html', '../site-src/pages/how-it-works.html', '../marketing/positioning.md', '../marketing/demo-script.md'];
+  for (const rel of [...telling, '../docs/data-inventory.md', '../site/index.html', '../site/how-it-works/index.html']) {
+    const text = read(rel);
+    for (const re of COPIES) assert.doesNotMatch(text, re, `${rel} matches ${re}`);
+  }
+  for (const rel of telling) assert.match(read(rel), SAYS_NOT, `${rel} does not say the description is not copied from the website's write-up`);
+  // and the help says what the rewrite service is sent instead, and that its draft is checked
+  const help = doc('help.md');
+  assert.ok(help.includes("The template builds the description from the car's listed facts"), 'docs/help.md does not say what the template builds the description from');
+  assert.ok(help.includes('the write-up is sent to it as the website wrote it, a whole line at a time, from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
+  assert.ok(help.includes("The service's draft goes through the same checks"), "docs/help.md does not say the service's draft is checked");
+});
+
 test('README\'s unit-test count is the number of tests npm test runs', () => {
   const dir = new URL('./', import.meta.url);
   const files = readdirSync(dir).filter((f) => f.endsWith('.test.js'));

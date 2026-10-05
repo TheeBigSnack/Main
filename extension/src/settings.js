@@ -1,7 +1,7 @@
 // Settings shared by the popup and the side panel, with defaults so a
 // settings object saved by v0.1 ({ myStores, basis }) keeps working.
 
-import { shortLocation, storeNames, matchStore } from './normalize.js';
+import { storeNames, matchStore } from './normalize.js';
 import { DEFAULT_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 import { sortOrder, newDaysOf } from './readyList.js';
@@ -10,6 +10,13 @@ export const SETTINGS_VERSION = 2;
 export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 // A closing line is checked by words (src/rewriteTemplate.js); this only stops a pasted page being kept.
 export const CLOSING_LINE_MAX_CHARS = 300;
+
+// Every description names the dealership. The name comes from the website
+// (src/scan.js) or a person; a website that gives none leaves it blank until
+// someone types it. The wizard's address step does not go on without it,
+// Settings says so on Save, and the side panel opens no form until it is set.
+export const NO_DEALER_NAME = 'No dealership name is set: type it in Dealership name. Every description names the dealership, so nothing can be posted until it is.';
+export const dealerNameMissing = (dealer) => !String((dealer && dealer.name) || '').trim();
 
 // The usual gap between the main price and the lower second price a website
 // shows (on some sites that is the doc fee), taken from what most cars agree
@@ -46,10 +53,13 @@ export function withDefaults(settings, site = {}) {
     basis: s.basis === 'beforeFees' ? 'beforeFees' : 'website',
     // closingLine: the salesperson's own line after the sign-off (src/rewriteTemplate.js checkClosingLine); '' for none
     salesperson: { name: String(sp.name || ''), title: String(sp.title || DEFAULT_SALESPERSON_TITLE), closingLine: String(sp.closingLine || '').replace(/\s+/g, ' ').trim().slice(0, CLOSING_LINE_MAX_CHARS) },
-    // blanks are filled from the website's own address (site.address, read by the scan)
+    // blanks are filled from the website's own address (site.address, read by the scan). The city
+    // is never guessed from a store name: with no address on the website it stays blank, and the
+    // wizard and Settings ask a person to type it (a store name is not a town to put in a listing
+    // or in Marketplace's location box)
     dealer: {
       name: String(d.name || site.name || ''),
-      city: String(d.city || (site.address && site.address.city) || (myStores[0] ? shortLocation(myStores[0]) : '')),
+      city: String(d.city || (site.address && site.address.city) || ''),
       state: String(d.state || (site.address && site.address.state) || ''),
       zip: String(d.zip || (site.address && site.address.zip) || ''),
     },

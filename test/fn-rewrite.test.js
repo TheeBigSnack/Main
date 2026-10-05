@@ -9,7 +9,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadFunction, invoke, fake, net, logs, hermetic, functionsFetch, uuid, keysOf, NETWORK_ERROR, SUPABASE_URL, ANON_KEY, SERVICE_KEY, EXTENSION_ORIGIN } from './functions/harness.mjs';
 import { LAPSED_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
-import { generateDescription, rewriteWithBackend, guessColorsWithBackend, rewriteFacts } from '../extension/src/rewriter.js';
+import { generateDescription, rewriteWithBackend, guessColorsWithBackend, rewriteFacts, REWRITE_TIMEOUT_MS } from '../extension/src/rewriter.js';
+import { readFileSync } from 'node:fs';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -249,7 +250,7 @@ test('rewrite: a draft the guardrails refuse is written once more with the probl
   const r = await rewrite(handler, TOKEN.u1);
   assert.equal(r.status, 200);
   assert.deepEqual([r.body.ok, r.body.text, r.body.error], [false, BAD, 'the draft failed the checks twice']);
-  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'no-dealer', 'no-role', 'too-short', 'unknown-number']);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'mileage-mismatch', 'no-dealer', 'no-role', 'too-short', 'unknown-number']);
   assert.equal(r.body.costUsd, 0.037, '$0.02 and $0.017');
   const [first, second] = requests();
   assert.doesNotMatch(first.json.messages[0].content, /previous draft failed/);
@@ -272,12 +273,91 @@ test('rewrite: a draft that names the dealership but not the salesperson\'s role
   assert.equal(r.body.ok, false);
   assert.deepEqual(r.body.guardrails.problems.map((p) => p.code), ['no-role']);
   const fixes = requests()[1].json.messages[0].content.split('Your previous draft failed these checks')[1] || '';
-  assert.match(fixes, /Doesn't give your role \(sales consultant\)/, 'the second prompt asks for the role');
+  assert.match(fixes, /Doesn't give your role \("sales consultant"\)/, 'the second prompt asks for the role');
   // the salesperson's own title is the role checked
   world();
   anthropic(says(GOOD));
   const manager = await rewrite(handler, TOKEN.u1, { ...FACTS, salesperson: { name: 'Sam', title: 'sales manager' } });
   assert.deepEqual(manager.body.guardrails.problems.map((p) => p.code), ['no-role']);
+});
+
+test('rewrite: a draft repeating a stale price, price drop or mileage from the write-up is refused, though the write-up holds those numbers', async () => {
+  world();
+  const narrative = ['Was $24,995, now just $21,995 with 29,000 miles.'];
+  const stale = GOOD.replace('It shows 34,567 miles', 'It was $24,995, now just $21,995 with 29,000 miles');
+  anthropic(says(stale));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1, { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative }), origin: ORIGIN });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  const codes = r.body.guardrails.problems.map((p) => p.code);
+  assert.ok(!codes.includes('unknown-number'), 'every number is in the write-up');
+  assert.deepEqual([...new Set(codes)].sort(), ['mileage-mismatch', 'price-change', 'price-mismatch']);
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says 29,000 miles, but the website shows 34,567 miles'));
+});
+
+test('rewrite: a stale mileage or price said without "miles" right after it or without "$" is refused too', async () => {
+  world();
+  const narrative = ['Was 24,995, now just 21,995 with 29,000 original miles. Mileage: 29,000.'];
+  const stale = GOOD.replace('It shows 34,567 miles', 'It was 24,995, now just 21,995, with 29,000 original miles (odometer reads 29,000)');
+  anthropic(says(stale));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1, { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative }), origin: ORIGIN });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  const codes = r.body.guardrails.problems.map((p) => p.code);
+  assert.ok(!codes.includes('unknown-number'), 'every number is in the write-up');
+  assert.deepEqual([...new Set(codes)].sort(), ['mileage-mismatch', 'price-change', 'price-mismatch']);
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says 29,000 miles, but the website shows 34,567 miles'));
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says "was 24,995"; a description never claims a price change'));
+});
+
+test('rewrite: a draft that leaves out the salesperson\'s role is refused, whatever else it gets right', async () => {
+  world();
+  anthropic(says(GOOD.replace("I'm Sam, sales consultant at Example Motors.", "I'm Sam at Example Motors.")));
+  const handler = await load();
+  const r = await rewrite(handler, TOKEN.u1);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems, [{ code: 'no-role', text: 'Doesn\'t give your role ("sales consultant"); the sign-off says it' }]);
+  // the title in the facts is the role looked for
+  world();
+  anthropic(says(GOOD));
+  const handler2 = await load();
+  const other = await rewrite(handler2, TOKEN.u1, { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: { name: 'Sam', title: 'product specialist' }, narrative: [] }), origin: ORIGIN });
+  assert.deepEqual(other.body.guardrails.problems.map((p) => p.code), ['no-role']);
+});
+
+test('rewrite: a draft that leaves out the dealership\'s price note is refused; with the note it passes', async () => {
+  const note = 'Price is before the $490 doc fee; tax and tags extra.';
+  const facts = { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, priceNote: note, narrative: [] }), origin: ORIGIN };
+  world();
+  anthropic(says(GOOD));
+  const r = await rewrite(await load(), TOKEN.u1, facts);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems, [{ code: 'no-price-note', text: `Doesn't include your dealership's price note: "${note}"` }]);
+  world();
+  anthropic(says(GOOD.replace("I'm Sam,", `${note}\nI'm Sam,`)));
+  const withNote = await rewrite(await load(), TOKEN.u1, facts);
+  assert.deepEqual([withNote.body.ok, withNote.body.guardrails.problems], [true, []]);
+});
+
+test('rewrite: a draft that invents a warranty, a history or a certification is refused; the facts\' own claims pass', async () => {
+  const invented = GOOD.replace('It is a comfortable, easy car', 'It is certified, accident free, has a warranty and new tires, and is a comfortable, easy car');
+  world();
+  anthropic(says(invented));
+  const r = await rewrite(await load(), TOKEN.u1);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.code).sort(), ['banned-phrase', 'unsupported-claim', 'unsupported-claim', 'unsupported-claim']);
+  assert.ok(r.body.guardrails.problems.some((p) => p.text === 'Says "warranty", but the website says nothing about a warranty or guarantee for this car'));
+  // a write-up that says certified, new tires and a warranty: the draft may say them too
+  const certified = GOOD.replace('It is a comfortable, easy car', 'It is certified, has the rest of its warranty and new tires, and is a comfortable, easy car');
+  const facts = { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative: ['Certified pre-owned with new tires and the rest of the factory warranty.'] }), origin: ORIGIN };
+  world();
+  anthropic(says(certified));
+  const ok = await rewrite(await load(), TOKEN.u1, facts);
+  assert.deepEqual([ok.body.ok, ok.body.guardrails.problems], [true, []]);
 });
 
 test('rewrite: a model that declines is not asked again; the answer says so', async () => {
@@ -395,4 +475,69 @@ test('rewrite: scripts/check-deploy.mjs reads its rewrite lines as ok against th
   const mine = findings.filter((f) => f.check.startsWith('rewrite:'));
   assert.deepEqual(mine.map((f) => f.check), ['rewrite: answers the extension\'s CORS preflight', 'rewrite: refuses a call with no user token']);
   for (const f of mine) assert.equal(f.ok, true, `${f.check}: ${f.detail}`);
+});
+
+test('rewrite: a draft that adds a part to the one the facts name is refused; each added part is named', async () => {
+  const facts = { ...rewriteFacts({ vehicle: VEHICLE, dealer: DEALER, salesperson: SALESPERSON, narrative: ['Local trade with new tires.'] }), origin: ORIGIN };
+  world();
+  anthropic(says(GOOD.replace('It is a comfortable, easy car', 'It has new tires and new brakes, plus a new battery, and is a comfortable, easy car')));
+  const r = await rewrite(await load(), TOKEN.u1, facts);
+  assert.equal(r.body.ok, false);
+  assert.deepEqual(r.body.guardrails.problems.map((p) => p.text), [
+    'Says "new brakes", but the website says nothing about new or replaced parts for this car',
+    'Says "new battery", but the website says nothing about new or replaced parts for this car',
+  ]);
+  world();
+  anthropic(says(GOOD.replace('It is a comfortable, easy car', 'It has new tires and is a comfortable, easy car')));
+  const ok = await rewrite(await load(), TOKEN.u1, facts);
+  assert.deepEqual([ok.body.ok, ok.body.guardrails.problems], [true, []]);
+});
+
+// An Anthropic answer that comes back after `ms`.
+const slowly = (ms, answer) => () => new Promise((resolve) => setTimeout(() => resolve(answer), ms));
+
+test('rewrite: one deadline under the extension\'s wait: a call still running then is stopped (504, nothing logged), a second draft starts only with time left, and a caller who leaves stops the call', async () => {
+  // the deadline is under the extension's own wait, so nothing is spent on an answer nobody will see
+  const source = readFileSync(new URL('../supabase/functions/rewrite/index.ts', import.meta.url), 'utf8');
+  const deadline = Number(/deadlineMs: Number\(env\('REWRITE_DEADLINE_MS'\)\) \|\| ([\d_]+)/.exec(source)[1].replace(/_/g, ''));
+  assert.ok(deadline > 0 && deadline < REWRITE_TIMEOUT_MS, `${deadline} ms against the extension's ${REWRITE_TIMEOUT_MS}`);
+
+  // a slow call is stopped at the deadline, not retried, and costs nothing
+  world();
+  net.route(ANTHROPIC, slowly(1500, says(GOOD)));
+  let started = Date.now();
+  const slow = await rewrite(await load({ REWRITE_DEADLINE_MS: '200' }), TOKEN.u1);
+  assert.ok(Date.now() - started < 1200, 'answered at the deadline, not when the call came back');
+  assert.deepEqual([slow.status, slow.body], [504, { ok: false, error: 'Claude took too long to answer, so it was stopped; the template is used instead' }]);
+  assert.deepEqual(net.to(ANTHROPIC).map((c) => c.aborted), [true]);
+  assert.equal(fake.rows('rewrite_usage').length, 0);
+
+  // a draft the checks refuse, with too little time left: no second draft
+  world();
+  net.calls = [];
+  net.route(ANTHROPIC, slowly(700, says(BAD)));
+  const late = await rewrite(await load({ REWRITE_DEADLINE_MS: '1000' }), TOKEN.u1);
+  assert.deepEqual([late.status, late.body.ok, late.body.error], [200, false, 'the draft failed the checks, and there was no time for a second one']);
+  assert.equal(requests().length, 1);
+  assert.equal(fake.rows('rewrite_usage').length, 1, 'the one call made is paid for');
+
+  // the caller goes away: the call is stopped, and nothing is logged
+  world();
+  net.calls = [];
+  net.route(ANTHROPIC, slowly(1500, says(GOOD)));
+  const gone = new AbortController();
+  setTimeout(() => gone.abort(), 150);
+  started = Date.now();
+  await rewrite(await load(), TOKEN.u1, undefined, { signal: gone.signal });
+  assert.ok(Date.now() - started < 1200, 'stopped when the caller left');
+  assert.deepEqual(net.to(ANTHROPIC).map((c) => c.aborted), [true]);
+  assert.equal(fake.rows('rewrite_usage').length, 0);
+
+  // /color keeps the same deadline
+  world();
+  net.calls = [];
+  net.route(ANTHROPIC, slowly(1500, says('{"exterior":"Gray","interior":"Black","confidence":"high"}')));
+  const color = await invoke(await load({ REWRITE_DEADLINE_MS: '200' }), { path: 'rewrite/color', token: TOKEN.u1, body: { photos: ['https://images.example-motors.test/1.jpg'], options: ['Gray', 'Black'], origin: ORIGIN } });
+  assert.equal(color.status, 504);
+  assert.equal(fake.rows('rewrite_usage').length, 0);
 });

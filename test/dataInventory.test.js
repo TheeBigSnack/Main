@@ -312,7 +312,7 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   // the self-hosted backend/ takes the same body, so it must drop origin too
   const server = stripComments(read('backend/server.js'));
   const strip = server.indexOf('delete facts.origin;');
-  assert.ok(strip > 0 && strip < server.indexOf('await rewrite(facts)'), 'backend/server.js no longer removes origin before the facts reach Anthropic: update the inventory and the privacy policy');
+  assert.ok(strip > 0 && strip < server.indexOf('await rewrite(facts, clock)'), 'backend/server.js no longer removes origin before the facts reach Anthropic: update the inventory and the privacy policy');
   const t = tables(section(inventory, '## What leaves the browser'))[0];
   const row = t.rows.find((r) => r[0].startsWith('Description writer'));
   assert.ok(row && row[column(t, 'What is sent')].includes('`origin`'), 'the Description writer row does not name origin');
@@ -328,6 +328,16 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   assert.ok(bullets.length >= 4);
   const listed = bullets.flatMap((l) => [...l.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
   assert.deepEqual(sorted(listed), sorted(sent), 'the fields the extension sends are not the fields docs/data-inventory.md lists');
+});
+
+test('the rewrite services\' READMEs and the facts code say the write-up goes as the website wrote it, and never that no VIN can reach the service', () => {
+  // the facts carry no VIN or price field, but the website's own write-up goes as written and can hold either
+  for (const rel of ['backend/README.md', 'supabase/README.md', 'extension/src/rewriter.js']) {
+    const text = read(rel).replace(/\n\/\/ /g, ' ');
+    assert.doesNotMatch(text, /\bno VIN\b(?! or price field)/i, `${rel} says no VIN reaches the service; a VIN in the website's write-up does`);
+    assert.match(text, /`narrative` is the website description's own sentences as the website wrote them, so a VIN, a price or a phone number the dealership wrote there/, `${rel} does not say the write-up goes as written`);
+  }
+  assert.match(inventory, /`narrative` is the website's own wording, so whatever the dealership wrote in a car's description goes as it wrote it\./);
 });
 
 test('a colour guess sends the photo addresses, the colour words and the origin, nothing else; Anthropic gets the first two', async () => {
@@ -355,6 +365,20 @@ test('a colour guess sends the photo addresses, the colour words and the origin,
   // and the help a salesperson reads
   const help = read('docs/help.md');
   assert.match(help, /for a colour guess, up to four photo addresses and the list of colour words, sent to the rewrite service with your dealership website's address/, 'docs/help.md: what leaves the browser for a draft or a colour guess');
+});
+
+// A guessed colour reaches the published listing's colour field (never its
+// description), so the attorney is asked about it, as the guess works today.
+test('the attorney is asked about the colour guessed from the photos, as the side panel uses it', () => {
+  const ai = questions.slice(questions.indexOf('## 5. AI-written descriptions'), questions.indexOf('## 6.'));
+  const asked = ai.split('\n').find((l) => /^- Colours guessed from photos\./.test(l));
+  assert.ok(asked, 'questions-for-attorney.md section 5 does not ask about the colour guessed from the photos');
+  assert.match(asked, /up to four of the car's photos/);
+  assert.match(asked, /in the form's colour fields only, never in the description/);
+  assert.match(asked, /with the model's confidence/);
+  assert.match(asked, /\?/);
+  const readme = read('README.md');
+  assert.match(readme, /used on the form's color field only, never in the description/, 'README no longer says where the colour guess goes');
 });
 
 test('the sync row names every part of the sync payload', () => {

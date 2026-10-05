@@ -204,7 +204,7 @@ try {
   assert.match(vehicle, /\$19,995/);
   const draft = await panel.inputValue('#description');
   assert.match(draft, /^2019 Honda Civic EX with 41,230 miles\./);
-  assert.match(draft, /This Civic EX has the 1\.5L Turbo 4-Cylinder, a CVT and a sunroof\./, "the car's own write-up is kept");
+  assert.doesNotMatch(draft, /This Civic EX has the 1\.5L Turbo 4-Cylinder/, "the template never copies the car's own write-up");
   assert.doesNotMatch(draft, /one owner/i, 'no Carfax one-owner flag in standard data, so never said');
   assert.match(draft, /Tax, title and registration are extra\./);
   assert.match(draft, new RegExp(`I'm Alex, sales consultant at ${DEALER}\\.`));

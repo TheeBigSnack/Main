@@ -6,7 +6,7 @@ For a used car manager, at their desk, on their own website. One laptop with Chr
 
 - Reload the extension (chrome://extensions → Reload) and scan the store's website once so the first scan in the demo is a rescan and shows a To do list.
 - Delete any saved drafts on Facebook (Marketplace → Your listings → Drafts). A restored draft during the demo is recoverable but distracting.
-- Pick the car you will post: pre-owned, at this store, with photos and a price, and with a real write-up on the website if possible. Have a second one in mind.
+- Pick the car you will post: pre-owned, at this store, with photos and a price, and with a full feature list on the website if possible (the description is written from the car's listed facts, not copied from its write-up). Have a second one in mind.
 - The demo post is never published. You close the Facebook tab without publishing and nothing is recorded. If the manager wants to see a real listing, a salesperson makes it later on their own computer, signed in to their own Facebook account, and clicks Publish themselves; not you, and not on your laptop.
 - Settings: name, role, store ticked, address filled from the website, defaults Clean / Very good, cap 10.
 - On a group website, know the group's other rooftops before you start: their cars show under **Other stores**, not Ready to post.

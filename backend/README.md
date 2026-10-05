@@ -21,14 +21,14 @@ The extension works without it: descriptions then come from the built-in templat
    npm start
    ```
 
-   You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`.
+   You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`: it answers `{"ok":true}`, and, to a call that sends the `REWRITE_KEY` (or when none is set), also the month's spend, the cap and the number of requests.
 4. In the extension: click the Lot Current icon, **Settings**, **Description writer**. Tick "Use the Lot Current rewrite service", enter `http://localhost:8787` as the address and your `REWRITE_KEY` as the key. Save.
 
-From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, banned phrases, the dealership's name and the salesperson's role, length); a draft that fails is regenerated once, then the template is used.
+From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, prices and mileage must be the listing's own, banned phrases, the dealership's name and the salesperson's role, length); a draft that fails is regenerated once, then the template is used.
 
 ## Colors from the photos
 
-`POST /color` with `{ "photos": [up to 4 https addresses], "options": [Facebook's color words] }` asks Claude to look at the photos and pick the exterior and interior color from the list, answering `{ ok, exterior, interior, confidence }`. The extension calls it only for a car whose website record gives no usable color, shows the answer as a guess with its confidence, and never overrides a color the website does state. Each call is about 4 photos of input, roughly $0.006 on Haiku 4.5.
+`POST /color` with `{ "photos": [up to 4 https addresses], "options": [Facebook's color words] }` asks Claude to look at the photos and pick the exterior and interior color from the list, answering `{ ok, exterior, interior, confidence }`. The extension calls it only for a car whose website record gives no usable color, shows the answer as a guess with its confidence, puts it on the form's color fields only (never into the description), and never overrides a color the website does state. Each call is about 4 photos of input, roughly $0.006 on Haiku 4.5.
 
 ## Model
 
@@ -44,6 +44,7 @@ Current model names and prices: https://docs.claude.com/en/docs/about-claude/mod
 - Each description is roughly 1,500 input tokens and 200 output tokens. On Haiku 4.5 that is about $0.0025, so around $2.50 per 1,000 descriptions; a failed check that triggers a second draft doubles it for that car.
 - `MONTHLY_COST_CAP_USD` (default 25) stops the service for the rest of the month once the running total in `usage.json` reaches it. The extension then falls back to the template.
 - `RATE_LIMIT_PER_MINUTE` (default 20) is per caller.
+- `REWRITE_DEADLINE_MS` (default 20000, 20 seconds) is how long one request may spend on Claude. The extension waits 25 seconds and then shows its template, so a call still running at the deadline is stopped (the answer is 504), a second draft starts only while 40% of that time is left, and a call whose caller has gone away is stopped too. A stopped call adds nothing to `usage.json`.
 
 ## Running it for a whole store
 
@@ -53,4 +54,4 @@ To share it, run it on any small Node host (Railway, Fly.io, Render, a VPS) with
 
 ## What it stores
 
-`usage.json` (a running cost total for the month) and nothing else. It logs one line per request with the car's year, make and model. No VIN, no Facebook data and no salesperson data reach this service beyond the sign-off name and title that go into the description.
+`usage.json` (a running cost total for the month; `USAGE_FILE` names another file) and nothing else. It logs one line per request with the car's year, make and model. A request has no VIN or price field, no Facebook data and no salesperson data beyond the sign-off name and title that go into the description. Its `narrative` is the website description's own sentences as the website wrote them, so a VIN, a price or a phone number the dealership wrote there reaches this service with them.

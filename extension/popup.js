@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -724,7 +724,9 @@ function viewMine(l) {
     rows(
       l.mine.map((p) => {
         const now = p.now;
-        const own = postedBasis(p, state.settings?.basis); // the basis this listing was posted at (src/rescan.js postedBasis)
+        // the basis this listing was posted at (src/rescan.js postedBasis; an entry with none reads it off the last scan),
+        // so a switch of Price to post is not shown (or recorded) as a change
+        const own = postedBasis(p, state.settings?.basis, now ? [now] : []);
         const site = now ? basisPrice(now, own) : null;
         const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
         // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus)
@@ -1604,7 +1606,9 @@ async function onSettingsSubmit(ev) {
   // withPostedBasis). Stamped before the new basis is saved, so a background
   // rescan in between never reads them under the new one; nothing is saved
   // when the stamp could not be written.
-  if (basisChanged && !(await update('posted', (p) => withPostedBasis(p, prev.basis)))) { render(); return; }
+  if (basisChanged && !(await update('posted', (p) => withPostedBasis(p, prev.basis, state.snapshot?.vehicles)))) { render(); return; }
+  // the other settings are kept either way; the side panel opens no form until the name is set
+  if (state.origin && dealerNameMissing(state.settings.dealer)) message += ` ${NO_DEALER_NAME}`;
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting
   await saveProfile(state.settings, undefined, state.origin); // the person's explicit save is what (re)creates the synced profile
   if (basisChanged && ownListings()) message += ' Your listings keep the price they were posted at; the new price setting is for new posts.';

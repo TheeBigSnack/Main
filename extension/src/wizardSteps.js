@@ -1,5 +1,6 @@
 // The first-run wizard's pure parts (wizard.js draws them): which steps it
-// has, and what the Account step shows. The Account step is there only when
+// has, what the Account step shows, and what the address step says about
+// where its values came from. The Account step is there only when
 // the extension has an account server to talk to (src/accountConfig.js
 // accountsConfigured()): the committed config names the production project,
 // so the shipped build has it (eleven steps); with an empty config the
@@ -122,4 +123,18 @@ export function accountStepModel({ configured = false, session = null, joined = 
     later: !signedIn ? LATER.signIn : !isJoined ? LATER.join : '',
     next: signedIn ? 'Next' : 'Skip for now',
   };
+}
+
+// What the address step says about the store's address. Only what the
+// website itself gave (site.address from src/scan.js probeSiteInPage) is
+// called read from it; a part it did not give is asked for, never guessed
+// (a store name is not a town).
+const ADDRESS_PARTS = Object.freeze([['city', 'city'], ['state', 'state'], ['zip', 'ZIP']]);
+export function addressHint(address) {
+  const a = address && typeof address === 'object' ? address : {};
+  const tail = 'Marketplace asks for a location; the ZIP is what gets typed.';
+  const missing = ADDRESS_PARTS.filter(([k]) => !str(a[k]).trim()).map(([, label]) => label);
+  if (!str(a.source).trim() || missing.length === ADDRESS_PARTS.length) return `No address was found on the website: type the store's city, state and ZIP. ${tail}`;
+  const list = missing.length > 1 ? `${missing.slice(0, -1).join(', ')} or ${missing[missing.length - 1]}` : missing[0];
+  return `Read from the website (${a.source})${missing.length ? `. It gives no ${list}: type ${missing.length > 1 ? 'them' : 'it'}` : ''}. ${tail}`;
 }

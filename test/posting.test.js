@@ -39,6 +39,7 @@ test('the posted registry can carry the listing link and who posted, without bre
   assert.deepEqual(full[VIN], {
     name: '2019 Ram 1500 Classic Express',
     price: 26673,
+    basis: 'beforeFees',
     postedAt: '2026-09-26T21:00:00.000Z',
     basis: 'beforeFees',
     listingUrl: 'https://www.facebook.com/marketplace/item/424242/',

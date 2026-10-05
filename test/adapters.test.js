@@ -1369,7 +1369,8 @@ test('a rescan that read only the new arrivals\' pages makes no lot-wide line of
   const today = standardSite({ cars: [...cars, ...arrivals], perPage: 40 });
   for (const c of arrivals) {
     const got = today.get(STANDARD_ORIGIN + c.path);
-    today.set(STANDARD_ORIGIN + c.path, { ...got, text: got.text.replace('Every car gets a 120-point inspection.', `Every car gets a 120-point inspection.<br>${SHARED}`) });
+    // before the lot-wide line: the write-up is kept up to the first line left out (description.js cleanDescription)
+    today.set(STANDARD_ORIGIN + c.path, { ...got, text: got.text.replace('Every car gets a 120-point inspection.', `${SHARED}<br>Every car gets a 120-point inspection.`) });
   }
   const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(today), site, settings, prevSnapshot: first.snapshot, options, boilerplate: first.boilerplate });
   assert.equal(out.vehicles.filter((v) => v.descriptionRaw !== null).length, 3, 'only the new arrivals were read');
@@ -1425,7 +1426,8 @@ test('on a lot where few cars carry comments, a line those comments share is lot
     const site = { origin, host: new URL(origin).host, name: 'Sample Motors', title: 'Used', adapter: id };
     const settings = withDefaults({}, site);
     const options = adapter.scanOptions(fx.service);
-    const day1 = await scanWithSearch({ adapter, search: platformSearch(withComments(makeSite({ cars }), (i) => `${LINE}<br>A clean car, number ${i}.`)), site, settings, options });
+    // the car's own sentence first: the write-up is kept up to the first line left out (description.js cleanDescription)
+    const day1 = await scanWithSearch({ adapter, search: platformSearch(withComments(makeSite({ cars }), (i) => `A clean car, number ${i}.<br>${LINE}`)), site, settings, options });
     assert.equal(day1.vehicles.filter((v) => v.descriptionRaw !== null).length, 3, `${id}: three of the twelve cars carry comments`);
     assert.deepEqual(day1.boilerplate, [LINE], `${id}: the line on every car with comments is lot-wide`);
     const car = day1.vehicles.find((v) => v.descriptionRaw);

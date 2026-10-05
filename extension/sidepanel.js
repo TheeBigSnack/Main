@@ -3,7 +3,9 @@
 // tab (a popup would close).
 //
 // Steps: checking (fresh fetch + re-check) -> review (description, fields)
-// -> filling (opens the Marketplace form, fills it, attaches photos)
+// -> filling (opens the Marketplace form, fills it, attaches photos; a car
+// read more than ten minutes earlier, or one a later scan contradicts, is
+// read and checked again first: carStillCurrent)
 // -> publish (the salesperson checks the form and clicks Publish themselves)
 // -> done (the post is recorded in the same list the popup uses).
 //
@@ -18,13 +20,13 @@ import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
-import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
+import { buildListingData, listingChanges, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
-import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
+import { localVinCheck, decodeVinOnline, compareVin, compareSummary, NHTSA_ORIGIN } from './src/vin.js';
 import { neededPatterns, patternCovers, patternHost, hostList, isFacebookServer } from './src/photoHosts.js';
 import { askChrome } from './src/askChrome.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
@@ -57,6 +59,7 @@ const state = {
   settings: null, posted: {}, postLog: [], boilerplate: [], siteName: '',
   vehicle: null, price: null,
   readAt: null, // when the car was last read and checked on the website (READ_MAX_AGE_MS)
+  opening: false, // Open the Marketplace form is running its checks (openForm): a second click meanwhile does nothing
   description: '', descriptionSource: 'template', note: '', guardrails: null,
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
@@ -199,7 +202,7 @@ async function clearFlow({ keepSaved = false } = {}) {
   if (origin && !keepSaved) await chrome.storage.local.remove(siteKeys(origin).flow);
   if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
-    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
+    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, opening: false, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
   return run;
@@ -231,30 +234,53 @@ function setStatus(text, kind = '') {
 const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
 const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
 
+// Every description names the dealership (rule 5): with no dealership name
+// set, no description can, so the form is not opened until one is.
+const dealerNamed = () => Boolean(String((state.settings && state.settings.dealer && state.settings.dealer.name) || '').trim());
+const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
+
+// Why a description can't be typed into the form, or '' when it can. Every
+// way of opening or filling the form goes through this (Open the
+// Marketplace form, Open the form and check fields only, Fill it in now
+// after a fields check, Fill again, a queued car's form), so none of them
+// types a description that does not name the dealership (not with no name
+// set, and not a description written before the name was added), or one
+// that breaks any other posting rule (rewriteTemplate.js ruleProblems): a
+// number, price, mileage or claim the website doesn't make, a banned phrase,
+// a missing role, VIN or price note. Length, capitals and emoji only warn.
+function fillBlocker(description) {
+  if (!dealerNamed()) return NO_DEALER_TEXT;
+  const name = String(state.settings.dealer.name).trim();
+  if (!String(description || '').toLowerCase().includes(name.toLowerCase())) {
+    return `The description doesn't name ${name}, and every description names the dealership. Add it to the description (or use Reset to template) before the form is filled.`;
+  }
+  const stops = ruleProblems(runGuardrails(description, ctx()));
+  if (!stops.length) return '';
+  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. Fix the description (or use Reset to template) first.`;
+}
+
 // The description's checks, run again on the text that would be filled (the
-// box's, on the review screen). One that breaks a posting rule (the
-// dealership not named, a number or a claim the website doesn't give, a
-// banned phrase: rewriteTemplate.js ruleProblems) keeps the form shut, with
-// the problems in the status line: Lot Current never types such a text into
-// Facebook's form. Style warnings (length, capitals, emoji) don't stop it.
-// Returns true when stopped.
+// box's, on the review screen), with the checks line and the form buttons
+// brought up to date. A text fillBlocker stops keeps the form shut, with the
+// reason in the status line: Lot Current never types such a text into
+// Facebook's form. Returns true when stopped.
 function descriptionStopped() {
   const box = $('description');
   if (box) state.description = box.value;
   state.guardrails = runGuardrails(state.description, ctx());
-  const stops = ruleProblems(state.guardrails);
   const old = $('checks');
   if (old) old.outerHTML = checksHtml(state.guardrails);
   setFormButtons();
-  if (!stops.length) return false;
-  setStatus(`Fix the description first: ${stops.map((p) => p.text).join('; ')}.`, 'error');
+  const why = fillBlocker(state.description);
+  if (!why) return false;
+  setStatus(why, 'error');
   return true;
 }
 
-// Open the Marketplace form and Check fields: off at the day's cap, and while
-// the description breaks a posting rule.
+// Open the Marketplace form and Check fields: off at the day's cap, while no
+// dealership name is set, and while the description breaks a posting rule.
 function setFormButtons(cap = dailyCap()) {
-  const off = cap.reached || ruleProblems(state.guardrails).length > 0;
+  const off = cap.reached || !dealerNamed() || ruleProblems(state.guardrails).length > 0;
   for (const id of ['openForm', 'checkForm']) {
     const b = $(id);
     if (b) b.disabled = off;
@@ -424,8 +450,7 @@ function readIsOld() {
 // What the form would get from the car as it stands: every field but the
 // description (the person's own text), and the photos in order.
 function formValues() {
-  const l = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos() });
-  return { ...l.fields, photos: l.photos.join(' ') };
+  return buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
 }
 
 // Before Open the Marketplace form or Fill it in now: with a read older than
@@ -454,7 +479,8 @@ async function carStillCurrent() {
   takeCar(car);
   const after = formValues();
   const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
-  const changed = Object.keys({ ...before.values, ...after }).filter((k) => k !== 'description' && before.values[k] !== after[k]);
+  const changed = listingChanges(before.values, after).map((c) => c.key); // every form field but the description (src/listingData.js)
+  if (before.values.photos.join(' ') !== after.photos.join(' ')) changed.push('photos');
   state.guardrails = runGuardrails(state.description, ctx());
   const stops = ruleProblems(state.guardrails);
   state.message = '';
@@ -568,6 +594,8 @@ function canAutoOpen() {
   const blockers = listing.missing.filter((k) => !['titleStatus', 'cleanTitle'].includes(k));
   if (blockers.length) return false;
   if ((listing.assumed || []).some((a) => !['condition', 'titleStatus'].includes(a.key))) return false;
+  // the website's own text mentions a branded title: a person picks the title on the form
+  if (listing.branded) return false;
   // Chrome asks for a new photo server only from a click: the car waits for Open the Marketplace form
   if (photoPatterns().some((p) => !refusedPhotoServers.has(p))) return false;
   return !dailyCap().reached;
@@ -776,21 +804,16 @@ async function rewriteWithKey(rewrite) {
   return { ...rw, key: rewriteKeyFor({ rewrite: rw, session: s.ok ? s.session : null, config: ACCOUNT }) };
 }
 
-// The vehicle as the description writer should see it: a guessed color
-// fills in only where the website gives none.
-function vehicleForText() {
-  const v = state.vehicle;
-  const g = state.colorGuess || {};
-  return { ...v, exteriorColor: v.exteriorColor || g.exterior || '', interiorColor: v.interiorColor || g.interior || '' };
-}
-
+// The description is written from the website's record only (CLAUDE.md
+// rule 6). A colour guessed from the photos goes on the form's colour
+// fields, listed there as assumed, and never into the text as a fact.
 async function generate({ useClaude } = {}) {
   const run = flowRun;
   const s = state.settings;
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
   if (run !== flowRun) return;
   const settings = { ...s, rewrite };
-  const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
+  const r = await generateDescription({ vehicle: state.vehicle, dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
   if (run !== flowRun) return; // a dropped post's text never lands in the next car's
   state.highlightsUsed = settleHighlights(state.highlights, state.vehicle.features);
   state.description = r.text;
@@ -834,19 +857,31 @@ async function readStoredCounts() {
 
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
+// One form per click: the checks below can take a trip to the website (the
+// car read again) while the button is still on screen, so a second click
+// then does nothing, and neither does one that lands once the form is open.
 async function openForm({ probeOnly = false } = {}) {
+  if (state.opening || state.step === 'filling' || state.step === 'publish') return undefined;
   const run = flowRun;
   const dropped = () => run !== flowRun; // the post was dropped meanwhile: no tab for it, nothing filled
-  if (!(await readStoredCounts()) || dropped()) return;
-  if (state.posted[state.vin]) return stopPosted();
-  const cap = dailyCap();
-  if (cap.reached) {
-    setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
-    return;
+  state.opening = true;
+  try {
+    if (!(await readStoredCounts()) || dropped()) return undefined;
+    if (state.posted[state.vin]) return stopPosted();
+    const cap = dailyCap();
+    if (cap.reached) {
+      setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+      return undefined;
+    }
+    if (descriptionStopped()) return undefined;
+    if (!(await carStillCurrent()) || dropped()) return undefined;
+  } finally {
+    // released before the step below moves on, with no wait in between; a
+    // post dropped meanwhile leaves it to clearFlow, so the next car's own
+    // open (a queue's, as soon as its car is read) is not turned away by this one
+    if (!dropped()) state.opening = false;
   }
-  if (descriptionStopped()) return;
-  if (!(await carStillCurrent()) || dropped()) return;
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
+  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
@@ -918,6 +953,9 @@ const FORM_GONE_TEXT = "Nothing was filled: the tab Lot Current opened for this 
 // earlier are still on the form, and each change of its photo box adds to
 // what is there, so sending them again would put every photo on it twice
 // (Attach photos again does that, on the person's word).
+// Every fill, Fill again included, first reads the car again when its
+// last read is old (carStillCurrent) and goes through fillBlocker: nothing
+// is typed from an old read, or with a description that breaks a posting rule.
 async function runFill({ opened = false, photos = true } = {}) {
   const run = flowRun;
   const { map, listing } = state;
@@ -927,6 +965,16 @@ async function runFill({ opened = false, photos = true } = {}) {
     return undefined;
   }
   if (run !== flowRun || state.fbTabId !== tabId) return undefined;
+  if (!(await carStillCurrent()) || run !== flowRun || state.fbTabId !== tabId) return undefined;
+  const blocked = fillBlocker(listing && listing.fields && listing.fields.description);
+  if (blocked) {
+    if (state.step === 'filling') {
+      state.step = 'review';
+      state.message = '';
+      render();
+    }
+    return setStatus(blocked, 'error');
+  }
   state.message = 'Filling in the form…';
   render();
   let fill;
@@ -1318,17 +1366,15 @@ async function downloadPhotos() {
 
 // ---------- rendering ----------
 
-// Rule problems first (the form stays shut until they are fixed), then the
-// style warnings, which don't stop it.
+// The problems that keep the form from being filled (fillBlocker), then the
+// ones that only warn (length and tone).
 function checksHtml(g) {
   if (!g) return '';
-  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words, every number matches the website, no banned phrases, the dealership and your role named.</div>`;
-  const rules = ruleProblems(g);
-  const warnings = g.problems.filter((p) => !rules.includes(p));
-  const list = (problems) => `<ul>${problems.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
-  const fix = rules.length ? `Fix before posting (the form won't open until these are fixed):${list(rules)}` : '';
-  const check = warnings.length ? (rules.length ? 'Also worth a look:' : 'Worth a look before posting:') + list(warnings) : '';
-  return `<div class="checks ${rules.length ? 'bad' : 'warn'}" id="checks">${fix}${check}</div>`;
+  if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number the checks found is in the website's data, price and mileage included; no banned phrases or flagged claims; dealership and your role named${noteFor() ? '; price note included' : ''}. The checks look for set words and numbers, so read it through before you publish.</div>`;
+  const stops = ruleProblems(g);
+  const warns = g.problems.filter((p) => !stops.includes(p));
+  const list = (ps) => `<ul>${ps.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
+  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
 }
 
 function sourcePill() {
@@ -1473,7 +1519,7 @@ function viewBlocked() {
   return `<div class="banner bad" id="blocked">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
-const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
+const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
 
 function fieldsTable() {
   const l = currentListing();
@@ -1519,9 +1565,9 @@ function vinCheckHtml() {
   if (!local.ok) html += `<div class="banner warn">The VIN and the website disagree. Check the car before posting; the website's inventory may need a fix.</div>`;
   if (on && on.ok) {
     html += `<table class="fields"><tr><td></td><td><b>Website</b></td><td><b>VIN (NHTSA)</b></td></tr>${on.compare.rows
-      .map((r) => `<tr class="${r.verdict === 'differ' ? 'missing' : ''}"><td>${esc(r.field)}</td><td>${esc(r.website) || '—'}</td><td>${esc(r.vin) || '—'} ${r.verdict === 'agree' ? '✓' : r.verdict === 'differ' ? '✗' : ''}</td></tr>`)
+      .map((r) => `<tr class="${r.verdict === 'differ' ? 'missing' : ''}"><td>${esc(r.field)}</td><td>${esc(r.website) || '—'}</td><td>${esc(r.vin) || '—'} ${r.verdict === 'agree' ? '✓' : r.verdict === 'differ' ? '✗' : r.verdict === 'partly' ? '(partly)' : ''}</td></tr>`)
       .join('')}</table>
-      <p class="hint">${on.compare.ok ? 'NHTSA agrees with the website on everything it knows about this VIN.' : `${on.compare.differ.length} difference(s) between the website and the VIN: check the car before posting.`}</p>`;
+      ${compareSummary(on.compare).map((line) => `<p class="hint">${esc(line)}</p>`).join('')}`;
   } else if (on && !on.ok) {
     html += `<div class="banner warn">NHTSA check failed: ${esc(on.error)}</div>`;
   }
@@ -1677,7 +1723,7 @@ const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="c
 
 function viewReview() {
   const cap = dailyCap();
-  const formOff = cap.reached || ruleProblems(state.guardrails).length > 0;
+  const formOff = cap.reached || !dealerNamed() || ruleProblems(state.guardrails).length > 0;
   const rw = state.settings.rewrite;
   return `${relistHtml()}${carCard()}${readAgainHtml()}
   <section>
@@ -1699,6 +1745,7 @@ function viewReview() {
   ${assumptionsHtml()}
   <section>
     ${capHtml(cap)}
+    ${dealerNamed() ? '' : `<div class="banner bad" id="noDealer">${esc(NO_DEALER_TEXT)}</div>`}
     <button type="button" class="primary wide" id="openForm" ${formOff ? 'disabled' : ''}>Open the Marketplace form</button>
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
     <div id="photoServers">${photoServersHtml()}</div>
@@ -1715,6 +1762,7 @@ function viewProbe() {
   const missing = p.missing || [];
   const controls = p.controls || [];
   const limit = p.photoLimit ? `${p.photoLimit.value}${p.photoLimit.verified ? '' : ' (unverified)'}` : '?';
+  const blocked = fillBlocker(state.listing && state.listing.fields && state.listing.fields.description);
   return `${carCard()}${readAgainHtml()}
   <div class="banner info">Nothing was filled. This is what Lot Current can see on the form (map ${esc(p.mapVersion || state.map.version)}, Lot Current ${esc(p.extensionVersion || VERSION)}).</div>
   ${p.error ? `<div class="banner bad">${esc(p.error)}</div>` : ''}
@@ -1728,8 +1776,9 @@ function viewProbe() {
   </section>
   ${photoServersHtml()}
   ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${esc(capCount(cap))}). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
+  ${blocked ? `<div class="banner bad" id="fillBlocked">${esc(blocked)}</div>` : ''}
   <div class="actions">
-    <button type="button" class="primary" id="fillNow" ${found.length && !cap.reached ? '' : 'disabled'}>Fill it in now</button>
+    <button type="button" class="primary" id="fillNow" ${found.length && !cap.reached && !blocked ? '' : 'disabled'}>Fill it in now</button>
     <button type="button" class="plain" id="probeAgain">Check again</button>
     <button type="button" class="plain" id="copyReport">Copy report</button>
     <button type="button" class="plain" id="backToReview">Back</button>
@@ -2235,8 +2284,7 @@ async function onClick(ev) {
     case 'guessColors': {
       btn.disabled = true;
       setStatus('Looking at the photos…');
-      await maybeGuessColors(true);
-      await generate();
+      await maybeGuessColors(true); // the form's colour fields only: the description stays as it is
       setStatus(state.colorGuess && state.colorGuess.error ? '' : 'Colors guessed from the photos; check them on the form.');
       render();
       return saveFlow();
@@ -2444,6 +2492,10 @@ function adoptChanges(changes) {
     capLine.outerHTML = capHtml(cap);
     setFormButtons(cap);
   }
+  // a name added in Settings: the banner asking for one goes (a description
+  // written before it still has to name the dealership: fillBlocker)
+  const noDealer = $('noDealer');
+  if (noDealer && state.step === 'review' && dealerNamed()) noDealer.remove();
 }
 
 async function init() {

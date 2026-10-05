@@ -117,7 +117,7 @@ try {
   const draft = await panel.locator('#description').inputValue();
   assert.match(draft, /^2020 Ford F-150 XLT with 34,512 miles\./);
   assert.match(draft, /One owner according to the Carfax report\./);
-  assert.match(draft, /pairs the 2\.7L EcoBoost V6/, "the car's own write-up is kept");
+  assert.doesNotMatch(draft, /pairs the 2\.7L EcoBoost V6/, "the template never copies the car's own write-up");
   assert.doesNotMatch(draft, /documentation fee/, 'the lot-wide disclaimer is stripped');
   assert.match(draft, /Price includes the \$250 doc fee; tax and tags extra\./);
   assert.match(draft, /I'm Alex, sales consultant at Example Motors\./);
@@ -364,7 +364,7 @@ try {
   assert.match(stdDraft, /^2019 Honda Civic EX with 41,230 miles\./);
   assert.match(stdDraft, /I'm Alex, sales consultant at Example Auto Outlet\./);
   assert.match(stdDraft, /Tax, title and registration are extra\./);
-  assert.match(stdDraft, /This Civic EX has the 1\.5L Turbo 4-Cylinder, a CVT and a sunroof\./, "the car's own write-up is kept");
+  assert.doesNotMatch(stdDraft, /This Civic EX has the 1\.5L Turbo 4-Cylinder/, "the template never copies the car's own write-up");
   assert.match(await text(panel.locator('#checks')), /All checks passed/);
   assert.match(await text(panel.locator('#panel')), /Location[\s\S]*45505/);
   await panel.locator('#openForm').click();

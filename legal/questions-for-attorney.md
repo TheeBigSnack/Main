@@ -34,6 +34,7 @@ Context: Lot Current is a Chrome extension that reads a car dealership's own web
 ## 5. AI-written descriptions
 
 - Descriptions can be drafted by an AI model through Anthropic's API from the dealer's own data, then checked by software rules and reviewed by the salesperson before publishing. What is Lot Current's liability if a published description is inaccurate, and what disclaimer, review requirement or record-keeping reduces it? Any disclosure obligation about AI-generated ad copy?
+- Colours guessed from photos. When the dealer's website gives no usable colour for a car and the description writer is on, Lot Current asks an AI model to pick the exterior and interior colour from Facebook's list, looking at up to four of the car's photos. The guess is put in the form's colour fields only, never in the description; the side panel shows it as guessed from the photos, with the model's confidence, and lists it among the values to check on the form, and in a queue a car with a guessed colour waits at review instead of opening the form on its own. The salesperson can change it before clicking Publish. Is a model's guess, checked by the salesperson, acceptable in a vehicle advertisement's colour field, and what must the salesperson be told (in the side panel or the Posting Rules) before publishing it?
 
 ## 6. Company matters
 
