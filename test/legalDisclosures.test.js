@@ -190,7 +190,9 @@ test('every screenshot rule keeps Facebook\'s logo, wordmark and brand colour ou
   const listing = read('store/listing.md');
   const listingShots = listing.slice(listing.indexOf('## Screenshots'), listing.indexOf('\n## ', listing.indexOf('## Screenshots') + 1));
   const notes = section(read('legal/chrome-web-store-privacy.md'), '## Notes for the listing text');
-  for (const [where, text] of [['store/screenshots.md', shots], ['store/listing.md Screenshots', listingShots], ['legal/chrome-web-store-privacy.md notes', notes]]) {
+  // review: the trademark note said only "never ... brand colours ... screenshots", with no word of how a capture of
+  // the real form keeps to it, so the four texts the screenshots follow said it two ways
+  for (const [where, text] of [['legal/trademark-note.md', rule], ['store/screenshots.md', shots], ['store/listing.md Screenshots', listingShots], ['legal/chrome-web-store-privacy.md notes', notes]]) {
     assert.doesNotMatch(text, /beyond what the page itself shows/, `${where} lets the real page's logo or colour into a store image`);
     assert.match(text, /logo/, `${where} says nothing about Facebook's logo`);
     assert.match(text, /wordmark/, `${where} says nothing about Facebook's wordmark`);

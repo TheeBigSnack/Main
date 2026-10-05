@@ -5,7 +5,7 @@ DRAFT: starting point for attorney review. Not legal advice.
 ## Using Meta's names
 
 - Use "Facebook" and "Facebook Marketplace" (or "Marketplace") only as plain words that name where salespeople post: "pre-fills a Facebook Marketplace listing". This is descriptive (nominative) use.
-- Never use the Facebook, Marketplace or Meta logos, wordmark styling, brand colours or icons anywhere: extension icons, screenshots, the website, the sales sheet, emails, the Chrome Web Store listing.
+- Never use the Facebook, Marketplace or Meta logos, wordmark styling, brand colours or icons anywhere: extension icons, screenshots, the website, the sales sheet, emails, the Chrome Web Store listing. A capture of the real Marketplace form is cropped below Facebook's top bar, and any logo, wordmark or Facebook-blue button left in the frame is covered with a solid box (`store/screenshots.md`).
 - Never say or imply affiliation, sponsorship, approval, partnership or "works with Facebook" style certification. Do not use "for Facebook" in the product name or tagline. Preferred phrasing: "helps you post on Facebook Marketplace"; avoid "Facebook tool", "Marketplace app".
 - Put "Not affiliated with Meta Platforms, Inc." in the website footer, the extension's side panel footer, the Web Store listing and the sales sheet.
 - Do not register domains, social handles or app names containing "facebook", "marketplace", "meta" or close variants.
