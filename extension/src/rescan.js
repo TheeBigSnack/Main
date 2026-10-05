@@ -52,16 +52,48 @@ export const PRICE_BASES = Object.freeze(['website', 'beforeFees']);
 export function postedBasis(entry, basis = 'website', seen = []) {
   const own = entry && entry.basis;
   if (PRICE_BASES.includes(own)) return own;
-  const setting = basis === 'beforeFees' ? 'beforeFees' : 'website';
+  return seenBasis(entry, seen) || (basis === 'beforeFees' ? 'beforeFees' : 'website');
+}
+
+// The basis the scans in `seen` (oldest first) show an entry's price on: the
+// one basis that gives the car that price on the first scan where any does.
+// null when both do there, when none ever does, or with no price: then
+// nothing but the setting is left to go by.
+function seenBasis(entry, seen) {
   const price = entry && typeof entry.price === 'number' ? entry.price : null;
-  if (price === null) return setting;
+  if (price === null) return null;
   for (const v of Array.isArray(seen) ? seen : []) {
     if (!v) continue;
     const matches = PRICE_BASES.filter((b) => basisPrice(v, b) === price);
     if (matches.length === 1) return matches[0];
-    if (matches.length) return setting;
+    if (matches.length) return null;
   }
-  return setting;
+  return null;
+}
+
+// The posted list with the basis a scan reads off each entry without one
+// (seenBasis, from the last scan and this one, as diffScans reads it)
+// recorded on that entry, so the reading outlives the website's price: once
+// the website moves the price so that neither basis gives the listed one, an
+// entry with no basis would fall back to the current setting, and a switch
+// of Price to post would show up as part of a price change (rule 4). Entries
+// a scan can't settle (both bases give the price, or neither does) are left
+// as they are. undefined when nothing is recorded, so nothing is written.
+export function withSeenBasis(posted, previous, current) {
+  if (!posted || typeof posted !== 'object') return undefined;
+  const carsOf = (snap) => (snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles : {});
+  const before = carsOf(previous);
+  const now = carsOf(current);
+  let changed = false;
+  const next = {};
+  for (const [vin, e] of Object.entries(posted)) {
+    const read = e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) ? seenBasis(e, [before[vin], now[vin]]) : null;
+    if (read) {
+      next[vin] = { ...e, basis: read };
+      changed = true;
+    } else next[vin] = e;
+  }
+  return changed ? next : undefined;
 }
 
 // The website's price now for a posted listing, on the basis the listing

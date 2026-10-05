@@ -22,7 +22,7 @@
 // It never touches Facebook and never posts anything.
 
 import { adapterById } from './adapters/index.js';
-import { scanWithSearch } from './src/scanRunner.js';
+import { scanWithSearch, keepSeenBasis } from './src/scanRunner.js';
 import { siteKeys, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { settleDiff } from './src/rescan.js';
@@ -362,6 +362,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
     return noteFailure(origin, info, storageErrorText(e), reason); // the quota, most likely: the popup's To do shows it as the last error
   }
   await recordFlags(origin, diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
+  await keepSeenBasis(origin, data[k.snapshot] || null, out.snapshot).catch(() => null); // the price basis this read shows for a listing that has none
   const count = todoCountFor(diff);
   // Compared with the person's outstanding list (the saved diff, which the
   // popup and upkeep trim as items are handled), not with the last rescan's count.

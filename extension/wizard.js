@@ -11,7 +11,7 @@
 // closed and reopened; the sign-in session is not part of it (src/account.js
 // keeps it).
 
-import { performScan, rememberSite } from './src/scanRunner.js';
+import { performScan, rememberSite, keepSeenBasis } from './src/scanRunner.js';
 import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
@@ -205,6 +205,7 @@ async function runScan(ctx) {
     return false;
   }
   wiz.scan = scan; // only a read that was kept counts as done
+  await keepSeenBasis(wiz.origin, data[k.snapshot] || null, r.snapshot).catch(() => null); // the price basis this read shows for a listing that has none
   await recordFlags(wiz.origin, r.diff, r.diff.takenAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   await persist();

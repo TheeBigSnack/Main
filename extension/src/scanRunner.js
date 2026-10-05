@@ -5,12 +5,12 @@
 
 import { ADAPTERS, detectAdapter, unsupportedSiteMessage } from '../adapters/index.js';
 import { assessVehicle } from './classify.js';
-import { makeSnapshot, diffScans } from './rescan.js';
+import { makeSnapshot, diffScans, withSeenBasis } from './rescan.js';
 import { findBoilerplate, MIN_BOILERPLATE_COUNT } from './description.js';
 import { withDefaults } from './settings.js';
 import { storeNames, shortLocation, matchStore } from './normalize.js';
 import { probeSiteInPage } from './scan.js';
-import { SITES_KEY } from './storageKeys.js';
+import { SITES_KEY, siteKeys } from './storageKeys.js';
 import { updateKey } from './storage.js';
 
 /**
@@ -234,6 +234,15 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   }
   await rememberSite(origin, { name: site.name, adapter: adapter.PLATFORM.id, service, site: out.snapshot.site, photoOrigins: out.photoOrigins, lastScan: result.res.fetchedAt, lastError: null, auto: Boolean(s.autoRescan) });
   return { ok: true, settings: s, site, service, adapterId: adapter.PLATFORM.id, snapshot: result.snapshot, diff: result.diff, boilerplate: result.boilerplate, vehicles: result.vehicles, res: result.res, photoOrigins: out.photoOrigins };
+}
+
+// After a scan is saved: each posted entry without a price basis (brought by
+// a sync, or kept from before the basis was recorded) gets the one the scan
+// read its price on, the last scan's or this one's (src/rescan.js
+// withSeenBasis), so the reading still stands once the website moves the
+// price. Written under the posted list's lock; nothing when nothing is read.
+export function keepSeenBasis(origin, previous, snapshot, storage) {
+  return updateKey(siteKeys(origin).posted, (posted) => withSeenBasis(posted, previous, snapshot), storage);
 }
 
 // Sites the extension knows, for background rescans:
