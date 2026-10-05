@@ -1476,11 +1476,15 @@ test('It\'s posted keeps a listing link only when it is a listing\'s own address
     assert.equal(r.entry.listingUrl, kept, typed);
     assert.deepEqual(r.said, [], `${typed}: nothing to say`);
   }
-  // nothing typed: the listing the tab showed
-  assert.equal((await run({ detected: { status: 'listing', url: ITEM, id: '1234567890' } })).entry.listingUrl, ITEM);
-  // ...unless a queue found it does not show this car: no link, unless the person types one
+  // nothing typed: the listing the panel read and saw this car on, in a queue or not
+  for (const queueMode of [false, true]) {
+    assert.equal((await run({ detected: { status: 'listing', url: ITEM, id: '1234567890', verified: true }, queueMode })).entry.listingUrl, ITEM);
+    // ...never one it found does not show this car, or one not read yet: no link, unless the person types one
+    for (const detected of [{ status: 'listing', url: ITEM, id: '1234567890', unverified: true }, { status: 'listing', url: ITEM, id: '1234567890', checking: true }, { status: 'listing', url: ITEM, id: '1234567890' }]) {
+      assert.equal((await run({ detected, queueMode })).entry.listingUrl, undefined, `${JSON.stringify(detected)}: another car's listing is never saved as this car's link`);
+    }
+  }
   const notThisCar = { status: 'listing', url: ITEM, id: '1234567890', unverified: true };
-  assert.equal((await run({ detected: notThisCar, queueMode: true })).entry.listingUrl, undefined, 'another car\'s listing is never saved as this car\'s link');
   const OWN = 'https://www.facebook.com/marketplace/item/2222222222/';
   assert.equal((await run({ detected: notThisCar, queueMode: true, typed: OWN })).entry.listingUrl, OWN);
   // in a queue, only a listing page the panel read and saw this car on gives the link: not one still being read,
@@ -1616,7 +1620,7 @@ test('It\'s posted in a second window\'s side panel keeps the link and the count
   for (const queueMode of [false, true]) {
     const what = queueMode ? 'queued car' : 'single post';
     const store = queueMode ? { ['postQueue:' + O]: { vins: ['AAA', 'BBB'], index: 0, status: 'running', results: {} } } : {};
-    const one = queuePanel(store, { queueMode, detected: { status: 'listing', url: ITEM, verified: queueMode } }); // a queue's listing page read and seen to show this car
+    const one = queuePanel(store, { queueMode, detected: { status: 'listing', url: ITEM, verified: true } }); // the listing page read and seen to show this car
     const two = queuePanel(store, { queueMode, detected: null }); // no watcher result in the second window
     await one.fns.confirmPosted();
     await settle();
@@ -1640,14 +1644,14 @@ test('It\'s posted in a second window\'s side panel keeps the link and the count
   const bare = queuePanel(store, { queueMode: false, detected: null });
   await bare.fns.confirmPosted();
   const was = { ...store['posted:' + O].AAA };
-  const withLink = queuePanel(store, { queueMode: false, detected: { status: 'listing', url: ITEM } });
+  const withLink = queuePanel(store, { queueMode: false, detected: { status: 'listing', url: ITEM, verified: true } });
   await withLink.fns.confirmPosted();
   assert.deepEqual(store['posted:' + O].AAA, { ...was, listingUrl: ITEM }, 'only the link is added');
   assert.equal(store['postLog:' + O].length, 1);
 
   // a colleague's entry for the car (synced in after the form opened): this person's post is recorded
   const shared = { ['posted:' + O]: { AAA: { name: 'Car A', price: 20000, postedAt: '2026-09-30T09:00:00.000Z', userId: 'u2', mine: false } } };
-  const mine = queuePanel(shared, { queueMode: false, detected: { status: 'listing', url: ITEM } });
+  const mine = queuePanel(shared, { queueMode: false, detected: { status: 'listing', url: ITEM, verified: true } });
   await mine.fns.confirmPosted();
   assert.equal(shared['posted:' + O].AAA.mine, undefined, 'recorded as this person\'s');
   assert.equal(shared['posted:' + O].AAA.listingUrl, ITEM);
@@ -1852,11 +1856,51 @@ test('in a queue, only a new listing the form\'s tab moved to straight from the 
     assert.match(other.shown[1].banner, NOT_CONFIRMED, `${what}, of another car`);
     assert.equal(other.shown[1].box, '', `${what}, of another car: no link offered`);
   }
-  // a single post is not read: the person sees the listing address and confirms it
-  const single = await run({ queueMode: false, result: fromForm });
-  assert.deepEqual(single.calls, ['watch ' + FORM_MAP.createUrl, 'render', 'saveFlow']);
-  assert.equal(single.state.detected, fromForm);
-  assert.deepEqual(single.reads, [], 'a single post: nothing is read');
+});
+
+// A single post, and a queued car left on its form by Stop queue: the listing
+// page the tab goes to is read too, and only one that shows this car is
+// offered as its link; one of another car (a notification clicked on the
+// form, say) is not, before or after the panel is opened again. Neither is
+// ever recorded by itself: the person clicks It's posted, record it.
+const NOT_CONFIRMED_SINGLE = /^warn: The Facebook tab is on a listing page, and Lot Current couldn't confirm that it shows 2020 Make Model \(its VIN, or its name at \$20,000\), so its address isn't offered as this car's link\. If you clicked Publish and it posted, paste its listing link below if you have it and click It's posted, record it\.$/;
+test('a single post offers a listing as its link only when the page shows this car, after Stop queue and a reopen too', async () => {
+  const ITEM = 'https://www.facebook.com/marketplace/item/555/';
+  const fromForm = { status: 'listing', url: ITEM, id: '555', afterCreate: true };
+  // this car's new listing: read, then shown as posted with its link, and saved; the person confirms it
+  const mine = await queueWatch({ queueMode: false, result: fromForm });
+  assert.deepEqual(mine.calls, ['watch ' + FORM_MAP.createUrl, 'render', 'render', 'saveFlow'], 'read, shown, saved, not recorded without the person');
+  assert.deepEqual(mine.shown, [{ banner: READING, box: '' }, { banner: POSTED, box: ITEM }]);
+  assert.deepEqual(mine.reads.map((r) => r.expect), [{ id: '555', name: '2020 Make Model', prices: [20000], vin: 'AAA' }]);
+  assert.equal(mine.fns.offeredLink(mine.state.detected), ITEM);
+  // another car's listing the form's tab went to: never offered as this car's link
+  for (const result of [fromForm, { ...fromForm, afterCreate: false }]) {
+    const other = await queueWatch({ queueMode: false, result, pages: [OTHER_CAR] });
+    assert.ok(!other.calls.some((c) => c.startsWith('confirmPosted')));
+    assert.deepEqual(other.shown.map((v) => v.box), ['', ''], 'the other listing\'s address is never in the Listing link box');
+    assert.equal(other.shown[0].banner, READING);
+    assert.match(other.shown[1].banner, NOT_CONFIRMED_SINGLE);
+    assert.equal(other.fns.offeredLink(other.state.detected), '', "It's posted with nothing typed saves no link");
+  }
+  // Stop queue left the queued car on its form as a single post, with the listing it could not confirm; the panel is opened again on it
+  const OTHER = 'https://www.facebook.com/marketplace/item/616161/';
+  const saved = { status: 'listing', url: OTHER, id: '616161', afterCreate: true, unverified: true, name: '2020 Make Model', price: 20000 };
+  const h = await queueWatch({ queueMode: false, result: { status: 'listing', url: OTHER, id: '616161', afterCreate: false }, pages: [OTHER_CAR], detected: null });
+  const { resumeFlow } = compileMany(['resumeFlow'], {
+    state: h.state, FLOW_FIELDS, GLOBAL_KEYS: { devOverrides: 'devOverrides' }, applyOverrides, FORM_MAP,
+    chrome: { storage: { local: { get: async () => ({}) } } }, loadSaved: async () => {},
+    render: () => h.shown.push(publishShows(h.fns.viewPublish)), startWatcher: () => h.fns.startWatcher(),
+  });
+  h.shown.length = 0;
+  await resumeFlow('https://www.example-motors.test', { vin: 'AAA', step: 'publish', queueMode: false, fbTabId: 77, vehicle: h.state.vehicle, price: 20000, detected: saved });
+  for (let i = 0; i < 40; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(h.shown.length >= 3, `shown when it comes back, while read, after (${h.shown.length})`);
+  for (const v of h.shown) {
+    assert.notEqual(v.banner, POSTED, 'never "Looks like it posted"');
+    assert.equal(v.box, '', 'the listing the queue could not confirm is never offered as this car\'s link');
+  }
+  assert.match(h.shown.at(-1).banner, NOT_CONFIRMED_SINGLE);
+  assert.equal(h.fns.offeredLink(h.state.detected), '');
 });
 
 // A notification ("Someone is interested in your ...") or a listing clicked

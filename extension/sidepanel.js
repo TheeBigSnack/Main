@@ -1157,19 +1157,21 @@ function startWatcher() {
     if (state.step !== 'publish') return undefined;
     if (r.status === 'listing' || r.status === 'probably' || r.status === 'closed') {
       const own = postsWindow();
-      // In a queue, a listing page is read before the panel says anything
-      // about it (confirmIfThisCar): until then it says it is checking, with
-      // the Listing link box empty. The form's tab moving straight from the
-      // form to a new listing that shows this car means the person clicked
-      // Publish: the post is recorded and the next car loads. Any other
-      // listing address in that tab (one browsed to, or one it already
-      // showed when the panel came back) waits for the person's click. A
+      // A listing page is read before the panel says anything about it
+      // (confirmIfThisCar), in a queue or not: until then it says it is
+      // checking, with the Listing link box empty, and only a page that
+      // shows this car is offered as its link (offeredLink). In a queue, the
+      // form's tab moving straight from the form to a new listing that shows
+      // this car means the person clicked Publish: the post is recorded and
+      // the next car loads. Any other listing address in that tab (one
+      // browsed to, or one it already showed when the panel came back), and
+      // every listing of a single post, waits for the person's click. A
       // panel in a second window reads and shows it, but never records it:
       // two panels that both recorded the post would record it twice.
-      if (state.queueMode && r.status === 'listing') {
+      if (r.status === 'listing') {
         state.detected = { ...r, checking: true };
         render();
-        return confirmIfThisCar(state.detected, own && isNewListingFromForm(r, state.posted, state.map));
+        return confirmIfThisCar(state.detected, state.queueMode && own && isNewListingFromForm(r, state.posted, state.map));
       }
       state.detected = r;
       render();
@@ -1179,19 +1181,20 @@ function startWatcher() {
   });
 }
 
-// In a queue, the listing page the form's tab is on is read (read-only) a
-// few times while it loads. Only a page that is that listing and shows this
-// car (its VIN in the page's text, or, when no other posted car has its
-// name, its name and the price the form was filled with; never the form
-// itself: showsPostedCar) is shown as "Looks like it posted" with its address
-// in the Listing link box, and recorded by itself when `record` says the tab
-// came straight from the form to a new listing in the post's own panel. A
-// notification or a link clicked on the form page also goes straight to a
-// listing, of another car: then the panel says it could not confirm the page
-// shows this car and asks, and that listing's address stays out of the
-// Listing link box, so It's posted never saves it as this car's link. The
-// same holds when the panel is opened again or in a second window: the
-// watcher reports the listing again and it is read again.
+// The listing page the form's tab is on is read (read-only) a few times
+// while it loads. Only a page that is that listing and shows this car (its
+// VIN in the page's text, or, when no other posted car has its name, its
+// name and the price the form was filled with; never the form itself:
+// showsPostedCar) is shown as "Looks like it posted" with its address in the
+// Listing link box, and, in a queue, recorded by itself when `record` says
+// the tab came straight from the form to a new listing in the post's own
+// panel. A notification or a link clicked on the form page also goes
+// straight to a listing, of another car: then the panel says it could not
+// confirm the page shows this car and asks, and that listing's address stays
+// out of the Listing link box, so It's posted never saves it as this car's
+// link. The same holds for a single post, after Stop queue, and when the
+// panel is opened again or in a second window: the watcher reports the
+// listing again and it is read again.
 const VERIFY_READS = 6;
 const VERIFY_EVERY_MS = 1500;
 async function confirmIfThisCar(d, record) {
@@ -1230,13 +1233,13 @@ async function confirmIfThisCar(d, record) {
 }
 
 // The listing address the panel offers as this car's link (in the Listing
-// link box, and for It's posted with nothing typed). In a queue, only a
-// listing page the panel read and saw this car on (verified); a single post
-// offers the listing address the tab went to, which the person sees there
-// and confirms.
+// link box, and for It's posted with nothing typed): only a listing page the
+// panel read and saw this car on (verified), in a queue or not. A listing of
+// another car the tab went to (a notification clicked on the form, say), or
+// one not read yet, is never offered: It's posted then saves no link unless
+// the person pastes one.
 function offeredLink(d) {
-  if (!d || !d.url || d.unverified || d.checking) return '';
-  return state.queueMode && !d.verified ? '' : d.url;
+  return d && d.url && d.verified && !d.unverified && !d.checking ? d.url : '';
 }
 
 // Records the post of the car on the form, once: the watcher and a click on
@@ -1261,7 +1264,7 @@ async function confirmPosted() {
   // Facebook often lands after Publish, would open the wrong page from To do
   // and in the manager's view. Another address typed in is not swapped for
   // what the tab showed: the post is recorded with no link, and the panel says so.
-  const listingUrl = listingLink(typed || offeredLink(state.detected), state.map); // an address the queue could not match to this car is never kept unless typed
+  const listingUrl = listingLink(typed || offeredLink(state.detected), state.map); // a listing the panel did not see this car on is never kept unless typed
   const linkNote = typed && !listingUrl
     ? `No listing link was saved for ${nameOf(vin)}: the address in Listing link isn't a Marketplace listing's own address (Your listings, say). Its To do items open Your listings, where you pick the listing.`
     : '';
@@ -1872,8 +1875,9 @@ function viewPublish() {
   let detect = '';
   const name = esc(d && d.name ? d.name : (state.vehicle && state.vehicle.name) || 'this car');
   if (d && d.unverified) {
-    detect = `<div class="banner warn" id="detected">The Facebook tab is on a listing page, and Lot Current couldn't confirm that it shows ${name} (its VIN, or its name${d.price ? ` at ${money(d.price)}` : ''}), so the queue did not record it by itself. If you clicked <b>Publish</b> and it posted, paste its listing link below if you have it and click <b>It's posted, next car</b>.</div>`;
-  } else if (d && d.status === 'listing' && state.queueMode && !d.verified) {
+    const so = state.queueMode ? 'so the queue did not record it by itself' : "so its address isn't offered as this car's link";
+    detect = `<div class="banner warn" id="detected">The Facebook tab is on a listing page, and Lot Current couldn't confirm that it shows ${name} (its VIN, or its name${d.price ? ` at ${money(d.price)}` : ''}), ${so}. If you clicked <b>Publish</b> and it posted, paste its listing link below if you have it and click <b>${state.queueMode ? "It's posted, next car" : "It's posted, record it"}</b>.</div>`;
+  } else if (d && d.status === 'listing' && !d.verified) {
     // being read (confirmIfThisCar), or brought back from before a read: the watcher reports it again and it is read again
     detect = `<div class="banner info" id="detected">The Facebook tab is on a listing page. Lot Current is reading it (only reading) to see whether it shows ${name}…</div>`;
   } else if (d && (d.status === 'listing' || d.status === 'probably')) {
