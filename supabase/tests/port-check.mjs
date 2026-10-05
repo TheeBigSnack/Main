@@ -64,6 +64,8 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn. Plus tax, title and registration, which go to the state, not the dealer. Text me instead of the dealership; our family truck, selling for my brother.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Example Motors is locally owned and operated; this one was adult owned.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, only 2,019 dollars down, save 1,500 today, 1500 bucks off, driven by a 5.7L V8, never driven in winter, came in on trade from a local customer, full airbag coverage.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, 1,000 down, get 1500 off, 2,500 cash back, a rebate of 3,500, discount of 4,000, 4,500 in savings, an off-road 1500 off the lot.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Save 1,500 today.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

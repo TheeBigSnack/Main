@@ -446,6 +446,23 @@ test('a model year, fuel economy, a warranty, a range or a weight is never read 
   assert.deepEqual(dollarAmounts('Only 2,019 dollars down, 1500 bucks off, save 1,500 or save up to 2k.').map((a) => a.value), [2019, 1500, 1500, 2000]);
 });
 
+test('an amount said with what money does ("down", "off", "cash back", "rebate"), without "$", is a price the listing must carry', () => {
+  // the car is a Ram 1500 from 2019, so "1500" and "2019" are in its data
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price };
+  const base = buildTemplateDescription(c);
+  for (const sentence of ['Only 1,500 down.', 'Get 1500 off.', 'Take 1,500 off this week.', 'Only 2,019 down.', '1,500 cash back.', 'A 1,500 rebate on this one.', 'Rebate of 1,500.', 'A down payment of 1,500.', 'Discount of 1500 today.', '1,500 in savings.', '1500 under book.']) {
+    assert.deepEqual(dollarAmounts(sentence).length, 1, sentence);
+    const codes = runGuardrails(`${base}\n${sentence}`, c).problems.map((p) => p.code).filter((code) => /price|number/.test(code));
+    assert.deepEqual(codes, ['price-mismatch'], sentence);
+  }
+  assert.ok(runGuardrails(`${base}\nGet 1500 off.`, c).problems.some((p) => p.text === `Says $1,500, but this listing's price is $${v.price.toLocaleString('en-US')}`));
+  // "off" and "down" that are not money
+  for (const words of ['Ram 1500 Off-Road package.', 'A Ram 1500 Off Road.', 'A 1500 off-lease truck.', 'Drive this 1500 off the lot today.', 'Rear seats fold down 60/40.', 'A Ram 1500 Downtown edition.']) {
+    assert.deepEqual(dollarAmounts(words), [], words);
+  }
+});
+
 test('the template never copies a sentence the checks would refuse: a banned phrase, or one owner without the Carfax flag', async () => {
   const v = vehicle('usedNormal', { features: FEATURES });
   for (const sentence of ['Priced for our private sale event this weekend.', 'No accidents and runs perfect!', 'A one-owner truck, traded in here.']) {
