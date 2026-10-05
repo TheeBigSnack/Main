@@ -676,18 +676,12 @@ test('support.md names every file that carries the support address', () => {
   for (const rel of carriers) assert.ok(named.has(rel), `${rel} carries ${SITE.supportEmail} but support.md's inbox line does not name it`);
 });
 
-// Settings keys whose HANDOFF.md 5.1 entry is still to be written
-// (HANDOFF.md is kept by the lead): storesChosen, whether a person chose the
-// stores with them in view, so none ticked is every store (src/settings.js).
-const PENDING_HANDOFF_SETTINGS = new Set(['storesChosen']);
-
 test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 lists the wizard steps in order', () => {
   const handoff = read('../HANDOFF.md');
   const s51 = handoff.slice(handoff.indexOf('### 5.1'), handoff.indexOf('### 5.2'));
   const line = s51.split('\n').find((l) => l.startsWith('- `settings:<origin>`'));
   assert.ok(line, 'HANDOFF.md 5.1 documents settings:<origin>');
   for (const key of Object.keys(withDefaults({}))) {
-    if (PENDING_HANDOFF_SETTINGS.has(key)) continue;
     assert.ok(new RegExp(`[\\s{,]${key}[\\s:,\\[}]`).test(line), `HANDOFF.md 5.1 settings shape lacks "${key}"`);
   }
   // the profile is keyed on the website it was saved from, never the editable dealer name (CLAUDE.md)
