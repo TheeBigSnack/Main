@@ -99,7 +99,7 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
 const FACEBOOK_FUNCS = {
   fillFormInPage: /fill(?:s)? the vehicle listing form/i,
   attachPhotosInPage: /attach(?:es)? the car's photos/,
-  probeFormInPage: /check fields only, (?:to )?lists? that form's fields without filling them/,
+  probeFormInPage: /check fields only(?: \(nothing filled\)\*\*)?, (?:to )?lists? that form's fields without filling them/,
   fillPriceInPage: /fill(?:s)? the new price on the listing's edit form/,
   // store/listing.md says 'repeatedly': the listing copy carries no timing figures (test/honesty.js)
   readListingInPage: /reads? (?:every 1\.5 seconds|repeatedly) the Marketplace page[^|]*Your listings page when no (?:listing )?link was saved[^|]*title, (?:the )?prices/,
@@ -119,8 +119,14 @@ test('the Facebook host justification and the privacy texts name every read Lot 
 
   const store = rowText(read('legal/chrome-web-store-privacy.md'), 'Host `https://www.facebook.com/marketplace/*`');
   const listing = rowText(read('store/listing.md'), '`https://www.facebook.com/marketplace/*`');
-  for (const [where, row] of [['legal/chrome-web-store-privacy.md', store], ['store/listing.md', listing]]) {
+  // the help's install section says what Chrome's warning about that host covers, as the two rows do
+  const help = read('docs/help.md').split('\n').find((l) => l.startsWith('Chrome says the extension can read and change data on `www.facebook.com/marketplace`'));
+  assert.ok(help, 'docs/help.md no longer explains the Facebook host permission');
+  assert.match(read('extension/sidepanel.js'), /if \(state\.queueMode && r\.status === 'listing'\) \{[\s\S]{0,300}?return confirmIfThisCar\(/, 'a queue no longer reads the listing page it reached: update the texts and this test');
+  for (const [where, row] of [['legal/chrome-web-store-privacy.md', store], ['store/listing.md', listing], ['docs/help.md', help]]) {
     for (const [func, words] of Object.entries(FACEBOOK_FUNCS)) assert.match(row, words, `${where}: the Facebook host row does not say what ${func} does`);
+    assert.match(row, /notices? when the tab shows the published listing's address/, `${where}: the Facebook host row does not say the tab is watched for the listing's address`);
+    assert.match(row, /in a queue, [^;]*read(?:s)? that listing page a few times/, `${where}: the Facebook host row does not say a queue reads the listing it reached`);
     assert.doesNotMatch(row, /No other Facebook pages? (?:is|are) read/, `${where}: the Facebook host row says no other page is read while a to-do item reads the listing or Your listings page`);
     assert.match(row, /sent nowhere/);
   }
