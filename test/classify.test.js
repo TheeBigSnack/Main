@@ -199,13 +199,16 @@ test('a courtesy car, vehicle or loaner after a title separator is never Ready; 
     ['Used 2024 Jeep Grand Cherokee Limited - Courtesy Vehicle', 'Courtesy Vehicle'],
     ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Car', 'Courtesy Car'],
     ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Loaner | Example Motors', 'Courtesy Loaner'],
+    ['Used 2024 Jeep Grand Cherokee Limited - Courtesy Vehicle for Sale', 'Courtesy Vehicle'],
+    ['Used 2024 Jeep Grand Cherokee Limited - Courtesy Vehicle For Sale in Springfield, OH | Example Motors', 'Courtesy Vehicle'],
+    ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Car for Sale near Springfield', 'Courtesy Car'],
   ]) {
     const a = assessVehicle({ ...used, siteTitle }, {});
     assert.equal(a.decision, DECISION.REVIEW, siteTitle);
     assert.match(a.reason, new RegExp(`its title says "${word}"`), siteTitle);
   }
   assert.equal(assessVehicle({ ...used, inventoryType: null, urlConditionWord: null, url: null, siteTitle: '2024 Jeep Grand Cherokee Limited - Courtesy Vehicle' }, {}).decision, DECISION.SKIP);
-  for (const siteTitle of ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Car Center', 'Used 2024 Jeep Grand Cherokee Limited - Courtesy Cars', 'Used 2024 Jeep Grand Cherokee Limited – Courtesy Cars of Springfield', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Motors']) {
+  for (const siteTitle of ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Car Center', 'Used 2024 Jeep Grand Cherokee Limited - Courtesy Cars', 'Used 2024 Jeep Grand Cherokee Limited – Courtesy Cars of Springfield', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Motors', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Cars for Sale', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Car for Salem Motors']) {
     assert.equal(assessVehicle({ ...used, siteTitle }, {}).decision, DECISION.READY, siteTitle);
   }
   // the README's list of words holds after a separator too

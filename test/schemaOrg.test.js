@@ -755,10 +755,25 @@ test('the gate: a demo or loaner word only the page title has is read, with the 
   assert.match(a.reason, /its title says "Demo"/);
   // the name says Used and the page title says Courtesy Vehicle: both are read
   const used = flat({ name: 'Used 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX - Courtesy Vehicle | Sample Motors' }));
-  assert.equal(used.siteTitle, 'Used 2019 Honda Civic EX | 2019 Honda Civic EX - Courtesy Vehicle | Sample Motors');
+  assert.equal(used.siteTitle, 'Used 2019 Honda Civic EX - Courtesy Vehicle | Sample Motors');
   const b = assessVehicle(used, {});
   assert.equal(b.decision, DECISION.REVIEW);
   assert.match(b.reason, /^Listed as pre-owned but its title says "Courtesy Vehicle"/);
+  // the page title's word is read as the car's own word, wherever it stands after the model year
+  for (const [title, word] of [
+    ['2019 Honda Civic EX Courtesy Vehicle for Sale | Sample Motors', 'Courtesy Vehicle'],
+    ['2019 Honda Civic EX Courtesy Car Special | Sample Motors', 'Courtesy Car'],
+    ['Sample Motors | 2019 Honda Civic EX Courtesy Loaner Sale', 'Courtesy Loaner'],
+    ['2019 Honda Civic EX Demo Special | Sample Motors', 'Demo'],
+  ]) {
+    for (const name of ['Used 2019 Honda Civic EX', '2019 Honda Civic EX', 'Certified Pre-Owned 2019 Honda Civic EX']) {
+      const v = flat({ name }, shown(undefined, { ...carfax, title }));
+      const r = assessVehicle(v, {});
+      assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}: ${v.siteTitle}`);
+      assert.match(r.reason, new RegExp(`its title says "${word}"`), `${name} / ${title}`);
+      if (name !== '2019 Honda Civic EX') assert.equal(v.siteTitle, `${name.replace(/ 2019 Honda Civic EX$/, '')} ${title}`, 'the name\'s condition words go before the page title');
+    }
+  }
   // a page title about another car lends no words; a plain page title changes nothing
   assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2021 Kia Sorento LX Demo | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
   assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
