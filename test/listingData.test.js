@@ -421,6 +421,6 @@ test('on a website whose cars are all at one store, no car is away, ticked or no
   for (const doc of ['../README.md', '../docs/help.md']) {
     const said = readFileSync(new URL(doc, import.meta.url), 'utf8').split(/(?<=[.;])\s/).filter((x) => /does not name your town/.test(x));
     assert.ok(said.length, `${doc} says when the location is listed as assumed`);
-    for (const x of said) assert.match(x, /more than one store/, `${doc}: ${x}`);
+    for (const x of said) assert.match(x, /the last scan (?:did not find|found) every car on the website at that one store/, `${doc}: ${x}`);
   }
 });
