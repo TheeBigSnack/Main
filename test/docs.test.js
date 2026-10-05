@@ -1080,11 +1080,31 @@ test('no text says the data stays only in the browser: the profile follows the C
   assert.ok(line, "README no longer says where each salesperson's scans, settings and posted list are kept");
   assert.match(line, /the profile \(above\) is in Chrome's synced storage, so it follows their Chrome sign-in/, "README's storage line does not say the profile follows the Chrome sign-in");
   if (accountsConfigured()) {
-    assert.match(line, /while they are signed in to a Lot Current account their posted list, post timings, to-do items and each scan's counts also sync to the dealership's account/, "README's storage line does not say what syncs to the dealership's account");
+    assert.match(line, /while they are signed in to a Lot Current account their posted list, post timings, to-do items and the newest scan's counts also sync to the dealership's account/, "README's storage line does not say what syncs to the dealership's account");
   }
   // Clear everything for this website does not reach the synced profile (legal/privacy-policy.md, Retention)
   const support = read('../site-src/pages/support.html').split('\n').filter((l) => /stays in your browser/.test(l));
   for (const l of support) assert.match(l, /<b>Clear everything for this website<\/b> removes it\. Your profile \([^)]*closing line[^)]*\) is also kept by Chrome's sync under your Google account, and Settings, <b>Forget my synced profile<\/b> removes it\./, 'the support page says Clear everything removes what the extension keeps, but the synced profile needs Forget my synced profile');
+});
+
+// review: the privacy texts, README, help and set-up's Terms summary said "each scan's (time and) counts" sync,
+// while each sync sends one scan's counts, the newest stored one, and a scan judged a website hiccup sends none
+// (src/accountFlow.js scanFromStored).
+test('no text says each scan\'s counts sync: a sync sends the newest scan\'s, and none for a website hiccup', () => {
+  const flow = read('../extension/src/accountFlow.js');
+  assert.match(flow, /export function scanFromStored\(\{ snapshot = null, diff = null \} = \{\}\) \{\n  if \(diff && diff\.unreliable\) return null;/, 'a hiccup scan\'s counts may sync now: these texts can change');
+  const EACH = /\b(?:each|every) scan's (?:time and )?counts\b/i;
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  const pages = readdirSync(new URL('../site-src/pages/', import.meta.url)).map((f) => `../site-src/pages/${f}`);
+  for (const rel of ['../README.md', ...md('docs'), ...md('legal'), ...md('marketing'), '../store/listing.md', ...pages, '../extension/src/wizardSteps.js', '../extension/popup.js']) {
+    const hit = read(rel).match(EACH);
+    assert.equal(hit && hit[0], null, `${rel} says "${hit && hit[0]}" sync, while a sync sends the newest scan's counts and none for a website hiccup`);
+  }
+  const policy = read('../legal/privacy-policy.md').split('\n').find((l) => l.startsWith('| Scan results |'));
+  assert.match(policy, /of the newest scan, except a scan in which so many cars vanished at once that Lot Current treats it as a website hiccup, which sends none/);
+  const store = read('../legal/chrome-web-store-privacy.md');
+  assert.match(store, /the newest scan's counts \(none for a scan that looked like a website hiccup\)/);
+  assert.match(store, /unless the rescan looked like a website hiccup, the scan's counts/);
 });
 
 // "It didn't post" ends the post attempt the click on Post opened, as

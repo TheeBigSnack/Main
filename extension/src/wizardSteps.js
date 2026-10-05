@@ -46,7 +46,7 @@ export const LATER = Object.freeze({
 // it never says the data stays in the browser alone.
 export function termsSummary(configured = false) {
   const synced = configured
-    ? " While you are signed in, your posted list (each car's VIN, name and price, when you posted and updated it, the listing link and your name), your post timings, your to-do items (with the old and new price of a price change) and each scan's counts also sync to your dealership's account in Lot Current's database. There everyone at your dealership sees the posted list and the to-do items, and only you and your managers see your post timings."
+    ? " While you are signed in, your posted list (each car's VIN, name and price, when you posted and updated it, the listing link and your name), your post timings, your to-do items (with the old and new price of a price change) and the newest scan's counts also sync to your dealership's account in Lot Current's database. There everyone at your dealership sees the posted list and the to-do items, and only you and your managers see your post timings."
     : '';
   return "In short: Lot Current reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed, each with the car's VIN and name, your name from Settings and, for a price change, the website's old and new price), and never your Facebook login."
     + synced

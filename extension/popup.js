@@ -266,7 +266,7 @@ async function scan() {
     });
     if (!saved) return; // the status says why (the quota); the read stays on screen
     state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
-    syncInBackground(); // the scan's counts and the to-do items it flagged
+    syncInBackground(); // the scan's counts (none after a website hiccup) and the to-do items it flagged
     // the scan registered the website for background rescans; show its state
     state.site = ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {})[state.origin] || null;
     await checkRescanPermission();
