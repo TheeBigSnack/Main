@@ -26,6 +26,18 @@ test('one take-down keeps the VIN, when it was posted, when it was taken down an
   assert.deepEqual(noteTakenDown(null, { vin: VIN }, T(11), T(11)), [{ vin: VIN, postedAt: null, takenDownAt: T(11), stillListed: false }]);
 });
 
+test('a take-down keeps the car\'s name, so a listing still up is counted among the cars of that name', () => {
+  const log = noteTakenDown(null, { vin: VIN, postedAt: T(10), name: '  2019 Make\nModel  Trim ' }, T(11), T(11));
+  assert.deepEqual(log, [{ vin: VIN, postedAt: T(10), takenDownAt: T(11), stillListed: false, name: '2019 Make Model Trim' }]);
+  assert.deepEqual(takenDownList(log), log, 'read back as written');
+  // no name (an entry saved without one, or a record written before names were kept): none
+  for (const name of [undefined, '', '   ', 42, null]) {
+    assert.deepEqual(noteTakenDown(null, { vin: VIN, postedAt: T(10), name }, T(11), T(11)), [{ vin: VIN, postedAt: T(10), takenDownAt: T(11), stillListed: false }], String(name));
+    assert.deepEqual(takenDownList([{ vin: VIN, postedAt: T(10), takenDownAt: T(11), name }]), [{ vin: VIN, postedAt: T(10), takenDownAt: T(11), stillListed: false }], String(name));
+  }
+  assert.equal(takenDownList([{ vin: VIN, takenDownAt: T(11), name: 'x'.repeat(500) }])[0].name.length, 200, 'kept short');
+});
+
 test('the stored list is read defensively: what is not an entry is dropped', () => {
   assert.deepEqual(takenDownList(null), []);
   assert.deepEqual(takenDownList({ vin: VIN }), []);

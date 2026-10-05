@@ -1874,11 +1874,11 @@ const viewStubs = { carCard: () => '', languageHint: () => '', photosHtml: () =>
 // namesakesOf; `pages` is what each read of the listing page gives (an
 // Error: the read failed), the last one repeated; `during(n, state)` runs at
 // the n-th read. Each render records what the publish step shows.
-async function queueWatch({ queueMode, result, posted = {}, windowId = null, panelWindowId = null, pages = [THIS_CAR], during = null, detected = null }) {
+async function queueWatch({ queueMode, result, posted = {}, windowId = null, panelWindowId = null, pages = [THIS_CAR], during = null, detected = null, takenDown = null, snapshotVehicles = {}, name = '2020 Make Model' }) {
   const calls = [];
   const reads = [];
   const shown = [];
-  const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, detected, windowId, vin: 'AAA', vehicle: { vin: 'AAA', name: '2020 Make Model', price: 21000 }, price: 20000, settings: { basis: 'website' }, fill: null };
+  const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, takenDown, snapshotVehicles, detected, windowId, vin: 'AAA', vehicle: { vin: 'AAA', name, price: 21000 }, price: 20000, settings: { basis: 'website' }, fill: null };
   let fns;
   fns = compileMany(['startWatcher', 'postsWindow', 'confirmIfThisCar', 'offeredLink', 'viewPublish', 'onInput'], {
     state, watcher: null, isNewListingFromForm, showsPostedCar, namesakesOf, basisPrice, panelWindowId, flowRun: 0,
@@ -2030,6 +2030,20 @@ test('in a queue, a listing reached from the form page that does not show this c
   const twin = await queueWatch({ queueMode: true, result: fromForm, pages: [nameAndPrice], posted: { BBB: { name: '2020 Make Model', price: 20000 } } });
   assert.ok(!twin.calls.some((c) => c.startsWith('confirmPosted')), 'another posted car of the same name: only its VIN tells them apart');
   assert.equal(twin.state.detected.unverified, true);
+  // a car whose name is in this car's, a colleague's post, and a car taken off the posted list lately (its listing may still be up) count too
+  const T = (d) => `2026-10-0${d}T10:00:00.000Z`;
+  for (const [what, setup] of [
+    ['a posted car whose every word is in this car\'s name', { name: '2020 Make Model Sport 4x4', posted: { BBB: { name: '2020 Make Model Sport', price: 20000 } } }],
+    ['a colleague\'s post', { posted: { BBB: { name: '2020 Make Model', price: 20000, mine: false, userId: 'u2' } } }],
+    ['a car taken down, its name in the take-down record', { takenDown: noteTakenDown(null, { vin: 'BBB', postedAt: T(1), name: '2020 Make Model' }, T(2), T(2)) }],
+    ['a car taken down before names were kept, still on the website', { takenDown: noteTakenDown(null, { vin: 'BBB', postedAt: T(1) }, T(2), T(2)), snapshotVehicles: { BBB: { name: '2020 Make Model Sport' } } }],
+  ]) {
+    const r = await queueWatch({ queueMode: true, result: fromForm, pages: [nameAndPrice], ...setup });
+    assert.ok(!r.calls.some((c) => c.startsWith('confirmPosted')), what);
+    assert.equal(r.state.detected.unverified, true, what);
+  }
+  const ownTakeDown = await queueWatch({ queueMode: true, result: fromForm, pages: [nameAndPrice], takenDown: noteTakenDown(null, { vin: 'AAA', postedAt: T(1), name: '2020 Make Model' }, T(2), T(2)) });
+  assert.equal(ownTakeDown.calls.at(-1), 'confirmPosted ' + ITEM, 'this car\'s own take-down is not another car');
   // the person clicks It's posted (or the post ends) while the page is read: the reads stop and nothing more is said
   const clicked = await queueWatch({ queueMode: true, result: fromForm, pages: [OTHER_CAR], during: (n, state) => { if (n === 2) state.step = 'done'; } });
   assert.deepEqual([clicked.reads.length, clicked.calls.some((c) => c.startsWith('confirmPosted')), clicked.state.detected], [2, false, { ...fromForm, checking: true }]);

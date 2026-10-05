@@ -108,6 +108,7 @@ test('at the daily cap, Taken down or unmarking Posted ✓ on one of today\'s po
     const kept = p.local[k.takenDown];
     assert.equal(kept.length, 1, `${action}: the post is kept for the cap`);
     assert.deepEqual([kept[0].vin, kept[0].postedAt, kept[0].stillListed], [car.vin, posted[car.vin].postedAt, true], 'the website still lists the car as ready');
+    assert.equal(kept[0].name, car.name, `${action}: its name is kept, so a listing still up counts among the cars of that name`);
     await p.tab('ready');
     assert.match(p.panel(), new RegExp(`data-action="openPost" data-vin="${car.vin}" disabled`), `${action}: Post stays off at 1 of 1`);
     await p.click('openPost', { vin: car.vin });

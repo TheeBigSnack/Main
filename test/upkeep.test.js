@@ -16,7 +16,8 @@ import assert from 'node:assert/strict';
 import { readListingInPage } from '../extension/facebook/fillForm.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
-import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, offTargetNote } from '../extension/upkeep.js';
+import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote } from '../extension/upkeep.js';
+import { noteTakenDown } from '../extension/src/takenDown.js';
 
 // A page as the reader walks it: text nodes, each inside a plain block or a
 // dialog, and an optional Price box (in a dialog or on the page).
@@ -122,6 +123,61 @@ test('upkeep finds this car\'s own listing by its id, or with no link by its who
 // listing there, and no id is taken from it. A listing's own link opens the
 // listing, with no note. Run with upkeep.js's own startUpkeep; Chrome's tabs
 // are a stand-in.
+// A name like this car's, either way round, from any car that may still have
+// a listing up: posted by this salesperson or a colleague, or taken off the
+// posted list lately (the take-down record keeps the name; an older record
+// without one takes it from the last scan).
+test('a car whose name is in this car\'s, a colleague\'s post and a take-down all count as namesakes', async () => {
+  const EXPRESS = '2019 Ram 1500 Classic Express';
+  const EXPRESS_4X4 = '2019 Ram 1500 Classic Express 4x4';
+  const [MINE, TWIN, OTHER] = ['1C6RR7FT0KS000001', '1C6RR7FT0KS000002', '1C6RR7FT0KS000003'];
+  // this car's name holds every word of the other's: the other Ram's page shows 4x4 in its details, its name and the same price
+  assert.equal(namesakesOf({ [MINE]: { name: EXPRESS_4X4 }, [TWIN]: { name: EXPRESS } }, MINE, EXPRESS_4X4), 1);
+  assert.equal(namesakesOf({ [MINE]: { name: EXPRESS }, [TWIN]: { name: EXPRESS_4X4 } }, MINE, EXPRESS), 1, 'and the other way round, as before');
+  const mine = { id: '', name: EXPRESS_4X4, prices: [27163], vin: MINE };
+  const other = readPage({ url: at(434343), texts: [EXPRESS, '$27,163', 'Drivetrain: 4x4', `VIN ${TWIN}.`] }, mine);
+  assert.deepEqual([other.matchesName, other.matchesPrice, other.matchesVin], [true, true, false], 'the other Ram\'s page reads as this car by name and price');
+  assert.equal(onListing(other, { yourListingsUrl: YOURS, namesakes: namesakesOf({ [TWIN]: { name: EXPRESS } }, MINE, EXPRESS_4X4) }), false, 'so only this car\'s VIN tells them apart');
+  // names that share words but where neither holds the other: not namesakes; nor a car with no name
+  assert.equal(namesakesOf({ [TWIN]: { name: '2019 Ram 1500 Classic Tradesman' }, [OTHER]: { name: '' } }, MINE, EXPRESS), 0);
+  assert.equal(namesakesOf({ [TWIN]: {} }, MINE, EXPRESS), 0);
+  // a colleague's post, merged in by the sync
+  assert.equal(namesakesOf({ [TWIN]: { name: EXPRESS, mine: false, userId: 'u2' } }, MINE, EXPRESS), 1);
+  // taken off the posted list: still counted while the record keeps it, by its own name or, recorded without one, the last scan's
+  const T = (h) => new Date(Date.UTC(2026, 9, 5, h)).toISOString();
+  const named = noteTakenDown(null, { vin: TWIN, postedAt: T(1), name: EXPRESS }, T(2), T(2));
+  assert.equal(named[0].name, EXPRESS, 'the record keeps the name');
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: named }), 1);
+  const unnamed = noteTakenDown(null, { vin: TWIN, postedAt: T(1) }, T(2), T(2));
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: unnamed }), 0, 'with no name anywhere it is not counted');
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: unnamed, names: { [TWIN]: { name: EXPRESS_4X4 } } }), 1);
+  // each car once, and never this car's own take-down
+  assert.equal(namesakesOf({ [TWIN]: { name: EXPRESS } }, MINE, EXPRESS, { takenDown: named }), 1);
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: noteTakenDown(null, { vin: MINE, postedAt: T(1), name: EXPRESS }, T(2), T(2)) }), 0);
+
+  // To do reads all of it from storage: the posted list, the take-down record and, for a record with no name, the last scan (once per item)
+  const o = 'https://www.example-motors.test';
+  const store = {
+    [`posted:${o}`]: { [MINE]: { name: EXPRESS_4X4 } },
+    [`takenDown:${o}`]: [...unnamed, ...noteTakenDown(null, { vin: OTHER, postedAt: T(1), name: EXPRESS }, T(3), T(3))],
+    [`snapshot:${o}`]: { vehicles: { [TWIN]: { name: '2019 Ram 1500 Classic Express 4x4 Crew Cab' } } },
+  };
+  const asked = [];
+  globalThis.chrome = { storage: { local: { get: async (keys) => { asked.push(keys); return Object.fromEntries([keys].flat().map((k) => [k, store[k]])); } } } };
+  Object.assign(up, { origin: o, vin: MINE, name: EXPRESS_4X4, names: null });
+  try {
+    assert.equal(await namesakesNow(), 2, 'the take-down named in the record, and the one named by the last scan');
+    assert.equal(await namesakesNow(), 2);
+    assert.equal(asked.filter((k) => k === `snapshot:${o}`).length, 1, 'the last scan is read once');
+    globalThis.chrome = { storage: { local: { get: async () => { throw new Error('no storage'); } } } };
+    assert.equal(await namesakesNow(), null, 'unread: unknown');
+  } finally {
+    delete globalThis.chrome;
+    endUpkeep();
+    Object.assign(up, { origin: null, vin: null, name: '', names: null });
+  }
+});
+
 test('upkeep treats a saved link that is not a listing\'s own address as no link, and says to open the listing', async () => {
   const opened = [];
   globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 9 }; } } };
@@ -162,9 +218,9 @@ test('with another posted car of the same name, upkeep needs this car\'s VIN on 
     '1C4RJFBG5MC000004': { name: LIMITED, price: 31995 },
     '1C4RJFBG5MC000005': { name: '2019 Jeep Grand', price: 31995 },
   };
-  assert.equal(namesakesOf(posted, VIN_A, LAREDO), 2, 'the other Laredo, and the Laredo E whose name holds every word of it');
-  assert.equal(namesakesOf(posted, VIN_A.toLowerCase(), LAREDO), 2, 'never itself');
-  assert.equal(namesakesOf(posted, '1C4RJFBG5MC000004', LIMITED), 0);
+  assert.equal(namesakesOf(posted, VIN_A, LAREDO), 3, 'the other Laredo, the Laredo E whose name holds every word of it, and the Grand whose every word is in it');
+  assert.equal(namesakesOf(posted, VIN_A.toLowerCase(), LAREDO), 3, 'never itself');
+  assert.equal(namesakesOf(posted, '1C4RJFBG5MC000004', LIMITED), 1, 'the Grand: the Laredos have a word the Limited lacks, and it has one they lack');
   assert.equal(namesakesOf({}, VIN_A, LAREDO), 0);
   assert.equal(namesakesOf(null, VIN_A, LAREDO), 0);
 
@@ -197,7 +253,7 @@ test('with another posted car of the same name, upkeep needs this car\'s VIN on 
   // what the panel says on the other unit's page
   Object.assign(up, { kind: 'price', name: LAREDO, vin: VIN_A, listedPrice: 31995 });
   try {
-    assert.match(offTargetNote('', twin, 1), /Another car you posted also has 2019 Jeep Grand Cherokee Laredo in its name, so a listing counts as this car's only when its page shows this car's VIN, 1C4RJFBG5MC000001, and this page doesn't\. .*click I updated it\./);
+    assert.match(offTargetNote('', twin, 1), /Another car you posted or took down has a name like 2019 Jeep Grand Cherokee Laredo, so a listing counts as this car's only when its page shows this car's VIN, 1C4RJFBG5MC000001, and this page doesn't\. .*click I updated it\./);
     assert.match(offTargetNote('', twin, null), /couldn't read your posted cars/);
     assert.match(offTargetNote('', readPage({ url: YOURS, texts: ['Your listings'] }, mine), 1), /looks for its full name, \$31,995 and its VIN, 1C4RJFBG5MC000001/);
     assert.match(offTargetNote('', readPage({ url: YOURS, texts: ['Your listings'] }, mine), 0), /looks for its full name and \$31,995\)/);

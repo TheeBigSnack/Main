@@ -12,8 +12,8 @@
 //     no saved link, never on the Your listings page, and elsewhere only a
 //     page that shows every word of the car's name as a whole word and the
 //     price it was listed at (or the new price), and also its VIN when
-//     another car in the posted list has every word of this car's name in
-//     its own (two identical units at one price look alike otherwise). Such
+//     another car posted or taken down lately has a name like this car's
+//     (namesakesOf: two such units at one price look alike otherwise). Such
 //     a page that is a listing gives the id, which is what counts from then
 //     on. A car with neither a link nor a listed price is never matched: the
 //     person uses I updated it / I took it down;
@@ -26,7 +26,7 @@ import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { listingLink } from './facebook/detectPost.js';
 import { resolveFlag, updatePilot } from './src/pilot.js';
 import { siteKeys } from './src/storageKeys.js';
-import { noteTakenDown } from './src/takenDown.js';
+import { noteTakenDown, takenDownList } from './src/takenDown.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { accountsConfigured } from './src/accountConfig.js';
 import { loadSession } from './src/account.js';
@@ -37,6 +37,7 @@ export const up = {
   listingId: '', // the listing's id, from its saved link or from this car's own listing page once opened (onListing)
   tabId: null, status: 'idle', // idle | opening | waiting | filled | done | gone
   note: '', filledShown: '', seen: null, error: '', fills: 0,
+  names: null, // the last scan's cars by VIN, read once for a take-down recorded without its name (namesakesNow)
   baseline: null, // { url, sold, unavailable } from the first read of the current page
   offTarget: false, // the tab is showing some other page
 };
@@ -68,7 +69,7 @@ function stopPolling() {
 // to open the listing, instead of being sent to a page with no word about it.
 export async function startUpkeep(req, ctx) {
   stopPolling();
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false });
   ctx.render();
   const map = ctx.map();
   const url = up.listingUrl || map.yourListingsUrl;
@@ -97,24 +98,46 @@ const expectFor = (map) => ({ id: knownId(map), name: up.name, prices: [up.liste
 // The words of a car's name as the listing reader compares them.
 const nameWords = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase().split(' ').map((t) => t.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')).filter(Boolean);
 
-// How many other cars in the posted list have every word of this car's name
-// in their own: a listing of one of them shows this car's name too (a second
-// 2021 Jeep Grand Cherokee Laredo, or a Wrangler Unlimited Sport for a
-// Wrangler Sport), and perhaps the same price.
-export function namesakesOf(posted, vin, name) {
+// Whether a listing of a car named `theirs` (words) can show every word of
+// this car's name: every word of one name is in the other, either way round.
+// A second 2021 Jeep Grand Cherokee Laredo, a Wrangler Unlimited Sport for a
+// Wrangler Sport, and a Ram 1500 Classic for a Ram 1500 Classic 4x4 (whose
+// 4x4 that listing's description or details may well show) all do. A car
+// with no name is not counted.
+const nameLike = (mine, theirs) => theirs.length > 0 && (mine.every((w) => theirs.includes(w)) || theirs.every((w) => mine.includes(w)));
+
+// How many other cars have a name like this car's (nameLike): a listing of
+// one of them can show this car's name too, and perhaps the same price. The
+// cars are every entry of the posted list, colleagues' too (sync merges
+// theirs into it), and the posts taken off it lately (`takenDown`, the
+// take-down record, src/takenDown.js: such a listing may still be on
+// Facebook), each car once. A take-down recorded without its name takes it
+// from `names` (the last scan's cars by VIN) when the website still lists it.
+export function namesakesOf(posted, vin, name, { takenDown = null, names = null } = {}) {
   const mine = nameWords(name);
   if (mine.length < 2) return 0;
   const own = String(vin || '').toUpperCase();
-  return Object.entries(posted && typeof posted === 'object' ? posted : {})
-    .filter(([v, p]) => String(v).toUpperCase() !== own && p && mine.every((w) => nameWords(p.name).includes(w))).length;
+  const known = (v) => (names && typeof names === 'object' && names[v] && names[v].name) || '';
+  const others = new Map(); // VIN -> name
+  for (const [v, p] of Object.entries(posted && typeof posted === 'object' ? posted : {})) {
+    if (p && typeof p === 'object') others.set(String(v).toUpperCase(), p.name || known(v));
+  }
+  for (const t of takenDownList(takenDown)) if (!others.get(t.vin)) others.set(t.vin, t.name || known(t.vin));
+  return [...others].filter(([v, n]) => v !== own && nameLike(mine, nameWords(n))).length;
 }
 
 // The same, from what is stored now; null when the posted list can't be read
-// (onListing then asks for the VIN, as if there were one).
-async function namesakesNow() {
+// (onListing then asks for the VIN, as if there were one). The last scan is
+// read only for a take-down recorded before names were kept, once per item.
+export async function namesakesNow() {
   try {
-    const k = siteKeys(up.origin).posted;
-    return namesakesOf((await chrome.storage.local.get(k))[k], up.vin, up.name);
+    const k = siteKeys(up.origin);
+    const got = await chrome.storage.local.get([k.posted, k.takenDown]);
+    if (!up.names && takenDownList(got[k.takenDown]).some((t) => !t.name)) {
+      const snap = (await chrome.storage.local.get(k.snapshot))[k.snapshot];
+      up.names = (snap && snap.vehicles) || {};
+    }
+    return namesakesOf(got[k.posted], up.vin, up.name, { takenDown: got[k.takenDown], names: up.names });
   } catch (e) {
     return null;
   }
@@ -236,7 +259,7 @@ async function finish(ctx, how) {
     // car as ready
     if (!price) {
       const entry = ((await chrome.storage.local.get(k.posted))[k.posted] || {})[up.vin];
-      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true }));
+      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true, name: entry.name }));
     }
     await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
     await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook']));
@@ -262,7 +285,7 @@ export function offTargetNote(id, seen, namesakes = 0) {
   if (id) return `This tab isn't showing the listing for ${up.name}. Open that listing and Lot Current continues.`;
   if (!up.listedPrice) return `No listing link or listed price was saved for ${up.name}, so Lot Current can't tell which listing is its own and fills in or ticks off nothing. Do it on Facebook, then click ${done}.`;
   if (namesakes !== 0 && seen && seen.matchesName && seen.matchesPrice && !seen.matchesVin) {
-    const why = namesakes === null ? `Lot Current couldn't read your posted cars to check whether another one is also a ${up.name}` : `Another car you posted also has ${up.name} in its name`;
+    const why = namesakes === null ? `Lot Current couldn't read your posted cars to check whether another one is also a ${up.name}` : `Another car you posted or took down has a name like ${up.name}`;
     return `${why}, so a listing counts as this car's only when its page shows this car's VIN, ${up.vin}, and this page doesn't. Open this car's own listing (its description carries the VIN); if the VIN isn't on it, do it on Facebook, then click ${done}.`;
   }
   const looksFor = namesakes !== 0 ? `its full name, ${money(up.listedPrice)} and its VIN, ${up.vin}` : `its full name and ${money(up.listedPrice)}`;

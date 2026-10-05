@@ -1112,7 +1112,7 @@ async function keepTakenDown(vin) {
   const entry = state.posted[vin];
   if (!entry || entry.mine === false) return true;
   const stillListed = stillListedNow(state.snapshot, state.diff, vin);
-  return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed, listedBefore: entry.listedBefore === true }));
+  return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed, listedBefore: entry.listedBefore === true, name: entry.name }));
 }
 
 // The post under way in the side panel for this website (postFlow:<origin>),

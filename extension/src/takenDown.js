@@ -19,9 +19,13 @@
 //
 // Each entry is { vin, postedAt, takenDownAt, stillListed }, plus
 // listedBefore: true for a listing marked as made by hand before the day it
-// was marked posted (no post of that day, so the cap never counts it):
-// stillListed is whether the website still listed the car as ready to post
-// when it was taken down (stillListedNow). Kept in this browser only, under
+// was marked posted (no post of that day, so the cap never counts it), and
+// the car's name as the posted list had it (name, when it had one): a
+// listing taken down here may still be on Facebook, so the side panel and
+// To do count it among the cars whose listing looks like another car's of
+// that name (upkeep.js namesakesOf). stillListed is whether the website
+// still listed the car as ready to post when it was taken down
+// (stillListedNow). Kept in this browser only, under
 // takenDown:<origin> (src/storageKeys.js), never synced; pruned on every
 // write to the last KEEP_DAYS days and the newest MAX_ENTRIES entries.
 
@@ -41,6 +45,7 @@ const iso = (x) => {
   return t === null ? null : new Date(t).toISOString();
 };
 const vinOf = (v) => String(v ?? '').trim().toUpperCase().slice(0, 17);
+const nameOf = (n) => (typeof n === 'string' ? n.replace(/\s+/g, ' ').trim().slice(0, 200) : '');
 
 // The stored list, each entry well formed (a VIN and a take-down time).
 export function takenDownList(log) {
@@ -50,7 +55,8 @@ export function takenDownList(log) {
     const vin = vinOf(e.vin);
     const takenDownAt = iso(e.takenDownAt);
     if (!vin || !takenDownAt) continue;
-    out.push({ vin, postedAt: iso(e.postedAt), takenDownAt, stillListed: e.stillListed === true, ...(e.listedBefore === true ? { listedBefore: true } : {}) });
+    const name = nameOf(e.name);
+    out.push({ vin, postedAt: iso(e.postedAt), takenDownAt, stillListed: e.stillListed === true, ...(e.listedBefore === true ? { listedBefore: true } : {}), ...(name ? { name } : {}) });
   }
   return out;
 }
@@ -73,16 +79,18 @@ export function stillListedNow(snapshot, diff, vin) {
  *   stillListed    stillListedNow() at the moment of the take-down
  *   listedBefore   the posted entry's listedBefore (made by hand before the
  *                  day it was marked posted: no post of that day)
+ *   name           the posted entry's name (for namesakesOf)
  *   at             when it was taken down
  */
-export function noteTakenDown(log, { vin, postedAt = null, stillListed = false, listedBefore = false } = {}, at = new Date().toISOString(), now = at) {
+export function noteTakenDown(log, { vin, postedAt = null, stillListed = false, listedBefore = false, name = '' } = {}, at = new Date().toISOString(), now = at) {
   const v = vinOf(vin);
   const when = iso(at);
   const list = takenDownList(log);
   if (!v || !when) return list;
   const posted = iso(postedAt);
   const kept = list.filter((e) => !(e.vin === v && e.postedAt === posted));
-  kept.push({ vin: v, postedAt: posted, takenDownAt: when, stillListed: stillListed === true, ...(listedBefore === true ? { listedBefore: true } : {}) });
+  const named = nameOf(name);
+  kept.push({ vin: v, postedAt: posted, takenDownAt: when, stillListed: stillListed === true, ...(listedBefore === true ? { listedBefore: true } : {}), ...(named ? { name: named } : {}) });
   const floor = (ms(now) ?? Date.now()) - KEEP_DAYS * DAY_MS;
   return kept
     .filter((e) => ms(e.takenDownAt) >= floor || (e.postedAt && ms(e.postedAt) >= floor))

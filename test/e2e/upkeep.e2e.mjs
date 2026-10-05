@@ -194,7 +194,7 @@ try {
   // the person opens the OTHER Ram (same name, same price) and marks it sold: not this car's take-down
   await listing2.click('a[href="/marketplace/item/434343/"]');
   await listing2.waitForURL(/\/marketplace\/item\/434343\/$/);
-  await panel.waitForFunction(() => /Another car you posted also has 2019 Ram 1500 Classic Express in its name.*VIN, 1C6RR7FT0KS643289, and this page doesn't/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
+  await panel.waitForFunction(() => /Another car you posted or took down has a name like 2019 Ram 1500 Classic Express.*VIN, 1C6RR7FT0KS643289, and this page doesn't/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
   assert.deepEqual(await listingActions(), ['save 515151'], 'nothing was marked sold or deleted on Your listings');
   await listing2.click('text=Mark as sold'); // the person, on the wrong Ram
   await listing2.waitForTimeout(3500);
@@ -216,6 +216,9 @@ try {
   assert.deepEqual(await listingActions(), ['save 515151', 'sold 434343', 'sold 424242'], "one more Mark as sold, the person's");
   await panel.screenshot({ path: join(shots, 'upkeep-3-sold.png') });
   await panel.click('#upkeepClose');
+  // the take-down record keeps the Ram's name: its listing, marked sold, still looks like a car of that name
+  const downRecord = await panel.evaluate(async (o) => (await chrome.storage.local.get(`takenDown:${o}`))[`takenDown:${o}`], origin);
+  assert.deepEqual(downRecord.map((e) => [e.vin, e.name]), [[RAM, '2019 Ram 1500 Classic Express']]);
 
   popup = await openPopup();
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');

@@ -1198,9 +1198,9 @@ function startWatcher() {
 
 // The listing page the form's tab is on is read (read-only) a few times
 // while it loads. Only a page that is that listing and shows this car (its
-// VIN in the page's text, or, when no other posted car has its name, its
-// name and the price the form was filled with; never the form itself:
-// showsPostedCar) is shown as "Looks like it posted" with its address in the
+// VIN in the page's text, or, when no other car posted or taken down lately
+// has a name like its own (upkeep.js namesakesOf), its name and the price
+// the form was filled with; never the form itself: showsPostedCar) is shown as "Looks like it posted" with its address in the
 // Listing link box, and, in a queue, recorded by itself when `record` says
 // the tab came straight from the form to a new listing in the post's own
 // panel. A notification or a link clicked on the form page also goes
@@ -1220,7 +1220,7 @@ async function confirmIfThisCar(d, record) {
   const still = () => run === flowRun && state.step === 'publish' && state.vin === vin && state.detected === d;
   const price = typeof state.price === 'number' && state.price > 0 ? state.price : vehicle ? basisPrice(vehicle, state.priceBasis || state.settings.basis) : null;
   const expect = { id: r.id, name: vehicle ? vehicle.name : '', prices: typeof price === 'number' && price > 0 ? [price] : [], vin };
-  const namesakes = vehicle ? namesakesOf(state.posted, vin, vehicle.name) : null;
+  const namesakes = vehicle ? namesakesOf(state.posted, vin, vehicle.name, { takenDown: state.takenDown, names: state.snapshotVehicles }) : null;
   for (let i = 0; vehicle && i < VERIFY_READS; i += 1) {
     if (i) await sleep(VERIFY_EVERY_MS);
     if (!still()) return undefined;
