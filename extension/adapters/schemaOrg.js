@@ -774,11 +774,11 @@ async function twoAtATime(items, work) {
 // page is read for, `vin`, else the car its markup puts at this address),
 // such an address is another car's only when a word in it tells another
 // car from this one (namesAnotherCar: a stock number or id, another model
-// year, another make), so its tile does not pass for this car's text; any
-// other ("See all 2016 Honda Civic?sort=price", "Shop new 2027 Honda
-// Civic", another address of this same car) goes to no car, so the car's
-// own price box is not cut out, whether or not this website's car
-// addresses carry their VIN. On a
+// year, another make, a new car's other model or trim), so its tile does
+// not pass for this car's text; any other ("See all 2016 Honda
+// Civic?sort=price", "Shop new 2027 Honda Civic", another address of this
+// same car) goes to no car, so the car's own price box is not cut out,
+// whether or not this website's car addresses carry their VIN. On a
 // page that is no one car's own (a list), a VIN-less address that reads
 // like a car page goes to a car only when it has the shape of this lot's
 // car addresses (cars.shape, the addresses the list linked to, else those
@@ -837,24 +837,55 @@ function carKeys(pageUrl, cars, vin = '') {
 // one car from another: a word with a digit in it that is not a model year
 // and not one of this car's own words (another car's stock number "sm1001"
 // or id "88001", another model "f250"), in its path or in the values of its
-// query, where a number of one or two digits ("?page=2", "?srp=1") counts
-// for nothing; a model year other than this car's, unless the address is
-// about new cars ("Shop new 2027 Honda Civic"); or a make other than this
-// car's ("/used/2016-toyota-camry/" on a Honda's page; every make the VIN
-// check knows). This car's own words are its make, or the short name
-// people use for it, its model, trim, body style, drive and stock number,
-// also run together ("f150" for an F-150). Any other word names no car: a
-// search's or a breadcrumb's ("near-me", "hybrid", "?sort=price",
-// "?utm_source=vdp"), so "See all 2016 Honda Civic" in a car's own price
-// box never makes the box another car's. Two cars of one year, make and
-// model whose addresses carry no stock number or id can't be told apart
-// this way.
+// query, where a number of one or two digits ("?srp=1") counts for nothing;
+// a model year other than this car's; or a make other than this car's
+// ("/used/2016-toyota-camry/" on a Honda's page: every make in MAKES, also
+// in two words, "land rover"). This car's own words are its make, or the
+// short name people use for it, its model, trim, body style, drive and
+// stock number, also run together ("f150" for an F-150). Any other word
+// names no car: a search's or a breadcrumb's ("near-me", "hybrid"), so "See
+// all 2016 Honda Civic" in a car's own price box never makes the box
+// another car's. Neither do the parts of a search that are no car's: the
+// values of a tracking, place, paging, sorting, price or mileage query
+// (QUIET_QUERY_KEY: "?utm_campaign=fall2026", "?zip=15370", "?radius=100"),
+// a page number ("/page/3/"), a price limit ("-under-20000"), a range of
+// model years with this car's in it ("2014-2018") and a door, drive or
+// engine word ("4dr", "4x4", "v6": PLAIN_DIGIT_WORD). An address about new
+// cars at another model year ("Shop new 2027 Honda Civic") is a search for
+// this car's model only when every other word in it is this car's own or a
+// search's (SEARCH_WORDS); a word of any other kind ("/new/2027-honda-civic-
+// sport/", "/new-vehicles/2027-honda-accord/") makes it another car's. Not
+// told apart this way: an address with no stock number or id, no other make
+// and no model with a digit, at this car's model year ("/used/2016-honda-
+// accord/" or "/used/2016-accord/" on a 2016 Honda Civic's page), or about
+// new cars at another year with only this car's own and search words.
 const wordsOf = (value) => String(value || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 const MAKE_NAMES = new Map([['chevrolet', ['chevy']], ['volkswagen', ['vw']], ['mercedesbenz', ['mb']]]);
-const MAKES = new Set(MANUFACTURERS.flatMap(([, , makes]) => makes.map((m) => wordsOf(m).join(''))).concat(['chevy', 'vw', 'mb']));
+// Every make the VIN check knows, every other make the probe's SUBSET_WORDS
+// names, and a few more, each joined into one word ("landrover");
+// test/rescan.test.js checks the VIN check's and the probe's.
+const MAKES = new Set([
+  ...MANUFACTURERS.flatMap(([, , makes]) => makes.map((m) => wordsOf(m).join(''))),
+  'chevy', 'vw', 'mb', 'benz', 'alfa', 'alfaromeo', 'astonmartin', 'bentley', 'bugatti', 'canam', 'daewoo', 'ferrari', 'fisker', 'husqvarna',
+  'ineos', 'isuzu', 'karma', 'ktm', 'lamborghini', 'landrover', 'lotus', 'lucid', 'maserati', 'maybach', 'mclaren', 'mitsubishi', 'motoguzzi',
+  'polaris', 'polestar', 'porsche', 'rivian', 'rollsroyce', 'royalenfield', 'smart', 'vinfast',
+]);
+// Words a search's address holds besides a car's own: inventory, condition,
+// body, cab and drive words, and the pieces of a web address.
+const SEARCH_WORDS = new Set([
+  'used', 'new', 'pre', 'owned', 'preowned', 'certified', 'cpo', 'inventory', 'vehicle', 'vehicles', 'car', 'cars', 'auto', 'autos', 'truck', 'trucks', 'suv', 'suvs', 'van', 'vans',
+  'for', 'sale', 'forsale', 'search', 'all', 'shop', 'browse', 'view', 'see', 'more', 'similar', 'like', 'results', 'listing', 'listings', 'srp', 'make', 'makes', 'model', 'models',
+  'year', 'years', 'trim', 'trims', 'body', 'type', 'style', 'condition', 'en', 'es', 'index', 'html', 'htm', 'php', 'asp', 'aspx', 'jsp',
+  'sedan', 'sedans', 'coupe', 'coupes', 'hatchback', 'hatchbacks', 'hatch', 'wagon', 'wagons', 'convertible', 'convertibles', 'crossover', 'crossovers', 'minivan', 'minivans', 'pickup', 'pickups',
+  'cab', 'crew', 'crewcab', 'extended', 'double', 'quad', 'supercrew', 'supercab', 'crewmax', 'door', 'doors', 'awd', 'fwd', 'rwd', '4wd', '2wd', '4x4', '4x2',
+]);
 // words with a digit that only describe a car: doors, drive, engine
 const PLAIN_DIGIT_WORD = /^(?:[2-5]dr|4x[24]|[24]wd|[vi][3-8]|v1[02])$/;
 const MODEL_YEAR_WORD = /^(?:19[5-9][0-9]|20[0-9][0-9])$/;
+// query names whose values are a search's, never a car's: tracking, place, paging, sorting, price and mileage ranges
+const QUIET_QUERY_KEY = /^(?:utm_[a-z0-9_]*|gclid|gclsrc|dclid|fbclid|msclkid|gbraid|wbraid|yclid|_ga|_gl|mc_cid|mc_eid|referrer|zip|zipcode|zip_code|postal|postalcode|postal_code|radius|distance|lat|lng|lon|latitude|longitude|page|pg|start|offset|limit|per_?page|page_?size|sort[a-z_]*|order[a-z_]*|dir|direction|view|price[a-z_]*|min[a-z_]*|max[a-z_]*|mileage[a-z_]*|odometer[a-z_]*|payment[a-z_]*)$/i;
+const PAGE_WORD = /^(?:page|pg|p)$/;
+const PRICE_LIMIT_WORD = /^(?:under|below|over|above|max|min|maximum|minimum|less|than|upto)$/;
 function namesAnotherCar(href, car) {
   if (!car) return true;
   let u;
@@ -878,9 +909,11 @@ function namesAnotherCar(href, car) {
     }
   };
   const path = wordsOf(decoded(u.pathname + (/^#!?\//.test(u.hash) ? u.hash : '')));
-  const query = [...u.searchParams.values()].map(wordsOf);
+  const query = [...u.searchParams.entries()].filter(([k]) => !QUIET_QUERY_KEY.test(k)).map(([, v]) => wordsOf(v));
   const aboutNew = path.includes('new') || query.some((w) => w.includes('new'));
   const year = Number(car.year) || null;
+  let otherYear = false; // a model year other than this car's, in an address about new cars
+  let otherWord = false; // a word that is neither this car's own nor a search's
   const tells = (words, inQuery) => {
     for (let i = 0; i < words.length;) {
       let step = 0;
@@ -893,14 +926,28 @@ function namesAnotherCar(href, car) {
       // a make other than this car's, also in two words ("land rover")
       for (let j = Math.min(words.length, i + 2); j > i; j -= 1) if (MAKES.has(words.slice(i, j).join(''))) return true;
       const w = words[i];
+      const prev = words[i - 1] || '';
       if (MODEL_YEAR_WORD.test(w)) {
-        if (Number(w) !== year && !aboutNew) return true;
-      } else if (/\d/.test(w) && !PLAIN_DIGIT_WORD.test(w) && !(inQuery && /^\d{1,2}$/.test(w))) return true;
+        // a range of model years with this car's in it ("2014-2018")
+        if (year && MODEL_YEAR_WORD.test(words[i + 1] || '') && Number(w) <= year && year <= Number(words[i + 1])) {
+          i += 2;
+          continue;
+        }
+        if (Number(w) !== year) {
+          if (!aboutNew) return true;
+          otherYear = true;
+        }
+      } else if (/\d/.test(w)) {
+        const quiet = PLAIN_DIGIT_WORD.test(w) || (inQuery && /^\d{1,2}$/.test(w)) || (PAGE_WORD.test(prev) && /^\d{1,3}$/.test(w)) || (PRICE_LIMIT_WORD.test(prev) && /^\d{3,6}k?$/.test(w));
+        if (!quiet) return true;
+      } else if (!SEARCH_WORDS.has(w)) otherWord = true;
       i += 1;
     }
     return false;
   };
-  return tells(path, false) || query.some((words) => tells(words, true));
+  if (tells(path, false) || query.some((words) => tells(words, true))) return true;
+  // about new cars at another model year: a search for this car's model only with no word of another kind
+  return otherYear && otherWord;
 }
 
 // The car whose own page this is, from its markup: the node with a VIN at

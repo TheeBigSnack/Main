@@ -702,6 +702,7 @@ function linkTargets(root, unseen, own) {
     el.linkShown = link !== null ? shown : linkShown;
     el.money = money;
   }
+  return heading;
 }
 
 // An element is a car's card when every car link inside it goes to that one
@@ -720,8 +721,8 @@ const isCard = (parent, child) => child.cars !== null && child.cars !== undefine
 // tile: a car's own price box comes before a "similar vehicles" tile, while
 // a tile's own price may sit after its link ("<div class=tile><div><a>..</a>
 // Price drop $500</div><div>$15,000</div></div>" stays whole). visibleText
-// keeps the whole element as the tile's unless the page's own text shows no
-// dollar amount and the element comes right after the page's heading.
+// keeps the whole element as the tile's unless all of its conditions for
+// the cut hold (below).
 function tileOf(el) {
   const car = el.cars;
   let split = false;
@@ -770,6 +771,9 @@ function dollarAmounts(text) {
 // out only ever keeps a tile whole.
 const NOT_A_PRICE_BEFORE = /\b(?:save|savings|saved|discount|rebate|cash back|cash|incentives?|bonus|credit|allowance|drop|dropped|reduced|reduction|markdown|marked down|lowered|cut|fees?|deposit|down|payments?|lease|est|estimated|was|msrp|retail|list|reg|regular|originally|compare at)\b[^$\d]{0,12}$/i;
 const NOT_A_PRICE_AFTER = /^\s*(?:\/\s*|per\s+|a\s+|each\s+)?(?:mo|mos|month|monthly|wk|week|weekly|bi-?weekly|yr|year|off|down|savings|discount|dealer discount|rebates?|cash back|cash|bonus|incentives?|credit|allowance|below|fees?|deposit)\b/i;
+// Words that say the page shows no price of its own: "Call for price",
+// "Contact us for today's pricing", "Price on request".
+const NO_PRICE = /\b(?:call|contact(?:\s+us)?|ask|inquire|enquire)\s+(?:us\s+)?for\s+(?:(?:a|the|our|your|best|latest|current|today'?s)\s+)*(?:price|pricing)\b|\bprice\s*(?:is\s+)?(?:available\s+)?(?:on|upon)\s+request\b/i;
 function priceAmounts(text) {
   const t = String(text);
   const out = new Set();
@@ -793,18 +797,27 @@ function priceAmounts(text) {
  * the element may hold the page's own price box beside the tile: then the
  * card is the tile (tileOf), and the rest of the element is the page's own
  * text, with car null and near the tile's car (a list's one card keeps
- * it), only when all of these hold: the element comes right after the
- * page's first heading, with no other text between; the page's own text
- * (outside every card, in the heading's card or in its own car's) shows no
- * dollar amount, so its price box is not elsewhere; the tile shows a price
- * of its own (priceAmounts); and the rest shows none of the tile's dollar
- * amounts, in one place that comes before the tile (tileOf). Otherwise the
- * whole element is the card: the page's car may lose its price, never take
- * the tile's. Not told apart: a page whose own text shows no dollar amount
- * ("Call for price"), beside a tile whose price comes before its link and
- * which shows another, unlabelled amount next to that link, when the
- * tile's pieces sit loose in the block that holds the price box or the
- * tile comes right after the page's heading. Which car a link goes to is
+ * it), only when all of these hold: the last text shown before the element
+ * is the page's first heading (h1) itself, not other text in the heading's
+ * block; the page's own text (outside every card, in the heading's card or
+ * in its own car's) shows no dollar amount, so its price box is not
+ * elsewhere; neither that text nor the rest of any such element says the
+ * page shows no price ("Call for price", "Contact us for pricing", "Price
+ * on request": NO_PRICE); the tile shows a price of its own (priceAmounts);
+ * the rest shows at most one price (priceAmounts: a payment, a saving, a
+ * fee or an old price beside it counts for nothing) and none of the tile's
+ * dollar amounts; and the rest shows its amounts in one place that comes
+ * before the tile (tileOf). Otherwise the whole element is the card: the
+ * page's car may lose its price, never take the tile's. Known not to be
+ * told apart: a page whose own text shows no dollar amount and says nothing
+ * like "Call for price" (its price box says "Get today's price"), beside a
+ * tile whose price comes before its link and which shows another price
+ * next to that link (priceAmounts), when the tile's pieces sit loose in the
+ * block that holds the price box or the tile comes right after the page's
+ * heading: the tile's first amount is then read as the page's. Nor a tile
+ * with no element of its own whose price sits outside every element that
+ * holds a car link (its link and its price loose in the page): that price
+ * is the page's own text, as it always was. Which car a link goes to is
  * the caller's carKey (parseVehiclePage), and carKey.own, when it gives
  * one, is the page's own car; without a carKey, every address on this
  * website is a car of its own. Text outside any card, and inside the card
@@ -814,7 +827,11 @@ function priceAmounts(text) {
  */
 function visibleText(root, { struck = new Set(), own = null } = {}) {
   const unseen = (n) => UNSEEN.has(n.tag) || isHidden(n.attrs) || isCrossedOut(n, struck);
-  linkTargets(root, unseen, own);
+  const heading = linkTargets(root, unseen, own);
+  const inHeading = new Set(); // the pieces of text inside the page's first heading itself
+  if (heading) walk(heading, (n) => {
+    if (n.text !== undefined) inHeading.add(n);
+  });
   const parts = [];
   const segments = []; // { car, raw }, consecutive texts of one card together
   const regions = [];
@@ -834,7 +851,7 @@ function visibleText(root, { struck = new Set(), own = null } = {}) {
   // the page's own text (outside every card, in the card around its heading
   // or in its own car's) shows a dollar amount: its price box is not in a region
   let ownMoney = false;
-  // what the last piece of text shown belonged to: HERE, a region, or anything else
+  // what the last piece of text shown belonged to: the page's first heading itself (HERE), a region, or anything else
   let before = null;
   while (nodes.length) {
     const n = nodes.pop();
@@ -851,7 +868,7 @@ function visibleText(root, { struck = new Set(), own = null } = {}) {
         const region = card === null ? null : card.inTile ? card : card.region || null;
         if (region !== null && region.afterHeading === undefined) region.afterHeading = before === HERE;
         if (n.money && (card === null || card === HERE || card === own)) ownMoney = true;
-        before = region !== null ? region : card === HERE ? HERE : n;
+        before = region !== null ? region : inHeading.has(n) ? HERE : n;
       }
       continue;
     }
@@ -870,10 +887,13 @@ function visibleText(root, { struck = new Set(), own = null } = {}) {
     if (g.car && g.car.inTile) g.car.aroundText += ' ' + g.raw;
     else if (g.car && g.car.region) g.car.region.tileText += ' ' + g.raw;
   }
+  // the page says it shows no price of its own ("Call for price"): an amount beside a tile is never its price
+  const noPrice = regions.length > 0 && NO_PRICE.test(squeeze(segments.filter((g) => g.car === null || g.car === own || (g.car && g.car.inTile)).map((g) => g.raw).join(' ')));
   for (const r of regions) {
     const tileText = squeeze(r.tileText);
+    const aroundText = squeeze(r.aroundText);
     const inTile = dollarAmounts(tileText);
-    r.apart = !ownMoney && r.afterHeading === true && priceAmounts(tileText).size > 0 && ![...dollarAmounts(squeeze(r.aroundText))].some((a) => inTile.has(a));
+    r.apart = !ownMoney && !noPrice && r.afterHeading === true && priceAmounts(tileText).size > 0 && priceAmounts(aroundText).size <= 1 && ![...dollarAmounts(aroundText)].some((a) => inTile.has(a));
   }
   const resolved = [];
   for (const g of segments) {

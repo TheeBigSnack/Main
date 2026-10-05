@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
 import { scanWithSearch, confirmOrder } from '../extension/src/scanRunner.js';
 import { withDefaults } from '../extension/src/settings.js';
+import { MANUFACTURERS } from '../extension/src/vin.js';
 
 const VIN = {
   ram: fixtures.usedNormal.vin, // ready, $27,163
@@ -914,7 +915,7 @@ test('a website read from its pages: another car\'s tile at the old price is not
   }
 });
 
-test('a website read from its pages: on a lot whose car addresses carry the VIN, a car\'s own price stays its own when its price box links a search for its model in other words (F150 for F-150, Chevy for Chevrolet, a model without its body style, a new-car search, a sort, a tracking query, any other word without a digit)', async () => {
+test('a website read from its pages: on a lot whose car addresses carry the VIN, a car\'s own price stays its own when its price box links a search for its model in other words (F150 for F-150, Chevy for Chevrolet, a model without its body style, a new-car search, a sort, a tracking or place query, a page number, a price limit, a range of years, any other word without a digit), and another car\'s tile at the old price is told apart by its make (every make), its model year, a new car\'s model or trim, a model with a digit or an id', async () => {
   const base = standardCars(4);
   const variants = {
     'F150 for an F-150': { patch: (c) => ({ ...c, make: 'Ford', model: 'F-150', trim: 'XLT' }), href: (c) => `/used-vehicles/${c.year}-ford-f150/` },
@@ -927,6 +928,12 @@ test('a website read from its pages: on a lot whose car addresses carry the VIN,
     'a page number': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda-civic/?page=2` },
     'a place word': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda-civic-near-me/` },
     'a fuel word': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda-civic-hybrid/` },
+    'a place query': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda-civic/?zip=15370&radius=100` },
+    'a tracking query with digits': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda-civic/?utm_source=vdp&utm_campaign=fall2026&gclid=EAIaIQobChMI2026` },
+    'a page number in the path': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda-civic/page/3/` },
+    'a price limit': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year}-honda-civic-under-20000/` },
+    'a range of years with its own in it': { patch: (c) => c, href: (c) => `/used-vehicles/${c.year - 2}-${c.year + 2}-honda-civic/` },
+    'a search for the new model, sorted': { patch: (c) => c, href: () => '/new-vehicles/2027-honda-civic/?sort=price' },
   };
   for (const [name, v] of Object.entries(variants)) {
     const cars = base.slice();
@@ -947,16 +954,39 @@ test('a website read from its pages: on a lot whose car addresses carry the VIN,
   site.set(STANDARD_ORIGIN + c.path, htmlAnswer(standardCarPage(c).replace(/(<h1>[^<]*<\/h1>)<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, (all, h1, price, miles) => `<div class="bar">${h1}</div><div class="main"><div class="price-box"><p>Our price ${price}</p><p>${miles}</p><a href="/used/${c.year}-honda-civic-sm9999/">Next vehicle</a></div></div>`)));
   assert.equal((await rescanOf(site, null)).vehicles.find((x) => x.vin === c.vin).price, null, 'another car\'s address');
   // and another car's tile at the old price is not this car's price when its address names another
-  // model year, another make, another model with a digit or an id in its query, even without a stock number
+  // model year, another make (also one the VIN check has no maker code for), a new car's other model or
+  // trim at another year, another model with a digit or an id in its query, even without a stock number
   const posted = markPosted({}, { vin: c.vin, name: 'posted car', price: c.price });
   const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
-  for (const href of [`/used/${c.year + 1}-honda-civic-ex/`, `/used/${c.year}-toyota-camry/`, `/used/${c.year}-land-rover-discovery/`, `/used/${c.year}-ford-f250-xlt/`, `/used/${c.year}-honda-civic/?id=88001`]) {
+  for (const href of [
+    `/used/${c.year + 1}-honda-civic-ex/`, `/used/${c.year}-toyota-camry/`, `/used/${c.year}-land-rover-discovery/`, `/used/${c.year}-ford-f250-xlt/`, `/used/${c.year}-honda-civic/?id=88001`,
+    `/used/${c.year}-mitsubishi-outlander/`, `/used/${c.year}-porsche-macan/`, `/used/${c.year}-aston-martin-vantage/`, `/used/${c.year}-rolls-royce-ghost/`,
+    `/new/${c.year + 11}-honda-civic-sport/`, `/new-vehicles/${c.year + 11}-honda-accord/`, `/used/${c.year}-honda-civic/?utm_source=similar&id=88001`,
+  ]) {
     const stale = standardSite({ cars, perPage: 10 });
     stale.set(STANDARD_ORIGIN + c.path, htmlAnswer(standardCarPage(c).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', `<aside><div class="tile"><a href="${href}">Another car</a> <span>$15,000</span></div></aside><a href="/used-vehicles/">`)));
     const out = await rescanOf(stale, first.snapshot, posted);
     assert.equal(out.snapshot.vehicles[c.vin].price, null, href);
     const one = await schemaOrg.getDetails(fakeSiteSearch(stale), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
     assert.equal(schemaOrg.normalize(one.record).price, null, `post time: ${href}`);
+  }
+});
+
+test('a website read from its pages: another car\'s tile at the old price is told apart by its make, for every make the VIN check knows and every make the probe names', async () => {
+  const cars = standardCars(4);
+  const c = cars[0];
+  // the probe's make words (the first line of its SUBSET_WORDS), a make in two words joined as an address writes it
+  const line = schemaOrg.probeInPage.toString().match(/SUBSET_WORDS = new Set\(\[\s*\n([^\n]*)\n/)[1];
+  const probeWords = [...line.matchAll(/'([a-z0-9]+)'/g)].map((m) => m[1]);
+  assert.ok(probeWords.includes('mitsubishi') && probeWords.includes('porsche'), 'the probe\'s make words were found');
+  const pairs = { alfa: 'alfa-romeo', romeo: 'alfa-romeo', aston: 'aston-martin', land: 'land-rover', rover: 'land-rover', rolls: 'rolls-royce', royce: 'rolls-royce', harley: 'harley-davidson', davidson: 'harley-davidson', guzzi: 'moto-guzzi', motorrad: 'bmw-motorrad' };
+  const slugs = new Set([...probeWords.map((w) => pairs[w] || w), ...MANUFACTURERS.flatMap(([, , makes]) => makes.map((m) => m.toLowerCase().replace(/[^a-z0-9]+/g, '-')))]);
+  slugs.delete('honda');
+  for (const slug of slugs) {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STANDARD_ORIGIN + c.path, htmlAnswer(standardCarPage(c).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', `<aside><div class="tile"><a href="/used/${c.year}-${slug}-sport/">Another car</a> <span>$15,000</span></div></aside><a href="/used-vehicles/">`)));
+    const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
+    assert.equal(schemaOrg.normalize(one.record).price, null, slug);
   }
 });
 
@@ -1057,7 +1087,7 @@ test('a website read from its pages: a car\'s own price stays its own beside one
   }
 });
 
-test('a website read from its pages: another car\'s lone tile at a posted car\'s old price is not its price, whatever sits beside the tile\'s link, wherever the tile sits and however its "$" is written, in the scan and at post time', async () => {
+test('a website read from its pages: another car\'s lone tile at a posted car\'s old price is not its price, whatever sits beside the tile\'s link, wherever the tile sits and however its "$" is written, also beside a page that shows no amount of its own or a price box that shows two, in the scan and at post time', async () => {
   const cars = standardCars(4);
   const [c, o] = cars;
   const read = async (html, prev, posted) => {
@@ -1085,6 +1115,15 @@ test('a website read from its pages: another car\'s lone tile at a posted car\'s
   // or a "$" in an element of its own
   layouts.push(['the tile\'s price after the block holding the price box and its link', bar(`<div class="outer"><div class="main">${box('$14,000')}<div class="head">${L} <span>$16,000</span></div></div><div class="info"><span>$15,000</span></div></div>`)]);
   layouts.push(['a "$" in an element of its own', bar(`<div class="main">${box('<sup>$</sup>14,000')}<div class="head">${L} <span>$16,000</span></div><div class="info"><sup>$</sup>15,000</div></div>`)]);
+  // the tile's price before its link, another amount beside the link, and the page showing no amount of its own:
+  // more text after the title in the title's own block; "Call for price" beside the tile or after it
+  const priceFirst = `<div class="tile"><div class="info"><span>$15,000</span></div><div class="head">${L} <span>$16,000</span></div></div>`;
+  layouts.push(['text after the title in its own block, then the tile, its price first', bar('').replace('<div class="bar">', '<div class="top">').replace('</h1></div>', `</h1><p>20,000 miles</p><p>Automatic, one owner</p></div>${priceFirst}`)]);
+  layouts.push(['"Call for price" beside the tile\'s pieces, its price first', bar(`<div class="main">${box('Call for price')}<div class="info"><span>$15,000</span></div><div class="head">${L} <span>$16,000</span></div></div>`)]);
+  layouts.push(['the tile right after the title, its price first, "Contact us for today\'s pricing" after it', bar(`<aside>${priceFirst}</aside>${box('Contact us for today\'s pricing')}`).replace('<div class="bar">', '<div>')]);
+  // the price box and the tile's price grouped together, or a note in the price box with another amount
+  layouts.push(['the price box and the tile\'s price in one group', bar(`<div class="main"><div class="group">${box('$14,000')}<div class="info"><span>$15,000</span></div></div><div class="head">${L} <span>$16,000</span></div></div>`)]);
+  layouts.push(['a note with another amount in the price box', bar(`<div class="main"><div class="price-box"><p>Our price $14,000</p><p>Similar cars from $15,000</p></div><div class="head">${L} <span>$16,000</span></div></div>`)]);
   for (const [name, html] of layouts) {
     const stale = await read(html, first.snapshot, posted);
     assert.equal(stale.out.snapshot.vehicles[c.vin].price, null, name);
