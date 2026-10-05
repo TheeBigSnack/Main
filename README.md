@@ -107,7 +107,7 @@ npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
 npm run screenshots   # the landing page's product images, taken from the sandbox with sample data (site/screenshots/)
-npm run site-pages    # the website's pages, robots.txt, llms.txt (and sitemap.xml, CNAME once config.js has siteUrl) from site-src/pages/ and site/config.js (--check: exit 1 when a file differs)
+npm run site-pages    # the website's pages, robots.txt, llms.txt (and sitemap.xml, CNAME once config.js has siteUrl) from site-src/pages/ and site/config.js (--check: exit 1 when a file differs, or a file under site/ is none of the site's)
 npm run legal-pages   # the Terms, Privacy Policy and posting rules as site/legal/*/index.html from legal/*.md, plus the redirect stubs at the old addresses (--check: exit 1 when a page differs; legal/legal-status.json says draft)
 npm run favicons      # favicon.ico, favicon-32.png and apple-touch-icon.png from site/favicon.svg
 npm run social-images # the 1200x630 share image per page (site/social/) from site-src/social/template.html
