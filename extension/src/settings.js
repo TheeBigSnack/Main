@@ -50,6 +50,11 @@ export function withDefaults(settings, site = {}) {
   return {
     version: SETTINGS_VERSION,
     myStores,
+    // true once a person chose the stores with the website's stores in view
+    // (Settings after a scan, set-up's store step, or a profile saved from
+    // either), so none ticked is their choice of every store and the
+    // website's first scan keeps it (src/scanRunner.js performScan)
+    storesChosen: s.storesChosen === true,
     basis: s.basis === 'beforeFees' ? 'beforeFees' : 'website',
     // closingLine: the salesperson's own line after the sign-off (src/rewriteTemplate.js checkClosingLine); '' for none
     salesperson: { name: String(sp.name || ''), title: String(sp.title || DEFAULT_SALESPERSON_TITLE), closingLine: String(sp.closingLine || '').replace(/\s+/g, ' ').trim().slice(0, CLOSING_LINE_MAX_CHARS) },
@@ -98,6 +103,7 @@ export function profileFrom(settings, origin = '') {
     salesperson: s.salesperson,
     dealer: s.dealer,
     myStores: s.myStores,
+    storesChosen: s.storesChosen,
     basis: s.basis,
     priceNote: s.priceNote,
     dailyCap: s.dailyCap,

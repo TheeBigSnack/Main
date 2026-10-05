@@ -213,6 +213,69 @@ test('saving Settings or signing in before the website\'s first scan leaves the 
   assert.equal(p.local[k.settings].salesperson.name, 'Sam', 'what the person typed stays');
 });
 
+// "Leave all unticked to include every store" is a choice a person makes
+// with the website's stores in view (Settings after a scan, set-up's store
+// step). The website's first scan on another computer, or after Clear
+// everything for this website, settles the stores only when no such choice
+// was made: an every-store choice stands, and a Save before the first scan
+// (no store boxes yet) leaves the stores as they were.
+test("a person's choice of every store survives the website's first scan; a Save before a scan changes no store", async () => {
+  const STORE = MY_STORE.myStores[0]; // the site is named after one of the fixture lot's three stores
+  const submitStores = async (p, ticked) => {
+    await p.tab('settings');
+    const values = { salespersonName: 'Sam', dailyCap: '10', dealerName: STORE };
+    const before = globalThis.FormData;
+    globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll(name) { return name === 'store' ? ticked : []; } has(name) { return name in values; } };
+    try {
+      await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: () => null }, preventDefault() {} });
+    } finally {
+      globalThis.FormData = before;
+    }
+  };
+  const readyStores = (p) => [...new Set(Object.values(p.local[k.snapshot].vehicles).filter((v) => v.decision === 'ready').map((v) => v.location))].sort();
+
+  // the first scan ticks the website's own store; the person unticks it in Settings: every store
+  const p = await loadPopup({ name: STORE });
+  await p.scan();
+  assert.deepEqual(p.local[k.settings].myStores, [STORE]);
+  await submitStores(p, []);
+  assert.deepEqual(p.local[k.settings].myStores, []);
+  assert.equal(p.local[k.settings].storesChosen, true, 'chosen with the stores in view');
+  assert.equal(p.sync[PROFILE_KEY].storesChosen, true, 'and the synced profile carries it');
+  await p.scan();
+  const every = readyStores(p);
+  assert.ok(every.length > 1, 'every store\'s cars are ready to post');
+
+  // Clear everything for this website, then Rescan: the profile's choice comes back and the first scan keeps it
+  await p.click('clear');
+  await p.click('clear');
+  await p.scan();
+  assert.deepEqual(p.local[k.settings].myStores, [], 'still every store');
+  assert.deepEqual(readyStores(p), every);
+
+  // another computer: only the synced profile, no scan of the website yet
+  const other = await loadPopup({ name: STORE, sync: { [PROFILE_KEY]: structuredClone(p.sync[PROFILE_KEY]) } });
+  await other.scan();
+  assert.deepEqual(other.local[k.settings].myStores, [], 'the profile\'s every-store choice stands');
+  assert.deepEqual(readyStores(other), every);
+
+  // a profile that never chose (saved before a scan): the first scan ticks the website's own store, as before
+  const unchosen = await loadPopup({ name: STORE, sync: { [PROFILE_KEY]: { ...structuredClone(p.sync[PROFILE_KEY]), storesChosen: false } } });
+  await unchosen.scan();
+  assert.deepEqual(unchosen.local[k.settings].myStores, [STORE]);
+  assert.deepEqual(readyStores(unchosen), [STORE]);
+
+  // a Save before this computer's first scan (no store boxes drawn) keeps the profile's stores, ticked or every
+  for (const [stores, after] of [[[], []], [[MY_STORE.myStores[0]], [STORE]]]) {
+    const q = await loadPopup({ name: STORE, sync: { [PROFILE_KEY]: { ...structuredClone(p.sync[PROFILE_KEY]), myStores: stores } } });
+    await submitStores(q, []);
+    assert.deepEqual(q.local[k.settings].myStores, stores, 'the Save changed no store');
+    assert.equal(q.local[k.settings].storesChosen, true);
+    await q.scan();
+    assert.deepEqual(q.local[k.settings].myStores, after);
+  }
+});
+
 // Clear the numbers is what the storage-full message sends people to. An
 // open to-do item is still on To do, and its synced copy on the manager's
 // list closes only when this computer closes it, so it stays.

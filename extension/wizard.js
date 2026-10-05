@@ -245,7 +245,9 @@ export function wizardHtml() {
       const matched = stores.length ? matchStore(wiz.site, stores) : null;
       const ticked = s.myStores.filter((st) => stores.includes(st));
       const byMatch = matched ? ticked.length === 1 && ticked[0] === matched : !ticked.length;
+      const every = s.storesChosen && !s.myStores.length; // chosen before, with the stores in view: every store
       const hint = !stores.length ? ''
+        : every ? 'The website lists these stores. None is ticked, as chosen before: every store\'s cars count.'
         : !byMatch ? (ticked.length ? 'The website lists these stores; your earlier choice is ticked.' : 'The website lists these stores. None is ticked: tick yours.')
         : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
@@ -369,7 +371,11 @@ function readInputs() {
     wiz.account.error = ''; // a failed try is not news on the way back
   }
   const next = { ...s };
-  if (wiz.step === 'store') next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
+  if (wiz.step === 'store') {
+    next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
+    // with the website's stores in view, none ticked is the person's choice of every store (src/scanRunner.js keeps it)
+    if (document.querySelector('.wizStore')) next.storesChosen = true;
+  }
   if (wiz.step === 'you') next.salesperson = { ...s.salesperson, name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE }; // the closing line is Settings' (or the profile's), kept as it is
   if (wiz.step === 'address') next.dealer = { name: val('wizDealer') || s.dealer.name, city: val('wizCity') ?? s.dealer.city, state: (val('wizState') ?? s.dealer.state).toUpperCase(), zip: val('wizZip') ?? s.dealer.zip };
   if (wiz.step === 'price') {

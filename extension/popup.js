@@ -1563,10 +1563,16 @@ async function onSettingsSubmit(ev) {
   }
   const prev = withDefaults(state.settings || {}, knownSite());
   const str = (k) => String(form.get(k) ?? '').trim();
+  // the store boxes are drawn once a scan has named the stores (viewSettings):
+  // a Save with them in view is the person's choice, none ticked meaning every
+  // store (storesChosen, which the website's first scan keeps); a Save before
+  // that leaves the stores as they were
+  const storesShown = Object.values(state.snapshot?.vehicles || {}).some((e) => e && e.location);
   state.settings = withDefaults(
     {
       ...prev,
-      myStores: form.getAll('store').map(String),
+      myStores: storesShown ? form.getAll('store').map(String) : prev.myStores,
+      storesChosen: storesShown || prev.storesChosen,
       basis: chooseBasis(form.get('basis'), prev.basis, state.snapshot ? Object.values(state.snapshot.vehicles || {}) : null), // the lower price only when this website shows one; without a scan the previous choice stands
       salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || DEFAULT_SALESPERSON_TITLE, closingLine: cleanClosingLine(form.get('closingLine')) },
       dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },

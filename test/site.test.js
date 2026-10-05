@@ -705,6 +705,7 @@ const PROFILE_PARTS = {
   salesperson: /\bname\b[^)]*\brole\b[^)]*closing line/,
   dealer: /the dealership's name, town, state and ZIP/,
   myStores: /\bstores\b/,
+  storesChosen: /\bstores\b/, // whether a person chose them (none ticked: every store), part of the store choice
   basis: /price basis/,
   priceNote: /price note/,
   dailyCap: /daily cap/,
