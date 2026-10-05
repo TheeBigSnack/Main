@@ -77,6 +77,33 @@ export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperso
 // hide the stale warning until its date comes.
 export const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
+// The listing links the page and the CSV show: a Marketplace listing's own
+// address only, by the rule the extension saves links by (extension/
+// facebook/detectPost.js listingLink, with formMap.js's listingUrlPattern
+// and the create form's origin; this file is not imported from there, and
+// test/manager.test.js holds the two equal). Another spelling of the website
+// (m., web. or no www) becomes the form's origin. A link saved before the
+// extension checked it (the Your listings page Facebook lands on after
+// Publish, another page, text that is not an address) is shown as none: it
+// would open the wrong page.
+export const LISTING_URL_PATTERN = '^https://www\\.facebook\\.com/marketplace/item/(\\d+)';
+export const LISTING_ORIGIN = 'https://www.facebook.com';
+export function listingHref(url) {
+  const t = typeof url === 'string' ? url.trim() : '';
+  if (!t) return '';
+  let u;
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : 'https://' + t);
+  } catch (e) {
+    return '';
+  }
+  const domain = new URL(LISTING_ORIGIN).hostname.replace(/^www\./i, '');
+  const host = u.hostname.toLowerCase();
+  const tries = /^https?:$/.test(u.protocol) && (host === domain || host.endsWith('.' + domain)) ? [LISTING_ORIGIN + u.pathname, LISTING_ORIGIN + u.pathname + u.search] : [u.href];
+  const pattern = new RegExp(LISTING_URL_PATTERN, 'i');
+  return tries.find((link) => { const m = pattern.exec(link); return Boolean(m && m[1]); }) || '';
+}
+
 // What the to-do cards say, claiming only what the items show: an item opens
 // only on the poster's own computer, when their extension's rescan finds the
 // car gone from the website or its price changed. So no open item does not
@@ -250,7 +277,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
       vin,
       name: text(f.name, 80) || (l && text(l.name, 80)) || vin,
       salesperson: nameOf(l),
-      listingUrl: l && l.listing_url ? String(l.listing_url) : '',
+      listingUrl: listingHref(l && l.listing_url),
       listedPrice: l ? num(l.price) : null,
       flaggedAt: f.flagged_at || null,
       hoursOpen,
@@ -292,7 +319,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
         vin: vinOf(l),
         name: text(l.name, 80) || vinOf(l),
         salesperson: nameOf(l),
-        listingUrl: l.listing_url ? String(l.listing_url) : '',
+        listingUrl: listingHref(l.listing_url),
         listedPrice: num(l.price),
         postedAt: l.posted_at || null,
         hoursListed: hoursBetween(l.posted_at, nowAt),
@@ -1204,7 +1231,7 @@ export function managerCsv(input = {}, { role = '', now = nowIso(), dealer = '',
   // a listing marked as made by hand before that day: Posted is when it was marked, and it is not one of the posts in the last 7 days
   out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link', 'Listed by hand before (Posted is when it was marked)']));
   for (const l of [...L].sort((a, b) => (ms(b.posted_at) ?? 0) - (ms(a.posted_at) ?? 0))) {
-    out.push(csvRow([local(l.posted_at), who(l), l.name, vinOf(l), num(l.price), isTakenDown(l) ? 'taken down' : 'listed', local(l.taken_down_at), l.listing_url || '', l.listed_before === true ? 'yes' : '']));
+    out.push(csvRow([local(l.posted_at), who(l), l.name, vinOf(l), num(l.price), isTakenDown(l) ? 'taken down' : 'listed', local(l.taken_down_at), listingHref(l.listing_url), l.listed_before === true ? 'yes' : '']));
   }
   out.push('');
   out.push(csvRow(['To-do items']));

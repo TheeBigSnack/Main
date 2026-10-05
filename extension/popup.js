@@ -10,7 +10,8 @@ import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
-import { FORM_MAP } from './facebook/formMap.js';
+import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
+import { listingLink } from './facebook/detectPost.js';
 import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilotCsv, pilotFileName, hasPilotData } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -50,6 +51,7 @@ const state = {
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
   pilot: null, // pilot numbers (src/pilot.js): post timings, fill failures per field, to-do item durations
   takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap counts the day's ones the day's log never had (src/cap.js dayLog)
+  listingMap: FORM_MAP, // the form map's addresses (with the test hook's, devOverrides): which saved links are a listing's own (listingHref)
   syncState: null, // this website's sync state (src/sync.js nextSyncState): dealership, role, when it last synced, the plan, the server's count of today's posts (the cap reads it); accounts only
   account: { session: null, email: '', note: '', error: '' }, // the signed-in session (read only when accounts are configured) and what the Account section says
   rescanPermission: null, // true/false once known: may the service worker read this website?
@@ -85,7 +87,7 @@ async function checkRescanPermission() {
 
 async function loadSaved() {
   const k = siteKeys(state.origin);
-  const data = await chrome.storage.local.get([...Object.values(k), SITES_KEY]);
+  const data = await chrome.storage.local.get([...Object.values(k), SITES_KEY, GLOBAL_KEYS.devOverrides]);
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
@@ -108,6 +110,7 @@ async function loadSaved() {
   state.pilot = data[k.pilot] || null;
   state.takenDown = data[k.takenDown] || null;
   state.syncState = data[k.sync] || null;
+  state.listingMap = applyOverrides(FORM_MAP, data[GLOBAL_KEYS.devOverrides]); // test hook: addresses only, see formMap.js
   await checkRescanPermission();
 }
 
@@ -734,7 +737,7 @@ function viewMine(l) {
         const pill = `<span class="pill ${status.tone}">${esc(status.text)}</span>`;
         const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
         const entry = { name: p.name, url: now?.url };
-        const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
+        const link = openListing(p.listingUrl);
         const refused = notShared(p);
         return row(entry, {
           sub: `${pill} ${p.listedBefore ? `Listed before ${esc(day(p.postedAt))}` : `Posted ${esc(when(p.postedAt))}`}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
@@ -748,6 +751,17 @@ function viewMine(l) {
   );
 }
 
+// "Open listing" on My listings: only for a Marketplace listing's own
+// address (facebook/detectPost.js listingLink, the side panel's rule for
+// what it saves). A link saved before that rule, or synced from a computer
+// without it (the Your listings page Facebook lands on after Publish, any
+// other page), would open the wrong page: none is shown, as for a listing
+// saved with no link.
+function openListing(url) {
+  const href = listingLink(url, state.listingMap);
+  return href ? ` · <a href="${esc(href)}" target="_blank" rel="noopener">Open listing</a>` : '';
+}
+
 // Colleagues' listings, as the last sync brought them: who posted the car,
 // when, at what price and the link, so nobody lists it again. No buttons:
 // marking one taken down or updated here would change nothing on Facebook
@@ -755,7 +769,7 @@ function viewMine(l) {
 function viewColleagues(l) {
   if (!l.colleagues.length) return '';
   const items = l.colleagues.map((p) => {
-    const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
+    const link = openListing(p.listingUrl);
     return row({ name: p.name || p.vin, url: p.now?.url }, { sub: `Posted by ${byWhom(p)} ${esc(when(p.postedAt))}${link}`, right: `Listed ${money(p.price)}`, muted: true });
   });
   return `<h3 id="colleagueListings">Posted by colleagues <span class="pill">${items.length}</span></h3><p class="hint">Their listings, as of the last sync. Keeping them up to date is theirs to do.</p>${rows(items)}`;

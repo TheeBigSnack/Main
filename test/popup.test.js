@@ -57,7 +57,7 @@ test('My listings counts only the person\'s own listings; a colleague\'s come in
   const colleague = { mine: false, userId: 'colleague-id', salesperson: 'Pat' }; // as src/sync.js mergeRegistry writes it
   const posted = {
     [own.vin]: { name: own.name, price: own.price, postedAt: at },
-    [theirs.vin]: { name: theirs.name, price: theirs.price, postedAt: at, listingUrl: 'https://listing.example.test/1', ...colleague },
+    [theirs.vin]: { name: theirs.name, price: theirs.price, postedAt: at, listingUrl: 'https://www.facebook.com/marketplace/item/1001/', ...colleague },
     [gone]: { name: '2020 Example Truck', price: 20000, postedAt: at, ...colleague },
   };
   const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted } });
@@ -76,7 +76,7 @@ test('My listings counts only the person\'s own listings; a colleague\'s come in
   assert.ok(!ownPart.includes(theirs.name) && !ownPart.includes(gone), 'a colleague\'s listing is not among the person\'s own');
   assert.match(theirPart, /Posted by colleagues <span class="pill">2<\/span>/);
   assert.match(theirPart, /Posted by Pat/);
-  assert.match(theirPart, /href="https:\/\/listing\.example\.test\/1"/, 'with the link to the listing');
+  assert.match(theirPart, /href="https:\/\/www\.facebook\.com\/marketplace\/item\/1001\/"/, 'with the link to the listing');
   assert.doesNotMatch(theirPart, /data-action=/, 'no Taken down or Updated on a colleague\'s listing');
 
   await p.tab('ready');
@@ -643,4 +643,44 @@ test('Mark posted records a car whose form the side panel filled today as today\
   await q.click('post', { vin: car.vin });
   assert.match(q.panel(), /data-action="markBefore"/, 'filled on another day: the question is asked');
   assert.equal(q.local[k.posted], undefined, 'nothing recorded yet');
+});
+
+// Only a Marketplace listing's own address is saved as a listing link now
+// (facebook/detectPost.js listingLink). A link saved before that rule (the
+// Your listings page Facebook lands on after Publish, another page), or
+// synced from a colleague's computer without it, showed as "Open listing"
+// in My listings and opened the wrong page until the car was posted again.
+test('My listings shows Open listing only for a Marketplace listing\'s own address, the test hook\'s included', async () => {
+  const own = vehicle('usedZeroMiles');
+  const theirs = vehicle('usedNormal');
+  const at = new Date().toISOString();
+  const colleague = { mine: false, userId: 'colleague-id', salesperson: 'Pat' };
+  const listed = (ownUrl, theirUrl, extra = {}) => ({
+    [own.vin]: { name: own.name, price: own.price, postedAt: at, listingUrl: ownUrl },
+    [theirs.vin]: { name: theirs.name, price: theirs.price, postedAt: at, listingUrl: theirUrl, ...colleague },
+    ...extra,
+  });
+  const mine = async (posted, local = {}) => {
+    const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted, ...local } });
+    await p.scan();
+    await p.tab('mine');
+    return p.panel();
+  };
+  // saved before the rule: Your listings, another website, text that is no address
+  for (const bad of ['https://www.facebook.com/marketplace/you/selling', 'https://www.facebook.com/marketplace/', 'https://listing.example.test/1', 'javascript:alert(1)', 'not a link']) {
+    const html = await mine(listed(bad, bad));
+    assert.doesNotMatch(html, /Open listing/, `no link for ${bad}`);
+    assert.match(html, /Posted by Pat/, 'the colleague\'s listing is still shown');
+  }
+  // a listing's own address is linked; another spelling of the website opens the form's own
+  const good = await mine(listed('https://www.facebook.com/marketplace/item/1001/', 'https://m.facebook.com/marketplace/item/2002/?ref=share'));
+  assert.equal((good.match(/>Open listing</g) || []).length, 2);
+  assert.match(good, /href="https:\/\/www\.facebook\.com\/marketplace\/item\/1001\/"/);
+  assert.match(good, /href="https:\/\/www\.facebook\.com\/marketplace\/item\/2002\/"/);
+  // the mock Marketplace of the end-to-end tests, through the form map's test hook
+  const market = 'http://127.0.0.1:4321';
+  const devOverrides = { createUrl: `${market}/marketplace/create/vehicle`, listingUrlPattern: `^${market.replace(/\./g, '\\.')}/marketplace/item/(\\d+)`, afterPublishPatterns: [] };
+  const mock = await mine(listed(`${market}/marketplace/item/424242/`, `${market}/marketplace/you/selling`), { devOverrides });
+  assert.equal((mock.match(/>Open listing</g) || []).length, 1);
+  assert.match(mock, new RegExp(`href="${market.replace(/\./g, '\\.')}/marketplace/item/424242/"`));
 });
