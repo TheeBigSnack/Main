@@ -221,13 +221,15 @@ test('saving Settings or signing in before the website\'s first scan leaves the 
 // (no store boxes yet) leaves the stores as they were.
 test("a person's choice of every store survives the website's first scan; a Save before a scan changes no store", async () => {
   const STORE = MY_STORE.myStores[0]; // the site is named after one of the fixture lot's three stores
-  const submitStores = async (p, ticked) => {
-    await p.tab('settings');
+  const submitStores = async (p, ticked, { reopen = true } = {}) => {
+    if (reopen) await p.tab('settings');
     const values = { salespersonName: 'Sam', dailyCap: '10', dealerName: STORE };
     const before = globalThis.FormData;
     globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll(name) { return name === 'store' ? ticked : []; } has(name) { return name in values; } };
     try {
-      await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: () => null }, preventDefault() {} });
+      // the form as drawn: its store boxes are there only when the panel drew them
+      const drawn = p.panel();
+      await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: (sel) => (sel === 'input[name="store"]' && drawn.includes('name="store"') ? {} : null) }, preventDefault() {} });
     } finally {
       globalThis.FormData = before;
     }
@@ -274,6 +276,23 @@ test("a person's choice of every store survives the website's first scan; a Save
     await q.scan();
     assert.deepEqual(q.local[k.settings].myStores, after);
   }
+
+  // Settings opened before the first scan, and a scan (the service worker's,
+  // or set-up's) finishes while it is open: the form keeps no store boxes, so
+  // its Save is no store choice, and the stores that scan settled stand
+  const donor = await loadPopup({ name: STORE });
+  await donor.scan();
+  const scanned = { snapshot: structuredClone(donor.local[k.snapshot]), settings: structuredClone(donor.local[k.settings]) };
+  const racing = await loadPopup({ name: STORE, echo: true, sync: { [PROFILE_KEY]: { ...structuredClone(p.sync[PROFILE_KEY]), myStores: [], storesChosen: false } } });
+  await racing.tab('settings');
+  await new Promise((r) => setTimeout(r, 20)); // the popup's own writes have echoed
+  assert.doesNotMatch(racing.panel(), /name="store"/, 'no store boxes before a scan');
+  Object.assign(racing.local, { [k.snapshot]: scanned.snapshot, [k.settings]: scanned.settings });
+  racing.storageChanged({ [k.snapshot]: { newValue: scanned.snapshot }, [k.settings]: { newValue: scanned.settings } });
+  assert.doesNotMatch(racing.panel(), /name="store"/, 'Settings is not redrawn under the person');
+  await submitStores(racing, [], { reopen: false });
+  assert.deepEqual(racing.local[k.settings].myStores, [STORE], 'the store the scan settled stands');
+  assert.notEqual(racing.local[k.settings].storesChosen, true, 'no every-store choice nobody made');
 });
 
 // A lot of 10 or more that really shrinks by more than half: each scan is

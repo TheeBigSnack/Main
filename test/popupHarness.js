@@ -4,7 +4,9 @@
 // `tabUrl`: a Facebook page, a new tab), and sync storage.
 // Enough to click the popup's buttons and read what it draws, without a
 // browser. Each loadPopup imports a fresh copy of the popup, so its state
-// starts from the storage given.
+// starts from the storage given. With `echo`, the popup's own writes to
+// local storage come back through storage.onChanged after they land, as
+// Chrome sends them, so a test can tell another page's write from an echo.
 
 import { fixtures, fakeDealerPage, fakeChrome } from './helpers.js';
 
@@ -12,12 +14,19 @@ export const POPUP_ORIGIN = 'https://example-dealer.test';
 const RECORDS = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => r);
 let copies = 0;
 
-export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, records = RECORDS, granted = true, name = 'Example Motors', tabUrl = origin + '/used-vehicles/' } = {}) {
+export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, records = RECORDS, granted = true, name = 'Example Motors', tabUrl = origin + '/used-vehicles/', echo = false } = {}) {
   const page = fakeDealerPage({ records, origin, name });
   const chrome = fakeChrome(page, local);
   chrome.storage.local.remove = async (keys) => { for (const key of [].concat(keys)) delete local[key]; };
   const storageListeners = [];
   chrome.storage.onChanged = { addListener(fn) { storageListeners.push(fn); } };
+  if (echo) {
+    const fire = (changes) => setTimeout(() => { for (const fn of storageListeners) fn(changes, 'local'); }, 0);
+    const set = chrome.storage.local.set;
+    const remove = chrome.storage.local.remove;
+    chrome.storage.local.set = async (obj) => { await set(obj); fire(Object.fromEntries(Object.keys(obj).map((key) => [key, { newValue: structuredClone(obj[key]) }]))); };
+    chrome.storage.local.remove = async (keys) => { await remove(keys); fire(Object.fromEntries([].concat(keys).map((key) => [key, {}]))); };
+  }
   chrome.storage.sync = {
     get: async (key) => (key in sync ? { [key]: structuredClone(sync[key]) } : {}),
     set: async (obj) => { Object.assign(sync, structuredClone(obj)); },

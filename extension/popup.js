@@ -1617,8 +1617,11 @@ async function onSettingsSubmit(ev) {
   // the store boxes are drawn once a scan has named the stores (viewSettings):
   // a Save with them in view is the person's choice, none ticked meaning every
   // store (storesChosen, which the website's first scan keeps); a Save before
-  // that leaves the stores as they were
-  const storesShown = Object.values(state.snapshot?.vehicles || {}).some((e) => e && e.location);
+  // that leaves the stores as they were. The form decides, not the snapshot: a
+  // scan the service worker or set-up finishes while Settings is open updates
+  // state.snapshot without redrawing the form, so a form drawn without boxes
+  // can be saved after the stores are known
+  const storesShown = Boolean(ev.target.querySelector && ev.target.querySelector('input[name="store"]'));
   state.settings = withDefaults(
     {
       ...prev,
