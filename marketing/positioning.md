@@ -6,7 +6,7 @@ Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here i
 
 - **Buyer:** the used car manager (or general manager) of a franchise dealership, one rooftop at a time. They approve the tool, set the rules, and want to know who posted what and that sold cars came down.
 - **User:** the salespeople who post their store's used cars on Facebook Marketplace from their own accounts, because Marketplace no longer takes vehicle listings from dealer Pages or partner feeds (since January 2023 and September 2021).
-- **First market:** dealerships on Dealer Inspire websites in western Pennsylvania, starting with the first pilot's dealer group (named in `PILOT.md`).
+- **First market:** dealerships on Dealer Inspire websites, starting with the first pilot's dealer group (named in `PILOT.md`).
 
 ## The problem in their words
 
@@ -39,8 +39,8 @@ Other tools in this space list at roughly $39 to $1,299 a month as of September 
 
 Say:
 - "You click Publish. Lot Current never does." (True by construction: there is no code for it and a test that fails if any appears.)
-- "Only pre-owned cars, only at your store, only at the website price."
-- "With automatic rescans on and Chrome open, sold cars flagged the same day." (With automatic rescans on, they run every 3 hours while Chrome is open. Say both conditions with the claim, not only when asked: a salesperson who skips the rescan permission is flagged only when they rescan by hand, and nothing is rescanned while every Chrome at the store is closed.)
+- "Only cars your website marks as pre-owned, only at your store, only at the website price." (It goes by the website's labels: a car the website labels wrong can get through, so the salesperson still looks over each car.)
+- "With automatic rescans on and Chrome open, sold cars flagged the same day." (With automatic rescans on, they run every 3 hours while Chrome is open. Say both conditions with the claim, not only when asked: a salesperson who skips the rescan permission is flagged only when they rescan by hand. Each salesperson installs Lot Current in their own Chrome, with their own settings, and their listings are rescanned only there: one salesperson's Chrome being open does nothing for another's listings, and nothing flags a salesperson's sold car while their own Chrome is closed.)
 - "On Facebook's live form, with a real dealership's cars, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always". Never name the store or its results without its written permission, pilot agreement section 3.)
 - "Not affiliated with Meta Platforms, Inc."
 

@@ -24,6 +24,7 @@ const AGREEMENTS = ['pilot-agreement.md', 'dealer-subscription-agreement.md'];
 const legal = (rel) => read('../legal/' + rel);
 // the pilot dealer is a fixture, not a default (the same words as test/anyDealer.test.js)
 const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
+const US_STATE = /\b(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/;
 const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // "hypothesis" stays true until a dealer agrees to a price in writing. Setting
@@ -154,7 +155,15 @@ test('no marketing or Web Store document names the pilot dealer: every marketing
     const doc = read('../' + rel);
     const line = doc.split('\n').findIndex((l) => PILOT.test(l));
     assert.equal(line, -1, `${rel}:${line + 1} contains the pilot value "${line >= 0 && doc.split('\n')[line].match(PILOT)[0]}"`);
+    // region is data too (CLAUDE.md): the pilot's state, or any other, is not where Lot Current is sold
+    const region = doc.split('\n').findIndex((l) => US_STATE.test(l));
+    assert.equal(region, -1, `${rel}:${region + 1} names a state: "${region >= 0 && doc.split('\n')[region].match(US_STATE)[0]}"`);
   }
+  // the positioning once said nothing is rescanned "while every Chrome at the store is closed", as if one open
+  // Chrome covered the store: each salesperson's listings are rescanned only in their own Chrome
+  const positioning = read('../marketing/positioning.md');
+  assert.doesNotMatch(positioning, /every Chrome at the store/);
+  assert.match(positioning, /Each salesperson installs Lot Current in their own Chrome/);
 });
 
 test('the store-install emails quote the pricing config and the code\'s numbers, and name the controls as the code labels them', () => {
