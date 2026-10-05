@@ -170,7 +170,8 @@ test('help.md gives the one-car-at-a-time sold check only for the standard-data 
   // what every other reader still does when its check fails: no car is marked gone that scan
   const one = { vin: 'V1', name: 'Car', decision: 'ready', price: 1 };
   const held = diffScans({ vehicles: { V1: one } }, { vehicles: {} }, { confirm: { checked: [], notFound: [], error: 'HTTP 500' } }).needsALook[0].text;
-  const rest = help.split('\n').find((l) => l.includes(`"${held}"`)) || '';
+  // (the standard-data bullet quotes it too, for a refused page: the whole-check rule's own bullet is the other one)
+  const rest = help.split('\n').find((l) => l.includes(`"${held}"`) && l !== own) || '';
   assert.match(rest, /^- On Dealer Inspire, DealerOn and Dealer\.com websites, one failed check holds back every missing car for that scan/, `help.md names the readers that still show "${held}"`);
 });
 
@@ -397,7 +398,7 @@ test('the help and the data inventory say which website the side panel\'s list o
   assert.ok(para, 'help.md no longer explains the side panel\'s own list');
   assert.doesNotMatch(para, /list for the website you last scanned/, 'help.md says the panel\'s list follows the last scan; it follows the website the panel last worked on');
   assert.match(para, /list for the website it last worked on/, 'help.md does not say the list opens on the website the panel last worked on');
-  assert.match(para, /scanning another website in the popup does not switch it/, 'help.md does not say a scan in the popup leaves the panel\'s website alone');
+  assert.match(para, /[Ss]canning another website in the popup does not switch it/, 'help.md does not say a scan in the popup leaves the panel\'s website alone');
   const row = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `lastPostOrigin` |'));
   assert.ok(row, 'the data inventory has no lastPostOrigin row');
   const [, , why, written] = row.split(' | ');
@@ -1170,6 +1171,40 @@ test('no text says the data stays only in the browser: the profile follows the C
   // Clear everything for this website does not reach the synced profile (legal/privacy-policy.md, Retention)
   const support = read('../site-src/pages/support.html').split('\n').filter((l) => /stays in your browser/.test(l));
   for (const l of support) assert.match(l, /<b>Clear everything for this website<\/b> removes it\. Your profile \([^)]*closing line[^)]*\) is also kept by Chrome's sync under your Google account, and Settings, <b>Forget my synced profile<\/b> removes it\./, 'the support page says Clear everything removes what the extension keeps, but the synced profile needs Forget my synced profile');
+});
+
+// Three help lines went stale against the code they describe: the side
+// panel's own list was said to show "the same cars as the popup's tab" in the
+// very case where the popup shows another website (panelList.js
+// defaultOrigin); a single ready arrival was said to have its own Post button
+// when a Facebook draft shows Mark posted instead (popup.js postButton); and
+// a standard-data website's failed page check left out the refusal, which
+// still holds back every missing car (rescan.js, schemaOrg.js confirmMissing).
+test('the help says what the panel list, a single arrival and a refused page check show', () => {
+  const help = doc('help.md').split('\n');
+  const panel = help.find((l) => l.startsWith('**Post the next car from the side panel.**'));
+  assert.ok(panel, 'docs/help.md no longer explains the side panel\'s own list');
+  assert.match(read('../extension/src/panelList.js'), /if \(lastOrigin && has\(all, lastOrigin\)\) return lastOrigin;/, 'the panel no longer opens on the website it last worked on: check the help');
+  assert.doesNotMatch(panel, /as the popup's tab,/, 'the help says the panel shows the popup tab\'s cars, which can be another website\'s');
+  assert.match(panel, /as the popup's tab shows for that website/);
+  assert.match(panel, /once that website's data was cleared/, 'the help leaves out that a cleared website sends the panel to the most recent scan');
+
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /const readyArrivals = \(items\) => items\.filter\(\(n\) => n\.decision === DECISION\.READY && !state\.posted\[n\.vin\]\);/, 'ready arrivals changed: check what the help says a single one shows');
+  assert.match(popup, /if \(state\.drafts\[vin\]\) \{\n[^\n]*draftPill[^\n]*\n[^\n]*data-action="post"[^\n]*>Mark posted</, 'a Facebook draft no longer shows Mark posted: check the help');
+  const arrivals = help.find((l) => l.startsWith('- On **To do**, **Queue all N ready arrivals**'));
+  assert.ok(arrivals, 'docs/help.md no longer explains Queue all N ready arrivals');
+  assert.match(arrivals, /a single one has its own \*\*Post\*\* button, or, when it was saved as a draft on Facebook, a "Draft on Facebook" pill and \*\*Mark posted\*\*/, 'the help says a single ready arrival always has a Post button');
+
+  const rescan = read('../extension/src/rescan.js');
+  assert.match(rescan, /const notFound = new Set\(confirm && !confirm\.error \?/, 'a refused check may now mark cars gone: check the help');
+  assert.match(rescan, /text: 'Missing from this scan but not confirmed gone\. Rescan later\.'/);
+  const schema = read('../extension/adapters/schemaOrg.js');
+  assert.match(schema, /if \(item\.verdict\.refused\) \{\s*confirm\.error = item\.verdict\.refused;/, "a refused car page no longer stops the whole check: check the help");
+  assert.match(schema, /else if \(got && got\.kind === 'blocked'\) confirm\.error =/, 'a refused comparison page no longer stops the whole check: check the help');
+  const standard = help.find((l) => l.startsWith('- On a website Lot Current reads from the standard vehicle data'));
+  assert.ok(standard, 'docs/help.md no longer explains the standard-data check of missing cars');
+  assert.match(standard, /except when the website turned a page away \(HTTP 403, 429 or 503, or a check page shown instead of it\)[^.]*: then no car is marked gone in that scan, each missing car shows under \*\*Needs a look\*\* as "Missing from this scan but not confirmed gone\. Rescan later\."/, 'the help leaves out that a refusal holds back every missing car');
 });
 
 // README's Account item once sent readers to "steps 3 to 6: the functions, ..."
