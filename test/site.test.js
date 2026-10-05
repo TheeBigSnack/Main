@@ -580,7 +580,9 @@ test('the free pilot is offered for the salespeople named in the pilot agreement
 // A posting rule ("take sold cars down the same day") asks something of the salesperson and is not a promise.
 const RESCAN_PROMISE = /\b(?:3|three)[- ]hour(?:s|ly)?\b|\bevery few hours\b|\bsame[- ]day\b|\bwithin one rescan\b/i;
 const TAKE_DOWN_RULE = /\bdown the same day\b|\bsame-day take-?downs?\b/gi;
-const RESCANS_ALLOWED = /\b(?:automatic )?rescans (?:allowed|on)\b|\bif you allow it\b|\bonly if you allow\b|\bwebsites? (?:the person|you) allow(?:ed)?\b/i;
+// "rescans on" counts only as "automatic rescans on" (a setting), never the verb ("Lot Current rescans on its
+// own"), and neither counts when it says the setting needs nothing from the person ("on by default").
+const RESCANS_ALLOWED = /\b(?:automatic rescans on|(?:automatic )?rescans allowed)\b(?! (?:its|their) own\b| by default\b)|\bif you allow it\b|\bonly if you allow\b|\bwebsites? (?:the person|you) allow(?:ed)?\b/i;
 const CHROME_OPEN = /\bChrome (?:is )?open\b/i;
 // the sentences of a page or a Markdown text that promise the rescan, with their rule wording taken out
 function rescanPromises(src, markdown) {
@@ -605,6 +607,10 @@ test('the rescan-promise check catches a same-day or 3-hour promise without both
     'Flagged within one rescan (3 hours while Chrome is open), with the listing opened for you.',
     'It re-reads the website every few hours and tells them when a car sells.',
     'Lot Current flags sold cars the same day so they come down the same day.',
+    // the verb, not the setting
+    'Lot Current rescans on its own every 3 hours while Chrome is open and flags sold cars the same day.',
+    'With Chrome open, Lot Current rescans on its own schedule and flags sold cars the same day.',
+    'Automatic rescans on by default: every 3 hours while Chrome is open.',
   ]) assert.equal(unconditionalRescanPromises(`<p>${said}</p>`, false).length, 1, said);
   for (const said of [
     'With automatic rescans allowed and Chrome open, it also tells you the same day when a car sells or its price changes.',
@@ -613,6 +619,8 @@ test('the rescan-promise check catches a same-day or 3-hour promise without both
     'facts only, sold cars down the same day.',
     'Same-day take-downs are the point of the pilot, so please clear To do items the day they appear.',
     'The posting rules ask for sold cars to come down the same day.',
+    'Downloads photos; rescans every website with automatic rescans on every 3 hours while Chrome is open.',
+    'Rescans run every 3 hours while someone\'s Chrome is open with rescans allowed.',
   ]) assert.deepEqual(unconditionalRescanPromises(said, true), [], said);
 });
 
