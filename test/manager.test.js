@@ -31,17 +31,23 @@ const pricing = JSON.parse(read('marketing/pricing.json'));
 
 // ---------- the definitions ----------
 
-test('the definitions are the pilot\'s, sentence for sentence (both files read as text, and both modules)', () => {
+// The manager view never receives the records of which form fields filled
+// (they stay on each salesperson's Numbers tab, extension/src/sync.js), so
+// its CSV carries every pilot definition but the one about form fields.
+test('the definitions are the pilot\'s, sentence for sentence, less the form-fields one the manager has no numbers for (both files read as text, and both modules)', () => {
   const block = (src, file) => {
     const m = src.match(/export const DEFINITIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
     assert.ok(m, `${file} has a DEFINITIONS list`);
     return m[1].trim().split('\n').map((l) => l.trim()).filter(Boolean);
   };
+  const aboutFields = (d) => /form fields?|\bfields?\b/i.test(d);
   const manager = block(read('manager/data.js'), 'manager/data.js');
   const pilot = block(read('extension/src/pilot.js'), 'extension/src/pilot.js');
-  assert.deepEqual(manager, pilot, 'the sentences in manager/data.js must stay equal to extension/src/pilot.js');
-  assert.deepEqual([...DEFINITIONS], [...PILOT_DEFINITIONS]);
-  assert.equal(DEFINITIONS.length, 5);
+  assert.equal(pilot.filter(aboutFields).length, 1, 'the pilot has its one form-fields sentence');
+  assert.deepEqual(manager, pilot.filter((d) => !aboutFields(d)), 'the sentences in manager/data.js must stay equal to extension/src/pilot.js, less the form-fields one');
+  assert.deepEqual([...DEFINITIONS], PILOT_DEFINITIONS.filter((d) => !aboutFields(d)));
+  assert.equal(DEFINITIONS.length, 4);
+  assert.ok(!DEFINITIONS.some(aboutFields), 'nothing in the manager\'s definitions speaks of form fields');
   assert.doesNotMatch(read('manager/data.js'), /from ['"]\.\.\/extension/, 'data.js does not import the extension (the page is hosted on its own)');
 });
 
@@ -397,12 +403,13 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.equal(row('Sold cars still listed'), 'Sold cars still listed,2');
   assert.equal(row('Price changes still open'), 'Price changes still open,1');
   assert.equal(row('Median hours from the flagging scan until taken down'), 'Median hours from the flagging scan until taken down,');
-  // the definitions, each as one quoted cell (commas inside), the same five
+  // the definitions, each as one quoted cell (commas inside), the same four
   const at = lines.indexOf('Definitions');
   assert.ok(at > 0);
   const unquote = (l) => (l.startsWith('"') ? l.slice(1, -1).replace(/""/g, '"') : l);
-  assert.deepEqual(lines.slice(at + 1, at + 6).map(unquote), [...DEFINITIONS]);
-  assert.equal(lines[at + 6], '');
+  assert.deepEqual(lines.slice(at + 1, at + 1 + DEFINITIONS.length).map(unquote), [...DEFINITIONS]);
+  assert.equal(lines[at + 1 + DEFINITIONS.length], '');
+  assert.doesNotMatch(csv, /form fields?/i, 'the manager\'s CSV has no form-field numbers and says nothing of them');
   // the sections and their header rows
   const after = (title) => lines[lines.indexOf(title) + 1];
   assert.equal(after('Salespeople'), 'Salesperson,Posted in the last 7 days,Posted,Listings up,Taken down,Median seconds per post');

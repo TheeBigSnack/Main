@@ -175,7 +175,7 @@ test('a link that lands with #access_token: the tokens leave the address before 
   const seen = {};
   const page = await openPage(PAGE + IMPLICIT, { client: fakeClient({ seen }), fetchImpl: () => answer(204, {}) });
   assert.ok(seen.created, 'the client was made');
-  assert.doesNotMatch(seen.created.href, /access_token|refresh_token|#/, 'supabase-js never sees the fragment, so it cannot wipe a session this browser already holds');
+  assert.doesNotMatch(seen.created.href, /access_token|refresh_token|#/, 'supabase-js never sees the fragment, so it cannot refuse it silently or touch a session this browser already holds');
   assert.equal(page.href, PAGE, 'the address bar keeps no token');
   assert.ok(page.history.every((h) => !/access_token|refresh_token/.test(h)), 'no history entry the page wrote holds a token');
   const logout = page.fetches.find((f) => f.url.startsWith(`${PROJECT}/auth/v1/logout`));
@@ -202,13 +202,14 @@ test('a link that lands with the auth server\'s #error: the fragment leaves the 
 // GoTrue sends a refused link of the PKCE flow (expired, used, replaced by
 // a newer email) back with the error in the query as well as the fragment.
 // supabase-js reads the query too, and takes an error_description there for
-// a failed sign-in: it would remove a session this browser already holds.
+// a failed sign-in: it would say nothing and leave the words in the address
+// (older versions also removed a session this browser already held).
 const REFUSED = 'error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired';
 
 test('a refused link of this page\'s own (the error in the query and the fragment): both leave the address before supabase-js starts, and the page says the link did not work', async () => {
   const seen = {};
   const page = await openPage(`${PAGE}?${REFUSED}#${REFUSED}`, { client: fakeClient({ seen }) });
-  assert.doesNotMatch(seen.created.href, /error|#/, 'supabase-js never sees the error, so it cannot wipe a session this browser holds');
+  assert.doesNotMatch(seen.created.href, /error|#/, 'supabase-js never sees the error, so it cannot refuse it silently or touch a session this browser holds');
   assert.equal(page.href, PAGE, 'the address bar keeps none of the error\'s words');
   assert.ok(page.history.every((h) => !/error/.test(h)));
   assert.equal(page.fetches.filter((f) => f.url.includes('/auth/v1/logout')).length, 0);

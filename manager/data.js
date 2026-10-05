@@ -91,9 +91,12 @@ export const NOT_ON_TEAM_HINT = 'Their extension no longer syncs, and sold-car a
 // only a manager reads the whole team, so nobody else can be told apart.
 export const NOT_ON_TEAM_UNKNOWN = 'Left out: only a manager reads the whole team, so only a manager\'s download lists these cars.';
 
+// What each number in the CSV means: the pilot's definitions
+// (extension/src/pilot.js) less its form-fields sentence, because the
+// records of which form fields filled stay on each salesperson's Numbers
+// tab and never sync, so the manager's numbers have none.
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
-  'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
   'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
   'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.',
@@ -460,10 +463,11 @@ export async function readAll(page, { pageRows = PAGE_ROWS, maxPages = MAX_PAGES
 // this page: #access_token=...&refresh_token=... from an implicit-flow link
 // (an email asked for elsewhere without a PKCE challenge: an extension from
 // before it sent one, or a call made by hand), and #error=... when the auth
-// server refused a link. supabase-js would refuse either and, doing so,
-// remove a session this browser already has, while the fragment stays in
-// the address bar. authFragment() reads the fragment so the page can take
-// it out of the address before supabase-js starts, end the session those
+// server refused a link. supabase-js refuses either with no word on the
+// page and leaves the fragment, tokens and all, in the address bar (the
+// pinned copy keeps a session this browser already has; older versions
+// removed it). authFragment() reads the fragment so the page can take it
+// out of the address before supabase-js starts, end the session those
 // tokens opened, and say one sentence. The sentences never quote the
 // address: anyone can write words into a link.
 export const STRAY_LINK_NOTE = 'That link was not asked for on this page, so it does not sign you in here. Asked from the Lot Current extension? Ask it for a new code: opening the link used this one up. To sign in here, send yourself a link below.';
@@ -489,9 +493,10 @@ export function authFragment(hash) {
 // A link the auth server refused (expired, used, replaced by a newer email)
 // on this page's own PKCE flow comes back with the error in the query as
 // well as in the fragment: ?error=...&error_code=...&error_description=...
-// supabase-js reads the query too, takes an error_description there for a
-// failed sign-in and removes a session this browser already has; and the
-// words would stay in the address bar. authQueryError() names the error
+// supabase-js reads the query too and takes an error_description there for
+// a failed sign-in, says nothing on the page, and leaves the words in the
+// address bar (older versions also removed a session this browser already
+// had; the pinned copy keeps it). authQueryError() names the error
 // parameters the query carries, so the page takes them out before
 // supabase-js starts, and says FAILED_LINK_NOTE.
 export const AUTH_ERROR_PARAMS = Object.freeze(['error', 'error_code', 'error_description']);
