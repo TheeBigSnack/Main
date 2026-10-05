@@ -1277,6 +1277,11 @@ test('the help, README and site say a price update reads the website again first
   assert.match(open, /stops there and says why: it opens and fills nothing/);
   assert.match(open, /marks it sold or sale-pending, no longer calls it pre-owned, has details that need a look/);
   assert.match(open, /A car at another store, without photos or not yet on the lot still gets its new price/);
+  // a read that fails, or that Chrome refuses from the panel, stops it too (upkeepPriceNow)
+  const priceNow = read('../extension/sidepanel.js').match(/async function upkeepPriceNow\([\s\S]*?\n\}\n/)[0];
+  assert.match(priceNow, /if \(!fresh\.ok && fresh\.needsPermission\) \{\s*return \{ ok: false,/);
+  assert.match(priceNow, /if \(!fresh\.ok\) \{[\s\S]*?return \{ ok: false,/);
+  assert.match(open, /If the website can't be read just then \(or Chrome hasn't let Lot Current read it from the panel: open the website's used inventory page and click \*\*Open & update price\*\* in the popup there\)/);
   const step = help.split('\n').find((l) => l.includes('The moment the Price box appears'));
   assert.match(step, /the price the website showed at that read/);
   for (const rel of ['../docs/help.md', '../README.md', '../site-src/pages/how-it-works.html', '../site/how-it-works/index.html']) {
