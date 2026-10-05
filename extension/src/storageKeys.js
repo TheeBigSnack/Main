@@ -26,7 +26,8 @@ export const SITE_KEY_NAMES = Object.freeze({
   flow: 'postFlow',
   pilot: 'pilot',
   sync: 'sync', // the sync state for this website (src/sync.js, Milestone 4): since, dealership id, role, the plan state, today's server-side post count
-  takenDown: 'takenDown', // the posts this salesperson took off their posted list (src/takenDown.js): still counted by the daily cap on the day they were made
+  postLog: 'postLog', // today's posts recorded on this computer, take-downs and unmarks included: the daily cap's record of the day's posts (src/cap.js logPost, dayLog)
+  takenDown: 'takenDown', // the posts this salesperson took off their posted list (src/takenDown.js): the re-post notice, and the cap's source for a post of the day the day's log never had
 });
 
 // { settings: 'settings:<origin>', queue: 'postQueue:<origin>', ... }: every

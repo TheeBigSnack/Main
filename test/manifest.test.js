@@ -171,6 +171,17 @@ test('the CHANGELOG section reader finds a release and stops at the next heading
   assert.equal(changelogSection(text, { entry: 'Photos' }), null);
 });
 
+// Every top-level key, pinned like the permissions above: a new one (a
+// content script, web-accessible files, a connection from web pages, an
+// options page) can reach pages or change what the extension is, so it fails
+// here until someone has looked at it and updated this list.
+test('the manifest has exactly the keys it has today: no content scripts or other new way onto a page arrives unreviewed', () => {
+  assert.deepEqual(Object.keys(manifest).sort(), [
+    'action', 'background', 'description', 'host_permissions', 'icons', 'manifest_version', 'minimum_chrome_version', 'name', 'optional_host_permissions', 'permissions', 'side_panel', 'version',
+  ]);
+  assert.deepEqual(Object.keys(manifest.background).sort(), ['service_worker', 'type'], 'one service worker, nothing else in the background');
+});
+
 test('the package script exists and the packed zip is ignored by git', () => {
   assert.equal(pkg.scripts.pack, 'node scripts/pack.mjs');
   assert.match(read('../.gitignore'), /^dist\/$/m);

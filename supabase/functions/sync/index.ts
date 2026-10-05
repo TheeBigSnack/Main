@@ -33,7 +33,10 @@
 //     it by anyone else is skipped (counts.conflicts), so a car is re-posted
 //     only by the person who has it up, or after their row is taken down;
 //   - `today` is the caller's local calendar day; `postsToday` counts their
-//     own rows posted in it (any status), so the per-salesperson daily cap
+//     own rows posted in it (any status), less the listings they marked
+//     posted but had made by hand before that day (listed_before, written
+//     on insert from the entry's listedBefore and never changed by an
+//     upload), so the per-salesperson daily cap
 //     (extension/src/cap.js) can take the larger of its local count and
 //     the server's. No `today`, or one that is not a day, gives null;
 //   - a listing row of another user, or one already taken down, is never
@@ -86,6 +89,7 @@ interface ListingRow {
   updated_at: string | null;
   status: 'listed';
   taken_down_at: null;
+  listed_before: boolean;
 }
 
 interface AttemptRow {
@@ -178,6 +182,7 @@ function listingRows(posted: unknown, dealershipId: string, userId: string): Lis
       updated_at: isoOrNull(e.updatedAt),
       status: 'listed',
       taken_down_at: null,
+      listed_before: e.listedBefore === true,
     });
   }
   return out;
@@ -600,10 +605,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // 7. the caller's posts in the calendar day they sent, for the daily
     //    cap: their own rows only (the cap is per salesperson), any status
-    //    (a post taken down later was still a post that day). Counted after
-    //    the writes so the posts this call brought are in it; null when the
-    //    request sent no day, and the cap then counts locally alone.
-    const postsToday = today ? await countOf(client.from('listings').select('id', { count: 'exact', head: true }).eq('dealership_id', dealershipId).eq('user_id', me).gte('posted_at', today.from).lt('posted_at', today.to), 'could not count listings') : null;
+    //    (a post taken down later was still a post that day). A listing they
+    //    marked posted that day but had made by hand before it
+    //    (listed_before, migration 0012) is not a post of that day. Counted
+    //    after the writes so the posts this call brought are in it; null
+    //    when the request sent no day, and the cap then counts locally alone.
+    const postsToday = today ? await countOf(client.from('listings').select('id', { count: 'exact', head: true }).eq('dealership_id', dealershipId).eq('user_id', me).eq('listed_before', false).gte('posted_at', today.from).lt('posted_at', today.to), 'could not count listings') : null;
 
     return json(req, 200, {
       ok: true,

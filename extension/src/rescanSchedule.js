@@ -82,6 +82,7 @@ export function latestOf(...isos) {
 export function originsFor(site, needs) {
   const out = new Set();
   let facebook = false;
+  // the pattern's '/' + '*' is split so the guard test's comment stripper never sees a block-comment opener
   const add = (u) => {
     try {
       if (isFacebookServer(u)) facebook = true;

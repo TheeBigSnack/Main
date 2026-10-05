@@ -10,25 +10,27 @@
 // This file never clicks anything on the Facebook page.
 
 import { markPosted, basisPrice } from './src/rescan.js';
+import { draftRecord, draftPill } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
-import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins } from './src/panelList.js';
+import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
 import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
-import { runGuardrails, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
+import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { buildListingData, normalizeColor, COLORS } from './src/listingData.js';
-import { capStatus } from './src/cap.js';
+import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
-import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick } from './upkeep.js';
+import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, NHTSA_ORIGIN } from './src/vin.js';
-import { neededPatterns, patternCovers, patternHost, isFacebookServer } from './src/photoHosts.js';
+import { neededPatterns, patternCovers, patternHost, hostList, isFacebookServer } from './src/photoHosts.js';
 import { askChrome } from './src/askChrome.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
-import { fillFormInPage, attachPhotosInPage, probeFormInPage } from './facebook/fillForm.js';
-import { watchForListing } from './facebook/detectPost.js';
+import { fillFormInPage, attachPhotosInPage, probeFormInPage, readListingInPage } from './facebook/fillForm.js';
+import { watchForListing, isNewListingFromForm, showsPostedCar, onCreatePage, listingLink } from './facebook/detectPost.js';
+import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { relistNotice } from './src/takenDown.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -52,8 +54,9 @@ const languageHint = (lang, nothingFound) => (lang && !/^en\b/i.test(lang) && no
 
 const state = {
   origin: null, vin: null, dealerTabId: null, windowId: null,
-  settings: null, posted: {}, boilerplate: [], siteName: '',
+  settings: null, posted: {}, postLog: [], boilerplate: [], siteName: '',
   vehicle: null, price: null,
+  readAt: null, // when the car was last read and checked on the website (READ_MAX_AGE_MS)
   description: '', descriptionSource: 'template', note: '', guardrails: null,
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
@@ -65,7 +68,7 @@ const state = {
   relist: null, // this car's take-down while the website still listed it (src/takenDown.js relistNotice): the review says so, a queue waits
   queue: null, // the batch queue (src/queue.js), shared with the popup
   queueMode: false, // this car is being posted as part of the queue
-  drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt } }
+  drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt, price, basis } } (src/drafts.js)
   snapshotVehicles: {}, // names for the queue bar
   syncState: null, // this website's sync state (src/sync.js nextSyncState): the server's count of today's posts feeds the cap
   takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap still counts the day's
@@ -79,6 +82,12 @@ const state = {
   map: FORM_MAP,
 };
 let watcher = null;
+// Counts the posts the panel has dropped (clearFlow: a new post, Stop queue,
+// Back, Skip, a set-up). Each step of a post that waits on something (the
+// website, the rewrite service, storage, the Marketplace tab) notes the count
+// first and goes no further when it changed meanwhile, so a post left behind
+// never writes into the post that took over, and never opens or fills a form.
+let flowRun = 0;
 
 // ---------- saved data ----------
 // The keys are named in src/storageKeys.js (siteKeys(origin) for this
@@ -127,7 +136,7 @@ const panelStorage = { get: (key) => chrome.storage.local.get(key), set: ownSet 
 async function loadSaved() {
   const origin = state.origin;
   const k = siteKeys(origin);
-  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate, k.queue, k.drafts, k.sync, k.takenDown, GLOBAL_KEYS.sites]);
+  const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.postLog, k.boilerplate, k.queue, k.drafts, k.sync, k.takenDown, GLOBAL_KEYS.sites]);
   const sites = data[GLOBAL_KEYS.sites] || {};
   const siteInfo = sites[origin] || null;
   const siteName = data[k.snapshot]?.site?.name || siteInfo?.name || origin;
@@ -141,6 +150,7 @@ async function loadSaved() {
     snapshotTakenAt: data[k.snapshot]?.takenAt || null,
     settings,
     posted: data[k.posted] || {},
+    postLog: data[k.postLog] || [],
     boilerplate: data[k.boilerplate] || [],
     queue: data[k.queue] || null,
     drafts: data[k.drafts] || {},
@@ -161,7 +171,11 @@ const saveQueue = async () => {
   }
 };
 
-const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'relist', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt', 'map'];
+// What a post under way keeps across a closed panel. Not the form map: a
+// reopened panel builds it from formMap.js again (resumeFlow), so nothing
+// saved can change what the fill code may touch, and a map fixed in a newer
+// version applies to a post saved before the update.
+const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'priceBasis', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'relist', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt'];
 
 async function saveFlow() {
   if (!state.origin) return;
@@ -174,15 +188,35 @@ async function saveFlow() {
   }
 }
 
-async function clearFlow() {
+// Resolves the new count (flowRun): the number of the post started next.
+// keepSaved: the saved post is left as it is (it is another panel's now).
+async function clearFlow({ keepSaved = false } = {}) {
+  const run = ++flowRun;
   if (watcher) watcher.cancel();
   watcher = null;
-  if (state.vin) await pilotNote((p) => endPost(p, state.vin, 'abandoned')); // only an attempt still open changes
-  if (state.origin) await chrome.storage.local.remove(siteKeys(state.origin).flow);
+  const { vin, origin } = state;
+  if (vin) await pilotNote((p) => endPost(p, vin, 'abandoned')); // only an attempt still open changes
+  if (origin && !keepSaved) await chrome.storage.local.remove(siteKeys(origin).flow);
+  if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
-    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
+    vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, description: '', descriptionSource: 'template', note: '', guardrails: null,
     listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
+  return run;
+}
+
+// Whether the post saved for this website is still this car's, or none is.
+// A side panel in a second window that finds its car already recorded and
+// moved on from elsewhere must not remove or overwrite the post the panel of
+// the first window saved since (its next car, with its open form's tab).
+async function savedFlowIs(origin, vin) {
+  try {
+    const k = siteKeys(origin).flow;
+    const saved = (await chrome.storage.local.get(k))[k];
+    return !saved || saved.vin === vin;
+  } catch (e) {
+    return true; // unknown: as before, this panel's
+  }
 }
 
 function setStatus(text, kind = '') {
@@ -196,6 +230,36 @@ function setStatus(text, kind = '') {
 // would be untrue for it, so it is left out and the car card says so.
 const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
 const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
+
+// The description's checks, run again on the text that would be filled (the
+// box's, on the review screen). One that breaks a posting rule (the
+// dealership not named, a number or a claim the website doesn't give, a
+// banned phrase: rewriteTemplate.js ruleProblems) keeps the form shut, with
+// the problems in the status line: Lot Current never types such a text into
+// Facebook's form. Style warnings (length, capitals, emoji) don't stop it.
+// Returns true when stopped.
+function descriptionStopped() {
+  const box = $('description');
+  if (box) state.description = box.value;
+  state.guardrails = runGuardrails(state.description, ctx());
+  const stops = ruleProblems(state.guardrails);
+  const old = $('checks');
+  if (old) old.outerHTML = checksHtml(state.guardrails);
+  setFormButtons();
+  if (!stops.length) return false;
+  setStatus(`Fix the description first: ${stops.map((p) => p.text).join('; ')}.`, 'error');
+  return true;
+}
+
+// Open the Marketplace form and Check fields: off at the day's cap, and while
+// the description breaks a posting rule.
+function setFormButtons(cap = dailyCap()) {
+  const off = cap.reached || ruleProblems(state.guardrails).length > 0;
+  for (const id of ['openForm', 'checkForm']) {
+    const b = $(id);
+    if (b) b.disabled = off;
+  }
+}
 
 // Pilot numbers (src/pilot.js): when each post started and ended, and what
 // each fill could not do. Bookkeeping only; a failure here never stops a post.
@@ -240,10 +304,6 @@ const noPhotosPicked = () => Boolean(state.vehicle) && !pickedPhotos().length &&
 const NO_PHOTOS_TEXT = 'No photos are ticked. Marketplace needs at least one: tick the photos to post first.';
 const photoList = () => (state.listing ? state.listing.photos : pickedPhotos());
 const photoPatterns = (urls = photoList()) => neededPatterns(urls, { manifestHosts: MANIFEST_HOSTS, granted: grantedOrigins });
-const hostList = (patterns) => {
-  const hosts = patterns.map(patternHost);
-  return hosts.length > 1 ? `${hosts.slice(0, -1).join(', ')} and ${hosts[hosts.length - 1]}` : hosts.join('');
-};
 const askSentence = (patterns) => `Chrome will ask to let Lot Current download this car's photos from ${hostList(patterns)}.`;
 
 // Asks Chrome, in one request, for every server this car's photos sit on
@@ -291,29 +351,165 @@ async function afterAllowPhotos(pattern, granted) {
 
 // ---------- the flow ----------
 
+// How long one read of the car counts as "at post time". Past this, Open the
+// Marketplace form and the dry run's Fill it in now read the car on the
+// website and check it again before anything is opened or filled
+// (carStillCurrent): a review left open for an hour, or one the panel
+// brought back the next day, is never filled from the old read.
+const READ_MAX_AGE_MS = 10 * 60 * 1000;
+
+// The car as the website shows it now, checked again (src/vehicleDetails.js
+// recheck): still there, still pre-owned and ready, still priced. Read
+// through the dealer tab when the post started from one that still shows this
+// website; otherwise straight from the extension, with the website
+// permission (readCarForPost). A failure stops the post with the reason
+// (block). Resolves { vehicle, price, noteApplies, readAt }, or null when
+// stopped. Also null, with nothing changed, when the post was dropped while
+// the website answered (flowRun: another car's Post, Stop queue, Skip,
+// Back): neither the car nor a failure lands in the post that took over.
+async function readCarNow() {
+  const run = flowRun;
+  const fresh = await readCarForPost({ tabId: state.dealerTabId ?? null, origin: state.origin, info: state.siteInfo, vin: state.vin, url: state.snapshotVehicles[state.vin]?.url });
+  if (run !== flowRun) return null;
+  if (!fresh.ok && fresh.needsPermission) {
+    state.blockedOrigins = fresh.origins;
+    await block(fresh.message, 'no-permission');
+    return null;
+  }
+  if (!fresh.ok) {
+    await block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
+    return null;
+  }
+  const check = recheck(fresh.vehicle, state.settings);
+  if (!check.ok) {
+    await block(check.message, 'check-' + check.assessment.decision);
+    return null;
+  }
+  // the store label the popup shows: settled over the lot's store names, not the adapter's brand-word guess for one record
+  fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
+  const price = basisPrice(fresh.vehicle, state.settings.basis); // the lower second price only when this car shows one
+  if (!price) {
+    await block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
+    return null;
+  }
+  // the basis the price was taken on, kept with it: the post is recorded on it (confirmPosted), whatever Settings says by then
+  return { vehicle: fresh.vehicle, price, priceBasis: state.settings.basis === 'beforeFees' ? 'beforeFees' : 'website', noteApplies: !(state.settings.basis === 'beforeFees' && price === fresh.vehicle.price), readAt: new Date().toISOString() };
+}
+
+function takeCar(car) {
+  state.vehicle = car.vehicle;
+  state.vinCheck = { local: localVinCheck(car.vehicle), online: null };
+  state.price = car.price;
+  state.priceBasis = car.priceBasis;
+  state.noteApplies = car.noteApplies;
+  state.readAt = car.readAt;
+}
+
+// No time recorded (a post saved before reads were timed) counts as old, and
+// so does a read that a scan since then contradicts: the car is not in it
+// (sold, or taken off the website meanwhile), or it is there with another
+// price, second price, status, availability or inventory type than the read
+// gave. The read again decides.
+function readIsOld() {
+  const readAt = Date.parse(state.readAt || '');
+  if (!(Date.now() - readAt < READ_MAX_AGE_MS)) return true;
+  if (!(Date.parse(state.snapshotTakenAt || '') > readAt)) return false;
+  const listed = (state.snapshotVehicles || {})[state.vin];
+  if (!listed) return true;
+  const v = state.vehicle || {};
+  const same = (a, b) => (a ?? null) === (b ?? null);
+  return !(same(listed.price, v.price) && same(listed.priceBeforeFees, v.priceBeforeFees) && same(listed.status, v.status) && same(listed.availability, v.availability) && same(listed.type, v.inventoryType));
+}
+
+// What the form would get from the car as it stands: every field but the
+// description (the person's own text), and the photos in order.
+function formValues() {
+  const l = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos() });
+  return { ...l.fields, photos: l.photos.join(' ') };
+}
+
+// Before Open the Marketplace form or Fill it in now: with a read older than
+// READ_MAX_AGE_MS, the car is read and checked on the website again. A car
+// that sold, turned new, went sale-pending or lost its price stops here
+// (block says why). The description's checks run again against the new read
+// too. A car whose price or any form value changed, or whose description
+// now breaks a posting rule (a fact the website no longer gives, such as the
+// Carfax one-owner flag or a feature's number, with every form value the
+// same), goes back to the review screen with the new values and checks, and
+// the status line says what changed and what to fix: the person sees it
+// before anything is filled. A post dropped during the read (readCarNow)
+// goes no further. Resolves true to go on.
+async function carStillCurrent() {
+  if (!readIsOld()) return true;
+  const run = flowRun;
+  const was = state.step;
+  const before = { price: state.price, values: formValues() };
+  state.step = 'checking';
+  state.message = 'Checking the car on the website again before the form opens…';
+  setStatus('');
+  render();
+  const car = await readCarNow();
+  if (!car) return false;
+  const online = state.vinCheck && state.vinCheck.online;
+  takeCar(car);
+  const after = formValues();
+  const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
+  const changed = Object.keys({ ...before.values, ...after }).filter((k) => k !== 'description' && before.values[k] !== after[k]);
+  state.guardrails = runGuardrails(state.description, ctx());
+  const stops = ruleProblems(state.guardrails);
+  state.message = '';
+  if (!changed.length && !stops.length) {
+    if (state.vinCheck && online) state.vinCheck.online = online; // the same car: the NHTSA comparison still stands
+    state.step = was;
+    await saveFlow();
+    return run === flowRun; // false when the post was dropped while it saved
+  }
+  const said = changed.map((k) => (k === 'price' ? `price ${money(before.price)} to ${money(state.price)}` : k === 'photos' ? 'photos' : (labels[k] || k).toLowerCase()));
+  state.listing = null;
+  state.step = 'review';
+  render();
+  const what = said.length ? ` (${said.join(', ')})` : '';
+  const next = stops.length
+    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then click Open the Marketplace form again.`
+    : ' Check the review, then click Open the Marketplace form again.';
+  setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
+  await saveFlow();
+  return false;
+}
+
+// A car marked as posted meanwhile (from the panel's own list while a queue
+// was paused, from the popup, or on another computer through the sync) never
+// gets a second form. It is checked when the post starts and again, from
+// what is stored then, before the form opens or the dry run's form is filled:
+// a queued car is skipped, a single post stops.
+async function stopPosted() {
+  const name = nameOf(state.vin);
+  if (state.queueMode) {
+    await afterQueueStep('skipped');
+    if (state.step === 'idle' || state.step === 'queueDone') setStatus(`${name} is already marked as posted, so the queue skipped it.`);
+    return undefined;
+  }
+  await clearFlow();
+  setStatus(`${name} is already marked as posted on this website, so it isn't posted again. Its listing is under My listings in the popup.`);
+  return render();
+}
+
 async function startFlow(req) {
   await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
   endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
-  await clearFlow();
+  // This post's number: another post started, Stop queue, Skip or Back
+  // changes it, and this one then stops at its next step (flowRun).
+  const run = await clearFlow();
+  const dropped = () => run !== flowRun;
+  if (dropped()) return undefined;
   state.origin = req.origin;
   state.vin = String(req.vin || '').toUpperCase();
   state.dealerTabId = req.dealerTabId;
   state.windowId = req.windowId || null;
   state.queueMode = Boolean(req.queue);
   await loadSaved();
-  if (state.posted[state.vin]) {
-    // posted meanwhile (from the panel's own list while a queue was paused,
-    // from the popup, or on another computer): never a second form for it
-    const name = nameOf(state.vin);
-    if (state.queueMode) {
-      await afterQueueStep('skipped');
-      if (state.step === 'idle' || state.step === 'queueDone') setStatus(`${name} is already marked as posted, so the queue skipped it.`);
-      return undefined;
-    }
-    await clearFlow();
-    setStatus(`${name} is already marked as posted on this website, so it isn't posted again. Its listing is under My listings in the popup.`);
-    return render();
-  }
+  if (dropped()) return undefined;
+  if (state.posted[state.vin]) return stopPosted();
   if (!state.settings.rulesReadAt) {
     // The posting rules come before the first post from this website. Set-up
     // shows them; whoever skipped it reads and ticks them here, and the post
@@ -323,50 +519,43 @@ async function startFlow(req) {
     return render();
   }
   await refreshGranted(); // current before canAutoOpen below looks at the photo servers
+  if (dropped()) return undefined;
   state.step = 'checking';
   setStatus('');
   render();
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
+  if (dropped()) return undefined;
 
-  // through the dealer tab when the post started from one that still shows
-  // this website; otherwise straight from the extension, with the website
-  // permission (src/vehicleDetails.js readCarForPost)
-  const fresh = await readCarForPost({ tabId: state.dealerTabId ?? null, origin: state.origin, info: state.siteInfo, vin: state.vin, url: state.snapshotVehicles[state.vin]?.url });
-  if (!fresh.ok && fresh.needsPermission) {
-    state.blockedOrigins = fresh.origins;
-    return block(fresh.message, 'no-permission');
-  }
-  if (!fresh.ok) return block(fresh.message, fresh.notFound ? 'not-on-website' : 'site-unreachable');
-  const check = recheck(fresh.vehicle, state.settings);
-  if (!check.ok) return block(check.message, 'check-' + check.assessment.decision);
-  // the store label the popup shows: settled over the lot's store names, not the adapter's brand-word guess for one record
-  fresh.vehicle.locationShort = shortLocation(fresh.vehicle.location, storeNames(Object.values(state.snapshotVehicles)));
-  state.vehicle = fresh.vehicle;
-  state.vinCheck = { local: localVinCheck(fresh.vehicle), online: null };
-  state.price = basisPrice(fresh.vehicle, state.settings.basis); // the lower second price only when this car shows one
-  state.noteApplies = !(state.settings.basis === 'beforeFees' && state.price === fresh.vehicle.price);
-  if (!state.price) return block("The website shows no price for this car right now, so it can't be posted.", 'no-price');
+  const car = await readCarNow();
+  if (!car) return undefined; // stopped, and block() says why
+  takeCar(car);
 
   // taken down by this person while the website still listed it: possibly a delete and repost (posting rule 3)
   state.relist = relistNotice(state.takenDown, state.vin);
   state.message = 'Writing the description…';
   render();
   await maybeGuessColors();
+  if (dropped()) return undefined;
   await generate();
+  if (dropped()) return undefined;
   state.step = 'review';
   state.message = '';
   render();
   await saveFlow();
+  if (dropped()) return undefined;
   await pilotNote((p) => notePostStep(p, state.vin, 'reviewedAt'));
+  if (dropped()) return undefined;
   // In a queue, a car that passes every check goes straight to the form;
   // one with a warning waits here so the person sees it.
   if (state.queueMode && canAutoOpen()) await openForm();
 }
 
-// The day's cap for this salesperson: this machine's posts (the ones taken
-// down since included) and, after a sync, the server's count of theirs
-// across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday, takenDown: state.takenDown });
+// The day's cap for this salesperson: this machine's posts (those taken down
+// or unmarked since included: the day's log, with the posts the take-down
+// record holds that the log never had), after a sync the server's count of
+// theirs across their machines, and the forms saved as drafts today that are
+// not marked posted yet (src/cap.js).
+const dailyCap = () => capStatus(state.posted, state.settings.dailyCap, new Date(), { log: state.postLog, takenDown: state.takenDown, serverCount: state.syncState && state.syncState.postsToday, drafts: state.drafts });
 
 // Anything assumed besides the dealership's own defaults (a reading of the
 // website's words, a colour guessed from the photos, a motorcycle read from
@@ -397,31 +586,54 @@ async function startNextInQueue() {
     state.queue = pauseQueue(q);
     await saveQueue();
     await clearFlow();
-    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap}). The queue is paused until tomorrow; the dealer can change the cap in Settings.`, 'error');
+    setStatus(`Daily post cap reached (${capCount(cap)}). The queue is paused until tomorrow; the dealer can change the cap in Settings.`, 'error');
     render();
     return;
   }
-  // the tab the queue was started from (the popup's), never one an earlier post or to-do item left behind
-  await startFlow({ origin: state.origin, vin, dealerTabId: q.dealerTabId ?? null, windowId: q.windowId || state.windowId, queue: true });
+  // the tab the queue was started from (the popup's), never one an earlier post or to-do item left behind.
+  // The car is this panel's, the one walking the queue: a queue made in
+  // another window (or before Chrome restarted) and continued here records
+  // its posts by itself here (postsWindow), not only in the window it was made in.
+  await startFlow({ origin: state.origin, vin, dealerTabId: q.dealerTabId ?? null, windowId: panelWindowId || q.windowId || state.windowId, queue: true });
 }
 
 // Records how this car ended and moves on: the next car, a pause, or the end.
 // The queue is advanced from what is stored, under its lock: the popup may
 // have stopped it (or paused it) while this car was on the form, and a stale
-// copy must not bring it back.
+// copy must not bring it back. It moves only while it is still on the car
+// this panel finished (vin): when it has moved on already (a second confirm
+// of the same car, or the side panel in another window), nothing is recorded
+// against the next car and the next car is not started a second time.
+// Resolves false only when the queue could not be saved: it stays on this
+// car, and the button that called it can be clicked again.
 let advancing = false;
-async function afterQueueStep(outcome) {
-  if (advancing) return; // the watcher and a click on the same car advance once
+async function afterQueueStep(outcome, vin = state.vin) {
+  if (advancing) return undefined; // the watcher and a click on the same car advance once
   advancing = true;
   let startNext = false;
   try {
     if (watcher) watcher.cancel();
-    if (state.vin) await pilotNote((p) => endPost(p, state.vin, outcome)); // a no-op for a car already recorded as posted or drafted
+    if (vin) await pilotNote((p) => endPost(p, vin, outcome)); // a no-op for a car already recorded as posted or drafted
     let stored;
+    let moved = false;
     try {
-      stored = await updateKey(siteKeys(state.origin).queue, (q) => (q ? advance(q, outcome) : undefined), panelStorage);
+      stored = await updateKey(siteKeys(state.origin).queue, (q) => {
+        if (!q) return undefined;
+        moved = Boolean(vin) && currentVin(q) === vin;
+        return advance(q, outcome, vin);
+      }, panelStorage);
     } catch (e) {
       setStatus(storageErrorText(e), 'error'); // the queue stays where it is; the button can be clicked again
+      return false;
+    }
+    if (stored && !moved) {
+      state.queue = stored;
+      if (state.vin !== vin) return; // this panel is on another car already: it stays on it
+      // the panel that moved the queue on (another window's) may have saved its next car since: that stays
+      await clearFlow({ keepSaved: !(await savedFlowIs(state.origin, vin)) });
+      state.step = stored.status === 'done' ? 'queueDone' : 'idle';
+      setStatus(`The queue had already moved on from ${nameOf(vin)}, so nothing more was recorded for it here.`);
+      render();
       return;
     }
     if (!stored) {
@@ -444,20 +656,34 @@ async function afterQueueStep(outcome) {
   } finally {
     advancing = false; // released before the next car's flow, whose own end must be able to advance
   }
-  if (startNext) return startNextInQueue();
+  if (startNext) await startNextInQueue(); // the next car's own outcome is not this car's
+  return undefined;
 }
 
+// The draft keeps the price the form was filled with: the listing published
+// from it later shows that price, so Mark posted records it (src/drafts.js).
+// Like It's posted, once per post (confirmedRun) and only from the publish
+// step, for the car captured here: a second click while the next car comes
+// up records nothing against the next car and starts nothing twice.
 async function savedDraft() {
-  const savedAt = new Date().toISOString();
+  const run = flowRun;
+  if (state.step !== 'publish' || !state.vehicle || confirmedRun === run) return undefined;
+  confirmedRun = run;
+  const { vin, vehicle, origin, price } = state;
+  // on the basis its price was read under (a post saved before that was kept goes by the setting)
+  const record = draftRecord({ name: vehicle.name, price, basis: state.priceBasis || state.settings.basis, savedAt: new Date().toISOString() });
   try {
     // added to the list as it is stored now: the popup may have changed it meanwhile
-    state.drafts = await updateKey(siteKeys(state.origin).drafts, (fresh) => ({ ...(fresh || {}), [state.vin]: { name: state.vehicle.name, savedAt } }), panelStorage);
+    state.drafts = await updateKey(siteKeys(origin).drafts, (fresh) => ({ ...(fresh || {}), [vin]: record }), panelStorage);
   } catch (e) {
+    confirmedRun = -1; // not saved: the button can be clicked again
     setStatus(storageErrorText(e), 'error');
-    return;
+    return undefined;
   }
-  await pilotNote((p) => endPost(p, state.vin, 'draft'));
-  return afterQueueStep('draft');
+  await pilotNote((p) => endPost(p, vin, 'draft'));
+  if (run !== flowRun) return undefined; // dropped meanwhile: the draft is kept, and the post now under way is not touched
+  if ((await afterQueueStep('draft', vin)) === false) confirmedRun = -1; // the queue could not be saved: clicking again moves it
+  return undefined;
 }
 
 function queueBar() {
@@ -469,7 +695,7 @@ function queueBar() {
   if (q.status === 'done') {
     buttons = `<button type="button" class="plain" id="queueClear">Clear queue</button>`;
   } else {
-    if (!active && next && q.status === 'running') buttons += `<button type="button" class="primary" id="queueNext">Post next car</button>`;
+    if (!active && !formOpen() && next && q.status === 'running') buttons += `<button type="button" class="primary" id="queueNext">Post next car</button>`;
     buttons += q.status === 'running' ? `<button type="button" class="plain" id="queuePause">Pause</button>` : `<button type="button" class="plain" id="queueResume">Resume</button>`;
     if (next) buttons += `<button type="button" class="plain" id="queueSkip">Skip this car</button>`;
     buttons += `<button type="button" class="plain" id="queueStop">Stop queue</button>`;
@@ -493,10 +719,15 @@ async function block(message, code = 'blocked') {
 async function resumeFlow(origin, flow) {
   state.origin = origin;
   for (const f of FLOW_FIELDS) if (f in flow) state[f] = flow[f];
-  if (!state.map) state.map = FORM_MAP;
+  const devOverrides = (await chrome.storage.local.get(GLOBAL_KEYS.devOverrides))[GLOBAL_KEYS.devOverrides]; // test hook: addresses and timings only, see formMap.js
+  state.map = applyOverrides(FORM_MAP, devOverrides);
   await loadSaved();
   if (state.step === 'checking' || state.step === 'filling') state.step = state.vehicle ? 'review' : 'idle';
   render();
+  // A side panel opened in a second window shows the same post with its
+  // buttons and watches the same tab, so its It's posted knows the listing's
+  // link too; only the panel of the post's own window records it by itself
+  // (startWatcher, postsWindow).
   if (state.step === 'publish' && state.fbTabId) startWatcher();
 }
 
@@ -520,13 +751,16 @@ async function maybeGuessColors(force = false) {
     state.colorGuess = { error: 'no photos to look at' };
     return;
   }
+  const run = flowRun;
   const rw = await rewriteWithKey(base);
+  let guess;
   try {
     const r = await guessColorsWithBackend({ endpoint: rw.endpoint, key: rw.key, photos, options: COLORS, origin: state.origin }); // the origin tells the service which store this is
-    state.colorGuess = r.ok ? { exterior: need.exterior ? r.exterior : '', interior: need.interior ? r.interior : '', confidence: r.confidence, model: r.model } : { error: r.error };
+    guess = r.ok ? { exterior: need.exterior ? r.exterior : '', interior: need.interior ? r.interior : '', confidence: r.confidence, model: r.model } : { error: r.error };
   } catch (e) {
-    state.colorGuess = { error: String((e && e.message) || e) };
+    guess = { error: String((e && e.message) || e) };
   }
+  if (run === flowRun) state.colorGuess = guess; // a dropped post's guess never lands in the next car's
 }
 
 // The rewrite settings as the writer should use them. Signed in, with the
@@ -551,10 +785,13 @@ function vehicleForText() {
 }
 
 async function generate({ useClaude } = {}) {
+  const run = flowRun;
   const s = state.settings;
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
+  if (run !== flowRun) return;
   const settings = { ...s, rewrite };
   const r = await generateDescription({ vehicle: vehicleForText(), dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
+  if (run !== flowRun) return; // a dropped post's text never lands in the next car's
   state.highlightsUsed = settleHighlights(state.highlights, state.vehicle.features);
   state.description = r.text;
   state.descriptionSource = r.source;
@@ -577,38 +814,62 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
   });
 }
 
+// The posted list and the day's counts the cap reads, as they are now: the
+// popup may have marked cars meanwhile, and a sync may have counted more
+// (posts from the person's other computers). Read before a form is opened
+// and before the dry run's form is first filled. False when the post was
+// dropped meanwhile (nothing of it is taken then).
+async function readStoredCounts() {
+  const run = flowRun;
+  const k = siteKeys(state.origin);
+  const fresh = await chrome.storage.local.get([k.posted, k.postLog, k.takenDown, k.sync, k.drafts]);
+  if (run !== flowRun) return false;
+  state.posted = fresh[k.posted] || state.posted;
+  state.postLog = fresh[k.postLog] || state.postLog;
+  state.takenDown = fresh[k.takenDown] || state.takenDown;
+  state.syncState = fresh[k.sync] || state.syncState;
+  state.drafts = fresh[k.drafts] || state.drafts;
+  return true;
+}
+
 // probeOnly: open the form and only report which fields can be found (the
 // first-run dry run); otherwise open it and fill it in.
 async function openForm({ probeOnly = false } = {}) {
-  const k = siteKeys(state.origin);
-  const fresh = await chrome.storage.local.get([k.posted, k.sync]); // as they are now: the popup may have marked cars meanwhile, and a sync may have counted more
-  state.posted = fresh[k.posted] || state.posted;
-  state.syncState = fresh[k.sync] || state.syncState;
+  const run = flowRun;
+  const dropped = () => run !== flowRun; // the post was dropped meanwhile: no tab for it, nothing filled
+  if (!(await readStoredCounts()) || dropped()) return;
+  if (state.posted[state.vin]) return stopPosted();
   const cap = dailyCap();
   if (cap.reached) {
-    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+    setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
     return;
   }
-  const box = $('description');
-  if (box) state.description = box.value;
-  state.guardrails = runGuardrails(state.description, ctx());
+  if (descriptionStopped()) return;
+  if (!(await carStillCurrent()) || dropped()) return;
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos() });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
   render();
   await saveFlow();
+  if (dropped()) return;
   await pilotNote((p) => notePostStep(p, state.vin, 'formOpenedAt'));
+  if (dropped()) return;
   try {
     const devOverrides = (await chrome.storage.local.get(GLOBAL_KEYS.devOverrides))[GLOBAL_KEYS.devOverrides]; // test hook: addresses and timings only, see formMap.js
+    if (dropped()) return;
     state.map = applyOverrides(FORM_MAP, devOverrides);
     const tab = await chrome.tabs.create({ url: state.map.createUrl, active: true });
+    if (dropped()) return; // the tab stays empty
     state.fbTabId = tab.id;
     await waitForTabLoad(tab.id);
+    if (dropped()) return;
     await sleep(state.map.settleMs ?? FORM_MAP.settleMs);
+    if (dropped()) return;
     if (probeOnly) await runProbe();
-    else await runFill();
+    else await runFill({ opened: true });
   } catch (e) {
+    if (dropped()) return;
     state.step = 'review';
     state.message = '';
     setStatus(String((e && e.message) || e), 'error');
@@ -617,45 +878,122 @@ async function openForm({ probeOnly = false } = {}) {
   }
 }
 
-async function runFill() {
+// The page an address shows, without its query: origin and path.
+function pageOf(url) {
+  try {
+    const u = new URL(String(url || ''));
+    return u.origin + u.pathname.replace(/\/+$/, '');
+  } catch (e) {
+    return '';
+  }
+}
+
+// Whether the post's Marketplace tab still shows its form, read just before
+// anything is typed or attached into a form that was opened earlier (Fill
+// again, Fill it in now, each batch of photos, Allow photos). The tab is an
+// ordinary tab: the person can move it to a listing or another listing's
+// edit form, and a tab id kept from before Chrome restarted can name another
+// tab. The form is the map's create page, or the page this post's fill or
+// dry run found the form's fields on. Nothing is typed or attached elsewhere.
+async function formTabShows(tabId) {
+  if (typeof tabId !== 'number') return false;
+  let url = '';
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    url = (tab && tab.url) || '';
+  } catch (e) {
+    return false;
+  }
+  if (!url) return false;
+  if (onCreatePage(url, state.map.createUrl)) return true;
+  const fill = state.fill && ((state.fill.filled || []).length || (state.fill.partial || []).length) ? state.fill.url : '';
+  const probe = state.probe && (state.probe.found || []).length ? state.probe.url : '';
+  return [fill, probe].map(pageOf).filter(Boolean).includes(pageOf(url));
+}
+const FORM_GONE_TEXT = "Nothing was filled: the tab Lot Current opened for this car no longer shows its Marketplace form. Go back to the form in that tab, then try again.";
+
+// opened: the form was opened for this car a moment ago (openForm), and is
+// filled as it loaded; any later fill checks the tab first (formTabShows).
+// photos: false for Fill again, which fills the fields only. The photos sent
+// earlier are still on the form, and each change of its photo box adds to
+// what is there, so sending them again would put every photo on it twice
+// (Attach photos again does that, on the person's word).
+async function runFill({ opened = false, photos = true } = {}) {
+  const run = flowRun;
+  const { map, listing } = state;
+  const tabId = state.fbTabId;
+  if (!opened && !(await formTabShows(tabId))) {
+    if (run === flowRun) setStatus(FORM_GONE_TEXT, 'error');
+    return undefined;
+  }
+  if (run !== flowRun || state.fbTabId !== tabId) return undefined;
   state.message = 'Filling in the form…';
   render();
+  let fill;
   try {
-    const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields, match: state.listing.match || {} }] });
-    state.fill = (inj && inj.result) || { filled: [], partial: [], blocked: [], photoLimit: { value: state.map.photoLimitDefault, verified: false } };
+    const [inj] = await chrome.scripting.executeScript({ target: { tabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields, match: state.listing.match || {} }] });
+    fill = (inj && inj.result) || { filled: [], partial: [], blocked: [], photoLimit: { value: map.photoLimitDefault, verified: false } };
   } catch (e) {
     // e.g. no permission for this page: the form is open, so let the salesperson copy everything by hand
-    state.fill = {
+    fill = {
       filled: [], partial: [],
-      blocked: state.map.fields.map((f) => ({ key: f.key, label: f.label, value: state.listing.fields[f.key] || '', reason: "couldn't run on this page: " + ((e && e.message) || e) })),
-      photoLimit: { value: state.map.photoLimitDefault, verified: false },
+      blocked: map.fields.map((f) => ({ key: f.key, label: f.label, value: listing.fields[f.key] || '', reason: "couldn't run on this page: " + ((e && e.message) || e) })),
+      photoLimit: { value: map.photoLimitDefault, verified: false },
     };
   }
+  if (run !== flowRun || state.fbTabId !== tabId) return; // the post was dropped while the form filled: nothing of it lands in the next car's, and no photos follow
+  state.fill = fill;
   state.step = 'publish';
   state.detected = null;
   state.message = '';
   render();
   await saveFlow();
+  if (run !== flowRun) return;
   await pilotNote((p) => notePostStep(noteFill(p, { vin: state.vin, fill: state.fill, mapVersion: state.map.version, version: VERSION }), state.vin, 'filledAt'));
+  if (run !== flowRun) return;
   startWatcher();
-  await attachPhotos();
+  if (photos) await attachPhotos();
+}
+
+// Fill it in now, on the form the dry run opened: the same checks as Open
+// the Marketplace form before anything is typed, the car's read included,
+// whether it was marked as posted meanwhile (stopPosted), and the day's cap
+// as it is now. The dry run may have been opened under the cap and left
+// open (or brought back the next day) while posts were recorded elsewhere:
+// a form first filled at the cap is a post over it.
+async function fillFromProbe() {
+  if (!(await readStoredCounts())) return undefined;
+  if (state.posted[state.vin]) return stopPosted();
+  const cap = dailyCap();
+  if (cap.reached) {
+    setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+    return render();
+  }
+  if (descriptionStopped()) return undefined;
+  if (!(await carStillCurrent())) return undefined;
+  return runFill();
 }
 
 // Read-only: which fields the map can find on the open page. Nothing is filled.
 async function runProbe() {
+  const run = flowRun;
+  const { map } = state;
   state.step = 'filling';
   state.message = 'Checking the form (nothing is filled)…';
   render();
+  let probe;
   try {
     const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: probeFormInPage, args: [state.map] });
-    state.probe = { ...((inj && inj.result) || { error: 'no result came back', found: [], missing: [], controls: [] }), extensionVersion: VERSION };
+    probe = { ...((inj && inj.result) || { error: 'no result came back', found: [], missing: [], controls: [] }), extensionVersion: VERSION };
   } catch (e) {
-    state.probe = {
+    probe = {
       error: "couldn't run on this page: " + ((e && e.message) || e),
       found: [], controls: [],
-      missing: state.map.fields.map((f) => ({ key: f.key, label: f.label, patterns: f.name })),
+      missing: map.fields.map((f) => ({ key: f.key, label: f.label, patterns: f.name })),
     };
   }
+  if (run !== flowRun) return;
+  state.probe = probe;
   state.step = 'probe';
   state.message = '';
   render();
@@ -663,15 +1001,24 @@ async function runProbe() {
 }
 
 // only: photos to try again (after Allow photos), added to what is already
-// attached; otherwise the car's photos up to the form's limit.
-async function attachPhotos(only = null) {
+// attached; otherwise the car's photos up to the form's limit. again: the
+// person's Attach photos again, which adds every photo once more; when some
+// were attached before, the photos section says each may now be on the
+// form twice (photosHtml). Each batch
+// goes to the tab this run began with, only while it still shows the form
+// (formTabShows), and only while this run's photo count is still the one on
+// screen: a post dropped, Attach photos again or It didn't post meanwhile ends it.
+async function attachPhotos(only = null, { again = false } = {}) {
+  const run = flowRun; // the post was dropped meanwhile: no more photos, and nothing written into the next car's post
+  const tabId = state.fbTabId;
   const limit = (state.fill && state.fill.photoLimit && state.fill.photoLimit.value) || state.map.photoLimitDefault;
   let urls = state.listing.photos.slice(0, limit);
   if (only && state.photos) {
     urls = urls.filter((u) => only.includes(u));
     Object.assign(state.photos, { failed: state.photos.failed.filter((f) => !urls.includes(f.url)), done: false, error: null });
   } else {
-    state.photos = { total: state.listing.photos.length, limit, verified: Boolean(state.fill && state.fill.photoLimit && state.fill.photoLimit.verified), attached: 0, failed: [], done: false, error: null };
+    const before = state.photos;
+    state.photos = { total: state.listing.photos.length, limit, verified: Boolean(state.fill && state.fill.photoLimit && state.fill.photoLimit.verified), attached: 0, failed: [], done: false, error: null, again: Boolean(again && before && (before.again || before.attached > 0 || !before.done)) }; // some attached before, or a run still sending them
   }
   // A server the salesperson said no to is not downloaded from: its photos
   // are recorded as failed like any other, and the photos section names the
@@ -685,73 +1032,227 @@ async function attachPhotos(only = null) {
   const fromFacebook = (u) => isFacebookServer(u);
   for (const url of urls.filter(fromFacebook)) state.photos.failed.push({ url, error: "on Facebook's servers", facebook: true });
   urls = urls.filter((u) => !fromFacebook(u));
+  const mine = state.photos;
+  const current = () => run === flowRun && state.photos === mine && state.fbTabId === tabId;
   render();
-  for (let i = 0; i < urls.length && !state.photos.error; i += 4) {
+  for (let i = 0; i < urls.length && !mine.error; i += 4) {
     const batch = urls.slice(i, i + 4);
     let res;
     try {
       res = await chrome.runtime.sendMessage({ type: 'downloadPhotos', urls: batch, offset: i });
     } catch (e) {
-      state.photos.error = 'Downloading photos failed: ' + ((e && e.message) || e);
+      if (!current()) return;
+      mine.error = 'Downloading photos failed: ' + ((e && e.message) || e);
       break;
     }
+    if (!current()) return;
     const photos = (res && res.photos) || [];
-    for (const p of photos.filter((p) => !p.ok)) state.photos.failed.push({ url: p.url, error: p.error });
+    for (const p of photos.filter((p) => !p.ok)) mine.failed.push({ url: p.url, error: p.error });
     const good = photos.filter((p) => p.ok).map(({ name, type, dataUrl }) => ({ name, type, dataUrl }));
     if (good.length) {
+      const onForm = await formTabShows(tabId);
+      if (!current()) return;
+      if (!onForm) {
+        mine.error = "The tab no longer shows this car's Marketplace form, so the rest of the photos were not attached.";
+        break;
+      }
       try {
-        const [inj] = await chrome.scripting.executeScript({ target: { tabId: state.fbTabId }, func: attachPhotosInPage, args: [state.map, good] });
+        const [inj] = await chrome.scripting.executeScript({ target: { tabId }, func: attachPhotosInPage, args: [state.map, good] });
+        if (!current()) return;
         const r = inj && inj.result;
-        if (r && r.ok) state.photos.attached += r.attached;
-        else state.photos.error = (r && r.reason) || "couldn't attach the photos";
+        if (r && r.ok) mine.attached += r.attached;
+        else mine.error = (r && r.reason) || "couldn't attach the photos";
       } catch (e) {
-        state.photos.error = 'Attaching photos failed: ' + ((e && e.message) || e);
+        if (!current()) return;
+        mine.error = 'Attaching photos failed: ' + ((e && e.message) || e);
       }
     }
     render();
   }
-  state.photos.done = true;
+  mine.done = true;
   render();
   await saveFlow();
+}
+
+// Whether this side panel is in the window the post under way belongs to
+// (or Chrome could not say which window either is). Chrome runs one side
+// panel per window, and a panel opened in a second window brings back the
+// same post: only the post's own panel records it or saves it by itself.
+function postsWindow() {
+  return !state.windowId || panelWindowId === null || state.windowId === panelWindowId;
 }
 
 function startWatcher() {
   if (watcher) watcher.cancel();
-  watcher = watchForListing({ tabId: state.fbTabId, listingUrlPattern: state.map.listingUrlPattern, afterPublishPatterns: state.map.afterPublishPatterns });
+  watcher = watchForListing({ tabId: state.fbTabId, listingUrlPattern: state.map.listingUrlPattern, afterPublishPatterns: state.map.afterPublishPatterns, createUrl: state.map.createUrl });
   watcher.promise.then((r) => {
-    if (state.step !== 'publish') return;
+    if (state.step !== 'publish') return undefined;
     if (r.status === 'listing' || r.status === 'probably' || r.status === 'closed') {
+      const own = postsWindow();
+      // In a queue, a listing page is read before the panel says anything
+      // about it (confirmIfThisCar): until then it says it is checking, with
+      // the Listing link box empty. The form's tab moving straight from the
+      // form to a new listing that shows this car means the person clicked
+      // Publish: the post is recorded and the next car loads. Any other
+      // listing address in that tab (one browsed to, or one it already
+      // showed when the panel came back) waits for the person's click. A
+      // panel in a second window reads and shows it, but never records it:
+      // two panels that both recorded the post would record it twice.
+      if (state.queueMode && r.status === 'listing') {
+        state.detected = { ...r, checking: true };
+        render();
+        return confirmIfThisCar(state.detected, own && isNewListingFromForm(r, state.posted, state.map));
+      }
       state.detected = r;
-      // In a queue, a listing address means the person clicked Publish: record it and load the next car.
-      if (state.queueMode && r.status === 'listing') return confirmPosted();
       render();
-      saveFlow();
+      if (own) saveFlow(); // the saved post is its own panel's: a second window's late write could land over the next car's
     }
+    return undefined;
   });
 }
 
+// In a queue, the listing page the form's tab is on is read (read-only) a
+// few times while it loads. Only a page that is that listing and shows this
+// car (its VIN in the page's text, or, when no other posted car has its
+// name, its name and the price the form was filled with; never the form
+// itself: showsPostedCar) is shown as "Looks like it posted" with its address
+// in the Listing link box, and recorded by itself when `record` says the tab
+// came straight from the form to a new listing in the post's own panel. A
+// notification or a link clicked on the form page also goes straight to a
+// listing, of another car: then the panel says it could not confirm the page
+// shows this car and asks, and that listing's address stays out of the
+// Listing link box, so It's posted never saves it as this car's link. The
+// same holds when the panel is opened again or in a second window: the
+// watcher reports the listing again and it is read again.
+const VERIFY_READS = 6;
+const VERIFY_EVERY_MS = 1500;
+async function confirmIfThisCar(d, record) {
+  const run = flowRun;
+  const { vin, vehicle, fbTabId } = state;
+  const own = postsWindow();
+  const { checking, ...r } = d; // the listing as the watcher reported it
+  const still = () => run === flowRun && state.step === 'publish' && state.vin === vin && state.detected === d;
+  const price = typeof state.price === 'number' && state.price > 0 ? state.price : vehicle ? basisPrice(vehicle, state.priceBasis || state.settings.basis) : null;
+  const expect = { id: r.id, name: vehicle ? vehicle.name : '', prices: typeof price === 'number' && price > 0 ? [price] : [], vin };
+  const namesakes = vehicle ? namesakesOf(state.posted, vin, vehicle.name) : null;
+  for (let i = 0; vehicle && i < VERIFY_READS; i += 1) {
+    if (i) await sleep(VERIFY_EVERY_MS);
+    if (!still()) return undefined;
+    let seen = null;
+    try {
+      const [inj] = await chrome.scripting.executeScript({ target: { tabId: fbTabId }, func: readListingInPage, args: [state.map, LISTING_SIGNS, expect] });
+      seen = inj && inj.result;
+    } catch (e) {
+      seen = null; // the page is still loading, or the tab went where Lot Current may not read: read again
+    }
+    if (!still()) return undefined;
+    if (showsPostedCar(seen, { namesakes })) {
+      state.detected = { ...r, verified: true };
+      if (record) return confirmPosted();
+      render();
+      if (own) await saveFlow();
+      return undefined;
+    }
+  }
+  if (!still()) return undefined;
+  state.detected = { ...r, unverified: true, name: expect.name, price: expect.prices[0] || null };
+  render();
+  if (own) await saveFlow();
+  return undefined;
+}
+
+// The listing address the panel offers as this car's link (in the Listing
+// link box, and for It's posted with nothing typed). In a queue, only a
+// listing page the panel read and saw this car on (verified); a single post
+// offers the listing address the tab went to, which the person sees there
+// and confirms.
+function offeredLink(d) {
+  if (!d || !d.url || d.unverified || d.checking) return '';
+  return state.queueMode && !d.verified ? '' : d.url;
+}
+
+// Records the post of the car on the form, once: the watcher and a click on
+// It's posted (or two quick clicks) can both arrive, and only the first
+// records it and moves a queue on (confirmedRun holds the post's flowRun).
+// Only from the publish step, for the car captured here; a post dropped
+// while it was recorded stays recorded, and the post that took over is left alone.
+// A car this person already has a stored entry for was recorded while it
+// was on the form (by the side panel in another window, or the popup's Mark
+// posted; the form never opens for a car already marked): that entry stays
+// as it is, gaining only a link it lacks, and the day's log gets nothing, so
+// the post is counted once. A colleague's entry (`mine: false`) is theirs,
+// not this person's post, and is recorded over as before.
+let confirmedRun = -1;
 async function confirmPosted() {
+  const run = flowRun;
+  if (state.step !== 'publish' || !state.vehicle || confirmedRun === run) return undefined;
+  confirmedRun = run;
+  const { vin, vehicle, origin } = state;
   const typed = (($('listingUrl') && $('listingUrl').value) || '').trim();
-  const listingUrl = /^https?:\/\//i.test(typed) ? typed : (state.detected && state.detected.url) || '';
+  // only a listing's own address is kept (listingLink): Your listings, where
+  // Facebook often lands after Publish, would open the wrong page from To do
+  // and in the manager's view. Another address typed in is not swapped for
+  // what the tab showed: the post is recorded with no link, and the panel says so.
+  const listingUrl = listingLink(typed || offeredLink(state.detected), state.map); // an address the queue could not match to this car is never kept unless typed
+  const linkNote = typed && !listingUrl
+    ? `No listing link was saved for ${nameOf(vin)}: the address in Listing link isn't a Marketplace listing's own address (Your listings, say). Its To do items open Your listings, where you pick the listing.`
+    : '';
   const now = new Date().toISOString();
   const extra = { postedWith: 'lotsync', salesperson: state.settings.salesperson.name || '' };
   if (listingUrl) extra.listingUrl = listingUrl;
+  // The price the form was filled with (read and checked on the website under
+  // the price basis of that moment), not one worked out again from today's
+  // Settings: a basis changed while the form waited would record a price the
+  // listing does not show. It is recorded on the basis it was read under
+  // (priceBasis; src/rescan.js postedBasis), so rescans compare the listing
+  // with the website on that basis, as for every listing posted before a
+  // change of the setting.
+  const filled = typeof state.price === 'number' && Number.isFinite(state.price) && state.price > 0 ? state.price : null;
+  let kept = null; // this person's entry for the car, already stored
   try {
     // recorded into the list as it is stored now: the popup may have marked or unmarked cars while this one was on the form
-    state.posted = await updateKey(siteKeys(state.origin).posted, (fresh) => markPosted(fresh || {}, state.vehicle, state.settings.basis, now, extra), panelStorage);
+    let list = {};
+    const stored = await updateKey(siteKeys(origin).posted, (fresh) => {
+      list = fresh || {};
+      const had = list[vehicle.vin];
+      kept = had && had.mine !== false ? had : null;
+      if (!kept) return markPosted(list, filled === null ? vehicle : { ...vehicle, price: filled, priceBeforeFees: null }, filled === null ? state.settings.basis : 'website', now, filled === null ? extra : { ...extra, basis: state.priceBasis || (state.settings.basis === 'beforeFees' ? 'beforeFees' : 'website') });
+      if (!listingUrl || kept.listingUrl) return undefined; // nothing to add: nothing is written
+      kept = { ...kept, listingUrl };
+      return { ...list, [vehicle.vin]: kept };
+    }, panelStorage);
+    state.posted = stored || list;
   } catch (e) {
+    confirmedRun = -1; // not recorded: It's posted can be clicked again
     setStatus(storageErrorText(e), 'error'); // the post is on Facebook; the panel stays here so it can be recorded once there is room
-    return;
+    return undefined;
   }
-  await pilotNote((p) => endPost(p, state.vin, 'posted', { at: now }));
+  if (!kept) {
+    try {
+      // the day's log for the cap, which a take-down later leaves alone
+      state.postLog = await updateKey(siteKeys(origin).postLog, (log) => logPost(log, vehicle.vin, now), panelStorage); // the same key as the posted entry
+    } catch (e) {
+      /* the posted list has the post, and counts it while it stays listed */
+    }
+  }
+  await pilotNote((p) => endPost(p, vin, 'posted', { at: now })); // a no-op once this post's attempt is ended
   // the dealership's shared registry (accounts only): the worker syncs; nothing here waits for it
-  if (accountsConfigured()) chrome.runtime.sendMessage({ type: 'syncNow', origin: state.origin }).catch(() => {});
+  if (accountsConfigured()) chrome.runtime.sendMessage({ type: 'syncNow', origin }).catch(() => {});
+  if (run !== flowRun) return undefined; // dropped meanwhile: recorded, and the post now under way is not touched
   if (watcher) watcher.cancel();
-  if (state.queueMode) return afterQueueStep('posted');
+  if (state.queueMode) {
+    if (linkNote) setStatus(linkNote, 'error');
+    // the queue could not be saved: the car is recorded, and clicking again only moves the queue
+    if ((await afterQueueStep('posted', vin)) === false) confirmedRun = -1;
+    return undefined;
+  }
   state.step = 'done';
-  state.doneAt = now;
+  state.doneAt = (kept && kept.postedAt) || now;
+  const said = [kept ? `${nameOf(vin)} was already recorded as posted, so it was not recorded or counted again.` : '', linkNote].filter(Boolean).join(' ');
+  if (said) setStatus(said, linkNote ? 'error' : '');
   render();
-  await saveFlow();
+  // recorded elsewhere first (another window's panel), which may have started another post since: its saved post stays
+  if (!kept || (await savedFlowIs(origin, vin))) await saveFlow();
 }
 
 async function notPosted() {
@@ -817,10 +1318,17 @@ async function downloadPhotos() {
 
 // ---------- rendering ----------
 
+// Rule problems first (the form stays shut until they are fixed), then the
+// style warnings, which don't stop it.
 function checksHtml(g) {
   if (!g) return '';
   if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words, every number matches the website, no banned phrases, the dealership and your role named.</div>`;
-  return `<div class="checks bad" id="checks">Fix before posting:<ul>${g.problems.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul></div>`;
+  const rules = ruleProblems(g);
+  const warnings = g.problems.filter((p) => !rules.includes(p));
+  const list = (problems) => `<ul>${problems.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
+  const fix = rules.length ? `Fix before posting (the form won't open until these are fixed):${list(rules)}` : '';
+  const check = warnings.length ? (rules.length ? 'Also worth a look:' : 'Worth a look before posting:') + list(warnings) : '';
+  return `<div class="checks ${rules.length ? 'bad' : 'warn'}" id="checks">${fix}${check}</div>`;
 }
 
 function sourcePill() {
@@ -854,7 +1362,8 @@ const siteMissing = () => missingOrigins(siteNeeds(), grantedOrigins);
 // registry (the read then says what to do instead).
 async function askForSite(origins = siteMissing()) {
   if (!origins.length) return true;
-  setStatus(`Chrome will ask to let Lot Current read ${hostOf(state.origin)} from the side panel (the same permission automatic rescans use).`);
+  const asking = missingOrigins(origins, grantedOrigins);
+  setStatus(siteAskText(asking.length ? asking : origins)); // every host Chrome's prompt will name, the inventory service's included
   promptOpen = true;
   let granted = false;
   try {
@@ -903,8 +1412,10 @@ function listRowHtml(r, { canPost = true } = {}) {
   const pill = r.isNew ? ' <span class="pill good new">New</span>' : '';
   const facts = [e.stock && 'Stock ' + esc(e.stock), typeof e.mileage === 'number' ? miles(e.mileage) : '', esc(e.locationShort || '')].filter(Boolean).join(' · ');
   let action = '';
-  if (r.draft) action = '<span class="pill warn" title="Saved as a draft on Facebook: publish it there, then mark it posted in the popup">Draft on Facebook</span>';
-  else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
+  if (r.draft) {
+    const draft = draftPill(state.drafts[r.vin], e, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
+    action = `<span class="pill ${draft.tone}" title="${esc(draft.title)}">${esc(draft.text)}</span>`;
+  } else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
   return `<li class="row"><div class="main">${name}${pill}<div class="sub">${facts}</div><div class="when">${esc(r.line)}</div></div><div class="price">${money(r.price)}</div>${action}</li>`;
 }
 
@@ -935,7 +1446,7 @@ function viewIdle() {
   return `<section id="panelReady" aria-labelledby="panelReadyLabel">
     <h3 id="panelReadyLabel">Ready to post</h3>
     <div class="meta" id="panelMeta">${meta}</div>
-    ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
+    ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${esc(capCount(cap))}). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
     <div class="toolbar listControls">
       ${siteChoiceHtml()}
       <label class="control"><span>Sort</span><select id="panelSort">${SORT_ORDERS.map((o) => `<option value="${o.id}" ${o.id === order ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>
@@ -943,7 +1454,7 @@ function viewIdle() {
     </div>
     <div class="toolbar listControls"><label class="control grow"><span class="sr">Search</span><input type="search" id="panelSearch" value="${esc(state.listFilter)}" placeholder="Search: stock number, last 6 of the VIN, year, make or model" autocomplete="off" spellcheck="false" /></label></div>
     <div id="panelList">${queueOfferHtml(list, cap)}${listBodyHtml(list, cap)}</div>
-    <p class="hint">Post re-checks the car on the website first, so a car that sold or changed since the last scan is stopped. You check every form and click Publish yourself.</p>
+    <p class="hint" id="panelListHint">Post re-checks the car on the website first: a car that sold, is now listed as new or is no longer ready to post is stopped, and a price that changed since the last scan is posted as the website shows it now. You check every form and click Publish yourself.</p>
   </section>${notAffiliated}`;
 }
 
@@ -1156,12 +1667,19 @@ function relistHtml() {
   return `<div class="banner warn" id="relistNotice" role="alert">You took this car off your listings on ${esc(when(r.takenDownAt))}, while the website still listed it. The posting rules say: no deleting and reposting to bump a listing. Post it again only if the old listing is gone for another reason, such as Facebook removing it or a Taken down clicked by mistake.</div>`;
 }
 
-const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.reached ? ' · cap reached' : ''}</div>`;
+// A review or dry run on an old read of the car (left open, or brought back
+// when the panel reopened) says so: the car is read again before the form opens.
+const readAgainHtml = () => (readIsOld()
+  ? `<p class="hint" id="readAgain">Read from the website ${state.readAt ? esc(when(state.readAt)) : 'a while ago'}. Lot Current reads and checks it again before the form opens or fills.</p>`
+  : '');
+
+const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="cap">${cap.used} of ${cap.cap} posts today${cap.drafts ? ` (${cap.drafts} saved as ${cap.drafts === 1 ? 'a draft' : 'drafts'})` : ''}${cap.reached ? ' · cap reached' : ''}</div>`;
 
 function viewReview() {
   const cap = dailyCap();
+  const formOff = cap.reached || ruleProblems(state.guardrails).length > 0;
   const rw = state.settings.rewrite;
-  return `${relistHtml()}${carCard()}
+  return `${relistHtml()}${carCard()}${readAgainHtml()}
   <section>
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
     ${state.note ? `<div class="banner warn">${esc(state.note)}</div>` : ''}
@@ -1181,21 +1699,23 @@ function viewReview() {
   ${assumptionsHtml()}
   <section>
     ${capHtml(cap)}
-    <button type="button" class="primary wide" id="openForm" ${cap.reached ? 'disabled' : ''}>Open the Marketplace form</button>
+    <button type="button" class="primary wide" id="openForm" ${formOff ? 'disabled' : ''}>Open the Marketplace form</button>
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
     <div id="photoServers">${photoServersHtml()}</div>
-    <button type="button" class="plain wide" id="checkForm" ${cap.reached ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
+    <button type="button" class="plain wide" id="checkForm" ${formOff ? 'disabled' : ''}>Open the form and check fields only (nothing filled)</button>
     <p class="hint">For the first run: the panel reports which fields it can find on the page, without filling anything. You can fill it in from there.</p>
+    ${state.queueMode ? '' : '<button type="button" class="plain wide" id="stopPost">Stop this post</button>'}
   </section>`;
 }
 
 function viewProbe() {
   const p = state.probe || {};
+  const cap = dailyCap();
   const found = p.found || [];
   const missing = p.missing || [];
   const controls = p.controls || [];
   const limit = p.photoLimit ? `${p.photoLimit.value}${p.photoLimit.verified ? '' : ' (unverified)'}` : '?';
-  return `${carCard()}
+  return `${carCard()}${readAgainHtml()}
   <div class="banner info">Nothing was filled. This is what Lot Current can see on the form (map ${esc(p.mapVersion || state.map.version)}, Lot Current ${esc(p.extensionVersion || VERSION)}).</div>
   ${p.error ? `<div class="banner bad">${esc(p.error)}</div>` : ''}
   ${languageHint(p.language, !found.some((f) => f.tag))}
@@ -1207,8 +1727,9 @@ function viewProbe() {
     <details><summary>Controls on the page (${controls.length})</summary><ul class="list">${controls.map((c) => `<li>${esc(c.tag)}${c.type ? '[' + esc(c.type) + ']' : ''}${c.role ? '[' + esc(c.role) + ']' : ''}: "${esc(c.name)}"</li>`).join('')}</ul></details>
   </section>
   ${photoServersHtml()}
+  ${cap.reached ? `<div class="banner warn" id="capReached">Daily post cap reached (${esc(capCount(cap))}). It resets tomorrow; the dealer can change it in Settings.</div>` : ''}
   <div class="actions">
-    <button type="button" class="primary" id="fillNow" ${found.length ? '' : 'disabled'}>Fill it in now</button>
+    <button type="button" class="primary" id="fillNow" ${found.length && !cap.reached ? '' : 'disabled'}>Fill it in now</button>
     <button type="button" class="plain" id="probeAgain">Check again</button>
     <button type="button" class="plain" id="copyReport">Copy report</button>
     <button type="button" class="plain" id="backToReview">Back</button>
@@ -1246,6 +1767,9 @@ function photosHtml() {
   if (!p) return '<div id="photos">Preparing photos…</div>';
   const limitNote = p.total > p.limit ? ` (the form takes ${p.limit}${p.verified ? '' : ', unverified'}; the first ${p.limit} were used)` : '';
   let html = `<div id="photos" class="${p.done ? 'done' : ''}">${p.attached} of ${Math.min(p.total, p.limit)} attached${p.done ? '' : '…'}${limitNote}</div>`;
+  // The count is what Lot Current sent to the form, not what the form holds now.
+  if (p.again) html += '<div class="banner warn" id="photosAgain">Every photo was attached again. If the form still had the ones attached before, each is on it twice now: remove the extra copies on Facebook before you publish.</div>';
+  else if (p.done && p.attached) html += '<p class="hint" id="photosKept"><b>Fill again</b> fills the fields only and leaves these photos on the form. If the form lost them (the page reloaded, or you discarded a draft), click <b>Attach photos again</b>.</p>';
   const blocked = blockedPatterns();
   const onFacebook = p.failed.filter((f) => f.facebook).length;
   const others = p.failed.filter((f) => !f.facebook && !blocked.some((b) => patternCovers(b, f.url))).length;
@@ -1267,7 +1791,7 @@ function viewPublish() {
   const skipped = f.skipped || [];
   const pre = f.preexisting || [];
   const preexisting = pre.length
-    ? `<div class="banner bad" id="preexisting"><b>This form already held another vehicle before Lot Current filled it:</b> ${pre.map((p) => `${esc(p.label)} "${esc(p.shown)}"`).join(', ')}. That is probably a draft Facebook restored. Lot Current replaced the fields it manages (check each one below), but photos and anything else from that draft may still be on the form. Remove them, or discard the draft on Facebook and click <b>Fill again</b>, before you publish.</div>`
+    ? `<div class="banner bad" id="preexisting"><b>This form already held another vehicle before Lot Current filled it:</b> ${pre.map((p) => `${esc(p.label)} "${esc(p.shown)}"`).join(', ')}. That is probably a draft Facebook restored. Lot Current replaced the fields it manages (check each one below), but photos and anything else from that draft may still be on the form. Remove them, or discard the draft on Facebook and click <b>Fill again</b>, then <b>Attach photos again</b>, before you publish.</div>`
     : '';
   const changed = f.changedAfterFill || [];
   const changedBanner = changed.length
@@ -1275,8 +1799,14 @@ function viewPublish() {
     : '';
   const d = state.detected;
   let detect = '';
-  if (d && (d.status === 'listing' || d.status === 'probably')) {
-    detect = `<div class="banner good" id="detected">Looks like it posted${d.url ? '' : ' (the listing page opened)'}. Confirm below to record it.</div>`;
+  const name = esc(d && d.name ? d.name : (state.vehicle && state.vehicle.name) || 'this car');
+  if (d && d.unverified) {
+    detect = `<div class="banner warn" id="detected">The Facebook tab is on a listing page, and Lot Current couldn't confirm that it shows ${name} (its VIN, or its name${d.price ? ` at ${money(d.price)}` : ''}), so the queue did not record it by itself. If you clicked <b>Publish</b> and it posted, paste its listing link below if you have it and click <b>It's posted, next car</b>.</div>`;
+  } else if (d && d.status === 'listing' && state.queueMode && !d.verified) {
+    // being read (confirmIfThisCar), or brought back from before a read: the watcher reports it again and it is read again
+    detect = `<div class="banner info" id="detected">The Facebook tab is on a listing page. Lot Current is reading it (only reading) to see whether it shows ${name}…</div>`;
+  } else if (d && (d.status === 'listing' || d.status === 'probably')) {
+    detect = `<div class="banner good" id="detected">Looks like it posted${d.url ? '' : ' (the tab moved to Your listings)'}. Confirm below to record it.</div>`;
   } else if (d && d.status === 'closed') {
     detect = `<div class="banner warn" id="detected">The Facebook tab was closed. Did it post?</div>`;
   } else {
@@ -1288,7 +1818,7 @@ function viewPublish() {
   return `${carCard()}
   ${preexisting}${changedBanner}
   ${languageHint(f.language, !f.filled.length && !f.partial.length)}
-  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When it posts, the next car loads by itself.' : ''}</div>
+  <div class="banner info">The form is filled in. Check every field, including <b>Vehicle condition</b> and <b>Title status</b> (from your dealership's defaults), then click <b>Publish</b>${state.queueMode ? ' (or <b>Save draft</b>)' : ''} on Facebook yourself.${state.queueMode ? ' When the Facebook tab goes straight from the form to your new listing and Lot Current sees this car on it, the next car loads by itself; if it does not, click <b>It\'s posted, next car</b>.' : ''}</div>
   <section id="fillResults">
     <h3>Filled in <span class="pill good">${f.filled.length}</span> <span class="why">as the form shows them</span></h3>
     ${f.filled.length ? `<ul class="list">${f.filled.map((x) => `<li>${esc(x.label)}: ${esc(x.shown || x.value).slice(0, 80)}${x.note ? ` <span class="why">${esc(x.note)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">Nothing could be filled.</p>'}
@@ -1299,10 +1829,10 @@ function viewPublish() {
     x.candidates && x.candidates.length ? `<div class="why">Similar controls on the page: ${x.candidates.map((c) => `${esc(c.tag)}${c.role ? '[' + esc(c.role) + ']' : ''}${c.type ? '[' + esc(c.type) + ']' : ''}${c.haspopup ? '[popup ' + esc(c.haspopup) + ']' : ''}${c.editable ? '[editable]' : ''} "${esc(c.name || c.near)}"`).join('; ')}</div>` : ''
   }</li>`).join('')}</ul><p class="hint">Copy the report (Copy report on the dry run, or this list) and send it to whoever maintains formMap.js.</p></section>` : ''}
   <section><h3>Photos</h3>${photosHtml()}${photoServersHtml(blockedPatterns())}
-    <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
+    <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="attachAgain">${state.photos && (state.photos.attached || state.photos.again) ? 'Attach photos again' : 'Attach photos'}</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
   </section>
   <section>${detect}
-    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc((d && d.url) || '')}" placeholder="paste the listing's address if you have it" /></label>
+    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc(offeredLink(d))}" placeholder="paste the listing's own address if you have it" /></label>
     <div class="actions">${outcome}</div>
   </section>`;
 }
@@ -1377,6 +1907,53 @@ const upkeepCtx = {
 const LIVE_STEPS = ['checking', 'review', 'filling', 'probe', 'publish'];
 const postUnderWay = () => Boolean(state.vin) && LIVE_STEPS.includes(state.step);
 
+// A Marketplace form open for the post under way: being opened and filled,
+// the dry run's, or waiting for Publish. Dropping it for another car would
+// leave a listing published from it unrecorded: never flagged when the car
+// sells, never checked for price changes, never counted against the cap.
+const FORM_STEPS = ['filling', 'probe', 'publish'];
+function formOpen() {
+  return Boolean(state.vin) && FORM_STEPS.includes(state.step);
+}
+const finishFirstText = (button) => `Finish or stop the current post (${state.vehicle ? state.vehicle.name : nameOf(state.vin)}) first: its Marketplace form is open. Then click ${button} again.`;
+
+// A post request from the popup (Post, or Continue in the side panel). A
+// request for the car already under way (being checked, reviewed, filled or
+// waiting for Publish) leaves the panel on it: the post goes on, the text
+// typed into the review is kept, and no second form is opened. A queue's
+// request takes that car into the queue. While a form is open, a request for
+// another car is refused until the person says whether that form posted.
+// Otherwise the new post starts; a review with nothing on Facebook yet gives
+// way to it, as before, and the post left behind stops (flowRun).
+async function postRequested(req) {
+  const sameCar = req.origin === state.origin && String(req.vin || '').toUpperCase() === state.vin;
+  if (!(sameCar && postUnderWay()) && !formOpen()) return startFlow(req);
+  await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
+  if (sameCar) {
+    if (req.queue && !state.queueMode) {
+      state.queueMode = true;
+      await saveFlow();
+    }
+    setStatus('');
+    return render();
+  }
+  setStatus(finishFirstText('Post'), 'error');
+  return undefined;
+}
+
+// A form left open on Facebook when the panel closed comes back before a
+// post request is handled, so the request meets it (postRequested) instead
+// of starting over it; so does a post of the very car the request is for
+// that was still being checked or reviewed, with its typed text.
+async function resumeOpenForm(origin, req = null) {
+  if (!origin) return;
+  const k = siteKeys(origin).flow;
+  const flow = (await chrome.storage.local.get(k))[k];
+  if (!flow || !flow.vin) return;
+  const sameCar = Boolean(req) && req.origin === origin && String(req.vin || '').toUpperCase() === flow.vin;
+  if (FORM_STEPS.includes(flow.step) || (sameCar && LIVE_STEPS.includes(flow.step))) await resumeFlow(origin, flow);
+}
+
 let lastUpkeepAt = 0;
 async function openUpkeep(req) {
   // the request can arrive twice (storage change + start-up read): act once
@@ -1389,6 +1966,11 @@ async function openUpkeep(req) {
   }
   endUpkeep();
   if (watcher) watcher.cancel();
+  // A post that is over (recorded, or stopped with the reason) is cleared
+  // first, as Post another car or Back clear it: left in place, its car would
+  // keep the Website menu shut once the item is closed (chooseSite). A saved
+  // post that is another window's panel's now stays where it is.
+  if (state.vin) await clearFlow({ keepSaved: !(await savedFlowIs(state.origin, state.vin)) });
   state.origin = req.origin;
   state.dealerTabId = req.dealerTabId || state.dealerTabId;
   await chrome.storage.local.set({ [GLOBAL_KEYS.lastPostOrigin]: req.origin });
@@ -1429,7 +2011,7 @@ async function postFromList(vin) {
   if (!entry || state.posted[vin]) return render(); // posted or gone meanwhile: the list is redrawn
   const cap = dailyCap();
   if (cap.reached) {
-    setStatus(`Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`, 'error');
+    setStatus(`Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`, 'error');
     return render();
   }
   return startFlow({ origin: state.origin, vin, dealerTabId: null, windowId: panelWindowId, at: Date.now() });
@@ -1530,7 +2112,7 @@ async function changeSort(value) {
 async function allowSiteAndRetry() {
   const origins = Array.isArray(state.blockedOrigins) && state.blockedOrigins.length ? state.blockedOrigins : siteNeeds();
   if (!(await askForSite(missingOrigins(origins, grantedOrigins).length ? origins : []))) return undefined;
-  return startFlow({ origin: state.origin, vin: state.vin, dealerTabId: null, windowId: state.windowId || panelWindowId, queue: state.queueMode, at: Date.now() });
+  return startFlow({ origin: state.origin, vin: state.vin, dealerTabId: null, windowId: panelWindowId || state.windowId, queue: state.queueMode, at: Date.now() }); // started again from this panel: its post
 }
 
 // ---------- events ----------
@@ -1604,6 +2186,7 @@ function onInput(ev) {
     state.guardrails = runGuardrails(state.description, ctx());
     const old = $('checks');
     if (old) old.outerHTML = checksHtml(state.guardrails);
+    setFormButtons();
     saveFlow();
   }, 250);
 }
@@ -1661,7 +2244,7 @@ async function onClick(ev) {
     case 'fillNow':
       await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
       if (noPhotosPicked()) return setStatus(NO_PHOTOS_TEXT, 'error');
-      return runFill();
+      return fillFromProbe();
     case 'probeAgain': return runProbe();
     case 'copyReport': return copy(JSON.stringify(state.probe, null, 2));
     case 'backToReview':
@@ -1697,9 +2280,10 @@ async function onClick(ev) {
       render();
       return saveFlow();
     case 'copyDescription': return copy(state.description);
-    case 'fillAgain':
+    case 'fillAgain': return runFill({ photos: false }); // the fields only: the photos stay as they are on the form
+    case 'attachAgain':
       await askForPhotos();
-      return runFill();
+      return state.step === 'publish' ? attachPhotos(null, { again: true }) : undefined;
     case 'downloadPhotos':
       await askForPhotos();
       return downloadPhotos();
@@ -1708,7 +2292,7 @@ async function onClick(ev) {
     case 'savedDraft': return savedDraft();
     case 'skipCar':
     case 'skipBlocked': return afterQueueStep(btn.id === 'skipBlocked' ? 'blocked' : 'skipped');
-    case 'queueNext': return startNextInQueue();
+    case 'queueNext': return formOpen() ? setStatus(finishFirstText('Post next car'), 'error') : startNextInQueue();
     case 'queuePause':
       state.queue = pauseQueue(state.queue);
       await saveQueue();
@@ -1725,13 +2309,35 @@ async function onClick(ev) {
       if (state.queue.status === 'done') state.step = 'queueDone';
       return render();
     case 'queueStop':
-    case 'queueClear':
-      if (watcher) watcher.cancel();
+    case 'queueClear': {
+      const stopped = btn.id === 'queueStop' ? 'Queue stopped. Posted cars stay recorded.' : '';
       state.queue = null;
       await saveQueue();
+      // The post under way stays when it isn't one of the queue's cars, and
+      // when its Marketplace form is open: a listing published from that form
+      // must still be recorded (formOpen). A queued car on its form goes on
+      // as a single post, recorded with It's posted, record it.
+      if (state.vin && (!state.queueMode || formOpen())) {
+        const open = formOpen() ? ` ${state.vehicle ? state.vehicle.name : state.vin} stays on its form: say whether it posted.` : '';
+        state.queueMode = false;
+        await saveFlow();
+        setStatus(stopped + open);
+        return render();
+      }
+      if (watcher) watcher.cancel();
       await clearFlow();
-      setStatus(btn.id === 'queueStop' ? 'Queue stopped. Posted cars stay recorded.' : '');
+      setStatus(stopped);
       return render();
+    }
+    case 'stopPost': {
+      // a single post at review: nothing is filled yet, so it can simply be
+      // dropped (a queued car has Skip in the queue bar instead)
+      if (state.step !== 'review' || state.queueMode) return undefined;
+      const name = state.vehicle ? state.vehicle.name : nameOf(state.vin);
+      await clearFlow();
+      setStatus(`Stopped the post of ${name}. Click Post on any car to start again.`);
+      return render();
+    }
     case 'back':
     case 'postAnother':
       await clearFlow();
@@ -1749,7 +2355,7 @@ let panelWindowId = null;
 const forThisWindow = (req) => Boolean(req) && (!req.windowId || panelWindowId === null || req.windowId === panelWindowId);
 const isFresh = (req) => Boolean(req) && (!req.at || Date.now() - req.at <= REQUEST_MAX_AGE_MS);
 
-const handlers = { [GLOBAL_KEYS.postRequest]: startFlow, [GLOBAL_KEYS.setupRequest]: openWizard, [GLOBAL_KEYS.upkeepRequest]: openUpkeep };
+const handlers = { [GLOBAL_KEYS.postRequest]: postRequested, [GLOBAL_KEYS.setupRequest]: openWizard, [GLOBAL_KEYS.upkeepRequest]: openUpkeep };
 
 // Changes to this website's posted list, drafts, queue and settings made by
 // the popup or the service worker are adopted here, so the cap, the queue
@@ -1794,6 +2400,7 @@ function adoptChanges(changes) {
     touched = true;
   };
   take(k.posted, 'posted', {});
+  take(k.postLog, 'postLog', []);
   take(k.drafts, 'drafts', {});
   // a new scan (the popup, the worker's rescan): the list follows it
   if (changes[k.snapshot]) {
@@ -1835,7 +2442,7 @@ function adoptChanges(changes) {
   if (capLine && state.settings) {
     const cap = dailyCap();
     capLine.outerHTML = capHtml(cap);
-    for (const id of ['openForm', 'checkForm']) { const b = $(id); if (b) b.disabled = cap.reached; }
+    setFormButtons(cap);
   }
 }
 
@@ -1883,11 +2490,12 @@ async function init() {
   const pending = REQUEST_KEYS.map((name) => ({ name, req: stored[name] })).filter(({ req }) => forThisWindow(req) && isFresh(req)).sort((a, b) => (b.req.at || 0) - (a.req.at || 0));
   const stale = REQUEST_KEYS.filter((name) => stored[name] && !isFresh(stored[name]));
   if (stale.length) await chrome.storage.local.remove(stale);
+  const lastPostOrigin = stored[GLOBAL_KEYS.lastPostOrigin];
   if (pending.length) {
     await chrome.storage.local.remove(REQUEST_KEYS);
+    if (pending[0].name === GLOBAL_KEYS.postRequest) await resumeOpenForm(lastPostOrigin, pending[0].req);
     return handlers[pending[0].name](pending[0].req);
   }
-  const lastPostOrigin = stored[GLOBAL_KEYS.lastPostOrigin];
   if (lastPostOrigin) {
     // a post under way comes back first; an unfinished set-up only when nothing else is going on
     const k = siteKeys(lastPostOrigin).flow;

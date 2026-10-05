@@ -90,7 +90,8 @@ test('the Facebook host justification and the privacy texts name every read Lot 
   // the code: the functions run in the tab Lot Current opened for a post or a to-do item
   const injected = new Set();
   for (const rel of ['extension/sidepanel.js', 'extension/upkeep.js', 'extension/popup.js', 'extension/background.js']) {
-    for (const m of read(rel).matchAll(/executeScript\(\{ target: \{ tabId: (?:state\.fbTabId|up\.tabId) \}, func: (\w+)/g)) injected.add(m[1]);
+    // the form's tab as state.fbTabId, or as the copy of it a fill or a listing read keeps (tabId, fbTabId) so it acts only on this car's tab
+    for (const m of read(rel).matchAll(/executeScript\(\{ target: \{ tabId(?:: (?:state\.fbTabId|fbTabId|up\.tabId))? \}, func: (\w+)/g)) injected.add(m[1]);
   }
   assert.deepEqual([...injected].sort(), Object.keys(FACEBOOK_FUNCS).sort(), 'a function now runs in a Facebook tab that the justification does not describe, or one is gone: update FACEBOOK_FUNCS and the texts');
   const upkeep = read('extension/upkeep.js');

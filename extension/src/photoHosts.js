@@ -11,7 +11,9 @@
 // Facebook's: Lot Current fills Facebook's form, it doesn't read from Facebook.
 // That rule holds for downloads too, not only for the asking: the manifest
 // covers www.facebook.com/marketplace/ for the form, so the side panel and
-// the worker both check isFacebookServer before a photo is fetched.
+// the worker both check isFacebookServer before a photo is fetched, and the
+// worker drops unread the answer of an address that redirected to one of
+// Facebook's servers.
 
 // Facebook's own domains, the image servers included: a dealer page that
 // reuses photos from its Facebook page points at scontent-*.fbcdn.net or
@@ -135,6 +137,12 @@ export function patternHost(pattern) {
   if (!p) return '';
   if (!p.host) return '*';
   return p.subdomains ? '*.' + p.host : p.host;
+}
+
+/** The hosts these patterns name, as a sentence says them: "a", "a and b", "a, b and c". */
+export function hostList(patterns) {
+  const hosts = (Array.isArray(patterns) ? patterns : []).map(patternHost).filter(Boolean);
+  return hosts.length > 1 ? `${hosts.slice(0, -1).join(', ')} and ${hosts[hosts.length - 1]}` : hosts.join('');
 }
 
 /**

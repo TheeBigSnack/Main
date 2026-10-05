@@ -102,7 +102,7 @@ async function findDealerTab() {
   try {
     // Without the tabs permission Chrome ignores the url filter for tabs the
     // extension can't read, so only a tab whose address is visible and on the
-    // site counts.
+    // site counts. ('/' + '*' is split so the guard test's comment stripper never sees a block-comment opener.)
     const tabs = (await chrome.tabs.query({ url: wiz.origin + '/' + '*' })).filter((t) => t.id && typeof t.url === 'string' && t.url.startsWith(wiz.origin + '/'));
     const pick = tabs.find((t) => t.id === wiz.dealerTabId) || tabs.find((t) => t.windowId === wiz.windowId) || tabs[0];
     if (pick) wiz.dealerTabId = pick.id;

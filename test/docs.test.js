@@ -1208,3 +1208,77 @@ test('README and help.md write the arrivals queue button as the popup draws it',
     if (shownAbove[1] === '1') assert.match(line, /more than one[^.]*ready/, `${rel} does not say the arrivals queue button is there only when more than one arrival is ready`);
   }
 });
+
+// The side panel reads the car again when its read is older than
+// READ_MAX_AGE_MS (sidepanel.js); the help names the same number of minutes.
+test('the help gives the same age for a re-read of the car as the side panel uses', () => {
+  const panel = read('../extension/sidepanel.js');
+  const ms = Number(new Function(`return ${/const READ_MAX_AGE_MS = ([^;]+);/.exec(panel)[1]}`)());
+  assert.ok(ms > 0);
+  const help = doc('help.md');
+  assert.match(help, new RegExp(`read from the website more than ${ms / 60000} minutes ago`), 'help.md says when the car is read again');
+});
+
+// Upkeep fills the new price the last scan found (the To do item's), and
+// does not read the website again at that point (upkeep.js). The copy a
+// person reads says so, never that it is "the website's new price" as if
+// read just then, and the panel's own price banner says it too.
+test('the help, README and site say a price update fills the last scan\'s price, as the upkeep banner does', async () => {
+  const help = doc('help.md');
+  const step = help.split('\n').find((l) => l.includes('The moment the Price box appears'));
+  assert.ok(step, 'help.md describes the price update');
+  assert.match(step, /the price the last scan found on the website/);
+  assert.match(step, /does not read the website again/);
+  assert.match(step, /\*\*Rescan website\*\* first/);
+  for (const rel of ['../docs/help.md', '../README.md', '../site-src/pages/how-it-works.html', '../site/how-it-works/index.html']) {
+    assert.doesNotMatch(read(rel), /the website's new price/, `${rel} calls the filled price the website's new price`);
+  }
+  assert.match(read('../README.md'), /the new price the last scan found on the website in the Price box/);
+  const { up, upkeepHtml } = await import('../extension/upkeep.js');
+  Object.assign(up, { active: true, kind: 'price', status: 'waiting', price: 19000, listedPrice: 20000, name: 'Car A', vin: 'AAA', listingUrl: '', note: '', error: '' });
+  assert.match(upkeepHtml(), /fills in <b>\$19,000<\/b> \(was \$20,000\), the price the website showed at the last scan;[^<]*<b>Update<\/b>\. If the website's price may have changed since, rescan first\./);
+  up.active = false;
+});
+
+// The cap counts this person's posts on the website today, taking the
+// server's count from all their computers when signed in (cap.js capStatus,
+// serverPostsToday). The help said "posts recorded in this browser" only,
+// which a salesperson with two computers finds untrue.
+test('the help says the daily cap counts your posts from all your computers when signed in, not this browser\'s alone', () => {
+  const cap = read('../extension/src/cap.js');
+  assert.match(cap, /serverPostsToday\(opts\.serverCount, now\)/, 'capStatus takes the server\'s count');
+  const help = doc('help.md');
+  const section = help.slice(help.indexOf('## The daily cap'), help.indexOf('\n## ', help.indexOf('## The daily cap') + 5));
+  assert.doesNotMatch(section, /counts posts recorded in this browser for this website today\./);
+  assert.match(section, /counts your own posts on this website today: the ones recorded in this browser or, when you are signed in to a Lot Current account[^.]*all your computers/);
+  assert.match(section, /A colleague's posts never count toward yours\./);
+  assert.match(section, /safety setting, not a guarantee/);
+  // unmarking a car never hands a post back (cap.js: nothing takes an entry off the day's log)
+  assert.doesNotMatch(help, /takes that post back off the count/);
+  assert.match(section, /Unmarking a car \(clicking \*\*Posted ✓\*\*\) does not take it off the count either/);
+  // and the data inventory's day's-log row says the same
+  const logRow = read('../docs/data-inventory.md').split('\n').find((l) => l.startsWith('| `postLog:<origin>`'));
+  assert.doesNotMatch(logRow, /an unmarking takes its own entry off/);
+  assert.match(logRow, /still counts a post taken down or unmarked the same day/);
+  assert.match(logRow, /a take-down or unmarking leaves it as it is/);
+});
+
+// A no to Chrome's question from the side panel's own list (Post, Post the
+// next N, Rescan the website) starts nothing: askForSite only sets the
+// status line, and a click on the same button asks again. The help said the
+// panel stopped with an Allow reading button, which the panel draws only for
+// a post already under way that stopped at its re-check for the permission.
+test('the help says what a no to Chrome from the side panel\'s list does: nothing starts, and the same button asks again', () => {
+  const panel = read('../extension/sidepanel.js');
+  for (const fn of ['postFromList', 'queueFromList', 'rescanFromList']) {
+    assert.match(panel, new RegExp(`async function ${fn}\\([^)]*\\) \\{\\n  if \\(!\\(await askForSite\\(\\)\\)\\) return undefined;`), `${fn} starts nothing after a no`);
+  }
+  assert.match(panel, /setStatus\(`Not allowed, so Lot Current can't read \$\{hostOf\(state\.origin\)\} from the side panel\. /, 'what the panel says after a no');
+  assert.match(panel, /function viewBlocked\(\) \{[\s\S]*?state\.blockedOrigins[\s\S]*?id="allowSite"/, 'Allow reading is drawn only on a post stopped for the permission');
+  const help = doc('help.md');
+  assert.doesNotMatch(help, /If you said no, the panel stops with \*\*Allow reading/);
+  assert.doesNotMatch(help, /or click \*\*Allow reading \[website\]\*\* to be asked again/);
+  assert.match(help, /If you say no, nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button/);
+  assert.match(help, /Decline and nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button again to be asked again/);
+  for (const line of help.split('\n').filter((l) => /Allow reading \[website\]/.test(l))) assert.match(line, /stopped at (the|its) re-check/, `help.md ties Allow reading to a stopped post: ${line.slice(0, 80)}`);
+});

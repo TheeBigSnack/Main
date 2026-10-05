@@ -223,10 +223,12 @@ test('the side panel asks Chrome for photo servers only from the click handler, 
       assert.doesNotMatch(branch, /\bawait\b/, `${name} is the first thing its click awaits: ${branch.trim().slice(0, 80)}`);
     }
   }
-  // the clicks that fill the form or download photos go through the same ask
-  for (const id of ['openForm', 'fillNow', 'fillAgain', 'downloadPhotos']) {
+  // the clicks that fill the form with its photos or download photos go through the same ask
+  for (const id of ['openForm', 'fillNow', 'attachAgain', 'downloadPhotos']) {
     assert.match(click, new RegExp(`case '${id}':\\s*await askForPhotos\\(\\);`), `${id} asks first`);
   }
+  // Fill again fills the fields only: no photos, so nothing to ask Chrome for
+  assert.match(click, /case 'fillAgain': return runFill\(\{ photos: false \}\);/);
   // the photo branches of the click handler come before anything the wizard or upkeep await
   assert.ok(click.indexOf('btn.dataset.allowPhotos') < click.indexOf('await handleWizardClick'), 'Allow photos asks before any other await');
 });
@@ -343,6 +345,8 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
     photoList: () => photos,
     hostList: (patterns) => patterns.map(patternHost).join(', '),
     sleep: async () => {},
+    flowRun: 0, // the post under way (sidepanel.js clearFlow); nothing drops it here
+    formTabShows: async () => true, // the form's tab still shows the form (tested in panelFlow.test.js)
     document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
     status: '',
   };

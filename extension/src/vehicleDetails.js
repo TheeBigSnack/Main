@@ -20,6 +20,7 @@ import { adapterById, adapterForService } from '../adapters/index.js';
 import { SITES_KEY } from './storageKeys.js';
 import { assessVehicle, DECISION } from './classify.js';
 import { siteReadOrigins } from './panelList.js';
+import { hostList } from './photoHosts.js';
 
 const errText = (e) => String((e && e.message) || e);
 const sentence = (t) => (/[.!?]$/.test(String(t).trim()) ? String(t).trim() : String(t).trim() + '.');
@@ -40,22 +41,52 @@ async function readOne(adapter, search, wanted, options) {
     return { ok: false, message: "Couldn't read the dealership website: " + errText(e) };
   }
   if (!r.ok) return { ok: false, message: r.message || "Couldn't read the dealership website." };
+  // a list the website did not give whole can't say a car is gone
+  if (!r.record && r.complete === false) {
+    return { ok: false, incomplete: true, message: "Couldn't read the website's whole list of cars just now, so this car couldn't be checked. Try again in a minute." };
+  }
   if (!r.record) {
     return { ok: false, notFound: true, message: "This car isn't on the website any more (sold, removed or hidden). Rescan before posting anything." };
   }
   return { ok: true, vehicle: adapter.normalize(r.record), fetchedAt: r.fetchedAt };
 }
 
+// The origin of the page a tab shows, '' when Chrome does not show it (no
+// access to that tab) or it is no web address.
+const tabOrigin = (tab) => {
+  try {
+    return new URL(tab && tab.url).origin;
+  } catch (e) {
+    return '';
+  }
+};
+
 const withUrl = (adapter, service, url) => ({ ...adapter.scanOptions(service), ...(typeof url === 'string' && url ? { url } : {}) });
 
 // `url` is the car's page as the last scan kept it (the snapshot entry's
 // url): an adapter that reads the car from its own page starts there; one
 // that asks an inventory service ignores it. `origin`, when given, is the
-// website the post is for: a tab that now shows another website is not read.
-// A tab that can't be used (closed, another page, another website) answers
-// with `tabUnusable: true`, so readCarForPost can read the car another way.
+// website the post is for: the tab's address is looked at first, and a tab
+// that now shows another website (Facebook included) has nothing injected
+// into it at all; a tab whose address Chrome does not show is not read
+// either. A tab that can't be used (closed, a page no adapter reads, another
+// website) answers with `tabUnusable: true`, so readCarForPost can read the
+// car another way.
 export async function fetchVehicleDetails(tabId, vin, { url = null, origin = null } = {}) {
   const wanted = String(vin || '').toUpperCase();
+  if (origin) {
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch (e) {
+      return { ok: false, tabUnusable: true, message: "Couldn't reach the dealership website tab. Open the used inventory page and click Post again. (" + errText(e) + ')' };
+    }
+    const at = tabOrigin(tab);
+    if (at !== origin) {
+      const shows = /^https?:/.test(at) ? `now shows ${hostOf(at)}, not ${hostOf(origin)}` : `no longer shows ${hostOf(origin)}`;
+      return { ok: false, tabUnusable: true, message: `The dealership tab ${shows}. Open ${hostOf(origin)}'s used inventory page and click Post again.` };
+    }
+  }
   let probe;
   try {
     probe = await probeTab(tabId);
@@ -70,22 +101,45 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   // What the probe could not see on this page (a car's own page has no
   // inventory list to find) comes from the service the last scan of this
   // website stored, when the same adapter read it; what the probe did see wins.
-  const service = await withStoredService(probe, adapter);
-  const r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
+  const { service, stored } = await withStoredService(probe, adapter);
+  let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
+  // A page of the website can have loaded another list than the one the
+  // last scan read (the new cars, a search filtered for a customer), and the
+  // probe saw that one. A car missing from it, or from the part of it the
+  // website gave (a later page failed, the paging did not move that list
+  // on), is not called gone or left unchecked on its word: the same tab
+  // reads the car once more the way the last scan read the website, and
+  // that answer is the one that counts.
+  if ((r.notFound || r.incomplete) && stored && differentRead(adapter, service, stored)) {
+    r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url));
+  }
   return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
 }
 
+// The service the read uses (the probe's, with what it could not see filled
+// from the last scan's) and the last scan's own, when the same adapter stored one.
 async function withStoredService(probe, adapter) {
   const probed = probe.service || {};
   try {
     const origin = probe.site && probe.site.origin;
     const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
     const stored = origin && sites[origin];
-    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return probed;
+    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return { service: probed, stored: null };
     const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
-    return { ...stored.service, ...seen };
+    return { service: { ...stored.service, ...seen }, stored: stored.service };
   } catch (e) {
-    return probed;
+    return { service: probed, stored: null };
+  }
+}
+
+// Would the last scan's service read the website another way than this one?
+// Told apart by what the adapter's getDetails is given (its scanOptions), so
+// a service whose read is the same is not asked twice.
+function differentRead(adapter, service, stored) {
+  try {
+    return JSON.stringify(adapter.scanOptions(service)) !== JSON.stringify(adapter.scanOptions(stored));
+  } catch (e) {
+    return false;
   }
 }
 
@@ -119,7 +173,7 @@ export async function fetchVehicleDetailsDirect(origin, info, vin, { url = null,
       ok: false,
       needsPermission: true,
       origins,
-      message: `To re-check this car on ${host} from here, Chrome has to let Lot Current read the website (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
+      message: `To re-check this car on ${host} from here, Chrome has to let Lot Current read ${hostList(origins) || 'the website'} (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
     };
   }
   const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url));

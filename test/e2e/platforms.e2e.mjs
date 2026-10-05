@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockPlatformSite, PLATFORM_LOT, DEALER_NAMES } from './mock-platform-sites.mjs';
 import { startMockMarketplace } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -48,6 +49,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const [sold, dropped, ...rest] = PLATFORM_LOT;
 const lowMiles = PLATFORM_LOT[PLATFORM_LOT.length - 1];
@@ -62,7 +64,12 @@ const watch = (p) => {
 };
 const control = async (kind, path) => (await fetch(originOf(kind) + path)).text();
 const requests = async (kind) => JSON.parse(await control(kind, '/requests'));
-const publishCount = async () => (await fetch(`${marketOrigin}/publish-count`)).text();
+// How many times Publish was clicked; and first, that nothing ever touched the
+// mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+const publishCount = async () => {
+  assert.deepEqual(await (await fetch(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  return (await fetch(`${marketOrigin}/publish-count`)).text();
+};
 
 try {
   const ext = await context.newPage();
@@ -182,9 +189,11 @@ try {
     // the second car was listed by hand
     await tab(popup, 'ready').click();
     await popup.click(`button[data-action="post"][data-vin="${dropped.vin}"]`);
+    await popup.click(`button[data-action="markBefore"][data-vin="${dropped.vin}"]`); // listed before today
     await popup.waitForSelector(`button[data-action="unpost"][data-vin="${dropped.vin}"]`);
     if (kind === 'dealerCom') {
       await popup.click(`button[data-action="post"][data-vin="${sold.vin}"]`);
+      await popup.click(`button[data-action="markBefore"][data-vin="${sold.vin}"]`);
       await popup.waitForSelector(`button[data-action="unpost"][data-vin="${sold.vin}"]`);
     }
 
@@ -210,6 +219,7 @@ try {
   assert.equal(await publishCount(), '1', "only the person's one click");
   assert.equal(rest.length > 0, true);
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('DealerOn and Dealer.com E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   for (const [name, p] of [['Panel', panelRef], ['Popup', popupRef]]) {

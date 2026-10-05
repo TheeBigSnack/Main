@@ -24,7 +24,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockStandardSite, STANDARD } from './mock-standard-site.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -55,6 +56,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const V = STANDARD.VINS;
 const DEALER = STANDARD.DEALER.name;
@@ -69,7 +71,15 @@ const watch = (p) => {
 };
 const control = async (path) => (await fetch(origin + path)).text();
 const requests = async () => JSON.parse(await control('/requests'));
-const publishCount = async () => (await fetch(`${marketOrigin}/publish-count`)).text();
+// How many times Publish was clicked; and first, that nothing ever touched the
+// mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+const publishCount = async () => {
+  assert.deepEqual(await (await fetch(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  // nor did anything mark a listing sold, delete one or save an edit: Facebook lands on a listing page after Publish
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-actions`)).json(), [], 'nothing may mark sold, delete or update a listing but the person');
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-state`)).json(), INITIAL_LISTINGS, 'every listing is as it was');
+  return (await fetch(`${marketOrigin}/publish-count`)).text();
+};
 
 try {
   const ext = await context.newPage();
@@ -252,7 +262,20 @@ try {
   popup = await openPopup();
   await tab(popup, 'ready').click();
   await popup.click(`button[data-action="post"][data-vin="${V.accord}"]`);
+  await popup.click(`button[data-action="markBefore"][data-vin="${V.accord}"]`); // listed before today
   await popup.waitForSelector(`button[data-action="unpost"][data-vin="${V.accord}"]`);
+  // a listing made by hand before today is watched, but it is no post of today's
+  assert.match(await popup.textContent('#status'), /^Recorded as listed before today: rescans watch [^,]*Accord[^,]*, and it doesn't count toward today's posts\.$/);
+  const marked = await popup.evaluate(async (vin) => {
+    const all = await chrome.storage.local.get(null);
+    const posted = Object.entries(all).find(([k]) => k.startsWith('posted:'))[1];
+    const log = Object.entries(all).find(([k]) => k.startsWith('postLog:'));
+    return { entry: posted[vin], log: (log ? log[1] : []).filter((e) => e.vin === vin) };
+  }, V.accord);
+  assert.equal(marked.entry.listedBefore, true, 'recorded as listed before today');
+  assert.deepEqual(marked.log, [], 'not on the day\'s post log');
+  await tab(popup, 'mine').click();
+  assert.match(await popup.textContent('.panel'), /Accord[\s\S]*Listed before [A-Z][a-z]{2} \d{1,2}/, 'My listings says it was listed before the day it was marked');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '2');
 
   // ---- 3. Day 2 on a bad server day: the Accord sold, but its old page answers 429 and another car's page 500 ----
@@ -319,6 +342,7 @@ try {
 
   assert.equal(await publishCount(), '1', "still only the person's one click");
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('Standard data E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   for (const [name, p] of [['Panel', panelRef], ['Popup', popupRef]]) {

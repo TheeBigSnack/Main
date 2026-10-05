@@ -201,8 +201,9 @@ function stripClosing(text, line) {
   return String(text || '').replace(closingPattern(c), ' ');
 }
 
-function firstSentences(text, maxSentences, maxWords) {
-  const sentences = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean);
+// keep: which sentences may be used at all (the rest are skipped, not counted).
+function firstSentences(text, maxSentences, maxWords, keep = () => true) {
+  const sentences = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean).filter(keep);
   const out = [];
   for (const s of sentences.slice(0, maxSentences)) {
     if (wordCount([...out, s].join(' ')) > maxWords) break;
@@ -242,7 +243,8 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45) : '';
+  // the dealer's own write-up, less any sentence a posting rule stops (breaksRule): the template never writes what its own checks stop
+  const story = Array.isArray(narrative) && narrative.length ? firstSentences(narrative[0], 2, 45, (s) => !breaksRule(s, v)) : '';
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
@@ -303,6 +305,13 @@ function emojiCount(text) {
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const BANNED_RE = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/\s+/g, '\\s+') + '\\b', 'i')]);
+const ONE_OWNER_RE = /\b(one|1|single)[- ]owner\b/i;
+
+// A sentence that a posting rule would stop in any description: a banned
+// phrase, or a one-owner claim the Carfax one-owner flag doesn't back.
+function breaksRule(sentence, vehicle) {
+  return BANNED_RE.some(([, re]) => re.test(sentence)) || (ONE_OWNER_RE.test(sentence) && !vehicle.carfaxOneOwner);
+}
 
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
@@ -345,7 +354,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(t)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
   }
-  if (/\b(one|1|single)[- ]owner\b/i.test(t) && !vehicle.carfaxOneOwner) {
+  if (ONE_OWNER_RE.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
   // who is posting: the dealership and the salesperson's role, in every description
@@ -359,3 +368,19 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   if (hasClosing) for (const p of checkClosingLine(closing).problems) if (!problems.some((q) => q.text === p.text)) problems.push(p);
   return { ok: problems.length === 0, problems, words };
 }
+
+// The problems that break a posting rule rather than a style preference:
+// the dealership or the salesperson's role not named (the dealership stays
+// identifiable), a number or
+// a one-owner claim the website's data doesn't hold (facts only), a banned
+// phrase (a claim the data can't support, posing as a private seller, words
+// about protected groups), a price note quoting the wrong fee (honest
+// prices), and the same four in the salesperson's closing line. The side
+// panel won't fill a description that has one. The rest (too short or long,
+// ALL CAPS, emoji, the VIN line missing) are warnings: a car with few
+// features on the website gives a short template, and that is no reason to
+// stop it being posted.
+export const RULE_PROBLEM_CODES = Object.freeze(['no-dealer', 'no-role', 'unknown-number', 'one-owner', 'banned-phrase', 'price-note-amount', 'closing-price', 'closing-number', 'closing-one-owner', 'closing-banned']);
+
+// The rule problems in a runGuardrails result ([] for none, or for no result).
+export const ruleProblems = (guardrails) => ((guardrails && Array.isArray(guardrails.problems)) ? guardrails.problems : []).filter((p) => RULE_PROBLEM_CODES.includes(p.code));

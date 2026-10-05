@@ -99,6 +99,26 @@ test('summarize on the sample: posts per salesperson, medians, listings up', () 
   assert.equal(s.week.from, ago(7 * 24));
 });
 
+// A salesperson who starts with Lot Current marks the listings they made by
+// hand earlier (Mark posted, "Before today"): those rows carry listed_before,
+// and posted_at is the moment of marking. They are their listings (all time,
+// listings up), not posts of this week.
+test('summarize: listings marked as made by hand before that day are not counted as posted this week', () => {
+  const base = sample();
+  const alexId = base.listings.find((l) => l.salesperson === 'Alex').user_id;
+  const marked = Array.from({ length: 12 }, (_, i) => ({ id: `hand-${i}`, dealership_id: base.listings[0].dealership_id, user_id: alexId, vin: `1HGHAND0${String(i).padStart(2, '0')}0000000`.slice(0, 17), name: 'Earlier listing', price: 20000 + i, posted_at: ago(2), listing_url: null, salesperson: 'Alex', updated_at: null, taken_down_at: null, status: 'listed', listed_before: true }));
+  const before = summarize(base);
+  const after = summarize({ ...base, listings: [...base.listings, ...marked] });
+  const alex = (s) => s.salespeople.find((p) => p.name === 'Alex');
+  assert.equal(alex(after).postedThisWeek, alex(before).postedThisWeek, 'the hand-made listings are not this week\'s posts');
+  assert.equal(after.totals.postedThisWeek, before.totals.postedThisWeek);
+  assert.equal(alex(after).postedAllTime, alex(before).postedAllTime + 12, 'they are still the salesperson\'s listings');
+  assert.equal(alex(after).listed, alex(before).listed + 12);
+  // a listing marked "Posted today" (listed_before false) counts as before
+  const today = summarize({ ...base, listings: [...base.listings, { ...marked[0], id: 'today', listed_before: false }] });
+  assert.equal(alex(today).postedThisWeek, alex(before).postedThisWeek + 1);
+});
+
 test('summarize on the sample: sold cars still listed, longest first, red past 24 h', () => {
   const s = summarize(sample());
   assert.equal(OVERDUE_HOURS, 24);

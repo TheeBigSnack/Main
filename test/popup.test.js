@@ -586,13 +586,15 @@ test('signed in, the popup\'s Rescan, Mark posted, unmarking, Taken down and Upd
     };
     await step('rescan', () => p.scan(), 1);
     assert.equal(p.status(), '', 'the scan went through');
-    await step('mark posted', () => p.click('post', { vin: ram.vin }), 2);
+    // Mark posted asks when the listing went up (src/cap.js askWhenListed): the answer records it
+    const markToday = async () => { await p.click('post', { vin: ram.vin }); await p.click('markToday', { vin: ram.vin }); };
+    await step('mark posted', markToday, 2);
     assert.ok(p.local[k.posted][ram.vin], 'marked posted');
     await step('updated', () => p.click('priceUpdated', { vin: ram.vin, price: String(ram.price - 500) }), 3);
     assert.equal(p.local[k.posted][ram.vin].price, ram.price - 500);
     await step('taken down', () => p.click('takenDown', { vin: ram.vin }), 4);
     assert.equal(p.local[k.posted][ram.vin], undefined, 'taken down');
-    await p.click('post', { vin: ram.vin });
+    await markToday();
     await step('unmarked', () => p.click('unpost', { vin: ram.vin }), 6);
     await new Promise((r) => setTimeout(r, 30)); // nothing more comes later
     return { steps, syncs: syncs() };

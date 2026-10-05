@@ -3,9 +3,12 @@
 // listings that are up: rescan.js markTakenDown removes the entry when the
 // person clicks Taken down or unmarks Posted ✓ (popup.js), or finishes a
 // take-down from To do (upkeep.js). Taken down here, a post still counts
-// toward the daily cap on the day it was made (cap.js postsToday), the way
-// the sync function counts the day's posts (any status): a take-down never
-// frees a slot.
+// toward the daily cap on the day it was made, the way the sync function
+// counts the day's posts (any status): a take-down never frees a slot. The
+// cap's record of the day's posts is the day's log (postLog:<origin>,
+// src/cap.js); it reads this record only to carry into that log the posts
+// of the day the log never had (cap.js dayLog: posts recorded before the log
+// existed, or synced from another computer).
 //
 // The side panel reads it too, before a post (relistNotice): a car this
 // person took down while the website still listed it as ready may be a
@@ -14,9 +17,11 @@
 // not refused: Facebook may have removed the listing, or the click was a
 // mistake.
 //
-// Each entry is { vin, postedAt, takenDownAt, stillListed }: stillListed is
-// whether the website still listed the car as ready to post when it was
-// taken down (stillListedNow). Kept in this browser only, under
+// Each entry is { vin, postedAt, takenDownAt, stillListed }, plus
+// listedBefore: true for a listing marked as made by hand before the day it
+// was marked posted (no post of that day, so the cap never counts it):
+// stillListed is whether the website still listed the car as ready to post
+// when it was taken down (stillListedNow). Kept in this browser only, under
 // takenDown:<origin> (src/storageKeys.js), never synced; pruned on every
 // write to the last KEEP_DAYS days and the newest MAX_ENTRIES entries.
 
@@ -45,7 +50,7 @@ export function takenDownList(log) {
     const vin = vinOf(e.vin);
     const takenDownAt = iso(e.takenDownAt);
     if (!vin || !takenDownAt) continue;
-    out.push({ vin, postedAt: iso(e.postedAt), takenDownAt, stillListed: e.stillListed === true });
+    out.push({ vin, postedAt: iso(e.postedAt), takenDownAt, stillListed: e.stillListed === true, ...(e.listedBefore === true ? { listedBefore: true } : {}) });
   }
   return out;
 }
@@ -66,16 +71,18 @@ export function stillListedNow(snapshot, diff, vin) {
  *   vin, postedAt  the posted entry being removed (postedAt may be missing
  *                  for an entry saved without one; it then counts toward no day)
  *   stillListed    stillListedNow() at the moment of the take-down
+ *   listedBefore   the posted entry's listedBefore (made by hand before the
+ *                  day it was marked posted: no post of that day)
  *   at             when it was taken down
  */
-export function noteTakenDown(log, { vin, postedAt = null, stillListed = false } = {}, at = new Date().toISOString(), now = at) {
+export function noteTakenDown(log, { vin, postedAt = null, stillListed = false, listedBefore = false } = {}, at = new Date().toISOString(), now = at) {
   const v = vinOf(vin);
   const when = iso(at);
   const list = takenDownList(log);
   if (!v || !when) return list;
   const posted = iso(postedAt);
   const kept = list.filter((e) => !(e.vin === v && e.postedAt === posted));
-  kept.push({ vin: v, postedAt: posted, takenDownAt: when, stillListed: stillListed === true });
+  kept.push({ vin: v, postedAt: posted, takenDownAt: when, stillListed: stillListed === true, ...(listedBefore === true ? { listedBefore: true } : {}) });
   const floor = (ms(now) ?? Date.now()) - KEEP_DAYS * DAY_MS;
   return kept
     .filter((e) => ms(e.takenDownAt) >= floor || (e.postedAt && ms(e.postedAt) >= floor))

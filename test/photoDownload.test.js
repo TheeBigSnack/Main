@@ -179,3 +179,31 @@ test('an empty body, or one that is not the photo its type names, is a photo tha
   const heic = await downloadPhoto('https://img.cdn.example/f', 5, { fetchImpl: async () => new Response(new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]), { headers: { 'content-type': 'image/heic' } }) });
   assert.deepEqual([heic.ok, heic.name, heic.type], [true, 'photo-06.heic', 'image/heic']);
 });
+
+// fetch follows redirects, and res.url is where the answer came from. A
+// photo address on another server that redirects to Facebook's photo servers
+// is dropped unread; a redirect anywhere else still brings the photo.
+test('never from Facebook\'s own servers by a redirect either: the answer is dropped unread', LIMIT, async () => {
+  const redirectedTo = (final, body) => async () => {
+    const res = new Response(body, { headers: { 'content-type': 'image/jpeg' } });
+    Object.defineProperty(res, 'url', { value: final });
+    Object.defineProperty(res, 'redirected', { value: true });
+    return res;
+  };
+  for (const final of ['https://scontent-iad3-1.xx.fbcdn.net/v/1.jpg', 'https://lookaside.fbsbx.com/a.jpg', 'https://www.facebook.com/photo.jpg']) {
+    const { stream, counter } = chunkedBody(1);
+    const r = await downloadPhoto('https://images.dealer.example/car/1.jpg', 0, { fetchImpl: redirectedTo(final, stream) });
+    assert.equal(r.ok, false, final);
+    assert.equal(r.url, 'https://images.dealer.example/car/1.jpg', 'the failure is filed under the address the car gives');
+    assert.match(r.error, /^redirected to Facebook's servers \(/, final);
+    assert.ok(r.error.includes(new URL(final).hostname), `names the server it redirected to: ${r.error}`);
+    assert.ok(!('dataUrl' in r), 'nothing of it comes back');
+    assert.equal(counter.pulled, 0, 'not one chunk of the body was read');
+    assert.equal(counter.cancelled, true, 'the body is cancelled');
+  }
+  // a JPEG's own bytes: an answer that is not the photo its type names is refused (the tests above)
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const elsewhere = await downloadPhoto('https://images.dealer.example/car/2.jpg', 1, { fetchImpl: redirectedTo('https://cdn.dealer.example/car/2.jpg', jpeg) });
+  assert.equal(elsewhere.ok, true, 'a redirect to another server that is not Facebook\'s still brings the photo');
+  assert.equal(elsewhere.bytes, jpeg.length);
+});

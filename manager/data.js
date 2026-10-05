@@ -8,7 +8,10 @@
 // member inside their own dealership; this file trusts what it is given):
 //   listings        id, dealership_id, user_id, vin, name, price, posted_at,
 //                   listing_url, salesperson, updated_at, taken_down_at,
-//                   status 'listed' | 'taken_down'
+//                   status 'listed' | 'taken_down', listed_before (a listing
+//                   made by hand before the day it was marked posted:
+//                   posted_at is when it was marked, so it is not counted as
+//                   posted this week)
 //   todo_items      id, dealership_id, vin, kind 'takeDown' | 'price', name,
 //                   flagged_at, done_at, how 'detected' | 'manual' | 'cleared',
 //                   from_price, to_price
@@ -205,7 +208,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     const p = get(l);
     p.postedAllTime += 1;
     const at = ms(l.posted_at);
-    if (at !== null && at >= t - WEEK_MS && at <= t) p.postedThisWeek += 1;
+    if (at !== null && at >= t - WEEK_MS && at <= t && l.listed_before !== true) p.postedThisWeek += 1;
     if (isTakenDown(l)) p.takenDown += 1; else p.listed += 1;
   }
   const posted = A.filter((a) => a.outcome === 'posted');

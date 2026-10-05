@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -39,6 +40,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 640 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const errors = [];
 let popup;
@@ -85,8 +87,24 @@ try {
 
   await tab(popup, 'ready').click();
   assert.match(await popup.textContent('.rows'), /2019 Ram 1500 Classic Express/);
+  // Mark posted asks when the listing went up (Cancel records nothing); this one went up today
   await popup.click('button[data-action="post"]');
+  await popup.waitForSelector('.markWhen button[data-action="markBefore"]');
+  assert.match(await popup.textContent('.markWhen'), /Listed on Facebook:\s*Today\s*Before today\s*Cancel/);
+  await popup.click('button[data-action="markCancel"]');
+  await popup.waitForSelector('button[data-action="post"]');
+  assert.equal(await popup.$('button[data-action="unpost"]'), null, 'Cancel records nothing');
+  await popup.click('button[data-action="post"]');
+  await popup.click('button[data-action="markToday"]');
   await popup.waitForSelector('button[data-action="unpost"]');
+  const marked = await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const posted = Object.entries(all).find(([k]) => k.startsWith('posted:'))[1];
+    const log = Object.entries(all).find(([k]) => k.startsWith('postLog:'));
+    return { entry: Object.values(posted)[0], log: log ? log[1] : [] };
+  });
+  assert.equal(marked.entry.listedBefore, undefined, 'a post of today');
+  assert.equal(marked.log.length, 1, 'on the day\'s post log');
   await popup.screenshot({ path: join(shots, '2-ready-marked-posted.png') });
 
   // ---- The price setting changes while the Ram is posted ----
@@ -206,6 +224,10 @@ try {
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count')?.textContent === '0');
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '0');
+  // the Ram's listing is down, but it was posted today: the daily cap still counts it
+  await tab(popup, 'ready').click();
+  assert.match(await popup.textContent('#pickHint'), /9 more posts allowed today\./);
+  await tab(popup, 'todo').click();
 
   await popup.click('#settingsBtn');
   assert.match(await popup.textContent('.settings'), /usually \$490 higher than/);
@@ -222,6 +244,13 @@ try {
   // other order gives, so a menu that mixed two of them up would show here.
   await dealer.request.get(`http://127.0.0.1:${server.address().port}/scenario?name=day3`);
   popup = await openPopup();
+  // a new day for the cap too: the day's log of posts (the Ram's, from day 1) moves back a day
+  await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const key = Object.keys(all).find((k) => k.startsWith('postLog:'));
+    const dayBefore = (at) => new Date(Date.parse(at) - 24 * 3600 * 1000).toISOString();
+    await chrome.storage.local.set({ [key]: all[key].map((e) => ({ ...e, at: dayBefore(e.at) })) });
+  });
   await popup.click('#scan');
   await popup.waitForFunction(() => /3 ready to post/.test(document.querySelector('.meta')?.textContent || '')); // the day-2 to-do list is on screen until the rescan ends
   assert.match(await popup.textContent('.panel'), /Just became ready\s*1[\s\S]*2025 Ram 1500 Tradesman[\s\S]*photos added, now at Waynesburg/);
@@ -317,6 +346,7 @@ try {
   assert.match(await popup.textContent('#status'), /Open your dealership's website/);
 
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   // Say what the popup was showing, so a failure is diagnosable from the log.

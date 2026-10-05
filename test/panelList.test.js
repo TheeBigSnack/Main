@@ -6,7 +6,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins } from '../extension/src/panelList.js';
+import { readFileSync } from 'node:fs';
+import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from '../extension/src/panelList.js';
 import { sortEntries } from '../extension/src/readyList.js';
 import { snapshot, fixtures, MY_STORE } from './helpers.js';
 
@@ -123,6 +124,28 @@ test('reading a car from the panel needs the website and its inventory service, 
   assert.deepEqual(siteReadOrigins('https://www.facebook.com', di), []);
   assert.deepEqual(siteReadOrigins('https://www.example-dealer.test', { adapter: 'dealerInspire', service: { search: 'https://www.facebook.com/marketplace/x', apiKey: 'k' } }), []);
   assert.deepEqual(siteReadOrigins('https://www.messenger.com', so), []);
+});
+
+// The panel's line before Chrome's prompt names every host the prompt will
+// list: for Dealer Inspire the inventory service as well as the website, and
+// only the ones not granted yet.
+test('what the panel says before asking Chrome to read the website names every host Chrome will list', () => {
+  const di = { adapter: 'dealerInspire', service: { search: 'https://websites-search.api.carscommerce.inc/api/v1/listings/1', apiKey: 'k' } };
+  const both = siteReadOrigins('https://www.example-dealer.test', di);
+  assert.equal(siteAskText(missingOrigins(both, [])), 'Chrome will ask to let Lot Current read www.example-dealer.test and websites-search.api.carscommerce.inc from the side panel (the same permission automatic rescans use).');
+  assert.equal(siteAskText(missingOrigins(both, ['https://www.example-dealer.test/*'])), 'Chrome will ask to let Lot Current read websites-search.api.carscommerce.inc from the side panel (the same permission automatic rescans use).', 'only what is still missing');
+  const so = siteReadOrigins('https://www.sample-motors.test', { adapter: 'schemaOrg', service: { kind: 'schemaOrg', origin: 'https://www.sample-motors.test', listUrl: 'https://www.sample-motors.test/used-vehicles/' } });
+  assert.match(siteAskText(so), /read www\.sample-motors\.test from the side panel/);
+  assert.match(siteAskText([]), /read the website from the side panel/);
+  // and the sentence is built from the patterns asked for, not from the website alone
+  const panel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
+  // up to the request itself (askChrome, src/askChrome.js, wraps chrome.permissions.request)
+  const askStart = panel.indexOf('async function askForSite(');
+  const askEnd = panel.indexOf('await askChrome(', askStart);
+  assert.ok(askStart >= 0 && askEnd > askStart, 'askForSite no longer asks Chrome through askChrome: this test must change with it');
+  const ask = panel.slice(askStart, askEnd);
+  assert.match(ask, /siteAskText\(/, 'askForSite says what it asks for with siteAskText');
+  assert.doesNotMatch(ask, /read \$\{hostOf\(state\.origin\)\}/, 'askForSite names only the website');
 });
 
 test('which website patterns Chrome has not granted: by Chrome\'s own matching, so only the missing ones are asked for', () => {

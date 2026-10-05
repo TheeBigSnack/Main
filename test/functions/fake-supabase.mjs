@@ -66,10 +66,10 @@ const SCHEMA = {
   listings: {
     columns: {
       id: 'uuid!', dealership_id: 'uuid!', user_id: 'uuid!', vin: 'text!', name: 'text', price: 'int', posted_at: 'ts!', created_at: 'ts!',
-      listing_url: 'text', salesperson: 'text', updated_at: 'ts', taken_down_at: 'ts', status: 'text!',
+      listing_url: 'text', salesperson: 'text', updated_at: 'ts', taken_down_at: 'ts', status: 'text!', listed_before: 'bool!',
     },
     keys: [['id'], ['dealership_id', 'vin', 'posted_at']],
-    defaults: { id: NEW_UUID, created_at: NOW, status: 'listed' },
+    defaults: { id: NEW_UUID, created_at: NOW, status: 'listed', listed_before: false },
     check: (r) => {
       if (!['listed', 'taken_down'].includes(r.status)) return 'listings_status_check';
       return (r.status === 'taken_down') === (r.taken_down_at !== null) ? '' : 'listings_status_matches_taken_down';

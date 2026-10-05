@@ -39,6 +39,7 @@ export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, 
     }
     return els.get(id);
   };
+  globalThis.CSS = globalThis.CSS || { escape: (s) => String(s).replace(/[^\w-]/g, (c) => `\\${c}`) }; // the browser's CSS.escape, for the popup's selectors
   globalThis.document = {
     getElementById: el, activeElement: null, querySelector: () => null, querySelectorAll: () => [],
     createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} },

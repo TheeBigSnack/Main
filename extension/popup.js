@@ -1,10 +1,11 @@
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis } from './src/rescan.js';
+import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE } from './src/settings.js';
-import { capStatus, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
@@ -28,6 +29,7 @@ const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.r
 const signedMoney = (n) => (n < 0 ? '−' : '+') + money(Math.abs(n));
 const miles = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') + ' mi' : 'no mileage');
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+const day = (iso) => (iso ? new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '');
 const dateOnly = (iso) => (iso ? new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 
 const state = {
@@ -37,22 +39,24 @@ const state = {
   snapshot: null, // last saved scan
   diff: null, // to-do list from the last scan
   posted: {}, // cars this salesperson marked as posted: { vin: { name, price, postedAt, listingUrl?, salesperson? } }; with an account, colleagues' too, marked `mine: false` by sync
+  postLog: [], // today's posts recorded on this computer, those taken down or unmarked since included: the cap counts them (src/cap.js)
   settings: null, // see src/settings.js
   settingsFromProfile: false, // true until the first scan checks the profile's store names against this website
   boilerplate: [],
   queue: null, // the batch queue (src/queue.js), shared with the side panel
-  drafts: {}, // cars saved as drafts on Facebook during a queue: { vin: { name, savedAt } }
+  drafts: {}, // cars saved as drafts on Facebook during a queue: { vin: { name, savedAt, price, basis } } (src/drafts.js)
   wizardDone: false, // set-up finished (or skipped) for this website
   wizardActive: false, // set-up started in the side panel and not finished
   site: null, // this website's entry in the background-rescan registry (src/scanRunner.js SITES_KEY)
   pilot: null, // pilot numbers (src/pilot.js): post timings, fill failures per field, to-do item durations
-  takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap still counts the day's
+  takenDown: null, // the posts this salesperson took off their posted list (src/takenDown.js): the cap counts the day's ones the day's log never had (src/cap.js dayLog)
   syncState: null, // this website's sync state (src/sync.js nextSyncState): dealership, role, when it last synced, the plan, the server's count of today's posts (the cap reads it); accounts only
   account: { session: null, email: '', note: '', error: '' }, // the signed-in session (read only when accounts are configured) and what the Account section says
   rescanPermission: null, // true/false once known: may the service worker read this website?
   scanning: false,
   view: 'todo',
   readyFilter: '', // the Ready tab's search box, for as long as the popup is open
+  markAsk: null, // the VIN whose Mark posted is asking "Posted today" or "Before today", for as long as the popup is open
   picked: new Set(), // the Ready tab's ticked cars (VINs), for as long as the popup is open: a tick survives the search box hiding its row and a redraw; the queue takes them all
 };
 
@@ -85,6 +89,7 @@ async function loadSaved() {
   state.snapshot = data[k.snapshot] || null;
   state.diff = data[k.diff] || null;
   state.posted = data[k.posted] || {};
+  state.postLog = data[k.postLog] || [];
   const site = state.snapshot?.site || {};
   if (data[k.settings]) {
     state.settings = withDefaults(data[k.settings], site);
@@ -395,19 +400,31 @@ function empty(text) {
 }
 
 // "Post" opens the guided flow in the side panel (only for ready cars). "Mark
-// posted" is for a listing the salesperson made by hand.
+// posted" is for a listing the salesperson made by hand, or published from a
+// draft: the draft's pill shows the price it was filled with, and says so
+// when the website's price moved or the car is not ready any more.
 function postButton(vin, { canPost = true } = {}) {
   const theirs = colleagueEntry(vin);
   if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
-  if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark">Posted ✓</button>`;
+  if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
+  if (state.markAsk === vin) return markChoice(vin);
   if (state.drafts[vin]) {
-    return `<span class="actions"><span class="pill warn" title="Saved as a draft on Facebook; publish it there, then mark it posted">Draft on Facebook</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
+    const pill = draftPill(state.drafts[vin], state.snapshot?.vehicles?.[vin], { basis: state.settings?.basis, ready: canPost });
+    return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
   const capReached = dailyCap().reached;
   const post = canPost
     ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${capReached ? 'disabled' : ''} title="${capReached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
     : '';
   return `<span class="actions">${post}<button type="button" class="small" data-action="post" data-vin="${esc(vin)}" title="Already listed it yourself? Mark it posted so rescans watch it.">Mark posted</button></span>`;
+}
+
+// Mark posted's question: did the listing go up today? A listing made by
+// hand before today is watched the same, but it is not one of today's posts
+// (src/cap.js askWhenListed, postsToday).
+function markChoice(vin) {
+  const v = esc(vin);
+  return `<span class="actions markWhen" role="group" aria-label="When did this listing go up on Facebook?"><span class="hint">Listed on Facebook:</span><button type="button" class="small go" data-action="markToday" data-vin="${v}" title="It went up today: it counts toward today's posts.">Today</button><button type="button" class="small" data-action="markBefore" data-vin="${v}" title="You listed it by hand before today: rescans watch it, and it doesn't count toward today's posts.">Before today</button><button type="button" class="small" data-action="markCancel" data-vin="${v}">Cancel</button></span>`;
 }
 
 function decisionPill(decision) {
@@ -528,11 +545,14 @@ function queueStatusHtml() {
   return `<div class="banner info queue" id="queueStatus"><b>${esc(describeQueue(q))}</b>${next ? ` · next: ${esc(name)}` : ''}<div class="toolbar">${buttons}</div></div>`;
 }
 
-// The day's cap for this salesperson: this machine's posts (the ones taken
-// down since included) and, after a sync, the server's count of theirs
-// across their machines (src/cap.js).
-const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { serverCount: state.syncState && state.syncState.postsToday, takenDown: state.takenDown });
-const capText = (cap) => `Daily post cap reached (${cap.used} of ${cap.cap} today). It resets tomorrow; the dealer can change it in Settings.`;
+// The day's cap for this salesperson: this machine's posts (those taken down
+// or unmarked since included: the day's log, with the posts the take-down
+// record holds that the log never had), after a sync the server's count of
+// theirs across their machines, and the forms saved as drafts today that are
+// not marked posted yet (src/cap.js). Mark posted never looks at it: a
+// listing already live on Facebook is always recorded, so rescans watch it.
+const dailyCap = () => capStatus(state.posted, state.settings?.dailyCap, new Date(), { log: state.postLog, takenDown: state.takenDown, serverCount: state.syncState && state.syncState.postsToday, drafts: state.drafts });
+const capText = (cap) => `Daily post cap reached (${capCount(cap)}). It resets tomorrow; the dealer can change it in Settings.`;
 
 // The Ready tab: the sort menu (remembered for this website in
 // settings.readySort) and the search box above the list; the list itself,
@@ -715,7 +735,7 @@ function viewMine(l) {
         const link = /^https?:\/\//i.test(p.listingUrl || '') ? ` · <a href="${esc(p.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : '';
         const refused = notShared(p);
         return row(entry, {
-          sub: `${pill} Posted ${esc(when(p.postedAt))}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
+          sub: `${pill} ${p.listedBefore ? `Listed before ${esc(day(p.postedAt))}` : `Posted ${esc(when(p.postedAt))}`}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
           line: refused ? `<span class="notShared" style="color: var(--bad)">${notSharedText(refused)}</span>` : '',
           right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
@@ -1066,15 +1086,17 @@ let clearArmed = false;
 let pilotClearArmed = false;
 
 // Before a post leaves the posted list (Taken down, or Posted ✓ unmarked):
-// it is kept in takenDown:<origin> (src/takenDown.js), so the daily cap
-// still counts it on the day it was made. Written first: if the posted list
-// then fails to change, the post is still counted once. A colleague's entry
-// is theirs and has no such buttons. False when the write failed.
+// it is kept in takenDown:<origin> (src/takenDown.js), for the side panel's
+// re-post notice. The daily cap counts the post from the day's log, which a
+// take-down leaves alone, and from this record when the log never had it
+// (src/cap.js dayLog). Written first: if the posted list then fails to
+// change, the post is still counted once. A colleague's entry is theirs and
+// has no such buttons. False when the write failed.
 async function keepTakenDown(vin) {
   const entry = state.posted[vin];
   if (!entry || entry.mine === false) return true;
   const stillListed = stillListedNow(state.snapshot, state.diff, vin);
-  return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed }));
+  return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed, listedBefore: entry.listedBefore === true }));
 }
 
 // Pilot numbers: an item the person ticked off by hand, or a car unmarked.
@@ -1095,10 +1117,44 @@ async function onPanelClick(ev) {
   if (!btn) return;
   const vin = btn.dataset.vin;
   switch (btn.dataset.action) {
-    case 'post': {
+    case 'markCancel':
+      state.markAsk = null;
+      break;
+    case 'post':
+    case 'markToday':
+    case 'markBefore': {
       const entry = state.snapshot?.vehicles?.[vin];
       if (!entry) return;
-      if (await update('posted', (p) => markPosted(p || {}, entry, state.settings?.basis))) syncInBackground(); // colleagues see the car is taken
+      // a listing published from a draft shows the draft's price: that is what is recorded (src/drafts.js)
+      const draft = state.drafts[vin] || null;
+      // Mark posted first asks whether the listing went up today, unless a draft saved today says so
+      if (btn.dataset.action === 'post' && askWhenListed(draft)) {
+        state.markAsk = vin;
+        render();
+        const today = document.querySelector(`button[data-action="markToday"][data-vin="${CSS.escape(vin)}"]`);
+        if (today) today.focus();
+        return;
+      }
+      state.markAsk = null;
+      const before = btn.dataset.action === 'markBefore';
+      const at = new Date().toISOString();
+      const basis = state.settings?.basis;
+      const extra = before ? { listedBefore: true } : {};
+      if (!(await update('posted', (p) => (draft ? markDraftPosted(p || {}, entry, draft, basis, at, extra) : markPosted(p || {}, entry, basis, at, extra))))) break;
+      // the day's log for the cap, which a take-down or an unmark leaves alone; a car unmarked today and marked again counts once.
+      // A listing made before today is not one of today's posts, so it stays off the log.
+      if (!before) await update('postLog', (log) => logPost(log, vin, at, undefined, { alreadyLive: true }));
+      else setStatus(`Recorded as listed before today: rescans watch ${entry.name || 'it'}, and it doesn't count toward today's posts.`);
+      if (draft) {
+        const gap = draftPriceUpdate(draft, entry, basis);
+        if (gap) {
+          await update('diff', (d) => withPriceUpdate(d, gap)); // on To do now; every rescan lists it too until the listing is updated
+          setStatus(`Recorded at ${money(gap.from)}, the price the draft was filled with. The website now shows ${money(gap.to)}: update the price on the listing (To do, Update price).`, 'error');
+        } else if (draftPrice(draft) === null && basisPrice(entry, basis)) {
+          setStatus(`Recorded at ${money(basisPrice(entry, basis))}, the website's price. Lot Current did not keep this draft's price: check that the published listing shows ${money(basisPrice(entry, basis))}.`);
+        }
+      }
+      syncInBackground(); // colleagues see the car is taken
       break;
     }
     case 'openPost': {
@@ -1229,6 +1285,9 @@ async function onPanelClick(ev) {
       break;
     }
     case 'unpost': {
+      // the car leaves the posted list; the day's log keeps the post, as for a
+      // take-down, so unmarking never hands a post back under the daily cap.
+      // It is kept in the take-down record first, as Taken down keeps it.
       if (!(await keepTakenDown(vin))) break;
       const unmarked = await update('posted', (p) => markTakenDown(p || {}, vin));
       // fire-and-forget: the redraw must not wait for the pilot bookkeeping; the sync goes after it, so it carries both
@@ -1323,7 +1382,7 @@ async function onPanelClick(ev) {
         btn.textContent = 'Click again to clear everything';
         return;
       }
-      Object.assign(state, { snapshot: null, diff: null, posted: {}, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
+      Object.assign(state, { snapshot: null, diff: null, posted: {}, postLog: [], takenDown: null, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
       await ownRemove(Object.values(siteKeys(state.origin)));
       // The synced profile is the person's, not this website's data: start
       // again from it, as a popup opened on a website with no settings does,
@@ -1608,6 +1667,7 @@ async function init() {
     };
     take(k.queue, 'queue', null);
     take(k.posted, 'posted', {});
+    take(k.postLog, 'postLog', []);
     take(k.drafts, 'drafts', {});
     take(k.diff, 'diff', null);
     take(k.snapshot, 'snapshot', null);

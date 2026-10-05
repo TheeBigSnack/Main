@@ -1229,6 +1229,45 @@ test('schemaOrg getDetails: the car\'s own page from the address the last scan k
   assert.ok(!off.calls.some((u) => /other\.example/.test(u)), 'an address off the website is never read');
 });
 
+// A car missing from a list read only in part is not gone: getDetails adds
+// complete false whenever the list read stopped before the list's own end,
+// in the same ways the scan calls a list not clean.
+test('schemaOrg getDetails: a car missing from a list read only in part is not called gone', async () => {
+  const cars = standardCars(6);
+  const missing = standardCars(1, { from: 70 })[0].vin;
+  const ask = (siteMap) => schemaOrg.getDetails(fakeSiteSearch(siteMap), missing, schemaOrg.scanOptions(SERVICE));
+  // the whole list, ending where it says it ends: gone
+  const whole = await ask(standardSite({ cars }));
+  assert.deepEqual([whole.ok, whole.record, whole.complete], [true, null, undefined]);
+  // page 2 links back to page 1
+  const loop = standardSite({ cars });
+  loop.set(LIST + '?page=2', html(standardListPage(cars.slice(4), { next: '/used-vehicles/' })));
+  assert.deepEqual(await ask(loop).then((r) => [r.ok, r.record, r.complete]), [true, null, false], 'a next link back to a page already read');
+  // page 2 links off the website
+  const off = standardSite({ cars });
+  off.set(LIST + '?page=2', html(standardListPage(cars.slice(4), { next: 'https://other.example/used-vehicles/?page=3' })));
+  assert.deepEqual(await ask(off).then((r) => [r.ok, r.record, r.complete]), [true, null, false], 'a next link off the website');
+  // more list pages than one read follows
+  const long = standardSite({ cars: standardCars(MAX_LIST_PAGES + 2), perPage: 1 });
+  const longSearch = fakeSiteSearch(long);
+  const tooLong = await schemaOrg.getDetails(longSearch, missing, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([tooLong.ok, tooLong.record, tooLong.complete], [true, null, false], 'more than MAX_LIST_PAGES pages');
+  assert.equal(longSearch.calls.length, MAX_LIST_PAGES);
+  // a list page cut at the text limit
+  const big = standardSite({ cars });
+  big.set(LIST + '?page=2', html(standardListPage(cars.slice(4)).replace('</body>', ' '.repeat(PAGE_TEXT_LIMIT) + '</body>')));
+  assert.deepEqual(await ask(big).then((r) => [r.ok, r.record, r.complete]), [true, null, false], 'a list page cut at the text limit');
+  // and the side panel is told the list could not be read whole, never that the car is sold
+  globalThis.chrome = fakeChrome(fakeStandardPage({ site: loop, path: '/used-vehicles/' }));
+  try {
+    const r = await fetchVehicleDetails(1, missing);
+    assert.deepEqual([r.ok, r.notFound], [false, undefined]);
+    assert.match(r.message, /Couldn't read the website's whole list of cars just now/);
+  } finally {
+    delete globalThis.chrome;
+  }
+});
+
 test('fetchVehicleDetails passes the car\'s known page to the adapter, from the dealer tab', async () => {
   const cars = standardCars(6);
   const page = fakeStandardPage({ site: standardSite({ cars }), path: cars[0].path });

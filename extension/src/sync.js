@@ -162,7 +162,9 @@ export function localDayRange(now = new Date()) {
  * The rows the sync function writes, from the local registry and pilot lists.
  * @param {object} args
  *   origin:       the dealer website's origin (posted:<origin>)
- *   posted:       the registry { [vin]: { name, price, postedAt, listingUrl?, salesperson?, updatedAt?, userId? } }
+ *   posted:       the registry { [vin]: { name, price, postedAt, listingUrl?, salesperson?, updatedAt?, listedBefore?, userId? } }
+ *                 (listedBefore: a listing made by hand before the day it was
+ *                 marked posted; the server leaves it out of postsToday)
  *   pilot:        { posts, flags } from pilot.js (fills are never sent)
  *   dealershipId: the dealership's id (the function fills it in from the membership; here for the tests)
  *   userId:       the signed-in user's id; entries of other users are left out
@@ -188,6 +190,7 @@ export function toServerRows({ origin = '', posted = {}, pilot = null, dealershi
       updated_at: isoOrNull(e.updatedAt),
       status: 'listed',
       taken_down_at: null,
+      listed_before: e.listedBefore === true,
     });
   }
   const p = withPilotDefaults(pilot);
@@ -278,6 +281,7 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
       ...(httpsUrl(e.listingUrl) ? { listingUrl: httpsUrl(e.listingUrl) } : {}),
       ...(text(e.salesperson, 60) ? { salesperson: text(e.salesperson, 60) } : {}),
       ...(isoOrNull(e.updatedAt) ? { updatedAt: isoOrNull(e.updatedAt) } : {}),
+      ...(e.listedBefore === true ? { listedBefore: true } : {}),
     };
   }
   const p = withPilotDefaults(pilot);
@@ -339,6 +343,7 @@ function entryFromRow(r, prev = {}, userId = '') {
     ...(httpsUrl(r.listing_url) ? { listingUrl: httpsUrl(r.listing_url) } : {}),
     ...(text(r.salesperson, 60) ? { salesperson: text(r.salesperson, 60) } : {}),
     ...(isoOrNull(r.updated_at) ? { updatedAt: isoOrNull(r.updated_at) } : {}),
+    ...(r.listed_before === true ? { listedBefore: true } : {}),
     ...(prev.postedWith ? { postedWith: prev.postedWith } : {}),
     ...ownership(r, userId),
   };
