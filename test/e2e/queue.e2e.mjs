@@ -110,8 +110,11 @@ try {
   const dealer = await context.newPage();
   await dealer.goto(siteUrl);
 
-  async function openPopup() {
+  // `at`: the moment this popup reads as now (step 6 on), so a run that crosses midnight still
+  // counts the day's post and draft as today's
+  async function openPopup({ at = null } = {}) {
     const popup = watch(await context.newPage());
+    if (at) await popup.clock.setFixedTime(at);
     await popup.addInitScript((url) => {
       const realQuery = chrome.tabs.query.bind(chrome.tabs);
       chrome.tabs.query = async (q) => (q && q.active ? realQuery({ url }) : realQuery(q));
@@ -268,14 +271,25 @@ try {
   await popup.screenshot({ path: join(shots, 'queue-4-popup.png') });
 
   // ---- 6. At the daily cap nothing more can be selected or posted; the form saved as a draft counts ----
-  await popup.evaluate(async (o) => {
+  // The cap counts the local day's posts, and a run can cross midnight after the post in step 3. So
+  // the post, its entry in the day's log and the draft are stamped with one moment, and the popups
+  // from here on read the clock at that moment: all of them fall on one day, whenever the run is.
+  const capDay = new Date();
+  await popup.evaluate(async ({ o, at }) => {
     const k = `settings:${o}`;
     const s = (await chrome.storage.local.get(k))[k];
     s.dailyCap = 2; // one post and one form saved as a draft today
-    await chrome.storage.local.set({ [k]: s });
-  }, origin);
+    const keys = { posted: `posted:${o}`, log: `postLog:${o}`, drafts: `drafts:${o}` };
+    const all = await chrome.storage.local.get(Object.values(keys));
+    const posted = all[keys.posted];
+    for (const e of Object.values(posted)) e.postedAt = at;
+    const log = (all[keys.log] || []).map((e) => ({ ...e, at }));
+    const drafts = all[keys.drafts];
+    for (const d of Object.values(drafts)) d.savedAt = at;
+    await chrome.storage.local.set({ [k]: s, [keys.posted]: posted, [keys.log]: log, [keys.drafts]: drafts });
+  }, { o: origin, at: capDay.toISOString() });
   await popup.close();
-  popup = await openPopup();
+  popup = await openPopup({ at: capDay });
   await tab(popup, 'ready').click();
   assert.match(await popup.textContent('#capReached'), /Daily post cap reached \(2 of 2 today, one of them saved as a draft\)/);
   assert.equal(await popup.locator('.pick').count(), 0, 'no boxes to tick');
@@ -287,7 +301,7 @@ try {
   // ---- 7. The website drops the Wagoneer $1,500 while its draft waits; the person publishes the draft and marks it posted ----
   // The draft still says $38,383, so that is what the listing shows: it is recorded at that price and To do lists the drop at once.
   await dealer.request.get(`${origin}/scenario?name=day2`);
-  popup = await openPopup();
+  popup = await openPopup({ at: capDay }); // the draft is today's, so Mark posted does not ask when it went up
   await popup.click('#scan');
   await popup.waitForSelector('h3');
   assert.match(await popup.textContent('.panel'), /Update price\s*1[\s\S]*Jeep Wagoneer[\s\S]*Not marked as posted/);
@@ -308,7 +322,7 @@ try {
   assert.equal(await popup.locator(`button[data-action="upkeep"][data-kind="price"][data-vin="${WAGONEER}"]`).count(), 1, 'Open & update price is offered');
   await popup.close();
   // and the next rescan still lists it, until the listing is updated
-  popup = await openPopup();
+  popup = await openPopup({ at: capDay });
   await popup.click('#scan');
   await popup.waitForSelector('h3');
   assert.match(await popup.textContent('.panel'), /Update price\s*1[\s\S]*Jeep Wagoneer[\s\S]*Your listing[\s\S]*\$38,383 → \$36,883/);

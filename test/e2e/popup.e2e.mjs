@@ -69,6 +69,8 @@ try {
     }, siteUrl);
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
     await popup.setViewportSize({ width: 720, height: 590 });
+    // popup.html shows "Scan website", disabled, until the first render has read the saved scan
+    await popup.waitForFunction(() => !document.querySelector('#scan').disabled);
     return popup;
   }
   const tab = (p, name) => p.locator(`.tabs button[data-view="${name}"]`);
