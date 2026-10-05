@@ -12,6 +12,7 @@ import { probeSiteInPage } from '../extension/src/scan.js';
 import { withDefaults } from '../extension/src/settings.js';
 import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, ROBOTS_TEXT_LIMIT, MAX_FAILED_IN_A_ROW, MAX_ADDRESSES_PER_CAR, REQUEST_TIMEOUT_MS, learnCarAddressShape, matchesCarAddressShape, vinInAddress, oneAddressPerCar } from '../extension/adapters/schemaOrg.js';
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
+import { MANUFACTURERS } from '../extension/src/vin.js';
 import { cleanDescription } from '../extension/src/description.js';
 import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, dealerOnPath, dealerComPath, platformSearch, fakePlatformPage } from './platformSites.js';
 import { fixtures, sampleVin, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage } from './helpers.js';
@@ -714,6 +715,36 @@ test('schemaOrg probe: a filtered list, a trade-in page or a page about one mode
   const carPage = site.get(O + LOT[0].path).text.replace(/<a [^>]*href="\/used-vehicles\/"[^>]*>[\s\S]*?<\/a>/g, '').replace('</body>', '<a href="/used-honda-civic/">More used Honda Civic</a></body>');
   const onCar = await runInPage(fakeStandardPage({ site, path: LOT[0].path, html: carPage }), schemaOrg.probeInPage);
   assert.equal(onCar.listUrl, null);
+  // a list of new and used cars whose only used links are about part of the lot: itself, never one of them
+  const both = 'New and Used Cars for Sale | Sample Motors';
+  for (const [label, link] of [
+    ['certified cars only', '<a href="/certified-pre-owned-vehicles/">Certified Pre-Owned Vehicles</a>'],
+    ['one make, with an inventory word', '<a href="/used-jeep-cars/">Jeep</a>'],
+    ['one model, its link text saying Inventory', '<a href="/used-jeep-wrangler/">Used Jeep Wrangler Inventory</a>'],
+    ['a model alone, its link text saying Inventory', '<a href="/used-wrangler/">Used Wrangler Inventory</a>'],
+    ['a price range', '<a href="/used-cars-under-15000/">Used cars under $15,000</a>'],
+    ['one fuel', '<a href="/used-electric-vehicles/">Used EVs</a>'],
+    ['certified cars by query', '<a href="/inventory/?condition=certified-pre-owned">Certified Pre-Owned</a>'],
+    ['a used path narrowed to certified cars', '<a href="/used-vehicles/?condition=certified">Certified</a>'],
+    ['a "Used" link filtered by make', '<a href="/used-cars/?make=Jeep">Used</a>'],
+  ]) assert.equal(await listAt('/inventory/', both, link), O + '/inventory/', label);
+  // every make the VIN check knows names part of the lot
+  for (const [, , makes] of MANUFACTURERS) {
+    for (const make of makes) {
+      const slug = make.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      assert.equal(await listAt('/inventory/', both, `<a href="/used-${slug}-cars/">${make}</a>`), O + '/inventory/', make);
+    }
+  }
+  // a used list named for its town beside a one-make page: the town's, though the other is shorter
+  assert.equal(await listAt('/inventory/', both, '<a href="/used-cars-sampletown/">Used Cars in Sampletown</a> <a href="/used-jeep-cars/">Jeep</a>'), O + '/used-cars-sampletown/');
+  // a page number, a sort order, or certified cars beside used ones do not narrow the list
+  assert.equal(await listAt('/', 'Sample Motors', '<a href="/used-vehicles/?sort=price">Search Used Vehicles</a>'), O + '/used-vehicles/?sort=price');
+  assert.equal(await listAt('/', 'Sample Motors', '<a href="/used-vehicles/?page=1">Search our used cars</a>'), O + '/used-vehicles/?page=1');
+  assert.equal(await listAt('/', 'Sample Motors', '<a href="/inventory/?condition=used&amp;condition=certified">Search inventory</a>'), O + '/inventory/?condition=used&condition=certified');
+  // a page about part of the lot that links the whole used list: the list it links, not itself
+  assert.equal(await listAt('/certified-pre-owned-vehicles/', 'Certified Pre-Owned Vehicles | Sample Motors', '<a href="/used-vehicles/">All used</a>'), LIST);
+  assert.equal(await listAt('/used-jeep-cars/', 'Used Jeep Cars for Sale | Sample Motors', '<a href="/used-vehicles/">All used</a>'), LIST);
+  assert.equal(await listAt('/inventory/jeep/', 'Used Jeep Cars for Sale | Sample Motors', '<a href="/used-cars-sampletown/">Used cars in Sampletown</a>'), O + '/used-cars-sampletown/');
 });
 
 test('schemaOrg in-page search: one GET on this website the way the page fetches, anything else refused before a request', async () => {

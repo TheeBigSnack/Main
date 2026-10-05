@@ -65,22 +65,29 @@ export const REQUEST_TIMEOUT_MS = 30000;
 // microdata, or at least two links on this website to car pages: an address
 // with a VIN in it, or one that reads like a car page) or on one car's own
 // page. The list to scan is, in order: the page it ran on when its own
-// address reads as used inventory; the used inventory page it links to when
-// that link reads as the whole used list (its words say so, "Used", "Shop
-// pre-owned", or its address is only inventory words with no query but one
-// that selects used cars, "/used-vehicles/", "/inventory/?condition=used");
-// the page it ran on when its title names used cars and not new ones ("Used
+// address reads as used inventory and names no part of the lot (below); the
+// used inventory page it links to when that link reads as the whole used
+// list (its words say so, "Used", "Shop pre-owned", or its address is only
+// inventory words, "/used-vehicles/", "/inventory/?condition=used"); the
+// page it ran on when its title names used cars and not new ones ("Used
 // Vehicles for Sale" at "/inventory/", the list of a lot that sells only
-// used cars) and it is not the site's home page (a home page titled "New &
-// Used Cars" with a few featured cars is not the used list); a link with a
-// used word and an inventory word in its address and no other filter
-// ("/used-cars-<town>/"); else the page it ran on. The shortest link of each
-// kind. A link that filters the list ("/used-cars/?make=Jeep"), is about one
-// model ("/used-jeep-wrangler/"), certified cars or one body style only, or
-// is for selling, trading in or valuing a car ("/sell-your-used-car/") is
-// never the list. On a used list
-// opened past its first page, or sorted or filtered, it is the same list
-// with fewer of those parameters when the page links to it (its "Used"
+// used cars), its address names no part of the lot, and it is not the
+// site's home page (a home page titled "New & Used Cars" with a few featured
+// cars is not the used list); a link with a used word and an inventory word
+// in its address and no other filter ("/used-cars-<town>/"); else the page it
+// ran on. The shortest link of each kind. A link is never the list when its
+// query holds anything but words that select used cars (certified ones too,
+// beside a value that selects used ones) and a page number or sort order (by
+// the parameter's name: "page", "sort", "order" and the like), so a filtered
+// list ("/used-cars/?make=Jeep") is not; nor when its address names a part
+// of the lot by a word this probe knows (SUBSET_WORDS: a make,
+// "/used-jeep-cars/", "/used-jeep-wrangler/"; certified cars,
+// "/certified-pre-owned-vehicles/"; a body style, a fuel, a price range or a
+// deal); nor when it is for selling, trading in or valuing a car
+// ("/sell-your-used-car/"). A page about part of the lot named only with
+// other words ("/used-wrangler-inventory/") can still be taken. On a used
+// list opened past its first page, or sorted or filtered, it is the same
+// list with fewer of those parameters when the page links to it (its "Used"
 // link, its first page), so a scan reads the whole list; a parameter is
 // never removed by its name, so one that selects used inventory stays. On a
 // car's page it is the used inventory page it links to, the same way (null
@@ -137,27 +144,45 @@ export function probeInPage() {
   const LIST_WORDS = new Set(['used', 'pre', 'owned', 'preowned', 'inventory', 'vehicles', 'vehicle', 'cars', 'car', 'autos', 'auto', 'search', 'searchused', 'usedcars', 'usedvehicles', 'usedinventory', 'all', 'for', 'sale', 'forsale', 'shop', 'browse', 'view', 'index', 'default', 'htm', 'html', 'aspx', 'asp', 'php', 'jsp', 'cfm']);
   const usedText = /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i;
   // A query that selects nothing but used inventory ("?condition=used",
-  // "?type=Pre-Owned"), or none. Any other value (a make, a price, a sort,
-  // a page number) narrows or orders the list.
-  const usedQuery = (u) => [...u.searchParams.entries()].every(([k, v]) => {
-    const words = String(v || k).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    return words.length > 0 && words.every((w) => LIST_WORDS.has(w));
-  });
+  // "?type=Pre-Owned", "?condition=used&condition=certified"), or none,
+  // besides a page number or a sort order. Any other value (a make, a price,
+  // certified cars alone) narrows the list.
+  const ORDER_KEY = /^(?:page|p|pg|start|sort|sortby|sort_by|sortorder|sort_order|order|orderby|order_by|dir|direction)$/i;
+  const valueWords = ([k, v]) => String(v || k).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const certifiedWord = (w) => w === 'certified' || w === 'cpo';
+  const usedQuery = (u) => {
+    const values = [...u.searchParams.entries()].filter(([k]) => !ORDER_KEY.test(k)).map(valueWords);
+    if (!values.every((words) => words.length > 0 && words.every((w) => LIST_WORDS.has(w) || certifiedWord(w)))) return false;
+    return !values.some((words) => words.some(certifiedWord)) || values.some((words) => !words.some(certifiedWord) && words.some((w) => /^(?:used|pre|owned|preowned|usedcars|usedvehicles|usedinventory|searchused)$/.test(w)));
+  };
+  // Words that name part of a lot: a make, certified cars, a body style, a
+  // fuel, a price range or a deal. An address with one of them in its path
+  // is about those cars only. Every make the VIN check knows is here
+  // (test/adapters.test.js checks it); a make or a place sharing a name
+  // ("Lincoln") makes the probe keep to the page it ran on.
+  const SUBSET_WORDS = new Set([
+    'acura', 'alfa', 'romeo', 'aprilia', 'aston', 'audi', 'bentley', 'benz', 'bmw', 'buick', 'cadillac', 'chevrolet', 'chevy', 'chrysler', 'datsun', 'dodge', 'ducati', 'eagle', 'ferrari', 'fiat', 'fisker', 'ford', 'genesis', 'gmc', 'guzzi', 'harley', 'davidson', 'honda', 'hummer', 'hyundai', 'indian', 'infiniti', 'isuzu', 'jaguar', 'jeep', 'kawasaki', 'kia', 'lamborghini', 'land', 'rover', 'landrover', 'rangerover', 'lexus', 'lincoln', 'lotus', 'lucid', 'maserati', 'mazda', 'mclaren', 'mercedes', 'mercedesbenz', 'mercury', 'mini', 'mitsubishi', 'motorrad', 'nissan', 'oldsmobile', 'plymouth', 'polestar', 'pontiac', 'porsche', 'ram', 'renault', 'rivian', 'rolls', 'royce', 'saab', 'saturn', 'scion', 'smart', 'subaru', 'suzuki', 'tesla', 'toyota', 'triumph', 'vespa', 'volkswagen', 'vw', 'volvo', 'yamaha',
+    'certified', 'cpo',
+    'truck', 'trucks', 'pickup', 'pickups', 'suv', 'suvs', 'sedan', 'sedans', 'coupe', 'coupes', 'convertible', 'convertibles', 'hatchback', 'hatchbacks', 'wagon', 'wagons', 'van', 'vans', 'minivan', 'minivans', 'crossover', 'crossovers', '4x4', 'awd', '4wd', 'sports', 'luxury', 'commercial', 'work', 'motorcycle', 'motorcycles', 'rv', 'rvs',
+    'electric', 'ev', 'evs', 'hybrid', 'hybrids', 'diesel', 'diesels',
+    'under', 'below', 'budget', 'cheap', 'bargain', 'bargains', 'deal', 'deals', 'special', 'specials', 'clearance', 'priced', 'reduced', 'discount', 'discounted', 'outlet',
+  ]);
+  const partOfLot = (u) => pathWords(u).some((words) => words.some((w) => SUBSET_WORDS.has(w)));
   // A page for selling or trading a car in, or for its value: never the list.
   const sellWords = /(?:^|[^a-z])(?:sell|selling|trade|trades|tradein|trade-in|value|valuation|apprais[a-z]*|we-?buy|instant-?offer|cash-?offer|kbb)(?:[^a-z]|$)/;
   const inventoryWord = /(?:^|[^a-z])(?:inventory|vehicles?|cars?|autos?)(?:[^a-z]|$)/;
   // 0: its words say used inventory; 1: its address is only inventory
-  // words, with no query but one that selects used cars; 2: an address with
-  // a used word and an inventory word ("/used-cars-<town>/"), unfiltered;
-  // 3: any other (one model, one body style, certified cars only, a filtered
-  // list, the home page), never taken over the page itself.
+  // words; 2: an address with a used word and an inventory word
+  // ("/used-cars-<town>/"); 3: any other (a filtered list, part of the lot,
+  // the home page), never taken over the page itself. Ranks 0 to 2 only
+  // with a query that selects used cars at most and an address that names
+  // no part of the lot.
   const usedRank = (u, text) => {
     const path = pathWords(u);
-    if (!path.length) return 3;
+    if (!path.length || !usedQuery(u) || partOfLot(u)) return 3;
     if (usedText.test(text)) return 0;
-    if (!usedQuery(u)) return 3;
     if (path.every((words) => words.every((w) => LIST_WORDS.has(w)))) return 1;
-    return inventoryWord.test(path.map((words) => words.join('-')).join('/')) || inventoryWord.test(String(text || '').toLowerCase()) ? 2 : 3;
+    return inventoryWord.test(path.map((words) => words.join('-')).join('/')) ? 2 : 3;
   };
   const samePage = (href) => {
     try {
@@ -237,9 +262,9 @@ export function probeInPage() {
   if (!onePage && !aList) return null;
   const usedList = usedLink && usedLinkRank < 3 ? usedLink : '';
   if (onePage) return { kind: 'schemaOrg', origin: site, listUrl: usedList || null };
-  if (usedWords.test(readable(here))) return { kind: 'schemaOrg', origin: site, listUrl: wholeList ? wholeList.href : pageAddress };
+  if (usedWords.test(readable(here)) && !partOfLot(here)) return { kind: 'schemaOrg', origin: site, listUrl: wholeList ? wholeList.href : pageAddress };
   if (usedList && usedLinkRank < 2) return { kind: 'schemaOrg', origin: site, listUrl: usedList };
-  if (usedTitle && !atRoot) return { kind: 'schemaOrg', origin: site, listUrl: pageAddress };
+  if (usedTitle && !atRoot && !partOfLot(here)) return { kind: 'schemaOrg', origin: site, listUrl: pageAddress };
   return { kind: 'schemaOrg', origin: site, listUrl: usedList || pageAddress };
 }
 
