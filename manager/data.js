@@ -300,16 +300,43 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
       .sort((a, b) => (b.hoursListed ?? -1) - (a.hoursListed ?? -1) || a.name.localeCompare(b.name))
     : null;
 
+  // Each count is of items, not rows: rows of one car whose times overlap
+  // (flagged before the other closed) are one item, the sync function's
+  // rule, which keeps one row per item but can be raced into two. Open rows
+  // of a car always overlap, so a car has at most one open item, as the
+  // lists above. An item is open while any of its rows is; else done when a
+  // row closed it other than as cleared (the first such close, its hours
+  // from the item's first sighting); else cleared. So flagged = done + open
+  // + cleared, as the CSV says.
   const flagStats = (flags) => {
-    const done = flags.filter((f) => f.done_at && f.how !== 'cleared');
-    const hours = done.map((f) => hoursBetween(f.flagged_at, f.done_at)).filter((h) => typeof h === 'number');
-    const openRows = flags.filter(isOpen);
-    const open = new Set(openRows.map(vinOf)).size; // one per car, as the lists above
+    const items = [];
+    const byCar = new Map();
+    for (const f of flags) byCar.set(vinOf(f), [...(byCar.get(vinOf(f)) || []), f]);
+    for (const carRows of byCar.values()) {
+      let item = null;
+      let end = -Infinity;
+      for (const f of [...carRows].sort((a, b) => (ms(a.flagged_at) ?? 0) - (ms(b.flagged_at) ?? 0))) {
+        const stop = isOpen(f) ? Infinity : ms(f.done_at) ?? Infinity;
+        if (item && (ms(f.flagged_at) ?? 0) <= end) item.push(f);
+        else items.push((item = [f]));
+        end = Math.max(end, stop);
+      }
+    }
+    const done = [];
+    let open = 0;
+    let cleared = 0;
+    for (const item of items) {
+      if (item.some(isOpen)) { open += 1; continue; }
+      const fix = item.filter((f) => f.how !== 'cleared').sort((a, b) => (ms(a.done_at) ?? Infinity) - (ms(b.done_at) ?? Infinity))[0];
+      if (fix) done.push({ how: fix.how, hours: hoursBetween(item[0].flagged_at, fix.done_at) });
+      else cleared += 1;
+    }
+    const hours = done.map((d) => d.hours).filter((h) => typeof h === 'number');
     return {
-      flagged: flags.length - openRows.length + open, // open rows of one car count once here too, so flagged = done + open + cleared
+      flagged: items.length,
       done: done.length,
-      detected: done.filter((f) => f.how === 'detected').length,
-      cleared: flags.filter((f) => f.how === 'cleared').length,
+      detected: done.filter((d) => d.how === 'detected').length,
+      cleared,
       open,
       medianHours: median(hours),
       longestHours: hours.length ? Math.max(...hours) : null,

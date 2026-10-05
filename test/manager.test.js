@@ -264,6 +264,28 @@ test('a car with two open items of one kind (two machines of one salesperson tha
   assert.deepEqual([p.flagged, p.done, p.open, p.cleared], [3, 1, 1, 1]);
 });
 
+test('closed rows of one sighting (two machines\' uploads raced in) count as one item too, so flagged, done, open and cleared all count items', () => {
+  const todoItems = [
+    // one sold car flagged on two machines, both rows closed when it came down: one item, taken down after 10 hours from the first sighting
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(30), done_at: ago(20), how: 'detected' },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(28), done_at: ago(19), how: 'manual' },
+    // one sighting left as an open row and a cleared row: one item, still open, as the list shows it
+    { vin: 'V2', kind: 'takeDown', flagged_at: ago(10), done_at: null },
+    { vin: 'V2', kind: 'takeDown', flagged_at: ago(9), done_at: ago(5), how: 'cleared' },
+    // one sighting cleared on one machine and fixed on the other: one item, done
+    { vin: 'V3', kind: 'takeDown', flagged_at: ago(60), done_at: ago(55), how: 'cleared' },
+    { vin: 'V3', kind: 'takeDown', flagged_at: ago(59), done_at: ago(52), how: 'manual' },
+    // two price changes of one car, one after the other closed: two items
+    { vin: 'V4', kind: 'price', flagged_at: ago(100), done_at: ago(90), how: 'manual' },
+    { vin: 'V4', kind: 'price', flagged_at: ago(50), done_at: ago(45), how: 'detected' },
+  ];
+  const s = summarize({ listings: [], todoItems, now: NOW });
+  assert.deepEqual(s.takeDowns, { flagged: 3, done: 2, detected: 1, cleared: 0, open: 1, medianHours: 9, longestHours: 10 });
+  assert.deepEqual(s.priceUpdates, { flagged: 2, done: 2, detected: 1, cleared: 0, open: 0, medianHours: 7.5, longestHours: 10 });
+  for (const k of ['takeDowns', 'priceUpdates']) assert.equal(s[k].flagged, s[k].done + s[k].open + s[k].cleared, k);
+  assert.deepEqual(s.soldStillListed.map((o) => o.vin), ['V2']);
+});
+
 test('a car still listed by someone no longer on the team is listed for the manager, since no rescan looks after it; the empty to-do cards claim only what the items show', () => {
   const memberships = [{ user_id: 'u1', role: 'salesperson', name: 'Alex' }, { user_id: 'u3', role: 'manager', name: 'Jamie' }];
   const listings = [
