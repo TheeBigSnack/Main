@@ -32,7 +32,7 @@ We do **not** collect Facebook passwords, cookies, session tokens, messages, buy
 - **GitHub**: serves our website (GitHub Pages); its access logs see visitors' IP addresses and browsers.
 - **Cloudflare**: serves the manager view (Cloudflare Pages); its access logs see the IP addresses and browsers of the people who open it.
 - **Resend**: sends the sign-in emails, with the email address and the code or link (our database host's own sender does until we set this up).
-- **GoDaddy**: provides our inbox, a Microsoft 365 mailbox, which holds the email people send us (support requests and emailed demo requests).
+- **GoDaddy**: provides our inbox, a Microsoft 365 mailbox, which holds the email people send us (support requests and emailed demo requests). [Owner: confirm which company runs this mailbox, GoDaddy or Microsoft, and list Microsoft here too if it holds the mail.]
 
 Lot Current also reaches services that are not our processors: the dealership's website (with the inventory search it uses, if any), which Lot Current reads as the User's browser would; the photo servers the dealership's website names for its cars' photos, which may belong to another company, and from which Lot Current downloads a car's photos, without cookies, only when the User fills in a listing form or clicks Download photos, and whose photos the side panel shows as pictures, the way any web page shows a picture, while the User picks which ones to post (an https server Lot Current may not read yet is first asked for in Chrome's own prompt, from the User's click, and after a no its photos are not requested); and NHTSA, when the User checks a VIN.
 
