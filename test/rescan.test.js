@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff, postedBasis, withPostedBasis } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, markLookDismissed, lookDismissed, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff, postedBasis, withPostedBasis } from '../extension/src/rescan.js';
 import { noteFlags } from '../extension/src/pilot.js';
 import { scanFromStored } from '../extension/src/accountFlow.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, standardCarPage, standardListPage, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
@@ -250,19 +250,54 @@ test('a posted car stays on Take down on every scan while the website marks it s
   assert.deepEqual(diffScans(pending, snapshot(LOT), { posted, confirm: confirmed() }).takeDown, []);
 });
 
-test('a posted car the pre-owned check now holds back stays under Needs a look on every scan, not only the first', () => {
+// A posted car the website now calls new, demo or loaner has to come down
+// (dealers may not list those): it goes under Take down on every scan, as a
+// car not sold. One whose details need a look stays under Needs a look on
+// every scan until the salesperson dismisses it for the reason shown; a new
+// reason raises it again.
+test('a posted car the website retypes new goes under Take down, and one that needs a look can be dismissed for its reason', () => {
   const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
   const retyped = snapshot([['usedNormal', { type: 'New', vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   assert.equal(retyped.vehicles[VIN.ram].decision, 'skip', 'every sign now says new');
   const disagree = snapshot([['usedNormal', { vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
   assert.equal(disagree.vehicles[VIN.ram].decision, 'review', 'the signs disagree');
-  for (const now of [retyped, disagree]) {
-    for (const prev of [snapshot(LOT), now]) {
-      const d = diffScans(prev, now, { posted, confirm: confirmed() });
-      assert.deepEqual(d.needsALook.map((n) => [n.vin, n.yours, n.text]), [[VIN.ram, true, now.vehicles[VIN.ram].reason]]);
-    }
-    assert.deepEqual(diffScans(now, now, { posted: {}, confirm: confirmed() }).needsALook, [], 'not posted: the Review tab holds it, To do does not');
+  for (const prev of [snapshot(LOT), retyped]) {
+    const d = diffScans(prev, retyped, { posted, confirm: confirmed() });
+    assert.deepEqual(d.takeDown.map((t) => [t.vin, t.yours, t.why, t.lastPrice]), [[VIN.ram, true, 'not-pre-owned', 27163]]);
+    assert.equal(d.takeDown[0].text, `${retyped.vehicles[VIN.ram].reason} Delete the listing: the car was not sold.`);
+    assert.deepEqual(d.needsALook, [], 'not under Needs a look as well');
   }
+  for (const prev of [snapshot(LOT), disagree]) {
+    const d = diffScans(prev, disagree, { posted, confirm: confirmed() });
+    assert.deepEqual(d.needsALook.map((n) => [n.vin, n.yours, n.why, n.text]), [[VIN.ram, true, 'review', disagree.vehicles[VIN.ram].reason]]);
+    assert.deepEqual(d.takeDown, []);
+  }
+  for (const now of [retyped, disagree]) {
+    const d = diffScans(now, now, { posted: {}, confirm: confirmed() });
+    assert.deepEqual([d.takeDown, d.needsALook], [[], []], 'not posted: the Review tab holds it, To do does not');
+  }
+  // sale pending and retyped new: one take-down, the website's sold word first
+  const both = snapshot([['usedNormal', { type: 'New', status: 'pend-sale', vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } }]]);
+  assert.deepEqual(diffScans(both, both, { posted, confirm: confirmed() }).takeDown.map((t) => t.why), ['sale-pending']);
+
+  // Dismiss: off To do while the website gives the same reason, back with another
+  const reason = disagree.vehicles[VIN.ram].reason;
+  const dismissed = markLookDismissed(posted, VIN.ram, reason, AT);
+  assert.deepEqual(dismissed[VIN.ram], { name: 'Ram', price: 27163, lookDismissed: { reason, at: AT } });
+  assert.deepEqual(diffScans(disagree, disagree, { posted: dismissed, confirm: confirmed() }).needsALook, []);
+  assert.deepEqual(posted[VIN.ram].lookDismissed, undefined, 'the input is not changed');
+  const otherReason = snapshot([['usedNormal', { mileage: 3 }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);
+  assert.equal(otherReason.vehicles[VIN.ram].decision, 'review');
+  assert.notEqual(otherReason.vehicles[VIN.ram].reason, reason);
+  assert.deepEqual(diffScans(disagree, otherReason, { posted: dismissed, confirm: confirmed() }).needsALook.map((n) => n.text), [otherReason.vehicles[VIN.ram].reason], 'another reason raises it again');
+  // a dismissal never hides a take-down, a price change or a missing car
+  assert.deepEqual(diffScans(disagree, retyped, { posted: dismissed, confirm: confirmed() }).takeDown.map((t) => t.why), ['not-pre-owned']);
+  assert.deepEqual(diffScans(disagree, snapshot([]), { posted: dismissed, confirm: { checked: [VIN.ram], notFound: [] } }).needsALook.filter((n) => n.yours).map((n) => n.vin), [VIN.ram]);
+  // nothing to dismiss: an entry not posted, or no reason
+  assert.equal(markLookDismissed(posted, 'NOPE', reason), posted);
+  assert.equal(markLookDismissed(posted, VIN.ram, ''), posted);
+  assert.equal(lookDismissed(dismissed[VIN.ram], reason), true);
+  assert.equal(lookDismissed(posted[VIN.ram], reason), false);
 });
 
 test('My listings: sold, sale-pending and held back by the pre-owned check come before a price change', () => {

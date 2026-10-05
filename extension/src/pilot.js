@@ -162,16 +162,20 @@ const flagOpen = (f) => !f.doneAt;
 // only when the scan was complete and confirmed; a scan with warnings keeps
 // every open flag as it is, and so does a take-down whose car is still under
 // Needs a look as the salesperson's (still missing, only not confirmed gone
-// this time: its page could not be checked).
+// this time: its page could not be checked). A take-down of a car the website
+// now calls new, demo or loaner (why 'not-pre-owned') is no sold car, which
+// is all the pilot agreement lets these numbers time: it gets no flag, and
+// an open take-down flag of that car stays as it is.
 export function noteFlags(pilot, diff, { at } = {}) {
   const p = withPilotDefaults(pilot);
   if (!diff || typeof diff !== 'object') return p;
   const when = at || diff.takenAt || nowIso();
   const wanted = [];
-  for (const t of Array.isArray(diff.takeDown) ? diff.takeDown : []) if (t && t.yours && t.vin) wanted.push({ vin: t.vin, kind: 'takeDown', name: clean(t.name, 80), why: clean(t.why, 40) });
+  const notSold = (t) => t.why === 'not-pre-owned';
+  for (const t of Array.isArray(diff.takeDown) ? diff.takeDown : []) if (t && t.yours && t.vin && !notSold(t)) wanted.push({ vin: t.vin, kind: 'takeDown', name: clean(t.name, 80), why: clean(t.why, 40) });
   for (const u of Array.isArray(diff.priceUpdates) ? diff.priceUpdates : []) if (u && u.yours && u.vin) wanted.push({ vin: u.vin, kind: 'price', name: clean(u.name, 80), from: u.from, to: u.to });
   const reliable = !diff.unreliable && !(Array.isArray(diff.warnings) && diff.warnings.length);
-  const unsettled = new Set((Array.isArray(diff.needsALook) ? diff.needsALook : []).filter((n) => n && n.yours && n.vin).map((n) => n.vin));
+  const unsettled = new Set([...(Array.isArray(diff.needsALook) ? diff.needsALook : []), ...(Array.isArray(diff.takeDown) ? diff.takeDown.filter((t) => t && notSold(t)) : [])].filter((n) => n && n.yours && n.vin).map((n) => n.vin));
   const flags = p.flags.map((f) => {
     if (!flagOpen(f)) return f;
     const still = wanted.find((w) => w.vin === f.vin && w.kind === f.kind);

@@ -2,13 +2,15 @@
 // cars the salesperson has marked as posted, and turns the differences into
 // a to-do list:
 //   - take down: cars gone from the website (confirmed by a direct VIN lookup)
-//                and posted cars the website marks sale-pending or sold
+//                and posted cars the website marks sale-pending or sold, or
+//                now calls new, demo or loaner
 //                (on every scan while they are still marked posted)
 //   - update price: website price went up or down since it was posted / last seen
 //   - new arrivals: cars on the website that weren't there last time
 //   - now ready: cars that just got photos, a price, arrived on the lot, etc.
 //   - needs a look: anything ambiguous (price removed, unconfirmed disappearance),
-//                and posted cars the pre-owned check now holds back (every scan)
+//                and posted cars whose details the pre-owned check now
+//                questions (every scan, until the salesperson dismisses it)
 //
 // A car is only called gone when the website's own search can't find its VIN.
 // If more than half of a lot of 10 or more disappears at once, nothing is
@@ -277,12 +279,20 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     // whole diff, so a one-scan item would leave To do, the badge and the
     // pilot's open flag while the listing is still up. Taken down (or the
     // website changing back) is what ends it.
+    // A listing of a car the website now calls new, demo or loaner (SKIP)
+    // has to come down: dealers may not list those on Marketplace, so it goes
+    // under Take down, to be deleted (it was not sold). One whose details
+    // need a look (REVIEW) stays a question for a person, until they dismiss
+    // it for the website's reason as it stands (the entry's lookDismissed,
+    // markLookDismissed): a new reason raises it again.
     const held = mine ? pendingText(now) : null;
     if (held) {
       out.takeDown.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'sale-pending', text: held, lastPrice: posted[vin].price });
+    } else if (mine && now.decision === DECISION.SKIP) {
+      out.takeDown.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'not-pre-owned', text: `${now.reason} Delete the listing: the car was not sold.`, lastPrice: posted[vin].price });
     }
-    if (mine && (now.decision === DECISION.SKIP || now.decision === DECISION.REVIEW)) {
-      out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, text: now.reason });
+    if (mine && now.decision === DECISION.REVIEW && !lookDismissed(posted[vin], now.reason)) {
+      out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'review', text: now.reason });
     }
 
     // Price: posted cars compare with the price on the Marketplace listing
@@ -349,6 +359,19 @@ export function markPosted(posted, entry, basis = 'website', now = new Date().to
 export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {
   if (!posted[vin]) return posted;
   return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now } };
+}
+
+// Needs a look, dismissed for a posted car (the To do item's Dismiss): the
+// listing stays up and the item stays off To do while the website gives the
+// same reason; `reason` is the one the item showed (the last scan's).
+export function markLookDismissed(posted, vin, reason, now = new Date().toISOString()) {
+  if (!posted[vin] || typeof reason !== 'string' || !reason) return posted;
+  return { ...posted, [vin]: { ...posted[vin], lookDismissed: { reason: reason.slice(0, 400), at: now } } };
+}
+
+export function lookDismissed(entry, reason) {
+  const d = entry && entry.lookDismissed;
+  return Boolean(d && typeof d === 'object' && typeof reason === 'string' && d.reason === reason.slice(0, 400));
 }
 
 export function markTakenDown(posted, vin) {

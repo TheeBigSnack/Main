@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis, markLookDismissed } from './src/rescan.js';
 import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
@@ -485,7 +485,7 @@ function viewTodo(l) {
           sub: esc(t.text) + (t.yours ? '' : notYours(t.vin)),
           right: t.lastPrice ? money(t.lastPrice) : '',
           action: t.yours
-            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="takeDown" data-vin="${esc(t.vin)}" title="Opens your listing so you can mark it sold or delete it">Open listing</button><button type="button" class="small" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button></span>`
+            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="takeDown" data-vin="${esc(t.vin)}" title="${t.why === 'not-pre-owned' ? 'Opens your listing so you can delete it' : 'Opens your listing so you can mark it sold or delete it'}">Open listing</button><button type="button" class="small" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button></span>`
             : '',
           muted: !t.yours,
         })
@@ -528,7 +528,9 @@ function viewTodo(l) {
   const nowReady = d?.nowReady || [];
   if (nowReady.length) parts.push(section('Just became ready', 'good', nowReady.map((n) => row(n, { sub: esc(n.what), action: postButton(n.vin) }))));
   const look = d?.needsALook || [];
-  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : '') }))));
+  // a posted car whose details the pre-owned check questions: the person may look and dismiss it (the listing stays up)
+  const dismiss = (n) => (n.yours && n.why === 'review' ? `<span class="actions"><button type="button" class="small" data-action="dismissLook" data-vin="${esc(n.vin)}" title="Your listing stays up; the item comes back if the website gives another reason">Dismiss</button></span>` : '');
+  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : ''), action: dismiss(n) }))));
   if (!parts.length && d && !d.firstScan) html += empty('Nothing changed since the last scan.');
   return html + parts.join('');
 }
@@ -1237,7 +1239,8 @@ async function onPanelClick(ev) {
       // sees the change. The person clicks Update / Mark as sold / Delete.
       if (!state.tab) return;
       const p = state.posted[vin] || {};
-      const item = { origin: state.origin, vin, kind: btn.dataset.kind, price: Number(btn.dataset.price) || null, listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
+      const why = btn.dataset.kind === 'takeDown' ? (state.diff?.takeDown || []).find((t) => t && t.vin === vin)?.why || '' : ''; // a car not sold (not-pre-owned) is deleted, not marked sold
+      const item = { origin: state.origin, vin, kind: btn.dataset.kind, why, price: Number(btn.dataset.price) || null, listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
       let opened = true;
       try {
         await chrome.sidePanel.open({ windowId: state.tab.windowId }); // straight from the click
@@ -1304,6 +1307,16 @@ async function onPanelClick(ev) {
       if (!(await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook'])))) break;
       notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' })).then(syncInBackground);
       break;
+    case 'dismissLook': {
+      // The person looked at the website's reason: the listing stays up, and
+      // the item stays off To do while the website gives that reason
+      // (src/rescan.js lookDismissed); no pilot flag is involved.
+      const item = (state.diff?.needsALook || []).find((n) => n && n.vin === vin && n.yours && n.why === 'review');
+      if (!item) break;
+      if (!(await update('posted', (p) => markLookDismissed(p || {}, vin, item.text)))) break;
+      if (!(await update('diff', (d) => (d && typeof d === 'object' ? { ...d, needsALook: (d.needsALook || []).filter((n) => !(n && n.vin === vin && n.why === 'review')) } : undefined)))) break;
+      break;
+    }
     case 'priceUpdated':
       if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;

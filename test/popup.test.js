@@ -670,3 +670,34 @@ test('signed in, the popup\'s Rescan, Mark posted, unmarking, Taken down and Upd
   const signedOut = await run({ [k.settings]: { ...MY_STORE } }, { expect: false });
   assert.deepEqual(signedOut.syncs, [], 'signed out: nothing to sync with');
 });
+
+// To do for a posted car the pre-owned check now questions: Dismiss keeps the
+// listing up and the item off To do while the website gives that reason. A
+// posted car the website retypes new is under Take down, to be deleted.
+test('To do: Dismiss on a posted car that needs a look keeps it off until the reason changes; a car retyped new is to be deleted', async () => {
+  const car = vehicle('usedNormal');
+  const posted = { [car.vin]: { name: car.name, price: car.price, postedAt: new Date().toISOString() } };
+  const lot = (patch) => Object.entries(fixtures).filter(([name]) => name !== '_about').map(([name]) => (name === 'usedNormal' ? raw(name, patch) : raw(name)));
+  const first = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted } });
+  await first.scan();
+  const disagree = await loadPopup({ local: first.local, records: lot({ vdp_url: 'https://example-dealer.test/inventory/new-2019-ram-1500-x/' }) });
+  await disagree.scan();
+  const item = disagree.local[k.diff].needsALook.find((n) => n.vin === car.vin);
+  assert.deepEqual([item.yours, item.why], [true, 'review']);
+  assert.match(disagree.panel(), new RegExp(`data-action="dismissLook" data-vin="${car.vin}"`));
+  await disagree.click('dismissLook', { vin: car.vin });
+  assert.deepEqual(disagree.local[k.posted][car.vin].lookDismissed.reason, item.text, 'the reason dismissed is kept on the listing');
+  assert.equal(disagree.local[k.diff].needsALook.some((n) => n.vin === car.vin), false, 'off To do at once');
+  assert.ok(disagree.local[k.posted][car.vin], 'the listing stays posted');
+  await disagree.scan();
+  assert.equal(disagree.local[k.diff].needsALook.some((n) => n.vin === car.vin), false, 'and on the next scan, the website giving the same reason');
+  assert.doesNotMatch(disagree.panel(), /data-action="dismissLook"/);
+
+  const NEW = { type: 'New', vdp_url: 'https://example-dealer.test/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } };
+  const retyped = await loadPopup({ local: disagree.local, records: lot(NEW) });
+  await retyped.scan();
+  assert.deepEqual(retyped.local[k.diff].takeDown.filter((t) => t.vin === car.vin).map((t) => t.why), ['not-pre-owned'], 'a dismissal never hides a take-down');
+  assert.match(retyped.panel(), /Delete the listing: the car was not sold\./);
+  assert.match(retyped.panel(), new RegExp(`data-kind="takeDown" data-vin="${car.vin}" title="Opens your listing so you can delete it"`));
+  assert.equal(retyped.local[k.pilot]?.flags?.length || 0, 0, 'no sold-car flag in the numbers');
+});
