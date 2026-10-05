@@ -2,7 +2,7 @@
 # project, by hand only (Actions, Supabase, Run workflow): nothing here runs
 # on a push. docs/production-setup.md, step 3, says when to run each step.
 # The job runs only when started on the repository's default branch; started
-# on any other branch it is skipped and nothing is deployed. That stops a
+# on any other branch (or a tag) it is skipped and nothing is deployed. That stops a
 # mistake, not a determined branch: a run uses the branch's own copy of this
 # file, which could drop the check, so the environment's branch limit below
 # is what keeps the secrets from another branch.
@@ -68,13 +68,18 @@ on:
 permissions:
   contents: read
 
+# One group per step, so a read-only verify, plan or check never waits
+# behind a deploy, and a run queued for one step never replaces one waiting
+# for another (GitHub keeps one waiting run per group). Two runs of one step
+# still take turns. A run started anywhere but the default branch is
+# skipped, and takes a group of its own so it never displaces a real one.
 concurrency:
-  group: supabase-production
+  group: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && format('supabase-production-{0}', inputs.step) || format('supabase-skipped-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   run:
-    if: github.ref_name == github.event.repository.default_branch
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     # verify starts a local database in Docker on the runner for db diff,
     # which takes a few minutes
@@ -196,8 +201,11 @@ jobs:
       # writes the files as another user, and the line-ending fix and the
       # restore below fail on them before anything is compared. A folder the
       # download does not refill shows as deleted, so a download that lands
-      # somewhere else fails rather than passes. Line endings are not
-      # behaviour: a function deployed from a Windows checkout compares equal.
+      # somewhere else fails rather than passes. A download that fails (the
+      # function is not deployed, or the CLI could not fetch it) is named as
+      # such and turns the run red, and the next function is still compared.
+      # Line endings are not behaviour: a function deployed from a Windows
+      # checkout compares equal.
       - name: "verify: each deployed function's source is the one in supabase/functions"
         if: ${{ !cancelled() && inputs.step == 'verify' && steps.link.outcome == 'success' }}
         env:
@@ -209,7 +217,13 @@ jobs:
             f=$(basename "$dir")
             if [ "$f" = _shared ]; then continue; fi
             rm -rf "supabase/functions/$f"
-            supabase functions download "$f" --project-ref "$PROJECT_REF" --use-api
+            if ! supabase functions download "$f" --project-ref "$PROJECT_REF" --use-api; then
+              echo "::error::$f: could not download the deployed function (not deployed, or the download failed), so it was not compared"
+              status=1
+              git checkout -q -- supabase/functions
+              git clean -fdq -- supabase/functions
+              continue
+            fi
             find supabase/functions -type f -exec sed -i 's/\r$//' {} +
             if git diff --quiet -- supabase/functions; then
               echo "$f: the deployed source matches the repository"

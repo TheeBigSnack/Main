@@ -98,10 +98,12 @@ test('a FAIL from the outside check turns a plan or database run red, unless the
 // job itself refuses every branch but the default, as manager.yml's does, so a
 // branch's edited migration or function never reaches production by mistake
 test('the Supabase job runs only when started on the default branch, and the header and the doc say what that guards', () => {
-  assert.match(supabase, /^jobs:\n  run:\n    if: github\.ref_name == github\.event\.repository\.default_branch\n/m, 'a job-level guard, before anything runs');
+  assert.match(supabase, /^jobs:\n  run:\n    if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)\n/m, 'a job-level guard, before anything runs');
+  // the branch's full ref, so a tag that bears the default branch's name is not taken for it
+  for (const yml of [supabase, manager]) assert.doesNotMatch(yml, /github\.ref_name/);
   assert.doesNotMatch(supabase, /branches:/, 'no branch name is written into the workflow');
   const header = headerOf(supabase);
-  assert.match(header, /The job runs only when started on the repository's default branch; started on any other branch it is skipped and nothing is deployed\./);
+  assert.match(header, /The job runs only when started on the repository's default branch; started on any other branch \(or a tag\) it is skipped and nothing is deployed\./);
   assert.match(header, /a run uses the branch's own copy of this file, which could drop the check, so the environment's branch limit below is what keeps the secrets from another branch\./);
   assert.match(read('docs/production-setup.md'), /runs by hand only, from the repository's \*\*Actions\*\* tab or by Claude through GitHub, and only on the default branch: started on any other branch, its job is skipped and nothing is deployed\./);
 });
@@ -199,6 +201,28 @@ test('every verify comparison reports, once the project is linked, even after an
   }
 });
 
+// verify downloads each deployed function in turn: one that cannot be
+// downloaded (not deployed, or the CLI failed) is named as such, turns the
+// run red, and the checkout is put back before the next function is
+// compared, rather than the step stopping on the first error.
+test('a function verify cannot download is named, turns the run red, and the next one is still compared', () => {
+  const steps = supabase.split(/\n      - /);
+  const fn = runText(steps.find((st) => /^name: "verify: each deployed function's source/.test(st)));
+  assert.match(fn, /if ! supabase functions download "\$f" --project-ref "\$PROJECT_REF" --use-api; then\n\s+echo "::error::\$f: could not download the deployed function[^"]*"\n\s+status=1\n\s+git checkout -q -- supabase\/functions\n\s+git clean -fdq -- supabase\/functions\n\s+continue\n\s+fi\n/);
+  assert.equal(fn.split('\n').filter((l) => /\bsupabase functions download\b/.test(l)).length, 1, 'the one download is the checked one');
+});
+
+// GitHub keeps one waiting run per concurrency group and cancels the one
+// before it: with one group for every step, a verify queued behind a deploy
+// waited for it, and a plan queued after a waiting database run replaced
+// it. Each step has its own group, and a run started on another branch (its
+// job skipped) takes a group of its own, as in pages.yml.
+test('each Supabase step queues only behind a run of the same step, and a skipped run displaces nothing', () => {
+  const group = (yml) => (yml.match(/^concurrency:\n  group: (.+)\n  cancel-in-progress: false$/m) || [, ''])[1];
+  assert.equal(group(supabase), "${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && format('supabase-production-{0}', inputs.step) || format('supabase-skipped-{0}', github.run_id) }}");
+  assert.equal(group(manager), "${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'manager-view' || format('manager-view-skipped-{0}', github.run_id) }}");
+});
+
 // A function from the repository may write a column only its migration adds
 // (0009_cancel_at.sql and billing): deployed before that migration, its
 // webhook answers 500 until database runs. The docs say database first; the
@@ -240,7 +264,7 @@ test('the Supabase CLI in the deploy is the one the CI stack job tests with', ()
 });
 
 test('the manager view deploys from the default branch only, configured, tested, without serve.mjs, with an exact wrangler', () => {
-  assert.match(manager, /if: github\.ref_name == github\.event\.repository\.default_branch/);
+  assert.match(manager, /^  deploy:\n    if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)\n/m);
   assert.match(manager, /^permissions:\n  contents: read$/m);
   const order = ['node scripts/set-project.mjs --check', 'run: npm test\n', '--exclude serve.mjs', 'pages deploy'];
   const at = order.map((s) => manager.indexOf(s));
