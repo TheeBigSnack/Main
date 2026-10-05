@@ -948,11 +948,15 @@ function namesAnotherCar(href, car) {
   const ownSearch = !otherWordIn(path) && !query.some(otherWordIn);
   let otherYear = false; // a model year other than this car's, in an address about new cars
   const tells = (words, inQuery) => {
+    // the word before was read as one of this car's own ("max" in an Expedition MAX's "expedition-max"), so
+    // it is no search word and a number after it is never a page number or a price limit
+    let afterOwn = false;
     for (let i = 0; i < words.length;) {
       // the longest run of words from here that is one of this car's own ("f-150")
       const step = ownRun(words, i);
       if (step) {
         i += step;
+        afterOwn = true;
         continue;
       }
       // a make other than this car's, also in two words ("land rover")
@@ -964,6 +968,7 @@ function namesAnotherCar(href, car) {
         const to = MODEL_YEAR_WORD.test(words[i + 1] || '') ? Number(words[i + 1]) : null;
         if (ownSearch && year && to && Number(w) <= year && year <= to && to - Number(w) <= 10) {
           i += 2;
+          afterOwn = false;
           continue;
         }
         if (Number(w) !== year) {
@@ -971,10 +976,12 @@ function namesAnotherCar(href, car) {
           otherYear = true;
         }
       } else if (/\d/.test(w)) {
+        const searchWordBefore = ownSearch && !afterOwn;
         const quiet = PLAIN_DIGIT_WORD.test(w) || (inQuery && /^\d{1,2}$/.test(w))
-          || (ownSearch && PAGE_WORD.test(prev) && /^\d$/.test(w)) || (ownSearch && PRICE_LIMIT_WORD.test(prev) && isPriceLimit(w));
+          || (searchWordBefore && PAGE_WORD.test(prev) && /^\d$/.test(w)) || (searchWordBefore && PRICE_LIMIT_WORD.test(prev) && isPriceLimit(w));
         if (!quiet) return true;
       }
+      afterOwn = false;
       i += 1;
     }
     return false;

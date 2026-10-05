@@ -989,6 +989,28 @@ test('a website read from its pages: on a lot whose car addresses carry the VIN,
   await stalePrice(escape, [`/used/${escape.year}-ford-expedition-max-12345/`, `/used/${escape.year}-ford-expedition-max/12345/`]);
 });
 
+test('a website read from its pages: on a car whose model name holds a search word ("Expedition MAX"), another car\'s round stock number after that word still names another car', async () => {
+  // with and without the VIN in the lot's car addresses; the stock numbers are numbers, one of them round
+  for (const vinInAddress of [true, false]) {
+    const cars = standardCars(5).map((c, i) => ({ ...c, stock: String(10000 + i * 2500 + 7) }));
+    Object.assign(cars[2], { make: 'Ford', model: 'Expedition MAX' });
+    if (!vinInAddress) for (const c of cars) c.path = `/used/${c.year}-${c.make}-${c.model.replace(/ /g, '-')}-${c.stock}/`.toLowerCase();
+    else cars[2].path = `/inventory/used-${cars[2].year}-ford-expedition-max-${cars[2].vin}/`.toLowerCase();
+    const car = cars[2];
+    const posted = markPosted({}, { vin: car.vin, name: 'posted car', price: car.price });
+    const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+    const was = '$' + car.price.toLocaleString('en-US');
+    for (const href of [`/used/${car.year}-ford-expedition-max-17500/`, `/used/${car.year}-ford-expedition-max-2000/`, `/used/${car.year}-ford-expedition-max-20k/`]) {
+      const stale = standardSite({ cars, perPage: 10 });
+      stale.set(STANDARD_ORIGIN + car.path, htmlAnswer(standardCarPage(car).replace(`Our price ${was}`, 'Our price $9,999').replace('<a href="/used-vehicles/">', `<aside><div class="tile"><div class="head"><a href="${href}">Similar car</a></div><div class="info"><span>${was}</span></div></div></aside><a href="/used-vehicles/">`)));
+      const out = await rescanOf(stale, first.snapshot, posted);
+      assert.equal(out.snapshot.vehicles[car.vin].price, null, `${vinInAddress ? 'VIN' : 'stock'} lot: ${href}`);
+      const one = await schemaOrg.getDetails(fakeSiteSearch(stale), car.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + car.path });
+      assert.equal(schemaOrg.normalize(one.record).price, null, `${vinInAddress ? 'VIN' : 'stock'} lot, post time: ${href}`);
+    }
+  }
+});
+
 test('a website read from its pages: another car\'s tile at the old price is told apart by its make, for every make the VIN check knows and every make the probe names', async () => {
   const cars = standardCars(4);
   const c = cars[0];
