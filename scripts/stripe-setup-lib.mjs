@@ -59,6 +59,15 @@ export const TAX_BEHAVIOR = 'exclusive';
 export const FAILED_PAYMENTS_NOTE = 'not read or set here: in the Stripe Dashboard set "If all retries for a payment fail" to "Cancel the subscription" (docs/stripe-setup.md step 3), so a dealership that stops paying ends and reaches the retention list instead of being kept with no end date';
 
 const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+// A price a dealer agreed to in writing: "hypothesis": false with "confirmedOn",
+// the real date of that agreement (docs/launch-checklist.md, "Pricing confirmed")
+function pricingConfirmed(pricing) {
+  if (!isRecord(pricing) || pricing.hypothesis !== false) return false;
+  const day = pricing.confirmedOn;
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const t = Date.parse(day + 'T00:00:00Z');
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === day;
+}
 const cents = (dollars) => Math.round(Number(dollars) * 100);
 
 // 'test', 'live', or null for something that is not a Stripe secret or
@@ -253,8 +262,8 @@ export async function runSetup(opts) {
     return done();
   }
   // Live prices charge real money: not from a file that still calls itself a guess
-  if (mode === 'live' && !(isRecord(pricing) && pricing.hypothesis === false)) {
-    fail('marketing/pricing.json', 'it still says "hypothesis": true, so nothing was read or changed in live mode. Live prices wait for docs/launch-checklist.md, "Pricing confirmed": a dealer has agreed to a price in writing, pricing.json has "hypothesis": false and those numbers, and test/marketing.test.js passes');
+  if (mode === 'live' && !pricingConfirmed(pricing)) {
+    fail('marketing/pricing.json', 'it still says "hypothesis": true, or has no "confirmedOn" date, so nothing was read or changed in live mode. Live prices wait for docs/launch-checklist.md, "Pricing confirmed": a dealer has agreed to a price in writing, pricing.json has "hypothesis": false, "confirmedOn" set to the date of that agreement and those numbers, and test/marketing.test.js passes');
     return done();
   }
   // A --site-url that is given but unusable would leave the portal with no

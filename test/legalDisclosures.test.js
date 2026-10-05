@@ -53,6 +53,18 @@ test('the attorney\'s automated-means question says how the form is typed into a
     assert.match(row, /to-do item/, `${where}: the scripting row leaves out the listing read and the price fill`);
     assert.doesNotMatch(row, /form (?:the person opened )?when (?:the user|they) click Post/, `${where}: the scripting row says the form is filled only on a click on Post`);
   }
+  // review: Q1 and the scripting row named "Post selected", the label the popup's button shows while it is disabled,
+  // and left out Queue all N ready arrivals on the To do tab, which starts the same queue
+  const popup = read('extension/popup.js');
+  assert.match(popup, /: 'Post selected'\);/, 'the popup\'s queue button changed its idle label: check these texts');
+  assert.match(popup, /`Post \$\{state\.picked\.size\} car\$\{/, 'the popup\'s queue button no longer reads Post N cars');
+  assert.match(popup, />Queue all \$\{ready\.length\} ready arrivals</, 'the To do tab no longer has Queue all N ready arrivals');
+  assert.match(panel, />Post the next \$\{vins\.length\}</, 'the side panel no longer has Post the next N');
+  const scripting = rowText(read('legal/chrome-web-store-privacy.md'), '`scripting`');
+  for (const [where, text] of [['questions-for-attorney.md 1', q1], ['the Web Store scripting row', scripting]]) {
+    assert.doesNotMatch(text, /Post selected/, `${where} names Post selected, the label of a button that starts nothing`);
+    for (const label of [/Post N cars/, /Queue all N ready arrivals/, /Post the next N/]) assert.match(text, label, `${where} does not name ${label} among the queue's starts`);
+  }
   // and the data inventory the privacy texts follow
   const inventory = rowText(read('docs/data-inventory.md'), 'Fill the Marketplace form (`facebook/fillForm.js`)');
   assert.match(inventory, /in a queue the person started, each car that passes every check, without another click/);
@@ -69,7 +81,14 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
 
   const what = section(read('legal/terms-of-service.md'), '## 1. What Lot Current is');
   assert.doesNotMatch(what, /does not act while the User is away/, 'the Terms say Lot Current does nothing while the User is away');
-  assert.match(what, /never acts on Facebook while the User is away/);
+  // review: "never acts on Facebook while the User is away" was absolute too: after a Publish the queue opens and
+  // fills the next car's form with no new click, and an open to-do item reads its listing page, whoever is there
+  const panel = read('extension/sidepanel.js');
+  assert.match(panel, /if \(state\.queueMode && canAutoOpen\(\)\)[^\n]*openForm\(/, 'the queue no longer opens the next form by itself: the Terms can change');
+  assert.doesNotMatch(what, /never acts on Facebook while the User is away/, 'the Terms say Lot Current does nothing on Facebook while the User is away, while a queue opens and fills the next form by itself');
+  assert.match(what, /never posts or edits a listing in the background or while the User is away/);
+  assert.match(what, /It acts on Facebook only in a tab it opened for a post or a to-do item the User started/);
+  assert.match(what, /in a queue the User started it opens and fills the next car's form, without another click, once the User has published the previous one/);
   assert.match(what, /If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open/);
   assert.match(what, /while the User is signed in to a Lot Current account, sends that rescan's results to the dealership's records/);
 });
@@ -80,7 +99,7 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
 const FACEBOOK_FUNCS = {
   fillFormInPage: /fill(?:s)? the vehicle listing form/i,
   attachPhotosInPage: /attach(?:es)? the car's photos/,
-  probeFormInPage: /check fields only, (?:to )?lists? that form's fields without filling them/,
+  probeFormInPage: /check fields only(?: \(nothing filled\)\*\*)?, (?:to )?lists? that form's fields without filling them/,
   fillPriceInPage: /fill(?:s)? the new price on the listing's edit form/,
   // store/listing.md says 'repeatedly': the listing copy carries no timing figures (test/honesty.js)
   readListingInPage: /reads? (?:every 1\.5 seconds|repeatedly) the Marketplace page[^|]*Your listings page when no (?:listing )?link was saved[^|]*title, (?:the )?prices/,
@@ -100,8 +119,14 @@ test('the Facebook host justification and the privacy texts name every read Lot 
 
   const store = rowText(read('legal/chrome-web-store-privacy.md'), 'Host `https://www.facebook.com/marketplace/*`');
   const listing = rowText(read('store/listing.md'), '`https://www.facebook.com/marketplace/*`');
-  for (const [where, row] of [['legal/chrome-web-store-privacy.md', store], ['store/listing.md', listing]]) {
+  // the help's install section says what Chrome's warning about that host covers, as the two rows do
+  const help = read('docs/help.md').split('\n').find((l) => l.startsWith('Chrome says the extension can read and change data on `www.facebook.com/marketplace`'));
+  assert.ok(help, 'docs/help.md no longer explains the Facebook host permission');
+  assert.match(read('extension/sidepanel.js'), /if \(state\.queueMode && r\.status === 'listing'\) \{[\s\S]{0,300}?return confirmIfThisCar\(/, 'a queue no longer reads the listing page it reached: update the texts and this test');
+  for (const [where, row] of [['legal/chrome-web-store-privacy.md', store], ['store/listing.md', listing], ['docs/help.md', help]]) {
     for (const [func, words] of Object.entries(FACEBOOK_FUNCS)) assert.match(row, words, `${where}: the Facebook host row does not say what ${func} does`);
+    assert.match(row, /notices? when the tab shows the published listing's address/, `${where}: the Facebook host row does not say the tab is watched for the listing's address`);
+    assert.match(row, /in a queue, [^;]*read(?:s)? that listing page a few times/, `${where}: the Facebook host row does not say a queue reads the listing it reached`);
     assert.doesNotMatch(row, /No other Facebook pages? (?:is|are) read/, `${where}: the Facebook host row says no other page is read while a to-do item reads the listing or Your listings page`);
     assert.match(row, /sent nowhere/);
   }
@@ -117,6 +142,25 @@ test('the Facebook host justification and the privacy texts name every read Lot 
   const faq = read('site-src/pages/faq.html');
   const reads = faq.slice(faq.indexOf('<h3>What does it read?</h3>'), faq.indexOf('</article>', faq.indexOf('<h3>What does it read?</h3>')));
   assert.match(reads, /When you open a to-do item, it reads the Marketplace page it opened for it \(the listing, or your Your listings page when no listing link was saved\) for the title, prices and a sold sign/);
+});
+
+// review: beside those reads, the Web Store answers said only that the extension "fills in the form" in the
+// user's tab, their Limited Use statement that "No Facebook account data is collected", and the privacy
+// policy that nothing at all is collected "from the User's Facebook account", while the listing address is
+// kept and the dry run, the queue and an open to-do item read Facebook pages of the user's own account.
+test('the privacy texts\' summary lines about Facebook name the reads they make, with no blanket "nothing from the account"', () => {
+  const store = read('legal/chrome-web-store-privacy.md');
+  const policy = read('legal/privacy-policy.md');
+  assert.doesNotMatch(store, /No Facebook account data is collected/, 'the Limited Use statement says no Facebook account data is collected while the listing address is kept');
+  assert.doesNotMatch(policy, /or anything from the User's Facebook account\./, 'the privacy policy says nothing is collected from the User\'s Facebook account while it keeps the listing address and reads the listing pages');
+  const noRequest = store.split('\n').find((l) => l.startsWith('The extension makes no request to Facebook itself'));
+  assert.ok(noRequest, 'the Web Store answers lost their line on requests to Facebook');
+  for (const seen of [/fills in the form/, /check fields only/, /listing page after a post in a queue/, /Your listings page while a to-do item is open/]) assert.match(noRequest, seen, `the Web Store answers' line on requests to Facebook leaves out a read (${seen})`);
+  const limited = section(store, '## Limited Use statement (for the listing and the Privacy Policy)');
+  assert.match(limited, /from Facebook pages, Lot Current keeps only the address of each listing the user posts/);
+  const policyLine = policy.split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
+  assert.match(policyLine, /from the User's Facebook account we keep and read only what this paragraph lists/);
+  assert.match(policyLine, /it types into the form and reads the pages above in the User's own tab/);
 });
 
 test('no text says Facebook gets nothing before Publish: the fill types into Facebook\'s own suggestion boxes and hands it the photos', () => {
@@ -152,7 +196,9 @@ test('every screenshot rule keeps Facebook\'s logo, wordmark and brand colour ou
   const listing = read('store/listing.md');
   const listingShots = listing.slice(listing.indexOf('## Screenshots'), listing.indexOf('\n## ', listing.indexOf('## Screenshots') + 1));
   const notes = section(read('legal/chrome-web-store-privacy.md'), '## Notes for the listing text');
-  for (const [where, text] of [['store/screenshots.md', shots], ['store/listing.md Screenshots', listingShots], ['legal/chrome-web-store-privacy.md notes', notes]]) {
+  // review: the trademark note said only "never ... brand colours ... screenshots", with no word of how a capture of
+  // the real form keeps to it, so the four texts the screenshots follow said it two ways
+  for (const [where, text] of [['legal/trademark-note.md', rule], ['store/screenshots.md', shots], ['store/listing.md Screenshots', listingShots], ['legal/chrome-web-store-privacy.md notes', notes]]) {
     assert.doesNotMatch(text, /beyond what the page itself shows/, `${where} lets the real page's logo or colour into a store image`);
     assert.match(text, /logo/, `${where} says nothing about Facebook's logo`);
     assert.match(text, /wordmark/, `${where} says nothing about Facebook's wordmark`);
@@ -162,6 +208,17 @@ test('every screenshot rule keeps Facebook\'s logo, wordmark and brand colour ou
   // the shot of the real form says it too
   const shot3 = shots.split('\n').find((l) => l.startsWith('| `3-form.png` |'));
   assert.match(shot3, /Crop below Facebook's top bar/);
+  // personal details are covered with a solid box, never blurred: the shot list says a blur can be read back, and
+  // the listing (its Screenshots section and its checklist) and the Web Store notes once said "blurs"/"blurred"
+  assert.match(shots, /solid filled box[^.]*\(a light blur can sometimes be read back\)/);
+  for (const [where, text] of [['store/screenshots.md', shots], ['store/listing.md', listing], ['legal/chrome-web-store-privacy.md notes', notes]]) {
+    const blur = text.replace(/\(a (?:light )?blur can sometimes be read back\)/g, '').match(/[^.\n]*\bblur(?:s|red|ring)?\b[^.\n]*/i);
+    assert.equal(blur, null, `${where} still asks for a blur: "${blur && blur[0].trim()}"`);
+  }
+  // the Numbers shot's caption keeps the unfilled fields out of the manager's numbers, as the home page does
+  const shot5 = listing.split('\n').find((l) => l.startsWith('| 5 |'));
+  assert.doesNotMatch(shot5, /The numbers your manager sees/);
+  assert.match(shot5, /the fields that could not be filled stay in your browser/);
 });
 
 test('the privacy texts say Anthropic\'s servers fetch and look at the colour-guess photos, not only receive their addresses', () => {
@@ -323,6 +380,26 @@ test('while the subscription agreement says nothing about seats added during the
   assert.match(item, /prorated from the day it is added or only from the next billing period is the owner's commercial choice, not yet made/);
 });
 
+// review: Stripe, set up as docs/stripe-setup.md step 3 says, cancels a subscription by itself once the retries of a
+// failed payment run out, and the plan counts as lapsed from the first failed payment; the Terms and the
+// subscription agreement describe only cancelling on purpose, and the attorney was not asked about it.
+test('while the agreements say nothing of a failed payment, the attorney is asked about the subscription Stripe ends by itself', async () => {
+  // the code and the setup: a past-due subscription is lapsed, and Stripe is told to cancel after the retries
+  const { subscriptionState } = await import('../supabase/functions/_shared/billing.mjs');
+  assert.equal(subscriptionState({ status: 'past_due', pilot_ends_at: null }), 'lapsed', 'a failed payment no longer lapses the plan: update question 11.3 and this test');
+  assert.match(read('docs/stripe-setup.md'), /set \*\*If all retries for a payment fail\*\* to \*\*Cancel the subscription\*\*/, 'Stripe is no longer set to cancel after the retries: update question 11.3 and this test');
+
+  const terms = section(read('legal/terms-of-service.md'), '## 7. Fees, billing and cancellation');
+  const dsa = section(read('legal/dealer-subscription-agreement.md'), '## 6. Term and termination');
+  if (/fail(?:s|ed)? payment|non-?payment|not paid|unpaid/i.test(terms + dsa)) return; // the agreements now say it: drop question 11.3 with this test
+  const q11 = section(read('legal/questions-for-attorney.md'), '## 11. Where the agreements disagree or say nothing');
+  const item = q11.split('\n').find((l) => l.startsWith('- **11.3**'));
+  assert.ok(item, 'questions-for-attorney.md 11 does not ask about ending a subscription for non-payment');
+  assert.match(item, /when every retry has failed, cancels the subscription by itself, with no notice from Lot Current/);
+  assert.match(item, /From the first failed payment the dealership's plan counts as lapsed: syncing and the description writer stop/);
+  assert.match(item, /its database records are deleted within 30 days/);
+});
+
 // The dry run (Open the form and check fields only) reads the Marketplace
 // form page: its address, title and language, the names of up to 100 visible
 // controls anywhere on it and 200 characters next to the photo box. The side
@@ -354,4 +431,34 @@ test('the privacy texts name what the dry-run report holds from the Facebook pag
   assert.match(inventory, /^- \*\*Copy report\*\* \(side panel, after \*\*Open the form and check fields only \(nothing filled\)\*\*, `copyReport` in `extension\/sidepanel\.js`\): [^\n]*up to 100 visible controls on that page[^\n]*the person pastes it into a message to support\./m, 'the data inventory does not list what Copy report puts on the clipboard');
   assert.match(read('docs/support.md'), /The dry run's report also holds the form page's address and title and the names of up to 100 controls on that page, which can include Facebook's own menus: ask the person to read it before sending and take out anything personal/);
   assert.match(read('docs/help.md'), /\*\*Copy report\*\* on the result \(read it before you send it: it holds the form page's address and title and the names of the controls on that page/);
+});
+
+// review: the store listing's reviewer steps said the test needs no sign-in but never said how to get past the
+// set-up wizard's Your account step, which shows whenever accounts are configured (extension/src/accountConfig.js),
+// and did not mention the fields check; its privacy summary left out the colour guess's photo addresses and what
+// the fields check reads from the form page, which the Web Store answers name.
+test('the store listing tells the reviewer to skip the account step, and its privacy summary names the photos and the fields check', async () => {
+  const { accountsConfigured } = await import('../extension/src/accountConfig.js');
+  const { accountStepModel } = await import('../extension/src/wizardSteps.js');
+  const listing = read('store/listing.md');
+  const steps = listing.slice(listing.indexOf('## Test instructions'), listing.indexOf('## Support and homepage'));
+  assert.match(steps, /Lot Current needs no account or sign-in for this test\./);
+  if (accountsConfigured()) {
+    const model = accountStepModel({ configured: true });
+    assert.equal(model.heading, 'Your account', 'the wizard\'s account step was renamed: change the reviewer steps with it');
+    assert.equal(model.next, 'Skip for now', 'the account step\'s button was renamed: change the reviewer steps with it');
+    assert.match(steps, /At the Your account step, click Skip for now: this test needs no sign-in\./);
+  }
+  assert.match(read('extension/sidepanel.js'), />Open the form and check fields only \(nothing filled\)<\/button>/, 'the fields check button was renamed: change the reviewer steps with it');
+  assert.match(steps, /click "Open the form and check fields only \(nothing filled\)" instead/);
+  assert.match(steps, /attaches the car's photos/);
+  const answers = read('legal/chrome-web-store-privacy.md');
+  assert.match(answers, /for a colour guess, up to four photo addresses/, 'the Web Store answers no longer name the photo addresses: change the summary with them');
+  assert.match(answers, /for Open the form and check fields only, the form page's address, title and language/);
+  const short = listing.split('\n').find((l) => l.startsWith('The answers are in `legal/chrome-web-store-privacy.md`'));
+  assert.ok(short, 'the store listing has its privacy summary');
+  assert.match(short, /for a colour guess up to four of its photo addresses \(Anthropic's servers fetch those photos to look at them\)/);
+  // the summary names what the answers name: the controls (Facebook's own menus among them) and the photo box's text
+  assert.match(answers, /the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/, 'the Web Store answers changed what the fields check reads: change the summary with them');
+  assert.match(short, /for Open the form and check fields only, that form page's address, title and language, the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/);
 });

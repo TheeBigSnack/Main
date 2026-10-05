@@ -35,6 +35,12 @@ const AFFILIATION_CLAIMS = [
   'Meta has approved Lot Current.',
   'Lot Current is an authorized Facebook Marketplace tool.',
   'Recognized by Meta.',
+  // the present tense
+  'Meta approves of Lot Current.',
+  'Facebook endorses Lot Current.',
+  'Marketplace recommends Lot Current for dealers.',
+  'Meta supports Lot Current.',
+  'Facebook OKs Lot Current.',
 ];
 
 // Promises and made-up numbers that customer-facing copy may not make.
@@ -66,6 +72,12 @@ const CUSTOMER_CLAIMS = [
   'Ban protection included.',
   'Completely secure.',
   'Undetectable by Facebook.',
+  "Your account's safe.",
+  'Your profile’s always secure.',
+  'Post without getting banned.',
+  'List every car without ever being blocked.',
+  'Helps you avoid getting restricted.',
+  'Keeps salespeople from getting banned.',
   'Salespeople post 30 cars a day with Lot Current.',
   'Dealerships sell their used cars 3 days faster.',
   'Trusted by 140 dealerships.',
@@ -93,6 +105,16 @@ const CUSTOMER_CLAIMS = [
   'The form is ready in about ten seconds.',
   'Listed in about 10 sec.',
   'Thirty seconds a car.',
+  // the short forms
+  'Listed in 10s.',
+  'Posted in under 15 s.',
+  'A listing takes 8s.',
+  '10s a car.',
+  'Filled in 10sec.',
+  'A 10s post.',
+  'Posted in roughly 10s.',
+  'Listed in ~10s.',
+  'Post without your account getting banned.',
 ];
 
 // Lines today's copy uses, which must stay allowed.
@@ -119,6 +141,18 @@ const HONEST = [
   "The median seconds per post is the time from Post to It's posted, their own review and Publish click included.",
   'Facebook sometimes puts a saved draft back onto a new listing form a few seconds after it opens.',
   'Enter the six-digit code from the email; it works for one hour.',
+  'Facebook decides what happens to any account; Lot Current makes no promise about it.',
+  'Cars from the 2010s are listed like any other used car.',
+];
+
+// Honest lines the lists once caught, though no copy uses them yet: a verb with an honest use about Facebook, a
+// queue keeping one car from blocking another, an age.
+const ONCE_CAUGHT = [
+  'Facebook backs up your draft.',
+  'Facebook recommends square photos.',
+  'Marketplace supports up to 20 photos.',
+  'A queue keeps a car from being blocked by another.',
+  'Not for under 18s.',
 ];
 
 test('every affiliation or approval claim fails, in any document', () => {
@@ -136,6 +170,7 @@ test('every guarantee, account-safety promise and made-up number fails in custom
 
 test('the honest lines the copy already uses pass', () => {
   for (const line of HONEST) assert.deepEqual(honestyProblems(line), [], line);
+  for (const line of ONCE_CAUGHT) assert.deepEqual(honestyProblems(line), [], line);
   // a sentence that only denies a forbidden thing passes once that denial is named
   const denial = 'Lot Current is not affiliated with, endorsed by or partnered with Meta, and no one can promise your account will never be restricted.';
   assert.notDeepEqual(honestyProblems(denial), [], 'without the denials named, the words are caught');

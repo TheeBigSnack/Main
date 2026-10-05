@@ -46,7 +46,8 @@ test('the pricing constants and the migration carry the numbers from marketing/p
   assert.ok(pilots.length >= 2, 'start_pilot sets the pilot length on insert and on update');
   for (const days of pilots) assert.equal(days, pricing.pilotDays, 'start_pilot uses pilotDays');
   assert.match(sql, new RegExp(`values \\(start_pilot.dealership_id, 'pilot', now\\(\\) \\+ interval '${pricing.pilotDays} days', ${pricing.includedSalespeople}, now\\(\\)\\)`));
-  assert.equal(pricing.hypothesis, true, 'pricing stays a hypothesis until a dealer agrees to a price in writing (docs/launch-checklist.md, Pricing confirmed)');
+  // whether pricing.json is still a hypothesis is test/marketing.test.js's rule ("Pricing confirmed" in
+  // docs/launch-checklist.md flips it with the date of the dealer's written agreement); these numbers hold either way
 });
 
 // ---------- the state machine ----------

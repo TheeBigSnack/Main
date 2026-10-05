@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
-import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
+import { OVERDUE_HOURS, SCAN_STALE_HOURS, SCAN_STALE_WHY } from '../manager/data.js';
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing, TIME_PER_POST } from './honesty.js';
 import { stripComments } from './helpers.js';
@@ -24,15 +24,50 @@ const AGREEMENTS = ['pilot-agreement.md', 'dealer-subscription-agreement.md'];
 const legal = (rel) => read('../legal/' + rel);
 // the pilot dealer is a fixture, not a default (the same words as test/anyDealer.test.js)
 const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
+const US_STATE = /\b(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/;
 const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// "hypothesis" stays true until a dealer agrees to a price in writing. Setting
+// it to false is docs/launch-checklist.md's "Pricing confirmed" step, and the
+// file then records when that happened ("confirmedOn", the agreement's date),
+// so npm test passes on the step the checklist and docs/stripe-setup.md
+// describe and fails on a bare flip with no record.
+function pricingRecordRule(p) {
+  assert.equal(typeof p.hypothesis, 'boolean', '"hypothesis" is true or false');
+  if (p.hypothesis) {
+    assert.ok(!('confirmedOn' in p), 'a hypothesis carries no confirmation date');
+    return;
+  }
+  assert.match(String(p.confirmedOn), /^\d{4}-\d{2}-\d{2}$/, 'a confirmed price says when a dealer agreed to it in writing ("confirmedOn": "YYYY-MM-DD")');
+  const t = Date.parse(p.confirmedOn + 'T00:00:00Z');
+  assert.ok(Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === p.confirmedOn, 'confirmedOn is a real date');
+}
+
 test('the pricing hypothesis is one config with the fields the docs quote', () => {
-  assert.equal(pricing.hypothesis, true, 'it stays a hypothesis until a dealer agrees to a price in writing (docs/launch-checklist.md, Pricing confirmed)');
+  pricingRecordRule(pricing);
   for (const k of ['perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'pilotDays', 'foundingDealerMonthly', 'foundingDealerMonths', 'foundingDealerCount']) {
     assert.ok(Number.isInteger(pricing[k]) && pricing[k] > 0, `${k} is a whole number`);
   }
   assert.match(pricing.asOf, /^\d{4}-\d{2}-\d{2}$/);
   assert.ok(Array.isArray(pricing.wouldChangeIt) && pricing.wouldChangeIt.length >= 2, 'says what would change it');
+});
+
+test('pricing.json can be marked confirmed the way the launch checklist says, and only with the agreement\'s date', () => {
+  const { confirmedOn: _, ...numbers } = pricing;
+  // the step docs/launch-checklist.md ("Pricing confirmed") and docs/stripe-setup.md describe passes
+  pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-01' });
+  pricingRecordRule({ ...numbers, hypothesis: true });
+  // a bare flip, a date that does not exist, a hypothesis with a date, a string for the flag: each fails
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false }), /confirmedOn/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }), /real date/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: true, confirmedOn: '2026-12-01' }), /no confirmation date/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: 'false' }), /true or false/);
+  // and both documents name the date with the flag, and say npm test passes after it
+  const checklist = read('../docs/launch-checklist.md');
+  const item = checklist.slice(checklist.indexOf('**Pricing confirmed.**'));
+  assert.match(item.split('\n')[0], /"hypothesis": false`[^\n]*`"confirmedOn"[^\n]*`npm test` (still )?passes/, 'the checklist item names confirmedOn and npm test');
+  const stripe = read('../docs/stripe-setup.md');
+  for (const para of stripe.split('\n').filter((l) => l.includes('"hypothesis": false'))) assert.match(para, /"confirmedOn"/, `docs/stripe-setup.md: ${para.slice(0, 60)}`);
 });
 
 test('the sales sheet and the positioning quote the pricing config, not their own numbers', () => {
@@ -120,7 +155,15 @@ test('no marketing or Web Store document names the pilot dealer: every marketing
     const doc = read('../' + rel);
     const line = doc.split('\n').findIndex((l) => PILOT.test(l));
     assert.equal(line, -1, `${rel}:${line + 1} contains the pilot value "${line >= 0 && doc.split('\n')[line].match(PILOT)[0]}"`);
+    // region is data too (CLAUDE.md): the pilot's state, or any other, is not where Lot Current is sold
+    const region = doc.split('\n').findIndex((l) => US_STATE.test(l));
+    assert.equal(region, -1, `${rel}:${region + 1} names a state: "${region >= 0 && doc.split('\n')[region].match(US_STATE)[0]}"`);
   }
+  // the positioning once said nothing is rescanned "while every Chrome at the store is closed", as if one open
+  // Chrome covered the store: each salesperson's listings are rescanned only in their own Chrome
+  const positioning = read('../marketing/positioning.md');
+  assert.doesNotMatch(positioning, /every Chrome at the store/);
+  assert.match(positioning, /Each salesperson installs Lot Current in their own Chrome/);
 });
 
 test('the store-install emails quote the pricing config and the code\'s numbers, and name the controls as the code labels them', () => {
@@ -138,6 +181,15 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   // the day-7 numbers are read the way the manager view draws them
   assert.match(store, new RegExp(`more than ${OVERDUE_HOURS} hours`), 'the red threshold is OVERDUE_HOURS from manager/data.js');
   assert.match(store, new RegExp(`more than ${SCAN_STALE_HOURS} hours ago`), 'the stale-scan line is SCAN_STALE_HOURS from manager/data.js');
+  // the last-scan line shows the last scan the extension sent: one judged a website hiccup never goes up
+  // (extension/src/accountFlow.js scanFromStored, manager/data.js SCAN_STALE_WHY), so an old line is not only a closed Chrome
+  assert.match(SCAN_STALE_WHY, /website hiccup/, 'the manager view no longer says hiccup scans are held back: change onboarding-store.md and For managers with it');
+  const scanPara = store.split('\n').find((l) => /last-scan line/.test(l)) || '';
+  assert.match(scanPara, /last scan Lot Current trusted/, 'onboarding-store.md calls the line the last read of the website');
+  assert.match(scanPara, /website hiccup[^.]*not recorded/, 'onboarding-store.md does not say a hiccup scan is held back');
+  assert.doesNotMatch(scanPara, /, nobody's Chrome had it on\./, 'onboarding-store.md blames a closed Chrome alone for an old line');
+  // a rescan reaches the dealership's account only while its salesperson is signed in (accountFlow.js syncNow)
+  assert.match(scanPara, /not signed in to their Lot Current accounts \(a scan reaches this view only while its salesperson is signed in\)/, 'onboarding-store.md leaves out that a signed-out salesperson\'s rescans never reach the view');
   // the three sentences that matter
   assert.match(store, /\*\*You click Publish\. Lot Current never does\.\*\*/);
   assert.match(store, /\*\*Keep prices honest\.\*\*/);

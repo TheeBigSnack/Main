@@ -19,7 +19,8 @@ import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing } from './honesty.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { profileFrom } from '../extension/src/settings.js';
-import { ADAPTERS, isCheckedLive } from '../extension/adapters/index.js';
+import { ADAPTERS, isCheckedLive, unsupportedSiteMessage } from '../extension/adapters/index.js';
+import { normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -468,6 +469,87 @@ test('the pre-owned check is described as the gate decides it: two signs, or one
   for (const [name, doc] of [['How it works', how], ['README.md', readme]]) assert.match(doc, /only one sign and no Carfax report goes to \**Needs a look/, `${name} says one sign alone goes to Needs a look`);
 });
 
+// review: the home page, How it works, the sales sheet, the demo script and the store's test steps said new, demo
+// and loaner cars "never get through", "can't get in" or "never appear under Ready to post", and the home page that
+// a demo or loaner flag "always means no". The gate reads the website's own labels (classify.js), so a car the
+// website labels wrong passes it, and a reader that drops a demo or loaner word before the gate sees it lets that car
+// through too. The copy says what the gate lets through and that it goes by the website's labels.
+test('no copy says new, demo or loaner cars can never get through, and the gate is said to go by the website\'s labels', () => {
+  const ABSOLUTE = /\b(?:new|demo|loaner)\b[^.;:]*\b(?:never (?:get|gets|got) (?:through|in)|can(?:no|['’])t get (?:through|in)|never (?:appear|show) (?:under|on|in)|always means no)\b/i;
+  for (const said of ['New, demo and loaner cars never get through.', "New, demo and loaner cars can't get in.", 'New, demo and loaner cars never appear under Ready to post.', 'A demo or loaner flag always means no.']) {
+    assert.match(said, ABSOLUTE, said);
+  }
+  const files = [
+    ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
+    ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+    '../README.md', '../docs/help.md',
+  ];
+  for (const rel of files) {
+    const said = rel.endsWith('.md') ? read(rel) : stripTags(read(rel));
+    const hit = said.match(ABSOLUTE);
+    assert.equal(hit, null, `${rel.slice(3)} says the gate can never let such a car through: "${hit && hit[0]}"`);
+  }
+  const LABELS = /goes by (?:your|the) website's (?:own )?labels|can only go by what your website says/;
+  for (const [name, said] of [['the home page', text], ['How it works', stripTags(howPage)], ['the sales sheet', read('../marketing/sales-sheet.md')], ['the demo script', read('../marketing/demo-script.md')]]) {
+    assert.match(said, LABELS, `${name} does not say the check goes by the website's labels`);
+  }
+});
+
+// review: the same claim was still made the other way round ("It only lets pre-owned cars at your store through" in
+// the pilot offer email, "lets only pre-owned cars through", "Only pre-owned cars at your store are ready to post",
+// "the cars at your store that are pre-owned", "checks every car is really pre-owned"), and the home page kept "A
+// demo or loaner flag means no." with a caveat that blamed only a website's wrong label. A reader can also lose a
+// correct label before the gate sees it: on DealerOn and Dealer.com, a car the website marks certified is read as
+// certified used whatever its inventory type says (inventoryJson.js normalizeInventoryRecord), so a certified
+// loaner passes. The copy says the cars the website marks as pre-owned, says a demo or loaner label Lot Current
+// misses can get through wherever it says a wrong label can, and names that reader gap for exactly as long as the
+// reader has it.
+test('no copy says only pre-owned cars get through as a plain fact, and the reader gap for certified loaners is named while it exists', () => {
+  const UNQUALIFIED = /\b(?:only (?:lets |let |shows |lists |posts )?(?:through )?pre-owned (?:cars|vehicles)|lets only pre-owned|(?:cars|vehicles)(?: at your store)? that are pre-owned|(?:every|each) car is (?:really |truly )?pre-owned|(?:demo|loaner) flag means no)\b/i;
+  for (const said of ['It only lets pre-owned cars at your store through.', 'It reads the inventory, lets only pre-owned cars through.', 'Only pre-owned cars at your store are ready to post.', 'It shows the cars at your store that are pre-owned.', 'It checks every car is really pre-owned.', 'A demo or loaner flag means no.']) {
+    assert.match(said, UNQUALIFIED, said);
+  }
+  for (const said of ['It lists only the cars your website marks as pre-owned.', 'Only cars the website says are pre-owned, at your store.', 'Pre-owned cars only.', 'Pre-owned cars at your store that are missing something a listing needs.']) {
+    assert.doesNotMatch(said, UNQUALIFIED, said);
+  }
+  const files = [
+    ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
+    ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+    '../README.md', '../docs/help.md', '../package.json',
+  ];
+  for (const rel of files) {
+    const said = rel.endsWith('.html') ? stripTags(read(rel)) : read(rel);
+    const hit = said.match(UNQUALIFIED);
+    assert.equal(hit, null, `${rel.slice(3)} says only pre-owned cars get through, not that it lists the cars the website marks as pre-owned: "${hit && hit[0]}"`);
+    // a caveat that a wrong label can get through also says a label Lot Current misses can
+    for (const sentence of said.split(/(?<=[.!?)])\s+/)) {
+      if (/labels wrong/.test(sentence)) assert.match(sentence, /label Lot Current misses/, `${rel.slice(3)} blames only the website's label: "${sentence}"`);
+    }
+  }
+  const card = stripTags((html.match(/<h3>Pre-owned only<\/h3>\s*<p>[\s\S]*?<\/p>/) || [''])[0]);
+  for (const [name, said] of [["the home page's Pre-owned only card", card], ['How it works', stripTags(howPage)], ['the positioning', read('../marketing/positioning.md')]]) {
+    assert.match(said, /a demo or loaner whose label Lot Current misses/, `${name} does not say a demo or loaner label Lot Current misses can get through`);
+  }
+
+  // the reader gap, read from the shipped reader and gate: a certified card whose inventory type says loaner or demo
+  const passes = (condition) => checkPreOwned(normalizeInventoryRecord({
+    vin: '1SAMPLE0000000001', condition, certified: true, link: '/used/2024-sample-suv.htm',
+    title: 'Certified Pre-Owned 2024 Sample SUV Limited', year: 2024, make: 'Sample', model: 'SUV', mileage: 4200, price: 41000,
+  }, { origin: 'https://dealer.example' })).verdict === 'pre-owned';
+  assert.equal(passes('Used'), true, 'a plain certified used card passes');
+  const gapOpen = ['Loaner', 'Demo', 'Service Loaner'].some(passes);
+  const GAP = /on DealerOn and Dealer\.com websites, a car the website marks certified is read as certified used even when its inventory type says demo or loaner/;
+  const how = stripTags((howPage.match(/<section aria-labelledby="preowned-h">[\s\S]*?<\/section>/) || [''])[0]);
+  const readme = (read('../README.md').match(/## How the pre-owned check works\n[\s\S]*?(?=\n## )/) || [''])[0];
+  for (const [name, said] of [["How it works' pre-owned check", how], ["README.md's pre-owned check", readme]]) {
+    assert.ok(said.length > 0, `${name} is there`);
+    if (gapOpen) assert.match(said, GAP, `${name} does not name the gap: a certified loaner or demo on DealerOn and Dealer.com passes the check`);
+    else assert.doesNotMatch(said, GAP, `the DealerOn and Dealer.com reader now keeps a certified car's demo or loaner type: drop the known-gap sentence from ${name} (and regenerate the site)`);
+  }
+});
+
 // review: the FAQ (sent to search engines as FAQPage data) said Lot Current reads back only the
 // create-listing form and keeps nothing from Facebook beyond the links a person saves. The upkeep flow
 // (upkeep.js) also reads a listing the person opens to update or take down, and a queue records the
@@ -510,7 +592,16 @@ test('How it works and the Terms keep "while you are away" to Facebook, and name
   // the new price into the Price box and reads the listing a to-do item opened. A person starts those steps and
   // clicks every button that publishes or changes a listing.
   assert.doesNotMatch(how, /A person does every step/, 'Lot Current itself fills the form, so a person does not do every step that touches Facebook');
-  assert.match(how, /A person starts every step that touches Facebook, and clicks Publish, Update, Mark as sold or Delete themselves; Lot Current fills in the form\./);
+  // and "A person starts every step that touches Facebook" was wrong for a queue: once a car is published, the
+  // panel opens and fills the next car's form with no new click (docs/help.md, a car that passes every check)
+  assert.doesNotMatch(how, /A person starts every step/, 'a queue opens and fills the next form by itself');
+  // the queue moves on by itself only from a listing it confirmed, and a car whose photo server Chrome has not been
+  // asked about stops like a car with a warning (docs/help.md)
+  assert.match(how, /A person starts each post, or a queue of several, and clicks Publish, Update, Mark as sold or Delete themselves; Lot Current fills in the form\. In a queue, once you publish a car and the panel confirms the new listing shows it, Lot Current opens and fills the next car's form without another click; when it cannot confirm the listing, it waits for you to click It's posted, next car ?\. A car with a warning, or one whose photos sit on a server Chrome has not been asked about yet, stops for you first, and you still check and publish each one\./);
+  const help = read('../docs/help.md');
+  assert.match(help, /A car that passes every check opens and fills the Marketplace form straight away\./, 'the queue no longer opens the next form by itself: change How it works with it');
+  assert.match(help, /So does a car whose photos sit on a server Chrome has not been asked about yet/, 'a car with an unasked photo server no longer stops: change How it works with it');
+  assert.match(help, /the panel records the post and loads the next car\. A listing page that shows this car any other way[^\n]*waits for you\.[^\n]*click \*\*It's posted, next car\*\*/, 'the queue no longer waits for It\'s posted, next car on a listing it cannot confirm: change How it works with it');
   assert.match(how, /The rescan of your website in step four can also run on its own, if you allow it, and it never touches Facebook\./);
   const step = stripTags((howPage.match(/<section aria-labelledby="honest-h">[\s\S]*?<\/section>/) || [''])[0]);
   assert.match(step, /every 3 hours while Chrome is open, with nobody at the keyboard/, 'step four says the rescan runs unattended');
@@ -519,10 +610,32 @@ test('How it works and the Terms keep "while you are away" to Facebook, and name
   const terms = read('../legal/terms-of-service.md');
   const s1 = terms.slice(terms.indexOf('## 1.'), terms.indexOf('## 2.'));
   assert.doesNotMatch(s1, /does not act while the User is away/, 'the Terms say Lot Current does nothing while the User is away; the rescan runs then');
-  assert.match(s1, /never acts on Facebook while the User is away/);
+  assert.doesNotMatch(s1, /never acts on Facebook while the User is away/, 'a queue opens and fills the next form by itself, whoever is there');
+  assert.match(s1, /never posts or edits a listing in the background or while the User is away/);
   assert.match(s1, /re-reads the dealership's website every 3 hours while Chrome is open[^.]*signed in to a Lot Current account, sends that rescan's results/, 'the Terms name the rescan and its upload');
   const page = stripTags(read('../site/legal/terms/index.html'));
-  assert.match(page, /never acts on Facebook while the User is away/, 'npm run legal-pages wrote the Terms page from the Markdown');
+  assert.match(page, /never posts or edits a listing in the background or while the User is away/, 'npm run legal-pages wrote the Terms page from the Markdown');
+});
+
+// review: the home page said the listed price is the website's "on the price basis your dealership chooses",
+// while a listing keeps the basis it was posted at (src/rescan.js postedBasis) and a change of basis is for new posts.
+test('the home page says a change of price basis is for new posts, as the rescan compares a listing on its own basis', () => {
+  const rescan = read('../extension/src/rescan.js');
+  assert.match(rescan, /^export function postedBasis\(entry, basis = 'website', seen = \[\]\) \{\n  const own = entry && entry\.basis;\n  if \(PRICE_BASES\.includes\(own\)\) return own;/m, 'a posted listing no longer keeps its own basis: the home page line can change');
+  const card = stripTags((html.match(/<h3>The website price, always<\/h3>[\s\S]*?<\/p>/) || [''])[0]);
+  assert.match(card, /on the price basis your dealership chooses; a change of basis is for new posts, and a listing keeps the basis it was posted at\. Price changes only mirror the website\./);
+});
+
+// review: How it works said a car is ready only "at your store" and that cars "at a sister store" sit under Other
+// stores. With no store ticked every store's cars count (the wizard's and Settings' own hints), so the page names
+// the choice the salesperson made.
+test('How it works says which stores count: the ones ticked in Settings, or every store when none is', () => {
+  assert.match(read('../extension/wizard.js'), /with none ticked, every store's cars count/, 'no store ticked no longer means every store: change How it works with it');
+  assert.match(read('../extension/popup.js'), /Leave all unticked to include every store\./);
+  const how = stripTags(howPage);
+  assert.doesNotMatch(how, /\bat your store\b/, 'How it works ignores the every-store choice');
+  assert.equal((how.match(/any of the website's stores, when you tick none/g) || []).length, 2, 'the scan step and the ready rule both name the choice');
+  assert.match(how, /Cars at a store you did not tick sit under Other stores\s*\./);
 });
 
 // review: the For managers page said the manager view's numbers include "which form fields could not be
@@ -537,9 +650,15 @@ test('the site never puts the form fields that could not be filled in the manage
   assert.ok(numbers.length > 100, 'For managers has its numbers section');
   assert.doesNotMatch(numbers, /numbers the salespeople's own Numbers tab keeps: how long each post took, which form fields/, 'the manager view does not show the form fields');
   assert.match(numbers, /Which form fields could not be filled is not synced: it stays in each salesperson's own browser/);
-  const caption = stripTags((html.match(/<figcaption><b>The numbers you can share[\s\S]*?<\/figcaption>/) || [''])[0]);
+  const caption = stripTags((html.match(/<figcaption><b>Your Numbers tab\.[\s\S]*?<\/figcaption>/) || [''])[0]);
   assert.ok(caption, 'the home page has its Numbers caption');
-  if (/dealership's account/.test(caption)) assert.match(caption, /fields that could not be filled, which stay in your browser/, 'the caption says the fields stay in the browser');
+  // the caption once put the fields in a list whose lead said the numbers go to the dealership's account; the
+  // account and the manager view are named only in a sentence that leaves the fields out
+  for (const sentence of caption.split(/(?<=\.)\s+/)) {
+    if (/dealership's account|manager/.test(sentence)) assert.doesNotMatch(sentence, /fields/, `the caption puts the form fields in the account or the manager view: "${sentence}"`);
+  }
+  assert.match(caption, /The fields that could not be filled stay in your browser only\./);
+  assert.doesNotMatch(stripTags(html), /The numbers (?:you can share with your manager|your manager sees)/, 'a lead that offers every number on the tab, the fields included, to the manager');
   assert.doesNotMatch(text, /managers will see the same numbers for the whole store/, 'managers see the post and to-do numbers, not the form fields');
 });
 
@@ -584,7 +703,9 @@ test('the free pilot is offered for the salespeople named in the pilot agreement
 // A posting rule ("take sold cars down the same day") asks something of the salesperson and is not a promise.
 const RESCAN_PROMISE = /\b(?:3|three)[- ]hour(?:s|ly)?\b|\bevery few hours\b|\bsame[- ]day\b|\bwithin one rescan\b/i;
 const TAKE_DOWN_RULE = /\bdown the same day\b|\bsame-day take-?downs?\b/gi;
-const RESCANS_ALLOWED = /\b(?:automatic )?rescans (?:allowed|on)\b|\bif you allow it\b|\bonly if you allow\b|\bwebsites? (?:the person|you) allow(?:ed)?\b/i;
+// "rescans on" counts only as "automatic rescans on" (a setting), never the verb ("Lot Current rescans on its
+// own"), and neither counts when it says the setting needs nothing from the person ("on by default").
+const RESCANS_ALLOWED = /\b(?:automatic rescans on|(?:automatic )?rescans allowed)\b(?! (?:its|their) own\b| by default\b)|\bif you allow it\b|\bonly if you allow\b|\bwebsites? (?:the person|you) allow(?:ed)?\b/i;
 const CHROME_OPEN = /\bChrome (?:is )?open\b/i;
 // the sentences of a page or a Markdown text that promise the rescan, with their rule wording taken out
 function rescanPromises(src, markdown) {
@@ -609,6 +730,10 @@ test('the rescan-promise check catches a same-day or 3-hour promise without both
     'Flagged within one rescan (3 hours while Chrome is open), with the listing opened for you.',
     'It re-reads the website every few hours and tells them when a car sells.',
     'Lot Current flags sold cars the same day so they come down the same day.',
+    // the verb, not the setting
+    'Lot Current rescans on its own every 3 hours while Chrome is open and flags sold cars the same day.',
+    'With Chrome open, Lot Current rescans on its own schedule and flags sold cars the same day.',
+    'Automatic rescans on by default: every 3 hours while Chrome is open.',
   ]) assert.equal(unconditionalRescanPromises(`<p>${said}</p>`, false).length, 1, said);
   for (const said of [
     'With automatic rescans allowed and Chrome open, it also tells you the same day when a car sells or its price changes.',
@@ -617,6 +742,8 @@ test('the rescan-promise check catches a same-day or 3-hour promise without both
     'facts only, sold cars down the same day.',
     'Same-day take-downs are the point of the pilot, so please clear To do items the day they appear.',
     'The posting rules ask for sold cars to come down the same day.',
+    'Downloads photos; rescans every website with automatic rescans on every 3 hours while Chrome is open.',
+    'Rescans run every 3 hours while someone\'s Chrome is open with rescans allowed.',
   ]) assert.deepEqual(unconditionalRescanPromises(said, true), [], said);
 });
 
@@ -646,6 +773,18 @@ test('every page and marketing text that promises the 3-hour rescan or the same-
   assert.match(read('../extension/src/rescanSchedule.js'), /export const RESCAN_PERIOD_MINUTES = 180;/, 'the rescan no longer runs every 3 hours: change the texts with it');
 });
 
+// review: For managers said "The page says when the last scan ran". A rescan judged a website hiccup (most of the
+// lot gone at once) is never sent (accountFlow.js scanFromStored), so the line is the last scan Lot Current trusted,
+// and the manager view's own stale note says so (manager/data.js SCAN_STALE_WHY).
+test('For managers says the last-scan line is the last trusted scan, and that hiccup scans are held back', async () => {
+  const { SCAN_STALE_WHY } = await import('../manager/data.js');
+  assert.match(SCAN_STALE_WHY, /website hiccup[^.]*not recorded/, 'the manager view no longer holds back hiccup scans: change For managers with it');
+  const page = stripTags(read('../site/for-managers/index.html'));
+  assert.doesNotMatch(page, /The page says when the last scan ran\b/, 'For managers calls the line the last scan that ran');
+  assert.match(page, /when the last scan Lot Current trusted ran/);
+  assert.match(page, /looks like a website hiccup \(most of the lot gone at once\) is held back and not recorded there/);
+});
+
 // review: For managers said "Start the free pilot, Subscribe and Manage billing open Stripe's own pages for the card
 // and the invoices". Start the free pilot calls the database's start_pilot() and opens no page; only Subscribe and
 // Manage billing go to Stripe (manager/manager.js), and the manager view says no card is asked for (manager/data.js).
@@ -660,6 +799,13 @@ test('For managers says the free pilot starts with no card, and only Subscribe a
   assert.doesNotMatch(page, /Start the free pilot\s*,\s*Subscribe and Manage billing open Stripe/i, 'For managers says Start the free pilot opens Stripe\'s pages');
   assert.match(page, /start the free pilot here, with no card/, 'For managers says the pilot needs no card');
   assert.match(page, /Subscribe and Manage billing open Stripe's own pages for the card and the invoices/);
+  // Getting started's first step is the free pilot alone while billing is closed (manager/data.js
+  // PLAN_STEP_CLOSED_TITLE), and the page no longer groups the pilot with subscribing as one Stripe step
+  const { GETTING_STARTED, PLAN_STEP_CLOSED_TITLE } = await import('../manager/data.js');
+  assert.equal(PLAN_STEP_CLOSED_TITLE, 'Start the free pilot');
+  assert.equal(GETTING_STARTED.plan.title, 'Start the free pilot or subscribe');
+  const start = ((page.match(/Four steps above the other cards(.*?)Once all four are done/) || [])[1] || '').replace(/\s+([,;)])/g, '$1');
+  assert.match(start, /^[^;]*: Start the free pilot, which asks for no card \(once paying by card opens, the step reads Start the free pilot or subscribe, and only subscribing goes to Stripe's pages\);/, 'For managers groups the free pilot with subscribing');
 });
 
 // review: the demo form's fields were drawn with --line (#e2e5e1 on white, #2f3531 on #161917: 1.27:1 and
@@ -747,21 +893,27 @@ test('the FAQ and the support page name every part of the profile Chrome syncs, 
 // reader only, so a DealerOn dealer reading the website would conclude theirs was never tried. Each place now
 // names every reader in extension/adapters/index.js, and every reader not checked on a real dealership website
 // comes with the caveat that it has been tested only on sample websites.
-test('the FAQ, How it works and the sales sheet name every website reader, each unchecked one with its caveat', () => {
+// The sales sheet and the store listing then said "Other platforms come later", a promise with no date behind it;
+// they now say what a dealer on another platform sees.
+test('the FAQ, How it works, the sales sheet and the store listing name every website reader, each unchecked one with its caveat', () => {
   const faqText = stripTags(faqPage);
   const places = {
     'the FAQ\'s Which websites work?': (faqText.match(/Which websites work\? (.*?) How do updates arrive\?/) || [])[1],
     'How it works, What it needs': stripTags((howPage.match(/<li>A dealership website[\s\S]*?<\/li>/) || [''])[0]),
     'the sales sheet, What it needs': (read('../marketing/sales-sheet.md').match(/^- A dealership website[^\n]*/m) || [])[0],
+    'the store listing, What it needs': (read('../store/listing.md').match(/^- A dealership website[^\n]*/m) || [])[0],
   };
   const nameOf = (a) => (a.PLATFORM.id === 'schemaOrg' ? /standard vehicle data/i : new RegExp(a.PLATFORM.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   for (const [place, said] of Object.entries(places)) {
     assert.ok(said, `${place} is still there`);
     for (const a of ADAPTERS) assert.match(said, nameOf(a), `${place} does not name the ${a.PLATFORM.name} reader`);
-    if (ADAPTERS.some(isCheckedLive)) assert.match(said, /checked on a live site/, `${place} says which reader has been checked on a live site`);
+    if (ADAPTERS.some(isCheckedLive)) assert.match(said, /checked on a live site|checked on a real dealership website/i, `${place} says which reader has been checked on a live site`);
     if (ADAPTERS.some((a) => !isCheckedLive(a))) assert.match(said, /tested only on sample websites/, `${place} names readers that have not read a real website without saying so`);
-    assert.doesNotMatch(said, /on the way/, `${place} promises platforms instead of naming the readers there are`);
+    assert.doesNotMatch(said, /on the way|come later|coming soon/i, `${place} promises platforms instead of naming the readers there are`);
   }
+  // what a website no reader can read gets is the extension's own message (adapters/index.js unsupportedSiteMessage)
+  assert.match(unsupportedSiteMessage(), /^Lot Current can't read the cars on this page\./, 'the unsupported-site message changed: change the sales sheet and the store listing with it');
+  for (const place of ['the sales sheet, What it needs', 'the store listing, What it needs']) assert.match(places[place], /Lot Current says it can't read the cars on that page/, place);
 });
 
 // review: the home page said "Your dealership sets how many posts a day each salesperson may make", and For
@@ -782,5 +934,8 @@ test('the daily cap is described as the code has it: the dealership chooses, eac
     assert.doesNotMatch(page, /dealership (sets|changes)|cap you set\b/i, `${name} says the dealership sets the cap, but each salesperson enters it`);
   }
   assert.match(home, /Your dealership chooses how many posts a day each salesperson may make, and each salesperson enters that number in their own Settings\./);
+  // the card's heading said "A daily cap you choose", which a salesperson reads as their own choice
+  assert.doesNotMatch(home, /A daily cap you choose/);
+  assert.match(html, /<h3>A daily cap your dealership picks<\/h3>/);
   assert.match(managers, new RegExp(`posts a day, ${DEFAULT_DAILY_CAP} unless changed\\. Your dealership chooses the number, and each salesperson enters it in their own extension's Settings \\(Safety, Posts per day, per salesperson\\), up to 100; the manager view does not set or lock it\\.`));
 });

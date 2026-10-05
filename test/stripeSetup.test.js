@@ -171,7 +171,7 @@ test('stripe setup: a live key is refused without --live, and a missing key is a
   const none = await runSetup({ key: '', pricing, fetchImpl: s.fetchImpl });
   assert.equal(none.ok, false);
   assert.equal(s.calls.length, 0);
-  const allowed = await runSetup({ key: 'sk_live_abc', live: true, pricing: { ...pricing, hypothesis: false }, fetchImpl: s.fetchImpl });
+  const allowed = await runSetup({ key: 'sk_live_abc', live: true, pricing: { ...pricing, hypothesis: false, confirmedOn: '2026-12-01' }, fetchImpl: s.fetchImpl });
   assert.equal(allowed.mode, 'live');
   assert.ok(s.calls.length > 0);
 });
@@ -181,17 +181,23 @@ test('stripe setup: a live key is refused without --live, and a missing key is a
 // "Pricing confirmed"), and the website says prices are confirmed with the
 // dealer before any paid subscription starts.
 test('stripe setup: live mode is refused while pricing.json is still a hypothesis, before anything is read; test mode is not', async () => {
-  for (const guess of [pricing, { ...pricing, hypothesis: true }, { ...pricing, hypothesis: undefined }, { ...pricing, hypothesis: 'false' }]) {
+  // (the committed file is refused the same way while it says "hypothesis": true; test/marketing.test.js holds
+  // when it may say false)
+  // and while it says "hypothesis": false without the date of the dealer's written agreement, or with a date that is not one
+  const { confirmedOn: _date, ...numbers } = pricing;
+  const guesses = [{ ...numbers, hypothesis: true }, { ...numbers, hypothesis: undefined }, { ...numbers, hypothesis: 'false' }, { ...numbers, hypothesis: true, confirmedOn: '2026-12-01' },
+    { ...numbers, hypothesis: false }, { ...numbers, hypothesis: false, confirmedOn: '' }, { ...numbers, hypothesis: false, confirmedOn: 'soon' }, { ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }];
+  if (pricing.hypothesis !== false) guesses.unshift(pricing);
+  for (const guess of guesses) {
     const s = fakeStripe();
     const r = await runSetup({ key: 'sk_live_abc', live: true, apply: true, pricing: guess, fetchImpl: s.fetchImpl, webhookUrl: REF });
-    assert.equal(r.ok, false, JSON.stringify(guess.hypothesis));
+    assert.equal(r.ok, false, JSON.stringify([guess.hypothesis, guess.confirmedOn]));
     assert.equal(s.calls.length, 0, 'nothing read or created in live mode');
     assert.deepEqual(r.secrets, {});
     const refused = r.lines.find((l) => l.check === 'marketing/pricing.json');
     assert.ok(refused && !refused.ok && !refused.note, 'a failure, not a note');
     assert.match(refused.detail, /"hypothesis": true[\s\S]*docs\/launch-checklist\.md, "Pricing confirmed"/);
   }
-  assert.equal(pricing.hypothesis, true, 'the committed file is still a hypothesis, so the live run is refused today');
   const s = fakeStripe();
   const test = await runSetup({ key: KEY, apply: true, pricing, fetchImpl: s.fetchImpl, webhookUrl: REF });
   assert.equal(test.ok, true, 'test mode moves no money and runs on the hypothesis');

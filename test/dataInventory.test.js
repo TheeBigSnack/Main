@@ -575,6 +575,45 @@ test('the services production setup chooses, and the website\'s host, are each a
   assert.match(cells('GoDaddy'), /inbox/);
 });
 
+// review: the Web Store answers named only Supabase for the sign-in code, while the extension's sign-in
+// email goes out through Resend; and the merge of the two processor lists dropped the note that which
+// company runs the inbox (GoDaddy, or Microsoft behind its Microsoft 365 mailbox) is for the owner to confirm.
+test('the Web Store answers name every company the extension\'s sign-in email passes, and the inbox line asks the owner which company holds the mail', () => {
+  // the extension's sign-in row in the inventory, and the companies it names
+  const signIn = inventory.split('\n').find((l) => l.startsWith('| Sign in (`src/account.js`'));
+  assert.ok(signIn, 'docs/data-inventory.md has no Sign in row for the extension');
+  const cells = signIn.split('|').map((c) => c.trim());
+  const named = cells[cells.length - 3].split(',').map((n) => n.trim()).filter(Boolean);
+  assert.ok(named.includes('Resend'), 'the inventory no longer names Resend for the sign-in email: update this test');
+  const row = section(storeTexts, '## What the extension sends, and to whom (mirrors `docs/data-inventory.md`)').split('\n').find((l) => /sign-in code/.test(l));
+  assert.ok(row, 'the Web Store answers have no sign-in row');
+  for (const n of named) assert.ok(row.includes(n), `the Web Store answers' sign-in row does not name ${n}`);
+  const resend = recipients().find((r) => r.name === 'Resend');
+  assert.ok(resend.namedIn.includes('legal/chrome-web-store-privacy.md'), 'the inventory does not hold the Web Store answers to naming Resend');
+  // a mailbox on Microsoft 365, with no Microsoft processor line: the owner has not said who holds the mail
+  const godaddy = section(policy, '## Processors').split('\n').find((l) => l.startsWith('- **GoDaddy**'));
+  const microsoftListed = /^- \*\*Microsoft\*\*/m.test(section(policy, '## Processors'));
+  if (/Microsoft 365/.test(godaddy) && !microsoftListed) {
+    assert.match(godaddy, /\[Owner: confirm which company runs this mailbox/, 'the privacy policy names a Microsoft 365 mailbox as GoDaddy\'s and does not ask the owner which company holds the mail');
+    const row2 = recipients().find((r) => r.name === 'GoDaddy');
+    assert.ok(row2, 'no GoDaddy row');
+    assert.match(inventory.split('\n').find((l) => l.startsWith('| GoDaddy |')), /\[Owner: confirm which company runs this mailbox/, 'the inventory\'s GoDaddy row does not ask the owner which company holds the mail');
+  }
+});
+
+// review: the privacy policy said Cloudflare "serves the manager view" before the manager view is deployed there;
+// the inventory's row says it applies once production setup step 6 has run.
+test('while the inventory says the manager view goes to Cloudflare only once step 6 has run, the privacy policy says it in the future tense', () => {
+  const row = inventory.split('\n').find((l) => l.startsWith('| Cloudflare |'));
+  assert.ok(row, 'no Cloudflare row');
+  const line = section(policy, '## Processors').split('\n').find((l) => l.startsWith('- **Cloudflare**'));
+  assert.ok(line, 'no Cloudflare line in the privacy policy');
+  if (/once `docs\/production-setup\.md` step 6 has run/.test(row)) {
+    assert.doesNotMatch(line, /^- \*\*Cloudflare\*\*: serves the manager view/, 'the privacy policy says Cloudflare serves the manager view, which is not deployed there yet');
+    assert.match(line, /will serve the manager view \(Cloudflare Pages\) once it is deployed there/);
+  }
+});
+
 test('every Recipient cell names a recipient of the list, and every recipient receives something', () => {
   const names = new Set(recipients().map((r) => r.name));
   const used = new Set();

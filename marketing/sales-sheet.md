@@ -6,7 +6,7 @@ Lot Current is a Chrome extension for dealership salespeople. It reads your deal
 
 ## What it does
 
-1. **Reads your website.** Click Scan on your used inventory page. Lot Current lists the pre-owned cars at your store that have photos and a price. New, demo and loaner cars never get through.
+1. **Reads your website.** Click Scan on your used inventory page. Lot Current lists the cars at your store that your website marks as pre-owned and that have photos and a price; a car whose details don't add up goes to Needs a look instead. It goes by your website's own labels, so you still look over each car before you post it.
 2. **Fills in the listing.** Click Post on a car. The Marketplace form opens with the year, make, model, mileage, price, VIN, colors, body style, fuel, transmission, location, a description written from the website's facts, and the photos. Title status and condition come from your dealership's defaults. Several cars at once: tick them and post them one after another.
 3. **You check it and click Publish.** Lot Current shows you what it filled, as the form shows it, and anything it couldn't. Then you publish, every time; Lot Current never does.
 4. **Keeps listings honest.** With automatic rescans allowed, Lot Current re-reads your website every 3 hours while Chrome is open. Sold car? Price change? It shows on your To do list with a button that opens the right listing, price ready to update. Your manager sees who posted what.
@@ -14,7 +14,7 @@ Lot Current is a Chrome extension for dealership salespeople. It reads your deal
 ## What Lot Current won't do
 
 - Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it, and a test that fails if any appears.
-- Post a new, demo or loaner vehicle, or any car the pre-owned check can't confirm.
+- Post a car the pre-owned check reads as new, demo or loaner, or any car it can't confirm.
 - Invent a price or a price drop. The listed price is the website price.
 - Hide that the car is at a dealership. Every description names the store and your role.
 - Ask for your Facebook password, read your cookies or messages, use fake delays, proxies or extra accounts.
@@ -22,7 +22,7 @@ Lot Current is a Chrome extension for dealership salespeople. It reads your deal
 ## What it needs
 
 - Google Chrome on the salesperson's computer.
-- A dealership website on Dealer Inspire, which is where Lot Current has been checked on a live site. It also has readers for DealerOn and Dealer.com websites and for websites that publish standard vehicle data; those have been tested only on sample websites so far. Other platforms come later.
+- A dealership website on Dealer Inspire, which is where Lot Current has been checked on a live site. It also has readers for DealerOn and Dealer.com websites and for websites that publish standard vehicle data; those have been tested only on sample websites so far. On a website none of these readers can read, Lot Current says it can't read the cars on that page.
 - The salesperson's own Facebook account. Marketplace stopped taking vehicle listings from dealer Pages in 2023, which is why salespeople post.
 
 ## Straight talk

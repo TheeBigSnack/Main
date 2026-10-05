@@ -10,7 +10,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { PILOT_RETENTION_DAYS } from '../extension/src/pilot.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
@@ -26,7 +29,9 @@ import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 
-const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+// A checkout with CRLF line ends (git's autocrlf on Windows) reads the same as
+// an LF one: every line-anchored pattern below is written for \n.
+const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
 const doc = (name) => read('../docs/' + name);
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -165,7 +170,8 @@ test('help.md gives the one-car-at-a-time sold check only for the standard-data 
   // what every other reader still does when its check fails: no car is marked gone that scan
   const one = { vin: 'V1', name: 'Car', decision: 'ready', price: 1 };
   const held = diffScans({ vehicles: { V1: one } }, { vehicles: {} }, { confirm: { checked: [], notFound: [], error: 'HTTP 500' } }).needsALook[0].text;
-  const rest = help.split('\n').find((l) => l.includes(`"${held}"`)) || '';
+  // (the standard-data bullet quotes it too, for a refused page: the whole-check rule's own bullet is the other one)
+  const rest = help.split('\n').find((l) => l.includes(`"${held}"`) && l !== own) || '';
   assert.match(rest, /^- On Dealer Inspire, DealerOn and Dealer\.com websites, one failed check holds back every missing car for that scan/, `help.md names the readers that still show "${held}"`);
 });
 
@@ -392,7 +398,7 @@ test('the help and the data inventory say which website the side panel\'s list o
   assert.ok(para, 'help.md no longer explains the side panel\'s own list');
   assert.doesNotMatch(para, /list for the website you last scanned/, 'help.md says the panel\'s list follows the last scan; it follows the website the panel last worked on');
   assert.match(para, /list for the website it last worked on/, 'help.md does not say the list opens on the website the panel last worked on');
-  assert.match(para, /scanning another website in the popup does not switch it/, 'help.md does not say a scan in the popup leaves the panel\'s website alone');
+  assert.match(para, /[Ss]canning another website in the popup does not switch it/, 'help.md does not say a scan in the popup leaves the panel\'s website alone');
   const row = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `lastPostOrigin` |'));
   assert.ok(row, 'the data inventory has no lastPostOrigin row');
   const [, , why, written] = row.split(' | ');
@@ -781,8 +787,6 @@ test('help, README and the onboarding emails say the address comes from the webs
   }
 });
 
-// node --test runs every test( and it( call site once; none of the files
-// makes tests in a loop, so the count of call sites is the count npm test prints.
 test('the docs say the template writes the description from the car\'s listed facts and does not copy the website\'s write-up', () => {
   // the template once copied the website's opening sentences, and the help kept saying so after the code stopped
   const COPIES = [/write-up line/i, /opening sentences/i, /write-up is kept/i, /\bcop(?:y|ies|ied)\b[^.]{0,40}\bsentences\b/i, /real write-up on the website/i];
@@ -798,6 +802,60 @@ test('the docs say the template writes the description from the car\'s listed fa
   assert.ok(help.includes("The template builds the description from the car's listed facts"), 'docs/help.md does not say what the template builds the description from');
   assert.ok(help.includes('the write-up is sent to it as the website wrote it, a whole line at a time, from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
   assert.ok(help.includes("The service's draft goes through the same checks"), "docs/help.md does not say the service's draft is checked");
+});
+
+// README gives the number of test( and it( call sites in test/*.test.js, and
+// node --test runs each one once only while every call site stands alone at the
+// start of a line: a test made in a loop or a callback is indented or follows
+// other code on its line, and a subtest (t.test) or a node:test describe/suite
+// adds tests the count never sees. testSiteProblems refuses all of those.
+const TEST_CALL = /(?<![.\w$])(?:test|it)(?:\.(?:only|skip|todo))?\(/g;
+const NODE_TEST_NAMES = new Set(['test', 'after', 'afterEach', 'before', 'beforeEach', 'mock']);
+function testSiteProblems(src) {
+  const problems = [];
+  src.split(/\r?\n/).forEach((line, i) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+    for (const m of line.matchAll(TEST_CALL)) if (m.index !== 0) problems.push(`line ${i + 1}: a test call not at the start of its line: ${line.trim().slice(0, 60)}`);
+    if (/\b(?:t|ctx|context)\.(?:test|it|describe|suite)\(/.test(line)) problems.push(`line ${i + 1}: a subtest: ${line.trim().slice(0, 60)}`);
+  });
+  for (const m of src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*['"]node:test['"]/gm)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/)[0];
+      if (name && !NODE_TEST_NAMES.has(name)) problems.push(`imports ${name} from node:test`);
+    }
+  }
+  for (const m of src.matchAll(/^import\b[^\n]*from\s*['"]node:test['"]/gm)) if (!/^import\s*\{[^}]*\}\s*from/.test(m[0])) problems.push(`imports node:test other than by name: ${m[0]}`);
+  return problems;
+}
+
+test('every test in test/*.test.js is one call site at the start of its line, so README\'s count is what npm test runs', () => {
+  const dir = new URL('./', import.meta.url);
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.test.js'))) {
+    assert.deepEqual(testSiteProblems(readFileSync(new URL(f, dir), 'utf8')), [], `test/${f}`);
+  }
+  // the check itself sees a test made in a loop, in a callback, as a subtest or by describe
+  // (written with TEST so this file's own lines do not hold the shapes they show)
+  const probe = (src) => testSiteProblems(src.replaceAll('TEST', 'test'));
+  assert.notDeepEqual(probe("for (const n of [1, 2]) {\n  TEST('car ' + n, () => {});\n}\n"), []);
+  assert.notDeepEqual(probe("[1, 2].forEach((n) => TEST('car ' + n, () => {}));\n"), []);
+  assert.notDeepEqual(probe("TEST('cars', async (t) => {\n  await t.TEST('one', () => {});\n});\n"), []);
+  assert.notDeepEqual(probe("import { TEST, describe } from 'node:test';\n"), []);
+  assert.notDeepEqual(probe("import * as nt from 'node:test';\n"), []);
+  assert.deepEqual(probe("import { TEST, after } from 'node:test';\n// a comment naming TEST( is fine\nTEST('one', () => { assert.ok(/x/.test('x')); });\n"), []);
+});
+
+test('a checkout with CRLF line ends reads as LF, so the CHANGELOG headings are still found', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lot-current-crlf-'));
+  try {
+    const file = join(dir, 'CHANGELOG.md');
+    writeFileSync(file, read('../CHANGELOG.md').replace(/\n/g, '\r\n'));
+    const text = read(pathToFileURL(file).href);
+    assert.ok(!text.includes('\r'), 'read() keeps the carriage returns of a CRLF file');
+    const sections = text.split(/\n(?=## )/).slice(1);
+    assert.ok(sections.some((s) => /^## Unreleased[ \t]*(\n|$)/.test(s)), 'the "## Unreleased" heading is not found in a CRLF copy of CHANGELOG.md');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('README\'s unit-test count is the number of tests npm test runs', () => {
@@ -895,6 +953,34 @@ test('while accounts are configured, no text says the posted list stays only in 
   assert.ok(profile, 'README no longer explains the synced profile');
   assert.doesNotMatch(profile, /account[^.]*\bis Milestone 4\b/i, "README's profile line calls the Lot Current account a milestone still to come");
   assert.match(profile, /\*\*Account\*\*/, "README's profile line does not point at the Account item");
+});
+
+// README's profile line once named only the name, role and listing defaults as
+// what follows the person, and said the account gets the posted list "from then
+// on", while settingsFromProfile carries the closing line, the Terms acceptance
+// and the rewrite-service address too, and the first sync sends the posts and
+// numbers recorded before the sign-in (syncPayload sends every own post, and
+// every post attempt when nothing has synced yet).
+test('README and the help name every part of the profile that follows the person, and say earlier posts sync too', () => {
+  const code = read('../extension/src/settings.js');
+  const person = code.match(/const person = \{([^\n]*)\};/);
+  assert.ok(person, 'settingsFromProfile no longer builds the person part in one line: check what follows the person');
+  assert.deepEqual([...person[1].matchAll(/(\w+): /g)].map((m) => m[1]).filter((k) => k !== 'key'), ['salesperson', 'defaults', 'legal', 'rewrite'], 'the person part of the profile changed: update README and docs/help.md');
+  assert.match(code, /rewrite: \{ \.\.\.\(profile\.rewrite \|\| \{\}\), key: '' \}/, 'the rewrite-service key follows the profile now: the texts say it stays on the computer');
+  const PERSON = { salesperson: /\bname, role, closing line\b/, defaults: /listing defaults/, legal: /Terms acceptance/, rewrite: /rewrite-service address/ };
+  const texts = { 'README.md': read('../README.md').split('\n').find((l) => l.startsWith('- **Your profile follows you.**')), 'docs/help.md': doc('help.md').split('\n').find((l) => l.startsWith('Your profile follows you.')) };
+  for (const [name, line] of Object.entries(texts)) {
+    assert.ok(line, `${name} no longer says what follows the person`);
+    const follows = line.slice(0, line.search(/follow you\b/));
+    for (const [key, re] of Object.entries(PERSON)) assert.match(follows, re, `${name}: what follows the person leaves out ${key}`);
+    assert.match(line, /dealership part \(name, address, stores, price basis, price note and daily cap\)/, `${name} does not list the dealership part`);
+    assert.match(line, /rewrite-service key stays on the computer/, `${name} does not say the rewrite-service key stays behind`);
+  }
+  assert.doesNotMatch(texts['README.md'], /from then on/, "README's profile line says only posts after the sign-in reach the account");
+  assert.match(texts['README.md'], /including the ones from before you signed in/, "README's profile line does not say earlier posts sync too");
+  const sync = read('../extension/src/sync.js');
+  assert.match(sync, /const isOwn = \(entry, userId\) => entry\.mine !== false && \(!entry\.userId \|\|/, 'a post recorded before the sign-in (no userId) may no longer sync: check README');
+  assert.match(sync, /const cutoff = last === null \? null :/, 'the first sync may no longer send every post attempt: check README');
 });
 
 // Two rewrite services read an Anthropic API key: the standalone backend/
@@ -1081,11 +1167,186 @@ test('no text says the data stays only in the browser: the profile follows the C
   assert.ok(line, "README no longer says where each salesperson's scans, settings and posted list are kept");
   assert.match(line, /the profile \(above\) is in Chrome's synced storage, so it follows their Chrome sign-in/, "README's storage line does not say the profile follows the Chrome sign-in");
   if (accountsConfigured()) {
-    assert.match(line, /while they are signed in to a Lot Current account their posted list, post timings, to-do items and each scan's counts also sync to the dealership's account/, "README's storage line does not say what syncs to the dealership's account");
+    assert.match(line, /while they are signed in to a Lot Current account their posted list, post timings, to-do items and the newest scan's counts also sync to the dealership's account/, "README's storage line does not say what syncs to the dealership's account");
   }
   // Clear everything for this website does not reach the synced profile (legal/privacy-policy.md, Retention)
   const support = read('../site-src/pages/support.html').split('\n').filter((l) => /stays in your browser/.test(l));
   for (const l of support) assert.match(l, /<b>Clear everything for this website<\/b> removes it\. Your profile \([^)]*closing line[^)]*\) is also kept by Chrome's sync under your Google account, and Settings, <b>Forget my synced profile<\/b> removes it\./, 'the support page says Clear everything removes what the extension keeps, but the synced profile needs Forget my synced profile');
+});
+
+// Three help lines went stale against the code they describe: the side
+// panel's own list was said to show "the same cars as the popup's tab" in the
+// very case where the popup shows another website (panelList.js
+// defaultOrigin); a single ready arrival was said to have its own Post button
+// when a Facebook draft shows Mark posted instead (popup.js postButton); and
+// a standard-data website's failed page check left out the refusal, which
+// still holds back every missing car (rescan.js, schemaOrg.js confirmMissing).
+test('the help says what the panel list, a single arrival and a refused page check show', () => {
+  const help = doc('help.md').split('\n');
+  const panel = help.find((l) => l.startsWith('**Post the next car from the side panel.**'));
+  assert.ok(panel, 'docs/help.md no longer explains the side panel\'s own list');
+  assert.match(read('../extension/src/panelList.js'), /if \(lastOrigin && has\(all, lastOrigin\)\) return lastOrigin;/, 'the panel no longer opens on the website it last worked on: check the help');
+  assert.doesNotMatch(panel, /as the popup's tab,/, 'the help says the panel shows the popup tab\'s cars, which can be another website\'s');
+  assert.match(panel, /as the popup's tab shows for that website/);
+  assert.match(panel, /once that website's data was cleared/, 'the help leaves out that a cleared website sends the panel to the most recent scan');
+
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /const readyArrivals = \(items\) => items\.filter\(\(n\) => n\.decision === DECISION\.READY && !state\.posted\[n\.vin\]\);/, 'ready arrivals changed: check what the help says a single one shows');
+  assert.match(popup, /if \(state\.drafts\[vin\]\) \{\n[^\n]*draftPill[^\n]*\n[^\n]*data-action="post"[^\n]*>Mark posted</, 'a Facebook draft no longer shows Mark posted: check the help');
+  const arrivals = help.find((l) => l.startsWith('- On **To do**, **Queue all N ready arrivals**'));
+  assert.ok(arrivals, 'docs/help.md no longer explains Queue all N ready arrivals');
+  assert.match(arrivals, /a single one has its own \*\*Post\*\* button, or, when it was saved as a draft on Facebook, a "Draft on Facebook" pill and \*\*Mark posted\*\*/, 'the help says a single ready arrival always has a Post button');
+
+  const rescan = read('../extension/src/rescan.js');
+  assert.match(rescan, /const notFound = new Set\(confirm && !confirm\.error \?/, 'a refused check may now mark cars gone: check the help');
+  assert.match(rescan, /text: 'Missing from this scan but not confirmed gone\. Rescan later\.'/);
+  const schema = read('../extension/adapters/schemaOrg.js');
+  assert.match(schema, /if \(item\.verdict\.refused\) \{\s*confirm\.error = item\.verdict\.refused;/, "a refused car page no longer stops the whole check: check the help");
+  assert.match(schema, /else if \(got && got\.kind === 'blocked'\) confirm\.error =/, 'a refused comparison page no longer stops the whole check: check the help');
+  const standard = help.find((l) => l.startsWith('- On a website Lot Current reads from the standard vehicle data'));
+  assert.ok(standard, 'docs/help.md no longer explains the standard-data check of missing cars');
+  assert.match(standard, /except when the website turned a page away \(HTTP 403, 429 or 503, or a check page shown instead of it\)[^.]*: then no car is marked gone in that scan, each missing car shows under \*\*Needs a look\*\* as "Missing from this scan but not confirmed gone\. Rescan later\."/, 'the help leaves out that a refusal holds back every missing car');
+});
+
+// The help's Billing card once grouped Start the free pilot with Subscribe
+// and Manage billing under "(Stripe's own pages, ...)", as if the pilot took a
+// card; the manager view's own action says no card is asked for.
+test('the help keeps Start the free pilot apart from the two buttons that open Stripe', () => {
+  assert.match(read('../manager/data.js'), /label: 'Start the free pilot', does: '[^\n]*no card is asked for' \}/, 'the free pilot now asks for a card: check the help');
+  const billing = doc('help.md').split('\n').find((l) => l.startsWith('- **Billing**:'));
+  assert.ok(billing, 'docs/help.md no longer explains the Billing card');
+  assert.doesNotMatch(billing, /\*\*Start the free pilot\*\*, \*\*Subscribe\*\* and \*\*Manage billing\*\* \(Stripe's own pages/, 'the help puts Start the free pilot among Stripe\'s own pages');
+  assert.match(billing, /\*\*Start the free pilot\*\* \(no card\), and \*\*Subscribe\*\* and \*\*Manage billing\*\* \(Stripe's own pages/);
+});
+
+// The functions on the production project were deployed by hand, before the
+// Supabase workflow's first run, and production-setup's step 3 says verify
+// has not compared them with the repository yet. stripe-setup and the
+// website notes still stated what those deployed functions answer as fact.
+// A line that says a function is deployed on production and what it answers
+// says that holds for the repository's code, and names verify.
+test('the guides say what a deployed function answers only as what the repository\'s code does, until verify compares them', () => {
+  const setup = read('../docs/production-setup.md');
+  assert.match(setup, /\*\*verify\*\*: compares production with the repository/, 'production-setup no longer has a verify mode: check these lines');
+  const ANSWERS = /\b(?:answers with what is missing|refuses every request)\b/;
+  const DEPLOYED = /\b(?:is|were) deployed (?:on the production project|outside the Supabase workflow)\b/;
+  let seen = 0;
+  for (const rel of ['../docs/stripe-setup.md', '../docs/website.md']) {
+    for (const line of read(rel).split('\n').filter((l) => DEPLOYED.test(l) && ANSWERS.test(l))) {
+      seen += 1;
+      assert.match(line, /[Ii]f what was deployed is this repository's code \(`docs\/production-setup\.md` step 3's \*\*verify\*\* compares the two\)/, `${rel.slice(3)}: "${line.trim().slice(0, 100)}..." states what the deployed function answers as fact`);
+    }
+  }
+  assert.equal(seen, 2, 'stripe-setup and website.md each say what a deployed function answers');
+});
+
+// supabase/README.md drifted from the code in eight places: the header said
+// everything stays in the browser (the profile goes to Chrome sync); "the
+// two functions" after the header named four; the sync function's
+// late-sighting rule left out that a take-down needs rows of the caller's;
+// the checkout 409 said Stripe retries an unpaid invoice (it no longer does);
+// the seat rule for an untagged price left out the fallback with no seat
+// price set; "choose whether to prorate" read as settled while the owner has
+// not set the rule; two db push comments named files step 3 already applied;
+// and /rewrite left out its 400 for a missing dealership name.
+test('supabase/README.md says what the functions and the billing code do', () => {
+  const readme = read('../supabase/README.md');
+  const flat = readme.replace(/\s+/g, ' ');
+  assert.doesNotMatch(flat, /everything stays in the browser/, 'the header says everything stays in the browser, but the profile goes to Chrome sync');
+  assert.match(flat, /the profile still goes to Chrome's synced storage/);
+
+  const functions = readdirSync(new URL('../supabase/functions/', import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name).sort();
+  assert.deepEqual(functions, ['billing', 'lead', 'rewrite', 'sync'], 'the functions changed: check how supabase/README.md names them');
+  assert.doesNotMatch(readme, /^## The two functions$|\*\*Secrets and the two functions\.\*\*/m, 'supabase/README.md calls rewrite and sync "the two functions" after its header names four');
+  assert.match(readme, /^## The rewrite and sync functions$/m);
+
+  const sync = read('../supabase/functions/sync/index.ts');
+  assert.match(sync, /if \(kind === 'takeDown'\) return rows\.length > 0 && up\.length === 0;/, 'the late-sighting rule changed: check supabase/README.md');
+  assert.match(sync, /return to !== null && up\.length > 0 && up\.every\(\(r\) => intOrNull\(r\.price\) === to\)/);
+  assert.doesNotMatch(flat, /none of their rows for it up/, 'the late-sighting rule leaves out that a take-down needs rows of the caller\'s');
+  assert.match(flat, /for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up/);
+
+  const billing = read('../supabase/functions/_shared/billing.mjs');
+  assert.match(billing, /an invoice being retried \(past_due\) or no longer retried\n\/\/ but still payable \(unpaid\)/, 'the billing code\'s account of unpaid changed: check supabase/README.md');
+  assert.doesNotMatch(flat, /Stripe retries the open invoice/, 'supabase/README.md says Stripe retries an unpaid invoice');
+  assert.match(billing, /if \(priceSeat \? price === priceSeat : price !== priceRooftop\) extra \+= qty;/, 'the untagged seat rule changed: check supabase/README.md');
+  assert.doesNotMatch(flat, /an untagged price counts only when it is `STRIPE_PRICE_SEAT`/, 'the seat rule leaves out the fallback with no seat price set');
+  assert.match(flat, /with `STRIPE_PRICE_SEAT` unset, whenever it is not `STRIPE_PRICE_ROOFTOP`/);
+
+  if (/^- \*\*11\.2\*\*/m.test(read('../legal/questions-for-attorney.md'))) {
+    assert.doesNotMatch(flat, /choose whether to prorate/, 'supabase/README.md leaves proration to whoever adds a seat, while the owner has not set the rule');
+    assert.match(flat, /not set yet: `legal\/questions-for-attorney\.md` 11\.2/);
+  }
+  assert.doesNotMatch(readme, /db push\s+# applies 0\d{3}_/, 'a db push comment names a file step 3\'s push already applied');
+
+  const rewrite = read('../supabase/functions/rewrite/index.ts');
+  assert.match(rewrite, /if \(!dealerNameOf\(facts\)\) return json\(req, 400, \{ ok: false, error: NO_DEALER_NAME \}\);/, 'the rewrite function no longer refuses a body without the dealership\'s name: check supabase/README.md');
+  const msg = rewrite.match(/const NO_DEALER_NAME = "([^"]+)";/)[1];
+  assert.ok(flat.includes(`gets 400 \`${msg}\``), 'supabase/README.md leaves out /rewrite\'s 400 for a missing dealership name');
+});
+
+// README's Account item once sent readers to "steps 3 to 6: the functions, ..."
+// as what must go live before a sign-in completes, after production-setup's
+// step 3 said all four functions were up, and its storage line called two
+// things the only ones that go further, leaving out the description writer.
+// The range it names covers exactly the steps its list names, by heading, and
+// lists the functions only while step 3 says they are not up.
+test('README points at the set-up steps still open, and its storage line names the description writer', () => {
+  const setup = read('../docs/production-setup.md');
+  const headings = Object.fromEntries([...setup.matchAll(/^## Step (\d+)\. ([^[\n]*)/gm)].map((m) => [Number(m[1]), m[2].trim()]));
+  const account = read('../README.md').split('\n').find((l) => l.startsWith('- **Account**'));
+  assert.ok(account, 'README no longer has its Account item');
+  const m = account.match(/`docs\/production-setup\.md` steps (\d+) to (\d+): ([^;)]*)/);
+  assert.ok(m, "README's Account item no longer names the production-setup steps a sign-in waits for");
+  const [from, to] = [Number(m[1]), Number(m[2])];
+  const NAMED = { 'the sign-in settings': /^Sign-in settings/, 'the sign-in email sender': /^The sign-in email sender/, 'the manager view': /^The manager view/, 'the first dealership': /^The first dealership/, 'the functions': /\bthe functions\b/ };
+  const items = m[3].split(/, | and /).map((x) => x.trim()).filter(Boolean);
+  for (const item of items) {
+    assert.ok(NAMED[item], `README names "${item}": add it to this test's map`);
+    const step = Object.entries(headings).find(([, h]) => NAMED[item].test(h));
+    assert.ok(step, `docs/production-setup.md has no step for "${item}"`);
+    assert.ok(Number(step[0]) >= from && Number(step[0]) <= to, `README puts "${item}" in steps ${from} to ${to}, and it is step ${step[0]}`);
+  }
+  for (let n = from; n <= to; n++) assert.ok(items.some((item) => NAMED[item].test(headings[n] || '')), `README's steps ${from} to ${to} include step ${n} (${headings[n]}) without naming it`);
+  if (/already has the database[^.]*all four functions/.test(setup)) assert.ok(!items.includes('the functions'), 'production-setup says the functions are up, and README still lists them as what a sign-in waits for');
+  const storage = read('../README.md').split('\n').find((l) => l.startsWith("Each salesperson's scans, settings, posted list and numbers are kept in their own browser"));
+  assert.doesNotMatch(storage, /\bTwo things also go further\b/, "README's storage line calls two things the only ones that leave the browser");
+  assert.match(storage, /description writer[^.]*rewrite service/, "README's storage line leaves out what the description writer sends");
+});
+
+// review: the privacy texts, README, help and set-up's Terms summary said "each scan's (time and) counts" sync,
+// while each sync sends one scan's counts, the newest stored one, and a scan judged a website hiccup sends none
+// (src/accountFlow.js scanFromStored).
+test('no text says each scan\'s counts sync: a sync sends the newest scan\'s, and none for a website hiccup', () => {
+  const flow = read('../extension/src/accountFlow.js');
+  assert.match(flow, /export function scanFromStored\(\{ snapshot = null, diff = null \} = \{\}\) \{\n  if \(diff && diff\.unreliable\) return null;/, 'a hiccup scan\'s counts may sync now: these texts can change');
+  const EACH = /\b(?:each|every) scan's (?:time and )?counts\b/i;
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../${dir}/${f}`);
+  const pages = readdirSync(new URL('../site-src/pages/', import.meta.url)).map((f) => `../site-src/pages/${f}`);
+  for (const rel of ['../README.md', ...md('docs'), ...md('legal'), ...md('marketing'), '../store/listing.md', ...pages, '../extension/src/wizardSteps.js', '../extension/popup.js']) {
+    const hit = read(rel).match(EACH);
+    assert.equal(hit && hit[0], null, `${rel} says "${hit && hit[0]}" sync, while a sync sends the newest scan's counts and none for a website hiccup`);
+  }
+  const policy = read('../legal/privacy-policy.md').split('\n').find((l) => l.startsWith('| Scan results |'));
+  assert.match(policy, /of the newest scan, except a scan in which so many cars vanished at once that Lot Current treats it as a website hiccup, which sends none/);
+  const store = read('../legal/chrome-web-store-privacy.md');
+  assert.match(store, /the newest scan's counts \(none for a scan that looked like a website hiccup\)/);
+  assert.match(store, /unless the rescan looked like a website hiccup, the scan's counts/);
+});
+
+// review: help.md said "If you already belong to that dealership, a code does nothing and says so", while
+// redeem_invite (as 0010 last defined it) turns a salesperson who redeems a manager code into a manager and
+// leaves the code unused only for a member already at the code's role or a manager.
+test('the help says an invite code can raise a member\'s role and does nothing only for a member at its role or a manager', () => {
+  const dir = new URL('../supabase/migrations/', import.meta.url);
+  const defines = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().filter((f) => /create or replace function public\.redeem_invite\(/.test(read(`../supabase/migrations/${f}`)));
+  const latest = read(`../supabase/migrations/${defines[defines.length - 1]}`);
+  const body = latest.slice(latest.indexOf('create or replace function public.redeem_invite('));
+  assert.match(body, /if found and \(member\.role = 'manager' or member\.role = inv\.role\) then/, 'redeem_invite changed who a code leaves alone: update help.md and this test');
+  assert.match(body, /on conflict \(user_id, dealership_id\) do update\s+set role = excluded\.role/, 'redeem_invite no longer raises a member\'s role: update help.md and this test');
+  const help = doc('help.md');
+  assert.doesNotMatch(help, /If you already belong to that dealership, a code does nothing/, 'help.md says a code does nothing for any member, while a manager code makes a salesperson a manager');
+  assert.match(help, /A code can raise your role, never lower it: a salesperson who enters a manager code becomes a manager\. If you already belong to that dealership with the code's role, or as a manager, the code does nothing and says so/);
 });
 
 // "It didn't post" ends the post attempt the click on Post opened, as
@@ -1154,6 +1415,18 @@ test('texts about the daily cap say each salesperson enters the dealership\'s nu
       }
     }
   }
+  // review: the posting rules (shown in the product from src/postingRules.js) said "The dealership sets how many
+  // posts a day", and the subscription agreement "the daily cap it sets for its staff", with no word of who enters it
+  const legal = readdirSync(new URL('../legal/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../legal/${f}`);
+  for (const rel of [...legal, '../extension/src/postingRules.js']) {
+    for (const line of read(rel).split('\n').filter((l) => /daily (post )?cap|posts a day|posts per day/i.test(l))) {
+      if (/\b(dealership|dealer|manager|it)( can)? (sets?|changes?|controls?)\b/i.test(line) && /\bcap\b|posts a day/i.test(line)) {
+        assert.match(line, /Settings/, `${rel}: "${line.trim().slice(0, 120)}" says the dealership sets the cap without saying each salesperson enters it in Settings`);
+      }
+    }
+  }
+  assert.match(read('../legal/posting-rules.md'), /The dealership chooses how many posts a day each salesperson may make \(10 by default\), and you enter that number in Settings\./);
+  assert.match(read('../legal/dealer-subscription-agreement.md'), /the daily cap it chooses for its staff, which each User enters in the extension's Settings/);
   const help = doc('help.md');
   const capSection = help.slice(help.indexOf('## The daily cap'), help.indexOf('\n## ', help.indexOf('## The daily cap') + 5));
   assert.match(capSection, /each salesperson enters it in their own \*\*Settings\*\*/, 'the help doc does not say each salesperson enters the cap in their own Settings');

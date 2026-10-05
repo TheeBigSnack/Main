@@ -196,7 +196,7 @@ test('the Terms step\'s summary says what syncs to the dealership\'s account whe
     assert.match(s, /You publish every post yourself\. Lot Current is not affiliated with Meta Platforms, Inc\.$/);
   }
   assert.doesNotMatch(off, /sync|database|account/i, 'without accounts nothing leaves the browser, and the summary says nothing of an account');
-  assert.match(on, /While you are signed in, your posted list \([^)]*\), your post timings, your to-do items \(with the old and new price of a price change\) and each scan's counts also sync to your dealership's account in Lot Current's database\./);
+  assert.match(on, /While you are signed in, your posted list \([^)]*\), your post timings, your to-do items \(with the old and new price of a price change\) and the newest scan's counts also sync to your dealership's account in Lot Current's database\./);
   // every field of a posted-list entry that sync sends is named in the parentheses
   const sent = syncPayload({ origin: ORIGIN, posted: { TESTVIN00000000A1: { name: 'A', price: 1, postedAt: '2026-11-16T09:00:00.000Z', updatedAt: '2026-11-16T10:00:00.000Z', listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Sam' } } }).posted.TESTVIN00000000A1;
   const words = { name: 'name', price: 'price', postedAt: 'when you posted', updatedAt: 'and updated it', listingUrl: 'the listing link', salesperson: 'your name' };
