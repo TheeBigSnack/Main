@@ -147,6 +147,10 @@ test('the Facebook host justification and the privacy texts name every read Lot 
   assert.match(content, /title, prices and sold or unavailable sign of the Marketplace page/, 'the Website content answer leaves out the listing read');
   assert.match(content, /Your listings page/);
   assert.match(read('store/listing.md'), /website content, yes \([^)]*title, prices and sold sign of the listing page or Your listings page/);
+  // the read of the listing page after Publish (sidepanel.js confirmIfThisCar: readListingInPage on the post's tab), in the data-use answer and its summary as in the scripting rows
+  assert.match(read('extension/sidepanel.js'), /async function confirmIfThisCar[\s\S]*?executeScript\(\{ target: \{ tabId: fbTabId \}, func: readListingInPage/, 'the listing page after Publish is no longer read: update the Website content answers and this test');
+  assert.match(content, /once the user has published and that tab shows a listing, whether that listing page shows the car \(its VIN in the page's text, or the car's name and the price filled in\), a sold or unavailable sign, and whether a listing form is still on the page, kept with the post under way and sent nowhere/, 'the Website content answer leaves out the read of the listing page after Publish');
+  assert.match(read('store/listing.md'), /website content, yes \([^)]*the listing page that tab shows after they publish, read for the car's VIN, or its name and the price filled in, a sold sign and whether a listing form is still there, kept with the post and sent nowhere/, 'the store listing\'s privacy summary leaves out the read of the listing page after Publish');
 
   // the privacy policy, the data inventory and the FAQ a salesperson reads
   const policy = read('legal/privacy-policy.md').split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
