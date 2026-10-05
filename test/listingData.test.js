@@ -150,6 +150,7 @@ test('a title brand or odometer line written as a label and value is read as bra
     'Title: Flood': 'Title: Flood',
     'Title Brand: Hail': 'Title Brand: Hail',
     'Title Brands: Water Damage': 'Title Brands: Water Damage',
+    'Title Brand(s): Flood': 'Title Brand(s): Flood',
     'Title Brand - Fire': 'Title Brand - Fire',
     'Title Status: Junk': 'Title Status: Junk',
     'Title: Theft Recovery': 'Title: Theft Recovery',
@@ -170,14 +171,34 @@ test('a title brand or odometer line written as a label and value is read as bra
 });
 
 test('"flooded with light" or "with options" is a sales line, not a flood brand; a flooded car still is', () => {
-  for (const words of ['This SUV is flooded with natural light from the panoramic roof.', 'Flooded with options!', 'A cabin flooded with sunlight.', 'An interior flooded in natural light.']) {
+  const sales = [
+    'This SUV is flooded with natural light from the panoramic roof.', 'Flooded with options!', 'A cabin flooded with sunlight.', 'An interior flooded in natural light.',
+    'Flooded with plenty of natural light.', 'Flooded with tons of premium features.', 'Flooded with so many options.', 'A sun-flooded cabin.', 'A light-flooded interior.',
+  ];
+  for (const words of sales) {
     assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
     const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
     assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded], ['Clean', 'yes', ''], words);
   }
-  for (const words of ['Previously flooded.', 'This car was flooded with water.', 'Flooded with salt water.', 'Flooded in a hurricane, sold as is.']) {
+  // only a named sales object makes a sales line: whatever else flooded the car, it is a brand
+  const flooded = [
+    'Previously flooded.', 'This car was flooded with water.', 'Flooded with salt water.', 'Flooded in a hurricane, sold as is.',
+    'Previously flooded with saltwater.', 'This car was flooded with seawater during Hurricane Ian.', 'Flooded with rainwater, sold as is.', 'Was flooded with stormwater.',
+    'Flooded with floodwater up to the dash.', 'Flooded with 2 feet of water.', 'Flooded with contaminated flood water.', 'Flooded with mud and debris.',
+    'Flooded with light damage to the carpet.', 'Flooded in the light rain storm.', 'Flooded by a storm surge.', 'Flooded with the water.',
+  ];
+  for (const words of flooded) {
     assert.match(brandedTitleSignal({ descriptionRaw: words }), /^flooded$/i, words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded.toLowerCase()], ['', 'no', 'flooded'], words);
   }
+  // the help page's sales-line examples are what the code reads as no brand
+  const help = readFileSync(new URL('../docs/help.md', import.meta.url), 'utf8');
+  const named = help.match(/a sales line such as ((?:"[^"]+"(?: or |, )?)+)/);
+  assert.ok(named, 'help.md names the sales lines that do not count');
+  const examples = [...named[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(examples.length >= 2, named[1]);
+  for (const words of examples) assert.equal(brandedTitleSignal({ descriptionRaw: `${words}.` }), '', words);
 });
 
 test('the CARFAX or AutoCheck buyback program line is not a brand, as the help page says; a manufacturer buyback program still is', () => {

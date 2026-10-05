@@ -22,10 +22,21 @@ export const DEFAULT_LISTING_DEFAULTS = Object.freeze({ titleStatus: 'Clean', co
 // from a specs list ("Title Brand: Flood", "Title Type: Branded", "Title:
 // Hail", "Odometer: Not Actual"). A bare "title", "damage" or "branded" is
 // never one ("tax, title and license extra", "no frame damage",
-// "Mopar-branded mats"), "flood lights" is equipment, "total loss
-// protection" or "coverage" is an insurance product, and "odometer exempt"
-// ("Odometer: Exempt") is an age exemption, not a brand.
-const TITLE_LABEL = 'title(?:[\\s-]+(?:brands?|type|status|designation))?';
+// "Mopar-branded mats"), "flood lights" is equipment, "flooded with natural
+// light" is a sales line (FLOODED), "total loss protection" or "coverage" is
+// an insurance product, and "odometer exempt" ("Odometer: Exempt") is an age
+// exemption, not a brand.
+const TITLE_LABEL = 'title(?:[\\s-]+(?:brand\\(s\\)|brands?|type|status|designation))?';
+// "Flooded with" or "flooded in" is a sales line only when a sales object
+// follows, after at most three small words ("flooded with natural light",
+// "flooded with so many options", "an interior flooded in sunlight"), and
+// nothing about damage, rain, water or a flood follows that ("flooded with
+// light damage" stays a brand). Anything else that floods a car is a brand:
+// "flooded with saltwater", "flooded with 2 feet of water", "flooded with mud".
+// A "sun-flooded" or "light-flooded" cabin is a sales line too.
+const FLOOD_SALES_WORDS = '(?:so|much|many|plenty|lots|tons|loads|of|all|the|natural|bright|warm|soft|beautiful|great|premium|modern|desirable|popular|factory|extra|more|useful|top)';
+const FLOOD_SALES_OBJECT = '(?:(?:sun|day)?light|sunshine|options?|features?|upgrades?|tech(?:nology)?|amenities|extras|equipment|accessories|packages?|luxury|comfort|style)';
+const FLOODED = `(?<!\\b(?:sun|light)-)flooded(?![\\s-]+(?:with|in|by)\\s+(?:${FLOOD_SALES_WORDS}\\s+){0,3}${FLOOD_SALES_OBJECT}\\b(?![\\s-]+(?:damag|rain|water|flood|mud|silt|debris)))`;
 const BRANDED = new RegExp(
   '\\b(' +
     [
@@ -40,8 +51,8 @@ const BRANDED = new RegExp(
       '(?:odometer|mileage)(?:[\\s-]+(?:status|brand|reading|disclosure|type))?\\s*[:\\-\u2013]\\s*not[\\s-]+actual',
       '(?:flood|hail|water|fire)[\\s-]*damag\\w*',
       'flood (?:title|vehicle|car)',
-      // "flooded with natural light" or "flooded with options" is a sales line; "flooded with water" and "flooded in a storm" are brands
-      'flooded(?![\\s-]+(?:with\\s+(?!(?:\\w+\\s+)?water\\b)|(?:in|by)\\s+(?:\\w+\\s+)?(?:sun)?light\\b))',
+      // "flooded with natural light" or "flooded with options" is a sales line; any other flooding is a brand (FLOODED)
+      FLOODED,
       'total(?:l?ed|[\\s-]*loss(?![\\s-]+(?:protection|coverage)))',
       'non[\\s-]*repairable',
       'junk title',
