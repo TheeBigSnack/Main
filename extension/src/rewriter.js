@@ -90,13 +90,13 @@ export async function rewriteWithBackend({ endpoint, key = '', facts, fetchImpl 
  * @returns {{ text, source: 'template'|'claude', model?, guardrails, narrative, note? }}
  */
 export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, fetchImpl }) {
-  // the write-up without lot-wide text, labels, bullets and lists (the rewrite service gets it); the template
-  // reads its own write-up line from the vehicle's description and the same lot-wide text
+  // the write-up up to the first part it leaves out (lot-wide text, a label, an award line, a list): the rewrite
+  // service gets it; the template writes from the car's listed facts and never copies it
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
   const closingLine = usableClosingLine(salesperson.closingLine);
   const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine };
   const stores = Array.isArray(settings.myStores) ? settings.myStores : [];
-  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, boilerplate, highlights, stores });
+  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, highlights, stores });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };
   const rw = settings.rewrite || {};
   if (!rw.enabled || !rw.endpoint) return fallback;

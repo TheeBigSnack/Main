@@ -334,11 +334,12 @@ export const CLAIM_KINDS: readonly ClaimKind[] = Object.freeze([
 ]);
 
 // The write-up split at its line breaks, paragraphs and list items, markup
-// set aside, spacing made plain, as the extension's template copies it
+// set aside, spacing made plain, as the extension's checks read it
 // (extension/src/description.js splitSegments; claimSource makes it one
 // line, so where a wrapped line is joined again makes no difference here).
-// Here the facts' narrative is already plain text, so this changes nothing
-// but the spacing.
+// Here the facts' narrative is already plain text (the extension decodes
+// entities and drops invisible characters before sending it), so this
+// changes nothing but the spacing.
 const BLOCK_BREAK = /<\/?(?:br|p|div|li|ul|ol|h[1-6]|tr|td|th|dt|dd|section|article|blockquote)\b[^>]*>/i;
 function writeUpText(raw: unknown): unknown {
   if (typeof raw !== 'string') return raw;

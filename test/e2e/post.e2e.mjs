@@ -126,7 +126,7 @@ try {
   const draft = await panel.inputValue('#description');
   assert.match(draft, /^2019 Ram 1500 Classic Express with 20,986 miles\./);
   assert.match(draft, /One owner according to the Carfax report\./);
-  assert.match(draft, /pairs the HEMI 5\.7L V8/, "the car's own write-up is kept");
+  assert.doesNotMatch(draft, /pairs the HEMI 5\.7L V8/, "the template never copies the car's own write-up");
   assert.doesNotMatch(draft, /Documentation fee/, 'the lot-wide disclaimer is stripped');
   assert.match(draft, /Price includes the \$490 doc fee; tax and tags extra\./);
   assert.match(draft, /I'm Roger, sales consultant at Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\./);

@@ -19,29 +19,28 @@
 //     don't make, and no number, in digits or in words, that isn't in the
 //     website's data
 // The template is the final fallback, so it is built to pass its own checks
-// and, when in doubt, to say less. Its write-up line is the website's own
-// opening sentences, whole and in order (description.js openingSentences):
-// they start at the write-up's first line past headings and labels, and the
-// text is cut only at a clear sentence end (a single ".", "!" or "?" after a
-// word in lower case that is not an abbreviation, then a capital, a digit or
-// nothing). It takes at most two sentences and 45 words, stops at the first
-// sentence that does not end clearly, holds lot-wide text, is a list of
-// equipment, would fail the checks or is about fees, taxes, tags, title,
-// registration or licence (the price note's to say), copies nothing after
-// it, and never ends on a question or on a sentence the next words carry on
-// (storyLine). With nothing to copy there is no write-up line. When the
+// and, when in doubt, to say less. It is written from the car's listed facts
+// only (its name, mileage, features, colours, engine, store, stock number and
+// VIN, the Carfax flags, and the dealer's price note) and never copies the
+// website's own write-up: a sentence taken from free text can be cut where
+// it seems to end and say the opposite of the website, and no rule for where
+// a sentence ends holds for every dealer and language. The write-up is the
+// optional rewrite service's to draw on (description.js cleanDescription),
+// and the checks below read it as the website's own words. When the
 // website's words shout beyond the car's own abbreviations ("SLE", "AWD":
 // they stay as written, and the checks pass over them) it writes them
-// calmly, leaves out a write-up, colour or engine line that still shouts on
-// its own, and counts words as the checks do.
-// test/rewriteTemplate.test.js runs it over every fixture car, as written, in
-// capitals and with refused write-ups. What the tests find can still fail it
-// is the dealership's own Settings (no dealership name, a price note for
-// another fee, a name typed in capitals), and the side panel says which.
+// calmly, leaves out a colour or engine line that still shouts on its own,
+// and counts words as the checks do.
+// test/rewriteTemplate.test.js runs it over every fixture car, as written,
+// in capitals and with write-ups it must not copy, and test/writeUpLine.test.js
+// checks over thousands of write-ups that it never copies one. What the tests
+// find can still fail it is the dealership's own Settings (no dealership
+// name, a price note for another fee, a name typed in capitals), and the
+// side panel says which.
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
-import { splitSegments, openingSentences } from './description.js';
+import { splitSegments } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -237,37 +236,10 @@ function priceAndMileageProblems(text, { vehicle = {}, priceNote = '', price = n
   return problems;
 }
 
-// A feature the template may name, or the start of a write-up sentence it
-// may copy: no price at all (the price is the listing's own field), no
-// price change, and no mileage other than the website's.
+// A feature the template may name: no price at all (the price is the
+// listing's own field), no price change, and no mileage other than the
+// website's.
 const statesNoOtherNumbers = (text, vehicle) => !priceAndMileageProblems(text, { vehicle }).length;
-// Fees, taxes, tags, title, registration and licence are the dealer's price
-// note's to state (Settings, in every description it applies to): a
-// write-up sentence about any of them is never copied, so a disclaimer the
-// lot-wide check could not catch (on a lot of one or two cars) never
-// contradicts the note.
-const FEE_WORDS = /\b(?:fees?|tax(?:es)?|tags?|title[ds]?|titling|registration|registered|doc|docs|documentation|licen[cs]e[ds]?|licensing|charges?|processing)\b/i;
-
-// A write-up sentence the template may copy: that, and nothing the checks
-// would refuse in the template's own text, a banned phrase ("no accidents",
-// "private sale"), "one owner" without the Carfax one-owner flag, capitals
-// that shout, or more than one emoji (two sentences at most are copied, so
-// the text stays within the emoji the checks allow).
-const narrativeSentenceOk = (sentence, vehicle) =>
-  statesNoOtherNumbers(sentence, vehicle) && !FEE_WORDS.test(sentence) && !BANNED_RE.some(([, re]) => re.test(sentence)) && !(ONE_OWNER.test(sentence) && !vehicle.carfaxOneOwner) && !shouting(sentence, ownAbbreviations(vehicle)) && emojiCount(sentence) <= 1;
-
-// The write-up line: the website's opening sentences for this car, as
-// description.js openingSentences reads them from its description (the same
-// text the checks read as the website's own words), with the lot-wide text
-// `boilerplate` names. Each is taken only when it fits (at most two sentences
-// and 45 words) and the checks would pass it (narrativeSentenceOk); the first
-// that does not stops the line, and nothing after it is copied.
-const STORY_MAX_SENTENCES = 2;
-const STORY_MAX_WORDS = 45;
-function storyLine(vehicle, boilerplate) {
-  const fits = (sentence, taken) => taken.length < STORY_MAX_SENTENCES && wordCount([...taken, sentence].join(' ')) <= STORY_MAX_WORDS && narrativeSentenceOk(sentence, vehicle);
-  return openingSentences(vehicle.descriptionRaw, boilerplate, fits).join(' ');
-}
 
 // The website's features a description can name as highlights: each once,
 // short enough to read in a list (40 characters or less), stating no price,
@@ -387,14 +359,12 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  *   dealer:      { name, city }
  *   salesperson: { name, title }
  *   priceNote:   the dealer's wording about fees, typed in Settings (a suggested sentence is offered from the website's price gap)
- *   boilerplate: the lot-wide lines and sentences the scan found (description.js findBoilerplate), a Set or an
- *                array; the write-up line comes from vehicle.descriptionRaw without them (storyLine)
  *   highlights:  the salesperson's pick of the website's features (settleHighlights); null for the usual pick
  *   closingLine: the salesperson's own line from Settings (salesperson.closingLine), used when it passes checkClosingLine
  *   stores:      the salesperson's ticked stores (settings.myStores); a car the website lists at any other store, or
  *                with none or several ticked, is said to be at its own store, never at the dealership in its town
  */
-export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', boilerplate = [], highlights = null, stores = [] }) {
+export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', highlights = null, stores = [] }) {
   const dealerName = String(dealer.name || '').trim();
   const city = String(dealer.city || '').trim();
   const store = calmName(carStore(v, { stores, dealer }).store);
@@ -408,8 +378,6 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const closing = usableClosingLine(salesperson.closingLine);
   const mech = [v.engine, v.transmission, v.drivetrain].map((s) => String(s || '').trim()).filter(Boolean);
   const colors = [v.exteriorColor && `${v.exteriorColor} exterior`, v.interiorColor && `${v.interiorColor} interior`].filter(Boolean);
-  // the write-up line: the website's opening sentences, whole, up to the first one it cannot copy (storyLine)
-  const story = storyLine(v, new Set(boilerplate || []));
 
   // keep: 'always' = part of every description; 'optional' = dropped (in
   // order) if the text runs long; 'filler' = added (in order) if it runs short.
@@ -417,7 +385,6 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   const blocks = [
     { id: 'lead', keep: 'always', site: true, text: milesText ? `${name} with ${milesText}.` : `${name}.` },
     { id: 'owner', keep: 'always', text: v.carfaxOneOwner ? 'One owner according to the Carfax report.' : '' },
-    { id: 'narrative', keep: 'optional', site: true, text: story },
     { id: 'features', keep: 'always', site: true, text: features.length ? `Highlights: ${features.join(', ')}.` : '' },
     { id: 'colors', keep: 'optional', site: true, text: colors.length ? `${capitalize(colors.join(', '))}.` : '' },
     { id: 'mech', keep: 'optional', site: true, text: mech.length ? `${mech.join(', ')}.` : '' },
@@ -452,13 +419,13 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
   // website's spelling. The car's own abbreviations ("SLE EXT CAB", "AWD")
   // stay as written; the checks pass over them (ownAbbreviations), and so
   // does this test, so they never get the website's other words calmed. A
-  // write-up, colour or engine line that still shouts on its own is left
-  // out; a line that does not is kept, since leaving it out could not help.
+  // colour or engine line that still shouts on its own is left out; a line
+  // that does not is kept, since leaving it out could not help.
   const own = ownAbbreviations(v);
   const siteWords = blocks.filter((b) => b.site).map((b) => b.text).join('\n');
   if (shouting(siteWords, own)) for (const b of blocks) if (b.site) b.text = calmWords(b.text);
   for (const b of blocks) if (b.keep === 'optional' && b.site && shouting(b.text, own)) on.delete(b.id);
-  for (const id of ['narrative', 'mech', 'colors', 'cta']) {
+  for (const id of ['mech', 'colors', 'cta']) {
     if (words() <= WORD_LIMITS.max) break;
     on.delete(id);
   }
@@ -572,10 +539,10 @@ export const CLAIM_KINDS = Object.freeze([
   { what: 'its keys', re: /\b(?:(?:both|spare|extra|second|two|2|three|3|(?:sets?|pairs?) of) (?:keys|key[\s-]?fobs|fobs|remotes)|(?:spare|extra|second) (?:key|key[\s-]?fob|fob|remote))\b/i },
 ]);
 
-// The write-up as the website shows it, and as the template copies it
-// (description.js splitSegments): split at its line breaks, paragraphs and
-// list items, markup set aside, spacing made plain. A claim the template
-// copies from "new <b>tires</b>" is then found in its own source.
+// The write-up as the website shows it (description.js splitSegments):
+// split at its line breaks, paragraphs and list items, markup set aside,
+// entities decoded, spacing made plain. A claim a draft makes from "new
+// <b>tires</b>" is then found in its own source.
 function writeUpText(raw) {
   if (typeof raw !== 'string') return raw;
   return splitSegments(raw).join('\n');

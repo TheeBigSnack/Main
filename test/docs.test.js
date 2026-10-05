@@ -441,6 +441,23 @@ test('help, README and the onboarding emails say the address comes from the webs
 
 // node --test runs every test( and it( call site once; none of the files
 // makes tests in a loop, so the count of call sites is the count npm test prints.
+test('the docs say the template writes the description from the car\'s listed facts and does not copy the website\'s write-up', () => {
+  // the template once copied the website's opening sentences, and the help kept saying so after the code stopped
+  const COPIES = [/write-up line/i, /opening sentences/i, /write-up is kept/i, /\bcop(?:y|ies|ied)\b[^.]{0,40}\bsentences\b/i, /real write-up on the website/i];
+  const SAYS_NOT = /\b(?:does not copy|not copied from) (?:the website's |its )write-up\b/;
+  const telling = ['../docs/help.md', '../README.md', '../store/listing.md', '../site-src/pages/home.html', '../site-src/pages/how-it-works.html', '../marketing/positioning.md', '../marketing/demo-script.md'];
+  for (const rel of [...telling, '../docs/data-inventory.md', '../site/index.html', '../site/how-it-works/index.html']) {
+    const text = read(rel);
+    for (const re of COPIES) assert.doesNotMatch(text, re, `${rel} matches ${re}`);
+  }
+  for (const rel of telling) assert.match(read(rel), SAYS_NOT, `${rel} does not say the description is not copied from the website's write-up`);
+  // and the help says what the rewrite service is sent instead, and that its draft is checked
+  const help = doc('help.md');
+  assert.ok(help.includes("The template builds the description from the car's listed facts"), 'docs/help.md does not say what the template builds the description from');
+  assert.ok(help.includes('the write-up is sent to it as the website wrote it, a whole line at a time, from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
+  assert.ok(help.includes("The service's draft goes through the same checks"), "docs/help.md does not say the service's draft is checked");
+});
+
 test('README\'s unit-test count is the number of tests npm test runs', () => {
   const dir = new URL('./', import.meta.url);
   const files = readdirSync(dir).filter((f) => f.endsWith('.test.js'));

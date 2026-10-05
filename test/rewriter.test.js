@@ -19,12 +19,13 @@ const args = (extra = {}) => ({
 });
 const reply = (status, body) => async () => ({ ok: status < 400, status, json: async () => body });
 
-test('with the service off: the template, with the disclaimer stripped and the write-up kept', async () => {
+test('with the service off: the template, written from the listed facts, with neither the disclaimer nor the write-up copied', async () => {
   const r = await generateDescription(args());
   assert.equal(r.source, 'template');
   assert.ok(r.guardrails.ok, JSON.stringify(r.guardrails.problems));
+  // the write-up, without the disclaimer, is what the service would be sent; the template copies none of it
   assert.deepEqual(r.narrative, ['Local trade with new tires.']);
-  assert.match(r.text, /Local trade with new tires\./);
+  assert.doesNotMatch(r.text, /Local trade/);
   assert.doesNotMatch(r.text, /Documentation fee/);
 });
 
@@ -263,8 +264,8 @@ test('a Claude draft that adds parts to the one the write-up names falls back to
   const example = { name: 'Example Motors', city: 'Springfield' };
   const base = args({ dealer: example, priceNote: '' });
   const template = (await generateDescription(base)).text;
-  assert.match(template, /Local trade with new tires\./);
-  const more = template.replace('Local trade with new tires.', 'Local trade with new tires and new brakes, plus a new battery.');
+  const more = template.replace('\n', '\nLocal trade with new tires and new brakes, plus a new battery.\n');
+  assert.notEqual(more, template);
   const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: more }) });
   assert.equal(r.source, 'template');
   assert.match(r.note, /Says "new brakes"/);

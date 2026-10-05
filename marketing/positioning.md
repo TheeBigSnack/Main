@@ -29,7 +29,7 @@ A Chrome extension. It reads the dealership's own website inventory, lets only p
 | What gets listed | Whatever is in the feed | Only cars the website says are pre-owned, at your store, with photos and a price |
 | Price | Often set in the tool | Always the website price; changes only mirror the website |
 | Sold cars | Depends | Flagged within one rescan (3 hours while Chrome is open), with the listing opened for you |
-| Description | Templates or free text | Written from the website's facts, checked against them, reviewed by the salesperson |
+| Description | Templates or free text | Written from the car's listed facts on the website (not copied from its write-up), checked against them, reviewed by the salesperson |
 | Facebook login | Some ask for it | Never. No passwords, cookies or tokens; no extra accounts; no tricks |
 | The dealership | Sometimes hidden | Named in every description, with the salesperson's role |
 
