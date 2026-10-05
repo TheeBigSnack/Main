@@ -16,7 +16,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS, listingHref, LISTING_URL_PATTERN, LISTING_ORIGIN } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS, listingHref, LISTING_URL_PATTERN, LISTING_ORIGIN, BEFORE_TODAY_COLUMN, beforeTodayNote } from '../manager/data.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { listingLink } from '../extension/facebook/detectPost.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
@@ -101,17 +101,18 @@ test('summarize on the sample: posts per salesperson, medians, listings up', () 
   assert.equal(s.now, NOW);
   assert.deepEqual(s.salespeople.map((p) => p.name), ['Alex', 'Sam'], 'most posted this week first');
   const [alex, sam] = s.salespeople;
-  assert.deepEqual({ ...alex, userId: undefined }, { name: 'Alex', userId: undefined, postedThisWeek: 3, postedAllTime: 5, listed: 4, takenDown: 1, postedAttempts: 3, medianSeconds: 47 });
-  assert.deepEqual({ ...sam, userId: undefined }, { name: 'Sam', userId: undefined, postedThisWeek: 2, postedAllTime: 3, listed: 3, takenDown: 0, postedAttempts: 2, medianSeconds: 57.5 });
-  assert.deepEqual(s.totals, { salespeople: 2, postedThisWeek: 5, postedAllTime: 8, listed: 7, takenDown: 1, postedAttempts: 5, medianSeconds: 49 });
+  assert.deepEqual({ ...alex, userId: undefined }, { name: 'Alex', userId: undefined, postedThisWeek: 3, postedAllTime: 5, listedBefore: 0, listed: 4, takenDown: 1, postedAttempts: 3, medianSeconds: 47 });
+  assert.deepEqual({ ...sam, userId: undefined }, { name: 'Sam', userId: undefined, postedThisWeek: 2, postedAllTime: 3, listedBefore: 0, listed: 3, takenDown: 0, postedAttempts: 2, medianSeconds: 57.5 });
+  assert.deepEqual(s.totals, { salespeople: 2, postedThisWeek: 5, postedAllTime: 8, listedBefore: 0, listed: 7, takenDown: 1, postedAttempts: 5, medianSeconds: 49 });
   assert.equal(s.week.from, ago(7 * 24));
 });
 
 // A salesperson who starts with Lot Current marks the listings they made by
 // hand earlier (Mark posted, "Before today"): those rows carry listed_before,
-// and posted_at is the moment of marking. They are their listings (all time,
-// listings up), not posts of this week.
-test('summarize: listings marked as made by hand before that day are not counted as posted this week', () => {
+// and posted_at is the moment of marking. They are their listings (listings
+// up, taken down), counted apart, and no posts: not this week, not all time,
+// in the page's table and the CSV alike.
+test('summarize: listings marked as made by hand before that day are counted apart, not as posts this week or all time', () => {
   const base = sample();
   const alexId = base.listings.find((l) => l.salesperson === 'Alex').user_id;
   const marked = Array.from({ length: 12 }, (_, i) => ({ id: `hand-${i}`, dealership_id: base.listings[0].dealership_id, user_id: alexId, vin: `1HGHAND0${String(i).padStart(2, '0')}0000000`.slice(0, 17), name: 'Earlier listing', price: 20000 + i, posted_at: ago(2), listing_url: null, salesperson: 'Alex', updated_at: null, taken_down_at: null, status: 'listed', listed_before: true }));
@@ -120,8 +121,31 @@ test('summarize: listings marked as made by hand before that day are not counted
   const alex = (s) => s.salespeople.find((p) => p.name === 'Alex');
   assert.equal(alex(after).postedThisWeek, alex(before).postedThisWeek, 'the hand-made listings are not this week\'s posts');
   assert.equal(after.totals.postedThisWeek, before.totals.postedThisWeek);
-  assert.equal(alex(after).postedAllTime, alex(before).postedAllTime + 12, 'they are still the salesperson\'s listings');
-  assert.equal(alex(after).listed, alex(before).listed + 12);
+  assert.equal(alex(after).postedAllTime, alex(before).postedAllTime, 'nor posts all time');
+  assert.equal(after.totals.postedAllTime, before.totals.postedAllTime);
+  assert.equal(alex(after).listedBefore, 12, 'they are counted apart');
+  assert.equal(after.totals.listedBefore, 12);
+  assert.equal(alex(after).listed, alex(before).listed + 12, 'and they are still the salesperson\'s listings');
+  assert.equal(after.totals.listed, before.totals.listed + 12);
+  // the CSV counts them the same way: Posted is the posts, and the before-today ones have their own row and column
+  const csv = managerCsv({ ...base, listings: [...base.listings, ...marked] }, { now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const was = managerCsv(base, { now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const row = (lines, label) => lines.find((l) => l.startsWith(label + ','));
+  assert.equal(row(csv, 'Posted'), row(was, 'Posted'));
+  assert.equal(row(csv, BEFORE_TODAY_COLUMN), `${BEFORE_TODAY_COLUMN},12`);
+  const head = csv[csv.indexOf('Salespeople') + 1].split(',');
+  const cell = (lines, name, col) => row(lines, name).split(',')[head.indexOf(col)];
+  assert.equal(cell(csv, 'Alex', 'Posted'), cell(was, 'Alex', 'Posted'));
+  assert.equal(cell(csv, 'Alex', BEFORE_TODAY_COLUMN), '12');
+  // and the page says why All time leaves them out
+  assert.equal(beforeTodayNote(0), '');
+  assert.equal(beforeTodayNote(12), '"This week" and "All time" count posts only: 12 listings marked posted as "Before today" (on Facebook before they were marked) are left out of them and counted under Listings up or Taken down.');
+  assert.match(beforeTodayNote(1), /: one listing marked posted as "Before today" \(on Facebook before it was marked\) is left out/);
+  assert.match(read('manager/manager.js'), /<\/table><\/div>\$\{s\.totals\.listedBefore \? `\n\s*<p class="hint" id="beforeToday">\$\{esc\(beforeTodayNote\(s\.totals\.listedBefore\)\)\}<\/p>` : ''\}/, 'the Salespeople table carries the line right under it');
+  // the managers page and help say how they are counted
+  assert.match(read('site-src/pages/for-managers.html'), /"Before today" \(already on Facebook before they marked it\) is no post: it is left out of this week and all time, counted under listings up or taken down, and counted apart in the CSV\./);
+  assert.match(read('docs/help.md'), /the Salespeople table's \*\*Posted this week\*\* and \*\*All time\*\* leave it out/);
+  assert.ok(read('docs/help.md').includes(`"${BEFORE_TODAY_COLUMN}"`), 'help names the CSV column as the CSV writes it');
   // a listing marked "Posted today" (listed_before false) counts as before
   const today = summarize({ ...base, listings: [...base.listings, { ...marked[0], id: 'today', listed_before: false }] });
   assert.equal(alex(today).postedThisWeek, alex(before).postedThisWeek + 1);
@@ -417,7 +441,7 @@ test('a salesperson who opens the manager view reads only their own membership, 
 test('empty or broken input gives zeros, not an exception', () => {
   const s = summarize({ now: NOW, timeZone: 'UTC' });
   assert.deepEqual(s.salespeople, []);
-  assert.deepEqual(s.totals, { salespeople: 0, postedThisWeek: 0, postedAllTime: 0, listed: 0, takenDown: 0, postedAttempts: 0, medianSeconds: null });
+  assert.deepEqual(s.totals, { salespeople: 0, postedThisWeek: 0, postedAllTime: 0, listedBefore: 0, listed: 0, takenDown: 0, postedAttempts: 0, medianSeconds: null });
   assert.equal(s.lastScan, null);
   assert.deepEqual(s.soldStillListed, []);
   const junk = summarize({ listings: 'nope', todoItems: [null, 3, { kind: 'takeDown', flagged_at: 'garbage' }], postAttempts: {}, scans: [{ taken_at: 'never' }], now: 'not a time' });
@@ -461,9 +485,9 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.doesNotMatch(csv, /form fields?/i, 'the manager\'s CSV has no form-field numbers and says nothing of them');
   // the sections and their header rows
   const after = (title) => lines[lines.indexOf(title) + 1];
-  assert.equal(after('Salespeople'), 'Salesperson,Posted in the last 7 days,Posted,Listings up,Taken down,Median seconds per post');
-  assert.equal(lines[lines.indexOf('Salespeople') + 2], 'Alex,3,5,4,1,47');
-  assert.equal(lines[lines.indexOf('Salespeople') + 3], 'Sam,2,3,3,0,57.5');
+  assert.equal(after('Salespeople'), `Salesperson,Posted in the last 7 days,Posted,${BEFORE_TODAY_COLUMN},Listings up,Taken down,Median seconds per post`);
+  assert.equal(lines[lines.indexOf('Salespeople') + 2], 'Alex,3,5,0,4,1,47');
+  assert.equal(lines[lines.indexOf('Salespeople') + 3], 'Sam,2,3,0,3,0,57.5');
   assert.equal(after('Sold cars still listed'), 'Flagged,Car,VIN,Salesperson,Hours open,Listing link');
   assert.match(lines[lines.indexOf('Sold cars still listed') + 2], /^2026-11-15 09:00,2021 Jeep Grand Cherokee Limited,SAMPLE00000000002,Alex,30,https:/);
   assert.equal(after('Price changes not yet updated'), 'Flagged,Car,VIN,Salesperson,Hours open,Price from,Price to,Listing link');
@@ -499,7 +523,7 @@ test('the managers page names every car, person, price and link detail the CSV c
   assert.ok(notOnTeam && notOnTeam[1].startsWith('Posted,'), "a manager's download has the table of cars listed by people no longer on the team");
   const columns = new Set(blocks.slice(defs + 1).filter((b) => b.length > 1).flatMap((b) => b[1].split(',')));
   assert.ok(columns.has('VIN') && columns.has('Salesperson') && columns.has('Hours listed'), [...columns].join(', '));
-  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Hours listed', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason', 'Listed by hand before (Posted is when it was marked)']);
+  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', BEFORE_TODAY_COLUMN, 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Hours listed', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason', 'Listed by hand before (Posted is when it was marked)']);
   const DETAILS = {
     Car: /\bthe car's name\b/,
     VIN: /\bVIN\b/,

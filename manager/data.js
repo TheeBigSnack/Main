@@ -10,8 +10,8 @@
 //                   listing_url, salesperson, updated_at, taken_down_at,
 //                   status 'listed' | 'taken_down', listed_before (a listing
 //                   made by hand before the day it was marked posted:
-//                   posted_at is when it was marked, so it is not counted as
-//                   posted this week)
+//                   posted_at is when it was marked, so it is no post, this
+//                   week or all time; it is counted apart)
 //   todo_items      id, dealership_id, vin, kind 'takeDown' | 'price', name,
 //                   flagged_at, done_at, how 'detected' | 'manual' | 'cleared',
 //                   from_price, to_price
@@ -122,6 +122,20 @@ export const NOT_ON_TEAM_HINT = 'Their extension no longer syncs, and sold-car a
 // only a manager reads the whole team, so nobody else can be told apart.
 export const NOT_ON_TEAM_UNKNOWN = 'Left out: only a manager reads the whole team, so only a manager\'s download lists these cars.';
 
+// The CSV's count of listings marked posted as "Before today" (listed_before),
+// apart from the posts: the summary row and the Salespeople column. The
+// page says the same under its Salespeople table (manager.js).
+export const BEFORE_TODAY_COLUMN = 'Marked posted as Before today (not posts)';
+
+// The page's line under its Salespeople table when listings were marked
+// posted as "Before today": they are left out of the posts (this week and
+// All time) and counted under Listings up or Taken down. '' when none were.
+export function beforeTodayNote(n) {
+  if (!(Number.isInteger(n) && n > 0)) return '';
+  const one = n === 1;
+  return `"This week" and "All time" count posts only: ${one ? 'one listing' : `${n} listings`} marked posted as "Before today" (on Facebook before ${one ? 'it was' : 'they were'} marked) ${one ? 'is' : 'are'} left out of them and counted under Listings up or Taken down.`;
+}
+
 // What each number in the CSV means: the pilot's definitions
 // (extension/src/pilot.js) less its form-fields sentence, because the
 // records of which form fields filled stay on each salesperson's Numbers
@@ -203,7 +217,7 @@ function peopleOf(memberships, listings, attempts) {
     const key = keyOf(r);
     let p = people.get(key);
     if (!p) {
-      p = { key, userId: r.user_id || null, name: '', postedThisWeek: 0, postedAllTime: 0, listed: 0, takenDown: 0, postedAttempts: 0, seconds: [] };
+      p = { key, userId: r.user_id || null, name: '', postedThisWeek: 0, postedAllTime: 0, listedBefore: 0, listed: 0, takenDown: 0, postedAttempts: 0, seconds: [] };
       people.set(key, p);
     }
     if (!p.name && r.salesperson) p.name = text(r.salesperson, 60);
@@ -243,13 +257,22 @@ export function summarize({ listings, todoItems, postAttempts, scans, heldScans,
   const M = rows(memberships);
 
   // ----- salespeople -----
+  // A listing marked posted as "Before today" (listed_before: it was on
+  // Facebook before the day it was marked, and posted_at is that marking) is
+  // no post, this week or all time: it counts apart (listedBefore), and
+  // under listings up or taken down like any other listing.
   const { people, get } = peopleOf(M, L, A);
+  const posts = L.filter((l) => l.listed_before !== true);
   for (const l of L) {
     const p = get(l);
+    if (isTakenDown(l)) p.takenDown += 1; else p.listed += 1;
+    if (l.listed_before === true) {
+      p.listedBefore += 1;
+      continue;
+    }
     p.postedAllTime += 1;
     const at = ms(l.posted_at);
-    if (at !== null && at >= t - WEEK_MS && at <= t && l.listed_before !== true) p.postedThisWeek += 1;
-    if (isTakenDown(l)) p.takenDown += 1; else p.listed += 1;
+    if (at !== null && at >= t - WEEK_MS && at <= t) p.postedThisWeek += 1;
   }
   const posted = A.filter((a) => a.outcome === 'posted');
   for (const a of posted) {
@@ -259,12 +282,13 @@ export function summarize({ listings, todoItems, postAttempts, scans, heldScans,
     if (s !== null) p.seconds.push(s);
   }
   const salespeople = [...people.values()]
-    .map((p) => ({ name: p.name || NO_NAME, userId: p.userId, postedThisWeek: p.postedThisWeek, postedAllTime: p.postedAllTime, listed: p.listed, takenDown: p.takenDown, postedAttempts: p.postedAttempts, medianSeconds: median(p.seconds) }))
+    .map((p) => ({ name: p.name || NO_NAME, userId: p.userId, postedThisWeek: p.postedThisWeek, postedAllTime: p.postedAllTime, listedBefore: p.listedBefore, listed: p.listed, takenDown: p.takenDown, postedAttempts: p.postedAttempts, medianSeconds: median(p.seconds) }))
     .sort((a, b) => b.postedThisWeek - a.postedThisWeek || b.postedAllTime - a.postedAllTime || a.name.localeCompare(b.name));
   const totals = {
     salespeople: salespeople.length,
     postedThisWeek: salespeople.reduce((n, p) => n + p.postedThisWeek, 0),
-    postedAllTime: L.length,
+    postedAllTime: posts.length,
+    listedBefore: L.length - posts.length,
     listed: L.filter(isListed).length,
     takenDown: L.filter(isTakenDown).length,
     postedAttempts: posted.length,
@@ -1261,6 +1285,7 @@ export function managerCsv(input = {}, { role = '', now = nowIso(), dealer = '',
   out.push(csvRow(['Salespeople', s.totals.salespeople]));
   out.push(csvRow(['Posted', s.totals.postedAllTime]));
   out.push(csvRow(['Posted in the last 7 days', s.totals.postedThisWeek]));
+  out.push(csvRow([BEFORE_TODAY_COLUMN, s.totals.listedBefore]));
   out.push(csvRow(['Listings up', s.totals.listed]));
   out.push(csvRow(['Taken down', s.totals.takenDown]));
   out.push(csvRow(['Median seconds per post', s.totals.medianSeconds]));
@@ -1281,8 +1306,8 @@ export function managerCsv(input = {}, { role = '', now = nowIso(), dealer = '',
   for (const d of DEFINITIONS) out.push(csvRow([d]));
   out.push('');
   out.push(csvRow(['Salespeople']));
-  out.push(csvRow(['Salesperson', 'Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post']));
-  for (const p of s.salespeople) out.push(csvRow([p.name, p.postedThisWeek, p.postedAllTime, p.listed, p.takenDown, p.medianSeconds]));
+  out.push(csvRow(['Salesperson', 'Posted in the last 7 days', 'Posted', BEFORE_TODAY_COLUMN, 'Listings up', 'Taken down', 'Median seconds per post']));
+  for (const p of s.salespeople) out.push(csvRow([p.name, p.postedThisWeek, p.postedAllTime, p.listedBefore, p.listed, p.takenDown, p.medianSeconds]));
   out.push('');
   out.push(csvRow(['Sold cars still listed']));
   out.push(csvRow(['Flagged', 'Car', 'VIN', 'Salesperson', 'Hours open', 'Listing link']));

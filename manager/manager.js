@@ -56,7 +56,7 @@
 // does it where there is one.
 
 import { CONFIG } from './config.js';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, closedBillingStatus, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, authQueryError, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, SCAN_STALE_WHY, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, FUTURE_SKEW_MS } from './data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, billingCard, billingBody, billingReturnNote, closedBillingStatus, inviteCard, teamCard, teamChangeNote, memberRole, gettingStarted, signupOriginNote, signupProblem, signupRefusal, mockCreateDealership, mockNewDealership, authFragment, authQueryError, readAll, UNUSED_CODE_NOTE, SIGNUP_WORDS, SIGNUP_EXAMPLE, OVERDUE_HOURS, INVITE_DAYS, DAY_MS, SCAN_STALE_WHY, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, FUTURE_SKEW_MS, beforeTodayNote } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -429,7 +429,8 @@ function viewData() {
       <thead><tr><th>Salesperson</th><th class="n">Posted this week</th><th class="n">All time</th><th class="n">Median seconds per post</th><th class="n">Listings up</th><th class="n hide-narrow">Taken down</th></tr></thead>
       <tbody>${peopleRows}</tbody>
       <tfoot><tr><td>Everyone</td><td class="n">${s.totals.postedThisWeek}</td><td class="n">${s.totals.postedAllTime}</td><td class="n">${secs(s.totals.medianSeconds)}</td><td class="n">${s.totals.listed}</td><td class="n hide-narrow">${s.totals.takenDown}</td></tr></tfoot>
-    </table></div>
+    </table></div>${s.totals.listedBefore ? `
+    <p class="hint" id="beforeToday">${esc(beforeTodayNote(s.totals.listedBefore))}</p>` : ''}
     <p class="hint">"This week" is the last 7 days. Seconds per post run from the click on Post to "It's posted", the salesperson's own review and Publish click included.${secondsNote(myRole())}</p>`;
 
   const car = (o) => `<td class="name">${o.listingUrl ? `<a href="${esc(o.listingUrl)}" target="_blank" rel="noopener">${esc(o.name)}</a>` : esc(o.name)}<div class="sub">${esc(o.salesperson || 'no salesperson on record')} · ${esc(o.vin)}</div></td>`;
