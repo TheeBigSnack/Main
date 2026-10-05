@@ -366,3 +366,31 @@ test('the privacy texts name what the dry-run report holds from the Facebook pag
   assert.match(read('docs/support.md'), /The dry run's report also holds the form page's address and title and the names of up to 100 controls on that page, which can include Facebook's own menus: ask the person to read it before sending and take out anything personal/);
   assert.match(read('docs/help.md'), /\*\*Copy report\*\* on the result \(read it before you send it: it holds the form page's address and title and the names of the controls on that page/);
 });
+
+// review: the store listing's reviewer steps said the test needs no sign-in but never said how to get past the
+// set-up wizard's Your account step, which shows whenever accounts are configured (extension/src/accountConfig.js),
+// and did not mention the fields check; its privacy summary left out the colour guess's photo addresses and what
+// the fields check reads from the form page, which the Web Store answers name.
+test('the store listing tells the reviewer to skip the account step, and its privacy summary names the photos and the fields check', async () => {
+  const { accountsConfigured } = await import('../extension/src/accountConfig.js');
+  const { accountStepModel } = await import('../extension/src/wizardSteps.js');
+  const listing = read('store/listing.md');
+  const steps = listing.slice(listing.indexOf('## Test instructions'), listing.indexOf('## Support and homepage'));
+  assert.match(steps, /Lot Current needs no account or sign-in for this test\./);
+  if (accountsConfigured()) {
+    const model = accountStepModel({ configured: true });
+    assert.equal(model.heading, 'Your account', 'the wizard\'s account step was renamed: change the reviewer steps with it');
+    assert.equal(model.next, 'Skip for now', 'the account step\'s button was renamed: change the reviewer steps with it');
+    assert.match(steps, /At the Your account step, click Skip for now: this test needs no sign-in\./);
+  }
+  assert.match(read('extension/sidepanel.js'), />Open the form and check fields only \(nothing filled\)<\/button>/, 'the fields check button was renamed: change the reviewer steps with it');
+  assert.match(steps, /click "Open the form and check fields only \(nothing filled\)" instead/);
+  assert.match(steps, /attaches the car's photos/);
+  const answers = read('legal/chrome-web-store-privacy.md');
+  assert.match(answers, /for a colour guess, up to four photo addresses/, 'the Web Store answers no longer name the photo addresses: change the summary with them');
+  assert.match(answers, /for Open the form and check fields only, the form page's address, title and language/);
+  const short = listing.split('\n').find((l) => l.startsWith('The answers are in `legal/chrome-web-store-privacy.md`'));
+  assert.ok(short, 'the store listing has its privacy summary');
+  assert.match(short, /for a colour guess up to four of its photo addresses \(Anthropic's servers fetch those photos to look at them\)/);
+  assert.match(short, /for Open the form and check fields only, that form page's address, title and language and the names of its fields and of the controls on it/);
+});
