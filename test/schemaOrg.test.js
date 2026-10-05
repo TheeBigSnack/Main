@@ -774,7 +774,20 @@ test('the gate: a demo or loaner word only the page title has is read, with the 
       if (name !== '2019 Honda Civic EX') assert.equal(v.siteTitle, `${name.replace(/ 2019 Honda Civic EX$/, '')} ${title}`, 'the name\'s condition words go before the page title');
     }
   }
+  // a demo, loaner or courtesy word before the page title's model year is read whatever condition word the name has
+  for (const title of ['Demo 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle: 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle - 2019 Honda Civic EX | Sample Motors', 'Sample Motors - Service Loaner 2019 Honda Civic EX']) {
+    for (const name of ['Used 2019 Honda Civic EX', '2019 Honda Civic EX', 'Certified Pre-Owned 2019 Honda Civic EX', 'New 2019 Honda Civic EX']) {
+      const v = flat({ name }, shown(undefined, { ...carfax, title }));
+      assert.equal(v.siteTitle, title, `${name} / ${title}: the page title is the title the gate reads`);
+      const r = assessVehicle(v, {});
+      assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}`);
+      assert.match(r.reason, /^Listed as pre-owned but also flagged as a demo\. Demos and loaners are usually sold as new/, `${name} / ${title}`);
+    }
+    // a name that says demo itself is kept
+    assert.equal(flat({ name: 'Demo 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title })).siteTitle, 'Demo 2019 Honda Civic EX', title);
+  }
   // a page title about another car lends no words; a plain page title changes nothing
+  assert.equal(flat({ name: 'Used 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: 'Demo 2021 Kia Sorento LX | Sample Motors' })).siteTitle, 'Used 2019 Honda Civic EX');
   assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2021 Kia Sorento LX Demo | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
   assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
 });

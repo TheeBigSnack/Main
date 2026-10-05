@@ -125,12 +125,20 @@ const saysCondition = (title) => readCondition(titleConditionWords(title)) !== '
 // The page title's car words then stay in the title's part with the model
 // year, which the gate reads for every demo, loaner and courtesy word; put
 // after the name, they would be a later part, where a courtesy word counts
-// only when it ends that part (classify.js, unitWordAfterYear).
+// only when it ends that part (classify.js, unitWordAfterYear). A page title
+// about this car whose words before the model year read as a demo or loaner
+// ("Demo 2019 Honda Civic EX | Sample Motors", "Courtesy Vehicle - 2019
+// ...") is taken over a name that does not say demo, whatever condition
+// word the name has: the gate reads a demo word before any other, so a
+// "Used" name changes nothing, exactly as with a plain name.
+const saysDemo = (title) => readCondition(titleConditionWords(title)) === 'demo' || Boolean(unitWordAfterYear({ siteTitle: title }));
+
 function siteTitleOf(name, pageTitle, year, model) {
   const about = Boolean(pageTitle && year && model) && pageTitle.includes(String(year)) && pageTitle.toLowerCase().includes(model.toLowerCase());
   if (name && about && !unitWordAfterYear({ siteTitle: name }) && unitWordAfterYear({ siteTitle: pageTitle })) {
     return saysCondition(name) && !saysCondition(pageTitle) ? `${titleConditionWords(name)} ${pageTitle.trim()}` : pageTitle;
   }
+  if (about && readCondition(titleConditionWords(pageTitle)) === 'demo' && !(name && saysDemo(name))) return pageTitle;
   if (name && (saysCondition(name) || unitWordAfterYear({ siteTitle: name }))) return name;
   if (about && (!name || saysCondition(pageTitle))) return pageTitle;
   return name || null;

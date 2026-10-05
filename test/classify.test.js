@@ -211,8 +211,13 @@ test('a courtesy car, vehicle or loaner after a title separator is never Ready; 
   for (const siteTitle of ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Car Center', 'Used 2024 Jeep Grand Cherokee Limited - Courtesy Cars', 'Used 2024 Jeep Grand Cherokee Limited – Courtesy Cars of Springfield', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Motors', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Cars for Sale', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Car for Salem Motors']) {
     assert.equal(assessVehicle({ ...used, siteTitle }, {}).decision, DECISION.READY, siteTitle);
   }
+  // before the model year, as README says, "courtesy" counts on its own, even as a dealership's name
+  for (const siteTitle of ['Courtesy Motors | Used 2024 Jeep Grand Cherokee Limited', 'Courtesy Car Center - Used 2024 Jeep Grand Cherokee Limited', 'Courtesy Chevrolet: Used 2024 Jeep Grand Cherokee Limited']) {
+    assert.equal(assessVehicle({ ...used, siteTitle }, {}).decision, DECISION.REVIEW, siteTitle);
+  }
   // the README's list of words holds after a separator too
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(readme, /before the model year, "courtesy" counts even on its own, so a title that opens with such a dealership name is read as a demo/);
   const listed = readme.match(/so does the word (.+?), in the car's own title/);
   assert.ok(listed, 'README names the demo and loaner words');
   const words = [...listed[1].matchAll(/"([^"]+)"|\b(demo|demonstrator|loaner)\b/g)].map((m) => m[1] || m[2]);
