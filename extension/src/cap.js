@@ -78,41 +78,53 @@ export function loggedToday(log, now = new Date()) {
 // when the post was made). Those are posts recorded before this computer
 // kept the log (an install updated during the day, whose take-downs were
 // recorded in takenDown:<origin>), or the person's own posts synced from
-// another of their computers and taken down here. A car already on today's
-// log is not carried again: the log has its posts (a Mark posted of a car
-// unmarked today is the same listing, src/cap.js logPost). One post (VIN and
-// posting time) is carried once; a listing marked as made before that day
-// (`listedBefore`) is no post of that day and stays out. Read only: nothing
-// is written, and the take-down record keeps its entries for the re-post
-// notice.
+// another of their computers and taken down here. A post is told apart by
+// its VIN and posting time, never by its VIN alone: a car posted, taken
+// down and posted again the same day is two posts, even when the first was
+// recorded before the log was kept. A post the log has (the same VIN and
+// time) is not carried again, and neither is a later post of a car already
+// on today's log: that is the listing marked posted again (Mark posted of a
+// car unmarked or taken down today: src/cap.js logPost, alreadyLive), which
+// the log counts once. One post (VIN and posting time) is carried once; a
+// listing marked as made before that day (`listedBefore`) is no post of that
+// day and stays out. Read only: nothing is written, and the take-down record
+// keeps its entries for the re-post notice.
 export function dayLog(log, takenDown = null, now = new Date()) {
   const { today, carried } = logParts(log, takenDown, now);
   return [...today, ...carried];
 }
 
+// Whether the log already counts the post of `vin` made at `at`: the log has
+// that post, or an earlier post of the car today (this one is then the same
+// listing marked again).
+function onLog(today, vin, at) {
+  const v = vinKey(vin);
+  const t = new Date(at).getTime();
+  return today.some((e) => vinKey(e.vin) === v && new Date(e.at).getTime() <= t);
+}
+
 function logParts(log, takenDown, now) {
   const today = entries(log).filter((e) => sameDay(e.at, now));
-  const logged = new Set(today.map((e) => vinKey(e.vin)));
   const carried = new Map();
   for (const t of takenDownList(takenDown)) {
-    if (t.listedBefore || !t.postedAt || !sameDay(t.postedAt, now) || logged.has(t.vin)) continue;
+    if (t.listedBefore || !t.postedAt || !sameDay(t.postedAt, now) || onLog(today, t.vin, t.postedAt)) continue;
     const key = postKey(t.vin, t.postedAt);
     if (!carried.has(key)) carried.set(key, { vin: t.vin, at: t.postedAt });
   }
-  return { today, logged, carried: [...carried.values()] };
+  return { today, carried: [...carried.values()] };
 }
 
 // This computer's count of the person's posts today: every post on the day's
 // log (one per post: a car posted twice through the side panel counts
-// twice), and, for cars the log does not have, the posts the take-down
-// record carries into it (dayLog) and the posted list's own posts of today
-// (recorded before the log existed, or synced from another of the person's
-// computers), one per VIN and posting time.
+// twice), and the posts the log does not count (onLog above): the ones the
+// take-down record carries into it (dayLog) and the posted list's own posts
+// of today (recorded before the log existed, or synced from another of the
+// person's computers), one per VIN and posting time.
 function localPostsToday(posted, log, takenDown, now) {
-  const { today, logged, carried } = logParts(log, takenDown, now);
+  const { today, carried } = logParts(log, takenDown, now);
   const others = new Set(carried.map((e) => postKey(e.vin, e.at)));
   for (const [vin, p] of Object.entries(posted || {})) {
-    if (!own(p) || p.listedBefore === true || !p.postedAt || !sameDay(p.postedAt, now) || logged.has(vinKey(vin))) continue;
+    if (!own(p) || p.listedBefore === true || !p.postedAt || !sameDay(p.postedAt, now) || onLog(today, vin, p.postedAt)) continue;
     others.add(postKey(vin, p.postedAt));
   }
   return today.length + others.size;

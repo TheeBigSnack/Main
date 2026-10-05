@@ -175,6 +175,30 @@ test('the take-down record is carried into the day\'s log on read: a post in bot
   assert.equal(log.length, 3);
 });
 
+// A post is one VIN at one posting time. On the day an install is updated,
+// a car posted before the update (no log entry: only the take-down record
+// has it), taken down and posted again after it (on the log) was posted
+// twice. Before, any log entry for the VIN hid the first post.
+test('a car posted before the day\'s log was kept, taken down and posted again the same day counts twice', () => {
+  const vin = 'TESTVIN0000000A1X';
+  let posted = markPosted({}, { vin, name: 'Car A', price: 10000 }, 'website', today(0));
+  const takenDown = noteTakenDown(null, { vin, postedAt: posted[vin].postedAt, stillListed: false }, today(30), now);
+  posted = markTakenDown(posted, vin);
+  // posted again through the side panel after the update: the posted list and the log have it
+  posted = markPosted(posted, { vin, name: 'Car A', price: 10000 }, 'website', today(60));
+  const log = logPost([], vin, today(60));
+  assert.equal(capStatus(posted, 10, now, { log, takenDown }).used, 2, 'two real posts');
+  assert.deepEqual(dayLog(log, takenDown, now), [{ vin, at: today(60) }, { vin, at: today(0) }]);
+  // taken down again: still two, the second post is on the log
+  const twice = noteTakenDown(takenDown, { vin, postedAt: posted[vin].postedAt }, today(70), now);
+  assert.equal(capStatus(markTakenDown(posted, vin), 10, now, { log, takenDown: twice }).used, 2);
+  // the VIN as the record writes it (upper case) and as a log might hold it count as one car
+  assert.equal(capStatus({}, 10, now, { log: [{ vin: vin.toLowerCase(), at: today(60) }], takenDown: twice }).used, 2);
+  // a car marked as made before that day and taken down stays out, whatever the log holds
+  const hand = noteTakenDown(null, { vin, postedAt: today(0), listedBefore: true }, today(30), now);
+  assert.equal(capStatus({}, 10, now, { log, takenDown: hand }).used, 1);
+});
+
 // A take-down removes the car from the posted list, but the post was made
 // today: the day's log (postLog:<origin>, src/cap.js logPost) keeps counting
 // it, as the sync function's count does. Unmarking does the same: the cap is
