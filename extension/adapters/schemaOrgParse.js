@@ -647,29 +647,15 @@ function struckClasses(doc) {
 // element's `cars` is null (no car link inside), that car's key (every car
 // link inside goes to one car), or MANY (two or more cars). The page's first
 // heading (h1) counts as a link to the page's own car (HERE): the element
-// around the car's own title and price is never another car's card. `others`
-// is the same for the links to cars other than the page's own (neither HERE
-// nor `own`, the key the caller gives the page's own car). `shown` counts
-// the pieces of text inside that are more than spaces, `linkShown` those
-// inside its links to cars, and `money` says whether a piece shows a dollar
-// amount. A dollar amount belongs to the piece of text that holds its
-// number, read as a person sees it: also when its "$" sits in an element of
-// its own just before ("<sup>$</sup>14,000") or is written as an entity
-// ("&#36;14,000", "$&nbsp;14,000").
+// around the car's own title and price is never another car's card. `shown`
+// counts the pieces of text inside that are more than spaces.
 const MANY = {};
 const HERE = {};
 const LINK = Symbol('link');
-const join = (a, b) => (a === null || a === b ? b : MANY);
-function linkTargets(root, unseen, own) {
+function linkTargets(root, unseen) {
   const order = [];
-  let dollar = false; // the text shown so far ends with a dollar sign
   walk(root, (n) => {
-    if (n.text !== undefined) {
-      const t = decodeEntities(n.text);
-      n.money = /\$\s*\d/.test(t) || (dollar && /^\s*\d/.test(t));
-      if (/\S/.test(t)) dollar = /\$\s*$/.test(t);
-      return false;
-    }
+    if (n.text !== undefined) return false;
     if (n.tag !== '#document' && unseen(n)) return false;
     order.push(n);
     return true;
@@ -677,32 +663,21 @@ function linkTargets(root, unseen, own) {
   const heading = order.find((el) => el.tag === 'h1') || null;
   for (let k = order.length - 1; k >= 0; k -= 1) {
     const el = order[k];
-    const link = (el.tag === 'a' || el.tag === 'area') ? el.attrs[LINK] ?? null : null;
-    let t = el === heading ? HERE : link;
-    let others = link !== null && link !== own ? link : null;
+    let t = el === heading ? HERE : (el.tag === 'a' || el.tag === 'area') ? el.attrs[LINK] ?? null : null;
     let shown = 0;
-    let linkShown = 0;
-    let money = false;
     for (const c of el.children) {
       if (c.text !== undefined) {
         if (/\S/.test(c.text)) shown += 1;
-        if (c.money) money = true;
         continue;
       }
       if (c.cars === undefined) continue; // not seen: hidden, crossed out, a script
       shown += c.shown;
-      linkShown += c.linkShown;
-      if (c.money) money = true;
-      if (c.cars !== null && t !== MANY) t = join(t, c.cars);
-      if (c.others !== null && others !== MANY) others = join(others, c.others);
+      if (t === MANY || c.cars === null) continue;
+      t = t === null || t === c.cars ? c.cars : MANY;
     }
     el.cars = t;
-    el.others = others;
     el.shown = shown;
-    el.linkShown = link !== null ? shown : linkShown;
-    el.money = money;
   }
-  return heading;
 }
 
 // An element is a car's card when every car link inside it goes to that one
@@ -711,80 +686,6 @@ function linkTargets(root, unseen, own) {
 // and "Check availability" button all sit in its card.
 const isCard = (parent, child) => child.cars !== null && child.cars !== undefined && child.cars !== MANY && (parent.cars === MANY || parent.shown > child.shown);
 
-// Inside that largest element, when nothing around it links to a car other
-// than the page's own, the car's tile: going in while exactly one child
-// holds the car's links and that child shows more than its links, through
-// one element whose other children show something (the page's own price
-// box beside the tile) and otherwise only through wrappers whose other
-// children show nothing. At that one element, at most one of the other
-// children may show a dollar amount, and only one that comes before the
-// tile: a car's own price box comes before a "similar vehicles" tile, while
-// a tile's own price may sit after its link ("<div class=tile><div><a>..</a>
-// Price drop $500</div><div>$15,000</div></div>" stays whole). visibleText
-// keeps the whole element as the tile's unless all of its conditions for
-// the cut hold (below).
-function tileOf(el) {
-  const car = el.cars;
-  let split = false;
-  for (;;) {
-    let only = null;
-    let count = 0;
-    let besides = false;
-    let money = 0;
-    let moneyAfter = false;
-    for (const c of el.children) {
-      if (c.text === undefined && c.cars === car) {
-        only = c;
-        count += 1;
-        continue;
-      }
-      if (c.text !== undefined ? !/\S/.test(c.text) : c.cars === undefined || c.shown === 0) continue;
-      besides = true;
-      if (c.money) {
-        money += 1;
-        if (only !== null) moneyAfter = true;
-      }
-    }
-    if (count !== 1 || only.shown <= only.linkShown) return el;
-    if (besides) {
-      if (split || money > 1 || moneyAfter) return el;
-      split = true;
-    }
-    el = only;
-  }
-}
-
-// The dollar amounts a piece of text shows, as numbers.
-const DOLLARS = /\$\s*(\d{1,3}(?:,\d{3})+|\d{1,9})(?:\.\d{1,2})?(?![\d,])/g;
-function dollarAmounts(text) {
-  const out = new Set();
-  for (const m of String(text).matchAll(DOLLARS)) out.add(Number(m[1].replace(/,/g, '')));
-  return out;
-}
-
-// Of those, the ones shown as a car's price: not a payment ("Est. $299/mo",
-// "$99 down"), a saving, a price cut or an incentive ("Save $500", "Price
-// drop $500", "$1,000 off", "$500 dealer discount", "$1,000 bonus cash"), a
-// fee or an old or sticker price ("Was $16,000", "MSRP $16,000"). A tile
-// shows its car's price when it shows one of these. Only the cut of a tile
-// out of a block (visibleText) reads them, so an amount these words leave
-// out only ever keeps a tile whole.
-const NOT_A_PRICE_BEFORE = /\b(?:save|savings|saved|discount|rebate|cash back|cash|incentives?|bonus|credit|allowance|drop|dropped|reduced|reduction|markdown|marked down|lowered|cut|fees?|deposit|down|payments?|lease|est|estimated|was|msrp|retail|list|reg|regular|originally|compare at)\b[^$\d]{0,12}$/i;
-const NOT_A_PRICE_AFTER = /^\s*(?:\/\s*|per\s+|a\s+|each\s+)?(?:mo|mos|month|monthly|wk|week|weekly|bi-?weekly|yr|year|off|down|savings|discount|dealer discount|rebates?|cash back|cash|bonus|incentives?|credit|allowance|below|fees?|deposit)\b/i;
-// Words that say the page shows no price of its own: "Call for price",
-// "Contact us for today's pricing", "Price on request".
-const NO_PRICE = /\b(?:call|contact(?:\s+us)?|ask|inquire|enquire)\s+(?:us\s+)?for\s+(?:(?:a|the|our|your|best|latest|current|today'?s)\s+)*(?:price|pricing)\b|\bprice\s*(?:is\s+)?(?:available\s+)?(?:on|upon)\s+request\b/i;
-function priceAmounts(text) {
-  const t = String(text);
-  const out = new Set();
-  for (const m of t.matchAll(DOLLARS)) {
-    if (NOT_A_PRICE_BEFORE.test(t.slice(Math.max(0, m.index - 40), m.index))) continue;
-    if (NOT_A_PRICE_AFTER.test(t.slice(m.index + m[0].length, m.index + m[0].length + 24))) continue;
-    out.add(Number(m[1].replace(/,/g, '')));
-  }
-  return out;
-}
-
 /**
  * What a person sees on the page, as one string (text) and as segments of
  * it tied to the car whose card holds them (segments: { car, text }). A
@@ -792,70 +693,23 @@ function priceAmounts(text) {
  * inside one that also links to another car or shows something else (one
  * car's tile in a "similar vehicles" carousel, one car's card on a list);
  * its links to anything else (a contact form, financing) don't split it.
- * When nothing around that element links to a car other than the page's
- * own (one "you may also like" tile, the page's title in a bar of its own),
- * the element may hold the page's own price box beside the tile: then the
- * card is the tile (tileOf), and the rest of the element is the page's own
- * text, with car null and near the tile's car (a list's one card keeps
- * it), only when all of these hold: the last text shown before the element
- * is the page's first heading (h1) itself, not other text in the heading's
- * block; the page's own text (outside every card, in the heading's card or
- * in its own car's) shows no dollar amount, so its price box is not
- * elsewhere; neither that text nor the rest of any such element says the
- * page shows no price ("Call for price", "Contact us for pricing", "Price
- * on request": NO_PRICE); the tile shows a price of its own (priceAmounts);
- * the rest shows at most one price (priceAmounts: a payment, a saving, a
- * fee or an old price beside it counts for nothing) and none of the tile's
- * dollar amounts; and the rest shows its amounts in one place that comes
- * before the tile (tileOf). Otherwise the whole element is the card: the
- * page's car may lose its price, never take the tile's. Known not to be
- * told apart: a page whose own text shows no dollar amount and says nothing
- * like "Call for price" (its price box says "Get today's price"), beside a
- * tile whose price comes before its link and which shows another price
- * next to that link (priceAmounts), when the tile's pieces sit loose in the
- * block that holds the price box or the tile comes right after the page's
- * heading: the tile's first amount is then read as the page's. Nor a tile
- * with no element of its own whose price sits outside every element that
- * holds a car link (its link and its price loose in the page): that price
- * is the page's own text, as it always was. Which car a link goes to is
- * the caller's carKey (parseVehiclePage), and carKey.own, when it gives
- * one, is the page's own car; without a carKey, every address on this
- * website is a car of its own. Text outside any card, and inside the card
- * around the page's first heading, has car null. The adapter reads a car's
- * own text from them: on its page, everything but other cars' cards; on a
- * list, its own card.
+ * Which car a link goes to is the caller's carKey (parseVehiclePage);
+ * without one, every address on this website is a car of its own. Text
+ * outside any card, and inside the card around the page's first heading,
+ * has car null. The adapter reads a car's own text from them: on its page,
+ * everything but other cars' cards; on a list, its own card.
  */
-function visibleText(root, { struck = new Set(), own = null } = {}) {
+function visibleText(root, { struck = new Set() } = {}) {
   const unseen = (n) => UNSEEN.has(n.tag) || isHidden(n.attrs) || isCrossedOut(n, struck);
-  const heading = linkTargets(root, unseen, own);
-  const inHeading = new Set(); // the pieces of text inside the page's first heading itself
-  if (heading) walk(heading, (n) => {
-    if (n.text !== undefined) inHeading.add(n);
-  });
+  linkTargets(root, unseen);
   const parts = [];
   const segments = []; // { car, raw }, consecutive texts of one card together
-  const regions = [];
-  const cardFor = (parent, child) => {
-    if (!isCard(parent, child)) return null;
-    if (child.cars === HERE || child.cars === own || parent.others === MANY) return child.cars;
-    const tile = tileOf(child);
-    if (tile === child) return child.cars;
-    const region = { car: child.cars, tile, inTile: null, aroundText: '', tileText: '' };
-    region.inTile = { region };
-    regions.push(region);
-    return region;
-  };
   let size = 0;
   const nodes = [root];
   const cards = [null];
-  // the page's own text (outside every card, in the card around its heading
-  // or in its own car's) shows a dollar amount: its price box is not in a region
-  let ownMoney = false;
-  // what the last piece of text shown belonged to: the page's first heading itself (HERE), a region, or anything else
-  let before = null;
   while (nodes.length) {
     const n = nodes.pop();
-    let card = cards.pop();
+    const card = cards.pop();
     if (size > TEXT_LIMIT * 2) break; // enough read; whitespace is squeezed below
     if (n.text !== undefined) {
       parts.push(n.text);
@@ -864,54 +718,20 @@ function visibleText(root, { struck = new Set(), own = null } = {}) {
       if (last && last.car === car) last.raw += ' ' + n.text;
       else segments.push({ car, raw: n.text });
       size += n.text.length;
-      if (/\S/.test(n.text)) {
-        const region = card === null ? null : card.inTile ? card : card.region || null;
-        if (region !== null && region.afterHeading === undefined) region.afterHeading = before === HERE;
-        if (n.money && (card === null || card === HERE || card === own)) ownMoney = true;
-        before = region !== null ? region : inHeading.has(n) ? HERE : n;
-      }
       continue;
     }
     if (n.tag !== '#document' && unseen(n)) continue;
-    if (card !== null && card.tile === n) card = card.inTile; // into the tile of a region
     for (let k = n.children.length - 1; k >= 0; k -= 1) {
       const c = n.children[k];
       nodes.push(c);
       // inside a card, everything is that card's; outside, a child may be one
-      cards.push(card !== null || c.text !== undefined ? card : cardFor(n, c));
+      cards.push(card !== null || c.text !== undefined ? card : isCard(n, c) ? c.cars : null);
     }
   }
   const squeeze = (t) => decodeEntities(t).replace(/\s+/g, ' ').trim();
-  // each region: the tile is the car's card, and the rest the page's own text when the amounts say so
-  for (const g of segments) {
-    if (g.car && g.car.inTile) g.car.aroundText += ' ' + g.raw;
-    else if (g.car && g.car.region) g.car.region.tileText += ' ' + g.raw;
-  }
-  // the page says it shows no price of its own ("Call for price"): an amount beside a tile is never its price
-  const noPrice = regions.length > 0 && NO_PRICE.test(squeeze(segments.filter((g) => g.car === null || g.car === own || (g.car && g.car.inTile)).map((g) => g.raw).join(' ')));
-  for (const r of regions) {
-    const tileText = squeeze(r.tileText);
-    const aroundText = squeeze(r.aroundText);
-    const inTile = dollarAmounts(tileText);
-    r.apart = !ownMoney && !noPrice && r.afterHeading === true && priceAmounts(tileText).size > 0 && priceAmounts(aroundText).size <= 1 && ![...dollarAmounts(aroundText)].some((a) => inTile.has(a));
-  }
-  const resolved = [];
-  for (const g of segments) {
-    let car = g.car;
-    let near = null;
-    if (car && car.inTile) {
-      if (car.apart) {
-        near = car.car;
-        car = null;
-      } else car = car.car;
-    } else if (car && car.region) car = car.region.car;
-    const last = resolved[resolved.length - 1];
-    if (last && last.car === car && last.near === near) last.raw += ' ' + g.raw;
-    else resolved.push({ car, near, raw: g.raw });
-  }
   return {
     text: squeeze(parts.join(' ')).slice(0, TEXT_LIMIT),
-    segments: resolved.map((g) => ({ car: g.car, ...(g.near !== null ? { near: g.near } : {}), text: squeeze(g.raw).slice(0, TEXT_LIMIT) })).filter((g) => g.text),
+    segments: segments.map((g) => ({ car: g.car, text: squeeze(g.raw).slice(0, TEXT_LIMIT) })).filter((g) => g.text),
   };
 }
 
@@ -976,7 +796,7 @@ function factsFrom(doc, pageUrl, carOf = null) {
       }
     }
   }
-  const seen = visibleText(doc.root, { struck: struckClasses(doc), own: typeof carOf === 'function' && typeof carOf.own === 'string' ? carOf.own : null });
+  const seen = visibleText(doc.root, { struck: struckClasses(doc) });
   return { title: ogTitle || title, canonical, next, prev, links, carfaxLinks, text: seen.text, segments: seen.segments };
 }
 
@@ -995,9 +815,7 @@ function factsFrom(doc, pageUrl, carOf = null) {
  *                a line-through style or a class for it: an old price),
  *                whitespace squeezed, at most TEXT_LIMIT characters
  *   segments     the same text in pieces, each with the car whose card
- *                holds it, or null (visibleText above); the page's own text
- *                that sits around one other car's tile also has near, that
- *                car
+ *                holds it, or null (visibleText above)
  * @param {string} html
  * @param {string} pageUrl  the page's own address
  * @param {{ carKey?: Function }} [options]  as for parseVehiclePage (given no cars)
@@ -1016,10 +834,8 @@ export function pageFacts(html, pageUrl, { carKey = null } = {}) {
  * @param {{ carKey?: Function }} [options]  carKey(vehicles), given the
  *   page's vehicle nodes, returns the function that names the car a link on
  *   this website goes to (a key string), or null when it goes to no car's
- *   page, with the page's own car's key as its `own` property when the page
- *   is one car's own; the page's text is cut into cards by it
- *   (facts.segments). Without it, every address on this website is a car of
- *   its own.
+ *   page; the page's text is cut into cards by it (facts.segments). Without
+ *   it, every address on this website is a car of its own.
  * @returns {{ vehicles: object[], facts: ReturnType<typeof pageFacts> }}
  */
 export function parseVehiclePage(html, pageUrl, { carKey = null } = {}) {

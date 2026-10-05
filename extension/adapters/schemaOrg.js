@@ -774,11 +774,12 @@ async function twoAtATime(items, work) {
 // page is read for, `vin`, else the car its markup puts at this address),
 // such an address is another car's only when a word in it tells another
 // car from this one (namesAnotherCar: a stock number or id, another model
-// year, another make, a new car's other model or trim), so its tile does
-// not pass for this car's text; any other ("See all 2016 Honda
+// year, another make it knows, a new car's other model or trim), so its
+// tile does not pass for this car's text; any other ("See all 2016 Honda
 // Civic?sort=price", "Shop new 2027 Honda Civic", another address of this
-// same car) goes to no car, so the car's own price box is not cut out,
-// whether or not this website's car addresses carry their VIN. On a
+// same car) goes to no car, so the car's own price box does not become
+// another car's card, whether or not this website's car addresses carry
+// their VIN. On a
 // page that is no one car's own (a list), a VIN-less address that reads
 // like a car page goes to a car only when it has the shape of this lot's
 // car addresses (cars.shape, the addresses the list linked to, else those
@@ -821,15 +822,12 @@ function carKeys(pageUrl, cars, vin = '') {
       return vinPages ? null : key;
     };
     const seen = new Map(); // a page links to one car many times
-    const carFor = (href) => {
+    return (href) => {
       if (seen.has(href)) return seen.get(href);
       const car = carOf(href);
       if (seen.size < 100000) seen.set(href, car);
       return car;
     };
-    // the page's own car, so a link to it is never counted as another car's (schemaOrgParse.js visibleText)
-    carFor.own = own ? 'vin:' + nodeVin(own) : null;
-    return carFor;
   };
 }
 
@@ -845,20 +843,29 @@ function carKeys(pageUrl, cars, vin = '') {
 // stock number, also run together ("f150" for an F-150). Any other word
 // names no car: a search's or a breadcrumb's ("near-me", "hybrid"), so "See
 // all 2016 Honda Civic" in a car's own price box never makes the box
-// another car's. Neither do the parts of a search that are no car's: the
-// values of a tracking, place, paging, sorting, price or mileage query
-// (QUIET_QUERY_KEY: "?utm_campaign=fall2026", "?zip=15370", "?radius=100"),
-// a page number ("/page/3/"), a price limit ("-under-20000"), a range of
-// model years with this car's in it ("2014-2018") and a door, drive or
-// engine word ("4dr", "4x4", "v6": PLAIN_DIGIT_WORD). An address about new
-// cars at another model year ("Shop new 2027 Honda Civic") is a search for
-// this car's model only when every other word in it is this car's own or a
-// search's (SEARCH_WORDS); a word of any other kind ("/new/2027-honda-civic-
-// sport/", "/new-vehicles/2027-honda-accord/") makes it another car's. Not
-// told apart this way: an address with no stock number or id, no other make
-// and no model with a digit, at this car's model year ("/used/2016-honda-
-// accord/" or "/used/2016-accord/" on a 2016 Honda Civic's page), or about
-// new cars at another year with only this car's own and search words.
+// another car's. Neither do the values of a tracking, campaign, place,
+// sorting, price or mileage query (QUIET_QUERY_KEY: "?utm_campaign=
+// fall2026", "?zip=43215", "?radius=100"; a car's own address names its car
+// elsewhere), nor a door, drive or engine word ("4dr", "4x4", "v6":
+// PLAIN_DIGIT_WORD). When the address reads as this car's own search (no
+// word without a digit but this car's own and a search's: SEARCH_WORDS,
+// "page", "under", "max" and the like), neither does a one-digit page number
+// after "page" or "pg" ("/page/3/"), a round price limit ("-under-20000",
+// "-under-20k") or a range of at most ten model years with this car's in it
+// ("2014-2018"). In any other address those words count as they are, so
+// another car's stock number after a search's word ("/used/2018-ford-
+// expedition-max-12345/" on an Escape's page, "-p-123", "-max-88001") still
+// tells it apart. An address about new cars at another model year ("Shop
+// new 2027 Honda Civic") is a search for this car's model only when it reads
+// as this car's own search; a word of any other kind ("/new/2027-honda-
+// civic-sport/", "/new-vehicles/2027-honda-accord/", but also "-near-me",
+// "-specials" or a town) makes it another car's, so a price box linking
+// such a search loses the car's price. Not told apart this way: an address
+// with no stock number or id, no other make that MAKES holds and no model
+// with a digit, at this car's model year or with no model year at all
+// ("/used/2016-honda-accord/", "/used/2016-accord/" or "/used/honda-
+// accord/" on a 2016 Honda Civic's page), or about new cars at another year
+// with only this car's own and search words ("/new/2027-honda-civic/").
 const wordsOf = (value) => String(value || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 const MAKE_NAMES = new Map([['chevrolet', ['chevy']], ['volkswagen', ['vw']], ['mercedesbenz', ['mb']]]);
 // Every make the VIN check knows, every other make the probe's SUBSET_WORDS
@@ -869,6 +876,7 @@ const MAKES = new Set([
   'chevy', 'vw', 'mb', 'benz', 'alfa', 'alfaromeo', 'astonmartin', 'bentley', 'bugatti', 'canam', 'daewoo', 'ferrari', 'fisker', 'husqvarna',
   'ineos', 'isuzu', 'karma', 'ktm', 'lamborghini', 'landrover', 'lotus', 'lucid', 'maserati', 'maybach', 'mclaren', 'mitsubishi', 'motoguzzi',
   'polaris', 'polestar', 'porsche', 'rivian', 'rollsroyce', 'royalenfield', 'smart', 'vinfast',
+  'freightliner', 'geo', 'hino', 'kenworth', 'peterbilt', 'workhorse', 'winnebago', 'jayco', 'airstream', 'newmar', 'tiffin',
 ]);
 // Words a search's address holds besides a car's own: inventory, condition,
 // body, cab and drive words, and the pieces of a web address.
@@ -882,10 +890,13 @@ const SEARCH_WORDS = new Set([
 // words with a digit that only describe a car: doors, drive, engine
 const PLAIN_DIGIT_WORD = /^(?:[2-5]dr|4x[24]|[24]wd|[vi][3-8]|v1[02])$/;
 const MODEL_YEAR_WORD = /^(?:19[5-9][0-9]|20[0-9][0-9])$/;
-// query names whose values are a search's, never a car's: tracking, place, paging, sorting, price and mileage ranges
-const QUIET_QUERY_KEY = /^(?:utm_[a-z0-9_]*|gclid|gclsrc|dclid|fbclid|msclkid|gbraid|wbraid|yclid|_ga|_gl|mc_cid|mc_eid|referrer|zip|zipcode|zip_code|postal|postalcode|postal_code|radius|distance|lat|lng|lon|latitude|longitude|page|pg|start|offset|limit|per_?page|page_?size|sort[a-z_]*|order[a-z_]*|dir|direction|view|price[a-z_]*|min[a-z_]*|max[a-z_]*|mileage[a-z_]*|odometer[a-z_]*|payment[a-z_]*)$/i;
-const PAGE_WORD = /^(?:page|pg|p)$/;
+// query names whose values are a search's, never a car's: tracking, place, sorting, price and mileage ranges
+// (a car's own address names its car elsewhere); a page number needs none ("?page=2": one or two digits)
+const QUIET_QUERY_KEY = /^(?:utm_[a-z0-9_]*|gclid|gclsrc|dclid|fbclid|msclkid|gbraid|wbraid|yclid|_ga|_gl|mc_cid|mc_eid|campaign|zip|zipcode|zip_code|postal|postalcode|postal_code|radius|distance|lat|lng|lon|latitude|longitude|sort[a-z_]*|dir|direction|price[a-z_]*|min[a-z_]*|max[a-z_]*|mileage[a-z_]*|miles[a-z_]*|odometer[a-z_]*|payment[a-z_]*)$/i;
+const PAGE_WORD = /^(?:page|pg)$/;
 const PRICE_LIMIT_WORD = /^(?:under|below|over|above|max|min|maximum|minimum|less|than|upto)$/;
+// a price limit as a search writes it: a round amount ("20000", "17500") or thousands ("20k")
+const isPriceLimit = (w) => /^\d{1,3}k$/.test(w) || (/^\d{4,6}$/.test(w) && Number(w) % 500 === 0);
 function namesAnotherCar(href, car) {
   if (!car) return true;
   let u;
@@ -912,13 +923,34 @@ function namesAnotherCar(href, car) {
   const query = [...u.searchParams.entries()].filter(([k]) => !QUIET_QUERY_KEY.test(k)).map(([, v]) => wordsOf(v));
   const aboutNew = path.includes('new') || query.some((w) => w.includes('new'));
   const year = Number(car.year) || null;
+  // how many words from i on are one of this car's own, the longest run ("f-150"), or 0
+  const ownRun = (words, i) => {
+    for (let j = Math.min(words.length, i + 4); j > i; j -= 1) if (mine.has(words.slice(i, j).join(''))) return j - i;
+    return 0;
+  };
+  // a word without a digit that is neither this car's own nor a search's ("accord", "expedition", "p", "near")
+  const otherWordIn = (words) => {
+    for (let i = 0; i < words.length;) {
+      const step = ownRun(words, i);
+      if (step) {
+        i += step;
+        continue;
+      }
+      const w = words[i];
+      if (!/\d/.test(w) && !SEARCH_WORDS.has(w) && !PAGE_WORD.test(w) && !PRICE_LIMIT_WORD.test(w)) return true;
+      i += 1;
+    }
+    return false;
+  };
+  // the address reads as this car's own search: no word but this car's own, a search's and words with a digit.
+  // Only then does a page number, a price limit or a range of years count for nothing, so another car's stock
+  // number after "max" or "p" ("/used/2018-ford-expedition-max-12345/" on an Escape's page) still tells it apart
+  const ownSearch = !otherWordIn(path) && !query.some(otherWordIn);
   let otherYear = false; // a model year other than this car's, in an address about new cars
-  let otherWord = false; // a word that is neither this car's own nor a search's
   const tells = (words, inQuery) => {
     for (let i = 0; i < words.length;) {
-      let step = 0;
       // the longest run of words from here that is one of this car's own ("f-150")
-      for (let j = Math.min(words.length, i + 4); j > i && !step; j -= 1) if (mine.has(words.slice(i, j).join(''))) step = j - i;
+      const step = ownRun(words, i);
       if (step) {
         i += step;
         continue;
@@ -928,8 +960,9 @@ function namesAnotherCar(href, car) {
       const w = words[i];
       const prev = words[i - 1] || '';
       if (MODEL_YEAR_WORD.test(w)) {
-        // a range of model years with this car's in it ("2014-2018")
-        if (year && MODEL_YEAR_WORD.test(words[i + 1] || '') && Number(w) <= year && year <= Number(words[i + 1])) {
+        // a range of at most ten model years with this car's in it ("2014-2018"), in this car's own search
+        const to = MODEL_YEAR_WORD.test(words[i + 1] || '') ? Number(words[i + 1]) : null;
+        if (ownSearch && year && to && Number(w) <= year && year <= to && to - Number(w) <= 10) {
           i += 2;
           continue;
         }
@@ -938,16 +971,17 @@ function namesAnotherCar(href, car) {
           otherYear = true;
         }
       } else if (/\d/.test(w)) {
-        const quiet = PLAIN_DIGIT_WORD.test(w) || (inQuery && /^\d{1,2}$/.test(w)) || (PAGE_WORD.test(prev) && /^\d{1,3}$/.test(w)) || (PRICE_LIMIT_WORD.test(prev) && /^\d{3,6}k?$/.test(w));
+        const quiet = PLAIN_DIGIT_WORD.test(w) || (inQuery && /^\d{1,2}$/.test(w))
+          || (ownSearch && PAGE_WORD.test(prev) && /^\d$/.test(w)) || (ownSearch && PRICE_LIMIT_WORD.test(prev) && isPriceLimit(w));
         if (!quiet) return true;
-      } else if (!SEARCH_WORDS.has(w)) otherWord = true;
+      }
       i += 1;
     }
     return false;
   };
   if (tells(path, false) || query.some((words) => tells(words, true))) return true;
   // about new cars at another model year: a search for this car's model only with no word of another kind
-  return otherYear && otherWord;
+  return otherYear && !ownSearch;
 }
 
 // The car whose own page this is, from its markup: the node with a VIN at
@@ -975,15 +1009,13 @@ function ownNode(nodes, pageUrl) {
 // car's price. For a car read from a list (list: true): its own card; a car
 // without one has no text, so the list's data shows no price and its own
 // page is read instead. A card is this car's when its car is this VIN or
-// one of this car's addresses. On a list, the text a card's tile was cut
-// from (a segment near this car: on a car's page, the page's own) is this
-// car's too.
+// one of this car's addresses.
 function factsForCar(facts, { urls = [], vin = '', list = false } = {}) {
   const out = { title: facts.title, text: facts.text, carfaxLinks: facts.carfaxLinks };
   if (!Array.isArray(facts.segments)) return out;
   const own = new Set(urls.filter((u) => typeof u === 'string' && u).map(pageKey).filter(Boolean));
   if (vin) own.add('vin:' + vin);
-  const kept = list ? facts.segments.filter((g) => (g.car !== null && own.has(g.car)) || (g.near !== undefined && own.has(g.near))) : facts.segments.filter((g) => g.car === null || own.has(g.car));
+  const kept = list ? facts.segments.filter((g) => g.car !== null && own.has(g.car)) : facts.segments.filter((g) => g.car === null || own.has(g.car));
   out.text = kept.map((g) => g.text).join(' ');
   return out;
 }
