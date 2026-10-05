@@ -137,13 +137,22 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   // last scan read (the new cars, a search filtered for a customer), and the
   // probe saw that one. A car missing from it, or from the part of it the
   // website gave (a later page failed, the paging did not move that list
-  // on), is not called gone or left unchecked on its word: the same tab
-  // reads the car once more the way the last scan read the website, and
-  // that answer is the one that counts.
-  if ((r.notFound || r.incomplete) && stored && differentRead(adapter, service, stored)) {
+  // on), or a list whose first page failed or held no cars, is not called
+  // gone or left unchecked on its word: the same tab reads the car once
+  // more the way the last scan read the website, and that answer is the one
+  // that counts. Never after a refusal, and never when the car's own page
+  // was the trouble (the same page would be asked for again).
+  if (!r.ok && !refusal(r) && !r.carPage && stored && differentRead(adapter, service, stored)) {
     r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url, carPages));
   }
   return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
+}
+
+// Did the website turn the read away? An adapter that says so (refused),
+// else its words: an HTTP 401, 403, 429 or 503, or a bot check. Nothing more
+// is asked of a website that refused.
+function refusal(r) {
+  return r.refused === true || /\b(?:401|403|429|503)\b|bot check/i.test(String(r.message || ''));
 }
 
 // The service the read uses (the probe's, with what it could not see filled

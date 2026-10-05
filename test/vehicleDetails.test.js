@@ -542,3 +542,41 @@ test('a car missing from the part of another list the website gave is read from 
   }
 });
 
+// The same tab on another list whose first page fails (a 500) or holds no
+// cars and no count: that is no answer about the car either, so the list
+// the last scan read is read too. A refusal is never followed by another read.
+test('a dealer tab whose own list fails on its first page reads the car from the last scan\'s list; a refusal is never followed by another read', async () => {
+  const cars = platformCars(4, { from: 1 });
+  const json = (body) => ({ ok: true, status: 200, contentType: 'application/json', text: JSON.stringify(body), json: body });
+  const service = { kind: 'dealerCom', origin: DEALERCOM_ORIGIN, inventoryUrl: DEALERCOM_LIST, listUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm' };
+  const other = DEALERCOM_LIST.replace('AUTO_USED', 'AUTO_NEW');
+  const usedList = (c) => c.url.startsWith(DEALERCOM_LIST.split('?')[0]) && c.url.includes('AUTO_USED');
+  const tabOn = (answer) => {
+    const site = dealerComSite({ cars });
+    site.set(other, answer);
+    const page = fakePlatformPage({ site, origin: DEALERCOM_ORIGIN, path: '/new-inventory/index.htm', requested: [other], windowExtras: { DDC: {} }, text: 'Website by Dealer.com' });
+    const store = { [SITES_KEY]: { [DEALERCOM_ORIGIN]: { adapter: 'dealerCom', service } } };
+    globalThis.chrome = fakeChrome(page, store);
+    return { page, info: store[SITES_KEY][DEALERCOM_ORIGIN] };
+  };
+  try {
+    for (const [what, answer] of [['a 500', answerWith(500, 'Server error')], ['no cars and no count', json({ inventory: [] })]]) {
+      const { page, info } = tabOn(answer);
+      const r = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: cars[1].vin, contains: async () => false });
+      assert.equal(r.ok, true, `${what}: ${r.message}`);
+      assert.equal(r.via, 'tab', `${what}: through the same tab`);
+      assert.equal(r.vehicle.vin, cars[1].vin);
+      assert.ok(page.fetchCalls.some(usedList), `${what}: the last scan's list was read`);
+    }
+    for (const status of [429, 403]) {
+      const { page, info } = tabOn(answerWith(status, 'No'));
+      const r = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: cars[1].vin, contains: async () => false });
+      assert.equal(r.ok, false);
+      assert.match(r.message, new RegExp(`\\(${status}\\)`));
+      assert.ok(!page.fetchCalls.some(usedList), `${status}: nothing more is asked of a website that refused`);
+    }
+  } finally {
+    delete globalThis.chrome;
+  }
+});
+
