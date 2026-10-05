@@ -372,6 +372,9 @@ begin
       ('New Motors',             'www.new-motors.test',                            E'Pat\tQuinn',    'your name'),
       ('New Motors',             'www.new-motors.test',                            'Pat' || U&'\2029' || 'Quinn', 'your name'),
       ('New Motors',             'www.new-motors.test',                            'Pat' || U&'\200F' || 'Quinn', 'your name'),
+      -- U+061C ARABIC LETTER MARK is a direction mark too
+      ('New' || U&'\061C' || 'Motors', 'www.new-motors.test',                       'Pat',            'dealership''s name'),
+      ('New Motors',             'www.new-motors.test',                            'Pat' || U&'\061C' || 'Quinn', 'your name'),
       ('New Motors',             'www.new-motors.test',                            null,             'your name')
     ) as f(dealer, website, person, field)
   loop
