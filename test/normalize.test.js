@@ -124,20 +124,22 @@ test('toNumber reads one amount, and text with two amounts in it is no number', 
   assert.equal(toNumber(null), null);
 });
 
-test('a Dealer Inspire price field with two amounts in it is no price, and the second line never stands in for it', () => {
+test('a Dealer Inspire price field that does not read as one amount (two amounts, a note) is no price, and the second line never stands in for it', () => {
   const display = (pricing) => ({ extra_fields: { lightning: { pricing } } });
   const two = '$24,995 $25,495';
-  assert.deepEqual(websitePrice(display({ low: { label: 'Price', value: two }, high: { label: 'Was', value: '26673' } })), { value: null, label: 'the price shows more than one amount' });
-  assert.deepEqual(websitePrice(display({ low: false, high: { label: 'Price', value: two } })), { value: null, label: 'the price shows more than one amount' });
-  assert.deepEqual(websitePrice({ pricing: { our_price: two, price: 24995 } }), { value: null, label: 'the price shows more than one amount' }, 'the hidden fields never stand in either');
+  assert.deepEqual(websitePrice(display({ low: { label: 'Price', value: two }, high: { label: 'Was', value: '26673' } })), { value: null, label: 'the price does not read as one amount' });
+  assert.deepEqual(websitePrice(display({ low: false, high: { label: 'Price', value: two } })), { value: null, label: 'the price does not read as one amount' });
+  assert.deepEqual(websitePrice({ pricing: { our_price: two, price: 24995 } }), { value: null, label: 'the price does not read as one amount' }, 'the hidden fields never stand in either');
   assert.deepEqual(websitePrice({ pricing: { our_price: '$24,995', price: 23995 } }), { value: 24995, label: 'Price' });
+  // a note or a phone number in the field is no price either, and the reason does not call it two amounts
+  for (const note of ['$24,995*', 'Call 555-555-0100']) assert.deepEqual(websitePrice(display({ low: { label: 'Price', value: note }, high: { label: 'Was', value: '26673' } })), { value: null, label: 'the price does not read as one amount' }, note);
   // and a car with such a price is not ready to post: it goes to To do with the reason
   const raw = structuredClone(fixtures.usedNormal);
   raw.extra_fields.lightning.pricing.low.value = two;
   const v = normalizeVehicle(raw);
   assert.equal(v.price, null);
   assert.equal(v.priceBeforeFees, null);
-  assert.equal(v.priceLabel, 'the price shows more than one amount');
+  assert.equal(v.priceLabel, 'the price does not read as one amount');
 });
 
 // ---------- pre-owned signs any website can carry ----------

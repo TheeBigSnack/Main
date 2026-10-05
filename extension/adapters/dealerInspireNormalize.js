@@ -14,8 +14,9 @@ function positive(value) {
 }
 
 // A field with digits in it that does not read as one amount ("$24,995
-// $25,495", two prices in one field): no price can be read from it.
-const UNREADABLE = 'the price shows more than one amount';
+// $25,495", two prices in one field; "$24,995*"; a phone number): no price
+// can be read from it.
+const UNREADABLE = 'the price does not read as one amount';
 const unreadable = (value) => typeof value === 'string' && /\d/.test(value) && toNumber(value) === null;
 
 // The price the website shows as its main price. On Dealer Inspire sites the
