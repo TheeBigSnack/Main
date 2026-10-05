@@ -71,12 +71,28 @@ test('the Supabase workflow runs by hand only, against the committed project, an
   assert.match(supabase, /supabase db push --dry-run/);
   const steps = supabase.split(/\n      - /);
   assert.match(steps.at(-1), /npm run check-deploy/, 'the last step is the outside check');
-  assert.match(steps.at(-1), /^name: Check the project from the outside\n\s+continue-on-error: \$\{\{ inputs\.step == 'plan' \|\| inputs\.step == 'database' \}\}\n\s+run:/, 'it runs for every step, and fails the run only once the functions should be there');
+  assert.match(steps.at(-1), /^name: Check the project from the outside\n\s+continue-on-error: \$\{\{ inputs\.new_project && \(inputs\.step == 'plan' \|\| inputs\.step == 'database'\) \}\}\n\s+run:/, 'it runs for every step, and a FAIL turns the run red unless plan or database was started for a brand-new project');
   assert.match(supabase, /run: supabase db push --yes\n/, 'the real push answers its own prompt');
 });
 
 // The workflow's leading comment block as one line of text
 const headerOf = (yml) => yml.split('\n').filter((l) => l.startsWith('#')).map((l) => l.replace(/^#\s?/, '')).join(' ').replace(/\s+/g, ' ');
+
+// Production has its tables and functions, so a FAIL from the outside check
+// on a plan or database run is a real one: it turns the run red. Only a run
+// started for a brand-new project (the new_project box, off by default)
+// lets the FAILs expected before the first push and deploy stay green.
+test('a FAIL from the outside check turns a plan or database run red, unless the run is for a brand-new project', () => {
+  const box = supabase.match(/      new_project:\n        description: (.+)\n        type: boolean\n        default: false\n/);
+  assert.ok(box, 'the new_project box, unticked by default');
+  assert.equal((supabase.match(/continue-on-error:/g) || []).length, 1, 'the outside check is the one step that may fail softly');
+  const header = headerOf(supabase);
+  assert.doesNotMatch(header, /fail by design/);
+  assert.match(header, /a FAIL there turns the run red\. The one exception is a plan or database run started with "new project" ticked/);
+  const doc = read('docs/production-setup.md');
+  assert.match(doc, /A `FAIL` from the outside check turns any run red\. On a brand-new project[^\n]*start those two runs with \*\*new project\*\* ticked[^\n]*Production is past that \(its tables and functions exist\), so leave the box unticked there\./);
+  assert.doesNotMatch(doc, /although the run stays green/);
+});
 
 // workflow_dispatch can start the workflow from any branch that carries it; the
 // job itself refuses every branch but the default, as manager.yml's does, so a

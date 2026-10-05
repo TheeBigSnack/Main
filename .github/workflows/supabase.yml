@@ -23,10 +23,13 @@
 #   check      only the outside check (npm run check-deploy)
 #
 # Every step ends with npm run check-deploy against the project the
-# committed config files name (only functions, verify and check fail on it;
-# before the functions exist some of its lines fail by design), and refuses to start when those files name a
-# different project from SUPABASE_PROJECT_REF, so a deploy can only reach the
-# project the extension and the manager view talk to.
+# committed config files name, and a FAIL there turns the run red. The one
+# exception is a plan or database run started with "new project" ticked: on
+# a project with no tables or functions yet, some of its lines fail until
+# functions has run, so those FAILs leave that run green. Every step refuses
+# to start when the config files name a different project from
+# SUPABASE_PROJECT_REF, so a deploy can only reach the project the extension
+# and the manager view talk to.
 #
 # Settings it reads, all on the "production" environment (Settings,
 # Environments, production). docs/production-setup.md, step 2, has the owner
@@ -57,6 +60,10 @@ on:
         description: Functions to deploy (functions step only)
         type: string
         default: rewrite sync billing lead
+      new_project:
+        description: A brand-new project with no tables or functions yet (plan and database only; the outside check's FAILs leave the run green)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -219,12 +226,12 @@ jobs:
             git clean -fdq -- supabase/functions
           done
           exit "$status"
-      # Before the functions are deployed (plan, database) some lines are
-      # expected to fail: tables missing before the first push, sync and
-      # rewrite missing before theirs. The output still shows, and the run
-      # stays green; on functions, verify and check a FAIL turns the run red.
+      # A FAIL turns the run red. Only on a brand-new project (the
+      # new_project box, plan and database runs) are some lines expected to
+      # fail: tables missing before the first push, the functions missing
+      # before theirs. There the output still shows and the run stays green.
       - name: Check the project from the outside
-        continue-on-error: ${{ inputs.step == 'plan' || inputs.step == 'database' }}
+        continue-on-error: ${{ inputs.new_project && (inputs.step == 'plan' || inputs.step == 'database') }}
         run: npm run check-deploy
         env:
           LOTSYNC_MANAGER_ORIGIN: ${{ vars.MANAGER_URL }}
