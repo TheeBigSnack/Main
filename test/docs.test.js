@@ -1207,6 +1207,17 @@ test('the help says what the panel list, a single arrival and a refused page che
   assert.match(standard, /except when the website turned a page away \(HTTP 403, 429 or 503, or a check page shown instead of it\)[^.]*: then no car is marked gone in that scan, each missing car shows under \*\*Needs a look\*\* as "Missing from this scan but not confirmed gone\. Rescan later\."/, 'the help leaves out that a refusal holds back every missing car');
 });
 
+// The help's Billing card once grouped Start the free pilot with Subscribe
+// and Manage billing under "(Stripe's own pages, ...)", as if the pilot took a
+// card; the manager view's own action says no card is asked for.
+test('the help keeps Start the free pilot apart from the two buttons that open Stripe', () => {
+  assert.match(read('../manager/data.js'), /label: 'Start the free pilot', does: '[^\n]*no card is asked for' \}/, 'the free pilot now asks for a card: check the help');
+  const billing = doc('help.md').split('\n').find((l) => l.startsWith('- **Billing**:'));
+  assert.ok(billing, 'docs/help.md no longer explains the Billing card');
+  assert.doesNotMatch(billing, /\*\*Start the free pilot\*\*, \*\*Subscribe\*\* and \*\*Manage billing\*\* \(Stripe's own pages/, 'the help puts Start the free pilot among Stripe\'s own pages');
+  assert.match(billing, /\*\*Start the free pilot\*\* \(no card\), and \*\*Subscribe\*\* and \*\*Manage billing\*\* \(Stripe's own pages/);
+});
+
 // README's Account item once sent readers to "steps 3 to 6: the functions, ..."
 // as what must go live before a sign-in completes, after production-setup's
 // step 3 said all four functions were up, and its storage line called two
