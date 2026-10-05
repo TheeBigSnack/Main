@@ -119,6 +119,25 @@ test('the Facebook host justification and the privacy texts name every read Lot 
   assert.match(reads, /When you open a to-do item, it reads the Marketplace page it opened for it \(the listing, or your Your listings page when no listing link was saved\) for the title, prices and a sold sign/);
 });
 
+// review: beside those reads, the Web Store answers said only that the extension "fills in the form" in the
+// user's tab, their Limited Use statement that "No Facebook account data is collected", and the privacy
+// policy that nothing at all is collected "from the User's Facebook account", while the listing address is
+// kept and the dry run, the queue and an open to-do item read Facebook pages of the user's own account.
+test('the privacy texts\' summary lines about Facebook name the reads they make, with no blanket "nothing from the account"', () => {
+  const store = read('legal/chrome-web-store-privacy.md');
+  const policy = read('legal/privacy-policy.md');
+  assert.doesNotMatch(store, /No Facebook account data is collected/, 'the Limited Use statement says no Facebook account data is collected while the listing address is kept');
+  assert.doesNotMatch(policy, /or anything from the User's Facebook account\./, 'the privacy policy says nothing is collected from the User\'s Facebook account while it keeps the listing address and reads the listing pages');
+  const noRequest = store.split('\n').find((l) => l.startsWith('The extension makes no request to Facebook itself'));
+  assert.ok(noRequest, 'the Web Store answers lost their line on requests to Facebook');
+  for (const seen of [/fills in the form/, /check fields only/, /listing page after a post in a queue/, /Your listings page while a to-do item is open/]) assert.match(noRequest, seen, `the Web Store answers' line on requests to Facebook leaves out a read (${seen})`);
+  const limited = section(store, '## Limited Use statement (for the listing and the Privacy Policy)');
+  assert.match(limited, /from Facebook pages, Lot Current keeps only the address of each listing the user posts/);
+  const policyLine = policy.split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
+  assert.match(policyLine, /from the User's Facebook account we keep and read only what this paragraph lists/);
+  assert.match(policyLine, /it types into the form and reads the pages above in the User's own tab/);
+});
+
 test('no text says Facebook gets nothing before Publish: the fill types into Facebook\'s own suggestion boxes and hands it the photos', () => {
   // the code: Location (and Make and Model) are suggestion boxes typed into, and the photos are put on the form's file input
   const map = read('extension/facebook/formMap.js');

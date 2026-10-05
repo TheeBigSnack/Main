@@ -102,7 +102,7 @@ To pass, at least two of them must say pre-owned, or one must and the car's page
 ## For development
 
 ```
-npm test              # 1463 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1464 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel
