@@ -368,3 +368,16 @@ test('lot-wide lines saved by an earlier scan with the entities as written still
   const claim = runGuardrails('It comes with a warranty.', { vehicle: v, boilerplate: [saved] }).problems.filter((p) => p.code === 'unsupported-claim');
   assert.equal(claim.length, 1, 'the lot-wide warranty line backs no claim about this car');
 });
+
+// The narrative stops before the first line left out, and the line before it
+// goes too when it may run on into it: a full stop after an abbreviation
+// ("the original Mfr.", "approx.") ends no sentence.
+test('a line that stops on an abbreviation is never sent without the line left out after it', () => {
+  const terms = 'Warranty: see the terms every car on the lot shares.';
+  assert.deepEqual(cleanDescription(`Runs great.<br>Covered by the rest of the original Mfr.<p>${terms}</p>`, new Set([terms])), ['Runs great.']);
+  assert.deepEqual(cleanDescription('Runs great.<br>Comes with approx.<br>Clean CARFAX. Except the accident in 2021.'), ['Runs great.']);
+  assert.deepEqual(cleanDescription('Runs great.<br>Tow pkg. incl.<br>Recent Arrival!'), ['Runs great.']);
+  // a line that ends a sentence still goes, a unit after a number included
+  assert.deepEqual(cleanDescription('Runs great.<br>Clean CARFAX.'), ['Runs great.']);
+  assert.deepEqual(cleanDescription('Rated 30 mpg.<br>Clean CARFAX.'), ['Rated 30 mpg.']);
+});

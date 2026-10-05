@@ -279,19 +279,21 @@ const leftOut = (seg, boilerplate) =>
 // after one left out may carry on from it ("Clean CARFAX." then "Except the
 // accident in 2021."), and the last segment sent goes too when it may run on
 // into the one left out: it does not end with ".", "!" or "?", or the one
-// left out does not start as a sentence does (past a bullet mark). Bullets
-// and headings go as written. The lot-wide lines are read as the
-// description's lines are (lotWideLines).
+// left out does not start as a sentence does (past a bullet mark), or it
+// stops on an abbreviation ("the original Mfr.", "approx."), whose full
+// stop ends no sentence. Bullets and headings go as written. The lot-wide
+// lines are read as the description's lines are (lotWideLines).
 export function cleanDescription(raw, boilerplate = new Set()) {
   const lot = lotWideLines(boilerplate);
   const kept = [];
+  const runsOn = (last, next) => !ENDS_SENTENCE.test(last) || endsAtAbbreviation(last) || !STARTS_SENTENCE.test(next.replace(/^[-•*]\s+/, ''));
   for (const seg of segmentsOf(raw, lot)) {
     if (!leftOut(seg, lot)) {
       kept.push(seg.text);
       continue;
     }
     let next = seg.text;
-    while (kept.length && (!ENDS_SENTENCE.test(kept[kept.length - 1]) || !STARTS_SENTENCE.test(next.replace(/^[-•*]\s+/, '')))) next = kept.pop();
+    while (kept.length && runsOn(kept[kept.length - 1], next)) next = kept.pop();
     break;
   }
   return kept;
