@@ -60,20 +60,14 @@ test('originOfSiteKey names the website a stored key belongs to, only for that f
   assert.equal(originOfSiteKey('sync', null), '');
 });
 
-// Keys documented in docs/data-inventory.md whose HANDOFF.md 5.1 entry is
-// still to be written (HANDOFF.md is kept by the lead).
-const PENDING_DOCS = new Set(['takenDown', 'postLog']);
-
 test('the names are the documented ones (HANDOFF.md section 5.1)', () => {
   const handoff = readFileSync(new URL('../HANDOFF.md', import.meta.url), 'utf8');
   const section = handoff.slice(handoff.indexOf('### 5.1'), handoff.indexOf('### 5.2'));
   assert.ok(section.length > 500, 'section 5.1 is there');
   for (const name of Object.values(SITE_KEY_NAMES)) {
-    if (PENDING_DOCS.has(name)) continue;
     assert.ok(section.includes('`' + name + ':<origin>`'), `HANDOFF.md 5.1 does not document ${name}:<origin>`);
   }
   for (const name of Object.values(GLOBAL_KEYS)) {
-    if (PENDING_DOCS.has(name)) continue;
     assert.ok(section.includes('`' + name + '`'), `HANDOFF.md 5.1 does not document ${name}`);
   }
 });
