@@ -91,9 +91,12 @@ export const NOT_ON_TEAM_HINT = 'Their extension no longer syncs, and sold-car a
 // only a manager reads the whole team, so nobody else can be told apart.
 export const NOT_ON_TEAM_UNKNOWN = 'Left out: only a manager reads the whole team, so only a manager\'s download lists these cars.';
 
+// What each number in the CSV means: the pilot's definitions
+// (extension/src/pilot.js) less its form-fields sentence, because the
+// records of which form fields filled stay on each salesperson's Numbers
+// tab and never sync, so the manager's numbers have none.
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
-  'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
   'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
   'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.',
@@ -300,16 +303,43 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
       .sort((a, b) => (b.hoursListed ?? -1) - (a.hoursListed ?? -1) || a.name.localeCompare(b.name))
     : null;
 
+  // Each count is of items, not rows: rows of one car whose times overlap
+  // (flagged before the other closed) are one item, the sync function's
+  // rule, which keeps one row per item but can be raced into two. Open rows
+  // of a car always overlap, so a car has at most one open item, as the
+  // lists above. An item is open while any of its rows is; else done when a
+  // row closed it other than as cleared (the first such close, its hours
+  // from the item's first sighting); else cleared. So flagged = done + open
+  // + cleared, as the CSV says.
   const flagStats = (flags) => {
-    const done = flags.filter((f) => f.done_at && f.how !== 'cleared');
-    const hours = done.map((f) => hoursBetween(f.flagged_at, f.done_at)).filter((h) => typeof h === 'number');
-    const openRows = flags.filter(isOpen);
-    const open = new Set(openRows.map(vinOf)).size; // one per car, as the lists above
+    const items = [];
+    const byCar = new Map();
+    for (const f of flags) byCar.set(vinOf(f), [...(byCar.get(vinOf(f)) || []), f]);
+    for (const carRows of byCar.values()) {
+      let item = null;
+      let end = -Infinity;
+      for (const f of [...carRows].sort((a, b) => (ms(a.flagged_at) ?? 0) - (ms(b.flagged_at) ?? 0))) {
+        const stop = isOpen(f) ? Infinity : ms(f.done_at) ?? Infinity;
+        if (item && (ms(f.flagged_at) ?? 0) <= end) item.push(f);
+        else items.push((item = [f]));
+        end = Math.max(end, stop);
+      }
+    }
+    const done = [];
+    let open = 0;
+    let cleared = 0;
+    for (const item of items) {
+      if (item.some(isOpen)) { open += 1; continue; }
+      const fix = item.filter((f) => f.how !== 'cleared').sort((a, b) => (ms(a.done_at) ?? Infinity) - (ms(b.done_at) ?? Infinity))[0];
+      if (fix) done.push({ how: fix.how, hours: hoursBetween(item[0].flagged_at, fix.done_at) });
+      else cleared += 1;
+    }
+    const hours = done.map((d) => d.hours).filter((h) => typeof h === 'number');
     return {
-      flagged: flags.length - openRows.length + open, // open rows of one car count once here too, so flagged = done + open + cleared
+      flagged: items.length,
       done: done.length,
-      detected: done.filter((f) => f.how === 'detected').length,
-      cleared: flags.filter((f) => f.how === 'cleared').length,
+      detected: done.filter((d) => d.how === 'detected').length,
+      cleared,
       open,
       medianHours: median(hours),
       longestHours: hours.length ? Math.max(...hours) : null,
@@ -433,10 +463,11 @@ export async function readAll(page, { pageRows = PAGE_ROWS, maxPages = MAX_PAGES
 // this page: #access_token=...&refresh_token=... from an implicit-flow link
 // (an email asked for elsewhere without a PKCE challenge: an extension from
 // before it sent one, or a call made by hand), and #error=... when the auth
-// server refused a link. supabase-js would refuse either and, doing so,
-// remove a session this browser already has, while the fragment stays in
-// the address bar. authFragment() reads the fragment so the page can take
-// it out of the address before supabase-js starts, end the session those
+// server refused a link. supabase-js refuses either with no word on the
+// page and leaves the fragment, tokens and all, in the address bar (the
+// pinned copy keeps a session this browser already has; older versions
+// removed it). authFragment() reads the fragment so the page can take it
+// out of the address before supabase-js starts, end the session those
 // tokens opened, and say one sentence. The sentences never quote the
 // address: anyone can write words into a link.
 export const STRAY_LINK_NOTE = 'That link was not asked for on this page, so it does not sign you in here. Asked from the Lot Current extension? Ask it for a new code: opening the link used this one up. To sign in here, send yourself a link below.';
@@ -462,9 +493,10 @@ export function authFragment(hash) {
 // A link the auth server refused (expired, used, replaced by a newer email)
 // on this page's own PKCE flow comes back with the error in the query as
 // well as in the fragment: ?error=...&error_code=...&error_description=...
-// supabase-js reads the query too, takes an error_description there for a
-// failed sign-in and removes a session this browser already has; and the
-// words would stay in the address bar. authQueryError() names the error
+// supabase-js reads the query too and takes an error_description there for
+// a failed sign-in, says nothing on the page, and leaves the words in the
+// address bar (older versions also removed a session this browser already
+// had; the pinned copy keeps it). authQueryError() names the error
 // parameters the query carries, so the page takes them out before
 // supabase-js starts, and says FAILED_LINK_NOTE.
 export const AUTH_ERROR_PARAMS = Object.freeze(['error', 'error_code', 'error_description']);

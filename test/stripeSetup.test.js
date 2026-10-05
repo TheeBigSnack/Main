@@ -396,8 +396,11 @@ test('stripe setup: no guide has the owner type a secret key or signing secret i
 // rows the test-mode webhook writes stay in public.subscriptions; the live
 // switch resets them. The statement in the doc must clear every column the
 // webhook copies from Stripe (all of them but the dealership, the free pilot's
-// end, which stays, and updated_at), so a column a later migration adds is
-// caught here, and the doc must not claim test mode leaves no trace.
+// end, which stays, and updated_at). The columns are read from every
+// migration: 0004's create table plus each `add column` of every later
+// `alter table public.subscriptions` statement, one or several, on one line
+// or over several, so a column a later migration adds that way is caught
+// here. The doc must not claim test mode leaves no trace.
 test('stripe setup doc: the live switch resets every Stripe column test mode wrote, keeps the free pilots, and the intro does not say nothing leaks', () => {
   const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
   const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
@@ -408,7 +411,9 @@ test('stripe setup doc: the live switch resets every Stripe column test mode wro
   const migrations = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort().map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
   const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migrations)[1];
   const columns = [...table.matchAll(/^\s+([a-z_]+) /gm)].map((m) => m[1]);
-  for (const m of migrations.matchAll(/^alter table public\.subscriptions add column (?:if not exists )?([a-z_]+)/gm)) columns.push(m[1]);
+  for (const [statement] of migrations.replace(/--.*$/gm, '').matchAll(/\balter table (?:if exists )?(?:only )?public\.subscriptions\b[^;]*;/gi)) {
+    for (const m of statement.matchAll(/\badd column (?:if not exists )?([a-z_]+)/gi)) columns.push(m[1]);
+  }
   assert.ok(columns.includes('stripe_customer_id') && columns.includes('cancel_at'), columns.join(','));
   const sets = [...sql.matchAll(/^\s+(?:set\s+)?([a-z_]+) = /gm)].map((m) => m[1]);
   assert.ok(sets.length >= 5, sets.join(','));

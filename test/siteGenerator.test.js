@@ -19,7 +19,7 @@ import {
   fullTitle, rootFor, cspFor, render, renderPage, jsonLdFor, socialAlt, faqItems, ancestorsOf, textOf, escapeHtml,
   robotsTxt, sitemapXml, llmsTxt, listedPages, cnameTxt, isPlaceholderHost, validateSite, validatePages, siteUrlReport, templateVars, renderFragmentPage,
   readContext, buildSite, staleFiles, writeSite, assertClean, main,
-  strayFiles, strayAdvice, KEPT_FILES, FAVICON_FILES, SOCIAL_INDEX, socialFile,
+  strayFiles, strayAdvice, referencedFiles, OS_FILES, KEPT_FILES, FAVICON_FILES, SOCIAL_INDEX, socialFile,
   PRICING_FORMAT, pricingText, fillPricing,
 } from '../scripts/site-pages.mjs';
 import { FILES as FAVICONS, SOURCE as FAVICON_SOURCE } from '../scripts/favicons.mjs';
@@ -623,6 +623,63 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// A file a page links to (href), offers at another size (srcset) or a
+// stylesheet draws (url()) is the site's as much as an image a page shows
+// (src): --check counted only src, so each of those failed it as stray.
+test('referencedFiles reads src, href, every srcset candidate and CSS url(), as paths under site/', () => {
+  const page = 'site/faq/index.html';
+  const html = '<link rel="stylesheet" href="../site.css"><a href="/downloads/price-sheet.pdf?v=2#p1">Sheet</a> <img src="/img/lot.png" srcset="/img/lot-1x.png 1x, img/lot-2x.png 2x" alt="The lot">'
+    + '<a href="mailto:hello@example.test">Mail</a> <a href="https://example.test/x.png">There</a> <a href="//cdn.example.test/y.png">CDN</a> <a href="#top">Top</a> <img src="data:image/png;base64,AA" alt="">';
+  assert.deepEqual(referencedFiles(page, html), ['site/site.css', 'site/downloads/price-sheet.pdf', 'site/img/lot.png', 'site/img/lot-1x.png', 'site/faq/img/lot-2x.png']);
+  const css = "body { background: url('/img/bg.png'); } @font-face { src: url(fonts/body.woff2) format('woff2'), url(\"https://fonts.example.test/a.woff2\"); } .x { background: url(data:image/svg+xml;utf8,abc) }";
+  assert.deepEqual(referencedFiles('site/site.css', css), ['site/img/bg.png', 'site/fonts/body.woff2']);
+});
+
+test('--check takes a file a page links to, a srcset size and a stylesheet image as the site\'s, and leaves out what an operating system writes', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-refs-'));
+  try {
+    for (const rel of [CONFIG_FILE, MARKETING_PRICING_FILE, STATUS_FILE]) {
+      mkdirSync(join(tmp, rel, '..'), { recursive: true });
+      cpSync(join(root, rel), join(tmp, rel));
+    }
+    cpSync(join(root, 'site-src'), join(tmp, 'site-src'), { recursive: true });
+    const faq = read('site-src/pages/faq.html');
+    assert.ok(faq.includes('</h1>'));
+    writeFileSync(join(tmp, 'site-src/pages/faq.html'), faq.replace('</h1>', '</h1>\n        <p><a href="/downloads/price-sheet.pdf">The price sheet</a> <img src="/img/lot.png" srcset="/img/lot.png 1x, img/lot-2x.png 2x" width="10" height="10" alt="The lot"></p>'));
+    writeFileSync(join(tmp, 'site/site.css'), "body { background: url('/img/bg.png'); }\n");
+    const quiet = { log: () => {}, error: () => {} };
+    assert.equal(await main([], quiet, tmp), 0);
+    const files = ['site/downloads/price-sheet.pdf', 'site/img/lot.png', 'site/faq/img/lot-2x.png', 'site/img/bg.png'];
+    const osFiles = ['site/.DS_Store', 'site/._index.html', 'site/img/Thumbs.db', 'site/img/ehthumbs.db', 'site/desktop.ini', 'site/faq/Desktop.ini', 'site/.directory'];
+    for (const f of [...files, ...osFiles]) {
+      mkdirSync(join(tmp, f, '..'), { recursive: true });
+      writeFileSync(join(tmp, f), 'x');
+    }
+    const ctx = await readContext(tmp);
+    assert.deepEqual(strayFiles(ctx), [], 'each is the site\'s, or an operating system\'s file .gitignore keeps out');
+    writeFileSync(join(tmp, 'site/img/unused.png'), 'x');
+    assert.deepEqual(strayFiles(ctx), ['site/img/unused.png'], 'a file nothing points at is still stray');
+    // and the README says a stray file fails --check too, not only a file that differs
+    assert.match(read('README.md'), /^npm run site-pages .*\(--check: exit 1 when a file differs, or a file under site\/ is none of the site's\)$/m);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// OS_FILES leaves files out of the stray check because .gitignore keeps
+// them out of the repository, and so off the deployed site: each name it
+// skips must be one .gitignore ignores.
+test('every operating-system file the stray check skips is one .gitignore keeps out of the repository', () => {
+  const globs = read('.gitignore').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.includes('/'))
+    .map((g) => new RegExp(`^${g.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')}$`));
+  const names = ['.DS_Store', '._index.html', '._site.css', 'Thumbs.db', 'ehthumbs.db', 'desktop.ini', 'Desktop.ini', '.directory'];
+  for (const name of names) {
+    assert.ok(OS_FILES.test(name), `${name} is skipped`);
+    assert.ok(globs.some((g) => g.test(name)), `${name} is skipped by the stray check, so .gitignore must keep it out`);
+  }
+  for (const name of ['index.html', 'site.css', 'desktop.ini.png', 'Thumbs.db.bak', 'a._b']) assert.ok(!OS_FILES.test(name), `${name} is no operating-system file`);
 });
 
 // review: the numbers a visitor reads without JavaScript were typed into the fragments by hand, so after a change

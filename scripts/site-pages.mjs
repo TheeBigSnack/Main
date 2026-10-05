@@ -247,8 +247,12 @@ export const KEPT_FILES = Object.freeze([CONFIG_FILE, 'site/site.css', 'site/sit
 export const FAVICON_FILES = Object.freeze(['site/favicon-32.png', 'site/apple-touch-icon.png', 'site/favicon.ico']);
 export const SOCIAL_INDEX = 'site/social/images.json';
 export const socialFile = (page) => `site/social/${page.slug}.png`;
-// what an operating system leaves in a folder (.gitignore keeps them out of the repository, so never deployed)
-const OS_FILES = /^(\.DS_Store|Thumbs\.db)$/;
+// what an operating system leaves in a folder: macOS (.DS_Store, the ._
+// copies it writes on other disks), Windows (Thumbs.db, ehthumbs.db,
+// desktop.ini) and KDE (.directory). .gitignore keeps each out of the
+// repository, so none is deployed (test/siteGenerator.test.js holds the two
+// lists together).
+export const OS_FILES = /^(\.DS_Store|\._.+|Thumbs\.db|ehthumbs\.db|[Dd]esktop\.ini|\.directory)$/;
 
 export const NAV = Object.freeze(PAGES.filter((p) => p.nav));
 export const LEGAL_PAGES = Object.freeze(PAGES.filter((p) => p.kind === 'legal'));
@@ -909,15 +913,36 @@ function filesUnder(dir, rel) {
   return readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? filesUnder(dir, `${rel}/${d.name}`) : OS_FILES.test(d.name) ? [] : [`${rel}/${d.name}`]));
 }
 
+// What a page or a stylesheet points at, each as a path under site/: the
+// src and href of a tag, every candidate of a srcset, and a CSS url().
+// Another site's address, a mailto: or data: URL and a bare #fragment are
+// none.
+const REFERENCE = /\b(?:src|href)\s*=\s*"([^"]*)"|\bsrcset\s*=\s*"([^"]*)"|\burl\(\s*(['"]?)([^'")]*)\3\s*\)/gi;
+export function referencedFiles(file, content) {
+  const out = [];
+  for (const m of String(content).matchAll(REFERENCE)) {
+    const urls = m[2] !== undefined ? m[2].split(',').map((c) => c.trim().split(/\s+/)[0]) : [m[1] ?? m[4]];
+    for (const url of urls) {
+      const path = String(url || '').split(/[?#]/)[0];
+      if (!path || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('//')) continue;
+      out.push(path.startsWith('/') ? `site${path}` : posix.normalize(posix.join(posix.dirname(file), path)));
+    }
+  }
+  return out;
+}
+
 /**
  * The files under site/ that are none of the site's: no generator writes
  * them (this one, scripts/legal-pages.mjs, favicons, social-images), they
- * are not kept by hand (KEPT_FILES), and no page shows them. The deploy
- * publishes site/ whole, so each would go live with no check reading it.
+ * are not kept by hand (KEPT_FILES), and no page or stylesheet points at
+ * them (referencedFiles). The deploy publishes site/ whole, so each would
+ * go live with no check reading it.
  */
 export function strayFiles(ctx, built = buildSite(ctx)) {
-  const shown = built.files.flatMap(({ file, content }) => [...content.matchAll(/\bsrc="([^":]+)"/g)]
-    .map((m) => (m[1].startsWith('/') ? `site${m[1]}` : posix.normalize(posix.join(posix.dirname(file), m[1])))));
+  // the pages this script writes, and the stylesheet and the legal pages as they are on disk
+  const onDisk = [...KEPT_FILES, ...LEGAL_PAGES.map((p) => p.file)].filter((f) => /\.(css|html)$/.test(f) && existsSync(join(ctx.dir, f)))
+    .map((file) => ({ file, content: readFileSync(join(ctx.dir, file), 'utf8') }));
+  const shown = [...built.files, ...onDisk].flatMap(({ file, content }) => referencedFiles(file, content));
   const known = new Set([
     ...built.files.map((f) => f.file), ...built.remove,
     ...PAGES.map((p) => p.file), ...REDIRECTS.map((r) => r.file),

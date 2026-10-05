@@ -53,8 +53,15 @@ const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u1680\\u2000-\\u200d\\u2010-\\u2015\\
 // A line break, optionally followed by the comment or quote marker that
 // starts a wrapped comment or quote line (// # * -- > ; <!--).
 const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
-const OLD_NAME = new RegExp(`lot${SEP}${WRAP}sync`, 'gi');
-const OLD_NAME_ONE = new RegExp(`lot${SEP}sync`, 'i');
+// "lot" where a word starts: not straight after a letter or digit ("pilot
+// sync", "ballotSync" and "slotsync" are other words), except a capital L
+// after a small letter or digit, which starts the next word of a camelCase
+// name ("initLotSync"). The case is spelled out in the classes, so the
+// expressions carry no i flag, which would make that capital L match any l.
+const LOT = '(?:(?<![A-Za-z0-9])[Ll][Oo][Tt]|(?<=[a-z0-9])L[Oo][Tt])';
+const SYNC = '[Ss][Yy][Nn][Cc]';
+const OLD_NAME = new RegExp(`${LOT}${SEP}${WRAP}${SYNC}`, 'g');
+const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
 
 // HTML entities and JS escapes are decoded first, so "Lot&nbsp;Sync" and
 // "Lot\u00a0Sync" written as an escape are caught too. Inline tags that can
@@ -401,6 +408,11 @@ test('the scan catches the old name in every spelling, in any file that is not e
     '<label class="lot-sync">Website</label>',
     String.raw`title: 'Lot\u00a0Sync'`,
     String.raw`title: 'Lot\x20Sync'`,
+    // where a word starts, after a mark or as the next word of a camelCase name
+    'initLotSync();',
+    'see (LotSync) and x.lotsync',
+    'MY_LOTSYNC_KEY',
+    'lOt SyNc',
   ];
   for (const text of spellings) {
     for (const path of ['docs/help.md', 'extension/popup.js', 'site/index.html', 'marketing/sales-sheet.md']) {
@@ -414,7 +426,8 @@ test('the scan catches the old name in every spelling, in any file that is not e
   // a file name
   assert.deepEqual(hitsIn('docs/lot-sync-guide.md', 'clean'), ['docs/lot-sync-guide.md: the file name carries the old name']);
   // and nothing else
-  for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>']) {
+  // nor a longer word that ends in "lot" ("pilot", "ballot", "slot", "allot")
+  for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>', 'the pilot sync runs nightly', 'ballotSync()', 'a slot-sync job', 'PILOTSYNC', 'allot_sync', 'PilotSync']) {
     assert.deepEqual(hitsIn('docs/help.md', text), [], text);
   }
 });

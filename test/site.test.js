@@ -452,6 +452,10 @@ test('the pre-owned check is described as the gate decides it: two signs, or one
   for (const rel of [...readdirSync(new URL('../marketing/', import.meta.url)).map((f) => `marketing/${f}`), ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `store/${f}`)].filter((f) => /\.(md|json)$/.test(f))) {
     assert.doesNotMatch(read(`../${rel}`), overclaim, `${rel} says all three signs must agree`);
   }
+  // the code's own comments and the help pages describe the gate too (extension/src/vehicle.js once said "three signs must agree")
+  for (const rel of [...readdirSync(new URL('../extension/src/', import.meta.url)).filter((f) => f.endsWith('.js')).map((f) => `extension/src/${f}`), ...readdirSync(new URL('../docs/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)]) {
+    assert.doesNotMatch(read(`../${rel}`), overclaim, `${rel} says all three signs must agree`);
+  }
   const card = stripTags((html.match(/<h3>Pre-owned only<\/h3>\s*<p>[\s\S]*?<\/p>/) || [''])[0]);
   const how = stripTags((howPage.match(/<section aria-labelledby="preowned-h">[\s\S]*?<\/section>/) || [''])[0]);
   const readme = (read('../README.md').match(/## How the pre-owned check works\n[\s\S]*?(?=\n## )/) || [''])[0];

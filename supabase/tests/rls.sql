@@ -18,7 +18,8 @@
 --                          wall a manager's checks run against
 --   newcomer   (none yet)  redeems two invites for B during the test: one
 --                          from create_invite's mould and one the owner
---                          typed in lower case
+--                          typed in lower case (and, as a salesperson of B,
+--                          is refused a second salesperson code)
 
 \set ON_ERROR_STOP on
 \set a_sales   '00000000-0000-4000-8000-0000000000a1'
@@ -154,7 +155,8 @@ insert into public.invites (code, dealership_id, role, created_by, expires_at) v
   ('ORPHANA00004', :'dealer_a', 'salesperson', :'b_sales', now() + interval '7 days'),   -- its maker is no manager of A (B's salesperson)
   ('DEMOTEA00006', :'dealer_a', 'salesperson', :'a_sales', now() + interval '7 days'),   -- live only while a_sales is a manager of A
   ('OPENC0000005', :'dealer_c', 'salesperson', null,       now() + interval '7 days'),   -- C's, out of a_mgr's reach
-  ('HIREB0000007', :'dealer_b', 'salesperson', :'a_mgr',   now() + interval '7 days');   -- a_mgr's code for a new hire at B
+  ('HIREB0000007', :'dealer_b', 'salesperson', :'a_mgr',   now() + interval '7 days'),   -- a_mgr's code for a new hire at B
+  ('SECONDB00008', :'dealer_b', 'salesperson', null,       now() + interval '7 days');   -- another salesperson code for B, which the newcomer enters as one
 
 -- ---------------------------------------------------------------------------
 -- a_sales: a salesperson of A
@@ -636,6 +638,19 @@ begin
   end if;
   raise notice 'ok: an invite code works once';
 
+  -- a code at the role the member already has changes nothing either: the newcomer, a salesperson of B,
+  -- enters another salesperson code for B. Answered P0012 naming their role (the words docs/help.md
+  -- quotes), still a salesperson under the same name, the code left unused for whoever it was made for
+  -- (checked as the owner below), and no miss counted (the throttle below still counts four)
+  got := public.redeem_invite('SECONDB00008', 'Someone Else');
+  if got ->> 'code' is distinct from 'P0012' or got ->> 'message' is distinct from 'you are already a salesperson of this dealership; the code was not used' then
+    raise exception 'a salesperson redeeming a second salesperson code was answered with %', got;
+  end if;
+  if (select role || ' ' || name from public.memberships where user_id = auth.uid() and dealership_id = b) is distinct from 'salesperson Riley' then
+    raise exception 'a salesperson redeeming a second salesperson code changed their membership';
+  end if;
+  raise notice 'ok: a code at the member''s own role is answered P0012 and changes nothing';
+
   -- an owner-made lower-case code, typed the way the extension sends it
   -- (upper case, with spaces around it): found, and rejoining B with it
   -- takes the invite's role and keeps the name
@@ -710,6 +725,9 @@ begin
   end if;
   if not exists (select 1 from public.invites where code = 'made-up-b002' and used_by = '00000000-0000-4000-8000-0000000000c1' and used_at is not null) then
     raise exception 'the redeemed lower-case invite was not marked used (it is stored as typed)';
+  end if;
+  if not exists (select 1 from public.invites where code = 'SECONDB00008' and used_by is null and used_at is null) then
+    raise exception 'a salesperson who already belongs used up a second salesperson code';
   end if;
   raise notice 'ok: the redeemed invite is marked used';
 

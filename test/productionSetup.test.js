@@ -71,21 +71,39 @@ test('the Supabase workflow runs by hand only, against the committed project, an
   assert.match(supabase, /supabase db push --dry-run/);
   const steps = supabase.split(/\n      - /);
   assert.match(steps.at(-1), /npm run check-deploy/, 'the last step is the outside check');
-  assert.match(steps.at(-1), /^name: Check the project from the outside\n\s+continue-on-error: \$\{\{ inputs\.step == 'plan' \|\| inputs\.step == 'database' \}\}\n\s+run:/, 'it runs for every step, and fails the run only once the functions should be there');
+  assert.match(steps.at(-1), /^name: Check the project from the outside\n\s+continue-on-error: \$\{\{ inputs\.new_project && \(inputs\.step == 'plan' \|\| inputs\.step == 'database'\) \}\}\n\s+run:/, 'it runs for every step, and a FAIL turns the run red unless plan or database was started for a brand-new project');
   assert.match(supabase, /run: supabase db push --yes\n/, 'the real push answers its own prompt');
 });
 
 // The workflow's leading comment block as one line of text
 const headerOf = (yml) => yml.split('\n').filter((l) => l.startsWith('#')).map((l) => l.replace(/^#\s?/, '')).join(' ').replace(/\s+/g, ' ');
 
+// Production has its tables and functions, so a FAIL from the outside check
+// on a plan or database run is a real one: it turns the run red. Only a run
+// started for a brand-new project (the new_project box, off by default)
+// lets the FAILs expected before the first push and deploy stay green.
+test('a FAIL from the outside check turns a plan or database run red, unless the run is for a brand-new project', () => {
+  const box = supabase.match(/      new_project:\n        description: (.+)\n        type: boolean\n        default: false\n/);
+  assert.ok(box, 'the new_project box, unticked by default');
+  assert.equal((supabase.match(/continue-on-error:/g) || []).length, 1, 'the outside check is the one step that may fail softly');
+  const header = headerOf(supabase);
+  assert.doesNotMatch(header, /fail by design/);
+  assert.match(header, /a FAIL there turns the run red\. The one exception is a plan or database run started with "new project" ticked/);
+  const doc = read('docs/production-setup.md');
+  assert.match(doc, /A `FAIL` from the outside check turns any run red\. On a brand-new project[^\n]*start those two runs with \*\*new project\*\* ticked[^\n]*Production is past that \(its tables and functions exist\), so leave the box unticked there\./);
+  assert.doesNotMatch(doc, /although the run stays green/);
+});
+
 // workflow_dispatch can start the workflow from any branch that carries it; the
 // job itself refuses every branch but the default, as manager.yml's does, so a
 // branch's edited migration or function never reaches production by mistake
 test('the Supabase job runs only when started on the default branch, and the header and the doc say what that guards', () => {
-  assert.match(supabase, /^jobs:\n  run:\n    if: github\.ref_name == github\.event\.repository\.default_branch\n/m, 'a job-level guard, before anything runs');
+  assert.match(supabase, /^jobs:\n  run:\n    if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)\n/m, 'a job-level guard, before anything runs');
+  // the branch's full ref, so a tag that bears the default branch's name is not taken for it
+  for (const yml of [supabase, manager]) assert.doesNotMatch(yml, /github\.ref_name/);
   assert.doesNotMatch(supabase, /branches:/, 'no branch name is written into the workflow');
   const header = headerOf(supabase);
-  assert.match(header, /The job runs only when started on the repository's default branch; started on any other branch it is skipped and nothing is deployed\./);
+  assert.match(header, /The job runs only when started on the repository's default branch; started on any other branch \(or a tag\) it is skipped and nothing is deployed\./);
   assert.match(header, /a run uses the branch's own copy of this file, which could drop the check, so the environment's branch limit below is what keeps the secrets from another branch\./);
   assert.match(read('docs/production-setup.md'), /runs by hand only, from the repository's \*\*Actions\*\* tab or by Claude through GitHub, and only on the default branch: started on any other branch, its job is skipped and nothing is deployed\./);
 });
@@ -151,7 +169,7 @@ test('verify compares production with the repository, and nothing it runs can wr
   for (const st of steps.filter((x) => WRITES.test(runText(x)))) {
     assert.ok(["inputs.step == 'database'", "inputs.step == 'functions'"].includes(ifOf(st)), `${st.split('\n')[0]} writes and must run for database or functions only`);
   }
-  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \] \|\| \[ "\$STEP" = verify \]; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'every step that reads the database needs its password');
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \] \|\| \[ "\$STEP" = verify \]; then\n\s+if \[ "\$HAS_DB_PASSWORD" != true \]/, 'every step that reads the database needs its password');
 });
 
 // The pinned CLI (2.117.0), without --use-api and with Docker running, as on a
@@ -183,6 +201,28 @@ test('every verify comparison reports, once the project is linked, even after an
   }
 });
 
+// verify downloads each deployed function in turn: one that cannot be
+// downloaded (not deployed, or the CLI failed) is named as such, turns the
+// run red, and the checkout is put back before the next function is
+// compared, rather than the step stopping on the first error.
+test('a function verify cannot download is named, turns the run red, and the next one is still compared', () => {
+  const steps = supabase.split(/\n      - /);
+  const fn = runText(steps.find((st) => /^name: "verify: each deployed function's source/.test(st)));
+  assert.match(fn, /if ! supabase functions download "\$f" --project-ref "\$PROJECT_REF" --use-api; then\n\s+echo "::error::\$f: could not download the deployed function[^"]*"\n\s+status=1\n\s+git checkout -q -- supabase\/functions\n\s+git clean -fdq -- supabase\/functions\n\s+continue\n\s+fi\n/);
+  assert.equal(fn.split('\n').filter((l) => /\bsupabase functions download\b/.test(l)).length, 1, 'the one download is the checked one');
+});
+
+// GitHub keeps one waiting run per concurrency group and cancels the one
+// before it: with one group for every step, a verify queued behind a deploy
+// waited for it, and a plan queued after a waiting database run replaced
+// it. Each step has its own group, and a run started on another branch (its
+// job skipped) takes a group of its own, as in pages.yml.
+test('each Supabase step queues only behind a run of the same step, and a skipped run displaces nothing', () => {
+  const group = (yml) => (yml.match(/^concurrency:\n  group: (.+)\n  cancel-in-progress: false$/m) || [, ''])[1];
+  assert.equal(group(supabase), "${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && format('supabase-production-{0}', inputs.step) || format('supabase-skipped-{0}', github.run_id) }}");
+  assert.equal(group(manager), "${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'manager-view' || format('manager-view-skipped-{0}', github.run_id) }}");
+});
+
 // A function from the repository may write a column only its migration adds
 // (0009_cancel_at.sql and billing): deployed before that migration, its
 // webhook answers 500 until database runs. The docs say database first; the
@@ -194,7 +234,7 @@ test('the functions step deploys nothing while production has a migration to app
   assert.ok(check > 0, 'the deploy step asks db push what it would apply');
   assert.ok(check < deploy.indexOf('supabase functions deploy'), 'before deploying anything');
   assert.match(deploy.slice(check), /if ! grep -q 'Remote database is up to date' "\$RUNNER_TEMP\/push-plan\.txt"; then\n[^\n]*::error::[^\n]*\n\s+exit 1\n\s+fi\n\s+for f in \$FUNCTIONS; do supabase functions deploy/);
-  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \]( \|\| \[ "\$STEP" = verify \])?; then\n\s+if \[ -z "\$SUPABASE_DB_PASSWORD" \]/, 'every step that reads the database needs its password');
+  assert.match(supabase, /if \[ "\$STEP" = plan \] \|\| \[ "\$STEP" = database \] \|\| \[ "\$STEP" = functions \]( \|\| \[ "\$STEP" = verify \])?; then\n\s+if \[ "\$HAS_DB_PASSWORD" != true \]/, 'every step that reads the database needs its password');
   assert.match(read('docs/production-setup.md'), /\*\*functions\*\* checks: it deploys nothing while a migration is still to be applied\./);
 });
 
@@ -224,7 +264,7 @@ test('the Supabase CLI in the deploy is the one the CI stack job tests with', ()
 });
 
 test('the manager view deploys from the default branch only, configured, tested, without serve.mjs, with an exact wrangler', () => {
-  assert.match(manager, /if: github\.ref_name == github\.event\.repository\.default_branch/);
+  assert.match(manager, /^  deploy:\n    if: github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)\n/m);
   assert.match(manager, /^permissions:\n  contents: read$/m);
   const order = ['node scripts/set-project.mjs --check', 'run: npm test\n', '--exclude serve.mjs', 'pages deploy'];
   const at = order.map((s) => manager.indexOf(s));
@@ -371,8 +411,9 @@ test('docs/stripe-setup.md deploys billing through the Supabase workflow, never 
 // A secret in a job's env reaches every step of the job, the third-party
 // actions included (supabase/setup-cli runs at a movable tag), and every
 // script that runs there. Each deploy secret goes only to the steps that use
-// it: the supabase command's steps, the deploy that runs wrangler, and the
-// check that the settings exist.
+// it: the supabase command's steps and the deploy that runs wrangler. The
+// check that the settings exist runs the repository's own code, so it
+// learns only whether each secret is set.
 test('the deploy secrets reach only the steps that use them, never an action or the outside checks', () => {
   const jobEnv = (yml) => (yml.match(/^ {4}env:\n((?: {6}.+\n)+)/m) || [, ''])[1];
   const value = /\$\{\{ secrets\.[A-Z_]+ \}\}/;
@@ -391,8 +432,16 @@ test('the deploy secrets reach only the steps that use them, never an action or 
     assert.match(st, /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD \}\}/, st.split('\n')[0]);
   }
   for (const st of steps.filter((x) => value.test(x))) {
-    assert.ok(cli.includes(st) || st.startsWith('name: The settings are there'), `${st.split('\n')[0]} gets a secret it does not use`);
+    assert.ok(cli.includes(st), `${st.split('\n')[0]} gets a secret it does not use`);
   }
+  // the settings check runs the repository's own code (accountConfig.js): it learns only whether each secret is set
+  const settings = steps.find((st) => st.startsWith('name: The settings are there'));
+  assert.ok(settings, 'the settings check');
+  assert.doesNotMatch(settings, value, 'the settings check gets no secret\'s value');
+  assert.match(settings, /HAS_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN != '' \}\}/);
+  assert.match(settings, /HAS_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD != '' \}\}/);
+  assert.match(runText(settings), /if \[ "\$HAS_ACCESS_TOKEN" != true \]; then echo "::error::the secret SUPABASE_ACCESS_TOKEN is not set"; exit 1; fi/);
+  assert.match(runText(settings), /if \[ "\$HAS_DB_PASSWORD" != true \]; then echo "::error::the secret SUPABASE_DB_PASSWORD is not set"; exit 1; fi/);
   assert.doesNotMatch(steps.at(-1), /secrets\./, 'check-deploy runs without the token');
   const mine = manager.split(/\n      - /).slice(1);
   const holders = mine.filter((st) => value.test(st));

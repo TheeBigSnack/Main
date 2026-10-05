@@ -9,6 +9,7 @@ import { PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
 import { POSTING_RULES } from '../extension/src/postingRules.js';
 import { noteFlags, resolveFlag, beginPost, endPost, noteFill } from '../extension/src/pilot.js';
+import { STORAGE_FULL } from '../extension/src/storage.js';
 
 const k = siteKeys(POPUP_ORIGIN);
 
@@ -607,3 +608,80 @@ test('signed in, the popup\'s Rescan, Mark posted, unmarking, Taken down and Upd
   const signedOut = await run({ [k.settings]: { ...MY_STORE } }, { expect: false });
   assert.deepEqual(signedOut.syncs, [], 'signed out: nothing to sync with');
 });
+
+// Taken down and Updated change the posted list, close the item's flag in
+// the pilot numbers and take the item off To do. A flag left open after the
+// posted list changed would be lost at the next sync: the sync function files
+// no item for an open flag the listing already shows, and mergeFlags drops
+// that flag, so the item would be in neither the numbers nor the manager
+// view. So the flag's write is awaited: when it fails (storage full) the
+// reason is shown, the item stays on To do with nothing synced, and the same
+// click closes it once there is room. Unmarking Posted ✓ says so too, and
+// still syncs: the car is unmarked either way.
+test('Taken down or Updated whose to-do flag cannot be saved says why and leaves the item on To do, and the same click closes it once there is room', async () => {
+  const session = { accessToken: 'a.e30.c', refreshToken: 'r', expiresAt: Date.now() + 3600e3, user: { id: 'u1', email: 'sam@example.test' } };
+  const sold = vehicle('usedNormal');
+  const repriced = vehicle('certified');
+  const records = Object.entries(fixtures).filter(([key]) => key !== '_about' && key !== 'usedNormal').map(([, r]) => r); // the sold car is gone from the website
+  const postedAt = new Date(Date.now() - 3 * 86400e3).toISOString();
+  const posted = { [sold.vin]: { name: sold.name, price: sold.price, postedAt }, [repriced.vin]: { name: repriced.name, price: repriced.price + 500, postedAt } };
+  const until = async (check) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 5)); };
+  const p = await loadPopup({ records, local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted, account: session } });
+  await p.scan();
+  assert.equal(p.status(), '', 'the scan went through');
+  const flag = (vin, kind) => (p.local[k.pilot]?.flags || []).find((f) => f.vin === vin && f.kind === kind);
+  assert.ok(flag(sold.vin, 'takeDown') && !flag(sold.vin, 'takeDown').doneAt, 'the sold car is flagged');
+  assert.ok(flag(repriced.vin, 'price') && !flag(repriced.vin, 'price').doneAt, 'the price change is flagged');
+  const sent = [];
+  globalThis.chrome.runtime.sendMessage = async (msg) => { sent.push(msg); return {}; };
+  const syncs = () => sent.filter((m) => m.type === 'syncNow').length;
+  const onTodo = (list, vin) => (p.local[k.diff]?.[list] || []).some((x) => x.vin === vin);
+  const set = globalThis.chrome.storage.local.set;
+  let full = true;
+  globalThis.chrome.storage.local.set = async (obj) => {
+    if (full && k.pilot in obj) throw new Error('QUOTA_BYTES quota exceeded');
+    return set(obj);
+  };
+
+  await p.click('takenDown', { vin: sold.vin });
+  assert.equal(p.status(), STORAGE_FULL, 'Taken down says why');
+  assert.equal(p.local[k.posted][sold.vin], undefined, 'the posted list changed first');
+  assert.ok(onTodo('takeDown', sold.vin), 'the item stays on To do');
+  assert.match(p.panel(), new RegExp(`data-action="takenDown" data-vin="${sold.vin}"`), 'with its Taken down button');
+  assert.equal(flag(sold.vin, 'takeDown').doneAt, undefined, 'its flag is still open');
+
+  const price = String(repriced.price);
+  await p.click('priceUpdated', { vin: repriced.vin, price });
+  assert.equal(p.status(), STORAGE_FULL, 'Updated says why');
+  assert.equal(p.local[k.posted][repriced.vin].price, repriced.price);
+  assert.ok(onTodo('priceUpdates', repriced.vin), 'the price item stays on To do');
+  assert.equal(flag(repriced.vin, 'price').doneAt, undefined);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(syncs(), 0, 'nothing synced while a flag is open on a fixed listing');
+
+  // room again: the same clicks close each item and sync
+  full = false;
+  await p.click('takenDown', { vin: sold.vin });
+  assert.equal(flag(sold.vin, 'takeDown').how, 'manual', 'the take-down closes');
+  assert.ok(!onTodo('takeDown', sold.vin), 'and leaves To do');
+  await p.click('priceUpdated', { vin: repriced.vin, price });
+  assert.equal(flag(repriced.vin, 'price').how, 'manual');
+  assert.ok(!onTodo('priceUpdates', repriced.vin));
+  await until(() => syncs() >= 2);
+  assert.equal(syncs(), 2, 'one sync after each');
+
+  // unmarking Posted ✓ with the numbers full: said, and the car is unmarked and synced all the same
+  const other = vehicle('usedZeroMiles');
+  await p.click('post', { vin: other.vin });
+  await p.click('markToday', { vin: other.vin });
+  assert.ok(p.local[k.posted][other.vin], 'marked posted');
+  await until(() => syncs() >= 3);
+  full = true;
+  await p.click('unpost', { vin: other.vin });
+  assert.equal(p.status(), STORAGE_FULL, 'unmarking says the numbers could not be saved');
+  assert.equal(p.local[k.posted][other.vin], undefined, 'the car is unmarked');
+  await until(() => syncs() >= 4);
+  assert.equal(syncs(), 4, 'and colleagues are told it is free');
+  globalThis.chrome.storage.local.set = set;
+});
+

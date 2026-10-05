@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, readdirSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, cpSync, mkdtempSync, rmSync, mkdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
@@ -267,11 +267,40 @@ test('a release refuses a CHANGELOG whose Unreleased section still holds entries
 // that reads CHANGELOG.md runs there for real.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const NOT_COPIED = new Set(['.git', 'node_modules', 'dist', 'survey-out', 'test-results']);
+// Nor what a working copy keeps private, so it never lands in the temporary
+// folder: a .env file anywhere (backend/.env holds the rewrite service's
+// Anthropic key; .env.example is a template and is copied) and the pilot's
+// CSVs, which name a dealer's salespeople (.gitignore).
+const PRIVATE = /^\.env(\..+)?$|^lot-current-(pilot|manager)-.*\.csv$/;
+const copied = (src) => {
+  const name = basename(src);
+  return !NOT_COPIED.has(name) && (name === '.env.example' || !PRIVATE.test(name));
+};
+const copyRepo = (from, to) => cpSync(from, to, { recursive: true, filter: copied });
+
+test('the release test\'s copy of the repository leaves every .env file and the pilot CSVs behind', () => {
+  const from = mkdtempSync(join(tmpdir(), 'lot-current-release-from-'));
+  const to = mkdtempSync(join(tmpdir(), 'lot-current-release-to-'));
+  try {
+    const files = ['README.md', 'backend/.env', 'backend/.env.example', 'backend/server.js', 'supabase/functions/.env', 'supabase/functions/.env.local', '.env.production', 'lot-current-pilot-2026-10-05.csv', 'lot-current-manager-example-2026-10-05.csv'];
+    for (const f of files) {
+      mkdirSync(join(from, f, '..'), { recursive: true });
+      writeFileSync(join(from, f), 'x');
+    }
+    copyRepo(from, to);
+    const there = files.filter((f) => existsSync(join(to, f)));
+    assert.deepEqual(there, ['README.md', 'backend/.env.example', 'backend/server.js']);
+  } finally {
+    rmSync(from, { recursive: true, force: true });
+    rmSync(to, { recursive: true, force: true });
+  }
+});
+
 test('the unit tests that read CHANGELOG.md pass on the layout a release leaves', () => {
   const next = bump(CURRENT, 'minor');
   const dir = mkdtempSync(join(tmpdir(), 'lot-current-release-'));
   try {
-    cpSync(ROOT, dir, { recursive: true, filter: (src) => !NOT_COPIED.has(basename(src)) });
+    copyRepo(ROOT, dir);
     const at = (rel) => join(dir, rel);
     const unreleased = /^## Unreleased[ \t]*$/m;
     assert.match(REAL['CHANGELOG.md'], unreleased);

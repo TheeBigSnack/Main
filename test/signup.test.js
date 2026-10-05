@@ -121,7 +121,8 @@ test('create_dealership: the checks run in order a to g, and the throttle and th
   // paragraph separators, and the marks, embeddings, overrides and isolates that reorder text
   const controls = fn.match(/controls constant text := '(\[[^']*\])';/);
   assert.ok(controls, 'create_dealership names its controls class');
-  assert.equal(controls[1], '[\\u0001-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]');
+  // (U+061C ARABIC LETTER MARK is one of those marks, Bidi_Control like U+200E and U+200F)
+  assert.equal(controls[1], '[\\u0001-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]');
   for (const [field, limit] of [['dealer_name', 120], ['person_name', 80]]) {
     assert.match(fn, new RegExp(`if length\\(${field}\\) not between 1 and ${limit} or ${field} ~ controls then\\s+raise exception '[^;]*' using errcode = '22023';`), `${field}: 1 to ${limit} characters, no control characters`);
   }

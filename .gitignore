@@ -3,7 +3,11 @@ backend/.env
 backend/usage.json
 test/e2e/screenshots/
 .DS_Store
+._*
 Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+.directory
 *.zip
 dist/
 demo/screenshots/

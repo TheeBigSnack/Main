@@ -31,17 +31,23 @@ const pricing = JSON.parse(read('marketing/pricing.json'));
 
 // ---------- the definitions ----------
 
-test('the definitions are the pilot\'s, sentence for sentence (both files read as text, and both modules)', () => {
+// The manager view never receives the records of which form fields filled
+// (they stay on each salesperson's Numbers tab, extension/src/sync.js), so
+// its CSV carries every pilot definition but the one about form fields.
+test('the definitions are the pilot\'s, sentence for sentence, less the form-fields one the manager has no numbers for (both files read as text, and both modules)', () => {
   const block = (src, file) => {
     const m = src.match(/export const DEFINITIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
     assert.ok(m, `${file} has a DEFINITIONS list`);
     return m[1].trim().split('\n').map((l) => l.trim()).filter(Boolean);
   };
+  const aboutFields = (d) => /form fields?|\bfields?\b/i.test(d);
   const manager = block(read('manager/data.js'), 'manager/data.js');
   const pilot = block(read('extension/src/pilot.js'), 'extension/src/pilot.js');
-  assert.deepEqual(manager, pilot, 'the sentences in manager/data.js must stay equal to extension/src/pilot.js');
-  assert.deepEqual([...DEFINITIONS], [...PILOT_DEFINITIONS]);
-  assert.equal(DEFINITIONS.length, 5);
+  assert.equal(pilot.filter(aboutFields).length, 1, 'the pilot has its one form-fields sentence');
+  assert.deepEqual(manager, pilot.filter((d) => !aboutFields(d)), 'the sentences in manager/data.js must stay equal to extension/src/pilot.js, less the form-fields one');
+  assert.deepEqual([...DEFINITIONS], PILOT_DEFINITIONS.filter((d) => !aboutFields(d)));
+  assert.equal(DEFINITIONS.length, 4);
+  assert.ok(!DEFINITIONS.some(aboutFields), 'nothing in the manager\'s definitions speaks of form fields');
   assert.doesNotMatch(read('manager/data.js'), /from ['"]\.\.\/extension/, 'data.js does not import the extension (the page is hosted on its own)');
 });
 
@@ -264,6 +270,28 @@ test('a car with two open items of one kind (two machines of one salesperson tha
   assert.deepEqual([p.flagged, p.done, p.open, p.cleared], [3, 1, 1, 1]);
 });
 
+test('closed rows of one sighting (two machines\' uploads raced in) count as one item too, so flagged, done, open and cleared all count items', () => {
+  const todoItems = [
+    // one sold car flagged on two machines, both rows closed when it came down: one item, taken down after 10 hours from the first sighting
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(30), done_at: ago(20), how: 'detected' },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(28), done_at: ago(19), how: 'manual' },
+    // one sighting left as an open row and a cleared row: one item, still open, as the list shows it
+    { vin: 'V2', kind: 'takeDown', flagged_at: ago(10), done_at: null },
+    { vin: 'V2', kind: 'takeDown', flagged_at: ago(9), done_at: ago(5), how: 'cleared' },
+    // one sighting cleared on one machine and fixed on the other: one item, done
+    { vin: 'V3', kind: 'takeDown', flagged_at: ago(60), done_at: ago(55), how: 'cleared' },
+    { vin: 'V3', kind: 'takeDown', flagged_at: ago(59), done_at: ago(52), how: 'manual' },
+    // two price changes of one car, one after the other closed: two items
+    { vin: 'V4', kind: 'price', flagged_at: ago(100), done_at: ago(90), how: 'manual' },
+    { vin: 'V4', kind: 'price', flagged_at: ago(50), done_at: ago(45), how: 'detected' },
+  ];
+  const s = summarize({ listings: [], todoItems, now: NOW });
+  assert.deepEqual(s.takeDowns, { flagged: 3, done: 2, detected: 1, cleared: 0, open: 1, medianHours: 9, longestHours: 10 });
+  assert.deepEqual(s.priceUpdates, { flagged: 2, done: 2, detected: 1, cleared: 0, open: 0, medianHours: 7.5, longestHours: 10 });
+  for (const k of ['takeDowns', 'priceUpdates']) assert.equal(s[k].flagged, s[k].done + s[k].open + s[k].cleared, k);
+  assert.deepEqual(s.soldStillListed.map((o) => o.vin), ['V2']);
+});
+
 test('a car still listed by someone no longer on the team is listed for the manager, since no rescan looks after it; the empty to-do cards claim only what the items show', () => {
   const memberships = [{ user_id: 'u1', role: 'salesperson', name: 'Alex' }, { user_id: 'u3', role: 'manager', name: 'Jamie' }];
   const listings = [
@@ -375,12 +403,13 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.equal(row('Sold cars still listed'), 'Sold cars still listed,2');
   assert.equal(row('Price changes still open'), 'Price changes still open,1');
   assert.equal(row('Median hours from the flagging scan until taken down'), 'Median hours from the flagging scan until taken down,');
-  // the definitions, each as one quoted cell (commas inside), the same five
+  // the definitions, each as one quoted cell (commas inside), the same four
   const at = lines.indexOf('Definitions');
   assert.ok(at > 0);
   const unquote = (l) => (l.startsWith('"') ? l.slice(1, -1).replace(/""/g, '"') : l);
-  assert.deepEqual(lines.slice(at + 1, at + 6).map(unquote), [...DEFINITIONS]);
-  assert.equal(lines[at + 6], '');
+  assert.deepEqual(lines.slice(at + 1, at + 1 + DEFINITIONS.length).map(unquote), [...DEFINITIONS]);
+  assert.equal(lines[at + 1 + DEFINITIONS.length], '');
+  assert.doesNotMatch(csv, /form fields?/i, 'the manager\'s CSV has no form-field numbers and says nothing of them');
   // the sections and their header rows
   const after = (title) => lines[lines.indexOf(title) + 1];
   assert.equal(after('Salespeople'), 'Salesperson,Posted in the last 7 days,Posted,Listings up,Taken down,Median seconds per post');
