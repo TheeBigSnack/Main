@@ -82,7 +82,7 @@ A week in. Open the manager view at [manager view address] and look at three thi
 
 **3. Price changes not yet updated.** Same reading: zero, or hours. The listing price must match the website; Open & update price puts the new price in the box, and they click Update.
 
-Above the table, the last-scan line says when a salesperson's extension last read the website. Rescans run every 3 hours while someone's Chrome is open with rescans allowed; if that line says more than 6 hours ago on a working day, nobody's Chrome had it on.
+Above the table, the last-scan line says when the last scan Lot Current trusted ran: a rescan that looks like a website hiccup (most of the lot gone at once) is held back and not recorded there. Rescans run every 3 hours while someone's Chrome is open with rescans allowed; if that line says more than 6 hours ago on a working day, either nobody's Chrome had rescans running or the rescans that ran looked like a website hiccup, so check the website.
 
 Listings a salesperson made by hand before starting and marked with Mark posted, Before today, are watched like the rest but don't count as posted this week (or toward their daily posts), so a first week isn't inflated by old listings. Three things the view can't show: a car listed by hand without clicking Mark posted in Lot Current isn't watched, so a sold one won't appear here; a car is flagged by the rescan on its poster's own computer, so someone away with Chrome closed is flagged when they are back (cars left listed by someone you removed from the team show under Listed by people no longer on the team, for you to chase); and the numbers are what the extensions recorded, nothing from Facebook itself. **Download CSV** at the top gives you the same rows in a spreadsheet.
 

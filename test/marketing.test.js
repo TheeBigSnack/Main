@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
-import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
+import { OVERDUE_HOURS, SCAN_STALE_HOURS, SCAN_STALE_WHY } from '../manager/data.js';
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing, TIME_PER_POST } from './honesty.js';
 import { stripComments } from './helpers.js';
@@ -172,6 +172,13 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   // the day-7 numbers are read the way the manager view draws them
   assert.match(store, new RegExp(`more than ${OVERDUE_HOURS} hours`), 'the red threshold is OVERDUE_HOURS from manager/data.js');
   assert.match(store, new RegExp(`more than ${SCAN_STALE_HOURS} hours ago`), 'the stale-scan line is SCAN_STALE_HOURS from manager/data.js');
+  // the last-scan line shows the last scan the extension sent: one judged a website hiccup never goes up
+  // (extension/src/accountFlow.js scanFromStored, manager/data.js SCAN_STALE_WHY), so an old line is not only a closed Chrome
+  assert.match(SCAN_STALE_WHY, /website hiccup/, 'the manager view no longer says hiccup scans are held back: change onboarding-store.md and For managers with it');
+  const scanPara = store.split('\n').find((l) => /last-scan line/.test(l)) || '';
+  assert.match(scanPara, /last scan Lot Current trusted/, 'onboarding-store.md calls the line the last read of the website');
+  assert.match(scanPara, /website hiccup[^.]*not recorded/, 'onboarding-store.md does not say a hiccup scan is held back');
+  assert.doesNotMatch(scanPara, /, nobody's Chrome had it on\./, 'onboarding-store.md blames a closed Chrome alone for an old line');
   // the three sentences that matter
   assert.match(store, /\*\*You click Publish\. Lot Current never does\.\*\*/);
   assert.match(store, /\*\*Keep prices honest\.\*\*/);

@@ -677,6 +677,18 @@ test('every page and marketing text that promises the 3-hour rescan or the same-
   assert.match(read('../extension/src/rescanSchedule.js'), /export const RESCAN_PERIOD_MINUTES = 180;/, 'the rescan no longer runs every 3 hours: change the texts with it');
 });
 
+// review: For managers said "The page says when the last scan ran". A rescan judged a website hiccup (most of the
+// lot gone at once) is never sent (accountFlow.js scanFromStored), so the line is the last scan Lot Current trusted,
+// and the manager view's own stale note says so (manager/data.js SCAN_STALE_WHY).
+test('For managers says the last-scan line is the last trusted scan, and that hiccup scans are held back', async () => {
+  const { SCAN_STALE_WHY } = await import('../manager/data.js');
+  assert.match(SCAN_STALE_WHY, /website hiccup[^.]*not recorded/, 'the manager view no longer holds back hiccup scans: change For managers with it');
+  const page = stripTags(read('../site/for-managers/index.html'));
+  assert.doesNotMatch(page, /The page says when the last scan ran\b/, 'For managers calls the line the last scan that ran');
+  assert.match(page, /when the last scan Lot Current trusted ran/);
+  assert.match(page, /looks like a website hiccup \(most of the lot gone at once\) is held back and not recorded there/);
+});
+
 // review: For managers said "Start the free pilot, Subscribe and Manage billing open Stripe's own pages for the card
 // and the invoices". Start the free pilot calls the database's start_pilot() and opens no page; only Subscribe and
 // Manage billing go to Stripe (manager/manager.js), and the manager view says no card is asked for (manager/data.js).
