@@ -774,15 +774,17 @@ test('every page and marketing text that promises the 3-hour rescan or the same-
 });
 
 // review: For managers said "The page says when the last scan ran". A rescan judged a website hiccup (most of the
-// lot gone at once) is never sent (accountFlow.js scanFromStored), so the line is the last scan Lot Current trusted,
-// and the manager view's own stale note says so (manager/data.js SCAN_STALE_WHY).
+// lot gone at once) goes up marked withheld (accountFlow.js scanFromStored) and the page tells it beside the last
+// trusted scan, never as it, so the line is the last scan Lot Current trusted, and the manager view's own stale
+// note says so (manager/data.js SCAN_STALE_WHY).
 test('For managers says the last-scan line is the last trusted scan, and that hiccup scans are held back', async () => {
   const { SCAN_STALE_WHY } = await import('../manager/data.js');
-  assert.match(SCAN_STALE_WHY, /website hiccup[^.]*not recorded/, 'the manager view no longer holds back hiccup scans: change For managers with it');
+  assert.match(SCAN_STALE_WHY, /held back as a likely website hiccup[^.]*never the last scan/, 'the manager view no longer holds back hiccup scans: change For managers with it');
   const page = stripTags(read('../site/for-managers/index.html'));
   assert.doesNotMatch(page, /The page says when the last scan ran\b/, 'For managers calls the line the last scan that ran');
   assert.match(page, /when the last scan Lot Current trusted ran/);
-  assert.match(page, /looks like a website hiccup \(most of the lot gone at once\) is held back and not recorded there/);
+  assert.match(page, /looks like a website hiccup \(most of the lot gone at once\) is held back and never shown as the last scan: the page says how many later scans were held back beside the last trusted one/);
+  assert.doesNotMatch(page, /not recorded there/, 'For managers says a hiccup scan is not recorded, while it goes up marked held back');
 });
 
 // review: For managers said "Start the free pilot, Subscribe and Manage billing open Stripe's own pages for the card
@@ -855,6 +857,7 @@ const PROFILE_PARTS = {
   salesperson: /\bname\b[^)]*\brole\b[^)]*closing line/,
   dealer: /the dealership's name, town, state and ZIP/,
   myStores: /\bstores\b/,
+  storesChosen: /\bstores\b/, // whether a person chose them (none ticked: every store), part of the store choice
   basis: /price basis/,
   priceNote: /price note/,
   dailyCap: /daily cap/,

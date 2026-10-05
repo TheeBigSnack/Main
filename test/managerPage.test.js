@@ -90,9 +90,12 @@ const settle = async (turns = 50) => { for (let i = 0; i < turns; i += 1) await 
 const answer = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
 // supabase-js as far as the page uses it: auth, rpc, and from(table) with
-// select / eq / order / limit / range, answering from `tables` and, like the
-// hosted API, at most `maxRows` rows per request whatever the range asks for.
-function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rpcs = {} } = {}) {
+// select / eq / lte / gt / order / limit / range, answering from `tables`
+// and, like the hosted API, at most `maxRows` rows per request whatever the
+// range asks for, and with select's count: 'exact', how many rows match. A
+// filter on a column `missingColumns` names for its table is answered with
+// Postgres's undefined-column error, as a database without that migration.
+function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rpcs = {}, missingColumns = {} } = {}) {
   const requests = [];
   const client = {
     requests,
@@ -107,13 +110,14 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rp
       return rpcs[fn] ? rpcs[fn](args) : { data: fn === 'list_invites' ? [] : null, error: null };
     },
     from(table) {
-      const q = { table, eq: [], lte: [], order: [], range: null, limit: null, count: null };
+      const q = { table, eq: [], lte: [], gt: [], order: [], range: null, limit: null, count: null };
       const builder = {
         select(_cols, opts) { q.count = (opts && opts.count) || null; return builder; },
         update(patch) { q.update = patch; return builder; },
         delete() { q.delete = true; return builder; },
         eq(col, value) { q.eq.push([col, value]); return builder; },
         lte(col, value) { q.lte.push([col, value]); return builder; },
+        gt(col, value) { q.gt.push([col, value]); return builder; },
         order(col, opts) { q.order.push([col, !opts || opts.ascending !== false]); return builder; },
         limit(n) { q.limit = n; return builder; },
         range(from, to) { q.range = [from, to]; return builder; },
@@ -124,7 +128,9 @@ function fakeClient({ session = null, tables = {}, maxRows = 1000, seen = {}, rp
   };
   function run(q) {
     requests.push(q);
-    const all = (tables[q.table] || []).filter((r) => q.eq.every(([c, v]) => r[c] === v) && q.lte.every(([c, v]) => r[c] != null && String(r[c]) <= String(v)));
+    const missing = [...q.eq, ...q.lte, ...q.gt].find(([c]) => (missingColumns[q.table] || []).includes(c));
+    if (missing) return { data: null, error: { code: '42703', message: `column ${q.table}.${missing[0]} does not exist` }, count: null };
+    const all = (tables[q.table] || []).filter((r) => q.eq.every(([c, v]) => r[c] === v) && q.lte.every(([c, v]) => r[c] != null && String(r[c]) <= String(v)) && q.gt.every(([c, v]) => r[c] != null && String(r[c]) > String(v)));
     if (q.update) { for (const r of all) Object.assign(r, q.update); return { data: all.map((r) => ({ ...r })), error: null }; }
     if (q.delete) { tables[q.table] = (tables[q.table] || []).filter((r) => !all.includes(r)); return { data: all.map((r) => ({ ...r })), error: null }; }
     const sorted = [...all].sort((a, b) => {
@@ -304,7 +310,7 @@ test('loadLive reads every row past the API\'s 1,000-row cap: the oldest open ta
       listings,
       todo_items: todo,
       post_attempts: [],
-      scan_summaries: [{ id: 's1', dealership_id: D, taken_at: at(1), cars: 1100, ready: 1000, take_down_count: 1, price_update_count: 0 }],
+      scan_summaries: [{ id: 's1', dealership_id: D, taken_at: at(1), cars: 1100, ready: 1000, take_down_count: 1, price_update_count: 0, withheld: false }],
     },
   });
   const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
@@ -320,37 +326,46 @@ test('loadLive reads every row past the API\'s 1,000-row cap: the oldest open ta
 
 // ---------- scans stamped ahead of the clock ----------
 
-// The page reads the newest 50 scans. A machine whose clock ran ahead can
-// have stored scans stamped in the future (before /sync refused them), and
-// summarize() leaves those out of the Last scan line; the read itself has to
-// leave them out too, or 50 of them fill the read and the real scans never
-// arrive.
-test('50 scans stamped in the future do not crowd the real last scan out of the 50-row read', async () => {
+// A machine whose clock ran ahead can have stored scans stamped in the
+// future (before /sync refused them), and summarize() leaves those out of
+// the Last scan line; the reads themselves have to leave them out too, or
+// they fill the reads and the real scans never arrive. The page reads the
+// newest trusted scan and the newest held-back scan since it (readScans), or,
+// on a database without the withheld column, the newest scan: every one of
+// those reads stops at now plus the clock margin.
+test('50 scans stamped in the future do not crowd the real last scan out of the scan reads', async () => {
   const D = 'd1';
   const NOW = Date.now();
   const at = (hoursAgo) => new Date(NOW - hoursAgo * 3600 * 1000).toISOString();
-  const future = Array.from({ length: 50 }, (_, i) => ({ id: `f${String(i).padStart(2, '0')}`, dealership_id: D, taken_at: at(-24 - i), cars: 999, ready: 999, take_down_count: 9, price_update_count: 9 }));
-  const client = fakeClient({
-    session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } },
-    tables: {
-      dealerships: [{ id: D, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
-      memberships: [{ user_id: 'u-manager', dealership_id: D, role: 'manager', name: 'Jamie' }],
-      listings: [],
-      todo_items: [],
-      post_attempts: [],
-      scan_summaries: [...future, { id: 's1', dealership_id: D, taken_at: at(1), cars: 42, ready: 37, take_down_count: 0, price_update_count: 1 }],
-    },
-  });
-  const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
-  const html = main(page);
-  assert.match(html, /Last scan [^<]*: 42 cars on the website, 37 ready to post, 0 to take down, 1 price change/, 'the real scan an hour ago is the last scan');
-  assert.doesNotMatch(html, /999 cars/);
-  assert.doesNotMatch(html, /No scan is recorded yet/);
-  const scanRead = client.requests.find((q) => q.table === 'scan_summaries');
-  assert.equal(scanRead.limit, 50);
-  assert.equal(scanRead.lte.length, 1, 'the read stops at now plus the clock margin');
-  assert.equal(scanRead.lte[0][0], 'taken_at');
-  assert.ok(Math.abs(Date.parse(scanRead.lte[0][1]) - (NOW + FUTURE_SKEW_MS)) < 60 * 1000, scanRead.lte[0][1]);
+  for (const [what, withheldColumn] of [['with the withheld column (0016 applied)', true], ['without it (0016 not applied yet)', false]]) {
+    const row = (r) => (withheldColumn ? { ...r, withheld: false } : r);
+    const future = Array.from({ length: 50 }, (_, i) => row({ id: `f${String(i).padStart(2, '0')}`, dealership_id: D, taken_at: at(-24 - i), cars: 999, ready: 999, take_down_count: 9, price_update_count: 9 }));
+    const client = fakeClient({
+      session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } },
+      missingColumns: withheldColumn ? {} : { scan_summaries: ['withheld'] },
+      tables: {
+        dealerships: [{ id: D, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+        memberships: [{ user_id: 'u-manager', dealership_id: D, role: 'manager', name: 'Jamie' }],
+        listings: [],
+        todo_items: [],
+        post_attempts: [],
+        scan_summaries: [...future, row({ id: 's1', dealership_id: D, taken_at: at(1), cars: 42, ready: 37, take_down_count: 0, price_update_count: 1 })],
+      },
+    });
+    const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
+    const html = main(page);
+    assert.match(html, /Last scan [^<]*: 42 cars on the website, 37 ready to post, 0 to take down, 1 price change/, `${what}: the real scan an hour ago is the last scan`);
+    assert.doesNotMatch(html, /999 cars/, what);
+    assert.doesNotMatch(html, /No scan is recorded yet/, what);
+    const scanReads = client.requests.filter((q) => q.table === 'scan_summaries');
+    assert.ok(scanReads.length >= 1, what);
+    for (const q of scanReads) {
+      assert.ok(q.limit, `${what}: each scan read is bounded`);
+      assert.equal(q.lte.length, 1, `${what}: each scan read stops at now plus the clock margin`);
+      assert.equal(q.lte[0][0], 'taken_at');
+      assert.ok(Math.abs(Date.parse(q.lte[0][1]) - (NOW + FUTURE_SKEW_MS)) < 60 * 1000, q.lte[0][1]);
+    }
+  }
 });
 
 // ---------- what the page says when nothing is flagged ----------
@@ -382,13 +397,83 @@ test('nothing flagged, no scan yet, and a removed salesperson\'s cars still up: 
   assert.ok(!/>Car [12]</.test(notOnTeam), 'a member\'s cars are not in it');
 
   // with a fresh scan and the cars all members', the pill is the plain one, never green, and the card says only what an item is
-  const fresh = { ...tables, listings: listings.slice(0, 2), scan_summaries: [{ id: 's1', dealership_id: D, taken_at: at(1), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0 }] };
+  const fresh = { ...tables, listings: listings.slice(0, 2), scan_summaries: [{ id: 's1', dealership_id: D, taken_at: at(1), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0, withheld: false }] };
   const ok = main(await openPage(PAGE, { client: fakeClient({ session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } }, tables: fresh }), fetchImpl: billing }));
   assert.match(ok, /Sold cars still listed <span class="pill ">0<\/span>/);
   assert.ok(!ok.includes('class="pill good">0<'), 'an empty card is never green');
   assert.match(ok, /<p class="empty">No open take-down items\. One opens when a rescan on the poster&#39;s own computer finds their car gone from the website\.<\/p>/);
   assert.ok(!ok.includes('id="notOnTeam"'));
   assert.ok(readFileSync(join(root, 'docs/help.md'), 'utf8').includes('**Listed by people no longer on the team**'), 'docs/help.md names the list as the page labels it');
+});
+
+// ---------- the last scan, past a long run of held-back scans ----------
+
+// A lot that keeps reading most of its cars gone sends a held-back scan at
+// every rescan until a salesperson accepts the smaller list: 3 salespeople
+// rescanning every 3 hours make 50 of them in about two days. However many
+// there are, the last trusted scan stays the page's last scan, and the line
+// counts every one held back since it.
+test('loadLive: 60 held-back scans after the last trusted one: the page still shows that scan as the last, and counts all 60', async () => {
+  const D = 'd1';
+  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600 * 1000).toISOString();
+  const held = Array.from({ length: 60 }, (_, i) => ({ id: `h${String(i).padStart(3, '0')}`, dealership_id: D, website_origin: 'https://www.example-motors.test', taken_at: at(1 + i), cars: 4, ready: 3, take_down_count: 0, price_update_count: 0, withheld: true }));
+  const scans = [
+    ...held,
+    { id: 's-trusted', dealership_id: D, website_origin: 'https://www.example-motors.test', taken_at: at(70), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0, withheld: false },
+    { id: 's-older-held', dealership_id: D, website_origin: 'https://www.example-motors.test', taken_at: at(80), cars: 3, ready: 3, take_down_count: 0, price_update_count: 0, withheld: true },
+    { id: 's-other-dealer', dealership_id: 'd2', website_origin: 'https://www.other-motors.test', taken_at: at(0.5), cars: 90, ready: 80, take_down_count: 0, price_update_count: 0, withheld: false },
+  ];
+  const client = fakeClient({
+    session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } },
+    tables: {
+      dealerships: [{ id: D, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+      memberships: [{ user_id: 'u-manager', dealership_id: D, role: 'manager', name: 'Jamie' }],
+      listings: [],
+      todo_items: [],
+      post_attempts: [],
+      scan_summaries: scans,
+    },
+  });
+  const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
+  const html = main(page);
+  assert.match(html, /Last scan [^:]+:\d\d: 40 cars on the website, 30 ready to post, 0 to take down, 0 price changes\. 60 later scans \(the newest [^)]*: 4 cars on the website\) were held back as a likely website hiccup/, 'the trusted scan is the last scan, with every held-back scan since it counted');
+  assert.doesNotMatch(html, /No trusted scan is recorded yet/);
+  assert.doesNotMatch(html, /Every scan recorded was held back/);
+  assert.match(html, /The scans since the last trusted one were held back as a likely website hiccup, so a car sold since then is not flagged yet\./);
+  // the page asked the database for what the line needs, not a capped run of the newest rows
+  const scanReads = client.requests.filter((q) => q.table === 'scan_summaries');
+  assert.ok(scanReads.every((q) => q.eq.some(([c, v]) => c === 'dealership_id' && v === D)), 'only this dealership\'s scans');
+  assert.ok(scanReads.some((q) => q.eq.some(([c, v]) => c === 'withheld' && v === false)), 'the last trusted scan is read on its own');
+  assert.ok(scanReads.some((q) => q.count === 'exact' && q.eq.some(([c, v]) => c === 'withheld' && v === true)), 'the held-back scans are counted');
+});
+
+// The page deploys on its own (a push that touches it), so it can reach a
+// database that has not applied 0016 yet. Such a database holds no
+// held-back scan (the sync function that writes one deploys after it), and
+// the page shows its newest scan as before rather than failing to load.
+test('loadLive: a database without the withheld column (0016 not applied yet): the newest scan is the last scan, and the page loads', async () => {
+  const D = 'd1';
+  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600 * 1000).toISOString();
+  const client = fakeClient({
+    session: { access_token: 'tok', user: { id: 'u-manager', email: 'manager@example.test' } },
+    missingColumns: { scan_summaries: ['withheld'] },
+    tables: {
+      dealerships: [{ id: D, name: 'Example Motors', website_origin: 'https://www.example-motors.test' }],
+      memberships: [{ user_id: 'u-manager', dealership_id: D, role: 'manager', name: 'Jamie' }],
+      listings: [],
+      todo_items: [],
+      post_attempts: [],
+      scan_summaries: [
+        { id: 's1', dealership_id: D, taken_at: at(5), cars: 38, ready: 28, take_down_count: 0, price_update_count: 0 },
+        { id: 's2', dealership_id: D, taken_at: at(1), cars: 40, ready: 30, take_down_count: 1, price_update_count: 0 },
+      ],
+    },
+  });
+  const page = await openPage(PAGE, { client, fetchImpl: () => answer(200, { ok: true, role: 'manager', state: 'pilot', subscription: { status: 'pilot', pilot_ends_at: '2099-01-01T00:00:00Z' } }) });
+  const html = main(page);
+  assert.doesNotMatch(status(page), /Couldn't read/);
+  assert.match(html, /Last scan [^:]+:\d\d: 40 cars on the website, 30 ready to post, 1 to take down, 0 price changes <span class="pill ">/);
+  assert.doesNotMatch(html, /held back/);
 });
 
 // ---------- in no dealership yet ----------

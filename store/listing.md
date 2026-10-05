@@ -25,7 +25,7 @@ What it does
 - Scans the dealership website's used inventory and shows the cars at your store that the website marks as pre-owned, with a price and photos, as ready to post.
 - Pre-fills the Marketplace vehicle listing: year, make, model, mileage, price, body style, colors, fuel type, transmission, location, a description written from the website's own facts, and the car's photos. You check every field and click Publish yourself.
 - Writes the description from the car's listed facts on the website only (it does not copy the website's write-up for the car), names the dealership and your role, and checks every number against the website before you see it.
-- Rescans the website, by hand or, if you allow it, every 3 hours while Chrome is open, and shows which of your listings to take down (sold, or sale-pending), which to reprice, and what's new. A button opens the right listing with the new price ready for you to apply; you click Update, Mark as sold or Delete.
+- Rescans the website, by hand or, if you allow it, every 3 hours while Chrome is open, and shows which of your listings to take down (sold, sale-pending, or no longer listed as pre-owned), which to reprice, and what's new. A button opens the right listing with the new price ready for you to apply; you click Update, Mark as sold or Delete.
 - Keeps a daily post cap per salesperson (10 by default): your dealership chooses the number, and each salesperson enters it in their own Settings. Meta doesn't publish its limits; this is a safety setting, not a guarantee.
 
 What it won't do

@@ -336,3 +336,35 @@ test('a price update reads the car on the website again first and fills the pric
     delete globalThis.chrome;
   }
 });
+
+// A take-down of a car the website now calls new, demo or loaner
+// (src/rescan.js why 'not-pre-owned') is no sale: the panel asks for Delete,
+// never Mark as sold. A sold car's take-down still offers both.
+test('upkeep asks for Delete, not Mark as sold, when the car was not sold but retyped new', async () => {
+  globalThis.chrome = { tabs: { create: async () => ({ id: 9 }) } };
+  const ctx = { render: () => {}, map: () => FORM_MAP };
+  const banner = async (why) => {
+    const started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'takeDown', why, listingUrl: 'https://www.facebook.com/marketplace/item/111/', name: 'Car A', listedPrice: 20000 }, ctx);
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    up.status = 'waiting';
+    const html = upkeepHtml();
+    endUpkeep();
+    await started;
+    return /id="takeDownWaiting">(.*?)<\/div>/.exec(html)[1];
+  };
+  try {
+    const notSold = await banner('not-pre-owned');
+    assert.match(notSold, /click <b>Delete<\/b> on this listing/);
+    assert.match(notSold, /do not mark it sold/);
+    assert.doesNotMatch(notSold, /click <b>Mark as sold<\/b>/);
+    // a sold car's take-down (drawn straight from the panel's state, without opening a tab again)
+    for (const why of ['gone', 'sale-pending', '']) {
+      Object.assign(up, { active: true, kind: 'takeDown', why, status: 'waiting', name: 'Car A', vin: 'AAA', error: '', note: '' });
+      assert.match(/id="takeDownWaiting">(.*?)<\/div>/.exec(upkeepHtml())[1], /click <b>Mark as sold<\/b> \(or <b>Delete<\/b>\)/);
+      endUpkeep();
+    }
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});

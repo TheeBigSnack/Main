@@ -66,12 +66,13 @@ const SCHEMA = {
   listings: {
     columns: {
       id: 'uuid!', dealership_id: 'uuid!', user_id: 'uuid!', vin: 'text!', name: 'text', price: 'int', posted_at: 'ts!', created_at: 'ts!',
-      listing_url: 'text', salesperson: 'text', updated_at: 'ts', taken_down_at: 'ts', status: 'text!', listed_before: 'bool!',
+      listing_url: 'text', salesperson: 'text', updated_at: 'ts', taken_down_at: 'ts', status: 'text!', listed_before: 'bool!', basis: 'text',
     },
     keys: [['id'], ['dealership_id', 'vin', 'posted_at']],
-    defaults: { id: NEW_UUID, created_at: NOW, status: 'listed', listed_before: false },
+    defaults: { id: NEW_UUID, created_at: NOW, status: 'listed', listed_before: false, basis: null },
     check: (r) => {
       if (!['listed', 'taken_down'].includes(r.status)) return 'listings_status_check';
+      if (r.basis !== null && r.basis !== undefined && !['website', 'beforeFees'].includes(r.basis)) return 'listings_basis_check';
       return (r.status === 'taken_down') === (r.taken_down_at !== null) ? '' : 'listings_status_matches_taken_down';
     },
   },
@@ -82,9 +83,9 @@ const SCHEMA = {
     check: (r) => (!['takeDown', 'price'].includes(r.kind) ? 'todo_items_kind_check' : r.how !== null && !['detected', 'manual', 'cleared'].includes(r.how) ? 'todo_items_how_check' : ''),
   },
   scan_summaries: {
-    columns: { id: 'uuid!', dealership_id: 'uuid!', website_origin: 'text!', taken_at: 'ts!', cars: 'int', ready: 'int', take_down_count: 'int', price_update_count: 'int' },
+    columns: { id: 'uuid!', dealership_id: 'uuid!', website_origin: 'text!', taken_at: 'ts!', cars: 'int', ready: 'int', take_down_count: 'int', price_update_count: 'int', withheld: 'bool!' },
     keys: [['id'], ['dealership_id', 'website_origin', 'taken_at']],
-    defaults: { id: NEW_UUID },
+    defaults: { id: NEW_UUID, withheld: false },
   },
   post_attempts: {
     columns: {

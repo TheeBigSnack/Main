@@ -181,12 +181,14 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   // the day-7 numbers are read the way the manager view draws them
   assert.match(store, new RegExp(`more than ${OVERDUE_HOURS} hours`), 'the red threshold is OVERDUE_HOURS from manager/data.js');
   assert.match(store, new RegExp(`more than ${SCAN_STALE_HOURS} hours ago`), 'the stale-scan line is SCAN_STALE_HOURS from manager/data.js');
-  // the last-scan line shows the last scan the extension sent: one judged a website hiccup never goes up
-  // (extension/src/accountFlow.js scanFromStored, manager/data.js SCAN_STALE_WHY), so an old line is not only a closed Chrome
-  assert.match(SCAN_STALE_WHY, /website hiccup/, 'the manager view no longer says hiccup scans are held back: change onboarding-store.md and For managers with it');
+  // the last-scan line shows the last trusted scan: one judged a website hiccup goes up marked withheld and is told
+  // beside it, never as it (extension/src/accountFlow.js scanFromStored, manager/data.js SCAN_STALE_WHY and
+  // summarize), so an old line is not only a closed Chrome
+  assert.match(SCAN_STALE_WHY, /held back as a likely website hiccup[^.]*never the last scan/, 'the manager view no longer says hiccup scans are held back: change onboarding-store.md and For managers with it');
   const scanPara = store.split('\n').find((l) => /last-scan line/.test(l)) || '';
   assert.match(scanPara, /last scan Lot Current trusted/, 'onboarding-store.md calls the line the last read of the website');
-  assert.match(scanPara, /website hiccup[^.]*not recorded/, 'onboarding-store.md does not say a hiccup scan is held back');
+  assert.match(scanPara, /website hiccup[^.]*is held back and never shown as the last scan: the line says how many later scans were held back beside the last trusted one\./, 'onboarding-store.md does not say a hiccup scan is held back and told beside the last trusted one');
+  assert.doesNotMatch(scanPara, /not recorded/, 'onboarding-store.md says a hiccup scan is not recorded, while it goes up marked held back');
   assert.doesNotMatch(scanPara, /, nobody's Chrome had it on\./, 'onboarding-store.md blames a closed Chrome alone for an old line');
   // a rescan reaches the dealership's account only while its salesperson is signed in (accountFlow.js syncNow)
   assert.match(scanPara, /not signed in to their Lot Current accounts \(a scan reaches this view only while its salesperson is signed in\)/, 'onboarding-store.md leaves out that a signed-out salesperson\'s rescans never reach the view');

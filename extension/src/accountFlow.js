@@ -241,17 +241,21 @@ export function rewriteKeyFor({ rewrite = {}, session = null, config = ACCOUNT }
 
 // This scan's counts from what a scan leaves behind (the snapshot and the
 // diff), for the sync function's scan summary; null when nothing was scanned.
-// Also null when the scan was judged a website hiccup (diff.unreliable): its
-// snapshot is not saved, so its short car count is not the lot's, and the
-// saved snapshot is an older scan whose own take-down and price counts are
-// gone. Nothing goes up, so the manager's "Last scan" stays at the last scan
-// the extension trusted, with its own time (and shows as stale when the
-// hiccups go on).
+// A scan judged a website hiccup (diff.unreliable) goes up marked withheld,
+// with the counts of its own read, held back with the diff (diff.withheld,
+// src/rescan.js withWithheld): its snapshot is not saved, so its short car
+// count is not the lot's, and the manager's page shows it as held back, not
+// as the last scan (manager/data.js), so the manager sees that scans are
+// running and being held back. A diff from a build that kept no read sends
+// nothing. Once the salesperson accepts the read (acceptWithheld), the next
+// scan compares with it and goes up as a trusted scan.
 export function scanFromStored({ snapshot = null, diff = null } = {}) {
-  if (diff && diff.unreliable) return null;
-  const takenAt = (diff && diff.takenAt) || (snapshot && snapshot.takenAt) || null;
+  const held = diff && diff.unreliable;
+  const read = held ? diff.withheld && diff.withheld.snapshot : snapshot;
+  if (held && !(read && read.vehicles && typeof read.vehicles === 'object')) return null;
+  const takenAt = (diff && diff.takenAt) || (read && read.takenAt) || null;
   if (!takenAt) return null;
-  const vehicles = snapshot && snapshot.vehicles && typeof snapshot.vehicles === 'object' ? Object.values(snapshot.vehicles) : [];
+  const vehicles = read && read.vehicles && typeof read.vehicles === 'object' ? Object.values(read.vehicles) : [];
   const count = (list) => (Array.isArray(list) ? list.length : 0);
   return scanSummary({
     takenAt,
@@ -259,6 +263,7 @@ export function scanFromStored({ snapshot = null, diff = null } = {}) {
     ready: vehicles.filter((v) => v && v.decision === DECISION.READY).length,
     takeDownCount: count(diff && diff.takeDown),
     priceUpdateCount: count(diff && diff.priceUpdates),
+    withheld: Boolean(held),
   });
 }
 

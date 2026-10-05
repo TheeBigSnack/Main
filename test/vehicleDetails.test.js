@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { recheck, fetchVehicleDetails, fetchVehicleDetailsDirect, readCarForPost } from '../extension/src/vehicleDetails.js';
+import { probeTab } from '../extension/src/scanRunner.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
-import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, STANDARD_ORIGIN } from './helpers.js';
+import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, standardCarPage, standardListPage, fakeStandardPage, STANDARD_ORIGIN } from './helpers.js';
 import { SITES_KEY } from '../extension/src/storageKeys.js';
 import { adapterById } from '../extension/adapters/index.js';
-import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage, answerWith } from './platformSites.js';
+import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, dealerOnPath, fakePlatformPage, answerWith } from './platformSites.js';
 
 test('the post-time re-check lets a ready car through and nothing else', () => {
   assert.equal(recheck(vehicle('usedNormal'), MY_STORE).ok, true);
@@ -182,6 +183,67 @@ test('a website read through its standard vehicle data: the car\'s own page, rea
   });
   assert.equal(seen[0].url, STANDARD_ORIGIN + cars[1].path, 'the car\'s own page first');
   assert.equal(seen[0].init.credentials, 'omit', 'without cookies, as the automatic rescan reads');
+});
+
+test('the post-time read knows the last scan\'s car pages, so another car\'s tile at the old price is not this car\'s price', async () => {
+  // a lot whose car addresses neither carry a VIN nor read like a car page
+  const cars = standardCars(4).map((c, i) => ({ ...c, path: `/vdp/${7000 + i}/` }));
+  const site = standardSite({ cars });
+  const tiles = `<aside><div class="tile"><a href="${cars[1].path}">${cars[1].year} ${cars[1].make}</a> <span>$15,000</span></div><div class="tile"><a href="${cars[2].path}">${cars[2].year} ${cars[2].make}</a> <span>$16,000</span></div></aside>`;
+  // the page now says $14,000; its markup still says $15,000, the price on the other car's tile
+  site.set(STANDARD_ORIGIN + cars[0].path, { ok: true, status: 200, contentType: 'text/html', text: standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', tiles + '<a href="/used-vehicles/">') });
+  const fetchImpl = async (url) => {
+    const got = site.get(url) || { ok: false, status: 404, contentType: 'text/plain', text: 'Not found' };
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: () => got.contentType }, text: async () => got.text };
+  };
+  const info = { name: 'Sample Motors', adapter: 'schemaOrg', service: { kind: 'schemaOrg', origin: STANDARD_ORIGIN, listUrl: STANDARD_ORIGIN + '/used-vehicles/' }, site: { origin: STANDARD_ORIGIN, name: 'Sample Motors' } };
+  const snapshot = { vehicles: Object.fromEntries(cars.map((c) => [c.vin, { url: STANDARD_ORIGIN + c.path, price: c.price }])) };
+  globalThis.chrome = fakeChrome({}, { ['snapshot:' + STANDARD_ORIGIN]: snapshot });
+  try {
+    await withFetch(fetchImpl, async () => {
+      const r = await fetchVehicleDetailsDirect(STANDARD_ORIGIN, info, cars[0].vin, { url: STANDARD_ORIGIN + cars[0].path, contains: async () => true });
+      assert.equal(r.ok, true);
+      assert.equal(r.vehicle.price, null);
+      assert.equal(recheck(r.vehicle, {}).ok, false, 'the post stops');
+    });
+  } finally {
+    delete globalThis.chrome;
+  }
+});
+
+test('the post-time read through the dealer tab knows the last scan\'s car pages too, on its first read and on its second, the way the last scan read the website', async () => {
+  const O = STANDARD_ORIGIN;
+  // a lot whose car addresses neither carry a VIN nor read like a car page
+  const cars = standardCars(6).map((c, i) => ({ ...c, path: `/vdp/${7000 + i}/` }));
+  const site = standardSite({ cars, perPage: 10 });
+  const tiles = `<aside><div class="tile"><a href="${cars[1].path}">${cars[1].year} ${cars[1].make}</a> <span>$15,000</span></div><div class="tile"><a href="${cars[2].path}">${cars[2].year} ${cars[2].make}</a> <span>$16,000</span></div></aside>`;
+  // the page now says $14,000; its markup still says $15,000, the price on the other car's tile
+  site.set(O + cars[0].path, { ok: true, status: 200, contentType: 'text/html', text: standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', tiles + '<a href="/used-vehicles/">') });
+  const whole = site.get(O + '/used-vehicles/');
+  const snapshot = { vehicles: Object.fromEntries(cars.map((c) => [c.vin, { url: O + c.path, price: c.price }])) };
+  const read = async ({ second, known }) => {
+    // second: the tab shows a list without the car, and the last scan read another list that has it
+    site.set(O + '/used-vehicles/', second ? { ok: true, status: 200, contentType: 'text/html', text: standardListPage(cars.slice(3, 5)) } : whole);
+    site.set(O + '/pre-owned/', whole);
+    const page = fakeStandardPage({ site, path: '/used-vehicles/' });
+    const store = { [SITES_KEY]: { [O]: { adapter: 'schemaOrg', service: { kind: 'schemaOrg', origin: O, listUrl: O + (second ? '/pre-owned/' : '/used-vehicles/') } } } };
+    if (known) store['snapshot:' + O] = snapshot;
+    globalThis.chrome = fakeChrome(page, store);
+    try {
+      const r = await fetchVehicleDetails(1, cars[0].vin, { origin: O, ...(second ? {} : { url: O + cars[0].path }) });
+      assert.equal(r.ok, true, r.message);
+      return { price: r.vehicle.price, fetched: page.fetchCalls.map((c) => c.url.replace(O, '')) };
+    } finally {
+      delete globalThis.chrome;
+    }
+  };
+  const first = await read({ second: false, known: true });
+  assert.deepEqual(first, { price: null, fetched: ['/vdp/7000/'] }, 'the first read, from the car\'s known page');
+  const again = await read({ second: true, known: true });
+  assert.deepEqual(again, { price: null, fetched: ['/used-vehicles/', '/pre-owned/', '/vdp/7000/'] }, 'the second read, from the last scan\'s list');
+  // Without the last scan's car pages, nothing on this lot tells the tile's link from a link to anything
+  // else: a known limit (extension/adapters/README.md), not something this test expects. Both reads
+  // above fail when either read is given no car pages.
 });
 
 test('readCarForPost: the tab when it shows the website, the direct read only when the tab can\'t be used', async () => {
@@ -410,12 +472,20 @@ test('a car missing from a list the website did not give whole is not called gon
     const partial = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
     assert.equal(partial.ok, false);
     assert.equal(partial.notFound, undefined, 'not "not on the website any more"');
-    assert.match(partial.message, /Couldn't read the website's whole list of cars just now, so this car couldn't be checked\. Try again in a minute\./);
+    // the cause can last (a next link that loops, paging the website ignores): no "try again in a minute", and no "turning Lot Current away"
+    assert.equal(partial.message, "Couldn't read the website's whole list of cars, so this car couldn't be checked. Open the website's used inventory page, click Scan website in the popup, then post this car from the popup there.");
     adapter.getDetails = async () => ({ ok: true, record: null, complete: true, fetchedAt: new Date().toISOString() });
     const whole = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
     assert.deepEqual([whole.ok, whole.notFound], [false, true], 'a whole list without the car: gone, as before');
     adapter.getDetails = async () => ({ ok: true, record: null, fetchedAt: new Date().toISOString() });
     assert.equal((await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true })).notFound, true, 'an adapter that does not say: as before');
+    // a page with no vehicle data is not the website turning Lot Current away; a failing page may be
+    adapter.getDetails = async () => ({ ok: false, message: "The car's page on the website has no vehicle data Lot Current can read.", carPage: true, noData: true });
+    const blank = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
+    assert.deepEqual([blank.ok, blank.notFound, blank.carPage, blank.noData], [false, undefined, true, true]);
+    assert.equal(blank.message, "The car's page on the website has no vehicle data Lot Current can read.");
+    adapter.getDetails = async () => ({ ok: false, message: "Couldn't read the car's page on the website (HTTP 500).", carPage: true });
+    assert.match((await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true })).message, /HTTP 500\)\. If the website keeps turning Lot Current away/);
   } finally {
     adapter.getDetails = real;
   }
@@ -461,7 +531,7 @@ test('a car missing from the part of another list the website gave is read from 
     cutShort.add(DEALERCOM_LIST);
     const both = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: platformCars(1, { from: 90 })[0].vin, contains: async () => false });
     assert.deepEqual([both.ok, both.notFound, both.incomplete], [false, undefined, true]);
-    assert.match(both.message, /Couldn't read the website's whole list of cars just now/);
+    assert.match(both.message, /^Couldn't read the website's whole list of cars, so this car couldn't be checked\. Open the website's used inventory page/);
 
     // with nothing stored for the website, the page's own part-read list says only that
     delete store[SITES_KEY];
@@ -469,6 +539,81 @@ test('a car missing from the part of another list the website gave is read from 
     assert.deepEqual([alone.ok, alone.notFound, alone.incomplete], [false, undefined, true]);
   } finally {
     adapter.getDetails = real;
+    delete globalThis.chrome;
+  }
+});
+
+// The same tab on another list whose first page fails (a 500) or holds no
+// cars and no count: that is no answer about the car either, so the list
+// the last scan read is read too. A refusal is never followed by another read.
+test('a dealer tab whose own list fails on its first page reads the car from the last scan\'s list; a refusal is never followed by another read', async () => {
+  const cars = platformCars(4, { from: 1 });
+  const json = (body) => ({ ok: true, status: 200, contentType: 'application/json', text: JSON.stringify(body), json: body });
+  const service = { kind: 'dealerCom', origin: DEALERCOM_ORIGIN, inventoryUrl: DEALERCOM_LIST, listUrl: DEALERCOM_ORIGIN + '/used-inventory/index.htm' };
+  const other = DEALERCOM_LIST.replace('AUTO_USED', 'AUTO_NEW');
+  const usedList = (c) => c.url.startsWith(DEALERCOM_LIST.split('?')[0]) && c.url.includes('AUTO_USED');
+  const tabOn = (answer) => {
+    const site = dealerComSite({ cars });
+    site.set(other, answer);
+    const page = fakePlatformPage({ site, origin: DEALERCOM_ORIGIN, path: '/new-inventory/index.htm', requested: [other], windowExtras: { DDC: {} }, text: 'Website by Dealer.com' });
+    const store = { [SITES_KEY]: { [DEALERCOM_ORIGIN]: { adapter: 'dealerCom', service } } };
+    globalThis.chrome = fakeChrome(page, store);
+    return { page, info: store[SITES_KEY][DEALERCOM_ORIGIN] };
+  };
+  try {
+    for (const [what, answer] of [['a 500', answerWith(500, 'Server error')], ['no cars and no count', json({ inventory: [] })]]) {
+      const { page, info } = tabOn(answer);
+      const r = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: cars[1].vin, contains: async () => false });
+      assert.equal(r.ok, true, `${what}: ${r.message}`);
+      assert.equal(r.via, 'tab', `${what}: through the same tab`);
+      assert.equal(r.vehicle.vin, cars[1].vin);
+      assert.ok(page.fetchCalls.some(usedList), `${what}: the last scan's list was read`);
+    }
+    for (const status of [429, 403]) {
+      const { page, info } = tabOn(answerWith(status, 'No'));
+      const r = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: cars[1].vin, contains: async () => false });
+      assert.equal(r.ok, false);
+      assert.match(r.message, new RegExp(`\\(${status}\\)`));
+      assert.ok(!page.fetchCalls.some(usedList), `${status}: nothing more is asked of a website that refused`);
+    }
+  } finally {
+    delete globalThis.chrome;
+  }
+});
+
+// The adapter the last scan used reads the car at post time, even when
+// another adapter's probe answers on the open page: a DealerOn car page that
+// shows standard vehicle data but no DealerOn mark is still read the way the
+// scan read the lot, so its price is chosen the same way (on the dealer's basis).
+test('at post time the adapter the last scan used reads the car, not another adapter whose probe answered on the page', async () => {
+  const cars = platformCars(4, { from: 1 });
+  const car = cars[1];
+  const service = { kind: 'dealerOn', origin: DEALERON_ORIGIN, inventoryUrl: DEALERON_LIST, listUrl: DEALERON_ORIGIN + '/searchused.aspx' };
+  const site = dealerOnSite({ cars });
+  const path = dealerOnPath(car);
+  // the car's page carries standard vehicle data at another price, and nothing that marks it as DealerOn's
+  const node = { '@context': 'https://schema.org', '@type': 'Car', name: `${car.year} ${car.make} ${car.model}`, vehicleIdentificationNumber: car.vin, url: DEALERON_ORIGIN + path, offers: { '@type': 'Offer', price: 1234, priceCurrency: 'USD' } };
+  const carPage = `<!doctype html><html><head><title>${car.year} ${car.make} ${car.model}</title><script type="application/ld+json">${JSON.stringify(node)}</script></head><body><h1>${car.year} ${car.make} ${car.model}</h1><p>$1,234</p></body></html>`;
+  // the website serves that page at the car's address too, so the page's own reader can read the car from it
+  site.set(DEALERON_ORIGIN + path, { ok: true, status: 200, contentType: 'text/html', text: carPage });
+  const page = fakeStandardPage({ site, origin: DEALERON_ORIGIN, path, html: carPage });
+  const store = { [SITES_KEY]: { [DEALERON_ORIGIN]: { adapter: 'dealerOn', service } } };
+  globalThis.chrome = fakeChrome(page, store);
+  try {
+    const probe = await probeTab(1);
+    assert.equal(probe.adapterId, 'schemaOrg', 'the page itself reads as standard vehicle data');
+    const r = await fetchVehicleDetails(1, car.vin, { origin: DEALERON_ORIGIN, url: DEALERON_ORIGIN + path });
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.vehicle.vin, car.vin);
+    assert.equal(r.vehicle.price, car.base + car.fee, 'the price the last scan\'s reader chooses, not the page markup\'s');
+    assert.ok(page.fetchCalls.some((c) => c.url === DEALERON_LIST), 'read through the list the last scan read');
+    // with no last scan stored, the page's own reader is all there is
+    delete store[SITES_KEY];
+    page.fetchCalls.length = 0;
+    const alone = await fetchVehicleDetails(1, car.vin, { origin: DEALERON_ORIGIN, url: DEALERON_ORIGIN + path });
+    assert.ok(!page.fetchCalls.some((c) => c.url === DEALERON_LIST), 'no stored reader: not read through it');
+    assert.deepEqual([alone.ok, alone.vehicle && alone.vehicle.price], [true, 1234], alone.message);
+  } finally {
     delete globalThis.chrome;
   }
 });

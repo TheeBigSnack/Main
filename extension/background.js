@@ -25,7 +25,7 @@ import { adapterById } from './adapters/index.js';
 import { scanWithSearch } from './src/scanRunner.js';
 import { siteKeys, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
-import { settleDiff } from './src/rescan.js';
+import { settleDiff, withWithheld } from './src/rescan.js';
 import { withDefaults } from './src/settings.js';
 import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
@@ -346,13 +346,16 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   // Saved under the diff's lock, against the posted list as it is now: the
   // salesperson may have ticked an item off while this scan ran, and the
   // popup and the side panel change the diff under the same lock
-  // (src/rescan.js settleDiff, src/storage.js).
+  // (src/rescan.js settleDiff, src/storage.js). A read judged a website
+  // hiccup is not saved as the snapshot: it is held back with the diff,
+  // counted on from the one saved before (withWithheld), for the popup to
+  // offer; only the salesperson's click there replaces the snapshot.
   let diff;
   let before;
   try {
     ({ diff, before } = await withLock(k.diff, async () => {
       const now = await chrome.storage.local.get([k.posted, k.diff]);
-      const settled = settleDiff(out.diff, now[k.posted] || {});
+      const settled = withWithheld(settleDiff(out.diff, now[k.posted] || {}), out.snapshot, now[k.diff]);
       const save = { [k.diff]: settled, [k.boilerplate]: out.boilerplate };
       if (!settled.unreliable) save[k.snapshot] = out.snapshot;
       await chrome.storage.local.set(save);

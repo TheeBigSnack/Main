@@ -215,6 +215,126 @@ test('saving Settings or signing in before the website\'s first scan leaves the 
   assert.equal(p.local[k.settings].salesperson.name, 'Sam', 'what the person typed stays');
 });
 
+// "Leave all unticked to include every store" is a choice a person makes
+// with the website's stores in view (Settings after a scan, set-up's store
+// step). The website's first scan on another computer, or after Clear
+// everything for this website, settles the stores only when no such choice
+// was made: an every-store choice stands, and a Save before the first scan
+// (no store boxes yet) leaves the stores as they were.
+test("a person's choice of every store survives the website's first scan; a Save before a scan changes no store", async () => {
+  const STORE = MY_STORE.myStores[0]; // the site is named after one of the fixture lot's three stores
+  const submitStores = async (p, ticked, { reopen = true } = {}) => {
+    if (reopen) await p.tab('settings');
+    const values = { salespersonName: 'Sam', dailyCap: '10', dealerName: STORE };
+    const before = globalThis.FormData;
+    globalThis.FormData = class { get(name) { return values[name] ?? null; } getAll(name) { return name === 'store' ? ticked : []; } has(name) { return name in values; } };
+    try {
+      // the form as drawn: its store boxes are there only when the panel drew them
+      const drawn = p.panel();
+      await p.el('panel').listeners.submit({ target: { id: 'settings', querySelector: (sel) => (sel === 'input[name="store"]' && drawn.includes('name="store"') ? {} : null) }, preventDefault() {} });
+    } finally {
+      globalThis.FormData = before;
+    }
+  };
+  const readyStores = (p) => [...new Set(Object.values(p.local[k.snapshot].vehicles).filter((v) => v.decision === 'ready').map((v) => v.location))].sort();
+
+  // the first scan ticks the website's own store; the person unticks it in Settings: every store
+  const p = await loadPopup({ name: STORE });
+  await p.scan();
+  assert.deepEqual(p.local[k.settings].myStores, [STORE]);
+  await submitStores(p, []);
+  assert.deepEqual(p.local[k.settings].myStores, []);
+  assert.equal(p.local[k.settings].storesChosen, true, 'chosen with the stores in view');
+  assert.equal(p.sync[PROFILE_KEY].storesChosen, true, 'and the synced profile carries it');
+  await p.scan();
+  const every = readyStores(p);
+  assert.ok(every.length > 1, 'every store\'s cars are ready to post');
+
+  // Clear everything for this website, then Rescan: the profile's choice comes back and the first scan keeps it
+  await p.click('clear');
+  await p.click('clear');
+  await p.scan();
+  assert.deepEqual(p.local[k.settings].myStores, [], 'still every store');
+  assert.deepEqual(readyStores(p), every);
+
+  // another computer: only the synced profile, no scan of the website yet
+  const other = await loadPopup({ name: STORE, sync: { [PROFILE_KEY]: structuredClone(p.sync[PROFILE_KEY]) } });
+  await other.scan();
+  assert.deepEqual(other.local[k.settings].myStores, [], 'the profile\'s every-store choice stands');
+  assert.deepEqual(readyStores(other), every);
+
+  // a profile that never chose (saved before a scan): the first scan ticks the website's own store, as before
+  const unchosen = await loadPopup({ name: STORE, sync: { [PROFILE_KEY]: { ...structuredClone(p.sync[PROFILE_KEY]), storesChosen: false } } });
+  await unchosen.scan();
+  assert.deepEqual(unchosen.local[k.settings].myStores, [STORE]);
+  assert.deepEqual(readyStores(unchosen), [STORE]);
+
+  // a Save before this computer's first scan (no store boxes drawn) keeps the profile's stores, ticked or every
+  for (const [stores, after] of [[[], []], [[MY_STORE.myStores[0]], [STORE]]]) {
+    const q = await loadPopup({ name: STORE, sync: { [PROFILE_KEY]: { ...structuredClone(p.sync[PROFILE_KEY]), myStores: stores } } });
+    await submitStores(q, []);
+    assert.deepEqual(q.local[k.settings].myStores, stores, 'the Save changed no store');
+    assert.equal(q.local[k.settings].storesChosen, true);
+    await q.scan();
+    assert.deepEqual(q.local[k.settings].myStores, after);
+  }
+
+  // Settings opened before the first scan, and a scan (the service worker's,
+  // or set-up's) finishes while it is open: the form keeps no store boxes, so
+  // its Save is no store choice, and the stores that scan settled stand
+  const donor = await loadPopup({ name: STORE });
+  await donor.scan();
+  const scanned = { snapshot: structuredClone(donor.local[k.snapshot]), settings: structuredClone(donor.local[k.settings]) };
+  const racing = await loadPopup({ name: STORE, echo: true, sync: { [PROFILE_KEY]: { ...structuredClone(p.sync[PROFILE_KEY]), myStores: [], storesChosen: false } } });
+  await racing.tab('settings');
+  await new Promise((r) => setTimeout(r, 20)); // the popup's own writes have echoed
+  assert.doesNotMatch(racing.panel(), /name="store"/, 'no store boxes before a scan');
+  Object.assign(racing.local, { [k.snapshot]: scanned.snapshot, [k.settings]: scanned.settings });
+  racing.storageChanged({ [k.snapshot]: { newValue: scanned.snapshot }, [k.settings]: { newValue: scanned.settings } });
+  assert.doesNotMatch(racing.panel(), /name="store"/, 'Settings is not redrawn under the person');
+  await submitStores(racing, [], { reopen: false });
+  assert.deepEqual(racing.local[k.settings].myStores, [STORE], 'the store the scan settled stands');
+  assert.notEqual(racing.local[k.settings].storesChosen, true, 'no every-store choice nobody made');
+});
+
+// A lot of 10 or more that really shrinks by more than half: each scan is
+// held back as a likely website hiccup, and once two in a row read the same
+// smaller list, To do says so with a button; only that click saves it.
+test('a lot that keeps reading more than half smaller is offered on To do after two scans that agree, and only the click saves the smaller list', async () => {
+  const records = Array.from({ length: 12 }, (_, i) => ({ ...structuredClone(fixtures.usedNormal), vin: sampleVin(i + 1), stock: `S${i + 1}` }));
+  const p = await loadPopup({ records });
+  await p.scan();
+  const cars = () => Object.keys(p.local[k.snapshot].vehicles).length;
+  assert.equal(cars(), 12);
+
+  records.splice(4); // the website now lists 4 of the 12
+  await p.scan();
+  assert.equal(p.local[k.diff].unreliable, true);
+  assert.equal(cars(), 12, 'the saved list stays');
+  assert.equal(p.local[k.diff].withheld.scans, 1);
+  assert.doesNotMatch(p.panel(), /acceptWithheld/, 'one short read is not offered');
+
+  await p.scan();
+  assert.equal(p.local[k.diff].withheld.scans, 2);
+  assert.equal(cars(), 12, 'never replaced by a scan');
+  assert.match(p.panel(), /id="withheld"/);
+  assert.match(p.panel(), /each read about 4 cars on the website, where the saved list has 12 cars/);
+  assert.match(p.panel(), /data-action="acceptWithheld">Use the new list of 4 cars</);
+
+  await p.click('acceptWithheld');
+  assert.equal(cars(), 4, 'the click saves the smaller list');
+  assert.equal(p.local[k.diff].unreliable, false);
+  assert.equal('withheld' in p.local[k.diff], false);
+  assert.doesNotMatch(p.panel(), /acceptWithheld|disappeared at once/);
+  assert.match(p.panel(), /id="withheldAccepted"/);
+
+  // the next scan compares with the new list: no hiccup
+  await p.scan();
+  assert.equal(p.local[k.diff].unreliable, false);
+  assert.equal(cars(), 4);
+  assert.doesNotMatch(p.panel(), /withheld/);
+});
+
 // Clear the numbers is what the storage-full message sends people to. An
 // open to-do item is still on To do, and its synced copy on the manager's
 // list closes only when this computer closes it, so it stays.
@@ -761,4 +881,35 @@ test('My listings shows Open listing only for a Marketplace listing\'s own addre
   const mock = await mine(listed(`${market}/marketplace/item/424242/`, `${market}/marketplace/you/selling`), { devOverrides });
   assert.equal((mock.match(/>Open listing</g) || []).length, 1);
   assert.match(mock, new RegExp(`href="${market.replace(/\./g, '\\.')}/marketplace/item/424242/"`));
+});
+
+// To do for a posted car the pre-owned check now questions: Dismiss keeps the
+// listing up and the item off To do while the website gives that reason. A
+// posted car the website retypes new is under Take down, to be deleted.
+test('To do: Dismiss on a posted car that needs a look keeps it off until the reason changes; a car retyped new is to be deleted', async () => {
+  const car = vehicle('usedNormal');
+  const posted = { [car.vin]: { name: car.name, price: car.price, postedAt: new Date().toISOString() } };
+  const lot = (patch) => Object.entries(fixtures).filter(([name]) => name !== '_about').map(([name]) => (name === 'usedNormal' ? raw(name, patch) : raw(name)));
+  const first = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted } });
+  await first.scan();
+  const disagree = await loadPopup({ local: first.local, records: lot({ vdp_url: 'https://example-dealer.test/inventory/new-2019-ram-1500-x/' }) });
+  await disagree.scan();
+  const item = disagree.local[k.diff].needsALook.find((n) => n.vin === car.vin);
+  assert.deepEqual([item.yours, item.why], [true, 'review']);
+  assert.match(disagree.panel(), new RegExp(`data-action="dismissLook" data-vin="${car.vin}"`));
+  await disagree.click('dismissLook', { vin: car.vin });
+  assert.deepEqual(disagree.local[k.posted][car.vin].lookDismissed.reason, item.text, 'the reason dismissed is kept on the listing');
+  assert.equal(disagree.local[k.diff].needsALook.some((n) => n.vin === car.vin), false, 'off To do at once');
+  assert.ok(disagree.local[k.posted][car.vin], 'the listing stays posted');
+  await disagree.scan();
+  assert.equal(disagree.local[k.diff].needsALook.some((n) => n.vin === car.vin), false, 'and on the next scan, the website giving the same reason');
+  assert.doesNotMatch(disagree.panel(), /data-action="dismissLook"/);
+
+  const NEW = { type: 'New', vdp_url: 'https://example-dealer.test/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } };
+  const retyped = await loadPopup({ local: disagree.local, records: lot(NEW) });
+  await retyped.scan();
+  assert.deepEqual(retyped.local[k.diff].takeDown.filter((t) => t.vin === car.vin).map((t) => t.why), ['not-pre-owned'], 'a dismissal never hides a take-down');
+  assert.match(retyped.panel(), /Delete the listing: the car was not sold\./);
+  assert.match(retyped.panel(), new RegExp(`data-kind="takeDown" data-vin="${car.vin}" title="Opens your listing so you can delete it"`));
+  assert.equal(retyped.local[k.pilot]?.flags?.length || 0, 0, 'no sold-car flag in the numbers');
 });

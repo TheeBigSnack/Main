@@ -20,7 +20,7 @@ import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
-import { withPostedBasis } from './src/rescan.js';
+import { withPostedBasis, withWithheld } from './src/rescan.js';
 import { updateKey, storageErrorText, isStorageFull, STORAGE_FULL } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
@@ -169,7 +169,7 @@ async function runScan(ctx) {
     ctx.render();
     return false;
   }
-  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate]);
+  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate, k.diff]);
   wiz.ownListings = Object.values(data[k.posted] || {}).filter((e) => e && typeof e === 'object' && e.mine !== false).length; // the Price step says a change is for new posts
   let r;
   try {
@@ -192,13 +192,16 @@ async function runScan(ctx) {
   wiz.site = r.site;
   await keepGrantedRescans();
   // Like the popup and the background rescan: a scan that lost most of the
-  // lot at once is a website hiccup, so the last good snapshot is kept.
+  // lot at once is a website hiccup, so the last good snapshot is kept, and
+  // the read is held back with the diff (src/rescan.js withWithheld) for the
+  // popup's To do to offer once scans agree.
   const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
+  const diff = withWithheld(r.diff, r.snapshot, data[k.diff]);
   const stores = storeNames(r.vehicles);
   // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
   const scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
   try {
-    await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: r.diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
+    await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
   } catch (e) {
     wiz.error = storageErrorText(e); // the quota, most likely: the step says what to clear, and Read the website is there again
     ctx.render();
@@ -245,7 +248,9 @@ export function wizardHtml() {
       const matched = stores.length ? matchStore(wiz.site, stores) : null;
       const ticked = s.myStores.filter((st) => stores.includes(st));
       const byMatch = matched ? ticked.length === 1 && ticked[0] === matched : !ticked.length;
+      const every = s.storesChosen && !s.myStores.length; // chosen before, with the stores in view: every store
       const hint = !stores.length ? ''
+        : every ? 'The website lists these stores. None is ticked, as chosen before: every store\'s cars count.'
         : !byMatch ? (ticked.length ? 'The website lists these stores; your earlier choice is ticked.' : 'The website lists these stores. None is ticked: tick yours.')
         : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
@@ -369,7 +374,11 @@ function readInputs() {
     wiz.account.error = ''; // a failed try is not news on the way back
   }
   const next = { ...s };
-  if (wiz.step === 'store') next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
+  if (wiz.step === 'store') {
+    next.myStores = [...document.querySelectorAll('.wizStore:checked')].map((b) => b.value);
+    // with the website's stores in view, none ticked is the person's choice of every store (src/scanRunner.js keeps it)
+    if (document.querySelector('.wizStore')) next.storesChosen = true;
+  }
   if (wiz.step === 'you') next.salesperson = { ...s.salesperson, name: val('wizName') ?? s.salesperson.name, title: val('wizTitle') || s.salesperson.title || DEFAULT_SALESPERSON_TITLE }; // the closing line is Settings' (or the profile's), kept as it is
   if (wiz.step === 'address') next.dealer = { name: val('wizDealer') || s.dealer.name, city: val('wizCity') ?? s.dealer.city, state: (val('wizState') ?? s.dealer.state).toUpperCase(), zip: val('wizZip') ?? s.dealer.zip };
   if (wiz.step === 'price') {

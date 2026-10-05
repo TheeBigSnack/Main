@@ -150,6 +150,30 @@ test('a posted car the website keeps showing as sale-pending keeps its take-down
   assert.deepEqual(p.flags.map((f) => [f.how, f.hours]), [['manual', 7]]);
 });
 
+// A posted car the website retypes new is a take-down on To do, but no sold
+// car: the pilot agreement lets these numbers time only how long sold cars
+// stayed listed and price changes stayed unfixed, so it gets no flag. A flag
+// the car already had (it was sale-pending first) stays open, not "cleared".
+test('a take-down of a car the website now calls new is not timed as a sold car, and leaves an open flag of the car open', () => {
+  const posted = { [RAM]: { name: '2019 Ram 1500 Classic Express', price: 27163 } };
+  const NEW = { type: 'New', vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } };
+  const retyped = (at) => snapshot([['usedNormal', NEW], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, at);
+  const diff = diffScans(snapshot(LOT), retyped(T(0)), { posted, confirm: confirmed() });
+  diff.takenAt = T(0);
+  assert.deepEqual(diff.takeDown.map((t) => [t.vin, t.why]), [[RAM, 'not-pre-owned']]);
+  assert.deepEqual(noteFlags(null, diff).flags, []);
+  // sale-pending first (flagged), then retyped new on a complete scan: the flag stays open
+  const pending = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, T(0));
+  const first = diffScans(snapshot(LOT), pending, { posted, confirm: confirmed() });
+  first.takenAt = T(0);
+  let p = noteFlags(null, first);
+  const next = diffScans(pending, retyped(T(180)), { posted, confirm: confirmed() });
+  next.takenAt = T(180);
+  assert.deepEqual([next.warnings, next.unreliable], [[], false]);
+  p = noteFlags(p, next);
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.why, f.flaggedAt, f.doneAt]), [[RAM, 'takeDown', 'sale-pending', T(0), undefined]]);
+});
+
 test('a sold car\'s take-down flag stays open while a later scan could not check its page, and is never "cleared" by that', () => {
   const posted = { [RAM]: { name: '2019 Ram 1500 Classic Express', price: 27163 } };
   const gone = (at) => snapshot([['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, at);

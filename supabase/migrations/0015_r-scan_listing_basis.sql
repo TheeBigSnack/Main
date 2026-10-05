@@ -1,0 +1,33 @@
+-- Lot Current: the price a listing was posted at, kept with the listing.
+--
+-- A dealer's website can show two prices for a car: the main price and a
+-- lower second price (often before the doc fee). Settings (Price to post)
+-- picks which one goes on Marketplace, and each listing keeps the one it was
+-- posted at: rescans compare a listing with the website's price on that same
+-- basis, so a later change of the setting never reads as a price change the
+-- website did not make (extension/src/rescan.js postedBasis). The extension
+-- records it on its own entry when the listing is posted, but the server did
+-- not keep it: a listing brought to another of the salesperson's computers
+-- by sync came without it, and that computer could only guess it from the
+-- website's prices, falling back on its own setting once the website price
+-- had moved. A listing posted at the main price, read after a switch to the
+-- lower price and a real price drop, was then asked for the drop plus the
+-- gap between the two prices.
+--
+-- basis  'website' (the website's main price) or 'beforeFees' (the lower
+--        second price the website shows), as the extension sent it; null
+--        for a row from a build that did not send one. The sync function
+--        writes it on insert, and on a later upload only into a row that has
+--        none, never over one already there (supabase/functions/sync). It
+--        comes back with the registry, so every machine of the salesperson
+--        compares the listing on the price it was posted at.
+--
+-- Nothing personal: it says which of the website's two prices the listing
+-- carries. The table's grants and row-level security policies cover the new
+-- column as they cover the others (0002_rls.sql). Apply this before
+-- deploying the sync function that writes it. A change made after the
+-- project applied 0001 to 0008; it applies on top of 0009 to 0014 as on a
+-- fresh build.
+
+alter table public.listings add column if not exists basis text check (basis in ('website', 'beforeFees'));
+comment on column public.listings.basis is 'Which of the website''s prices the listing was posted at: website (the main price) or beforeFees (the lower second price); null when the extension that posted it did not say.';

@@ -35,7 +35,8 @@
 // (the function's and the database's) and two transactions never decide it.
 //
 // What travels: the salesperson's own entries of posted:<origin> (VIN, name,
-// price, times, the listing link they saved, their name), the post attempts
+// price and the price basis it was posted at, times, the listing link they
+// saved, their name), the post attempts
 // and to-do flags from pilot.js, and one scan summary (counts only). Never a
 // description, a photo, a buyer or anything from the Facebook account. The
 // fill records (which form fields could not be filled) stay in the browser.
@@ -98,6 +99,8 @@ const intOrNull = (v) => {
   return r >= INT_MIN && r <= INT_MAX ? r : null;
 };
 const httpsUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u.trim()) ? u.trim().slice(0, 500) : null);
+// which of the website's prices a listing was posted at (src/rescan.js PRICE_BASES), or null
+const basisOf = (b) => (b === 'website' || b === 'beforeFees' ? b : null);
 const sameMoment = (a, b) => {
   const x = ms(a);
   const y = ms(b);
@@ -162,9 +165,11 @@ export function localDayRange(now = new Date()) {
  * The rows the sync function writes, from the local registry and pilot lists.
  * @param {object} args
  *   origin:       the dealer website's origin (posted:<origin>)
- *   posted:       the registry { [vin]: { name, price, postedAt, listingUrl?, salesperson?, updatedAt?, listedBefore?, userId? } }
+ *   posted:       the registry { [vin]: { name, price, basis?, postedAt, listingUrl?, salesperson?, updatedAt?, listedBefore?, userId? } }
  *                 (listedBefore: a listing made by hand before the day it was
- *                 marked posted; the server leaves it out of postsToday)
+ *                 marked posted; the server leaves it out of postsToday;
+ *                 basis: which of the website's prices it was posted at,
+ *                 src/rescan.js postedBasis)
  *   pilot:        { posts, flags } from pilot.js (fills are never sent)
  *   dealershipId: the dealership's id (the function fills it in from the membership; here for the tests)
  *   userId:       the signed-in user's id; entries of other users are left out
@@ -191,6 +196,7 @@ export function toServerRows({ origin = '', posted = {}, pilot = null, dealershi
       status: 'listed',
       taken_down_at: null,
       listed_before: e.listedBefore === true,
+      basis: basisOf(e.basis),
     });
   }
   const p = withPilotDefaults(pilot);
@@ -235,17 +241,19 @@ export function toServerRows({ origin = '', posted = {}, pilot = null, dealershi
 }
 
 // One scan's counts (the popup's diff plus the snapshot's size), or null.
+// withheld: the scan was judged a website hiccup and its read held back
+// (src/accountFlow.js scanFromStored); sent only when true.
 export function scanSummary(scan) {
   if (!isObject(scan)) return null;
   const takenAt = isoOrNull(scan.takenAt);
   if (!takenAt) return null;
-  return { takenAt, cars: intOrNull(scan.cars), ready: intOrNull(scan.ready), takeDownCount: intOrNull(scan.takeDownCount), priceUpdateCount: intOrNull(scan.priceUpdateCount) };
+  return { takenAt, cars: intOrNull(scan.cars), ready: intOrNull(scan.ready), takeDownCount: intOrNull(scan.takeDownCount), priceUpdateCount: intOrNull(scan.priceUpdateCount), ...(scan.withheld === true ? { withheld: true } : {}) };
 }
 
 export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
   const s = scanSummary(scan);
   if (!s) return null;
-  return { dealership_id: dealershipId, website_origin: String(origin || ''), taken_at: s.takenAt, cars: s.cars, ready: s.ready, take_down_count: s.takeDownCount, price_update_count: s.priceUpdateCount };
+  return { dealership_id: dealershipId, website_origin: String(origin || ''), taken_at: s.takenAt, cars: s.cars, ready: s.ready, take_down_count: s.takeDownCount, price_update_count: s.priceUpdateCount, withheld: s.withheld === true };
 }
 
 /**
@@ -282,6 +290,7 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
       ...(text(e.salesperson, 60) ? { salesperson: text(e.salesperson, 60) } : {}),
       ...(isoOrNull(e.updatedAt) ? { updatedAt: isoOrNull(e.updatedAt) } : {}),
       ...(e.listedBefore === true ? { listedBefore: true } : {}),
+      ...(basisOf(e.basis) ? { basis: basisOf(e.basis) } : {}),
     };
   }
   const p = withPilotDefaults(pilot);
@@ -332,16 +341,19 @@ function ownership(r, userId) {
   return userId && id !== String(userId) ? { userId: id, mine: false } : { userId: id };
 }
 
-// A server row as a registry entry. Only the keys markPosted() would set
-// are written; postedWith (a fixed marker that the side panel recorded the
-// post; never synced) is kept from the local entry when there is one. The
-// price basis is not on the server: the next rescan reads it from the
-// entry's price (rescan.js postedBasis), and the same post merged below
-// keeps the one recorded here.
+// A server row as a registry entry: what the row holds of the post (the
+// keys markPosted() and Mark posted set: name, price, the price basis it was
+// posted at, when, the listing link, who posted, whether it was listed
+// before that day) and when its price changed. postedWith (a fixed marker
+// that the side panel recorded the post; never synced) is kept from the
+// local entry when there is one. A row with no basis (posted by a build that
+// did not send one) brings none: the next rescan reads it from the entry's
+// price (rescan.js postedBasis).
 function entryFromRow(r, prev = {}, userId = '') {
   return {
     name: text(r.name, 80) || text(prev.name, 80),
     price: intOrNull(r.price),
+    ...(basisOf(r.basis) ? { basis: basisOf(r.basis) } : {}),
     postedAt: isoOrNull(r.posted_at),
     ...(httpsUrl(r.listing_url) ? { listingUrl: httpsUrl(r.listing_url) } : {}),
     ...(text(r.salesperson, 60) ? { salesperson: text(r.salesperson, 60) } : {}),
@@ -463,6 +475,8 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
       if (httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
     }
     if (!merged.listingUrl && httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
+    // the price the post went up at, as the server holds it: the posting machine's record, or the first one sent for a row without
+    if (basisOf(r.basis)) merged.basis = basisOf(r.basis);
     if (isTheirs(r, userId)) {
       // a colleague's post: the server's name stands, an empty one too, so a
       // name the owner cleared there (forget_person, 0006_privacy.sql) or

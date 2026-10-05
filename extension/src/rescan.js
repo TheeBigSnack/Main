@@ -2,25 +2,31 @@
 // cars the salesperson has marked as posted, and turns the differences into
 // a to-do list:
 //   - take down: cars gone from the website (confirmed by a direct VIN lookup)
-//                and posted cars the website marks sale-pending or sold
+//                and posted cars the website marks sale-pending or sold, or
+//                now calls new, demo or loaner
 //                (on every scan while they are still marked posted)
 //   - update price: website price went up or down since it was posted / last seen
 //   - new arrivals: cars on the website that weren't there last time
 //   - now ready: cars that just got photos, a price, arrived on the lot, etc.
 //   - needs a look: anything ambiguous (price removed, unconfirmed disappearance),
-//                and posted cars the pre-owned check now holds back (every scan)
+//                and posted cars whose details the pre-owned check now
+//                questions (every scan, until the salesperson dismisses it)
 //
 // A car is only called gone when the website's own search can't find its VIN.
 // If more than half of a lot of 10 or more disappears at once, nothing is
 // marked gone: that is almost always a website hiccup, not a sales record.
+// That scan is not saved; it is held back with the diff (withWithheld), and
+// when scans in a row keep reading the same smaller list, To do offers to
+// use it. Only the salesperson's click does (acceptWithheld).
 
 import { DECISION } from './classify.js';
 
 export const MASS_DISAPPEARANCE_SHARE = 0.5;
 // The share rule applies from this many cars in the last scan up. Below it a
-// lot that really sells half its cars in one rescan would otherwise never be
-// saved again (an unreliable scan is not saved); a small lot relies on the
-// adapter refusing an answer that is not a list (adapters/README.md).
+// lot that really sells half its cars in one rescan would otherwise wait for
+// the salesperson to accept its new list (an unreliable scan is not saved:
+// withWithheld, acceptWithheld); a small lot relies on the adapter refusing
+// an answer that is not a list (adapters/README.md).
 export const MASS_DISAPPEARANCE_MIN_LOT = 10;
 
 // The price to post. 'beforeFees' means the lower second price the website
@@ -245,7 +251,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   if (massDisappearance) {
     out.unreliable = true;
     out.warnings.push(
-      `${missingFromLastScan} of ${out.counts.previous} cars disappeared at once. That's usually a website hiccup, so nothing was marked as gone. Check the website before taking anything down.`
+      `${missingFromLastScan} of ${out.counts.previous} cars ${HICCUP_WORDS}, so nothing was marked as gone. Check the website before taking anything down.`
     );
   }
 
@@ -277,12 +283,20 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     // whole diff, so a one-scan item would leave To do, the badge and the
     // pilot's open flag while the listing is still up. Taken down (or the
     // website changing back) is what ends it.
+    // A listing of a car the website now calls new, demo or loaner (SKIP)
+    // has to come down: dealers may not list those on Marketplace, so it goes
+    // under Take down, to be deleted (it was not sold). One whose details
+    // need a look (REVIEW) stays a question for a person, until they dismiss
+    // it for the website's reason as it stands (the entry's lookDismissed,
+    // markLookDismissed): a new reason raises it again.
     const held = mine ? pendingText(now) : null;
     if (held) {
       out.takeDown.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'sale-pending', text: held, lastPrice: posted[vin].price });
+    } else if (mine && now.decision === DECISION.SKIP) {
+      out.takeDown.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'not-pre-owned', text: `${now.reason} Delete the listing: the car was not sold.`, lastPrice: posted[vin].price });
     }
-    if (mine && (now.decision === DECISION.SKIP || now.decision === DECISION.REVIEW)) {
-      out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, text: now.reason });
+    if (mine && now.decision === DECISION.REVIEW && !lookDismissed(posted[vin], now.reason)) {
+      out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: true, why: 'review', text: now.reason });
     }
 
     // Price: posted cars compare with the price on the Marketplace listing
@@ -338,6 +352,82 @@ export function settleDiff(diff, posted) {
   return out;
 }
 
+// A scan judged a website hiccup (diff.unreliable) is not saved. So a lot of
+// MASS_DISAPPEARANCE_MIN_LOT or more that really did shrink by more than half
+// would read as a hiccup on every scan for good: the saved list would never
+// move on, and the manager's Last scan would stop. Each such scan is kept
+// with its diff instead, held back (diff.withheld): its snapshot, how many
+// cars it read, how many the saved list has, since when and in how many
+// scans in a row the website has read that same smaller list. Once
+// WITHHELD_AGREE_SCANS have, To do says so and offers to use the new list
+// (acceptWithheld). Only that click replaces the saved list: no scan does it
+// on its own.
+export const WITHHELD_AGREE_SCANS = 2;
+
+// Two held-back reads agree when both read some cars, both got the website's
+// whole list (complete), and they differ by no more than a tenth of the
+// larger, or two cars: a car sold or arrived between two scans hours apart
+// still agrees, a read of another part of the lot does not. A read with no
+// cars never agrees, so an empty list is never offered.
+export function sameRead(a, b) {
+  const x = Object.keys((a && a.vehicles) || {});
+  const y = new Set(Object.keys((b && b.vehicles) || {}));
+  if (!x.length || !y.size || a.complete === false || b.complete === false) return false;
+  const shared = x.filter((vin) => y.has(vin)).length;
+  return x.length - shared + (y.size - shared) <= Math.max(2, Math.floor(Math.max(x.length, y.size) / 10));
+}
+
+/**
+ * The diff to save for a scan, with its read held back when it was judged a
+ * website hiccup. `snapshot` is this scan's (not saved when the scan is
+ * unreliable), `before` the diff saved before this scan: its held-back read,
+ * when this one agrees with it (sameRead), carries the count on. A scan that
+ * is saved holds nothing back.
+ */
+export function withWithheld(diff, snapshot, before = null) {
+  if (!diff || typeof diff !== 'object') return diff;
+  const { withheld: _gone, ...out } = diff;
+  if (!diff.unreliable || !snapshot || typeof snapshot !== 'object' || !snapshot.vehicles || typeof snapshot.vehicles !== 'object') return out;
+  const last = before && typeof before === 'object' && before.withheld && typeof before.withheld === 'object' ? before.withheld : null;
+  const agree = Boolean(last && sameRead(last.snapshot, snapshot));
+  out.withheld = {
+    since: agree && typeof last.since === 'string' ? last.since : snapshot.takenAt || diff.takenAt || null,
+    scans: agree ? (Number(last.scans) || 1) + 1 : 1,
+    cars: Object.keys(snapshot.vehicles).length,
+    saved: diff.counts && typeof diff.counts.previous === 'number' ? diff.counts.previous : null,
+    snapshot,
+  };
+  return out;
+}
+
+// The held-back read To do offers to use: WITHHELD_AGREE_SCANS or more in a row agree.
+export function withheldOffer(diff) {
+  const w = diff && typeof diff === 'object' ? diff.withheld : null;
+  if (!w || typeof w !== 'object' || !(Number(w.scans) >= WITHHELD_AGREE_SCANS)) return null;
+  const vehicles = w.snapshot && w.snapshot.vehicles;
+  return vehicles && typeof vehicles === 'object' && Object.keys(vehicles).length ? w : null;
+}
+
+// The words of the hiccup warning that stay the same whatever the counts.
+export const HICCUP_WORDS = "disappeared at once. That's usually a website hiccup";
+
+/**
+ * The salesperson's Use the new list: the held-back read becomes the saved
+ * snapshot, and the diff no longer calls the scan a hiccup (its warning
+ * goes, `accepted` says what was chosen). Its to-do items stay as they were:
+ * the cars it missed stay under Needs a look, none marked gone. The next scan
+ * compares with the new list; a posted car missing from it is looked up on
+ * the website before it is called gone, as always. null when there is
+ * nothing to accept (a scan since saved the list, or no reads agree yet).
+ */
+export function acceptWithheld(diff, now = new Date().toISOString()) {
+  const w = withheldOffer(diff);
+  if (!w) return null;
+  const { withheld: _taken, ...rest } = diff;
+  const warnings = (Array.isArray(diff.warnings) ? diff.warnings : []).filter((x) => !String(x).includes(HICCUP_WORDS));
+  return { snapshot: w.snapshot, diff: { ...rest, unreliable: false, warnings, accepted: { at: now, cars: w.cars, saved: w.saved } } };
+}
+
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
 // `extra` can carry the listing link and who posted (listingUrl, salesperson).
 // The entry records the price basis it was posted with (postedBasis).
@@ -349,6 +439,19 @@ export function markPosted(posted, entry, basis = 'website', now = new Date().to
 export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {
   if (!posted[vin]) return posted;
   return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now } };
+}
+
+// Needs a look, dismissed for a posted car (the To do item's Dismiss): the
+// listing stays up and the item stays off To do while the website gives the
+// same reason; `reason` is the one the item showed (the last scan's).
+export function markLookDismissed(posted, vin, reason, now = new Date().toISOString()) {
+  if (!posted[vin] || typeof reason !== 'string' || !reason) return posted;
+  return { ...posted, [vin]: { ...posted[vin], lookDismissed: { reason: reason.slice(0, 400), at: now } } };
+}
+
+export function lookDismissed(entry, reason) {
+  const d = entry && entry.lookDismissed;
+  return Boolean(d && typeof d === 'object' && typeof reason === 'string' && d.reason === reason.slice(0, 400));
 }
 
 export function markTakenDown(posted, vin) {

@@ -87,8 +87,10 @@ try {
   await setup.evaluate(async ({ origin, marketOrigin }) => {
     await chrome.storage.local.set({
       [`settings:${origin}`]: {
-        // the two stores the ready cars are at, named: with none chosen, the website's first scan ticks only its own (src/scanRunner.js)
-        myStores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', 'Ron Lewis Chrysler Dodge Jeep Ram Cranberry'],
+        // every store, chosen in Settings with the stores in view: the website's first scan keeps that choice
+        // (src/scanRunner.js), so the ready cars at both stores are queued
+        myStores: [],
+        storesChosen: true,
         basis: 'website',
         salesperson: { name: 'Roger', title: 'sales consultant' },
         dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: '', state: '', zip: '' }, // filled from the website's own address

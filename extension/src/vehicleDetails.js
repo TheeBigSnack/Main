@@ -17,7 +17,7 @@
 
 import { probeTab, searchViaTab, detectAdapter } from './scanRunner.js';
 import { adapterById, adapterForService } from '../adapters/index.js';
-import { SITES_KEY } from './storageKeys.js';
+import { SITES_KEY, siteKeys } from './storageKeys.js';
 import { assessVehicle, DECISION } from './classify.js';
 import { siteReadOrigins } from './panelList.js';
 import { hostList } from './photoHosts.js';
@@ -32,7 +32,12 @@ const hostOf = (origin) => {
   }
 };
 
-// The adapter's answer for one car, as both ways report it.
+// The adapter's answer for one car, as both ways report it. A failure keeps
+// what the adapter says of it (adapters/README.md getDetails): refused (the
+// website turned the read away: nothing more is asked of it now), carPage
+// (the car's own page failed or showed no data: another list would not
+// change that) and noData (the website still lists the car but its page
+// shows no vehicle data).
 async function readOne(adapter, search, wanted, options) {
   let r;
   try {
@@ -40,10 +45,18 @@ async function readOne(adapter, search, wanted, options) {
   } catch (e) {
     return { ok: false, message: "Couldn't read the dealership website: " + errText(e) };
   }
-  if (!r.ok) return { ok: false, message: r.message || "Couldn't read the dealership website." };
-  // a list the website did not give whole can't say a car is gone
+  if (!r.ok) {
+    const out = { ok: false, message: r.message || "Couldn't read the dealership website." };
+    for (const flag of ['refused', 'carPage', 'noData']) if (r[flag] === true) out[flag] = true;
+    return out;
+  }
+  // A list the website did not give whole can't say a car is gone. The
+  // cause can last (a next link that loops, more list pages than one read
+  // follows, paging the website ignores), so waiting is not the advice:
+  // a scan from the used inventory page records the car's own page, and a
+  // post from the popup there reads the list that page loads.
   if (!r.record && r.complete === false) {
-    return { ok: false, incomplete: true, message: "Couldn't read the website's whole list of cars just now, so this car couldn't be checked. Try again in a minute." };
+    return { ok: false, incomplete: true, message: "Couldn't read the website's whole list of cars, so this car couldn't be checked. Open the website's used inventory page, click Scan website in the popup, then post this car from the popup there." };
   }
   if (!r.record) {
     return { ok: false, notFound: true, message: "This car isn't on the website any more (sold, removed or hidden). Rescan before posting anything." };
@@ -61,7 +74,23 @@ const tabOrigin = (tab) => {
   }
 };
 
-const withUrl = (adapter, service, url) => ({ ...adapter.scanOptions(service), ...(typeof url === 'string' && url ? { url } : {}) });
+const withUrl = (adapter, service, url, carPages = []) => ({ ...adapter.scanOptions(service), ...(typeof url === 'string' && url ? { url } : {}), ...(carPages.length ? { carPages } : {}) });
+
+// The car pages the last scan of this website kept ([{ vin, url }], from its
+// snapshot), for an adapter that cuts a car's page into cards by car (the
+// standard-data reader): another car's tile on the page is then known for
+// one at post time as it is in a scan. None when the snapshot can't be read.
+async function lastScanPages(origin) {
+  if (!origin) return [];
+  try {
+    const key = siteKeys(origin).snapshot;
+    const snap = (await chrome.storage.local.get(key))[key];
+    const vehicles = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles : {};
+    return Object.entries(vehicles).filter(([, e]) => e && typeof e.url === 'string' && e.url).map(([vin, e]) => ({ vin, url: e.url }));
+  } catch (e) {
+    return [];
+  }
+}
 
 // `url` is the car's page as the last scan kept it (the snapshot entry's
 // url): an adapter that reads the car from its own page starts there; one
@@ -98,38 +127,64 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   if (origin && probe.site && probe.site.origin && probe.site.origin !== origin) {
     return { ok: false, tabUnusable: true, message: `The dealership tab now shows ${hostOf(probe.site.origin)}, not ${hostOf(origin)}. Open ${hostOf(origin)}'s used inventory page and click Post again.` };
   }
+  const carPages = await lastScanPages(origin || (probe.site && probe.site.origin));
+  const entry = await storedSite(probe.site && probe.site.origin);
+  // The adapter the last scan of this website used reads the car, with the
+  // service it stored, when another adapter's probe answered on this page (a
+  // car's page that carries standard vehicle data on a website whose list
+  // another platform's reader scanned): the car's price is then chosen the
+  // way the scan chose it, on the dealer's price basis.
+  const lastAdapter = entry && entry.adapter !== adapter.PLATFORM.id && entry.service && typeof entry.service === 'object' ? adapterById(entry.adapter) : null;
+  if (lastAdapter) {
+    const r = await readOne(lastAdapter, searchViaTab(tabId, lastAdapter, entry.service), wanted, withUrl(lastAdapter, entry.service, url, carPages));
+    return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
+  }
   // What the probe could not see on this page (a car's own page has no
   // inventory list to find) comes from the service the last scan of this
   // website stored, when the same adapter read it; what the probe did see wins.
-  const { service, stored } = await withStoredService(probe, adapter);
-  let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
+  const { service, stored } = withStoredService(probe, adapter, entry);
+  let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url, carPages));
   // A page of the website can have loaded another list than the one the
   // last scan read (the new cars, a search filtered for a customer), and the
   // probe saw that one. A car missing from it, or from the part of it the
   // website gave (a later page failed, the paging did not move that list
-  // on), is not called gone or left unchecked on its word: the same tab
-  // reads the car once more the way the last scan read the website, and
-  // that answer is the one that counts.
-  if ((r.notFound || r.incomplete) && stored && differentRead(adapter, service, stored)) {
-    r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url));
+  // on), or a list whose first page failed or held no cars, is not called
+  // gone or left unchecked on its word: the same tab reads the car once
+  // more the way the last scan read the website, and that answer is the one
+  // that counts. Never after a refusal, and never when the car's own page
+  // was the trouble (the same page would be asked for again).
+  if (!r.ok && !refusal(r) && !r.carPage && stored && differentRead(adapter, service, stored)) {
+    r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url, carPages));
   }
   return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
 }
 
+// Did the website turn the read away? An adapter that says so (refused),
+// else its words: an HTTP 401, 403, 429 or 503, or a bot check. Nothing more
+// is asked of a website that refused.
+function refusal(r) {
+  return r.refused === true || /\b(?:401|403|429|503)\b|bot check/i.test(String(r.message || ''));
+}
+
+// This website's site registry entry (the last scan's adapter and service), or null.
+async function storedSite(origin) {
+  if (!origin) return null;
+  try {
+    const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
+    const entry = sites[origin];
+    return entry && typeof entry === 'object' ? entry : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // The service the read uses (the probe's, with what it could not see filled
 // from the last scan's) and the last scan's own, when the same adapter stored one.
-async function withStoredService(probe, adapter) {
+function withStoredService(probe, adapter, entry) {
   const probed = probe.service || {};
-  try {
-    const origin = probe.site && probe.site.origin;
-    const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
-    const stored = origin && sites[origin];
-    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return { service: probed, stored: null };
-    const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
-    return { service: { ...stored.service, ...seen }, stored: stored.service };
-  } catch (e) {
-    return { service: probed, stored: null };
-  }
+  if (!entry || entry.adapter !== adapter.PLATFORM.id || !entry.service || typeof entry.service !== 'object') return { service: probed, stored: null };
+  const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+  return { service: { ...entry.service, ...seen }, stored: entry.service };
 }
 
 // Would the last scan's service read the website another way than this one?
@@ -176,8 +231,9 @@ export async function fetchVehicleDetailsDirect(origin, info, vin, { url = null,
       message: `To re-check this car on ${host} from here, Chrome has to let Lot Current read ${hostList(origins) || 'the website'} (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
     };
   }
-  const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url));
-  if (!r.ok && !r.notFound) return { ...r, message: `${sentence(r.message)} If the website keeps turning Lot Current away, open its used inventory page and click Post in the popup.` };
+  const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url, await lastScanPages(origin)));
+  // a list that can't be read whole, or a page with no vehicle data, is not the website turning Lot Current away
+  if (!r.ok && !r.notFound && !r.incomplete && !r.noData) return { ...r, message: `${sentence(r.message)} If the website keeps turning Lot Current away, open its used inventory page and click Post in the popup.` };
   return r.ok ? { ...r, site: info.site || { origin, name: info.name || host }, via: 'direct' } : r;
 }
 

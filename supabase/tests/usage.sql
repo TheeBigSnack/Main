@@ -29,7 +29,8 @@
 -- matches subscription_state(); the rows come busiest first, then by name;
 -- a dealership with no activity has its row, with zeros; a scan stamped
 -- more than 5 minutes ahead of the database's clock is never
--- last_synced_scan_at; a listing marked as made by hand before that day
+-- last_synced_scan_at, while a scan held back as a likely website hiccup
+-- is; a listing marked as made by hand before that day
 -- (listed_before) is no post and makes no one active; public, anon,
 -- authenticated and service_role cannot execute it, and it runs as its
 -- caller with an empty search_path.
@@ -317,6 +318,32 @@ begin
     raise exception 'a scan stamped 5 minutes ahead (ordinary drift) is not the last synced scan: %', r.last_synced_scan_at;
   end if;
   raise notice 'ok: last_synced_scan_at leaves out a scan more than 5 minutes ahead of the database''s clock';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- A scan held back as a likely website hiccup (withheld,
+-- 0016_r-scan_scan_withheld.sql) is still a scan the extension synced: it
+-- counts in last_synced_scan_at, which says whether anyone's extension still
+-- runs and syncs. The manager's Last scan, which skips it, asks something
+-- else: when the lot was last read in a way the extension trusted. C's scans
+-- so far go; a trusted scan an hour ago and a held-back one ten minutes ago
+-- go in, and the held-back one is the last synced scan.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  c uuid := '00000000-0000-4000-8000-0000000000d3';
+  r record;
+begin
+  delete from public.scan_summaries where dealership_id = c;
+  insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count, withheld)
+    values (c, 'https://www.usage-c.test', now() - interval '1 hour', 40, 30, 0, 0, false),
+           (c, 'https://www.usage-c.test', now() - interval '10 minutes', 4, 3, 0, 0, true);
+  select * into r from public.usage_report() u where u.dealership_id = c;
+  if r.last_synced_scan_at is distinct from now() - interval '10 minutes' then
+    raise exception 'a held-back scan is not the last synced scan: %', r.last_synced_scan_at;
+  end if;
+  raise notice 'ok: a scan held back as a likely website hiccup counts as the last synced scan';
 end;
 $$;
 

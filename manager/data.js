@@ -18,7 +18,9 @@
 //   post_attempts   id, dealership_id, user_id, vin, name, salesperson, queue,
 //                   started_at, ended_at, outcome, seconds, reason
 //   scan_summaries  id, dealership_id, website_origin, taken_at, cars, ready,
-//                   take_down_count, price_update_count
+//                   take_down_count, price_update_count, withheld (a scan
+//                   the extension held back as a likely website hiccup: its
+//                   counts are of its own short read, migration 0016)
 //   memberships     user_id, dealership_id, role 'salesperson' | 'manager', name
 //
 // The Billing card (Milestone 5) is drawn from GET .../billing/status's
@@ -67,9 +69,11 @@ export const OVERDUE_HOURS = 24; // an open item past this is shown in red
 export const SCAN_STALE_HOURS = 6; // with automatic rescans allowed they run every 3 hours while Chrome is open; twice that and something is off
 // What the stale pill says after the hours: why a scan can be that old. No
 // rescan ran (Chrome closed, or automatic rescans not allowed), or the ones
-// that ran looked like a website hiccup, which the extension never sends
-// (accountFlow.js scanFromStored).
-export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one that looks like a website hiccup (most of the lot gone at once) is not recorded here';
+// that ran looked like a website hiccup: those are held back, never the last
+// scan (an extension of this build sends them marked withheld, and the line
+// says how many there were; an older one sends none; accountFlow.js
+// scanFromStored).
+export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one held back as a likely website hiccup (most of the lot gone at once) is never the last scan';
 // A scan stamped further ahead of this computer's clock than this ran on a
 // machine whose clock was ahead: /sync refuses such a scan (the same margin,
 // FUTURE_SKEW_MS in supabase/functions/sync/index.ts), and the last scan line
@@ -216,12 +220,18 @@ function peopleOf(memberships, listings, attempts) {
 /**
  * @param {object} input
  *   listings, todoItems, postAttempts, scans, memberships: rows as above
+ *   heldScans: how many scans were held back as a likely website hiccup
+ *             since the newest trusted scan in `scans`, when the rows hold
+ *             only the newest of them (manager.js reads the newest trusted
+ *             scan, and the newest held-back one since it with a count of
+ *             them all); default and floor: the held-back rows `scans` has
+ *             since that trusted scan
  *   role:     the signed-in viewer's role in the dealership; only for
  *             'manager' is notOnTeam a list (else null: not known)
  *   now:      ISO time the ages count from (default: the clock)
  *   timeZone: IANA zone for the last-scan line (default: this computer's)
  */
-export function summarize({ listings, todoItems, postAttempts, scans, memberships, role = '', now = nowIso(), timeZone } = {}) {
+export function summarize({ listings, todoItems, postAttempts, scans, heldScans, memberships, role = '', now = nowIso(), timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
@@ -373,10 +383,19 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     };
   };
 
-  // ----- the last scan: the newest one that has run by now (FUTURE_SKEW_MS) -----
+  // ----- the last scan: the newest trusted one that has run by now
+  // (FUTURE_SKEW_MS), with the scans held back as a likely website hiccup
+  // since it (withheld): how many, from heldScans when the page counted them
+  // apart from the rows it read -----
   let last = null;
-  for (const s of S) if (ms(s.taken_at) !== null && ms(s.taken_at) <= t + FUTURE_SKEW_MS && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
-  const lastScan = last ? scanLine(last, nowAt, zone) : null;
+  const heldRows = [];
+  for (const s of S) {
+    if (ms(s.taken_at) === null || ms(s.taken_at) > t + FUTURE_SKEW_MS) continue;
+    if (s.withheld === true) heldRows.push(s);
+    else if (!last || ms(s.taken_at) > ms(last.taken_at)) last = s;
+  }
+  const heldSince = heldRows.filter((s) => !last || ms(s.taken_at) > ms(last.taken_at));
+  const lastScan = last || heldSince.length ? scanLine(last, nowAt, zone, heldSince, Math.max(heldSince.length, count(heldScans) ?? 0)) : null;
 
   return {
     now: nowAt,
@@ -413,6 +432,11 @@ export function clearLine(kind, lastScan, notOnTeamCount = 0) {
   let tone = '';
   if (!lastScan) {
     parts.push('No scan is recorded yet, so nothing has been checked.');
+  } else if (lastScan.withheld) {
+    const one = lastScan.withheld.scans === 1;
+    const which = lastScan.takenAt ? (one ? 'The scan since the last trusted one was' : 'The scans since the last trusted one were') : (one ? 'The one scan recorded was' : 'Every scan recorded was');
+    parts.push(`${which} held back as a likely website hiccup, so ${w.since} is not flagged yet.`);
+    tone = 'warn';
   } else if (lastScan.stale) {
     parts.push(`The last scan is ${typeof lastScan.hoursAgo === 'number' ? `${lastScan.hoursAgo} h` : 'hours'} old, so ${w.since} is not flagged yet.`);
     tone = 'warn';
@@ -427,7 +451,23 @@ export function clearLine(kind, lastScan, notOnTeamCount = 0) {
 
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-function scanLine(s, nowAt, zone) {
+// The last scan line: the newest trusted scan `s` (null when none is
+// recorded), and the scans held back since it (`held`, the withheld rows
+// read, and `heldCount`, how many there are, read or not): how
+// many, the newest one's time and car count, and that nothing they missed
+// is flagged until the website recovers or a salesperson accepts the smaller
+// list. With held-back scans the line is stale whatever the trusted scan's
+// age: nothing it missed has been flagged since.
+function scanLine(s, nowAt, zone, held = [], heldCount = held.length) {
+  const newest = held.reduce((a, h) => (!a || ms(h.taken_at) > ms(a.taken_at) ? h : a), null);
+  const withheld = newest ? { scans: heldCount, newestAt: newest.taken_at, cars: num(newest.cars) ?? 0 } : null;
+  const heldLine = withheld
+    ? `${withheld.scans === 1 ? `One${s ? ' later' : ''} scan` : `${withheld.scans}${s ? ' later' : ''} scans`} (the newest ${fmtLocal(withheld.newestAt, zone)}: ${plural(withheld.cars, 'car')} on the website) ${withheld.scans === 1 ? 'was' : 'were'} held back as a likely website hiccup, with most of the lot missing at once, so nothing ${withheld.scans === 1 ? 'it' : 'they'} missed is flagged. If the website really lists fewer cars now, a salesperson can accept the smaller list on the extension's To do tab.`
+    : '';
+  if (!s) {
+    const hoursAgo = hoursBetween(newest.taken_at, nowAt);
+    return { takenAt: null, websiteOrigin: newest.website_origin || '', cars: null, ready: null, takeDownCount: null, priceUpdateCount: null, hoursAgo, stale: true, withheld, line: `No trusted scan is recorded yet. ${heldLine}` };
+  }
   const cars = num(s.cars) ?? 0;
   const ready = num(s.ready) ?? 0;
   const takeDown = num(s.take_down_count) ?? 0;
@@ -438,8 +478,9 @@ function scanLine(s, nowAt, zone) {
     websiteOrigin: s.website_origin || '',
     cars, ready, takeDownCount: takeDown, priceUpdateCount: price,
     hoursAgo,
-    stale: typeof hoursAgo === 'number' && hoursAgo > SCAN_STALE_HOURS,
-    line: `Last scan ${fmtLocal(s.taken_at, zone)}: ${plural(cars, 'car')} on the website, ${ready} ready to post, ${takeDown} to take down, ${plural(price, 'price change')}`,
+    stale: Boolean(withheld) || (typeof hoursAgo === 'number' && hoursAgo > SCAN_STALE_HOURS),
+    withheld,
+    line: `Last scan ${fmtLocal(s.taken_at, zone)}: ${plural(cars, 'car')} on the website, ${ready} ready to post, ${takeDown} to take down, ${plural(price, 'price change')}${withheld ? `. ${heldLine}` : ''}`,
   };
 }
 

@@ -41,6 +41,7 @@ import { loadSession } from './src/account.js';
 export const up = {
   active: false,
   origin: null, vin: null, kind: null, price: null, listingUrl: '', name: '', listedPrice: null,
+  why: '', // a take-down's reason (src/rescan.js): 'not-pre-owned' is a car not sold, so its listing is deleted
   listingId: '', // the listing's id, from its saved link or from this car's own listing page once opened (onListing)
   tabId: null, status: 'idle', // idle | checking | stopped | opening | waiting | filled | done | gone
   scanPrice: null, // a price update: the price the last scan found, when the website shows another one now
@@ -79,7 +80,7 @@ function stopPolling() {
 export async function startUpkeep(req, ctx) {
   stopPolling();
   const run = ++starts;
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, scanPrice: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, why: String(req.why || ''), price: req.price || null, scanPrice: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false });
   ctx.render();
   if (up.kind === 'price') {
     let now;
@@ -365,7 +366,9 @@ export function upkeepHtml() {
       ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price.</div>`
       : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Current fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}, the price the website shows now: Lot Current read the car on the website again just before opening the listing${up.scanPrice ? ` (the last scan had found ${money(up.scanPrice)})` : ''}. Then you click <b>Update</b>.</div>`;
   } else {
-    body = `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Mark as sold</b> (or <b>Delete</b>) on this listing. Lot Current will notice and mark it done.</div>`;
+    body = up.why === 'not-pre-owned'
+      ? `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Delete</b> on this listing: the website no longer lists the car as pre-owned, and it was not sold, so do not mark it sold. Lot Current will notice and mark it done.</div>`
+      : `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Mark as sold</b> (or <b>Delete</b>) on this listing. Lot Current will notice and mark it done.</div>`;
   }
   const buttons = up.status === 'done' || up.status === 'stopped'
     ? `<button type="button" class="primary" id="upkeepClose">Close</button>`

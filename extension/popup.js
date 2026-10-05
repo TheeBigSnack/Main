@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld } from './src/rescan.js';
 import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
 import { performScan } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
@@ -259,17 +259,20 @@ async function scan() {
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
     state.siteName = r.site.name;
     // saved under the diff's lock, against the posted list as it is now: the
-    // side panel may have finished a to-do item while this scan ran (src/rescan.js settleDiff)
+    // side panel may have finished a to-do item while this scan ran (src/rescan.js settleDiff).
+    // A read judged a hiccup is held back with the diff, counted on from the
+    // one saved before it (withWithheld): To do offers it once scans agree.
     const diffKey = siteKeys(state.origin).diff;
     const saved = await withLock(diffKey, async () => {
       const postedKey = siteKeys(state.origin).posted;
-      state.posted = (await chrome.storage.local.get(postedKey))[postedKey] || {};
-      state.diff = settleDiff(r.diff, state.posted);
+      const stored = await chrome.storage.local.get([postedKey, diffKey]);
+      state.posted = stored[postedKey] || {};
+      state.diff = withWithheld(settleDiff(r.diff, state.posted), r.snapshot, stored[diffKey]);
       return save('snapshot', 'diff', 'settings', 'boilerplate');
     });
     if (!saved) return; // the status says why (the quota); the read stays on screen
     state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
-    syncInBackground(); // the scan's counts (none after a website hiccup) and the to-do items it flagged
+    syncInBackground(); // the scan's counts (marked withheld after a website hiccup) and the to-do items it flagged
     // the scan registered the website for background rescans; show its state
     state.site = ((await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {})[state.origin] || null;
     await checkRescanPermission();
@@ -465,6 +468,23 @@ function scheduleBanner() {
   return '';
 }
 
+// A lot that keeps reading more than half smaller (src/rescan.js
+// withWithheld): the saved list stays until the salesperson, having looked at
+// the website, says the new one is right. Then, until the next scan, what
+// they chose.
+function withheldBanner(d) {
+  const w = withheldOffer(d);
+  if (w) {
+    const cars = (n) => `${n} ${n === 1 ? 'car' : 'cars'}`;
+    return `<div class="banner warn" id="withheld">The last ${w.scans} scans, since ${esc(when(w.since))}, each read about ${cars(w.cars)} on the website, where the saved list has ${cars(w.saved ?? 0)}. Lot Current keeps the saved list and marks nothing gone, in case the website is having trouble. If the website's used-inventory page really lists only these cars now, use the new list: the next scan compares with it, and looks up each of your listings it misses on the website before calling it gone.<div class="toolbar"><button type="button" class="small go" data-action="acceptWithheld">Use the new list of ${cars(w.cars)}</button></div></div>`;
+  }
+  const a = d && d.accepted;
+  if (a && typeof a === 'object') {
+    return `<div class="banner info" id="withheldAccepted">You chose the website's new list of ${esc(String(a.cars))} cars (${esc(when(a.at))}) over the ${esc(String(a.saved))} saved. The next scan compares with it.</div>`;
+  }
+  return '';
+}
+
 // Why a to-do item has no buttons: a colleague's listing, or a car nobody marked as posted.
 const notYours = (vin) => (colleagueEntry(vin) ? ` · posted by ${byWhom(colleagueEntry(vin))}` : ' · not marked as posted');
 
@@ -476,6 +496,7 @@ function viewTodo(l) {
   let html = setupBanner() + scheduleBanner() + notSharedBanner();
   html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
+  html += withheldBanner(d);
   if (d?.firstScan) {
     html += `<div class="banner info">First scan saved. Start with the <b>Ready to post</b> tab. From now on, each scan compares with the last one and lists what sold, what changed price and what's new. Mark cars as posted so your own listings come first.</div>`;
   }
@@ -488,7 +509,7 @@ function viewTodo(l) {
           sub: esc(t.text) + (t.yours ? '' : notYours(t.vin)),
           right: t.lastPrice ? money(t.lastPrice) : '',
           action: t.yours
-            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="takeDown" data-vin="${esc(t.vin)}" title="Opens your listing so you can mark it sold or delete it">Open listing</button><button type="button" class="small" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button></span>`
+            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="takeDown" data-vin="${esc(t.vin)}" title="${t.why === 'not-pre-owned' ? 'Opens your listing so you can delete it' : 'Opens your listing so you can mark it sold or delete it'}">Open listing</button><button type="button" class="small" data-action="takenDown" data-vin="${esc(t.vin)}">Taken down</button></span>`
             : '',
           muted: !t.yours,
         })
@@ -531,7 +552,9 @@ function viewTodo(l) {
   const nowReady = d?.nowReady || [];
   if (nowReady.length) parts.push(section('Just became ready', 'good', nowReady.map((n) => row(n, { sub: esc(n.what), action: postButton(n.vin) }))));
   const look = d?.needsALook || [];
-  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : '') }))));
+  // a posted car whose details the pre-owned check questions: the person may look and dismiss it (the listing stays up)
+  const dismiss = (n) => (n.yours && n.why === 'review' ? `<span class="actions"><button type="button" class="small" data-action="dismissLook" data-vin="${esc(n.vin)}" title="Your listing stays up; the item comes back if the website gives another reason">Dismiss</button></span>` : '');
+  if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : ''), action: dismiss(n) }))));
   if (!parts.length && d && !d.firstScan) html += empty('Nothing changed since the last scan.');
   return html + parts.join('');
 }
@@ -1281,7 +1304,8 @@ async function onPanelClick(ev) {
       // sees the change. The person clicks Update / Mark as sold / Delete.
       if (!state.tab) return;
       const p = state.posted[vin] || {};
-      const item = { origin: state.origin, vin, kind: btn.dataset.kind, price: Number(btn.dataset.price) || null, listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
+      const why = btn.dataset.kind === 'takeDown' ? (state.diff?.takeDown || []).find((t) => t && t.vin === vin)?.why || '' : ''; // a car not sold (not-pre-owned) is deleted, not marked sold
+      const item = { origin: state.origin, vin, kind: btn.dataset.kind, why, price: Number(btn.dataset.price) || null, listingUrl: p.listingUrl || '', name: p.name || state.snapshot?.vehicles?.[vin]?.name || vin, listedPrice: p.price || null, dealerTabId: state.tab.id, windowId: state.tab.windowId, at: Date.now() };
       let opened = true;
       try {
         await chrome.sidePanel.open({ windowId: state.tab.windowId }); // straight from the click
@@ -1354,6 +1378,33 @@ async function onPanelClick(ev) {
       if (!(await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook'])))) break;
       syncInBackground();
       break;
+    case 'dismissLook': {
+      // The person looked at the website's reason: the listing stays up, and
+      // the item stays off To do while the website gives that reason
+      // (src/rescan.js lookDismissed); no pilot flag is involved.
+      const item = (state.diff?.needsALook || []).find((n) => n && n.vin === vin && n.yours && n.why === 'review');
+      if (!item) break;
+      if (!(await update('posted', (p) => markLookDismissed(p || {}, vin, item.text)))) break;
+      if (!(await update('diff', (d) => (d && typeof d === 'object' ? { ...d, needsALook: (d.needsALook || []).filter((n) => !(n && n.vin === vin && n.why === 'review')) } : undefined)))) break;
+      break;
+    }
+    case 'acceptWithheld': {
+      // The salesperson's word that the website's smaller list is right: the
+      // held-back read becomes the saved list, under the diff's lock (a scan
+      // saves both under it), and only while the diff still offers it.
+      const diffKey = siteKeys(state.origin).diff;
+      let took = null;
+      const saved = await withLock(diffKey, async () => {
+        took = acceptWithheld((await chrome.storage.local.get(diffKey))[diffKey]);
+        if (!took) return false;
+        state.snapshot = took.snapshot;
+        state.diff = took.diff;
+        return save('snapshot', 'diff');
+      });
+      if (!took) setStatus('A scan since then has changed To do; nothing was replaced.');
+      else if (saved) syncInBackground(); // the scan's counts, now as a trusted scan
+      break;
+    }
     case 'priceUpdated':
       if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
       if (!(await notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })))) break;
@@ -1614,10 +1665,19 @@ async function onSettingsSubmit(ev) {
   }
   const prev = withDefaults(state.settings || {}, knownSite());
   const str = (k) => String(form.get(k) ?? '').trim();
+  // the store boxes are drawn once a scan has named the stores (viewSettings):
+  // a Save with them in view is the person's choice, none ticked meaning every
+  // store (storesChosen, which the website's first scan keeps); a Save before
+  // that leaves the stores as they were. The form decides, not the snapshot: a
+  // scan the service worker or set-up finishes while Settings is open updates
+  // state.snapshot without redrawing the form, so a form drawn without boxes
+  // can be saved after the stores are known
+  const storesShown = Boolean(ev.target.querySelector && ev.target.querySelector('input[name="store"]'));
   state.settings = withDefaults(
     {
       ...prev,
-      myStores: form.getAll('store').map(String),
+      myStores: storesShown ? form.getAll('store').map(String) : prev.myStores,
+      storesChosen: storesShown || prev.storesChosen,
       basis: chooseBasis(form.get('basis'), prev.basis, state.snapshot ? Object.values(state.snapshot.vehicles || {}) : null), // the lower price only when this website shows one; without a scan the previous choice stands
       salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || DEFAULT_SALESPERSON_TITLE, closingLine: cleanClosingLine(form.get('closingLine')) },
       dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },

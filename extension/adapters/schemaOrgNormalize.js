@@ -174,15 +174,18 @@ const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|
 const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|market value|market price|fair market|fair purchase|typical listing|book value|trade[-\s]?in(?: value)?|kbb|kelley(?: blue book)?|blue book|black book|nada|j\.?\s?d\.?\s?power|cash offer|edmunds|estimated(?: value)?|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$/i;
 
 // Every dollar amount the page shows: its value, whether it is written with
-// a dollar sign, and whether the words before it make it a reference price.
+// a dollar sign, and whether the words before it make it a reference price
+// (cue: those words, as the page writes them, else '').
 function shownPrices(pageText) {
   const t = String(pageText || '');
   const out = [];
   for (const m of t.matchAll(AMOUNT)) {
+    const cue = REFERENCE_CUE.exec(t.slice(Math.max(0, m.index - 48), m.index));
     out.push({
       value: Number(m[2].replace(/,/g, '') + (m[3] ? '.' + m[3] : '')),
       dollar: m[1].includes('$'),
-      reference: REFERENCE_CUE.test(t.slice(Math.max(0, m.index - 48), m.index)),
+      reference: Boolean(cue),
+      cue: cue ? cue[0].replace(/[\s:\-\u2013\u2014\u00ae\u2122]+$/, '').replace(/\s+/g, ' ') : '',
     });
   }
   return out;
@@ -241,8 +244,17 @@ export function priceFromOffers(node, facts) {
   if (new Set(priced.map((p) => p.value + ' ' + p.currency)).size > 1) return none('the page gives more than one price');
   const { value, currency } = priced[0];
   if (currency && currency !== 'USD') return none('the price is not in US dollars');
-  const current = shownPrices(facts && facts.text).filter((p) => p.value === value && !p.reference);
-  if (!current.length) return none('the page does not show this price');
+  const shown = shownPrices(facts && facts.text);
+  const current = shown.filter((p) => p.value === value && !p.reference);
+  if (!current.length) {
+    // The page's only price is this one, after words that make it a guide's,
+    // an old or a sticker price ("Market Price $24,995"). Some websites label
+    // their own selling price that way, so the reason quotes the label for a
+    // person to check; the price is still not taken.
+    const labelled = shown.find((p) => p.value === value && p.reference);
+    if (labelled && labelled.cue && shown.every((p) => p.reference)) return none(`the page labels its only price "${labelled.cue}", which Lot Current does not read as the selling price`);
+    return none('the page does not show this price');
+  }
   // no currency in the markup: US dollars only when the page shows this amount with a dollar sign
   if (!currency && !current.some((p) => p.dollar)) return none('the page does not say the price is in US dollars');
   return { value, label: 'Price', reason: '' };
