@@ -1417,6 +1417,14 @@ test('schemaOrg scan: when only forms carry the VIN and none of them gave a car,
   assert.equal(incompleteWarning(res), 'The website returned 0 of 6 cars.');
   const out = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(lot(false)), site, settings: withDefaults({}, site), options: schemaOrg.scanOptions(SERVICE) });
   assert.equal(out.diff.warnings[0], 'The website returned 0 of 6 cars.', 'the scan says so first on To do');
+  // one car whose card also links its page with its VIN in the path does not make the others' forms the read of the lot
+  const odd = `/inventory/used-${cars[0].vin.toLowerCase()}/`;
+  const oneByVin = lot(false);
+  oneByVin.set(O + odd, oneByVin.get(O + cars[0].path));
+  for (const [at, a] of oneByVin) if (at.startsWith(LIST)) oneByVin.set(at, { ...a, text: a.text.replace(`<a href="/finance/apply/?vin=${cars[0].vin}">Get pre-approved</a>`, `<a href="${odd}">Details</a>`) });
+  const one = await schemaOrg.scan(fakeSiteSearch(oneByVin), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([one.ok, one.total, one.records.length, one.complete], [true, 6, 1, false], 'one car read of six: not complete');
+  assert.equal(incompleteWarning(one), 'The website returned 1 of 6 cars.');
   // with the list's data the cars are read as before, and the read is complete
   const withData = await schemaOrg.scan(fakeSiteSearch(lot(true)), schemaOrg.scanOptions(SERVICE));
   assert.deepEqual([withData.ok, withData.total, withData.records.length, withData.complete], [true, 6, 6, true]);

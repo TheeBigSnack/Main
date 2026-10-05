@@ -1537,9 +1537,10 @@ export async function scan(search, options = {}) {
   // Files with a VIN in their address that are no car's page leave the
   // learned shape of this lot's car addresses in doubt, so a link that read
   // like a car page but was left out for not having that shape may be one.
-  // So do links with a VIN none of which gave a car, only web pages without
-  // one (forms that carry the VIN where the car pages don't).
-  const shapeInDoubt = shapeLeftOut > 0 && (notCarPages > 0 || (carsFound === 0 && noneShown > 0));
+  // So do links with a VIN that showed no car more often than they gave one,
+  // web pages without one (forms that carry the VIN where most car pages
+  // don't, one car's page beside them carrying its VIN).
+  const shapeInDoubt = shapeLeftOut > 0 && (notCarPages > 0 || noneShown > carsFound);
   const total = cars.size - notCarPages;
   // a lot that counted cars and gave none is never a complete read of it
   const complete = listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !(total > 0 && records.size === 0);
