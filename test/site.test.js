@@ -591,8 +591,13 @@ test('How it works and the Terms keep "while you are away" to Facebook, and name
   // and "A person starts every step that touches Facebook" was wrong for a queue: once a car is published, the
   // panel opens and fills the next car's form with no new click (docs/help.md, a car that passes every check)
   assert.doesNotMatch(how, /A person starts every step/, 'a queue opens and fills the next form by itself');
-  assert.match(how, /A person starts each post, or a queue of several, and clicks Publish, Update, Mark as sold or Delete themselves; Lot Current fills in the form\. In a queue, once you publish a car, Lot Current opens and fills the next car's form without another click \(a car with a warning stops for you first\), and you still check and publish each one\./);
-  assert.match(read('../docs/help.md'), /A car that passes every check opens and fills the Marketplace form straight away\./, 'the queue no longer opens the next form by itself: change How it works with it');
+  // the queue moves on by itself only from a listing it confirmed, and a car whose photo server Chrome has not been
+  // asked about stops like a car with a warning (docs/help.md)
+  assert.match(how, /A person starts each post, or a queue of several, and clicks Publish, Update, Mark as sold or Delete themselves; Lot Current fills in the form\. In a queue, once you publish a car and the panel confirms the new listing shows it, Lot Current opens and fills the next car's form without another click; when it cannot confirm the listing, it waits for you to click It's posted, next car ?\. A car with a warning, or one whose photos sit on a server Chrome has not been asked about yet, stops for you first, and you still check and publish each one\./);
+  const help = read('../docs/help.md');
+  assert.match(help, /A car that passes every check opens and fills the Marketplace form straight away\./, 'the queue no longer opens the next form by itself: change How it works with it');
+  assert.match(help, /So does a car whose photos sit on a server Chrome has not been asked about yet/, 'a car with an unasked photo server no longer stops: change How it works with it');
+  assert.match(help, /the panel records the post and loads the next car\. A listing page that shows this car any other way[^\n]*waits for you\.[^\n]*click \*\*It's posted, next car\*\*/, 'the queue no longer waits for It\'s posted, next car on a listing it cannot confirm: change How it works with it');
   assert.match(how, /The rescan of your website in step four can also run on its own, if you allow it, and it never touches Facebook\./);
   const step = stripTags((howPage.match(/<section aria-labelledby="honest-h">[\s\S]*?<\/section>/) || [''])[0]);
   assert.match(step, /every 3 hours while Chrome is open, with nobody at the keyboard/, 'step four says the rescan runs unattended');

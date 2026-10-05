@@ -188,6 +188,8 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   assert.match(scanPara, /last scan Lot Current trusted/, 'onboarding-store.md calls the line the last read of the website');
   assert.match(scanPara, /website hiccup[^.]*not recorded/, 'onboarding-store.md does not say a hiccup scan is held back');
   assert.doesNotMatch(scanPara, /, nobody's Chrome had it on\./, 'onboarding-store.md blames a closed Chrome alone for an old line');
+  // a rescan reaches the dealership's account only while its salesperson is signed in (accountFlow.js syncNow)
+  assert.match(scanPara, /not signed in to their Lot Current accounts \(a scan reaches this view only while its salesperson is signed in\)/, 'onboarding-store.md leaves out that a signed-out salesperson\'s rescans never reach the view');
   // the three sentences that matter
   assert.match(store, /\*\*You click Publish\. Lot Current never does\.\*\*/);
   assert.match(store, /\*\*Keep prices honest\.\*\*/);

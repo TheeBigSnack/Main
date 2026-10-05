@@ -392,5 +392,7 @@ test('the store listing tells the reviewer to skip the account step, and its pri
   const short = listing.split('\n').find((l) => l.startsWith('The answers are in `legal/chrome-web-store-privacy.md`'));
   assert.ok(short, 'the store listing has its privacy summary');
   assert.match(short, /for a colour guess up to four of its photo addresses \(Anthropic's servers fetch those photos to look at them\)/);
-  assert.match(short, /for Open the form and check fields only, that form page's address, title and language and the names of its fields and of the controls on it/);
+  // the summary names what the answers name: the controls (Facebook's own menus among them) and the photo box's text
+  assert.match(answers, /the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/, 'the Web Store answers changed what the fields check reads: change the summary with them');
+  assert.match(short, /for Open the form and check fields only, that form page's address, title and language, the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/);
 });
