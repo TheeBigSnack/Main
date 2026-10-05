@@ -174,6 +174,10 @@ test('"flooded with light" or "with options" is a sales line, not a flood brand;
   const sales = [
     'This SUV is flooded with natural light from the panoramic roof.', 'Flooded with options!', 'A cabin flooded with sunlight.', 'An interior flooded in natural light.',
     'Flooded with plenty of natural light.', 'Flooded with tons of premium features.', 'Flooded with so many options.', 'A sun-flooded cabin.', 'A light-flooded interior.',
+    // a light word that ends its phrase, equipment, and a flood the sentence denies keep it a sales line
+    'Flooded with light thanks to the dual-pane sunroof.', 'Cabin flooded with daylight - perfect for road trips.', 'Interior flooded with natural light and no flood damage!',
+    'Flooded with options like rain-sensing wipers and mud flaps.', 'Flooded with options, including the 3.0L Hurricane twin-turbo engine.',
+    'Flooded with natural light through the sunroof, Mud-Terrain tires and flood lights.', 'Flooded with features. No water damage, no salt.',
   ];
   for (const words of sales) {
     assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
@@ -186,6 +190,12 @@ test('"flooded with light" or "with options" is a sales line, not a flood brand;
     'Previously flooded with saltwater.', 'This car was flooded with seawater during Hurricane Ian.', 'Flooded with rainwater, sold as is.', 'Was flooded with stormwater.',
     'Flooded with floodwater up to the dash.', 'Flooded with 2 feet of water.', 'Flooded with contaminated flood water.', 'Flooded with mud and debris.',
     'Flooded with light damage to the carpet.', 'Flooded in the light rain storm.', 'Flooded by a storm surge.', 'Flooded with the water.',
+    // "light" can be an adjective, and a flood named anywhere in the sentence makes it a flood
+    'Flooded with light saltwater.', 'Flooded with light seawater.', 'Flooded with light salt water.', 'Flooded with light amounts of water.',
+    'Previously flooded with light saltwater exposure, sold as is.', 'Flooded by light storm surge', 'Flooded in light surge waters.',
+    'Flooded with light standing water in the cabin.', 'Flooded with light sludge.', 'Flooded with light brown mud.', 'Flooded with light and water.',
+    'Flooded in style during Hurricane Ian.', 'This car was light-flooded in a storm', 'Flooded with sunlight, then a hurricane.',
+    'Flooded in the light of a hurricane.', 'Flooded with options and saltwater.', 'Flooded with natural light from the river floodwaters.',
   ];
   for (const words of flooded) {
     assert.match(brandedTitleSignal({ descriptionRaw: words }), /^flooded$/i, words);
