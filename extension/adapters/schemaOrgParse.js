@@ -652,15 +652,24 @@ function struckClasses(doc) {
 // nor `own`, the key the caller gives the page's own car). `shown` counts
 // the pieces of text inside that are more than spaces, `linkShown` those
 // inside its links to cars, and `money` says whether a piece shows a dollar
-// amount.
+// amount. A dollar amount belongs to the piece of text that holds its
+// number, read as a person sees it: also when its "$" sits in an element of
+// its own just before ("<sup>$</sup>14,000") or is written as an entity
+// ("&#36;14,000", "$&nbsp;14,000").
 const MANY = {};
 const HERE = {};
 const LINK = Symbol('link');
 const join = (a, b) => (a === null || a === b ? b : MANY);
 function linkTargets(root, unseen, own) {
   const order = [];
+  let dollar = false; // the text shown so far ends with a dollar sign
   walk(root, (n) => {
-    if (n.text !== undefined) return false;
+    if (n.text !== undefined) {
+      const t = decodeEntities(n.text);
+      n.money = /\$\s*\d/.test(t) || (dollar && /^\s*\d/.test(t));
+      if (/\S/.test(t)) dollar = /\$\s*$/.test(t);
+      return false;
+    }
     if (n.tag !== '#document' && unseen(n)) return false;
     order.push(n);
     return true;
@@ -677,7 +686,7 @@ function linkTargets(root, unseen, own) {
     for (const c of el.children) {
       if (c.text !== undefined) {
         if (/\S/.test(c.text)) shown += 1;
-        if (!money && /\$\s*\d/.test(c.text)) money = true;
+        if (c.money) money = true;
         continue;
       }
       if (c.cars === undefined) continue; // not seen: hidden, crossed out, a script
@@ -705,12 +714,14 @@ const isCard = (parent, child) => child.cars !== null && child.cars !== undefine
 // than the page's own, the car's tile: going in while exactly one child
 // holds the car's links and that child shows more than its links, through
 // one element whose other children show something (the page's own price
-// box beside the tile; at most one of them may show a dollar amount) and
-// otherwise only through wrappers whose other children show nothing. So the
-// tile is never cut smaller than the element that holds both its link and
-// its price ("<div class=tile><div><a>..</a> Save $500</div><div>$15,000
-// </div></div>" stays whole), and a tile whose pieces sit loose beside the
-// price box, its price in one of them, is not cut out of them.
+// box beside the tile) and otherwise only through wrappers whose other
+// children show nothing. At that one element, at most one of the other
+// children may show a dollar amount, and only one that comes before the
+// tile: a car's own price box comes before a "similar vehicles" tile, while
+// a tile's own price may sit after its link ("<div class=tile><div><a>..</a>
+// Price drop $500</div><div>$15,000</div></div>" stays whole). visibleText
+// keeps the whole element as the tile's unless the page's own text shows no
+// dollar amount and the element comes right after the page's heading.
 function tileOf(el) {
   const car = el.cars;
   let split = false;
@@ -719,21 +730,23 @@ function tileOf(el) {
     let count = 0;
     let besides = false;
     let money = 0;
+    let moneyAfter = false;
     for (const c of el.children) {
-      if (c.text !== undefined) {
-        if (/\S/.test(c.text)) besides = true;
-        if (/\$\s*\d/.test(c.text)) money += 1;
-      } else if (c.cars === car) {
+      if (c.text === undefined && c.cars === car) {
         only = c;
         count += 1;
-      } else if (c.cars !== undefined && c.shown > 0) {
-        besides = true;
-        if (c.money) money += 1;
+        continue;
+      }
+      if (c.text !== undefined ? !/\S/.test(c.text) : c.cars === undefined || c.shown === 0) continue;
+      besides = true;
+      if (c.money) {
+        money += 1;
+        if (only !== null) moneyAfter = true;
       }
     }
     if (count !== 1 || only.shown <= only.linkShown) return el;
     if (besides) {
-      if (split || money > 1) return el;
+      if (split || money > 1 || moneyAfter) return el;
       split = true;
     }
     el = only;
@@ -749,11 +762,14 @@ function dollarAmounts(text) {
 }
 
 // Of those, the ones shown as a car's price: not a payment ("Est. $299/mo",
-// "$99 down"), a saving or an incentive ("Save $500", "$1,000 off", "$500
-// rebate") or an old or sticker price ("Was $16,000", "MSRP $16,000"). A
-// tile shows its car's price when it shows one of these.
-const NOT_A_PRICE_BEFORE = /\b(?:save|savings|saved|discount|rebate|cash back|incentives?|bonus|down|payments?|lease|est|estimated|was|msrp|retail|list|reg|regular|originally|compare at)\b[^$\d]{0,12}$/i;
-const NOT_A_PRICE_AFTER = /^\s*(?:\/\s*|per\s+|a\s+|each\s+)?(?:mo|mos|month|monthly|wk|week|weekly|bi-?weekly|yr|year|off|down|savings|rebate|cash back|below)\b/i;
+// "$99 down"), a saving, a price cut or an incentive ("Save $500", "Price
+// drop $500", "$1,000 off", "$500 dealer discount", "$1,000 bonus cash"), a
+// fee or an old or sticker price ("Was $16,000", "MSRP $16,000"). A tile
+// shows its car's price when it shows one of these. Only the cut of a tile
+// out of a block (visibleText) reads them, so an amount these words leave
+// out only ever keeps a tile whole.
+const NOT_A_PRICE_BEFORE = /\b(?:save|savings|saved|discount|rebate|cash back|cash|incentives?|bonus|credit|allowance|drop|dropped|reduced|reduction|markdown|marked down|lowered|cut|fees?|deposit|down|payments?|lease|est|estimated|was|msrp|retail|list|reg|regular|originally|compare at)\b[^$\d]{0,12}$/i;
+const NOT_A_PRICE_AFTER = /^\s*(?:\/\s*|per\s+|a\s+|each\s+)?(?:mo|mos|month|monthly|wk|week|weekly|bi-?weekly|yr|year|off|down|savings|discount|dealer discount|rebates?|cash back|cash|bonus|incentives?|credit|allowance|below|fees?|deposit)\b/i;
 function priceAmounts(text) {
   const t = String(text);
   const out = new Set();
@@ -775,20 +791,26 @@ function priceAmounts(text) {
  * When nothing around that element links to a car other than the page's
  * own (one "you may also like" tile, the page's title in a bar of its own),
  * the element may hold the page's own price box beside the tile: then the
- * card is the tile (tileOf) when the tile shows a price of its own (a
- * dollar amount that is not a payment, a saving or an old price) and the
- * rest of the element shows none of the tile's dollar amounts, and that
- * rest is the page's own text, with car null and near the tile's car (a
- * list's one card keeps it). Otherwise the whole element is the card. The
- * tile is never cut smaller than an element holding both its link and its
- * price, and the rest must show its dollar amounts in one place (one price
- * box), so a tile's own price is not cut out of it. Which car a link goes
- * to is the caller's
- * carKey (parseVehiclePage), and carKey.own, when it gives one, is the page's
- * own car; without a carKey, every address on this website is a car of its
- * own. Text outside any card, and inside the card around the page's first
- * heading, has car null. The adapter reads a car's own text from them: on
- * its page, everything but other cars' cards; on a list, its own card.
+ * card is the tile (tileOf), and the rest of the element is the page's own
+ * text, with car null and near the tile's car (a list's one card keeps
+ * it), only when all of these hold: the element comes right after the
+ * page's first heading, with no other text between; the page's own text
+ * (outside every card, in the heading's card or in its own car's) shows no
+ * dollar amount, so its price box is not elsewhere; the tile shows a price
+ * of its own (priceAmounts); and the rest shows none of the tile's dollar
+ * amounts, in one place that comes before the tile (tileOf). Otherwise the
+ * whole element is the card: the page's car may lose its price, never take
+ * the tile's. Not told apart: a page whose own text shows no dollar amount
+ * ("Call for price"), beside a tile whose price comes before its link and
+ * which shows another, unlabelled amount next to that link, when the
+ * tile's pieces sit loose in the block that holds the price box or the
+ * tile comes right after the page's heading. Which car a link goes to is
+ * the caller's carKey (parseVehiclePage), and carKey.own, when it gives
+ * one, is the page's own car; without a carKey, every address on this
+ * website is a car of its own. Text outside any card, and inside the card
+ * around the page's first heading, has car null. The adapter reads a car's
+ * own text from them: on its page, everything but other cars' cards; on a
+ * list, its own card.
  */
 function visibleText(root, { struck = new Set(), own = null } = {}) {
   const unseen = (n) => UNSEEN.has(n.tag) || isHidden(n.attrs) || isCrossedOut(n, struck);
@@ -809,6 +831,11 @@ function visibleText(root, { struck = new Set(), own = null } = {}) {
   let size = 0;
   const nodes = [root];
   const cards = [null];
+  // the page's own text (outside every card, in the card around its heading
+  // or in its own car's) shows a dollar amount: its price box is not in a region
+  let ownMoney = false;
+  // what the last piece of text shown belonged to: HERE, a region, or anything else
+  let before = null;
   while (nodes.length) {
     const n = nodes.pop();
     let card = cards.pop();
@@ -820,6 +847,12 @@ function visibleText(root, { struck = new Set(), own = null } = {}) {
       if (last && last.car === car) last.raw += ' ' + n.text;
       else segments.push({ car, raw: n.text });
       size += n.text.length;
+      if (/\S/.test(n.text)) {
+        const region = card === null ? null : card.inTile ? card : card.region || null;
+        if (region !== null && region.afterHeading === undefined) region.afterHeading = before === HERE;
+        if (n.money && (card === null || card === HERE || card === own)) ownMoney = true;
+        before = region !== null ? region : card === HERE ? HERE : n;
+      }
       continue;
     }
     if (n.tag !== '#document' && unseen(n)) continue;
@@ -840,7 +873,7 @@ function visibleText(root, { struck = new Set(), own = null } = {}) {
   for (const r of regions) {
     const tileText = squeeze(r.tileText);
     const inTile = dollarAmounts(tileText);
-    r.apart = priceAmounts(tileText).size > 0 && ![...dollarAmounts(squeeze(r.aroundText))].some((a) => inTile.has(a));
+    r.apart = !ownMoney && r.afterHeading === true && priceAmounts(tileText).size > 0 && ![...dollarAmounts(squeeze(r.aroundText))].some((a) => inTile.has(a));
   }
   const resolved = [];
   for (const g of segments) {

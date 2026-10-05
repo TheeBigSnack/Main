@@ -32,6 +32,7 @@
 import { parseVehiclePage, extractJsonLd, decodeEntities } from './schemaOrgParse.js';
 import { normalizeVehicle } from './schemaOrgNormalize.js';
 import { checkPreOwned, DECISION } from '../src/classify.js';
+import { MANUFACTURERS } from '../src/vin.js';
 
 export const PLATFORM = Object.freeze({ id: 'schemaOrg', name: 'Standard vehicle data (schema.org)' });
 
@@ -771,11 +772,13 @@ async function twoAtATime(items, work) {
 // only by their query is never read as one car; or when it reads like a car
 // page, new or used (readsLikeAnyCar). On one car's own page (the car the
 // page is read for, `vin`, else the car its markup puts at this address),
-// such an address that names no car but that one (namesOnlyThisCar: "See
-// all 2016 Honda Civic", "Shop new 2027 Honda Civic", another address of
-// this same car) goes to no car, so the car's own price box is not cut out;
-// any other one is another car's, so its tile does not pass for this car's
-// text, whether or not this website's car addresses carry their VIN. On a
+// such an address is another car's only when a word in it tells another
+// car from this one (namesAnotherCar: a stock number or id, another model
+// year, another make), so its tile does not pass for this car's text; any
+// other ("See all 2016 Honda Civic?sort=price", "Shop new 2027 Honda
+// Civic", another address of this same car) goes to no car, so the car's
+// own price box is not cut out, whether or not this website's car
+// addresses carry their VIN. On a
 // page that is no one car's own (a list), a VIN-less address that reads
 // like a car page goes to a car only when it has the shape of this lot's
 // car addresses (cars.shape, the addresses the list linked to, else those
@@ -813,7 +816,7 @@ function carKeys(pageUrl, cars, vin = '') {
         if (known && known.has(plain)) return known.get(plain);
       }
       if (!readsLikeAnyCar(href)) return null;
-      if (own) return namesOnlyThisCar(href, ownCar) ? null : key;
+      if (own) return namesAnotherCar(href, ownCar) ? key : null;
       if (shape) return matchesCarAddressShape(href, shape) ? key : null;
       return vinPages ? null : key;
     };
@@ -830,29 +833,36 @@ function carKeys(pageUrl, cars, vin = '') {
   };
 }
 
-// Does an address name no car but this one? Every word of it is one of this
-// car's own (its make, or the short name people use for it, its model,
-// trim, body style, drive or stock number, also run together: "f150" for an
-// F-150, "crv" for a CR-V), a model year, or a word of the website's
-// inventory and search pages ("used", "vehicles", "shop", "sedan", "awd").
-// So "See all 2016 Honda Civic", "Shop new 2027 Honda Civic", a breadcrumb
-// to "2016 Chevy" and another address of this same car ("/used/2016-honda-
-// civic-sm1000/") name only this car, and an address with any other word
-// ("/used/2017-toyota-camry-sm1001/", "/used/2016-honda-civic-sm1001/")
-// names another. Two cars of one model whose addresses carry no stock
-// number or other word of their own can't be told apart this way.
+// Does an address name a car other than this one? Only by a word that tells
+// one car from another: a word with a digit in it that is not a model year
+// and not one of this car's own words (another car's stock number "sm1001"
+// or id "88001", another model "f250"), in its path or in the values of its
+// query, where a number of one or two digits ("?page=2", "?srp=1") counts
+// for nothing; a model year other than this car's, unless the address is
+// about new cars ("Shop new 2027 Honda Civic"); or a make other than this
+// car's ("/used/2016-toyota-camry/" on a Honda's page; every make the VIN
+// check knows). This car's own words are its make, or the short name
+// people use for it, its model, trim, body style, drive and stock number,
+// also run together ("f150" for an F-150). Any other word names no car: a
+// search's or a breadcrumb's ("near-me", "hybrid", "?sort=price",
+// "?utm_source=vdp"), so "See all 2016 Honda Civic" in a car's own price
+// box never makes the box another car's. Two cars of one year, make and
+// model whose addresses carry no stock number or id can't be told apart
+// this way.
 const wordsOf = (value) => String(value || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 const MAKE_NAMES = new Map([['chevrolet', ['chevy']], ['volkswagen', ['vw']], ['mercedesbenz', ['mb']]]);
-const SEARCH_WORDS = new Set([
-  'used', 'new', 'pre', 'owned', 'preowned', 'certified', 'cpo', 'inventory', 'vehicle', 'vehicles', 'car', 'cars', 'auto', 'autos', 'truck', 'trucks', 'suv', 'suvs', 'van', 'vans',
-  'for', 'sale', 'forsale', 'search', 'all', 'shop', 'browse', 'view', 'see', 'more', 'similar', 'like', 'results', 'listing', 'listings', 'srp', 'vdp', 'detail', 'details', 'stock',
-  'make', 'makes', 'model', 'models', 'year', 'years', 'trim', 'trims', 'body', 'type', 'style', 'condition', 'en', 'es', 'index', 'html', 'htm', 'php', 'asp', 'aspx', 'jsp',
-  'sedan', 'sedans', 'coupe', 'coupes', 'hatchback', 'hatchbacks', 'hatch', 'wagon', 'wagons', 'convertible', 'convertibles', 'crossover', 'crossovers', 'minivan', 'minivans', 'pickup', 'pickups',
-  'cab', 'crew', 'crewcab', 'extended', 'double', 'quad', 'supercrew', 'supercab', 'crewmax', 'door', 'doors', '2dr', '4dr', 'awd', 'fwd', 'rwd', '4wd', '2wd', '4x4', '4x2',
-]);
+const MAKES = new Set(MANUFACTURERS.flatMap(([, , makes]) => makes.map((m) => wordsOf(m).join(''))).concat(['chevy', 'vw', 'mb']));
+// words with a digit that only describe a car: doors, drive, engine
+const PLAIN_DIGIT_WORD = /^(?:[2-5]dr|4x[24]|[24]wd|[vi][3-8]|v1[02])$/;
 const MODEL_YEAR_WORD = /^(?:19[5-9][0-9]|20[0-9][0-9])$/;
-function namesOnlyThisCar(href, car) {
-  if (!car) return false;
+function namesAnotherCar(href, car) {
+  if (!car) return true;
+  let u;
+  try {
+    u = new URL(String(href));
+  } catch (e) {
+    return true;
+  }
   const mine = new Set();
   for (const value of [car.make, car.model, car.trim, car.bodyType, car.drivetrain, car.stock]) {
     const w = wordsOf(value);
@@ -860,16 +870,37 @@ function namesOnlyThisCar(href, car) {
     if (w.length > 1) mine.add(w.join(''));
   }
   for (const short of MAKE_NAMES.get(wordsOf(car.make).join('')) || []) mine.add(short);
-  const words = wordsOf(addressText(href));
-  for (let i = 0; i < words.length;) {
-    let step = 0;
-    // the longest run of words from here that is one word of this car's ("f-150"), else one word the address may hold anyway
-    for (let j = Math.min(words.length, i + 4); j > i && !step; j -= 1) if (mine.has(words.slice(i, j).join(''))) step = j - i;
-    if (!step && (SEARCH_WORDS.has(words[i]) || MODEL_YEAR_WORD.test(words[i]))) step = 1;
-    if (!step) return false;
-    i += step;
-  }
-  return true;
+  const decoded = (s) => {
+    try {
+      return decodeURIComponent(s);
+    } catch (e) {
+      return s;
+    }
+  };
+  const path = wordsOf(decoded(u.pathname + (/^#!?\//.test(u.hash) ? u.hash : '')));
+  const query = [...u.searchParams.values()].map(wordsOf);
+  const aboutNew = path.includes('new') || query.some((w) => w.includes('new'));
+  const year = Number(car.year) || null;
+  const tells = (words, inQuery) => {
+    for (let i = 0; i < words.length;) {
+      let step = 0;
+      // the longest run of words from here that is one of this car's own ("f-150")
+      for (let j = Math.min(words.length, i + 4); j > i && !step; j -= 1) if (mine.has(words.slice(i, j).join(''))) step = j - i;
+      if (step) {
+        i += step;
+        continue;
+      }
+      // a make other than this car's, also in two words ("land rover")
+      for (let j = Math.min(words.length, i + 2); j > i; j -= 1) if (MAKES.has(words.slice(i, j).join(''))) return true;
+      const w = words[i];
+      if (MODEL_YEAR_WORD.test(w)) {
+        if (Number(w) !== year && !aboutNew) return true;
+      } else if (/\d/.test(w) && !PLAIN_DIGIT_WORD.test(w) && !(inQuery && /^\d{1,2}$/.test(w))) return true;
+      i += 1;
+    }
+    return false;
+  };
+  return tells(path, false) || query.some((words) => tells(words, true));
 }
 
 // The car whose own page this is, from its markup: the node with a VIN at

@@ -590,13 +590,12 @@ test('price: a card holds all of its car\'s links, so a contact, finance or "Che
     }
   }
   // a car's page with one other car's tile, the tile's price outside its link, beside a contact link:
-  // the tile is the card, and the heading around it, which shows none of its amounts, is the page's
+  // the page's own price shows outside the tile's block, so the whole block, heading and all, is the tile's
   for (const extra of extras) {
     const one = `<html><body><header><a href="/">Home</a></header><main><h1>Used 2021 Kia Sorento LX</h1><p>Our price $14,000</p><section><h2>You may also like</h2>${card(A, '$15,000', extra.replace('VIN', A))}</section></main><footer><a href="/about/">About</a></footer></body></html>`;
     const segments = pageFacts(one, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments;
-    assert.deepEqual(segments.filter((g) => g.car === null).map((g) => g.text).join(' '), 'Home Used 2021 Kia Sorento LX Our price $14,000 You may also like About', extra);
-    assert.deepEqual(segments.find((g) => g.text === 'You may also like'), { car: null, near: A, text: 'You may also like' }, extra);
-    assert.match(segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /^Used car 102 \$15,000/, extra);
+    assert.deepEqual(segments.filter((g) => g.car === null).map((g) => g.text).join(' '), 'Home Used 2021 Kia Sorento LX Our price $14,000 About', extra);
+    assert.match(segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /^You may also like Used car 102 \$15,000/, extra);
   }
   // the car's own title, price and form link next to that tile, with no heading: still not the tile's
   const plain = `<html><body><div><p>Our price $14,000</p><a href="/contact-us/?vin=${C}">Ask about this car</a></div>${card(A, '$15,000', '')}</body></html>`;
@@ -649,6 +648,60 @@ test('price: beside one other car\'s tile, the car\'s own price box is its own w
   const B = '1FMSAMPL0HU000103';
   const two = `<div class="similar"><a href="${link}">2018 Honda Accord $15,500</a><a href="/inventory/used-${B.toLowerCase()}/">2017 Ford Escape $16,000</a></div>`;
   assert.equal(own(box('$15,000') + two), 'Home Used 2021 Kia Sorento LX Our price $15,000 20,000 miles Check availability Get financing Call us');
+});
+
+test('price: one other car\'s tile is never cut so that its own price passes for the page\'s: not beside a price box shown outside its block, not inside the tile, and not when a "$" sits in an element of its own', () => {
+  const byVin = () => (href) => {
+    const vins = href.match(/\b[a-z0-9]{17}\b/gi) || [];
+    return vins.length === 1 ? vins[0].toUpperCase() : null;
+  };
+  const A = '1HGSAMPL0JH000102';
+  const here = SITE + '/inventory/used-5xysampl6mg000114/';
+  const L = `<a href="/inventory/used-${A.toLowerCase()}/">2018 Honda Accord</a>`;
+  const read = (body) => pageFacts(`<html><body><header><a href="/">Home</a></header>${body}<footer>Call us</footer></body></html>`, here, { carKey: byVin }).segments;
+  const own = (body) => read(body).filter((g) => g.car === null).map((g) => g.text).join(' ');
+  const tile = (body) => read(body).filter((g) => g.car === A).map((g) => g.text).join(' ');
+  const box = (price) => `<div class="price-box"><p>Our price ${price}</p><p>20,000 miles</p><a href="/contact-us/">Check availability</a></div>`;
+  const h1 = '<h1>Used 2021 Kia Sorento LX</h1>';
+  const bar = `<div class="bar">${h1}</div>`;
+  const wrapped = (beside, info = '$15,000') => `<div class="tile"><div class="head">${L} <span>${beside}</span></div><div class="info"><span>${info}</span></div></div>`;
+  // the page's title and price box together, the tile in an aside or straight in the page: whatever sits beside
+  // the tile's link, the tile's $15,000 stays the tile's
+  for (const [beside, info] of [['Save $500'], ['Price drop $500'], ['$500 dealer discount'], ['Reduced $1,000'], ['$1,000 bonus cash'], ['Est. $299/mo'], ['Low miles'], ['$16,000', 'Sale price $15,000']]) {
+    for (const [where, body] of [
+      ['in an aside', `${h1}${box('$14,000')}<aside>${wrapped(beside, info)}</aside>`],
+      ['in an aside under a heading', `${h1}${box('$14,000')}<aside><h3>You may also like</h3>${wrapped(beside, info)}</aside>`],
+      ['straight in the page', `${h1}${box('$14,000')}${wrapped(beside, info)}`],
+      ['its price first, beside a page that shows no amount', `${h1}${box('Call for price')}<aside><div class="tile"><div class="info"><span>${info || '$15,000'}</span></div><div class="head">${L} <span>${beside}</span></div></div></aside>`],
+    ]) {
+      assert.doesNotMatch(own(body), /15,000/, `${beside}, ${where}`);
+      assert.match(tile(body), /\$15,000/, `${beside}, ${where}`);
+    }
+  }
+  // the page's title in a bar of its own: a tile's price after the block that holds the price box and the
+  // tile's link is not the page's, nor is one whose "$" sits in an element of its own, nor one written as an entity
+  for (const beside of ['$16,000', 'Save $500']) {
+    assert.doesNotMatch(own(`${bar}<div class="outer"><div class="main">${box('$14,000')}<div class="head">${L} <span>${beside}</span></div></div><div class="info"><span>$15,000</span></div></div>`), /15,000/, `nested: ${beside}`);
+  }
+  assert.doesNotMatch(own(`${bar}<div class="main">${box('<sup>$</sup>14,000')}<div class="head">${L} <span>$16,000</span></div><div class="info"><sup>$</sup>15,000</div></div>`), /15,000/, 'a "$" of its own');
+  assert.doesNotMatch(own(`${bar}<div class="main">${box('&#36;14,000')}<div class="head">${L} <span>$16,000</span></div><div class="info">&#36;15,000</div></div>`), /15,000/, 'an entity');
+  // the tile before the price box, the page's own text showing an amount elsewhere, or other text between the
+  // page's title and the block: the whole block stays the tile's
+  for (const [name, body] of [
+    ['the tile first', `${bar}<div class="main">${wrapped('Low miles')}${box('$14,000')}</div>`],
+    ['an amount in the page\'s own text after the block', `${bar}<div class="main">${box('$14,000')}${wrapped('Low miles')}</div><p>Doc fee $499</p>`],
+    ['text between the title and the block', `${bar}<div class="gallery">1 of 24</div><div class="main">${box('$14,000')}${wrapped('Low miles')}</div>`],
+  ]) {
+    assert.doesNotMatch(own(body), /14,000|15,000/, name);
+    assert.match(tile(body), /Our price \$14,000.*\$15,000|\$15,000.*Our price \$14,000/, name);
+  }
+  // the tile right after the page's title, its price before its link, the page's own price box after it
+  const priceFirst = `<div class="tile"><div class="info"><span>$15,000</span></div><div class="head">${L} <span>$16,000</span></div></div>`;
+  assert.doesNotMatch(own(`${h1}<aside>${priceFirst}</aside>${box('$14,000')}`), /15,000/, 'the page\'s own price after the tile');
+  assert.match(own(`${h1}<aside>${priceFirst}</aside>${box('$14,000')}`), /Our price \$14,000/);
+  // the honest layout still reads: the title in a bar, the price box first, then the whole tile
+  assert.match(own(`${bar}<div class="main">${box('$14,000')}${wrapped('Low miles')}</div>`), /Our price \$14,000/);
+  assert.equal(tile(`${bar}<div class="main">${box('$14,000')}${wrapped('Low miles')}</div>`), '2018 Honda Accord Low miles $15,000');
 });
 
 test('price: priceSpecification without an offer price; a strikethrough, list or MSRP entry is never the price', () => {

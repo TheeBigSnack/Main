@@ -241,9 +241,9 @@ test('the post-time read through the dealer tab knows the last scan\'s car pages
   assert.deepEqual(first, { price: null, fetched: ['/vdp/7000/'] }, 'the first read, from the car\'s known page');
   const again = await read({ second: true, known: true });
   assert.deepEqual(again, { price: null, fetched: ['/used-vehicles/', '/pre-owned/', '/vdp/7000/'] }, 'the second read, from the last scan\'s list');
-  // without the last scan's car pages, nothing tells the tile's link from a link to anything else
-  assert.equal((await read({ second: false, known: false })).price, 15000);
-  assert.equal((await read({ second: true, known: false })).price, 15000);
+  // Without the last scan's car pages, nothing on this lot tells the tile's link from a link to anything
+  // else: a known limit (extension/adapters/README.md), not something this test expects. Both reads
+  // above fail when either read is given no car pages.
 });
 
 test('readCarForPost: the tab when it shows the website, the direct read only when the tab can\'t be used', async () => {
