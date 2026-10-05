@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { recheck, fetchVehicleDetails, fetchVehicleDetailsDirect, readCarForPost } from '../extension/src/vehicleDetails.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
-import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, STANDARD_ORIGIN } from './helpers.js';
+import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, standardCarPage, STANDARD_ORIGIN } from './helpers.js';
 import { SITES_KEY } from '../extension/src/storageKeys.js';
 import { adapterById } from '../extension/adapters/index.js';
 import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage, answerWith } from './platformSites.js';
@@ -182,6 +182,32 @@ test('a website read through its standard vehicle data: the car\'s own page, rea
   });
   assert.equal(seen[0].url, STANDARD_ORIGIN + cars[1].path, 'the car\'s own page first');
   assert.equal(seen[0].init.credentials, 'omit', 'without cookies, as the automatic rescan reads');
+});
+
+test('the post-time read knows the last scan\'s car pages, so another car\'s tile at the old price is not this car\'s price', async () => {
+  // a lot whose car addresses neither carry a VIN nor read like a car page
+  const cars = standardCars(4).map((c, i) => ({ ...c, path: `/vdp/${7000 + i}/` }));
+  const site = standardSite({ cars });
+  const tiles = `<aside><div class="tile"><a href="${cars[1].path}">${cars[1].year} ${cars[1].make}</a> <span>$15,000</span></div><div class="tile"><a href="${cars[2].path}">${cars[2].year} ${cars[2].make}</a> <span>$16,000</span></div></aside>`;
+  // the page now says $14,000; its markup still says $15,000, the price on the other car's tile
+  site.set(STANDARD_ORIGIN + cars[0].path, { ok: true, status: 200, contentType: 'text/html', text: standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', tiles + '<a href="/used-vehicles/">') });
+  const fetchImpl = async (url) => {
+    const got = site.get(url) || { ok: false, status: 404, contentType: 'text/plain', text: 'Not found' };
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: () => got.contentType }, text: async () => got.text };
+  };
+  const info = { name: 'Sample Motors', adapter: 'schemaOrg', service: { kind: 'schemaOrg', origin: STANDARD_ORIGIN, listUrl: STANDARD_ORIGIN + '/used-vehicles/' }, site: { origin: STANDARD_ORIGIN, name: 'Sample Motors' } };
+  const snapshot = { vehicles: Object.fromEntries(cars.map((c) => [c.vin, { url: STANDARD_ORIGIN + c.path, price: c.price }])) };
+  globalThis.chrome = fakeChrome({}, { ['snapshot:' + STANDARD_ORIGIN]: snapshot });
+  try {
+    await withFetch(fetchImpl, async () => {
+      const r = await fetchVehicleDetailsDirect(STANDARD_ORIGIN, info, cars[0].vin, { url: STANDARD_ORIGIN + cars[0].path, contains: async () => true });
+      assert.equal(r.ok, true);
+      assert.equal(r.vehicle.price, null);
+      assert.equal(recheck(r.vehicle, {}).ok, false, 'the post stops');
+    });
+  } finally {
+    delete globalThis.chrome;
+  }
 });
 
 test('readCarForPost: the tab when it shows the website, the direct read only when the tab can\'t be used', async () => {

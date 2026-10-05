@@ -715,17 +715,20 @@ async function twoAtATime(items, work) {
 // it is one of those addresses with a query added ("?srp=1", "?print=1"),
 // for a car whose own address has no query, so a lot whose car pages differ
 // only by their query is never read as one car; or when it reads like a car
-// page, new or used (readsLikeAnyCar), unless this website's car addresses
-// carry their VIN: then a VIN-less address that only reads like one ("See
-// all 2016 Honda Civic", another address of this same car) goes to no car.
-// Whether they do is the shape of the car addresses the list linked to
-// (cars.shape), else of the cars this page's markup names, else this page's
-// own address when it carries a VIN; without any of those, such a link
-// counts as a car's. On a page that is no one car's own (a list), a VIN-less
-// address that reads like a car page but has not the shape of this lot's car
-// addresses is no car either: a card's "More like this" search
-// ("/used-vehicles/2016-honda-civic/") does not split it. Keys: "vin:" and
-// the VIN, else the page's key.
+// page, new or used (readsLikeAnyCar). On one car's own page, such an
+// address that names that car (its model year, make and model all in its
+// words: "See all 2016 Honda Civic", another address of this same car) goes
+// to no car, so the car's own price box is never cut out; any other one is
+// another car's, so its tile never passes for this car's text, whether or
+// not this website's car addresses carry their VIN. On a page that is no one
+// car's own (a list), a VIN-less address that reads like a car page goes to
+// a car only when it has the shape of this lot's car addresses (cars.shape,
+// the addresses the list linked to, else those of the cars this page's
+// markup names): a card's "More like this" search
+// ("/used-vehicles/2016-honda-civic/") does not split it, and on a lot
+// whose car addresses carry their VIN no VIN-less one is a car. Without a
+// shape it is a car unless this page's own address carries a VIN. Keys:
+// "vin:" and the VIN, else the page's key.
 function carKeys(pageUrl, cars) {
   const known = cars && cars.known instanceof Map ? cars.known : null;
   return (vehicles) => {
@@ -740,7 +743,8 @@ function carKeys(pageUrl, cars) {
     }
     const shape = (cars && cars.shape) || learnCarAddressShape([...named.keys()]);
     const vinPages = shape ? shape.vin : Boolean(vinInAddress(pageUrl));
-    const ownPage = Boolean(ownNode(nodes, pageUrl));
+    const own = ownNode(nodes, pageUrl);
+    const ownCar = own ? normalizeVehicle(own, { url: pageUrl }) : null;
     const carOf = (href) => {
       const vins = vinsInAddress(href);
       if (vins.length) return vins.length === 1 ? 'vin:' + vins[0] : null;
@@ -754,7 +758,8 @@ function carKeys(pageUrl, cars) {
         if (known && known.has(plain)) return known.get(plain);
       }
       if (!readsLikeAnyCar(href)) return null;
-      if (!ownPage && shape) return matchesCarAddressShape(href, shape) ? key : null;
+      if (own) return namesCar(href, ownCar) ? null : key;
+      if (shape) return matchesCarAddressShape(href, shape) ? key : null;
       return vinPages ? null : key;
     };
     const seen = new Map(); // a page links to one car many times
@@ -765,6 +770,16 @@ function carKeys(pageUrl, cars) {
       return car;
     };
   };
+}
+
+// Does an address name this car: its model year, make and model all among
+// the address's words ("/used-vehicles/2016-honda-civic/" for a 2016 Honda
+// Civic EX)? A car without all three is named by no address.
+const wordsOf = (value) => String(value || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+function namesCar(href, car) {
+  if (!car || !car.year || !car.make || !car.model) return false;
+  const have = new Set(wordsOf(addressText(href)));
+  return [String(car.year), ...wordsOf(car.make), ...wordsOf(car.model)].every((w) => have.has(w));
 }
 
 // The car whose own page this is, from its markup: the node with a VIN at
@@ -1412,6 +1427,11 @@ async function carFromPage(site, vin, href) {
  * options.url (the address the last scan kept, which the side panel passes
  * through vehicleDetails.fetchVehicleDetails) when known, else the page the
  * list links to for this VIN. record null when the website no longer has the car.
+ * options.carPages ([{ url, vin }], the car pages the last scan kept) tells
+ * the pages read here which links go to the lot's other cars, as a scan
+ * knows them (carKeys), so another car's tile is cut out of this car's text
+ * at post time too, even on a lot whose car addresses neither carry a VIN
+ * nor read like a car page ("/vdp/7001/").
  * A list read that stopped before its end (MAX_LIST_PAGES pages, a next link
  * off the website or back to a page already read, a page cut at
  * PAGE_TEXT_LIMIT, a first page firstListPage could not walk back to), the
@@ -1423,6 +1443,18 @@ export async function getDetails(search, vin, options = {}) {
   const opts = options || {};
   const origin = originOf(opts.origin) || originOf(opts.listUrl) || originOf(opts.url);
   const site = siteReader(search, origin);
+  const known = new Map();
+  for (const car of Array.isArray(opts.carPages) ? opts.carPages : []) {
+    const at = car && typeof car === 'object' ? onSite(typeof car.url === 'string' ? car.url : '', null, origin) : null;
+    if (!at) continue;
+    const key = pageKey(at.href);
+    const vin = typeof car.vin === 'string' ? car.vin.toUpperCase() : '';
+    if (!known.has(key)) known.set(key, VIN.test(vin) ? 'vin:' + vin : key);
+  }
+  if (known.size) {
+    site.cars.known = known;
+    site.cars.shape = learnCarAddressShape([...known.keys()]);
+  }
   const done = (record) => ({ ok: true, record, fetchedAt: new Date().toISOString() });
   let pageWithoutData = false;
   const own = onSite(typeof opts.url === 'string' ? opts.url : '', null, origin);

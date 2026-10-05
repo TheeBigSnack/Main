@@ -745,6 +745,41 @@ test('a website read from its pages: on a lot whose car addresses carry no VIN, 
   assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']]);
 });
 
+test('a website read from its pages: another car\'s tile at the old price is not this car\'s price when it links to that car through an address without a VIN that reads like a car page, in the scan and at post time', async () => {
+  const cars = standardCars(6);
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  const o = cars[1];
+  // the lot's car addresses carry the VIN; these tiles link through an address the list never uses
+  const aside = `<aside><div class="tile"><a href="/used/${o.year}-${o.make}-${o.model}-${o.stock}/">${o.year} ${o.make}</a> <span>$15,000</span></div><div class="tile"><a href="/used/${cars[2].year}-${cars[2].make}-${cars[2].model}-${cars[2].stock}/">${cars[2].year} ${cars[2].make}</a> <span>$17,000</span></div></aside>`.toLowerCase();
+  const site = standardSite({ cars, perPage: 10 });
+  site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', aside + '<a href="/used-vehicles/">')));
+  const out = await rescanOf(site, first.snapshot, posted);
+  assert.equal(out.snapshot.vehicles[cars[0].vin].price, null);
+  assert.deepEqual(out.diff.needsALook.map((n) => [n.vin, n.text]), [[cars[0].vin, 'Website no longer shows a price (the page does not show this price)']]);
+  const one = await schemaOrg.getDetails(fakeSiteSearch(site), cars[0].vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + cars[0].path });
+  assert.equal(schemaOrg.normalize(one.record).price, null, 'post time');
+});
+
+test('a website read from its pages: on a lot whose car addresses neither carry a VIN nor read like a car page, another car\'s tile at the old price is not this car\'s price at post time either, once the last scan\'s car pages are known', async () => {
+  const cars = standardCars(6).map((c, i) => ({ ...c, path: `/vdp/${7000 + i}/` }));
+  const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  assert.equal(first.snapshot.vehicles[cars[0].vin].price, 15000);
+  const aside = `<aside><div class="tile"><a href="${cars[1].path}">${cars[1].year} ${cars[1].make}</a> <span>$15,000</span></div><div class="tile"><a href="${cars[2].path}">${cars[2].year} ${cars[2].make}</a> <span>$17,000</span></div></aside>`;
+  const site = standardSite({ cars, perPage: 10 });
+  site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0]).replace('Our price $15,000', 'Our price $14,000').replace('<a href="/used-vehicles/">', aside + '<a href="/used-vehicles/">')));
+  const out = await rescanOf(site, first.snapshot, posted);
+  assert.equal(out.snapshot.vehicles[cars[0].vin].price, null, 'the scan knows the lot\'s car pages');
+  const carPages = Object.entries(first.snapshot.vehicles).map(([vin, e]) => ({ vin, url: e.url }));
+  const one = await schemaOrg.getDetails(fakeSiteSearch(site), cars[0].vin, { origin: STANDARD_ORIGIN, listUrl: STD.listUrl, url: STANDARD_ORIGIN + cars[0].path, carPages });
+  assert.equal(schemaOrg.normalize(one.record).price, null, 'post time, with the last scan\'s car pages');
+  // the car's own price is still read there when no other car shows the old one
+  site.set(STANDARD_ORIGIN + cars[0].path, htmlAnswer(standardCarPage(cars[0]).replace('<a href="/used-vehicles/">', aside.replace('$15,000', '$15,500') + '<a href="/used-vehicles/">')));
+  const fine = await schemaOrg.getDetails(fakeSiteSearch(site), cars[0].vin, { origin: STANDARD_ORIGIN, listUrl: STD.listUrl, url: STANDARD_ORIGIN + cars[0].path, carPages });
+  assert.equal(schemaOrg.normalize(fine.record).price, 15000);
+});
+
 test('a website read from its pages: a car\'s own price stays its own when its price box also links to a model search, another address of the same car, or a page of its own', async () => {
   const cars = standardCars(4);
   const c = cars[0];
@@ -763,6 +798,24 @@ test('a website read from its pages: a car\'s own price stays its own when its p
     assert.equal(v.price, c.price, `scan: ${name}`);
     assert.equal(v.mileage, c.miles, `scan: ${name}`);
     // and at post time, from the car's page alone
+    const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
+    assert.equal(schemaOrg.normalize(one.record).price, c.price, `post time: ${name}`);
+  }
+});
+
+test('a website read from its pages: on a lot whose car addresses carry no VIN, a car\'s own price stays its own when its page links to a search for its own model', async () => {
+  const cars = vinLessCars(4);
+  const c = cars[0];
+  const see = `<a href="${`/used-vehicles/${c.year}-${c.make}-${c.model}/`.toLowerCase()}">See all ${c.year} ${c.make} ${c.model}</a>`;
+  const layouts = {
+    'in its price box': standardCarPage(c).replace(/<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, `<section class="info"><p>Our price $1</p><p>$2</p>${see}</section>`),
+    'beside its price box, its title in a bar of its own': standardCarPage(c).replace(/(<h1>[^<]*<\/h1>)<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, `<div class="bar">$1</div><div class="main"><div class="price-box"><p>Our price $2</p><p>$3</p><a href="/contact-us/">Check availability</a></div><div class="specs"><p>Automatic</p>${see}</div></div>`),
+  };
+  for (const [name, html] of Object.entries(layouts)) {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STANDARD_ORIGIN + c.path, htmlAnswer(html));
+    const out = await rescanOf(site, null);
+    assert.equal(out.vehicles.find((x) => x.vin === c.vin).price, c.price, `scan: ${name}`);
     const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
     assert.equal(schemaOrg.normalize(one.record).price, c.price, `post time: ${name}`);
   }

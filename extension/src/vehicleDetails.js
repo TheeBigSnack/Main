@@ -17,7 +17,7 @@
 
 import { probeTab, searchViaTab, detectAdapter } from './scanRunner.js';
 import { adapterById, adapterForService } from '../adapters/index.js';
-import { SITES_KEY } from './storageKeys.js';
+import { SITES_KEY, siteKeys } from './storageKeys.js';
 import { assessVehicle, DECISION } from './classify.js';
 import { siteReadOrigins } from './panelList.js';
 import { hostList } from './photoHosts.js';
@@ -61,7 +61,23 @@ const tabOrigin = (tab) => {
   }
 };
 
-const withUrl = (adapter, service, url) => ({ ...adapter.scanOptions(service), ...(typeof url === 'string' && url ? { url } : {}) });
+const withUrl = (adapter, service, url, carPages = []) => ({ ...adapter.scanOptions(service), ...(typeof url === 'string' && url ? { url } : {}), ...(carPages.length ? { carPages } : {}) });
+
+// The car pages the last scan of this website kept ([{ vin, url }], from its
+// snapshot), for an adapter that cuts a car's page into cards by car (the
+// standard-data reader): another car's tile on the page is then known for
+// one at post time as it is in a scan. None when the snapshot can't be read.
+async function lastScanPages(origin) {
+  if (!origin) return [];
+  try {
+    const key = siteKeys(origin).snapshot;
+    const snap = (await chrome.storage.local.get(key))[key];
+    const vehicles = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles : {};
+    return Object.entries(vehicles).filter(([, e]) => e && typeof e.url === 'string' && e.url).map(([vin, e]) => ({ vin, url: e.url }));
+  } catch (e) {
+    return [];
+  }
+}
 
 // `url` is the car's page as the last scan kept it (the snapshot entry's
 // url): an adapter that reads the car from its own page starts there; one
@@ -102,7 +118,8 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   // inventory list to find) comes from the service the last scan of this
   // website stored, when the same adapter read it; what the probe did see wins.
   const { service, stored } = await withStoredService(probe, adapter);
-  let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url));
+  const carPages = await lastScanPages(origin || (probe.site && probe.site.origin));
+  let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url, carPages));
   // A page of the website can have loaded another list than the one the
   // last scan read (the new cars, a search filtered for a customer), and the
   // probe saw that one. A car missing from it, or from the part of it the
@@ -111,7 +128,7 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   // reads the car once more the way the last scan read the website, and
   // that answer is the one that counts.
   if ((r.notFound || r.incomplete) && stored && differentRead(adapter, service, stored)) {
-    r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url));
+    r = await readOne(adapter, searchViaTab(tabId, adapter, stored), wanted, withUrl(adapter, stored, url, carPages));
   }
   return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
 }
@@ -176,7 +193,7 @@ export async function fetchVehicleDetailsDirect(origin, info, vin, { url = null,
       message: `To re-check this car on ${host} from here, Chrome has to let Lot Current read ${hostList(origins) || 'the website'} (the same permission automatic rescans use). Click Allow reading ${host}, or open the website's used inventory page and click Post in the popup.`,
     };
   }
-  const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url));
+  const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url, await lastScanPages(origin)));
   if (!r.ok && !r.notFound) return { ...r, message: `${sentence(r.message)} If the website keeps turning Lot Current away, open its used inventory page and click Post in the popup.` };
   return r.ok ? { ...r, site: info.site || { origin, name: info.name || host }, via: 'direct' } : r;
 }
