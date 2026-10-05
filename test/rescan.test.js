@@ -8,7 +8,7 @@ import { assessVehicle } from '../extension/src/classify.js';
 import * as rescan from '../extension/src/rescan.js';
 import { readFileSync } from 'node:fs';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
-import { scanWithSearch } from '../extension/src/scanRunner.js';
+import { scanWithSearch, confirmOrder } from '../extension/src/scanRunner.js';
 import { withDefaults } from '../extension/src/settings.js';
 
 const VIN = {
@@ -535,6 +535,40 @@ test('a website read from its pages: one posted car whose page keeps failing nev
       }
     }
   }
+});
+
+test('confirmOrder: the cars the last check left unchecked go last, the ones it never got to before the pages that failed', () => {
+  assert.deepEqual(confirmOrder(['A', 'B', 'C', 'D', 'E'], { C: 'its page gave HTTP 500', A: 'its page gave HTTP 500', E: 'not checked this time' }), ['B', 'D', 'E', 'A', 'C']);
+  assert.deepEqual(confirmOrder(['A', 'B'], undefined), ['A', 'B'], 'nothing left unchecked: the order stands');
+  assert.deepEqual(confirmOrder(['a', 'B'], { A: 'x' }), ['B', 'a'], 'VINs in any case');
+});
+
+test('a website read from its pages: posted cars whose pages keep failing are checked after the others, so a sold car behind them is taken down', async () => {
+  const cars = standardCars(10);
+  const broken = cars.slice(0, 5); // posted first, their pages fail on every scan
+  const sold = cars[5];
+  let posted = {};
+  for (const c of [...broken, sold]) posted = markPosted(posted, { vin: c.vin, name: 'posted car', price: c.price });
+  const day0 = await rescanOf(standardSite({ cars }), null, posted);
+  const site = () => {
+    const m = standardSite({ cars: cars.slice(6) });
+    for (const c of broken) m.set(STANDARD_ORIGIN + c.path, httpError(500));
+    m.set(STANDARD_ORIGIN + sold.path, httpError(404));
+    return m;
+  };
+  // day 1: the failing pages come first and stop the check before the sold car's page
+  const day1 = await rescanOf(site(), day0.snapshot, posted);
+  assert.deepEqual(day1.diff.takeDown, []);
+  assert.match(day1.res.confirm.unchecked[sold.vin], /not checked this time/);
+  assert.deepEqual(Object.keys(day1.snapshot.unchecked).sort(), [...broken, sold].map((c) => c.vin).sort(), 'the snapshot keeps the cars left unchecked');
+  // day 2: those go last, the one never checked first among them, and the sold car is found gone
+  const seen = [];
+  const spy = { ...schemaOrg, scan: (search, options) => { seen.push(options); return schemaOrg.scan(search, options); } };
+  const day2 = await scanWithSearch({ adapter: spy, search: fakeSiteSearch(site()), site: STD_SITE, settings: withDefaults({}, STD_SITE), prevSnapshot: day1.snapshot, posted, options: schemaOrg.scanOptions(STD) });
+  assert.equal(seen[0].confirmVins[seen[0].confirmVins.length - Object.keys(day1.snapshot.unchecked).length], sold.vin, 'the car the last check never reached comes first among those it left');
+  assert.deepEqual(seen[0].confirmVins.slice(-3), broken.slice(0, 3).map((c) => c.vin).reverse(), 'the pages that failed first come last');
+  assert.deepEqual(day2.diff.takeDown.map((t) => [t.vin, t.why]), [[sold.vin, 'gone']]);
+  assert.equal(day2.snapshot.unchecked[sold.vin], undefined, 'checked now: no longer left');
 });
 
 // A list that names each car by its address and VIN only, as many do: the

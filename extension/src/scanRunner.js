@@ -59,7 +59,7 @@ export function siteForSnapshot(site) {
  */
 export async function scanWithSearch({ adapter, search, site, settings, prevSnapshot = null, posted = {}, options = null, boilerplate: savedBoilerplate = [] }) {
   const last = (prevSnapshot && prevSnapshot.vehicles) || {};
-  const confirmVins = [...new Set([...Object.keys(last), ...Object.keys(posted || {})])];
+  const confirmVins = confirmOrder([...new Set([...Object.keys(last), ...Object.keys(posted || {})])], prevSnapshot && prevSnapshot.unchecked);
   // Where each car was last seen, for an adapter that checks a missing car
   // at its own page; the last read and the posted list, for one that reads
   // only what may have changed. An adapter that needs none of it ignores it.
@@ -112,6 +112,24 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   return { ok: true, res, vehicles, assessments, snapshot, diff, boilerplate, photoOrigins, carry };
 }
 
+// The cars a scan checks when they are missing, in the order it is to try
+// them: those the last scan's check left unchecked (`unchecked`, the last
+// snapshot's: their own page failed, or the check stopped before them after
+// pages failed in a row) go last, so a few pages that keep failing never hold
+// back the other cars' sold check scan after scan, whatever the adapter;
+// among those, the reverse of the order the last scan gave them, so the
+// ones it never got to come before the pages that failed.
+export function confirmOrder(vins, unchecked) {
+  const list = Array.isArray(vins) ? vins : [];
+  const left = unchecked && typeof unchecked === 'object' ? Object.keys(unchecked).map((v) => v.toUpperCase()) : [];
+  if (!left.length) return list;
+  const rank = new Map(left.map((vin, n) => [vin, n]));
+  const at = (vin) => rank.get(String(vin || '').toUpperCase());
+  const first = list.filter((vin) => at(vin) === undefined);
+  const last = list.filter((vin) => at(vin) !== undefined).sort((a, b) => at(b) - at(a));
+  return [...first, ...last];
+}
+
 // The snapshot a scan leaves for the next one. Four things come over from
 // the last one. When Lot Current first saw each car (firstSeenAt, rescan.js:
 // the last entry's, this scan's time for a car that was not in the last
@@ -129,7 +147,9 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
 // car at its own page can check a posted car again next time, even after
 // the car has left the lot's list; with it, when Lot Current first saw that
 // car (missingSeen), so a car that comes straight back is not called a
-// first sighting (rescan.js firstSeenAt).
+// first sighting (rescan.js firstSeenAt). It also keeps the cars this scan's
+// check left unchecked, with why (unchecked), so the next scan checks them
+// last (confirmOrder).
 function snapshotOf({ site, res, vehicles, assessments, carry }) {
   const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments, previous: carry.previous || null });
   const readNow = new Set(Array.isArray(res.pagesRead) ? res.pagesRead : []);
@@ -152,6 +172,10 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
   }
   if (Object.keys(missingPages).length) snapshot.missingPages = missingPages;
   if (Object.keys(missingSeen).length) snapshot.missingSeen = missingSeen;
+  const unchecked = res.confirm && res.confirm.unchecked && typeof res.confirm.unchecked === 'object' ? res.confirm.unchecked : {};
+  const left = {};
+  for (const [vin, why] of Object.entries(unchecked)) if (!snapshot.vehicles[vin]) left[vin] = typeof why === 'string' ? why.slice(0, 200) : '';
+  if (Object.keys(left).length) snapshot.unchecked = left;
   return snapshot;
 }
 
