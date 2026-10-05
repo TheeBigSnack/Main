@@ -1153,6 +1153,18 @@ test('texts about the daily cap say each salesperson enters the dealership\'s nu
       }
     }
   }
+  // review: the posting rules (shown in the product from src/postingRules.js) said "The dealership sets how many
+  // posts a day", and the subscription agreement "the daily cap it sets for its staff", with no word of who enters it
+  const legal = readdirSync(new URL('../legal/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../legal/${f}`);
+  for (const rel of [...legal, '../extension/src/postingRules.js']) {
+    for (const line of read(rel).split('\n').filter((l) => /daily (post )?cap|posts a day|posts per day/i.test(l))) {
+      if (/\b(dealership|dealer|manager|it)( can)? (sets?|changes?|controls?)\b/i.test(line) && /\bcap\b|posts a day/i.test(line)) {
+        assert.match(line, /Settings/, `${rel}: "${line.trim().slice(0, 120)}" says the dealership sets the cap without saying each salesperson enters it in Settings`);
+      }
+    }
+  }
+  assert.match(read('../legal/posting-rules.md'), /The dealership chooses how many posts a day each salesperson may make \(10 by default\), and you enter that number in Settings\./);
+  assert.match(read('../legal/dealer-subscription-agreement.md'), /the daily cap it chooses for its staff, which each User enters in the extension's Settings/);
   const help = doc('help.md');
   const capSection = help.slice(help.indexOf('## The daily cap'), help.indexOf('\n## ', help.indexOf('## The daily cap') + 5));
   assert.match(capSection, /each salesperson enters it in their own \*\*Settings\*\*/, 'the help doc does not say each salesperson enters the cap in their own Settings');
