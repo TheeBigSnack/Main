@@ -149,11 +149,31 @@ export function draftsToday(drafts, { posted = {}, log = [], now = new Date() } 
 // up today decides whether it is one of today's posts, and only the
 // salesperson knows, so the popup asks: "Posted today" or "Before today"
 // (`listedBefore`, left out of postsToday above, and out of the sync
-// function's count and the manager's posted this week). A form Lot Current
-// filled and the person saved as a Facebook draft today went up today at
-// the earliest: there is nothing to ask, it is today's.
-export function askWhenListed(draft, now = new Date()) {
-  return !(draft && typeof draft === 'object' && typeof draft.savedAt === 'string' && sameDay(draft.savedAt, now));
+// function's count and the manager's posted this week). Nothing is asked
+// for a car Lot Current has a record of today, since the listing went up
+// today at the earliest and a "Before today" would take it off the cap:
+//   - a form it filled and the person saved as a Facebook draft today
+//     (`draft`, drafts:<origin>);
+//   - a car on today's log (`options.log`): posted or marked posted today,
+//     unmarked or taken down since;
+//   - a form it filled for the car today and the person published without
+//     the side panel recording it: the panel closed before "It's posted",
+//     or the car marked here while its form is open. The post under way
+//     (`options.flow`, postFlow:<origin>: this car's, its form filled, the
+//     car read today) or a post attempt of the Numbers tab (`options.pilot`,
+//     pilot:<origin> posts: this car's form filled today, filledAt) says so.
+// `options.vin` names the car; without it only the draft is looked at.
+export function askWhenListed(draft, now = new Date(), options = undefined) {
+  if (draft && typeof draft === 'object' && typeof draft.savedAt === 'string' && sameDay(draft.savedAt, now)) return false;
+  const { vin = '', log = [], flow = null, pilot = null } = options && typeof options === 'object' ? options : {};
+  const v = vinKey(vin);
+  if (!v) return true;
+  const mine = (x) => vinKey(x) === v;
+  if (entries(log).some((e) => mine(e.vin) && sameDay(e.at, now))) return false;
+  const f = flow && typeof flow === 'object' ? flow : null;
+  if (f && mine(f.vin) && f.fill && typeof f.readAt === 'string' && sameDay(f.readAt, now)) return false;
+  const attempts = pilot && typeof pilot === 'object' && Array.isArray(pilot.posts) ? pilot.posts : [];
+  return !attempts.some((a) => a && typeof a === 'object' && mine(a.vin) && typeof a.filledAt === 'string' && sameDay(a.filledAt, now));
 }
 
 // The day's standing: the larger of two counts of this person's posts

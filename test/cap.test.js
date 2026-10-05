@@ -7,6 +7,7 @@ import { draftRecord } from '../extension/src/drafts.js';
 import { mergeRegistry, syncPayload } from '../extension/src/sync.js';
 import { markPosted, markTakenDown } from '../extension/src/rescan.js';
 import { noteTakenDown } from '../extension/src/takenDown.js';
+import { beginPost, notePostStep, endPost } from '../extension/src/pilot.js';
 
 const U1 = '00000000-0000-4000-8000-000000000001';
 const U2 = '00000000-0000-4000-8000-000000000002';
@@ -360,9 +361,47 @@ test('Mark posted asks when the listing went up, unless a draft saved today answ
   // the popup offers the choice and records the flag, and keeps such a listing off the day's log
   const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
   const markCase = popup.slice(popup.indexOf("case 'post':\n"), popup.indexOf("case 'openPost':"));
-  assert.match(markCase, /askWhenListed\(draft\)/);
+  assert.match(markCase, /askWhenListed\(draft, new Date\(\), \{ vin, log: state\.postLog, flow: await savedFlow\(\), pilot: state\.pilot \}\)/);
   assert.match(markCase, /before \? \{ listedBefore: true \} : \{\}/);
   assert.match(markCase, /if \(!before\) await update\('postLog'/);
   assert.match(popup, /data-action="markToday"[^>]*>Today<\/button>/);
   assert.match(popup, /data-action="markBefore"[^>]*>Before today<\/button>/);
+});
+
+// "Before today" takes a car off the day's cap. A car Lot Current has a
+// record of today went up today at the earliest, so nothing is asked: one
+// on today's log (posted or marked today, unmarked or taken down since), or
+// one whose form it filled today and the side panel never recorded (the
+// panel closed before "It's posted", or the car marked in the popup while
+// its form is open). Before, only a draft saved today stopped the question.
+test('Mark posted does not ask for a car on today\'s log or one whose form Lot Current filled today', () => {
+  const yesterday = new Date(2026, 8, 25, 18, 0).toISOString();
+  const ask = (options) => askWhenListed(null, now, { vin: VIN_A, ...options });
+  assert.equal(ask({}), true, 'no record: the person is asked');
+  assert.equal(askWhenListed(null, now, { log: logPost([], VIN_A, today(1)) }), true, 'no VIN: only the draft is looked at');
+  // today's log
+  assert.equal(ask({ log: logPost([], VIN_A, today(1)) }), false, 'posted or marked today, unmarked since');
+  assert.equal(ask({ log: [{ vin: VIN_A.toLowerCase(), at: today(1) }] }), false, 'the VIN in any case');
+  assert.equal(ask({ log: [{ vin: VIN_A, at: yesterday }] }), true, 'yesterday\'s log says nothing about today');
+  assert.equal(ask({ log: logPost([], VIN_B, today(1)) }), true, 'another car');
+  // the post under way in the side panel: this car's form filled, the car read today
+  const flow = { vin: VIN_A, step: 'publish', readAt: today(2), fill: { filled: [{ key: 'price' }], partial: [], blocked: [] } };
+  assert.equal(ask({ flow }), false, 'its form is open, filled today');
+  assert.equal(ask({ flow: { ...flow, vin: VIN_B } }), true, 'another car\'s post');
+  assert.equal(ask({ flow: { ...flow, fill: null, step: 'review' } }), true, 'the form was never filled');
+  assert.equal(ask({ flow: { ...flow, readAt: yesterday } }), true, 'a post from yesterday');
+  // a post attempt on the Numbers tab: this car's form filled today, the panel closed before "It's posted"
+  let pilot = beginPost(null, { vin: VIN_A, name: 'A', at: today(3) });
+  assert.equal(ask({ pilot }), true, 'picked up but no form filled');
+  assert.equal(ask({ pilot: notePostStep(pilot, VIN_A, 'formOpenedAt', today(4)) }), true, 'a dry run opens the form and fills nothing');
+  pilot = endPost(notePostStep(pilot, VIN_A, 'filledAt', today(5)), VIN_A, 'abandoned', { at: today(6) });
+  assert.equal(ask({ pilot }), false, 'filled today, then the panel was closed');
+  assert.equal(askWhenListed(null, now, { vin: VIN_B, pilot }), true, 'another car');
+  const old = notePostStep(beginPost(null, { vin: VIN_A, at: yesterday }), VIN_A, 'filledAt', yesterday);
+  assert.equal(ask({ pilot: old }), true, 'filled yesterday: it may have gone up yesterday');
+  // anything that is not a record is ignored
+  for (const bad of [{ log: 'x' }, { flow: 'x' }, { pilot: { posts: 'x' } }, { pilot: { posts: [null, 1] } }]) assert.equal(ask(bad), true);
+  // the help says when nothing is asked
+  const help = readFileSync(new URL('../docs/help.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(help, /Nothing is asked for a car Lot Current has a record of from today, and it counts as today's post: a form it filled today that you saved as a Facebook draft, or published without the side panel recording it \(the panel closed before \*\*It's posted\*\*, or the car marked here while its form is open\), or a car recorded as posted today and unmarked or taken down since\./);
 });

@@ -8,7 +8,7 @@ import { fixtures, raw, vehicle, sampleVin, MY_STORE } from './helpers.js';
 import { PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
 import { POSTING_RULES } from '../extension/src/postingRules.js';
-import { noteFlags, resolveFlag, beginPost, endPost, noteFill } from '../extension/src/pilot.js';
+import { noteFlags, resolveFlag, beginPost, endPost, noteFill, notePostStep } from '../extension/src/pilot.js';
 
 const k = siteKeys(POPUP_ORIGIN);
 
@@ -594,7 +594,9 @@ test('signed in, the popup\'s Rescan, Mark posted, unmarking, Taken down and Upd
     assert.equal(p.local[k.posted][ram.vin].price, ram.price - 500);
     await step('taken down', () => p.click('takenDown', { vin: ram.vin }), 4);
     assert.equal(p.local[k.posted][ram.vin], undefined, 'taken down');
-    await markToday();
+    // marked again: today's log has the car, so nothing is asked (src/cap.js askWhenListed)
+    await p.click('post', { vin: ram.vin });
+    assert.ok(p.local[k.posted][ram.vin], 'marked posted again');
     await step('unmarked', () => p.click('unpost', { vin: ram.vin }), 6);
     await new Promise((r) => setTimeout(r, 30)); // nothing more comes later
     return { steps, syncs: syncs() };
@@ -606,4 +608,39 @@ test('signed in, the popup\'s Rescan, Mark posted, unmarking, Taken down and Upd
 
   const signedOut = await run({ [k.settings]: { ...MY_STORE } }, { expect: false });
   assert.deepEqual(signedOut.syncs, [], 'signed out: nothing to sync with');
+});
+
+// A car whose form Lot Current filled today went up today at the earliest:
+// Mark posted records it as one of today's posts without asking, so a
+// "Before today" can't take it off the cap. Before, the question came for
+// any car without a draft saved today.
+test('Mark posted records a car whose form the side panel filled today as today\'s post, without asking', async () => {
+  const car = vehicle('usedNormal');
+  const now = new Date();
+  const filled = notePostStep(beginPost(null, { vin: car.vin, name: car.name, salesperson: 'Sam', at: new Date(now.getTime() - 60e3).toISOString() }), car.vin, 'filledAt', now.toISOString());
+  const cases = {
+    // the panel was closed before "It's posted": the attempt on the Numbers tab
+    'panel closed': { [k.pilot]: endPost(filled, car.vin, 'abandoned') },
+    // marked here while the form is open: the post under way in the side panel
+    'form open': { [k.flow]: { vin: car.vin, step: 'publish', readAt: now.toISOString(), fill: { filled: [{ key: 'price' }], partial: [], blocked: [] } } },
+  };
+  for (const [name, saved] of Object.entries(cases)) {
+    const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, ...saved } });
+    await p.scan();
+    assert.equal(p.status(), '', 'the scan went through');
+    await p.tab('ready');
+    await p.click('post', { vin: car.vin });
+    assert.doesNotMatch(p.panel(), /data-action="markBefore"/, `${name}: nothing is asked`);
+    const entry = p.local[k.posted][car.vin];
+    assert.ok(entry && entry.listedBefore === undefined, `${name}: recorded as posted today`);
+    assert.deepEqual(p.local[k.postLog].map((e) => e.vin), [car.vin], `${name}: on today's log, so the cap counts it`);
+    assert.match(p.status(), /^Recorded as posted today: Lot Current filled the form for .+ today or recorded it earlier today, so it counts toward today's posts\.$/);
+  }
+  // a car with no record of today is asked about, as before
+  const q = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.pilot]: notePostStep(beginPost(null, { vin: car.vin, at: '2026-09-01T09:00:00.000Z' }), car.vin, 'filledAt', '2026-09-01T09:01:00.000Z') } });
+  await q.scan();
+  await q.tab('ready');
+  await q.click('post', { vin: car.vin });
+  assert.match(q.panel(), /data-action="markBefore"/, 'filled on another day: the question is asked');
+  assert.equal(q.local[k.posted], undefined, 'nothing recorded yet');
 });

@@ -1101,6 +1101,19 @@ async function keepTakenDown(vin) {
   return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed, listedBefore: entry.listedBefore === true }));
 }
 
+// The post under way in the side panel for this website (postFlow:<origin>),
+// read when Mark posted is clicked: a form Lot Current filled for the car
+// today makes its listing one of today's posts (src/cap.js askWhenListed).
+// Null when there is none or it can't be read.
+async function savedFlow() {
+  try {
+    const key = siteKeys(state.origin).flow;
+    return (await chrome.storage.local.get(key))[key] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Pilot numbers: an item the person ticked off by hand, or a car unmarked.
 const notePilot = (change) => updatePilot(state.origin, change).then((p) => { state.pilot = p; }).catch(() => null);
 
@@ -1129,8 +1142,9 @@ async function onPanelClick(ev) {
       if (!entry) return;
       // a listing published from a draft shows the draft's price: that is what is recorded (src/drafts.js)
       const draft = state.drafts[vin] || null;
-      // Mark posted first asks whether the listing went up today, unless a draft saved today says so
-      if (btn.dataset.action === 'post' && askWhenListed(draft)) {
+      // Mark posted first asks whether the listing went up today, unless a draft saved today, today's log,
+      // or a form Lot Current filled for the car today says so (src/cap.js askWhenListed)
+      if (btn.dataset.action === 'post' && askWhenListed(draft, new Date(), { vin, log: state.postLog, flow: await savedFlow(), pilot: state.pilot })) {
         state.markAsk = vin;
         render();
         const today = document.querySelector(`button[data-action="markToday"][data-vin="${CSS.escape(vin)}"]`);
@@ -1146,7 +1160,8 @@ async function onPanelClick(ev) {
       // the day's log for the cap, which a take-down or an unmark leaves alone; a car unmarked today and marked again counts once.
       // A listing made before today is not one of today's posts, so it stays off the log.
       if (!before) await update('postLog', (log) => logPost(log, vin, at, undefined, { alreadyLive: true }));
-      else setStatus(`Recorded as listed before today: rescans watch ${entry.name || 'it'}, and it doesn't count toward today's posts.`);
+      if (btn.dataset.action === 'post') setStatus(`Recorded as posted today: Lot Current filled the form for ${entry.name || 'this car'} today or recorded it earlier today, so it counts toward today's posts.`);
+      else if (before) setStatus(`Recorded as listed before today: rescans watch ${entry.name || 'it'}, and it doesn't count toward today's posts.`);
       if (draft) {
         const gap = draftPriceUpdate(draft, entry, basis);
         if (gap) {
