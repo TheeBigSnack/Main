@@ -287,11 +287,19 @@ test('the dry run lists only the vehicle form\'s own controls, never Facebook\'s
   assert.equal(apart.found.length, 3);
   assert.deepEqual(apart.controls, []);
   // another file input earlier on the page (a chat's, outside any landmark) and the whole app in one wrapper: the form's part is still the form's
-  const chat = { tag: 'div', attrs: { id: 'chatTab' }, children: [{ tag: 'input', attrs: { type: 'file', 'aria-label': 'Attach a file to the chat with Sam Example' } }, menu('Chat settings')] };
-  const app = probe([{ tag: 'div', attrs: { id: 'app' }, children: [chat, topBar, formPart([...fields]), menu('Create new listing menu'), contacts] }]);
+  // and the text next to the photo box is the form's, never the chat's (any case)
+  const chat = { tag: 'div', attrs: { id: 'chatTab' }, children: [{ tag: 'p', text: 'Sam Example: is the truck still available? my number is 555-0100' }, { tag: 'input', attrs: { type: 'file', 'aria-label': 'Attach a file to the chat with Sam Example' } }, menu('Chat settings')] };
+  const photos = { tag: 'p', text: 'Photos: add up to 20' };
+  const app = probe([{ tag: 'div', attrs: { id: 'app' }, children: [chat, topBar, formPart([photos, ...fields]), menu('Create new listing menu'), contacts] }]);
   assert.equal(app.controlsFrom, 'the vehicle form');
   assert.deepEqual(app.controls.map((c) => c.name), ['year', 'make', 'price', 'description', 'fuel type']);
-  for (const outside of ['sam example', 'chat settings', 'create new listing menu']) assert.ok(!JSON.stringify(app).includes(outside), `${outside} is not in the report`);
+  assert.match(app.photoText, /^Photos: add up to 20\b/, 'the text next to the form\'s photo box');
+  for (const outside of ['sam example', 'chat settings', 'create new listing menu', 'still available', '555-0100']) assert.ok(!JSON.stringify(app).toLowerCase().includes(outside), `${outside} is not in the report`);
+  // with no field found, the photo box can't be placed among several file inputs: no text next to any
+  const unplaced = probe([{ tag: 'div', attrs: { id: 'app' }, children: [chat, topBar, formPart([photos, box('Kilometres'), { tag: 'input', attrs: { type: 'file' } }])] }]);
+  assert.deepEqual([unplaced.found.length, unplaced.fileInputs, unplaced.photoText], [0, 2, '']);
+  // a page's one and only file input still gives its text, field found or not
+  assert.match(probe([formPart([photos, box('Kilometres'), { tag: 'input', attrs: { type: 'file' } }])]).photoText, /^Photos: add up to 20\b/);
 });
 
 // What these source checks prove: the usual ways to click, submit, press a

@@ -708,9 +708,12 @@ export function probeFormInPage(map) {
       if (m && Number(m[1]) > 0) { photoLimit = { value: Number(m[1]), verified: true }; break; }
     } catch (e) { /* next pattern */ }
   }
-  // the words near the photo control, so the limit wording can be added to the map
+  // the words near the form's photo box (the one nearest the fields found;
+  // with no field found, only a page's one and only file input), never
+  // another file input's (a chat's), so the limit wording can be added to the map
   const photoText = (() => {
-    const input = document.querySelector(map.fileInput);
+    const all = map.fileInput ? document.querySelectorAll(map.fileInput) : [];
+    const input = foundEls.length ? photoBox && photoBox.f : all.length === 1 ? all[0] : null;
     const around = input && (input.closest('section, form, div') || input.parentElement);
     return around ? (around.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   })();
