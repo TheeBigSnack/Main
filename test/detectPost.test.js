@@ -97,12 +97,27 @@ test('the form map, its mock and the README say what the map was checked against
   assert.match(header, /not a guarantee/i);
   const readme = read('../README.md');
   assert.doesNotMatch(readme, /form map needs a live check/i, 'the README still says the form map was never checked live');
-  // a field the mock calls off limits is not one the map fills
+  // a field the mock calls off limits is not one the map fills. The header
+  // names them in brackets, either "never touch (a, b)" or "decoys of ...
+  // (a, b) ... Nothing may ever touch them"; a header the check cannot read
+  // fails, so it never passes by finding nothing.
+  const offLimits = (text) => [
+    ...text.matchAll(/never (?:touch|fill)[^.]*?\(([^)]*)\)/gi),
+    ...text.matchAll(/decoys of [^(]*\(([^)]*)\)(?=[^]*?\bnothing may ever (?:touch|fill) them\b)/gi),
+  ].flatMap((m) => m[1].split(/,|\band\b/).map((w) => w.trim().toLowerCase()).filter(Boolean));
+  const filled = FORM_MAP.fields.map((f) => f.label.toLowerCase());
+  const fillsOffLimits = (text) => offLimits(text).filter((name) => filled.some((label) => label.includes(name)));
   const mock = read('./e2e/mock-marketplace.mjs');
   const mockHeader = prose(mock.slice(0, mock.indexOf('import ')));
-  const fenced = [...mockHeader.matchAll(/never (?:touch|fill)[^.]*?\(([^)]*)\)/gi)].flatMap((m) => m[1].split(/,|\band\b/).map((w) => w.trim().toLowerCase()).filter(Boolean));
-  const filled = FORM_MAP.fields.map((f) => f.label.toLowerCase());
-  for (const name of fenced) assert.ok(!filled.some((label) => label.includes(name)), `the mock's header calls "${name}" off limits, but the map fills it`);
+  const fenced = offLimits(mockHeader);
+  assert.ok(fenced.length > 0, "the check reads no off-limits list from the mock's header: match its wording");
+  const decoys = JSON.parse(mock.match(/^const DECOYS = (\[[^\]]*\]);$/m)[1].replace(/'/g, '"'));
+  assert.deepEqual(fenced, decoys.map((d) => d.toLowerCase()), "the mock's header names the decoys it draws");
+  assert.deepEqual(fillsOffLimits(mockHeader), [], "the mock's header calls a field off limits, but the map fills it");
+  // the check itself: the old header's wording is still read and caught, and nothing found fails
+  assert.deepEqual(fillsOffLimits('Condition and title status are fields the extension must never touch (condition, title status).'), ['condition', 'title status']);
+  assert.deepEqual(offLimits('Beside Publish sit decoys of the other controls (Next, Mark as sold). Nothing may ever touch them.'), ['next', 'mark as sold']);
+  assert.deepEqual(offLimits('Beside Publish sit decoys of the other controls (Next, Mark as sold).'), [], 'a list nothing calls off limits is not read');
 });
 
 test('a listing address counts as coming from the form only when the tab moved to it straight from the create page', async () => {
