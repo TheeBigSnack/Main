@@ -11,7 +11,7 @@
 // closed and reopened; the sign-in session is not part of it (src/account.js
 // keeps it).
 
-import { performScan, rememberSite } from './src/scanRunner.js';
+import { performScan, rememberSite, keepSeenBasis } from './src/scanRunner.js';
 import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
@@ -114,15 +114,16 @@ export const TAB_GONE = "Couldn't reach the dealership tab. Open the used invent
 
 // Listings posted before the price basis was kept on each one stay on the
 // basis their price is on in the last scan, else the one in force until now,
-// when set-up changes it: the new setting is for new posts, never a website
-// price change (src/rescan.js withPostedBasis). Stamped before the new basis
+// when set-up changes it (one that got its price after that scan is left
+// for the next scan to read): the new setting is for new posts, never a
+// website price change (src/rescan.js withPostedBasis). Stamped before the new basis
 // is saved or read with, so no scan reads them under the new one.
 async function keepPostedBasis(k, stored, nextBasis) {
   if (!stored) return;
   const before = withDefaults(stored).basis;
   if (before === (nextBasis === 'beforeFees' ? 'beforeFees' : 'website')) return;
   const snapshot = (await chrome.storage.local.get(k.snapshot))[k.snapshot];
-  await updateKey(k.posted, (p) => withPostedBasis(p, before, snapshot && snapshot.vehicles));
+  await updateKey(k.posted, (p) => withPostedBasis(p, before, snapshot));
 }
 
 // What set-up starts from, read just before the first read of the website:
@@ -208,6 +209,7 @@ async function runScan(ctx) {
     return false;
   }
   wiz.scan = scan; // only a read that was kept counts as done
+  await keepSeenBasis(wiz.origin, data[k.snapshot] || null, r.snapshot).catch(() => null); // the price basis this read shows for a listing that has none
   await recordFlags(wiz.origin, r.diff, r.diff.takenAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   await persist();

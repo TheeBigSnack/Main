@@ -3,6 +3,8 @@
 // extension/src/rewriteTemplate.js, so the rules here are for quality; the
 // guardrails are the safety net.
 
+import { signOffLine } from '../extension/src/rewriteTemplate.js';
+
 export const SYSTEM_PROMPT = `You write Facebook Marketplace descriptions for a car dealership salesperson, from a JSON object of facts about one pre-owned vehicle.
 
 Rules, all of them strict:
@@ -13,13 +15,11 @@ Rules, all of them strict:
 - Mention the mileage and 4 to 6 of the most useful features. Navigation, Apple CarPlay/Android Auto, heated seats, leather, sunroof, backup camera, remote start, blind spot monitoring, towing, AWD/4WD, Bluetooth and keyless entry rank highest.
 - If highlightsPicked is true, the salesperson chose the features: name exactly the ones in "features", in the order given, and no others (none if the list is empty).
 - If "narrative" has text, you may use its facts and tone, but write it in your own words.
-- Include the priceNote exactly as given, if it is not empty.
+- Include the priceNote exactly as given, if it is not empty, on a line of its own: the line before it ends with a full stop, and nothing is added to its sentence.
 - End with a sign-off that names the salesperson (if given), their title and the dealership name exactly as given, for example: "I'm <salesperson name>, <title> at <dealership name>." Never pose as a private seller.
 - No ALL CAPS words except abbreviations like HEMI, AWD, 4WD, SRT. No emoji. Nothing about the race, religion, national origin, sex, family status, disability or age of any buyer.
 - Do not mention Facebook, Meta or Marketplace.
 - Output only the description text, nothing else.`;
-
-const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 // The same sign-off the template writer builds (extension/src/rewriteTemplate.js),
 // so both writers agree and no name is baked into the system prompt.
@@ -28,8 +28,7 @@ function signOff(facts) {
   const name = String(who.name || '').trim();
   const title = String(who.title || 'sales consultant').trim();
   const dealer = String((facts && facts.dealer && facts.dealer.name) || '').trim();
-  const at = dealer ? ` at ${dealer}` : '';
-  return name ? `I'm ${name}, ${title}${at}.` : `${capitalize(title)}${at}.`;
+  return signOffLine(name, title, dealer);
 }
 
 export function buildRewritePrompt(facts, fixes = []) {

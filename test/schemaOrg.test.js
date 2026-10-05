@@ -877,6 +877,53 @@ test('the gate: a schema.org car called a demo or loaner after its model year wa
   assert.equal(assessVehicle(store, {}).decision, DECISION.READY);
 });
 
+test('the gate: a demo or loaner word only the page title has is read, with the name\'s condition word kept', () => {
+  const carfax = { carfaxLinks: ['https://www.carfax.com/r?vin=2HGSAMPL8KH000101'] };
+  // the name is plain; the page title about this car says Demo
+  const plain = flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX Demo | Sample Motors' }));
+  assert.equal(plain.siteTitle, '2019 Honda Civic EX Demo | Sample Motors');
+  const a = assessVehicle(plain, {});
+  assert.equal(a.decision, DECISION.REVIEW);
+  assert.match(a.reason, /its title says "Demo"/);
+  // the name says Used and the page title says Courtesy Vehicle: both are read
+  const used = flat({ name: 'Used 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX - Courtesy Vehicle | Sample Motors' }));
+  assert.equal(used.siteTitle, 'Used 2019 Honda Civic EX - Courtesy Vehicle | Sample Motors');
+  const b = assessVehicle(used, {});
+  assert.equal(b.decision, DECISION.REVIEW);
+  assert.match(b.reason, /^Listed as pre-owned but its title says "Courtesy Vehicle"/);
+  // the page title's word is read as the car's own word, wherever it stands after the model year
+  for (const [title, word] of [
+    ['2019 Honda Civic EX Courtesy Vehicle for Sale | Sample Motors', 'Courtesy Vehicle'],
+    ['2019 Honda Civic EX Courtesy Car Special | Sample Motors', 'Courtesy Car'],
+    ['Sample Motors | 2019 Honda Civic EX Courtesy Loaner Sale', 'Courtesy Loaner'],
+    ['2019 Honda Civic EX Demo Special | Sample Motors', 'Demo'],
+  ]) {
+    for (const name of ['Used 2019 Honda Civic EX', '2019 Honda Civic EX', 'Certified Pre-Owned 2019 Honda Civic EX']) {
+      const v = flat({ name }, shown(undefined, { ...carfax, title }));
+      const r = assessVehicle(v, {});
+      assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}: ${v.siteTitle}`);
+      assert.match(r.reason, new RegExp(`its title says "${word}"`), `${name} / ${title}`);
+      if (name !== '2019 Honda Civic EX') assert.equal(v.siteTitle, `${name.replace(/ 2019 Honda Civic EX$/, '')} ${title}`, 'the name\'s condition words go before the page title');
+    }
+  }
+  // a demo, loaner or courtesy word before the page title's model year is read whatever condition word the name has
+  for (const title of ['Demo 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle: 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle - 2019 Honda Civic EX | Sample Motors', 'Sample Motors - Service Loaner 2019 Honda Civic EX']) {
+    for (const name of ['Used 2019 Honda Civic EX', '2019 Honda Civic EX', 'Certified Pre-Owned 2019 Honda Civic EX', 'New 2019 Honda Civic EX']) {
+      const v = flat({ name }, shown(undefined, { ...carfax, title }));
+      assert.equal(v.siteTitle, title, `${name} / ${title}: the page title is the title the gate reads`);
+      const r = assessVehicle(v, {});
+      assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}`);
+      assert.match(r.reason, /^Listed as pre-owned but also flagged as a demo\. Demos and loaners are usually sold as new/, `${name} / ${title}`);
+    }
+    // a name that says demo itself is kept
+    assert.equal(flat({ name: 'Demo 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title })).siteTitle, 'Demo 2019 Honda Civic EX', title);
+  }
+  // a page title about another car lends no words; a plain page title changes nothing
+  assert.equal(flat({ name: 'Used 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: 'Demo 2021 Kia Sorento LX | Sample Motors' })).siteTitle, 'Used 2019 Honda Civic EX');
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2021 Kia Sorento LX Demo | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
+});
+
 // ---------- parity with the Dealer Inspire reader ----------
 
 const DRIVE_MEMBERS = { '4WD': 'FourWheelDriveConfiguration', AWD: 'AllWheelDriveConfiguration', FWD: 'FrontWheelDriveConfiguration', RWD: 'RearWheelDriveConfiguration' };

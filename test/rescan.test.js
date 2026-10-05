@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffScans, markPosted, markPriceUpdated, markTakenDown, markLookDismissed, lookDismissed, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff, postedBasis, withPostedBasis } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, markTakenDown, markLookDismissed, lookDismissed, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff, postedBasis, withPostedBasis, withSeenBasis, listingWebsitePrice } from '../extension/src/rescan.js';
 import { noteFlags } from '../extension/src/pilot.js';
 import { scanFromStored } from '../extension/src/accountFlow.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, standardCarPage, standardListPage, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
@@ -488,6 +488,92 @@ test('a listing posted before the basis was recorded: its basis is the website p
   assert.deepEqual(moves(diffScans(s, dropped, { posted: entry(26673), confirm: confirmed(), basis: 'website' })), [{ vin: VIN.ram, from: 26673, to: 25673, change: -1000, yours: true }]);
   // a listing price that matches no website price is a real difference: compared under the setting, as before
   assert.deepEqual(moves(diffScans(s, snapshot(LOT), { posted: entry(28000), confirm: confirmed(), basis: 'beforeFees' })), [{ vin: VIN.ram, from: 28000, to: 26673, change: -1327, yours: true }]);
+});
+
+// An entry with no basis (brought by a sync from a server row that has none) is
+// read off the scans only while one basis still gives its price. Once the
+// website moves the price, nothing but the setting would be left, and a
+// listing posted at the main price would be asked for the website's drop plus
+// the doc-fee gap. The scan that reads the basis records it (withSeenBasis).
+test('a basis read off a scan is kept on the entry: a real drop never grows by the doc-fee gap on the next scan', () => {
+  const s = snapshot(LOT); // the Ram: 27,163 main, 26,673 before fees
+  const synced = { [VIN.ram]: { name: 'Ram', price: 27163, postedAt: AT } }; // posted at the main price elsewhere, no basis
+  const dropped = repriced(snapshot(LOT), VIN.ram, 26663, 26173); // the website drops $500
+  const first = diffScans(s, dropped, { posted: synced, confirm: confirmed(), basis: 'beforeFees' });
+  assert.deepEqual(moves(first), [{ vin: VIN.ram, from: 27163, to: 26663, change: -500, yours: true }]);
+  const kept = withSeenBasis(synced, s, dropped);
+  assert.deepEqual(kept[VIN.ram], { name: 'Ram', price: 27163, postedAt: AT, basis: 'website' });
+  // the next scan, the website unchanged: still the website's $500, not $990
+  assert.deepEqual(moves(diffScans(dropped, dropped, { posted: kept, confirm: confirmed(), basis: 'beforeFees' })), [{ vin: VIN.ram, from: 27163, to: 26663, change: -500, yours: true }]);
+  assert.equal(listingWebsitePrice(kept[VIN.ram], dropped.vehicles[VIN.ram], 'beforeFees'), 26663, 'My listings agrees');
+  // without it, that next scan would have nothing but the setting to go by
+  assert.deepEqual(moves(diffScans(dropped, dropped, { posted: synced, confirm: confirmed(), basis: 'beforeFees' })).map((m) => m.change), [-990]);
+  // posted at the lower second price: read and kept the same way
+  assert.equal(withSeenBasis({ [VIN.ram]: { price: 26673 } }, s, dropped)[VIN.ram].basis, 'beforeFees');
+  // read from this scan when the last one doesn't settle it (a first scan, or a car new to the list)
+  assert.equal(withSeenBasis(synced, null, s)[VIN.ram].basis, 'website');
+  // nothing to record: a basis already there, both bases giving the price, neither giving it, a car not in either scan
+  assert.equal(withSeenBasis({ [VIN.ram]: { price: 27163, basis: 'beforeFees' } }, s, s), undefined);
+  assert.equal(withSeenBasis({ X: { price: 20000 } }, { vehicles: { X: { price: 20000 } } }, { vehicles: { X: { price: 20000 } } }), undefined);
+  assert.equal(withSeenBasis({ [VIN.ram]: { price: 28000 } }, s, dropped), undefined);
+  assert.equal(withSeenBasis({ GONE: { price: 27163 } }, s, dropped), undefined);
+  assert.equal(withSeenBasis(null, s, dropped), undefined);
+  // other entries are carried over as they are
+  const both = withSeenBasis({ ...synced, OTHER: { price: 1, basis: 'website' } }, s, dropped);
+  assert.deepEqual(both.OTHER, { price: 1, basis: 'website' });
+});
+
+// A scan taken before a listing got its price (this computer's last scan,
+// when the car was posted or its price updated on another computer and came
+// by sync) shows the website as it was then. After a website price cut, the
+// price the listing was given can equal the other price on that scan: read
+// off it and kept on the entry, the cut would be asked for again on every
+// scan. Only scans taken once the listing had its price (updatedAt, else
+// postedAt) are read, by the rescan, by the scan that records the basis and
+// by a change of Price to post.
+test('a scan from before a listing got its price never decides its basis: a website cut made before the post is not asked for again', () => {
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const shows = (day, price, lower) => repriced(snapshot(LOT, MY_STORE, at(day)), VIN.ram, price, lower);
+  // this computer's last scan: $1,000 between the two prices; the website then cuts $1,000,
+  // and the car is posted on another computer at the new main price; it arrives by sync with no basis
+  const last = shows(1, 27163, 26163);
+  const synced = { [VIN.ram]: { name: 'Ram', price: 26163, postedAt: at(2) } };
+  let posted = synced;
+  let prev = last;
+  for (const day of [3, 4, 5]) {
+    const scan = shows(day, 26163, 25163);
+    assert.deepEqual(moves(diffScans(prev, scan, { posted, confirm: confirmed(), basis: 'website' })), [], `scan of day ${day}: the website made no change since the post`);
+    posted = withSeenBasis(posted, prev, scan) || posted;
+    prev = scan;
+  }
+  assert.equal(posted[VIN.ram].basis, 'website', 'read off the first scan taken after the post');
+  // the same for a listing whose price was updated on another computer after this computer's last scan
+  const updated = { [VIN.ram]: { name: 'Ram', price: 26163, postedAt: '2026-09-20T09:00:00.000Z', updatedAt: at(2) } };
+  assert.deepEqual(moves(diffScans(last, shows(3, 26163, 25163), { posted: updated, confirm: confirmed(), basis: 'website' })), []);
+  assert.equal(withSeenBasis(updated, last, shows(3, 26163, 25163))[VIN.ram].basis, 'website');
+  // a scan from before is never read, even when it is the only one that matches: nothing is recorded
+  assert.equal(withSeenBasis(synced, last, shows(3, 26663, 25663)), undefined);
+  // a change of Price to post before the next scan leaves such a listing for that scan to read
+  assert.equal(withPostedBasis(synced, 'website', last), undefined);
+  assert.deepEqual(moves(diffScans(last, shows(3, 26163, 25163), { posted: synced, confirm: confirmed(), basis: 'beforeFees' })), []);
+  // a scan taken once the listing had its price is read as before, by each of them
+  assert.equal(withPostedBasis(synced, 'beforeFees', shows(2, 26163, 25163))[VIN.ram].basis, 'website');
+  assert.equal(withPostedBasis({ [VIN.ram]: { name: 'Ram', price: 26163, postedAt: '2026-09-20T09:00:00.000Z' } }, 'website', last)[VIN.ram].basis, 'beforeFees');
+  assert.equal(withSeenBasis(synced, shows(2, 26163, 25163), shows(3, 26663, 25663))[VIN.ram].basis, 'website', 'the oldest scan since the post decides');
+});
+
+// Every place that saves a scan records the basis it read (scanRunner.js
+// keepSeenBasis): the popup's Scan, set-up's read and the background rescan.
+test('the popup, set-up and the background rescan each record the basis a scan reads', async () => {
+  for (const file of ['popup.js', 'wizard.js', 'background.js']) {
+    const src = readFileSync(new URL(`../extension/${file}`, import.meta.url), 'utf8');
+    assert.match(src, /keepSeenBasis\(/, `${file} records it`);
+  }
+  const { keepSeenBasis } = await import('../extension/src/scanRunner.js');
+  const store = { ['posted:' + STANDARD_ORIGIN]: { [VIN.ram]: { name: 'Ram', price: 27163, postedAt: AT } } };
+  const storage = { get: async (key) => ({ [key]: store[key] }), set: async (obj) => Object.assign(store, obj), lock: (name, fn) => fn() };
+  await keepSeenBasis(STANDARD_ORIGIN, snapshot(LOT), snapshot(LOT), storage);
+  assert.equal(store['posted:' + STANDARD_ORIGIN][VIN.ram].basis, 'website');
 });
 
 // My listings (popup.js viewMine), as written, with the page around it

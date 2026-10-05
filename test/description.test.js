@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitSegments, splitSentences, findBoilerplate, cleanDescription, endsAtAbbreviation, STARTS_SENTENCE, MIN_BOILERPLATE_COUNT } from '../extension/src/description.js';
+import { splitSegments, splitSentences, findBoilerplate, cleanDescription, endsAtAbbreviation, STARTS_SENTENCE, MIN_BOILERPLATE_COUNT, withoutLotWide } from '../extension/src/description.js';
 
 // Text captured from the live Waynesburg site on 2026-09-26 (the equipment
 // dump is abridged; the real one runs to 30+ items).
@@ -300,4 +300,84 @@ test('the lines are read as the page shows them: entities decoded, invisible for
 test('non-text input is handled', () => {
   assert.deepEqual(cleanDescription(undefined), []);
   assert.deepEqual(cleanDescription(42), []);
+});
+
+test('the write-up without its lot-wide text: each line the scan found is cut out wherever it stands, and a segment left empty goes', () => {
+  const lot = ['All loans are subject to bank approval.', 'We are a locally owned dealership.'];
+  assert.deepEqual(withoutLotWide('Local trade with new tires. All loans are subject to bank approval.<br>We are a locally owned dealership.', lot), ['Local trade with new tires.']);
+  // inside a segment, between other sentences, and more than once
+  assert.deepEqual(withoutLotWide('One owner. We are a locally owned dealership. Runs great. We are a locally owned dealership.', lot), ['One owner. Runs great.']);
+  // only where it stands between spaces: a line that is part of a longer word is not cut
+  assert.deepEqual(withoutLotWide('Xall loans are subject to bank approval.', ['all loans are subject to bank approval.']), ['Xall loans are subject to bank approval.']);
+  // the longest line first, so a shorter one inside it never leaves half of it behind
+  assert.deepEqual(withoutLotWide('Financing for all credit types. Runs great.', ['Financing for all credit types.', 'all credit types.']), ['Runs great.']);
+  // with no lot-wide text known, the segments as splitSegments gives them
+  assert.deepEqual(withoutLotWide('Runs great.<br>Clean inside.'), ['Runs great.', 'Clean inside.']);
+  assert.deepEqual(withoutLotWide('Runs great.', new Set(['', '  ', null])), ['Runs great.']);
+  assert.deepEqual(withoutLotWide(null, lot), []);
+});
+
+// Characters that can't be seen in an editor (zero-width spaces and joiners,
+// variation selectors, soft hyphens, non-breaking and other odd spaces) are
+// written as \u escapes in the code, so a regular expression or a table that
+// holds one can be read, and isn't changed by accident when the line is
+// edited. STARTS_SENTENCE's emoji joiners and the entity table's spaces once
+// slipped in as the characters themselves.
+test('the code writes invisible and space-like characters as \\u escapes, never as the characters', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const root = new URL('..', import.meta.url).pathname;
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(join(root, dir))) {
+      const rel = join(dir, name);
+      if (name === 'node_modules') continue;
+      if (statSync(join(root, rel)).isDirectory()) walk(rel);
+      else if (/\.(?:js|mjs|ts)$/.test(name)) files.push(rel);
+    }
+  };
+  for (const dir of ['extension', 'backend', 'supabase/functions']) walk(dir);
+  assert.ok(files.includes(join('extension', 'src', 'description.js')));
+  const hidden = /[\p{Cf}\p{Zl}\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufe00-\ufe0f]/u;
+  const found = [];
+  for (const rel of files) {
+    readFileSync(join(root, rel), 'utf8').split('\n').forEach((line, i) => {
+      const m = line.match(hidden);
+      if (m) found.push(`${rel}:${i + 1} U+${m[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
+    });
+  }
+  assert.deepEqual(found, []);
+});
+
+// A scan from before the lines were read with their entities decoded saved
+// the lot-wide lines as the website wrote them ("Tax, title &amp; tags
+// extra."), and a scan that does not read every description keeps them
+// (scanRunner.js). They are read the way the description's lines are, so
+// they still match, the disclaimer is not sent to the rewrite service, and
+// it backs no claim.
+test('lot-wide lines saved by an earlier scan with the entities as written still match the lines as they read now', async () => {
+  const { runGuardrails } = await import('../extension/src/rewriteTemplate.js');
+  const saved = 'Every vehicle comes with a warranty &amp; roadside help. Tax &amp; tags extra.';
+  const raw = `Runs great.<br>${saved}`;
+  assert.deepEqual(cleanDescription(raw, new Set([saved])), ['Runs great.']);
+  assert.deepEqual(cleanDescription(raw, [saved]), ['Runs great.'], 'a list as storage keeps it');
+  assert.deepEqual(withoutLotWide(raw, [saved]), ['Runs great.']);
+  assert.deepEqual(cleanDescription(raw, new Set(['Every vehicle comes with a warranty & roadside help. Tax & tags extra.'])), ['Runs great.'], 'as a scan saves it now');
+  assert.deepEqual(cleanDescription(`Runs great.<br>Tax &amp; tags extra.`, new Set(['Tax &amp; tags extra.'])), ['Runs great.'], 'a sentence of it too');
+  const v = { year: 2019, make: 'Ram', model: '1500', descriptionRaw: raw, features: [] };
+  const claim = runGuardrails('It comes with a warranty.', { vehicle: v, boilerplate: [saved] }).problems.filter((p) => p.code === 'unsupported-claim');
+  assert.equal(claim.length, 1, 'the lot-wide warranty line backs no claim about this car');
+});
+
+// The narrative stops before the first line left out, and the line before it
+// goes too when it may run on into it: a full stop after an abbreviation
+// ("the original Mfr.", "approx.") ends no sentence.
+test('a line that stops on an abbreviation is never sent without the line left out after it', () => {
+  const terms = 'Warranty: see the terms every car on the lot shares.';
+  assert.deepEqual(cleanDescription(`Runs great.<br>Covered by the rest of the original Mfr.<p>${terms}</p>`, new Set([terms])), ['Runs great.']);
+  assert.deepEqual(cleanDescription('Runs great.<br>Comes with approx.<br>Clean CARFAX. Except the accident in 2021.'), ['Runs great.']);
+  assert.deepEqual(cleanDescription('Runs great.<br>Tow pkg. incl.<br>Recent Arrival!'), ['Runs great.']);
+  // a line that ends a sentence still goes, a unit after a number included
+  assert.deepEqual(cleanDescription('Runs great.<br>Clean CARFAX.'), ['Runs great.']);
+  assert.deepEqual(cleanDescription('Rated 30 mpg.<br>Clean CARFAX.'), ['Rated 30 mpg.']);
 });

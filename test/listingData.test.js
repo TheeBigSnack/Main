@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { buildListingData, vehicleKind, normalizeColor, normalizeBodyStyle, normalizeTransmission, normalizeFuelType, locationQuery, locationExpect, brandedTitleSignal, STATE_NAMES, TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from '../extension/src/listingData.js';
 import { vehicle } from './helpers.js';
 
@@ -139,6 +140,87 @@ test('a branded title is caught in the usual ways a website writes it, and ordin
     assert.equal(d.fields.titleStatus, 'Clean', words);
     assert.equal(d.fields.cleanTitle, 'yes', words);
   }
+});
+
+test('a title brand or odometer line written as a label and value is read as branded; a clean or exempt value is not', () => {
+  const branded = {
+    'Title Brand: Flood': 'Title Brand: Flood',
+    'Title Type: Branded': 'Title Type: Branded',
+    'Odometer: Not Actual': 'Odometer: Not Actual',
+    'Title: Flood': 'Title: Flood',
+    'Title Brand: Hail': 'Title Brand: Hail',
+    'Title Brands: Water Damage': 'Title Brands: Water Damage',
+    'Title Brand(s): Flood': 'Title Brand(s): Flood',
+    'Title Brand - Fire': 'Title Brand - Fire',
+    'Title Status: Junk': 'Title Status: Junk',
+    'Title: Theft Recovery': 'Title: Theft Recovery',
+    'Odometer Status: Not Actual': 'Odometer Status: Not Actual',
+    'Mileage - Not Actual': 'Mileage - Not Actual',
+  };
+  for (const [words, signal] of Object.entries(branded)) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), signal, words);
+    assert.equal(brandedTitleSignal({ features: ['Backup Camera', words] }), signal, `${words} as a feature`);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle], ['', 'no'], words);
+  }
+  for (const words of ['Title: Clean', 'Title Brand: None', 'Title Brand: Not Branded', 'Title Type: Clean', 'Odometer: Actual', 'Odometer: Exempt', 'Title: In hand', 'Clean title - fire red paint', 'Clean title: hail-free, garage kept']) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle], ['Clean', 'yes'], words);
+  }
+});
+
+test('"flooded with light" or "with options" is a sales line, not a flood brand; a flooded car still is', () => {
+  const sales = [
+    'This SUV is flooded with natural light from the panoramic roof.', 'Flooded with options!', 'A cabin flooded with sunlight.', 'An interior flooded in natural light.',
+    'Flooded with plenty of natural light.', 'Flooded with tons of premium features.', 'Flooded with so many options.', 'A sun-flooded cabin.', 'A light-flooded interior.',
+    // a light word that ends its phrase, equipment, and a flood the sentence denies keep it a sales line
+    'Flooded with light thanks to the dual-pane sunroof.', 'Cabin flooded with daylight - perfect for road trips.', 'Interior flooded with natural light and no flood damage!',
+    'Flooded with options like rain-sensing wipers and mud flaps.', 'Flooded with options, including the 3.0L Hurricane twin-turbo engine.',
+    'Flooded with natural light through the sunroof, Mud-Terrain tires and flood lights.', 'Flooded with features. No water damage, no salt.',
+  ];
+  for (const words of sales) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded], ['Clean', 'yes', ''], words);
+  }
+  // only a named sales object makes a sales line: whatever else flooded the car, it is a brand
+  const flooded = [
+    'Previously flooded.', 'This car was flooded with water.', 'Flooded with salt water.', 'Flooded in a hurricane, sold as is.',
+    'Previously flooded with saltwater.', 'This car was flooded with seawater during Hurricane Ian.', 'Flooded with rainwater, sold as is.', 'Was flooded with stormwater.',
+    'Flooded with floodwater up to the dash.', 'Flooded with 2 feet of water.', 'Flooded with contaminated flood water.', 'Flooded with mud and debris.',
+    'Flooded with light damage to the carpet.', 'Flooded in the light rain storm.', 'Flooded by a storm surge.', 'Flooded with the water.',
+    // "light" can be an adjective, and a flood named anywhere in the sentence makes it a flood
+    'Flooded with light saltwater.', 'Flooded with light seawater.', 'Flooded with light salt water.', 'Flooded with light amounts of water.',
+    'Previously flooded with light saltwater exposure, sold as is.', 'Flooded by light storm surge', 'Flooded in light surge waters.',
+    'Flooded with light standing water in the cabin.', 'Flooded with light sludge.', 'Flooded with light brown mud.', 'Flooded with light and water.',
+    'Flooded in style during Hurricane Ian.', 'This car was light-flooded in a storm', 'Flooded with sunlight, then a hurricane.',
+    'Flooded in the light of a hurricane.', 'Flooded with options and saltwater.', 'Flooded with natural light from the river floodwaters.',
+  ];
+  for (const words of flooded) {
+    assert.match(brandedTitleSignal({ descriptionRaw: words }), /^flooded$/i, words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded.toLowerCase()], ['', 'no', 'flooded'], words);
+  }
+  // the help page's sales-line examples are what the code reads as no brand
+  const help = readFileSync(new URL('../docs/help.md', import.meta.url), 'utf8');
+  const named = help.match(/a sales line such as ((?:"[^"]+"(?: or |, )?)+)/);
+  assert.ok(named, 'help.md names the sales lines that do not count');
+  const examples = [...named[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(examples.length >= 2, named[1]);
+  for (const words of examples) assert.equal(brandedTitleSignal({ descriptionRaw: `${words}.` }), '', words);
+});
+
+test('the CARFAX or AutoCheck buyback program line is not a brand, as the help page says; a manufacturer buyback program still is', () => {
+  const help = readFileSync(new URL('../docs/help.md', import.meta.url), 'utf8');
+  assert.match(help, /CARFAX buyback program line many websites add to every car[^.]*does not count/);
+  for (const words of ['This vehicle qualifies for the CARFAX Buyback Program.', 'Qualifies for the CARFAX\u00ae Buyback Program!', 'AutoCheck Buy Back Program eligible.']) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded], ['Clean', 'yes', ''], words);
+  }
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Manufacturer buyback program vehicle.' }), 'buyback');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Qualifies for the CARFAX Buyback Program. Lemon law buyback.' }), 'Lemon law buyback');
 });
 
 test('a denied mention or a program or finance offer is not a brand; the same words stated of the car still are', () => {
@@ -313,4 +395,42 @@ test('the listing\'s location is listed as assumed when the website puts the car
   assert.deepEqual(carStore({ location: 'Sample Ford' }, { dealer: {} }), { store: 'Sample Ford', away: true }, 'no town known: it may be anywhere');
   assert.deepEqual(carStore({ location: '  Sample Ford ' }, { stores: ['Sample Ford'] }), { store: '', away: false });
   assert.deepEqual(carStore({}, { stores: [] }), { store: '', away: false });
+});
+
+test('on a website whose cars are all at one store, no car is away, ticked or not; a second store brings the check back', async () => {
+  const { carStore } = await import('../extension/src/listingData.js');
+  const { defaultSettings } = await import('../extension/src/settings.js');
+  const { storeNames } = await import('../extension/src/normalize.js');
+  // a one-store website whose own name differs from the store name its cars carry: nothing is ticked
+  const site = { name: 'Smith Auto Sales', title: 'Used cars | Smith Auto Sales', host: 'www.smithautosales.test', address: { city: 'Springfield', state: 'OH', zip: '45505' } };
+  const cars = [1, 2, 3].map(() => ({ ...vehicle('usedNormal'), location: 'Smith Motors' }));
+  const s = defaultSettings(site, cars);
+  assert.deepEqual(s.myStores, [], 'nothing stands out, so nothing is ticked');
+  const opts = (lot) => ({ dealer: s.dealer, defaults: s.defaults, price: 20000, stores: s.myStores, lot });
+  const location = (d) => d.assumed.find((a) => a.key === 'location');
+  assert.equal(location(buildListingData(cars[0], opts(storeNames(cars)))), undefined, 'the one store is the dealership: its address is where the car is');
+  assert.deepEqual(carStore(cars[0], { stores: [], dealer: s.dealer, lot: storeNames(cars) }), { store: 'Smith Motors', away: false });
+  // a second store on the website, or a car at a store the last scan did not list: check the location
+  const two = [...cars, { ...vehicle('usedNormal'), location: 'Jones Ford Shelbyville' }];
+  assert.ok(location(buildListingData(cars[0], opts(storeNames(two)))));
+  assert.ok(location(buildListingData({ ...cars[0], location: 'Jones Ford Shelbyville' }, opts(storeNames(cars)))));
+  // the side panel passes the last scan as it is stored: its cars by VIN
+  const snapshot = Object.fromEntries(cars.map((c, i) => [`VIN${i}`, { name: c.name, location: c.location }]));
+  assert.equal(location(buildListingData(cars[0], opts(snapshot))), undefined);
+  assert.ok(location(buildListingData(cars[0], opts({ ...snapshot, VIN9: { location: 'Jones Ford Shelbyville' } }))));
+  // with no lot to go on (no scan yet), it may be anywhere, as before
+  assert.ok(location(buildListingData(cars[0], opts(null))));
+  assert.ok(location(buildListingData(cars[0], opts([]))));
+  assert.ok(location(buildListingData(cars[0], opts({}))));
+  // every listing and description the side panel builds is given the last scan
+  const panel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
+  const calls = panel.split('\n').filter((line) => /\b(?:buildListingData|generateDescription)\(/.test(line) && !/^\s*(?:import|\/\/)/.test(line));
+  assert.ok(calls.length >= 4, calls.join('\n'));
+  for (const line of calls) assert.match(line, /lot: state\.snapshotVehicles\b/, line);
+  // the README and the help page say so wherever they say when the location is listed as assumed
+  for (const doc of ['../README.md', '../docs/help.md']) {
+    const said = readFileSync(new URL(doc, import.meta.url), 'utf8').split(/(?<=[.;])\s/).filter((x) => /does not name your town/.test(x));
+    assert.ok(said.length, `${doc} says when the location is listed as assumed`);
+    for (const x of said) assert.match(x, /the last scan (?:did not find|found) every car on the website at that one store/, `${doc}: ${x}`);
+  }
 });

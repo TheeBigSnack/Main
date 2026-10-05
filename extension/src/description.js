@@ -35,7 +35,7 @@ const OPEN_SENTENCE = /[^.!?:;)"'”]$/;
 // standard-data reader's (adapters/schemaOrgParse.js), kept here so this
 // shared code takes nothing from a platform's.
 const ENTITIES = new Map(Object.entries({
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ensp: ' ', emsp: ' ', thinsp: ' ', shy: '­',
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', shy: '\u00ad',
   copy: '©', reg: '®', trade: '™', hellip: '…', mdash: '—', ndash: '–', bull: '•', middot: '·',
   lsquo: '‘', rsquo: '’', sbquo: '‚', ldquo: '“', rdquo: '”', bdquo: '„', laquo: '«', raquo: '»',
   deg: '°', times: '×', divide: '÷', plusmn: '±', frac12: '½', frac14: '¼', frac34: '¾', sup2: '²', sup3: '³',
@@ -55,8 +55,22 @@ function decodeEntities(s) {
 // A line as plain text: markup set aside, entities decoded, invisible
 // format characters (zero-width spaces, word joiners, soft hyphens,
 // direction marks: Unicode's Cf) dropped, spacing made plain. So
-// "great.<br>&nbsp;except" and "great.<br>​except" read as the page shows them.
+// "great.<br>&nbsp;except" and "great.<br>&#8203;except" (a zero-width
+// space) read as the page shows them.
 const plain = (s) => decodeEntities(s.replace(/<[^>]+>/g, '')).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
+
+// The scan's lot-wide lines read the way the lines they are matched with
+// are (plain): a line saved by a scan from before entities were decoded
+// ("Tax, title &amp; tags extra.") still matches the line as it reads now.
+export function lotWideLines(boilerplate) {
+  const out = new Set();
+  if (!(Array.isArray(boilerplate) || boilerplate instanceof Set)) return out;
+  for (const part of boilerplate) {
+    const line = typeof part === 'string' ? plain(part) : '';
+    if (line) out.add(line);
+  }
+  return out;
+}
 
 // The description's lines as the website lays them out: one list of lines
 // per paragraph, division or list item, split at its plain line breaks.
@@ -71,7 +85,7 @@ function linesOf(raw) {
 // "¿"), quotes or emoji. A piece that starts in lower case ("warranty
 // of any kind.", "brakes and tires.") carries on a sentence begun before it.
 const ENDS_SENTENCE = /[.!?][\p{Pe}\p{Pf}"']*$/u;
-export const STARTS_SENTENCE = /^[\s\p{Ps}\p{Pi}"'¡¿\p{Extended_Pictographic}️‍]*[\p{Lu}\p{N}]/u;
+export const STARTS_SENTENCE = /^[\s\p{Ps}\p{Pi}"'\u00a1\u00bf\p{Extended_Pictographic}\ufe0f\u200d]*[\p{Lu}\p{N}]/u;
 
 // A full stop after an abbreviation does not end a sentence: "the original
 // Mfr. Warranty", "approx. two keys", "a Jeep Cert. Pre-Owned unit". An
@@ -91,12 +105,12 @@ export function endsAtAbbreviation(text) {
   const t = String(text ?? '').trimEnd();
   if (!t.endsWith('.')) return false;
   const tokens = t.slice(0, -1).split(/\s+/);
-  const word = tokens[tokens.length - 1].replace(/^[\p{Ps}\p{Pi}"'¡¿]+/u, '');
+  const word = tokens[tokens.length - 1].replace(/^[\p{Ps}\p{Pi}"'\u00a1\u00bf]+/u, '');
   const before = tokens.length > 1 ? tokens[tokens.length - 2] : '';
   if (/^(?:\p{L}\.)*\p{L}$/u.test(word)) return true;
   if (!/^\p{L}+$/u.test(word)) return false;
   if (ABBREVIATIONS.has(word.toLowerCase())) return true;
-  return /\p{Ll}/u.test(word) && !/[aeiouyà-ÿ]/i.test(word) && !/\d$/.test(before);
+  return /\p{Ll}/u.test(word) && !/[aeiouy\u00e0-\u00ff]/i.test(word) && !/\d$/.test(before);
 }
 
 // A plain line break that only wraps a sentence: the line before stops on an
@@ -157,6 +171,29 @@ function segmentsOf(raw, boilerplate = NONE) {
 
 export function splitSegments(raw) {
   return segmentsOf(raw).map((seg) => seg.text);
+}
+
+// The description's segments with the lot-wide text the scan found taken
+// out: what the website says about this car, not what it says about every
+// car (a bank-approval or as-is disclaimer, "We are a locally owned
+// dealership."). Lot-wide text is cut out wherever it stands between
+// spaces, the longest first, and a segment left with nothing goes. The
+// checks read this as the website's own words for the car
+// (rewriteTemplate.js claimSource).
+export function withoutLotWide(raw, boilerplate = NONE) {
+  const parts = [...lotWideLines(boilerplate)].sort((a, b) => b.length - a.length);
+  const out = [];
+  for (const segment of splitSegments(raw)) {
+    let text = segment;
+    for (const part of parts) {
+      for (let i = text.indexOf(part); i >= 0; i = text.indexOf(part, i + 1)) {
+        if ((i === 0 || /\s/.test(text[i - 1])) && (i + part.length === text.length || /\s/.test(text[i + part.length]))) text = `${text.slice(0, i)} ${text.slice(i + part.length)}`;
+      }
+    }
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text) out.push(text);
+  }
+  return out;
 }
 
 // The absolute floor under the share: a share alone misbehaves on a tiny
@@ -235,24 +272,28 @@ function looksLikeEquipmentDump(text) {
 const leftOut = (seg, boilerplate) =>
   seg.lotWide || lotWide(seg.text, boilerplate) || LABEL.test(seg.text) || AWARDS_PREFIX.test(seg.text) || splitSentences(seg.text).some(looksLikeEquipmentDump);
 
-// The write-up the rewrite service is sent and the side panel keeps (the
+// The write-up the rewrite service is sent (rewriter.js rewriteFacts; the
 // template writer does not use it): the description's segments as the
 // website wrote them, from its first, up to the first segment it leaves out,
 // one string per segment. Nothing after that segment is sent, since a line
 // after one left out may carry on from it ("Clean CARFAX." then "Except the
 // accident in 2021."), and the last segment sent goes too when it may run on
 // into the one left out: it does not end with ".", "!" or "?", or the one
-// left out does not start as a sentence does (past a bullet mark). Bullets
-// and headings go as written.
+// left out does not start as a sentence does (past a bullet mark), or it
+// stops on an abbreviation ("the original Mfr.", "approx."), whose full
+// stop ends no sentence. Bullets and headings go as written. The lot-wide
+// lines are read as the description's lines are (lotWideLines).
 export function cleanDescription(raw, boilerplate = new Set()) {
+  const lot = lotWideLines(boilerplate);
   const kept = [];
-  for (const seg of segmentsOf(raw, boilerplate)) {
-    if (!leftOut(seg, boilerplate)) {
+  const runsOn = (last, next) => !ENDS_SENTENCE.test(last) || endsAtAbbreviation(last) || !STARTS_SENTENCE.test(next.replace(/^[-•*]\s+/, ''));
+  for (const seg of segmentsOf(raw, lot)) {
+    if (!leftOut(seg, lot)) {
       kept.push(seg.text);
       continue;
     }
     let next = seg.text;
-    while (kept.length && (!ENDS_SENTENCE.test(kept[kept.length - 1]) || !STARTS_SENTENCE.test(next.replace(/^[-•*]\s+/, '')))) next = kept.pop();
+    while (kept.length && runsOn(kept[kept.length - 1], next)) next = kept.pop();
     break;
   }
   return kept;

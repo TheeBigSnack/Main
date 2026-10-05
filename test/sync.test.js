@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, UPLOAD_MARGIN_MS, FUTURE_SKEW_MS, flagsAwaitingSync, clearNumbersKeepingUnsynced, notSharedFrom } from '../extension/src/sync.js';
-import { markPosted, markPriceUpdated, markTakenDown, diffScans } from '../extension/src/rescan.js';
+import { markPosted, markPriceUpdated, markTakenDown, diffScans, withSeenBasis } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
 const T = (min, sec = 0) => new Date(Date.UTC(2026, 10, 16, 9, min, sec)).toISOString(); // Nov 16 2026 09:mm:ss
@@ -286,6 +286,31 @@ test('a listing synced from another computer is compared on the price it was pos
   const { basis, ...bare } = elsewhere[VIN_A];
   assert.equal(basis, 'beforeFees');
   assert.deepEqual(diffScans(dropped, dropped, { posted: { [VIN_A]: bare }, basis: 'website', confirm: { checked: [], notFound: [] } }).priceUpdates.map((u) => u.change), [-10]);
+});
+
+// One rule for a listing's basis across the scan and the sync: the basis
+// recorded on the listing wins (the posting computer's, which the server
+// keeps once a row has one); a listing that came down with none (an older
+// build posted it) gets the one a scan taken once it had its price reads
+// (rescan.js withSeenBasis, scanCar), never one read off a scan from before,
+// and that reading goes up with the next sync into the row that has none.
+test('a basis read off the website for a synced listing with none goes up with the next sync; one from a scan before its price never records; a recorded one wins', () => {
+  const down = mergeRegistry({}, [row(VIN_A, { user_id: U1, price: 27163, posted_at: T(1), updated_at: null, basis: null })], { userId: U1 });
+  assert.equal('basis' in down[VIN_A], false, 'posted by an older build: no basis');
+  const snap = (takenAt, price, priceBeforeFees) => ({ takenAt, vehicles: { [VIN_A]: { vin: VIN_A, name: 'A', price, priceBeforeFees, decision: 'ready' } } });
+  // the scan before the post shows the website before a $490 cut: the listing's price is its second price there
+  const before = snap(T(0), 27653, 27163);
+  const after = snap(T(2), 27163, 26673);
+  assert.equal(withSeenBasis(down, before, snap(T(2), 27000, 26510)), undefined, 'neither price on the scan since matches, and the scan before the post never decides');
+  const read = withSeenBasis(down, before, after);
+  assert.equal(read[VIN_A].basis, 'website', 'read off the scan taken after the post: the main price');
+  assert.equal(syncPayload({ posted: read, userId: U1 }).posted[VIN_A].basis, 'website', 'the reading goes up with the next sync');
+  assert.equal(toServerRows({ posted: read, dealershipId: D, userId: U1 }).listings[0].basis, 'website');
+  assert.equal(mergeRegistry(read, [row(VIN_A, { user_id: U1, price: 27163, posted_at: T(1), basis: null })], { userId: U1 })[VIN_A].basis, 'website', 'a row still without one leaves it');
+  // the posting computer's record, once the row has one, is the listing's basis, and no scan reading replaces it
+  const recorded = mergeRegistry(read, [row(VIN_A, { user_id: U1, price: 27163, posted_at: T(1), basis: 'beforeFees' })], { userId: U1 });
+  assert.equal(recorded[VIN_A].basis, 'beforeFees');
+  assert.equal(withSeenBasis(recorded, before, after), undefined);
 });
 
 test('mergeRegistry: a missing link, name or salesperson is filled from the server; the newer post of a car re-posted elsewhere replaces the old one', () => {

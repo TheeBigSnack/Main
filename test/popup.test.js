@@ -573,6 +573,8 @@ test('a change of Price to post is for new posts: a posted listing keeps its pri
   const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted } });
   await p.scan();
   assert.doesNotMatch(p.panel(), /Update price/, 'posted at the website price: nothing to do');
+  assert.equal(p.local[k.posted][ram.vin].basis, 'website', 'the scan records the price the listing is on (scanRunner.js keepSeenBasis)');
+  p.local[k.posted] = structuredClone(posted); // brought back without one, as a sync from another computer would
 
   // the lower second price: the listing is stamped with the basis in force
   // until now before the new one is saved, so a background rescan between

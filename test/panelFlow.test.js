@@ -21,7 +21,7 @@ import { updateKey, withLock } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData, listingChanges } from '../extension/src/listingData.js';
 import { recheck } from '../extension/src/vehicleDetails.js';
-import { basisPrice, snapshotEntry, listingWebsitePrice, pendingText } from '../extension/src/rescan.js';
+import { basisPrice, snapshotEntry, listingWebsitePrice, pendingText, scanCar } from '../extension/src/rescan.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
 import { draftRecord, draftPill } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
@@ -665,7 +665,7 @@ test('an old read of the car is read and checked again before the form opens or 
   assert.deepEqual(opened(drop.calls), []);
   assert.equal(drop.state.step, 'review');
   assert.equal(drop.state.price, v.price - 1500);
-  assert.ok(drop.calls.some((c) => c.startsWith('status(error): The website changed this car since it was read (price $' + v.price.toLocaleString('en-US') + ' to $' + (v.price - 1500).toLocaleString('en-US') + ')')), drop.calls.join(' | '));
+  assert.ok(drop.calls.includes('status(error): The website changed this car since it was read (Price $' + v.price.toLocaleString('en-US') + ' → $' + (v.price - 1500).toLocaleString('en-US') + '). Check the review, then click Open the Marketplace form again.'), drop.calls.join(' | '));
   // and the next click goes on from the new read, with the new price
   await drop.fns.openForm();
   assert.deepEqual(opened(drop.calls), ['tabs.create', `runFill: ${description}`]);
@@ -674,7 +674,7 @@ test('an old read of the car is read and checked again before the form opens or 
   // the mileage went up: the description's number no longer matches, so the checks stop the next click until it is fixed
   const miles = formOpener({ description, readAt: hourAgo, read: as({ mileage: v.mileage + 250 }) });
   await miles.fns.openForm();
-  assert.ok(miles.calls.some((c) => /^status\(error\): The website changed this car since it was read \(mileage\)/.test(c)), miles.calls.join(' | '));
+  assert.ok(miles.calls.some((c) => c.startsWith(`status(error): The website changed this car since it was read (Mileage ${v.mileage} → ${v.mileage + 250}).`)), miles.calls.join(' | '));
   assert.ok(ruleProblems(miles.state.guardrails).some((p) => p.code === 'unknown-number'));
   await miles.fns.openForm();
   assert.deepEqual(opened(miles.calls), [], 'the old mileage in the text is not filled');
@@ -2397,6 +2397,67 @@ test('Open the Marketplace form and Check fields are off while the description b
   assert.deepEqual([buttons.openForm.disabled, buttons.checkForm.disabled], [false, false], 'a style warning (too short) leaves them on');
 });
 
+// A dealership name typed in Settings (the popup) while the review screen is
+// open reaches the panel through adoptChanges. The checks run again with it:
+// a template written before the name is written again, so it names the
+// dealership and the buttons come on; an edited description keeps its text,
+// and its checks line and buttons follow the new settings.
+test('a dealership name added in Settings while the review is open brings the form buttons back, the template written again with it', async () => {
+  const v = vehicle('usedNormal');
+  const PAT = { name: 'Pat', title: 'sales consultant' };
+  const origin = 'https://www.example-dealer.test';
+  const k = { settings: 'settings:' + origin };
+  const unnamed = { ...DEALER, name: '' };
+  const template = (dealer) => buildTemplateDescription({ vehicle: v, dealer, salesperson: PAT });
+  const setup = (description, source) => {
+    const state = { origin, step: 'review', vin: v.vin, vehicle: v, price: v.price, description, descriptionSource: source, note: '', settings: { dealer: unnamed, salesperson: PAT, rewrite: { enabled: false } } };
+    const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: '', price: state.price, closingLine: '' });
+    state.guardrails = runGuardrails(description, ctx());
+    const box = { value: description };
+    const els = { openForm: { disabled: true }, checkForm: { disabled: true }, description: box, checks: { outerHTML: '' }, noDealer: { removed: false, remove() { this.removed = true; } } };
+    const calls = [];
+    const fns = compileMany(['adoptChanges', 'reviewAfterSettings', 'setFormButtons'], {
+      state, flowRun: 1, GLOBAL_KEYS: { sites: 'sites' }, siteKeys: () => k, isOwnEcho: () => false,
+      withDefaults: (s) => ({ ...s }), dailyCap: () => ({ reached: false, used: 0, cap: 10 }), capHtml: () => '', queueBar: () => '',
+      $: (id) => els[id] || null, runGuardrails, ruleProblems, ctx, checksHtml: (g) => (ruleProblems(g).length ? 'bad' : 'ok'),
+      generate: async ({ useClaude }) => { calls.push(`generate ${useClaude}`); state.description = template(state.settings.dealer); state.descriptionSource = 'template'; state.guardrails = runGuardrails(state.description, ctx()); },
+      render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'), setStatus: never('setStatus'), postUnderWay: () => true,
+      defaultOrigin: never('defaultOrigin'), loadSaved: never('loadSaved'),
+    }, [...BLOCKER_CONSTS, 'INPUT_STEPS', 'OWN_VIEW_STEPS']);
+    return { state, els, calls, fns };
+  };
+  const nameAdded = (state) => ({ [k.settings]: { newValue: { ...state.settings, dealer: DEALER } } });
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  // the template, written while no name was set: written again with the name, drawn again, and nothing left to fix
+  const t = setup(template(unnamed), 'template');
+  assert.ok(ruleProblems(t.state.guardrails).length > 0, 'without a name the template breaks the dealership rule');
+  t.fns.adoptChanges(nameAdded(t.state));
+  await settle();
+  assert.deepEqual(t.calls, ['generate false', 'render', 'saveFlow']);
+  assert.ok(t.state.description.includes(DEALER.name), 'the description names the dealership');
+  assert.deepEqual(ruleProblems(t.state.guardrails), [], 'its checks pass, so the buttons are drawn on');
+
+  // a description the person edited: kept as it is; the checks run again, and the buttons and banner follow
+  const own = template(unnamed).replace(/^/, `Ask me at ${DEALER.name}. `);
+  const e = setup(own, 'edited');
+  e.fns.adoptChanges(nameAdded(e.state));
+  await settle();
+  assert.deepEqual(e.calls, [], 'not written again, not redrawn');
+  assert.equal(e.els.description.value, own);
+  assert.deepEqual(ruleProblems(e.state.guardrails), [], 'checked again with the name: it names the dealership');
+  assert.deepEqual([e.els.openForm.disabled, e.els.checkForm.disabled], [false, false], 'Open the Marketplace form and Check fields come on');
+  assert.equal(e.els.checks.outerHTML, 'ok', 'the checks line is drawn again');
+  assert.ok(e.els.noDealer.removed, 'the banner asking for a name goes');
+
+  // an edited text that still doesn't name the dealership: the buttons stay off, for the reason the checks line now gives
+  const bare = setup(template(unnamed), 'edited');
+  bare.fns.adoptChanges(nameAdded(bare.state));
+  await settle();
+  assert.deepEqual([bare.els.openForm.disabled, bare.els.checkForm.disabled], [true, true]);
+  assert.equal(bare.els.checks.outerHTML, 'bad');
+});
+
 // A scan that lands after the car was read and no longer lists it (the
 // worker's rescan, the popup's Scan, a colleague's sale) contradicts the read
 // even inside READ_MAX_AGE_MS: Open the Marketplace form and Fill it in now
@@ -2750,7 +2811,7 @@ test('a post whose car was read a while ago (or before the panel was closed) rea
   assert.equal(state.price, 26163);
   assert.equal(state.vehicle.price, 26163);
   assert.equal(state.listing, null, 'the listing is built again from the new read');
-  assert.match(dropped.calls.said.at(-1)[0], /^The website changed this car since it was read \(price \$27,163 to \$26,163\)\./);
+  assert.match(dropped.calls.said.at(-1)[0], /^The website changed this car since it was read \(Price \$27,163 → \$26,163\)\. Check the review, then click Open the Marketplace form again\.$/);
   assert.equal(dropped.calls.said.at(-1)[1], 'error');
   assert.ok(dropped.calls.saved >= 1);
 
@@ -2758,8 +2819,18 @@ test('a post whose car was read a while ago (or before the panel was closed) rea
   const miles = reviewState({ readAt: '', description: '2019 Ram 1500 Classic Express with 20,986 miles.' });
   const moved = staleReader(miles, () => ({ ok: true, vehicle: { ...FRESH_CAR(), mileage: 21500 } }));
   assert.equal(await moved.run(), false);
-  assert.match(moved.calls.said.at(-1)[0], /The website changed this car since it was read \(mileage\)/);
+  assert.match(moved.calls.said.at(-1)[0], /^The website changed this car since it was read \(Mileage 20986 → 21500\)\. The description no longer matches it: [^.]+\. Fix the description, then click Open the Marketplace form again\.$/);
   assert.ok(miles.guardrails.problems.some((p) => p.code === 'mileage-mismatch'));
+
+  // Fill again (the form filled earlier) and Fill it in now (the dry run's form) come from a form already open:
+  // the review's button opens a new one, and the old form is to be closed unpublished
+  for (const step of ['publish', 'probe']) {
+    const open = reviewState({ readAt: '', step });
+    const r = staleReader(open, () => ({ ok: true, vehicle: { ...FRESH_CAR(), price: 26163, priceBeforeFees: 25673, mileage: 21500 } }));
+    assert.equal(await r.run(), false, step);
+    assert.equal(open.step, 'review');
+    assert.match(r.calls.said.at(-1)[0], /^The website changed this car since it was read \(Mileage 20986 → 21500; Price \$27,163 → \$26,163\)\. The description no longer matches it: [^]+\. Fix the description, then click Open the Marketplace form for a new form, and close the form opened before without publishing it\.$/, step);
+  }
 });
 
 test('a car that sold, went sale-pending, turned new or lost its price since it was read is stopped before the form is filled', async () => {
@@ -3335,11 +3406,11 @@ test('Continue in a second window says the car is under way in the other window,
 test('a price update reads the car on the website the way a post does, on the listing\'s own price basis', async () => {
   const ORIGIN = 'https://www.example-motors.test';
   const v = vehicle('usedNormal'); // $27,163 on the website, $26,673 before fees
-  const run = async ({ read, entry = { name: v.name, price: 27500 }, basis = 'website', car = v, myStores = [] }) => {
+  const run = async ({ read, entry = { name: v.name, price: 27500 }, basis = 'website', car = v, myStores = [], scanned = {}, takenAt = null }) => {
     const asked = [];
-    const state = { siteInfo: { adapter: 'dealerInspire', service: {} }, snapshotVehicles: { [car.vin]: { url: 'https://www.example-motors.test/car/1', price: car.price } }, posted: { [car.vin]: entry }, settings: { basis, myStores } };
+    const state = { siteInfo: { adapter: 'dealerInspire', service: {} }, snapshotVehicles: { [car.vin]: { url: 'https://www.example-motors.test/car/1', price: car.price, ...scanned } }, snapshotTakenAt: takenAt, posted: { [car.vin]: entry }, settings: { basis, myStores } };
     const upkeepPriceNow = compile('upkeepPriceNow', {
-      state, recheck, listingWebsitePrice, pendingText, DECISION, hostOf: (o) => new URL(o).host,
+      state, recheck, listingWebsitePrice, pendingText, scanCar, DECISION, hostOf: (o) => new URL(o).host,
       readCarForPost: async (req) => { asked.push(req); return typeof read === 'function' ? read(req) : read; },
     });
     const r = await upkeepPriceNow({ origin: ORIGIN, vin: car.vin.toLowerCase(), kind: 'price', price: 27000, dealerTabId: 4 });
@@ -3351,6 +3422,16 @@ test('a price update reads the car on the website the way a post does, on the li
   // a listing posted on the before-fees basis: the website's before-fees price, whatever Settings says now
   assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'beforeFees' } })).r, { ok: true, price: 26673 });
   assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'website' }, basis: 'beforeFees' })).r, { ok: true, price: 27163 });
+  // A listing with no basis recorded (brought by a sync) reads it off the last
+  // scan only when that scan was taken once the listing had its price
+  // (rescan.js scanCar), as the To do item's price was read (diffScans). The
+  // last scan (Jan 2nd) showed $27,163 and $26,673 before fees; the website
+  // then cut $490, and the car was posted on another computer at the new main
+  // price, $26,673, on Jan 3rd. The website now shows $26,500 / $26,010.
+  const lastScan = { scanned: { price: 27163, priceBeforeFees: 26673 }, takenAt: '2026-01-02T12:00:00.000Z' };
+  const moved = { ok: true, vehicle: { ...v, price: 26500, priceBeforeFees: 26010 } };
+  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-03T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26500 }, 'a scan from before the post never makes its second price the listing\'s basis');
+  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-01T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26010 }, 'posted before that scan: the scan shows the listing at its second price');
   // stops, each saying why
   const stops = [
     [{ ok: false, needsPermission: true, origins: [ORIGIN + '/*'], message: 'To re-check this car...' }, /^Lot Current reads this car on www\.example-motors\.test again before it fills a new price, and Chrome hasn't let it read www\.example-motors\.test from here\. Open www\.example-motors\.test's used inventory page, then click Open & update price in the popup there\.$/],

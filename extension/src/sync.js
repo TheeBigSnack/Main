@@ -347,8 +347,10 @@ function ownership(r, userId) {
 // before that day) and when its price changed. postedWith (a fixed marker
 // that the side panel recorded the post; never synced) is kept from the
 // local entry when there is one. A row with no basis (posted by a build that
-// did not send one) brings none: the next rescan reads it from the entry's
-// price (rescan.js postedBasis).
+// did not send one) brings none: a rescan reads it from the entry's price and
+// records it, only off a scan taken once the listing had its price
+// (rescan.js postedBasis, withSeenBasis); for the person's own listing, the
+// next sync sends it to the row, which takes it while it has none.
 function entryFromRow(r, prev = {}, userId = '') {
   return {
     name: text(r.name, 80) || text(prev.name, 80),

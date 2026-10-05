@@ -1,7 +1,7 @@
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld } from './src/rescan.js';
 import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
-import { performScan } from './src/scanRunner.js';
+import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
@@ -248,6 +248,7 @@ async function scan() {
   $('scan').disabled = true;
   setStatus("Reading the website's used inventory…");
   try {
+    const last = state.snapshot;
     const r = await performScan({ tabId: state.tab.id, origin: state.origin, settings: state.settings, settingsFromProfile: state.settingsFromProfile, snapshot: state.snapshot, posted: state.posted, boilerplate: state.boilerplate });
     if (!r.ok) {
       setStatus(r.message, 'error');
@@ -271,6 +272,8 @@ async function scan() {
       return save('snapshot', 'diff', 'settings', 'boilerplate');
     });
     if (!saved) return; // the status says why (the quota); the read stays on screen
+    // the price basis this read shows for a listing that has none, kept on it (src/scanRunner.js keepSeenBasis)
+    state.posted = (await keepSeenBasis(state.origin, last, r.snapshot, popupStorage).catch(() => undefined)) || state.posted;
     state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
     syncInBackground(); // the scan's counts (marked withheld after a website hiccup) and the to-do items it flagged
     // the scan registered the website for background rescans; show its state
@@ -1717,7 +1720,7 @@ async function onSettingsSubmit(ev) {
   // withPostedBasis). Stamped before the new basis is saved, so a background
   // rescan in between never reads them under the new one; nothing is saved
   // when the stamp could not be written.
-  if (basisChanged && !(await update('posted', (p) => withPostedBasis(p, prev.basis, state.snapshot?.vehicles)))) { render(); return; }
+  if (basisChanged && !(await update('posted', (p) => withPostedBasis(p, prev.basis, state.snapshot)))) { render(); return; }
   // the other settings are kept either way; the side panel opens no form until the name is set
   if (state.origin && dealerNameMissing(state.settings.dealer)) message += ` ${NO_DEALER_NAME}`;
   if (!(await save('settings'))) { render(); return; } // the status says why; the registry the worker reads must not change on an unsaved setting

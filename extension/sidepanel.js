@@ -11,7 +11,7 @@
 //
 // This file never clicks anything on the Facebook page.
 
-import { markPosted, basisPrice, listingWebsitePrice, pendingText } from './src/rescan.js';
+import { markPosted, basisPrice, listingWebsitePrice, pendingText, scanCar } from './src/rescan.js';
 import { DECISION } from './src/classify.js';
 import { draftRecord, draftPill } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
@@ -284,7 +284,8 @@ function setStatus(text, kind = '') {
 // second price and this car has none (the main price is used), the note
 // would be untrue for it, so it is left out and the car card says so.
 const noteFor = () => (state.noteApplies === false ? '' : state.settings.priceNote);
-const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine) });
+// the scan's lot-wide text goes too: a disclaimer every car carries backs no claim about this one
+const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, salesperson: state.settings.salesperson, priceNote: noteFor(), price: state.price, closingLine: usableClosingLine(state.settings.salesperson.closingLine), boilerplate: state.boilerplate });
 
 // Every description names the dealership (rule 5): with no dealership name
 // set, no description can, so the form is not opened until one is.
@@ -502,7 +503,7 @@ function readIsOld() {
 // What the form would get from the car as it stands: every field but the
 // description (the person's own text), and the photos in order.
 function formValues() {
-  return buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
+  return buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
 }
 
 // Before Open the Marketplace form or Fill it in now: with a read older than
@@ -520,7 +521,7 @@ async function carStillCurrent() {
   if (!readIsOld()) return true;
   const run = flowRun;
   const was = state.step;
-  const before = { price: state.price, values: formValues() };
+  const before = { values: formValues() };
   state.step = 'checking';
   state.message = 'Checking the car on the website again before the form opens…';
   setStatus('');
@@ -531,8 +532,8 @@ async function carStillCurrent() {
   takeCar(car);
   const after = formValues();
   const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
-  const changed = listingChanges(before.values, after).map((c) => c.key); // every form field but the description (src/listingData.js)
-  if (before.values.photos.join(' ') !== after.photos.join(' ')) changed.push('photos');
+  const changed = listingChanges(before.values, after); // every form field but the description (src/listingData.js)
+  if (before.values.photos.join(' ') !== after.photos.join(' ')) changed.push({ key: 'photos' });
   state.guardrails = runGuardrails(state.description, ctx());
   const stops = ruleProblems(state.guardrails);
   state.message = '';
@@ -542,14 +543,21 @@ async function carStillCurrent() {
     await saveFlow();
     return run === flowRun; // false when the post was dropped while it saved
   }
-  const said = changed.map((k) => (k === 'price' ? `price ${money(before.price)} to ${money(state.price)}` : k === 'photos' ? 'photos' : (labels[k] || k).toLowerCase()));
+  // each field as it was read and as it reads now (the photos only by name)
+  const shown = (key, value) => (key === 'price' && value ? money(Number(value)) : value) || 'nothing';
+  const said = changed.map((c) => (c.key === 'photos' ? 'photos' : `${labels[c.key] || c.key} ${shown(c.key, c.was)} → ${shown(c.key, c.now)}`));
   state.listing = null;
   state.step = 'review';
   render();
-  const what = said.length ? ` (${said.join(', ')})` : '';
+  const what = said.length ? ` (${said.join('; ')})` : '';
+  // the review's button opens a new form; Fill again and Fill it in now
+  // came from one already open, which is not filled again
+  const reopen = was === 'publish' || was === 'probe'
+    ? 'click Open the Marketplace form for a new form, and close the form opened before without publishing it'
+    : 'click Open the Marketplace form again';
   const next = stops.length
-    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then click Open the Marketplace form again.`
-    : ' Check the review, then click Open the Marketplace form again.';
+    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then ${reopen}.`
+    : ` Check the review, then ${reopen}.`;
   setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
   await saveFlow();
   return false;
@@ -891,7 +899,7 @@ async function generate({ useClaude } = {}) {
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
   if (run !== flowRun) return;
   const settings = { ...s, rewrite };
-  const r = await generateDescription({ vehicle: state.vehicle, dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
+  const r = await generateDescription({ vehicle: state.vehicle, dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights, lot: state.snapshotVehicles }); // the origin tells the service which store this is; the last scan, whether the website has one store (carStore)
   if (run !== flowRun) return; // a dropped post's text never lands in the next car's
   state.highlightsUsed = settleHighlights(state.highlights, state.vehicle.features);
   state.description = r.text;
@@ -972,7 +980,7 @@ async function openForm({ probeOnly = false } = {}) {
   // this window's before the form opens.
   const before = { windowId: state.windowId, listing: state.listing, listingTyped: state.listingTyped };
   state.windowId = panelWindowId || state.windowId;
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
+  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
   state.listingTyped = null; // a new form: nothing typed for it yet
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
@@ -1647,7 +1655,7 @@ function viewBlocked() {
   return `<div class="banner bad" id="blocked">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
-const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
+const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
 
 function fieldsTable() {
   const l = currentListing();
@@ -2092,9 +2100,11 @@ function renderList() {
 // need a look. Another store, no photos or not yet on the lot hold back a
 // new post but not this: the listing is up, and its price should match the
 // website. The price is the website's now, on the basis the listing was
-// posted at (listingWebsitePrice), as the To do item's was. Resolves
-// { ok, price } or { ok: false, message }; upkeep.js fills nothing on a
-// stop or when there is no price.
+// posted at (listingWebsitePrice), as the To do item's was: a listing with
+// no basis recorded reads it off the last scan only when that scan was taken
+// once the listing had its price (rescan.js scanCar), then off this read.
+// Resolves { ok, price } or { ok: false, message }; upkeep.js fills nothing
+// on a stop or when there is no price.
 async function upkeepPriceNow(req) {
   const vin = String(req.vin || '').toUpperCase();
   const host = hostOf(req.origin);
@@ -2113,7 +2123,7 @@ async function upkeepPriceNow(req) {
   if (held) return { ok: false, message: `${held}, so its price was not updated. Rescan the website: To do then lists it to take down.` };
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok && check.assessment.decision !== DECISION.NOT_READY) return { ok: false, message: `${check.message} Its price was not updated: rescan the website to see what to do with this listing.` };
-  return { ok: true, price: listingWebsitePrice(state.posted[vin], fresh.vehicle, state.settings.basis, [state.snapshotVehicles[vin], fresh.vehicle]) };
+  return { ok: true, price: listingWebsitePrice(state.posted[vin], fresh.vehicle, state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]) };
 }
 
 const upkeepCtx = {
@@ -2732,9 +2742,11 @@ function adoptChanges(changes) {
   }
   take(k.sync, 'syncState', null); // the server's count of today's posts feeds the cap line
   take(k.takenDown, 'takenDown', null); // a post taken down still counts toward the cap
+  let settingsChanged = false;
   if (changed(k.settings) && changes[k.settings].newValue && !same(changes[k.settings].newValue, state.settings)) {
     state.settings = withDefaults(changes[k.settings].newValue, { name: state.siteName });
     touched = true;
+    settingsChanged = true;
   }
   if (changed(k.queue)) {
     const next = changes[k.queue].newValue ?? null;
@@ -2761,10 +2773,34 @@ function adoptChanges(changes) {
     capLine.outerHTML = capHtml(cap);
     setFormButtons(cap);
   }
-  // a name added in Settings: the banner asking for one goes (a description
-  // written before it still has to name the dealership: fillBlocker)
+  // when the template can't be written again, the review stays as it was: its last checks still set the form buttons
+  if (settingsChanged && state.step === 'review') reviewAfterSettings().catch(() => {});
+}
+
+// Settings saved while the review screen is open (a dealership name added
+// in the popup, say): a description that is still the template as written
+// is written again from them, so it names the dealership it could not name
+// before, and the review is drawn again. One the person edited, or a
+// rewrite draft, stays as it is: its checks run again with the new settings
+// (fillBlocker still asks it to name the dealership), and the checks line,
+// the form buttons and the banner asking for a name follow them.
+async function reviewAfterSettings() {
+  const run = flowRun;
+  const box = $('description');
+  if (state.descriptionSource === 'template' && (!box || box.value === state.description)) {
+    await generate({ useClaude: false });
+    if (run === flowRun && state.step === 'review') {
+      render();
+      saveFlow();
+    }
+    return;
+  }
+  state.guardrails = runGuardrails(box ? box.value : state.description, ctx());
+  const old = $('checks');
+  if (old) old.outerHTML = checksHtml(state.guardrails);
+  setFormButtons();
   const noDealer = $('noDealer');
-  if (noDealer && state.step === 'review' && dealerNamed()) noDealer.remove();
+  if (noDealer && dealerNamed()) noDealer.remove();
 }
 
 async function init() {

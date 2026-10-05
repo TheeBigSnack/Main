@@ -18,11 +18,56 @@ export const DEFAULT_LISTING_DEFAULTS = Object.freeze({ titleStatus: 'Clean', co
 // shows up, the title default is NOT applied, the clean-title box is
 // unticked, the panel says why, and a queued car waits at review. Each word
 // is read in its usual forms ("Salvaged", "Flood-damaged", "Totaled",
-// "Previously flooded", "Title Status: Branded"). A bare "title", "damage"
-// or "branded" is never one ("tax, title and license extra", "no frame
-// damage", "Mopar-branded mats"), "flood lights" is equipment, "total loss
-// protection" or "coverage" is an insurance product, and "odometer exempt"
-// is an age exemption, not a brand.
+// "Previously flooded", "Title Status: Branded"), and as a label and value
+// from a specs list ("Title Brand: Flood", "Title Type: Branded", "Title:
+// Hail", "Odometer: Not Actual"). A bare "title", "damage" or "branded" is
+// never one ("tax, title and license extra", "no frame damage",
+// "Mopar-branded mats"), "flood lights" is equipment, "flooded with natural
+// light" is a sales line (FLOODED), "total loss protection" or "coverage" is
+// an insurance product, and "odometer exempt" ("Odometer: Exempt") is an age
+// exemption, not a brand.
+const TITLE_LABEL = 'title(?:[\\s-]+(?:brand\\(s\\)|brands?|type|status|designation))?';
+// "Flooded with" or "flooded in" is a sales line only when a sales object
+// follows, after at most three small words ("flooded with natural light",
+// "flooded with so many options", "an interior flooded in sunlight"). A
+// "sun-flooded" or "light-flooded" cabin is a sales line too. Light is also
+// a plain adjective ("flooded with light saltwater"), so after a light word
+// the phrase must end there or go on with a linking word ("flooded with
+// natural light from the panoramic roof"). And nothing in the same sentence
+// may name what floods a car (FLOOD_CAUSE): "flooded with light damage",
+// "flooded in style during Hurricane Ian" and "light-flooded in a storm" are
+// brands. Anything else that floods a car is a brand too: "flooded with
+// saltwater", "flooded with 2 feet of water", "flooded with mud"
+// (floodSalesLine).
+const FLOOD_SALES_WORDS = '(?:so|much|many|plenty|lots|tons|loads|of|all|the|natural|bright|warm|soft|beautiful|great|premium|modern|desirable|popular|factory|extra|more|useful|top)';
+const FLOOD_SALES_OBJECT = '(?:(?:sun|day)?light|sunshine|options?|features?|upgrades?|tech(?:nology)?|amenities|extras|equipment|accessories|packages?|luxury|comfort|style)';
+const FLOOD_SALES = new RegExp(`^[\\s-]+(?:with|in|by)\\s+(?:${FLOOD_SALES_WORDS}\\s+){0,3}(${FLOOD_SALES_OBJECT})\\b`, 'i');
+const LIGHT_OBJECT = /^(?:(?:sun|day)?light|sunshine)$/i;
+const LIGHT_PHRASE_ENDS = /^(?:\s*(?:$|[.,;:!?)\]|–—]|-\s)|\s+(?:from|through|thru|throughout|thanks|via|and|with|when|whenever|as|on|in|into|inside|for|to|that|which|while|all|at|by|coming|pouring|streaming|filtering|under|over|of)\b)/i;
+// What floods a car rather than a cabin. Equipment does not count ("rain-
+// sensing wipers", "mud flaps", "Mud-Terrain tires", "flood lights", a
+// Hurricane engine), and neither does a mention the sentence denies ("no
+// flood damage").
+const FLOOD_CAUSE = new RegExp(
+  [
+    '\\w*water\\w*',
+    '\\w*storm\\w*',
+    '\\bsalt(?:y)?\\b',
+    '\\bseas?\\b',
+    '\\bsurges?\\b',
+    '\\bhurricanes?\\b(?![\\s-]+(?:engines?|twin|turbo|i-?6|inline|straight|standard|high|[hs]\\.?o\\b|\\d))',
+    '\\brain(?:s|fall|y)?\\b(?![\\s-]*(?:sens\\w*|guards?|visors?|deflectors?)\\b)',
+    '\\bmud(?:dy)?\\b(?![\\s-]*(?:flaps?|guards?|terrain|tires?)\\b)',
+    '\\bsilt\\w*',
+    '\\bdebris\\b',
+    '\\bsew(?:age|er)\\w*',
+    '\\bsubmerg\\w*',
+    '\\bflood(?!ed\\b)(?![\\s-]*lights?\\b)\\w*',
+    '\\bdamag\\w*',
+  ].join('|'),
+  'gi',
+);
+const SENTENCE_END = /[.!?](?=\s|<|$)|[;\n|]|<br\b[^>]*>|<\/?p\b[^>]*>/gi;
 const BRANDED = new RegExp(
   '\\b(' +
     [
@@ -31,9 +76,13 @@ const BRANDED = new RegExp(
       'reconstructed',
       'branded[\\s-]+title',
       'title (?:is |was )?branded',
-      'title(?:\\s+status)?\\s*[:-]\\s*branded',
+      `${TITLE_LABEL}\\s*[:\\-\u2013]\\s*branded`,
+      // a label's value: after a bare "Title" only a colon makes it a label ("Clean title - fire red" is paint); "hail-free" is no brand
+      `(?:${TITLE_LABEL}\\s*:|title[\\s-]+(?:brands?|type|status|designation)\\s*[-\u2013])\\s*(?:flood(?:ed)?|hail|fire|water|junk|theft|stolen)(?:[\\s-]+(?:damag\\w*|recover\\w*))?(?![\\s-]*free\\b)`,
+      '(?:odometer|mileage)(?:[\\s-]+(?:status|brand|reading|disclosure|type))?\\s*[:\\-\u2013]\\s*not[\\s-]+actual',
       '(?:flood|hail|water|fire)[\\s-]*damag\\w*',
       'flood (?:title|vehicle|car)',
+      // "flooded with natural light" or "flooded with options" is a sales line; any other flooding is a brand (floodSalesLine)
       'flooded',
       'total(?:l?ed|[\\s-]*loss(?![\\s-]+(?:protection|coverage)))',
       'non[\\s-]*repairable',
@@ -56,12 +105,14 @@ const BRANDED = new RegExp(
 );
 // Mentions of those words that are about something else, read as no brand:
 // a program or a finance offer ("qualifies for the CARFAX Buyback
-// Guarantee", "3-day buyback", "lien-free title", "we pay off your lien",
-// "the lien on your trade"). A "buyback program" or a "lien payoff" stays a
+// Guarantee" or "Buyback Program", "3-day buyback", "lien-free title", "we
+// pay off your lien", "the lien on your trade"). Any other "buyback
+// program" ("manufacturer buyback program") or a "lien payoff" stays a
 // mention: either can be this car's own history.
 const NOT_A_BRAND = new RegExp(
   [
     'buy[\\s-]?back\\s+(?:guarantee|protection|pledge)',
+    '\\b(?:carfax|autocheck)[\\s\u00ae\u2122]+buy[\\s-]?back\\s+programs?',
     '\\d+[\\s-]*days?\\s+buy[\\s-]?back',
     '\\blien[\\s-]*free',
     'free\\s+(?:and|&)\\s+clear\\s+of\\s+(?:all\\s+|any\\s+)?liens?',
@@ -80,12 +131,43 @@ const NOT_A_BRAND = new RegExp(
 const FILLER = '(?:a|an|any|the|been|ever|prior|previous|previously|known|reported|history|of|record|records|sign|signs|evidence)';
 const DENIED = new RegExp(`\\b(?:no|never|not|without|zero|free\\s+of|(?:is|was|has|have|had)n['\u2019]t)\\s+(?:${FILLER}\\s+)*$`, 'i');
 const DENIAL_GOES_ON = new RegExp(`^\\s+(?:or|nor)\\s+(?:${FILLER}\\s+)*$`, 'i');
+
+// True when the "flooded" at text[start, end) is a sales line about the
+// cabin, not a flood (FLOOD_SALES above): a sales object follows (or "sun-"
+// or "light-" comes before), a light word ends its phrase, and nothing else
+// in the sentence names what floods a car unless the sentence denies it.
+function floodSalesLine(text, start, end) {
+  let from = 0;
+  let to = text.length;
+  for (const b of text.matchAll(SENTENCE_END)) {
+    if (b.index + b[0].length <= start) from = b.index + b[0].length;
+    else if (b.index >= end) {
+      to = b.index;
+      break;
+    }
+  }
+  const sentence = text.slice(from, start) + ' '.repeat(end - start) + text.slice(end, to);
+  let deniedUpTo = -1;
+  for (const c of sentence.matchAll(FLOOD_CAUSE)) {
+    const between = deniedUpTo >= 0 ? sentence.slice(deniedUpTo, c.index) : null;
+    const denied = DENIED.test(sentence.slice(Math.max(0, c.index - 80), c.index)) || (between !== null && (/^[\s-]*$/.test(between) || DENIAL_GOES_ON.test(between)));
+    if (!denied) return false;
+    deniedUpTo = c.index + c[0].length;
+  }
+  if (/\b(?:sun|light)-$/i.test(text.slice(Math.max(0, start - 6), start))) return true;
+  const after = text.slice(end, to);
+  const sales = after.match(FLOOD_SALES);
+  if (!sales) return false;
+  return !LIGHT_OBJECT.test(sales[1]) || LIGHT_PHRASE_ENDS.test(after.slice(sales[0].length));
+}
+
 export function brandedTitleSignal(v = {}) {
   // each part read on its own: a denial never reaches from one feature or field into the next
   const hay = [v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), v.name, v.trim, v.siteTitle].filter(Boolean).join(' | ');
   const text = hay.replace(NOT_A_BRAND, (s) => '#'.repeat(s.length));
   let deniedUpTo = -1;
   for (const m of text.matchAll(new RegExp(BRANDED.source, 'gi'))) {
+    if (/^flooded$/i.test(m[1]) && floodSalesLine(text, m.index, m.index + m[0].length)) continue;
     const before = text.slice(Math.max(0, m.index - 80), m.index);
     if (DENIED.test(before) || (deniedUpTo >= 0 && DENIAL_GOES_ON.test(text.slice(deniedUpTo, m.index)))) {
       deniedUpTo = m.index + m[0].length;
@@ -426,28 +508,36 @@ export function locationExpect(dealer = {}) {
 // car is at the one store ticked, or the website names no store. `away` is
 // true when that store's name does not name the dealership's town either, so
 // the dealership's address, which the listing's location is typed from, may
-// not be where the car is.
+// not be where the car is. `lot` is the website's cars from the last scan
+// (a list, or the snapshot's map by VIN; each a car with its location, or a
+// store name), when the caller has them: on a website whose cars are all at
+// one store, that store is the dealership the address came from, whatever
+// its name says, so its cars are never away. With no lot to go on, a store
+// whose name does not name the town may be anywhere.
 const placeWords = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+/g) || [];
-export function carStore(v = {}, { stores = [], dealer = {} } = {}) {
+export function carStore(v = {}, { stores = [], dealer = {}, lot = null } = {}) {
   const at = typeof v.location === 'string' ? v.location.trim() : '';
   const mine = (Array.isArray(stores) ? stores : []).map((st) => String(st || '').trim()).filter(Boolean);
   const store = at && !(mine.length === 1 && mine[0] === at) ? at : '';
   const name = placeWords(store);
   const town = placeWords(dealer && dealer.city);
   const inTown = town.length > 0 && name.some((_, i) => town.every((w, j) => name[i + j] === w));
-  return { store, away: Boolean(store) && !inTown };
+  const listed = Object.values(lot && typeof lot === 'object' ? lot : {}).map((c) => String((c && typeof c === 'object' ? c.location : c) || '').trim()).filter(Boolean);
+  const oneStore = listed.length > 0 && new Set([...listed, store]).size === 1;
+  return { store, away: Boolean(store) && !inTown && !oneStore };
 }
 
 /**
  * @param {object} vehicle   normalised vehicle
- * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition}, stores }
+ * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition}, stores, lot }
  *   price is the number to post (the caller applies the dealer's price basis);
  *   defaults are the dealership's answers for the fields the website can't give;
  *   guesses ({ exterior, interior, confidence }) are colors read from the photos,
  *   used only where the website gives no usable color;
- *   stores are the salesperson's ticked stores (settings.myStores), for carStore
+ *   stores are the salesperson's ticked stores (settings.myStores), and lot the website's cars
+ *   from the last scan (the snapshot's map by VIN, when known), for carStore
  */
-export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null, stores = [] } = {}) {
+export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null, stores = [], lot = null } = {}) {
   const v = vehicle || {};
   const d = defaults || {};
   const g = guesses || {};
@@ -505,7 +595,7 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
   if (extGuess) assumed.push({ key: 'exteriorColor', label: 'Exterior color', value: extGuess, why: guessWhy(v.exteriorColor) });
   if (intGuess) assumed.push({ key: 'interiorColor', label: 'Interior color', value: intGuess, why: guessWhy(v.interiorColor) });
   // the location is the dealership's address; a car the website lists at a store in another town may be elsewhere
-  const where = carStore(v, { stores, dealer });
+  const where = carStore(v, { stores, dealer, lot });
   if (fields.location && where.away) assumed.push({ key: 'location', label: 'Location', value: fields.location, why: `your dealership's address; the website lists this car at ${where.store}, so check the location on the form` });
   if (fields.condition) assumed.push({ key: 'condition', label: 'Vehicle condition', value: fields.condition, why: "your dealership's default; change it on the form if this car is different" });
   else leftBlank.push({ key: 'condition', label: 'Vehicle condition', why: 'no default set in Settings; pick it on the form' });

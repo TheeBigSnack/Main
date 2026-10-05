@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateDescription, rewriteFacts, rewriteWithBackend, guessColorsWithBackend } from '../extension/src/rewriter.js';
 import { SYSTEM_PROMPT, buildRewritePrompt } from '../backend/rewritePrompt.js';
 import { vehicle } from './helpers.js';
+import { readFileSync } from 'node:fs';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
 const ME = { name: 'Roger', title: 'sales consultant' };
@@ -122,10 +123,27 @@ test('the website\'s write-up goes to the service as the website wrote it, a VIN
   const r = await generateDescription(args({ vehicle: v, settings: on, fetchImpl }));
   assert.ok(body, 'the service was called');
   assert.ok(!('vin' in body) && !('price' in body), 'no VIN or price field');
-  assert.deepEqual(body.narrative, r.narrative, 'the write-up the template read, unchanged');
+  assert.deepEqual(body.narrative, [r.narrative.join(' ')], 'the write-up\'s lines, unchanged, as one text');
   const sent = body.narrative.join(' ');
   for (const part of [v.vin, '$27,163', '555-201-3344', 'Local trade with new tires.']) assert.ok(sent.includes(part), `${part} goes as written`);
   assert.ok(!sent.includes('Documentation fee'), 'the lot-wide boilerplate does not');
+});
+
+// The write-up's lines go to the service as one text: a sentence the
+// website broke across paragraphs or lines reaches it whole, and the
+// services' checks (which join the list with spaces) read the same words.
+test('a sentence the website broke across paragraphs reaches the rewrite service whole', async () => {
+  const v = vehicle('usedNormal', { description: `<p>Runs great and</p><p>drives like new.</p><p>Local trade.</p><br>${DISCLAIMER}` });
+  let body = null;
+  const fetchImpl = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ ok: true, text: '' }) };
+  };
+  const r = await generateDescription(args({ vehicle: v, settings: on, fetchImpl }));
+  assert.deepEqual(r.narrative, ['Runs great and', 'drives like new.', 'Local trade.'], 'the lines as the website lays them out');
+  assert.deepEqual(body.narrative, ['Runs great and drives like new. Local trade.'], 'one text, no half sentence on its own');
+  assert.deepEqual(rewriteFacts({ vehicle: v, narrative: [] }).narrative, [], 'no write-up: nothing');
+  assert.deepEqual(rewriteFacts({ vehicle: v, narrative: ['', '  '] }).narrative, []);
 });
 
 test('the service system prompt names no real person or dealer', () => {
@@ -147,6 +165,9 @@ test('the service user prompt tells Claude the exact sign-off, built from the fa
   // no name: the same form the template writer uses
   const anon = buildRewritePrompt({ ...facts, salesperson: { name: '', title: 'sales consultant' } });
   assert.match(anon.user, /Sign off with exactly: "Sales consultant at Test Motors\."/);
+  // a title that starts with an emoji or a mark: the template's line too (signOffLine)
+  assert.match(buildRewritePrompt({ ...facts, salesperson: { name: '', title: '\u{1F697} sales pro' } }).user, /Sign off with exactly: "\u{1F697} Sales pro at Test Motors\."/u);
+  assert.match(buildRewritePrompt({ ...facts, salesperson: { name: '', title: ', sales' } }).user, /Sign off with exactly: "I'm the , sales at Test Motors\."/);
   // the line survives a regeneration with fixes
   const again = buildRewritePrompt(facts, ['too long']);
   assert.match(again.user, /I'm Dana, sales consultant at Test Motors\./);
@@ -312,4 +333,42 @@ test('for a car the website lists at a store in another town, the template names
   await generateDescription({ ...home, settings: { ...on, myStores: [] }, fetchImpl: counting });
   await generateDescription({ ...away, settings: { ...on, myStores: ['Sample Chevrolet Shelbyville'] }, fetchImpl: counting });
   assert.equal(calls, 2);
+});
+
+test('on a website whose cars are all at one store, the service is asked even when the store name does not name the town', async () => {
+  const site = { name: 'Smith Auto Sales', city: 'Springfield', zip: '00000' };
+  let calls = 0;
+  const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: false }) }; };
+  const car = args({ vehicle: { ...args().vehicle, location: 'Smith Motors' }, dealer: site, priceNote: '' });
+  const r = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors'], fetchImpl: counting });
+  assert.equal(calls, 1, 'the one store is the dealership: the service was asked');
+  assert.doesNotMatch(r.note || '', /may not be at your dealership's address/);
+  // a second store on the website: the template, as for any car that may be elsewhere
+  const two = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors', 'Jones Ford Shelbyville'], fetchImpl: counting });
+  assert.equal(calls, 1);
+  assert.match(two.note, /lists this car at Smith Motors, which may not be at your dealership's address/);
+});
+
+// README and help said a car's description names its store "never your
+// dealership's town"; on a website whose cars are all at one store the
+// service is asked, and it knows the dealership's name and town, not the
+// store's, so its draft can say the car is at the dealership in its town.
+test('the README and help say the template names a car\'s store, and when the rewrite service writes from the dealership\'s name and town instead', async () => {
+  const site = { name: 'Smith Auto Sales', city: 'Springfield', zip: '00000' };
+  const car = args({ vehicle: { ...args().vehicle, location: 'Smith Motors' }, dealer: site, priceNote: '' });
+  const template = (await generateDescription({ ...car, settings: { myStores: [] } })).text;
+  assert.match(template, /at Smith Motors\./);
+  assert.doesNotMatch(template, /Springfield/);
+  const draft = template.replace('at Smith Motors.', 'at Smith Auto Sales in Springfield.');
+  const r = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors'], fetchImpl: reply(200, { ok: true, text: draft }) });
+  assert.equal(r.source, 'claude', JSON.stringify(r.guardrails.problems));
+  assert.match(r.text, /at Smith Auto Sales in Springfield\./, "the one store's car is described at the dealership in its town");
+  const said = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').split(/(?<=[.;])\s/).filter((x) => /names the store the website lists/.test(x));
+  for (const rel of ['../README.md', '../docs/help.md']) {
+    const text = readFileSync(new URL(rel, import.meta.url), 'utf8');
+    assert.doesNotMatch(text, /never (?:your|this) dealership's town/, `${rel} says a description never names the dealership's town`);
+    assert.ok(said(rel).length, `${rel} says which description names the car's store`);
+    for (const x of said(rel)) assert.match(x, /the template's description/, `${rel}: ${x}`);
+    assert.match(text, /otherwise \(the store's name names your town, or every car on the website is at that one store\) the rewrite service, when it is on, writes the draft, and it knows your dealership's name and town, not the store's/i, `${rel} says when the rewrite service writes the draft`);
+  }
 });

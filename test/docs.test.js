@@ -28,6 +28,7 @@ import { ADAPTERS, platformNames, unsupportedSiteMessage } from '../extension/ad
 import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
+import { runGuardrails } from '../extension/src/rewriteTemplate.js';
 
 // A checkout with CRLF line ends (git's autocrlf on Windows) reads the same as
 // an LF one: every line-anchored pattern below is written for \n.
@@ -802,6 +803,14 @@ test('help, README and the onboarding emails say the address comes from the webs
   for (const rel of ['../README.md', '../docs/help.md', '../marketing/onboarding-emails.md', '../marketing/onboarding-store.md']) {
     assert.doesNotMatch(read(rel), /already filled from the website/i, `${rel} promises the address is always filled from the website`);
   }
+  // README's set-up step and its Dealership setting said "(read from the website)" and "normally there is nothing to type"
+  const readme = read('../README.md');
+  const setup = readme.split('\n').find((l) => l.includes('**Set up Lot Current**'));
+  assert.ok(setup, "README's Use section describes set-up");
+  assert.doesNotMatch(readme, /address \(read from the website\)|normally there is nothing to type/, 'README promises the address is always read from the website');
+  assert.match(setup, /the store's address \(filled from the website when it shows one; type any part it leaves blank\)/, "README's set-up step does not say a missing part of the address is typed");
+  const dealership = readme.split('\n').find((l) => l.startsWith('- **Dealership**:'));
+  assert.match(dealership, /when it shows one, and leaves blank any part it does not give for you to type/, "README's Dealership setting does not say a missing part is typed");
 });
 
 test('the docs say the template writes the description from the car\'s listed facts and does not copy the website\'s write-up', () => {
@@ -817,7 +826,7 @@ test('the docs say the template writes the description from the car\'s listed fa
   // and the help says what the rewrite service is sent instead, and that its draft is checked
   const help = doc('help.md');
   assert.ok(help.includes("The template builds the description from the car's listed facts"), 'docs/help.md does not say what the template builds the description from');
-  assert.ok(help.includes('the write-up is sent to it as the website wrote it, a whole line at a time, from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
+  assert.ok(help.includes('the write-up is sent to it as the website wrote it, in whole lines joined into one text (so a sentence the website breaks across lines arrives whole), from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
   assert.ok(help.includes("The service's draft goes through the same checks"), "docs/help.md does not say the service's draft is checked");
 });
 
@@ -1704,4 +1713,44 @@ test('the help says one post from a website goes at a time across Chrome windows
   // a copy in a second window replaces the post only while it is the post as it stands (saveId)
   assert.match(panel, /const samePost = [^;]*\(saved\.saveId \|\| null\) === \(known \|\| null\);/, 'saveFlow lets a copy save only while it is the post as it stands');
   assert.match(help, /A side panel opened in a second window while a post was under way shows that post as it stood then\. Once the first window's side panel has changed it \(text typed there, or its form opened\), nothing done in the second window's copy is saved over it, and that copy opens no form, while the first window's side panel or that form stays open\./);
+});
+
+// The help said a price "with or without $" and a mileage "however it is
+// written" must match, and that one owner "is said only when" the Carfax flag
+// is set, while the checks read set forms: a price written out in words, or
+// after a word they don't know ("Get it for 15,350" where 15,350 is also the
+// stock number), passes. The help and README say which forms are read, every
+// form they quote is caught, and the caveat covers prices and one owner too.
+test('the help and README say which ways of writing a price, a mileage or one owner the checks read, and each example is caught', () => {
+  const vehicle = { year: 2019, make: 'Jeep', model: 'Cherokee', trim: 'Latitude', mileage: 41250, price: 26500, priceBeforeFees: 25995, vin: '1C4PJMCB5KD100001', features: [], descriptionRaw: 'Was 28,995 with 38,000 miles.', carfaxOneOwner: false };
+  const ctx = { vehicle, dealer: { name: 'Example Motors', city: 'Springfield' }, salesperson: { name: 'Pat', title: 'Sales Consultant' }, price: 26500 };
+  const codes = (said) => runGuardrails(`The 2019 Jeep Cherokee Latitude. ${said} I'm Pat, Sales Consultant at Example Motors.`, ctx).problems.map((p) => p.code);
+  const line = doc('help.md').split('\n').find((l) => l.includes('The checks line:'));
+  const readme = read('../README.md').split('\n').find((l) => l.startsWith('- **Description writer**'));
+  assert.ok(line && readme);
+  const caught = {
+    'price-mismatch': ['$28,995', 'Internet price: 28,995', 'Save 1,500', '1,500 down', '1500 off', '1,500 dollars'],
+    'mileage-mismatch': ['38,000 original miles', 'Mileage: 38,000', '38k on the clock'],
+    'one-owner': ['one owner', 'single owner', 'the only owner', 'one adult owner', 'one careful, loving owner', 'owned by one retired teacher', 'one damage-free owner'],
+    'price-change': ['Reduced from 31,995'],
+  };
+  for (const [code, examples] of Object.entries(caught)) {
+    for (const ex of examples) {
+      assert.ok(line.includes(`"${ex}"`), `help.md no longer quotes "${ex}"; update this list`);
+      assert.ok(codes(ex + '.').includes(code), `"${ex}" is not caught as ${code}`);
+    }
+  }
+  assert.ok(codes('Only 28,995!').includes('unknown-number'), 'a bare write-up amount is caught');
+  for (const text of [line, readme]) {
+    assert.doesNotMatch(text, /with or without "\$"|however it is written|One owner is said only when/, 'a check is described as catching every wording');
+    assert.match(text, /a price written with "\$", after a price word or before a money word/);
+    assert.match(text, /a mileage written in one of the usual ways/);
+    assert.match(text, /go by set words and number forms, so [^:]*can still pass: read (?:the description|every draft) through before you publish/);
+  }
+  assert.match(line, /Wording that says one owner \([^)]*\) fails unless the Carfax one-owner flag is set/);
+  assert.match(line, /a price, a mileage, one owner or any other claim worded in a way they don't know \(such as a price written out in words\) can still pass/);
+  // what the caveat names: a price in words, and a price after a word the checks don't know, pass
+  const stock = { ...ctx, vehicle: { ...vehicle, stock: '15350' } };
+  assert.equal(runGuardrails('The 2019 Jeep Cherokee Latitude. Twenty-five thousand nine hundred ninety-five dollars. I\'m Pat, Sales Consultant at Example Motors.', ctx).problems.filter((p) => /price|number/.test(p.code)).length, 0);
+  assert.equal(runGuardrails('The 2019 Jeep Cherokee Latitude. Get it for 15,350. I\'m Pat, Sales Consultant at Example Motors.', stock).problems.filter((p) => /price|number/.test(p.code)).length, 0);
 });
