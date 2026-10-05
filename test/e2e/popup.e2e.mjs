@@ -126,10 +126,13 @@ try {
   await popup.click('#panel button[type="submit"]');
   await popup.waitForFunction(() => (document.querySelector('#saved')?.textContent || '').length > 0);
   assert.match(await popup.textContent('#saved'), /Your listings keep the price they were posted at; the new price setting is for new posts\./);
-  assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, 'website']], 'the listing keeps the basis it was posted at');
+  // it was marked after the last scan, which shows the website as it was before (src/rescan.js scanCar):
+  // the switch leaves it for the next scan to read
+  assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, undefined]], 'not stamped off a scan taken before it was posted');
   const scanned = () => popup.waitForFunction(() => document.querySelector('#settingsBtn').getAttribute('aria-pressed') === 'false' && document.querySelector('#panel .meta') && !document.querySelector('#scan').disabled);
   await popup.click('#scan');
   await scanned(); // the view turns to To do only once the scan is saved
+  assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, 'website']], 'the scan reads the basis it was posted at');
   assert.match(await popup.textContent('#panel .meta'), /6 used cars/);
   assert.doesNotMatch(await popup.textContent('#panel'), /Update price/, 'a changed setting is not a website price change');
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
