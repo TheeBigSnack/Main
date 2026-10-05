@@ -8,7 +8,7 @@ import { fixtures, raw, vehicle, sampleVin, MY_STORE } from './helpers.js';
 import { PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
 import { POSTING_RULES } from '../extension/src/postingRules.js';
-import { noteFlags, resolveFlag, beginPost, endPost, noteFill } from '../extension/src/pilot.js';
+import { noteFlags, resolveFlag, beginPost, endPost, noteFill, notePostStep } from '../extension/src/pilot.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 
 const k = siteKeys(POPUP_ORIGIN);
@@ -58,7 +58,7 @@ test('My listings counts only the person\'s own listings; a colleague\'s come in
   const colleague = { mine: false, userId: 'colleague-id', salesperson: 'Pat' }; // as src/sync.js mergeRegistry writes it
   const posted = {
     [own.vin]: { name: own.name, price: own.price, postedAt: at },
-    [theirs.vin]: { name: theirs.name, price: theirs.price, postedAt: at, listingUrl: 'https://listing.example.test/1', ...colleague },
+    [theirs.vin]: { name: theirs.name, price: theirs.price, postedAt: at, listingUrl: 'https://www.facebook.com/marketplace/item/1001/', ...colleague },
     [gone]: { name: '2020 Example Truck', price: 20000, postedAt: at, ...colleague },
   };
   const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted } });
@@ -77,7 +77,7 @@ test('My listings counts only the person\'s own listings; a colleague\'s come in
   assert.ok(!ownPart.includes(theirs.name) && !ownPart.includes(gone), 'a colleague\'s listing is not among the person\'s own');
   assert.match(theirPart, /Posted by colleagues <span class="pill">2<\/span>/);
   assert.match(theirPart, /Posted by Pat/);
-  assert.match(theirPart, /href="https:\/\/listing\.example\.test\/1"/, 'with the link to the listing');
+  assert.match(theirPart, /href="https:\/\/www\.facebook\.com\/marketplace\/item\/1001\/"/, 'with the link to the listing');
   assert.doesNotMatch(theirPart, /data-action=/, 'no Taken down or Updated on a colleague\'s listing');
 
   await p.tab('ready');
@@ -109,6 +109,7 @@ test('at the daily cap, Taken down or unmarking Posted ✓ on one of today\'s po
     const kept = p.local[k.takenDown];
     assert.equal(kept.length, 1, `${action}: the post is kept for the cap`);
     assert.deepEqual([kept[0].vin, kept[0].postedAt, kept[0].stillListed], [car.vin, posted[car.vin].postedAt, true], 'the website still lists the car as ready');
+    assert.equal(kept[0].name, car.name, `${action}: its name is kept, so a listing still up counts among the cars of that name`);
     await p.tab('ready');
     assert.match(p.panel(), new RegExp(`data-action="openPost" data-vin="${car.vin}" disabled`), `${action}: Post stays off at 1 of 1`);
     await p.click('openPost', { vin: car.vin });
@@ -595,7 +596,9 @@ test('signed in, the popup\'s Rescan, Mark posted, unmarking, Taken down and Upd
     assert.equal(p.local[k.posted][ram.vin].price, ram.price - 500);
     await step('taken down', () => p.click('takenDown', { vin: ram.vin }), 4);
     assert.equal(p.local[k.posted][ram.vin], undefined, 'taken down');
-    await markToday();
+    // marked again: today's log has the car, so nothing is asked (src/cap.js askWhenListed)
+    await p.click('post', { vin: ram.vin });
+    assert.ok(p.local[k.posted][ram.vin], 'marked posted again');
     await step('unmarked', () => p.click('unpost', { vin: ram.vin }), 6);
     await new Promise((r) => setTimeout(r, 30)); // nothing more comes later
     return { steps, syncs: syncs() };
@@ -685,3 +688,77 @@ test('Taken down or Updated whose to-do flag cannot be saved says why and leaves
   globalThis.chrome.storage.local.set = set;
 });
 
+// A car whose form Lot Current filled today went up today at the earliest:
+// Mark posted records it as one of today's posts without asking, so a
+// "Before today" can't take it off the cap. Before, the question came for
+// any car without a draft saved today.
+test('Mark posted records a car whose form the side panel filled today as today\'s post, without asking', async () => {
+  const car = vehicle('usedNormal');
+  const now = new Date();
+  const filled = notePostStep(beginPost(null, { vin: car.vin, name: car.name, salesperson: 'Sam', at: new Date(now.getTime() - 60e3).toISOString() }), car.vin, 'filledAt', now.toISOString());
+  const cases = {
+    // the panel was closed before "It's posted": the attempt on the Numbers tab
+    'panel closed': { [k.pilot]: endPost(filled, car.vin, 'abandoned') },
+    // marked here while the form is open: the post under way in the side panel
+    'form open': { [k.flow]: { vin: car.vin, step: 'publish', readAt: now.toISOString(), fill: { filled: [{ key: 'price' }], partial: [], blocked: [] } } },
+  };
+  for (const [name, saved] of Object.entries(cases)) {
+    const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, ...saved } });
+    await p.scan();
+    assert.equal(p.status(), '', 'the scan went through');
+    await p.tab('ready');
+    await p.click('post', { vin: car.vin });
+    assert.doesNotMatch(p.panel(), /data-action="markBefore"/, `${name}: nothing is asked`);
+    const entry = p.local[k.posted][car.vin];
+    assert.ok(entry && entry.listedBefore === undefined, `${name}: recorded as posted today`);
+    assert.deepEqual(p.local[k.postLog].map((e) => e.vin), [car.vin], `${name}: on today's log, so the cap counts it`);
+    assert.match(p.status(), /^Recorded as posted today: Lot Current filled the form for .+ today or recorded it earlier today, so it counts toward today's posts\.$/);
+  }
+  // a car with no record of today is asked about, as before
+  const q = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.pilot]: notePostStep(beginPost(null, { vin: car.vin, at: '2026-09-01T09:00:00.000Z' }), car.vin, 'filledAt', '2026-09-01T09:01:00.000Z') } });
+  await q.scan();
+  await q.tab('ready');
+  await q.click('post', { vin: car.vin });
+  assert.match(q.panel(), /data-action="markBefore"/, 'filled on another day: the question is asked');
+  assert.equal(q.local[k.posted], undefined, 'nothing recorded yet');
+});
+
+// Only a Marketplace listing's own address is saved as a listing link now
+// (facebook/detectPost.js listingLink). A link saved before that rule (the
+// Your listings page Facebook lands on after Publish, another page), or
+// synced from a colleague's computer without it, showed as "Open listing"
+// in My listings and opened the wrong page until the car was posted again.
+test('My listings shows Open listing only for a Marketplace listing\'s own address, the test hook\'s included', async () => {
+  const own = vehicle('usedZeroMiles');
+  const theirs = vehicle('usedNormal');
+  const at = new Date().toISOString();
+  const colleague = { mine: false, userId: 'colleague-id', salesperson: 'Pat' };
+  const listed = (ownUrl, theirUrl, extra = {}) => ({
+    [own.vin]: { name: own.name, price: own.price, postedAt: at, listingUrl: ownUrl },
+    [theirs.vin]: { name: theirs.name, price: theirs.price, postedAt: at, listingUrl: theirUrl, ...colleague },
+    ...extra,
+  });
+  const mine = async (posted, local = {}) => {
+    const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.posted]: posted, ...local } });
+    await p.scan();
+    await p.tab('mine');
+    return p.panel();
+  };
+  // saved before the rule: Your listings, another website, text that is no address
+  for (const bad of ['https://www.facebook.com/marketplace/you/selling', 'https://www.facebook.com/marketplace/', 'https://listing.example.test/1', 'javascript:alert(1)', 'not a link']) {
+    const html = await mine(listed(bad, bad));
+    assert.doesNotMatch(html, /Open listing/, `no link for ${bad}`);
+    assert.match(html, /Posted by Pat/, 'the colleague\'s listing is still shown');
+  }
+  // a listing's own address is linked; another spelling of the website opens the form's own
+  const good = await mine(listed('https://www.facebook.com/marketplace/item/1001/', 'https://m.facebook.com/marketplace/item/2002/?ref=share'));
+  assert.equal((good.match(/>Open listing</g) || []).length, 2);
+  assert.match(good, /href="https:\/\/www\.facebook\.com\/marketplace\/item\/1001\/"/);
+  assert.match(good, /href="https:\/\/www\.facebook\.com\/marketplace\/item\/2002\/"/);
+  // the mock Marketplace of the end-to-end tests, through the form map's test hook
+  const market = 'http://127.0.0.1:4321';
+  const devOverrides = { createUrl: `${market}/marketplace/create/vehicle`, listingUrlPattern: `^${market.replace(/\./g, '\\.')}/marketplace/item/(\\d+)`, afterPublishPatterns: [] };
+  const mock = await mine(listed(`${market}/marketplace/item/424242/`, `${market}/marketplace/you/selling`), { devOverrides });
+  assert.equal((mock.match(/>Open listing</g) || []).length, 1);
+  assert.match(mock, new RegExp(`href="${market.replace(/\./g, '\\.')}/marketplace/item/424242/"`));
+});

@@ -16,7 +16,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS } from '../manager/data.js';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS, listingHref, LISTING_URL_PATTERN, LISTING_ORIGIN } from '../manager/data.js';
+import { FORM_MAP } from '../extension/facebook/formMap.js';
+import { listingLink } from '../extension/facebook/detectPost.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
 import { AFFILIATION } from './honesty.js';
@@ -235,8 +237,8 @@ test('people: memberships name the account, a salesperson with nothing posted st
 
 test('a to-do item joins to the listing that is up, and the ages sort longest first across kinds', () => {
   const listings = [
-    { user_id: 'u1', vin: 'V1', name: 'Old', posted_at: ago(300), salesperson: 'Alex', status: 'taken_down', taken_down_at: ago(250), listing_url: 'https://example.test/old' },
-    { user_id: 'u2', vin: 'v1', name: 'New', posted_at: ago(20), salesperson: 'Sam', status: 'listed', listing_url: 'https://example.test/new' },
+    { user_id: 'u1', vin: 'V1', name: 'Old', posted_at: ago(300), salesperson: 'Alex', status: 'taken_down', taken_down_at: ago(250), listing_url: 'https://www.facebook.com/marketplace/item/1001/' },
+    { user_id: 'u2', vin: 'v1', name: 'New', posted_at: ago(20), salesperson: 'Sam', status: 'listed', listing_url: 'https://www.facebook.com/marketplace/item/1002/' },
   ];
   const todoItems = [
     { vin: 'V1', kind: 'takeDown', flagged_at: ago(4) },
@@ -245,7 +247,7 @@ test('a to-do item joins to the listing that is up, and the ages sort longest fi
   ];
   const s = summarize({ listings, todoItems, now: NOW });
   assert.equal(s.soldStillListed[0].salesperson, 'Sam');
-  assert.equal(s.soldStillListed[0].listingUrl, 'https://example.test/new');
+  assert.equal(s.soldStillListed[0].listingUrl, 'https://www.facebook.com/marketplace/item/1002/');
   assert.equal(s.soldStillListed[0].name, 'New', 'no name on the item: the listing\'s');
   assert.deepEqual(s.priceMismatches.map((o) => [o.hoursOpen, o.overdue, o.toPrice]), [[25, true, 90], [1, false, 95]]);
 });
@@ -296,12 +298,12 @@ test('a car still listed by someone no longer on the team is listed for the mana
   const memberships = [{ user_id: 'u1', role: 'salesperson', name: 'Alex' }, { user_id: 'u3', role: 'manager', name: 'Jamie' }];
   const listings = [
     { user_id: 'u1', vin: 'V1', name: 'Alex car', posted_at: ago(5), salesperson: 'Alex', status: 'listed' },
-    { user_id: 'u9', vin: 'V9', name: 'Left behind', posted_at: ago(72), salesperson: 'Pat', status: 'listed', price: 18995, listing_url: 'https://example.test/v9' },
+    { user_id: 'u9', vin: 'V9', name: 'Left behind', posted_at: ago(72), salesperson: 'Pat', status: 'listed', price: 18995, listing_url: 'https://www.facebook.com/marketplace/item/1009/' },
     { user_id: 'u9', vin: 'V8', name: 'Taken down', posted_at: ago(90), salesperson: 'Pat', status: 'taken_down', taken_down_at: ago(80) },
     { user_id: 'u9', vin: 'V7', name: 'Newer', posted_at: ago(10), salesperson: 'Pat', status: 'listed' },
   ];
   const s = summarize({ memberships, listings, todoItems: [], role: 'manager', now: NOW });
-  assert.deepEqual(s.notOnTeam.map((o) => [o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]), [['V9', 'Pat', 72, 18995, 'https://example.test/v9'], ['V7', 'Pat', 10, null, '']], 'listed ones only, longest listed first');
+  assert.deepEqual(s.notOnTeam.map((o) => [o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]), [['V9', 'Pat', 72, 18995, 'https://www.facebook.com/marketplace/item/1009/'], ['V7', 'Pat', 10, null, '']], 'listed ones only, longest listed first');
   assert.deepEqual(s.soldStillListed, [], 'no item ever opens for them');
   assert.equal(summarize({ listings, role: 'manager', now: NOW }).notOnTeam, null, 'without the memberships nobody can be told apart');
   assert.deepEqual(summarize({ memberships, listings: listings.slice(0, 1), role: 'manager', now: NOW }).notOnTeam, []);
@@ -310,7 +312,7 @@ test('a car still listed by someone no longer on the team is listed for the mana
   assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},2`));
   const at = lines.indexOf(NOT_ON_TEAM_TITLE);
   assert.equal(lines[at + 1], 'Posted,Car,VIN,Salesperson,Hours listed,Price,Listing link');
-  assert.equal(lines[at + 2], '2026-11-13 15:00,Left behind,V9,Pat,72,18995,https://example.test/v9');
+  assert.equal(lines[at + 2], '2026-11-13 15:00,Left behind,V9,Pat,72,18995,https://www.facebook.com/marketplace/item/1009/');
   // the page shows them with the reason, and its empty cards say what an item is, never that every sold car is down
   const page = read('manager/manager.js');
   assert.doesNotMatch(page, /Every sold car is off Marketplace|Every listing shows the website price/);
@@ -419,7 +421,7 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.match(lines[lines.indexOf('Sold cars still listed') + 2], /^2026-11-15 09:00,2021 Jeep Grand Cherokee Limited,SAMPLE00000000002,Alex,30,https:/);
   assert.equal(after('Price changes not yet updated'), 'Flagged,Car,VIN,Salesperson,Hours open,Price from,Price to,Listing link');
   assert.match(lines[lines.indexOf('Price changes not yet updated') + 2], /,21495,20995,/);
-  assert.equal(after('Listings'), 'Posted,Salesperson,Car,VIN,Price,Status,Taken down,Listing link');
+  assert.equal(after('Listings'), 'Posted,Salesperson,Car,VIN,Price,Status,Taken down,Listing link,Listed by hand before (Posted is when it was marked)');
   assert.equal(lines.filter((l) => /,(listed|taken down),/.test(l)).length, 8, 'every listing is a row');
   assert.equal(after('To-do items'), 'Flagged,Kind,Car,VIN,Salesperson,Done,How,Hours,Price from,Price to');
   assert.equal(after('Post attempts'), 'Post started,Salesperson,Car,VIN,Outcome,Seconds,In a queue,Reason');
@@ -450,7 +452,7 @@ test('the managers page names every car, person, price and link detail the CSV c
   assert.ok(notOnTeam && notOnTeam[1].startsWith('Posted,'), "a manager's download has the table of cars listed by people no longer on the team");
   const columns = new Set(blocks.slice(defs + 1).filter((b) => b.length > 1).flatMap((b) => b[1].split(',')));
   assert.ok(columns.has('VIN') && columns.has('Salesperson') && columns.has('Hours listed'), [...columns].join(', '));
-  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Hours listed', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason']);
+  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Hours listed', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason', 'Listed by hand before (Posted is when it was marked)']);
   const DETAILS = {
     Car: /\bthe car's name\b/,
     VIN: /\bVIN\b/,
@@ -1408,6 +1410,32 @@ test('gettingStarted step 3: any listing of this dealership, taken down or not',
   assert.match(started().steps[2].line, /^No car yet\./);
 });
 
+// A listing marked as made by hand before that day (listed_before) is not a
+// post: summarize leaves it out of posted this week, and the Getting started
+// card agreed with it only in part. Before, 2 salespeople marking 6 old
+// listings each read "12 cars posted and synced so far" and "2 salespeople
+// posted in the past 7 days" beside a posted this week of 0.
+test('gettingStarted: listings marked as made by hand before that day are no car posted and nobody posting, as posted this week says', () => {
+  const people = [member('m1', 'manager'), member('s1', 'salesperson'), member('s2', 'salesperson')];
+  const marked = ['s1', 's2'].flatMap((who) => Array.from({ length: 6 }, (_, i) => listing(who, 1 + i, { vin: `VHAND${who}${i}`, listed_before: true })));
+  const g = started({ memberships: people, listings: marked });
+  assert.equal(summarize({ listings: marked, memberships: people, now: NOW }).totals.postedThisWeek, 0, 'posted this week');
+  assert.deepEqual([g.steps[2].done, g.steps[2].line], [false, 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs. 12 listings marked as made by hand before they were marked posted are not counted.']);
+  assert.deepEqual([g.steps[3].done, g.steps[3].line], [false, 'No salesperson has posted in the past 7 days.']);
+  // one real post beside them: one car, one salesperson
+  const one = started({ memberships: people, listings: [...marked.slice(0, 1), listing('s2', 3)] });
+  assert.equal(one.steps[2].line, '1 car posted and synced so far. 1 listing marked as made by hand before it was marked posted is not counted.');
+  assert.equal(one.steps[3].line, 'One salesperson posted in the past 7 days; this step needs 2.');
+  // a row with listed_before false, or none, is a post
+  assert.equal(started({ memberships: people, listings: [listing('s1', 2, { listed_before: false }), listing('s2', 2)] }).steps[3].done, true);
+  // the CSV's Listings table flags them: their Posted time is when they were marked
+  const csv = managerCsv({ listings: [marked[0], listing('s2', 3)], memberships: people }, { role: 'manager', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const at = csv.indexOf('Listings');
+  assert.match(csv[at + 1], /,Listed by hand before \(Posted is when it was marked\)$/);
+  assert.deepEqual(csv.slice(at + 2, at + 4).map((l) => l.split(',').pop()), ['yes', ''], 'newest first: the listing marked an hour ago, then the post made 3 hours ago');
+  assert.match(read('docs/help.md'), /\*\*First car posted and synced\*\* \(any car a signed-in salesperson posted; a listing marked posted as \*\*Before today\*\* is not counted/);
+});
+
 test('gettingStarted step 4: two different salespeople with a post in the past 7 days; a manager\'s own posts do not count', () => {
   const people = [member('m1', 'manager'), member('s1', 'salesperson'), member('s2', 'salesperson')];
   const four = (list) => started({ memberships: people, listings: list }).steps[3];
@@ -1641,4 +1669,43 @@ test('an empty sold or price list says only that nothing is flagged, and why tha
   const js = read('manager/manager.js');
   for (const w of never) assert.ok(!js.includes(w), `manager.js no longer says "${w}"`);
   assert.match(js, /summarize\(\{ \.\.\.d, role: myRole\(\),/, 'only a manager\'s read of the memberships is the whole team');
+});
+
+// A listing link saved before the extension kept only a listing's own
+// address (the Your listings page Facebook lands on after Publish, another
+// page) showed as the car's link on the to-do cards, the cars listed by
+// people no longer on the team and the CSV, until the car was posted again.
+// The page shows only a Marketplace listing's own address, by the
+// extension's rule (facebook/detectPost.js listingLink), which this file
+// holds equal without importing it.
+test('the manager page and CSV link only a Marketplace listing\'s own address, by the extension\'s rule', () => {
+  assert.equal(LISTING_URL_PATTERN, FORM_MAP.listingUrlPattern, 'the pattern the extension saves links by');
+  assert.equal(LISTING_ORIGIN, new URL(FORM_MAP.createUrl).origin, 'the form\'s own website');
+  const cases = ['https://www.facebook.com/marketplace/item/1001/', 'https://www.facebook.com/marketplace/item/1001/?ref=share', 'https://m.facebook.com/marketplace/item/2002/?ref=share', 'web.facebook.com/marketplace/item/3003', 'http://facebook.com/marketplace/item/4004/',
+    'https://www.facebook.com/marketplace/you/selling', 'https://www.facebook.com/marketplace/', 'https://www.facebook.com/marketplace/item/', 'https://example.test/marketplace/item/5/', 'javascript:alert(1)', 'not a link', '', null, undefined, 42];
+  for (const c of cases) assert.equal(listingHref(c), listingLink(typeof c === 'string' ? c : '', FORM_MAP), `${c}: as the extension keeps it`);
+  const D = 'd-links';
+  const rowsFor = (url) => ({
+    listings: [
+      { dealership_id: D, user_id: 'u1', vin: 'TESTVINLINK000001', name: 'Sold car', price: 20000, posted_at: ago(50), status: 'listed', salesperson: 'Sam', listing_url: url },
+      { dealership_id: D, user_id: 'u9', vin: 'TESTVINLINK000009', name: 'Left behind', price: 21000, posted_at: ago(60), status: 'listed', salesperson: 'Pat', listing_url: url },
+    ],
+    todoItems: [{ dealership_id: D, vin: 'TESTVINLINK000001', kind: 'takeDown', name: 'Sold car', flagged_at: ago(5), done_at: null }],
+    memberships: [{ user_id: 'u1', dealership_id: D, role: 'salesperson', name: 'Sam' }, { user_id: 'm1', dealership_id: D, role: 'manager', name: 'Lee' }],
+  });
+  const shown = (url) => {
+    const input = rowsFor(url);
+    const s = summarize({ ...input, role: 'manager', now: NOW });
+    const csv = managerCsv(input, { role: 'manager', now: NOW, timeZone: 'UTC' });
+    return { todo: s.soldStillListed[0].listingUrl, gone: s.notOnTeam[0].listingUrl, csv };
+  };
+  const bad = shown('https://www.facebook.com/marketplace/you/selling');
+  assert.deepEqual([bad.todo, bad.gone], ['', ''], 'Your listings is no car\'s link');
+  assert.doesNotMatch(bad.csv, /marketplace\/you/, 'nor in the CSV');
+  const good = shown('https://m.facebook.com/marketplace/item/2002/');
+  assert.deepEqual([good.todo, good.gone], ['https://www.facebook.com/marketplace/item/2002/', 'https://www.facebook.com/marketplace/item/2002/']);
+  assert.equal((good.csv.match(/https:\/\/www\.facebook\.com\/marketplace\/item\/2002\//g) || []).length, 4, 'the sold car still listed, the car left behind and both rows of Listings');
+  // the page links what summarize gives, never the stored column
+  const js = read('manager/manager.js');
+  assert.doesNotMatch(js, /listing_url/, 'manager.js reads no stored link itself');
 });

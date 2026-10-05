@@ -77,6 +77,33 @@ export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperso
 // hide the stale warning until its date comes.
 export const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
+// The listing links the page and the CSV show: a Marketplace listing's own
+// address only, by the rule the extension saves links by (extension/
+// facebook/detectPost.js listingLink, with formMap.js's listingUrlPattern
+// and the create form's origin; this file is not imported from there, and
+// test/manager.test.js holds the two equal). Another spelling of the website
+// (m., web. or no www) becomes the form's origin. A link saved before the
+// extension checked it (the Your listings page Facebook lands on after
+// Publish, another page, text that is not an address) is shown as none: it
+// would open the wrong page.
+export const LISTING_URL_PATTERN = '^https://www\\.facebook\\.com/marketplace/item/(\\d+)';
+export const LISTING_ORIGIN = 'https://www.facebook.com';
+export function listingHref(url) {
+  const t = typeof url === 'string' ? url.trim() : '';
+  if (!t) return '';
+  let u;
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : 'https://' + t);
+  } catch (e) {
+    return '';
+  }
+  const domain = new URL(LISTING_ORIGIN).hostname.replace(/^www\./i, '');
+  const host = u.hostname.toLowerCase();
+  const tries = /^https?:$/.test(u.protocol) && (host === domain || host.endsWith('.' + domain)) ? [LISTING_ORIGIN + u.pathname, LISTING_ORIGIN + u.pathname + u.search] : [u.href];
+  const pattern = new RegExp(LISTING_URL_PATTERN, 'i');
+  return tries.find((link) => { const m = pattern.exec(link); return Boolean(m && m[1]); }) || '';
+}
+
 // What the to-do cards say, claiming only what the items show: an item opens
 // only on the poster's own computer, when their extension's rescan finds the
 // car gone from the website or its price changed. So no open item does not
@@ -253,7 +280,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
       vin,
       name: text(f.name, 80) || (l && text(l.name, 80)) || vin,
       salesperson: nameOf(l),
-      listingUrl: l && l.listing_url ? String(l.listing_url) : '',
+      listingUrl: listingHref(l && l.listing_url),
       listedPrice: l ? num(l.price) : null,
       flaggedAt: f.flagged_at || null,
       hoursOpen,
@@ -295,7 +322,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
         vin: vinOf(l),
         name: text(l.name, 80) || vinOf(l),
         salesperson: nameOf(l),
-        listingUrl: l.listing_url ? String(l.listing_url) : '',
+        listingUrl: listingHref(l.listing_url),
         listedPrice: num(l.price),
         postedAt: l.posted_at || null,
         hoursListed: hoursBetween(l.posted_at, nowAt),
@@ -1074,10 +1101,13 @@ const PLAN_STEP_CLOSED_LINES = Object.freeze({
  * The Getting started card's four steps.
  *   1. a plan: the billing state is pilot or active;
  *   2. someone invited: an open invite code, or more than one member;
- *   3. a car posted and synced: any listing;
+ *   3. a car posted and synced: any listing but one marked as made by hand
+ *      before the day it was marked posted (listed_before: no post);
  *   4. two salespeople posting: at least two different people who hold the
  *      salesperson role in the dealership now, with a listing posted in the
- *      past 7 days (a manager, or someone who has left, does not count).
+ *      past 7 days (a manager, or someone who has left, does not count, and
+ *      neither does a listing marked as made before that day, as in
+ *      summarize's posted this week).
  * @param {object} input
  *   billing:      GET .../billing/status's answer (or the sample's); null when it could not be read
  *   invites:      the open codes the page holds (list_invites plus the ones made since)
@@ -1096,6 +1126,9 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
   const ours = (r) => !dealershipId || !r.dealership_id || r.dealership_id === dealershipId;
   const M = rows(memberships).filter((m) => m.user_id && INVITE_ROLES.includes(m.role) && ours(m));
   const L = rows(listings).filter(ours);
+  // a listing marked as made by hand before the day it was marked posted is not a post: its posted_at is when it was marked
+  const posts = L.filter((l) => l.listed_before !== true);
+  const before = L.length - posts.length;
   const step = (key, done, line) => {
     const s = GETTING_STARTED[key];
     return { key, title: s.title, done, line, action: !done && s.target ? { target: s.target, label: s.button } : null };
@@ -1114,7 +1147,7 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
   // own posts do not count, nor do those of someone no longer in the dealership (their cars stay on the page)
   const salespeople = new Set(M.filter((m) => m.role === 'salesperson').map((m) => m.user_id));
   const posting = new Set();
-  for (const l of L) {
+  for (const l of posts) {
     const at = ms(l.posted_at);
     if (at === null || at < t - WEEK_MS || at > t) continue;
     if (l.user_id && !salespeople.has(l.user_id)) continue;
@@ -1134,7 +1167,10 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
   const steps = [
     planStep,
     step('invite', M.length > 1 || open > 0, inviteLine),
-    step('firstCar', L.length > 0, L.length ? `${plural(L.length, 'car')} posted and synced so far.` : 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs.'),
+    step('firstCar', posts.length > 0, [
+      posts.length ? `${plural(posts.length, 'car')} posted and synced so far.` : 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs.',
+      before ? `${plural(before, 'listing')} marked as made by hand before ${before === 1 ? 'it was' : 'they were'} marked posted ${before === 1 ? 'is' : 'are'} not counted.` : '',
+    ].filter(Boolean).join(' ')),
     step('twoPosting', n >= ACTIVE_SALESPEOPLE, postingLine),
   ];
   const done = steps.filter((s) => s.done).length;
@@ -1224,9 +1260,10 @@ export function managerCsv(input = {}, { role = '', now = nowIso(), dealer = '',
   }
   out.push('');
   out.push(csvRow(['Listings']));
-  out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link']));
+  // a listing marked as made by hand before that day: Posted is when it was marked, and it is not one of the posts in the last 7 days
+  out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link', 'Listed by hand before (Posted is when it was marked)']));
   for (const l of [...L].sort((a, b) => (ms(b.posted_at) ?? 0) - (ms(a.posted_at) ?? 0))) {
-    out.push(csvRow([local(l.posted_at), who(l), l.name, vinOf(l), num(l.price), isTakenDown(l) ? 'taken down' : 'listed', local(l.taken_down_at), l.listing_url || '']));
+    out.push(csvRow([local(l.posted_at), who(l), l.name, vinOf(l), num(l.price), isTakenDown(l) ? 'taken down' : 'listed', local(l.taken_down_at), listingHref(l.listing_url), l.listed_before === true ? 'yes' : '']));
   }
   out.push('');
   out.push(csvRow(['To-do items']));

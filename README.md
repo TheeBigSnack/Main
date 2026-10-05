@@ -32,7 +32,7 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 5. Click **Open the Marketplace form**. A new tab opens on Facebook's create-vehicle-listing page and the fields fill in, photos included. Anything it couldn't fill is listed in the panel with a copy button.
 6. On Facebook: check every field, including condition and title, then click **Publish** yourself. The panel notices the listing page and asks you to confirm; paste the listing link if it didn't notice. The car moves to **My listings**.
 7. Click **Rescan website** any time (or let the automatic rescans do it). **To do** shows what to take down (sold, or gone sale-pending), what to reprice (with your listing price next to the website's), and what's new.
-   - **Open & update price** opens your listing in a new tab. Click **Edit listing** on Facebook; the side panel puts the new price the last scan found on the website in the Price box the moment it appears and tells you what the box shows (rescan first if the website may have changed since). Click **Update** yourself. The panel notices the new price on the listing and ticks the item off.
+   - **Open & update price** opens your listing in a new tab. Click **Edit listing** on Facebook; the side panel reads the car on the website again just before it opens the listing (it stops and says why if the car is gone, sold or sale-pending, no longer passes the pre-owned check, or has no new price), puts the price the website shows then in the Price box the moment it appears and tells you what the box shows. Click **Update** yourself. The panel notices the new price on the listing and ticks the item off.
    - **Open listing** on a sold car opens your listing. Click **Mark as sold** (or **Delete**) yourself; the panel notices and ticks the item off.
    - **Updated** and **Taken down** tick an item off by hand if you did it another way.
 
@@ -95,14 +95,14 @@ To pass, at least two of them must say pre-owned, or one must and the car's page
 ## Limits
 
 - Works on Dealer Inspire websites that use the Cars Commerce inventory search (`window.SEARCH_SERVICE` on the page), checked on the pilot dealer's live site. DealerOn and Dealer.com websites have readers of their own, built from public documentation and a survey of local dealer websites and tested only on sample websites: open the used inventory page, wait until the cars show, then Scan. Neither has read a real DealerOn or Dealer.com website yet. Lot Current also tries any other website that publishes standard vehicle data (schema.org) on its car pages; that reader has been tested only on sample websites, so no other platform is known to work until a real site has been scanned. Each platform is one file under `extension/adapters/`.
-- Photos on a server Lot Current has not been allowed to download from yet: Chrome asks from your click on **Open the Marketplace form** (or Fill it in now, Attach photos again, or Download photos) and remembers a yes. Say no and the form is still filled, without those photos; Lot Current doesn't ask about that server again while the side panel stays open, unless you click **Allow photos from ...**.
+- Photos on a server Lot Current has not been allowed to download from yet: Chrome asks from your click on **Open the Marketplace form** (or Fill it in now, Attach photos, which reads Attach photos again once photos are on the form, or Download photos) and remembers a yes. Say no and the form is still filled, without those photos; Lot Current doesn't ask about that server again while the side panel stays open, unless you click **Allow photos from ...**.
 - If more than half the cars of a lot of 10 or more vanish between scans, nothing is marked gone and a warning shows.
-- The Facebook form map was checked on the live create-listing form on Sept 27, 2026 (above); the upkeep pages (your listings, a listing's edit page and its Price box) have not been checked live yet. Facebook can change its page at any time, so a field under "Couldn't fill" means the map needs a look. Photos go in through the form's file input; if that fails, **Download photos** saves them to your Downloads folder to add by hand.
+- The Facebook form map was checked on the live create-listing form on Sept 27, 2026 (above); the upkeep pages (your listings, a listing's edit page and its Price box) and the words a listing page shows once it is sold or removed (`extension/facebook/listingSigns.js`) have not been checked live yet. Facebook can change its page at any time, so a field under "Couldn't fill" means the map needs a look. Photos go in through the form's file input; if that fails, **Download photos** saves them to your Downloads folder to add by hand.
 
 ## For development
 
 ```
-npm test              # 1496 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1530 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

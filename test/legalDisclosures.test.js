@@ -51,6 +51,11 @@ test('the attorney\'s automated-means question says how the form is typed into a
     assert.match(row, /queue/, `${where}: the scripting row leaves out the queue's forms`);
     assert.match(row, /without another click/, `${where}: the scripting row says every form is filled from a click`);
     assert.match(row, /to-do item/, `${where}: the scripting row leaves out the listing read and the price fill`);
+    // the queue's read of the listing page after Publish, and the advance it decides (sidepanel.js: readListingInPage on the post tab)
+    assert.match(row, /publish[^;]*(?:to read|reads) (?:that|the) listing page/, `${where}: the scripting row leaves out the read of the listing page after Publish`);
+    assert.match(row, /VIN[^|;]*name and the price filled in[^|;]*sold[^|;]*listing form is still/, `${where}: the scripting row does not say what the listing read looks for`);
+    assert.match(row, /in a queue, records the post and moves on[^|;]*only when the page shows that car/, `${where}: the scripting row leaves out the queue's conditional advance`);
+    assert.match(row, /sen(?:t|ding) nowhere|sending nothing anywhere/, `${where}: the scripting row does not say the listing read is sent nowhere`);
     assert.doesNotMatch(row, /form (?:the person opened )?when (?:the user|they) click Post/, `${where}: the scripting row says the form is filled only on a click on Post`);
   }
   // review: Q1 and the scripting row named "Post selected", the label the popup's button shows while it is disabled,
@@ -65,6 +70,12 @@ test('the attorney\'s automated-means question says how the form is typed into a
     assert.doesNotMatch(text, /Post selected/, `${where} names Post selected, the label of a button that starts nothing`);
     for (const label of [/Post N cars/, /Queue all N ready arrivals/, /Post the next N/]) assert.match(text, label, `${where} does not name ${label} among the queue's starts`);
   }
+  // the code: after Publish the post tab's listing page is read, and in a queue the post is recorded (and the queue moves on) only when it shows the car
+  assert.match(panel, /executeScript\(\{ target: \{ tabId(?:: \w+)? \}, func: readListingInPage/, 'the listing page after Publish is no longer read: update the scripting rows and this test');
+  const store2 = rowText(read('store/listing.md'), '`https://www.facebook.com/marketplace/*`');
+  assert.match(store2, /notices when the tab shows the published listing's address and then reads that listing page/, 'store/listing.md: the Facebook host row leaves out the read of the listing page after Publish');
+  const faq = read('site-src/pages/faq.html');
+  assert.match(faq, /After you click Publish, it reads the listing page that tab goes to/, 'the FAQ leaves out the read of the listing page after Publish');
   // and the data inventory the privacy texts follow
   const inventory = rowText(read('docs/data-inventory.md'), 'Fill the Marketplace form (`facebook/fillForm.js`)');
   assert.match(inventory, /in a queue the person started, each car that passes every check, without another click/);
@@ -91,6 +102,33 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
   assert.match(what, /in a queue the User started it opens and fills the next car's form, without another click, once the User has published the previous one/);
   assert.match(what, /If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open/);
   assert.match(what, /while the User is signed in to a Lot Current account, sends that rescan's results to the dealership's records/);
+});
+
+// The posted list keeps, for a listing the person marked posted, whether it
+// had gone up before that day (`listedBefore`: left out of the daily cap,
+// and synced as listed_before), and the day's post log keeps each post made
+// that day, so the cap still counts a listing taken down or unmarked the
+// same day. The privacy policy and the store privacy form name both, for
+// the browser's copy and for the synced one.
+test('the privacy texts name the posted list\'s before-that-day mark, and say the cap counts a listing taken down or unmarked the same day', () => {
+  // the code
+  assert.match(read('extension/src/cap.js'), /p\.listedBefore === true/, 'the cap no longer leaves out a listing marked as made before that day: update the texts and this test');
+  assert.match(read('extension/src/sync.js'), /listed_before: e\.listedBefore === true/, 'the before-that-day mark no longer syncs: update the texts and this test');
+  assert.match(read('extension/src/cap.js'), /export function dayLog\(/, 'the cap no longer keeps the day\'s post log: update the texts and this test');
+  // the privacy policy
+  const policy = read('legal/privacy-policy.md').split('\n').find((l) => l.startsWith('| Posted-listing registry'));
+  assert.ok(policy, 'the privacy policy has a row for the posted list');
+  assert.match(policy, /whether a listing the User marked posted had gone up before that day/);
+  assert.match(policy, /the daily cap still counts a listing taken down or unmarked the same day/);
+  // the store privacy form: the browser's copy and the synced one
+  const form = read('legal/chrome-web-store-privacy.md');
+  const storage = rowText(form, '`storage`');
+  assert.match(storage, /whether a listing the user marked posted had gone up before that day/, 'the storage row leaves out the before-that-day mark');
+  assert.match(storage, /the daily cap still counts a listing taken down or unmarked the same day/, 'the storage row leaves out unmarked posts');
+  const synced = form.split('\n').find((l) => l.startsWith('| While signed in:'));
+  assert.match(synced, /The user's posted list \([^)]*whether a listing the user marked posted had gone up before that day/, 'the sync row leaves out the before-that-day mark');
+  // and the data inventory they follow
+  assert.match(rowText(read('docs/data-inventory.md'), '`posted:<origin>`'), /whether the salesperson said a listing they marked had gone up before that day/);
 });
 
 // Each function the extension runs in a Facebook tab, and the words the
@@ -122,11 +160,15 @@ test('the Facebook host justification and the privacy texts name every read Lot 
   // the help's install section says what Chrome's warning about that host covers, as the two rows do
   const help = read('docs/help.md').split('\n').find((l) => l.startsWith('Chrome says the extension can read and change data on `www.facebook.com/marketplace`'));
   assert.ok(help, 'docs/help.md no longer explains the Facebook host permission');
-  assert.match(read('extension/sidepanel.js'), /if \(state\.queueMode && r\.status === 'listing'\) \{[\s\S]{0,300}?return confirmIfThisCar\(/, 'a queue no longer reads the listing page it reached: update the texts and this test');
+  // the listing page a post's tab reached is read in a queue or not (sidepanel.js startWatcher: confirmIfThisCar for every listing)
+  assert.match(read('extension/sidepanel.js'), /if \(r\.status === 'listing'\) \{[\s\S]{0,300}?return confirmIfThisCar\(/, 'the listing page a post reached is no longer read, or only in a queue: update the texts and this test');
   for (const [where, row] of [['legal/chrome-web-store-privacy.md', store], ['store/listing.md', listing], ['docs/help.md', help]]) {
     for (const [func, words] of Object.entries(FACEBOOK_FUNCS)) assert.match(row, words, `${where}: the Facebook host row does not say what ${func} does`);
     assert.match(row, /notices? when the tab shows the published listing's address/, `${where}: the Facebook host row does not say the tab is watched for the listing's address`);
-    assert.match(row, /in a queue, [^;]*read(?:s)? that listing page a few times/, `${where}: the Facebook host row does not say a queue reads the listing it reached`);
+    assert.match(row, /listing's address(?: and then|; once that tab shows a listing's address,)[^;]* read(?:s)? that listing page a few times/, `${where}: the Facebook host row does not say the listing page a post reached is read`);
+    assert.doesNotMatch(row, /in a queue, [^;]*read(?:s)? that listing page/, `${where}: the Facebook host row says only a queue reads the listing page, while every post's is read`);
+    assert.match(row, /offer(?:s|ing)? that (?:listing's )?address as the car's link/, `${where}: the Facebook host row does not say the address is offered as the car's link only when the page shows the car`);
+    assert.match(row, /in a queue,? [^;]*record/, `${where}: the Facebook host row leaves out the queue's own record of the post`);
     assert.doesNotMatch(row, /No other Facebook pages? (?:is|are) read/, `${where}: the Facebook host row says no other page is read while a to-do item reads the listing or Your listings page`);
     assert.match(row, /sent nowhere/);
   }
@@ -134,6 +176,10 @@ test('the Facebook host justification and the privacy texts name every read Lot 
   assert.match(content, /title, prices and sold or unavailable sign of the Marketplace page/, 'the Website content answer leaves out the listing read');
   assert.match(content, /Your listings page/);
   assert.match(read('store/listing.md'), /website content, yes \([^)]*title, prices and sold sign of the listing page or Your listings page/);
+  // the read of the listing page after Publish (sidepanel.js confirmIfThisCar: readListingInPage on the post's tab), in the data-use answer and its summary as in the scripting rows
+  assert.match(read('extension/sidepanel.js'), /async function confirmIfThisCar[\s\S]*?executeScript\(\{ target: \{ tabId: fbTabId \}, func: readListingInPage/, 'the listing page after Publish is no longer read: update the Website content answers and this test');
+  assert.match(content, /once the user has published and that tab shows a listing, whether that listing page shows the car \(its VIN in the page's text, or the car's name and the price filled in\), a sold or unavailable sign, and whether a listing form is still on the page, kept with the post under way and sent nowhere/, 'the Website content answer leaves out the read of the listing page after Publish');
+  assert.match(read('store/listing.md'), /website content, yes \([^)]*the listing page that tab shows after they publish, read for the car's VIN, or its name and the price filled in, a sold sign and whether a listing form is still there, kept with the post and sent nowhere/, 'the store listing\'s privacy summary leaves out the read of the listing page after Publish');
 
   // the privacy policy, the data inventory and the FAQ a salesperson reads
   const policy = read('legal/privacy-policy.md').split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
@@ -155,7 +201,7 @@ test('the privacy texts\' summary lines about Facebook name the reads they make,
   assert.doesNotMatch(policy, /or anything from the User's Facebook account\./, 'the privacy policy says nothing is collected from the User\'s Facebook account while it keeps the listing address and reads the listing pages');
   const noRequest = store.split('\n').find((l) => l.startsWith('The extension makes no request to Facebook itself'));
   assert.ok(noRequest, 'the Web Store answers lost their line on requests to Facebook');
-  for (const seen of [/fills in the form/, /check fields only/, /listing page after a post in a queue/, /Your listings page while a to-do item is open/]) assert.match(noRequest, seen, `the Web Store answers' line on requests to Facebook leaves out a read (${seen})`);
+  for (const seen of [/fills in the form/, /check fields only/, /listing page after each post/, /Your listings page while a to-do item is open/]) assert.match(noRequest, seen, `the Web Store answers' line on requests to Facebook leaves out a read (${seen})`);
   const limited = section(store, '## Limited Use statement (for the listing and the Privacy Policy)');
   assert.match(limited, /from Facebook pages, Lot Current keeps only the address of each listing the user posts/);
   const policyLine = policy.split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
@@ -402,7 +448,9 @@ test('while the agreements say nothing of a failed payment, the attorney is aske
 
 // The dry run (Open the form and check fields only) reads the Marketplace
 // form page: its address, title and language, the names of up to 100 visible
-// controls anywhere on it and 200 characters next to the photo box. The side
+// controls inside the vehicle form (only the part of the page holding the
+// fields it found, never Facebook's menus around it) and 200 characters next
+// to the photo box. The side
 // panel keeps that with the post under way, and Copy report puts all of it on
 // the clipboard for a support message. The privacy texts say so, and the
 // support steps ask the person to read it before sending.
@@ -412,14 +460,15 @@ test('the privacy texts name what the dry-run report holds from the Facebook pag
   const probe = fill.slice(fill.indexOf('export function probeFormInPage('), fill.indexOf('\n}\n', fill.indexOf('export function probeFormInPage(')));
   assert.match(probe, /return \{ url: location\.href, language: [^}]*title: document\.title,[^}]*controls,[^}]*photoText/, 'the dry run no longer returns the page address, title, controls and photo text: update the texts and this test');
   assert.match(probe, /\.slice\(0, 100\);/, 'the dry run no longer keeps up to 100 controls: update the texts and this test');
+  assert.match(probe, /const controls = \(formArea \? \[\.\.\.formArea\.querySelectorAll\(/, 'the dry run lists controls from more than the vehicle form: update the texts and this test');
   assert.match(probe, /\.slice\(0, 200\) : ''/, 'the dry run no longer keeps 200 characters next to the photo box: update the texts and this test');
   const panel = read('extension/sidepanel.js');
   assert.match(panel, /const FLOW_FIELDS = \[[^\]]*'probe'/, 'the side panel no longer keeps the dry-run report with the post: update the texts and this test');
   assert.match(panel, /case 'copyReport': return copy\(JSON\.stringify\(state\.probe/, 'Copy report no longer copies the dry-run report: update the texts and this test');
 
-  const what = /address, title and language, the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/;
+  const what = /address, title and language, the names of the fields found and of up to 100 visible controls inside the vehicle form, taken only from the part of that page that holds the form's fields and never from Facebook's menus or side columns around it, and up to 200 characters of the text next to its photo box/;
   const policy = read('legal/privacy-policy.md');
-  assert.match(rowText(policy, 'Support messages (name, dealership, role, email, phone, what the message says, and any problem report the User pastes in: the versions, the dealership website\'s address and platform, the last scan and its errors, the counts on each tab, which form fields the last fill could not do, the Chrome version and time zone; and the report of the dry run, Open the form and check fields only, if the User pastes that in: the Marketplace form page\'s address, title and language, the names of the fields found and of up to 100 visible controls on that page, which can include Facebook\'s own menus, and up to 200 characters of the text next to its photo box)'), /Our inbox and the support log/);
+  assert.match(rowText(policy, 'Support messages (name, dealership, role, email, phone, what the message says, and any problem report the User pastes in: the versions, the dealership website\'s address and platform, the last scan and its errors, the counts on each tab, which form fields the last fill could not do, the Chrome version and time zone; and the report of the dry run, Open the form and check fields only, if the User pastes that in: the Marketplace form page\'s address, title and language, the names of the fields found and of up to 100 visible controls inside the vehicle form, taken only from the part of that page that holds the form\'s fields and never from Facebook\'s menus or side columns around it, and up to 200 characters of the text next to its photo box)'), /Our inbox and the support log/);
   const facebook = policy.split('\n').find((l) => l.startsWith('We do **not** collect Facebook passwords'));
   assert.doesNotMatch(facebook, /From Facebook pages Lot Current keeps only the listing address the User saves or Lot Current detects on the User's own tab\./, 'the policy says only the listing address is kept from Facebook pages while the dry run keeps what it read');
   assert.match(facebook, /after Open the form and check fields only, what that check read on the form page \(listed under Support messages above\), which stays with the post under way and leaves the browser only if the User copies the report into a message/);
@@ -428,9 +477,9 @@ test('the privacy texts name what the dry-run report holds from the Facebook pag
   assert.match(content, /sent nowhere unless the user copies the report into a message/);
   const inventory = read('docs/data-inventory.md');
   assert.match(rowText(inventory, '`postFlow:<origin>`'), /the dry run's report \(Open the form and check fields only: the form page's address, title and language/, 'the data inventory\'s postFlow row leaves out the dry-run report');
-  assert.match(inventory, /^- \*\*Copy report\*\* \(side panel, after \*\*Open the form and check fields only \(nothing filled\)\*\*, `copyReport` in `extension\/sidepanel\.js`\): [^\n]*up to 100 visible controls on that page[^\n]*the person pastes it into a message to support\./m, 'the data inventory does not list what Copy report puts on the clipboard');
-  assert.match(read('docs/support.md'), /The dry run's report also holds the form page's address and title and the names of up to 100 controls on that page, which can include Facebook's own menus: ask the person to read it before sending and take out anything personal/);
-  assert.match(read('docs/help.md'), /\*\*Copy report\*\* on the result \(read it before you send it: it holds the form page's address and title and the names of the controls on that page/);
+  assert.match(inventory, /^- \*\*Copy report\*\* \(side panel, after \*\*Open the form and check fields only \(nothing filled\)\*\*, `copyReport` in `extension\/sidepanel\.js`\): [^\n]*up to 100 visible controls inside the vehicle form \(only from the part of the page that holds the form's fields, never Facebook's menus or side columns around it; none when Lot Current can't tell which part that is\)[^\n]*the person pastes it into a message to support\./m, 'the data inventory does not list what Copy report puts on the clipboard');
+  assert.match(read('docs/support.md'), /The dry run's report also holds the form page's address and title and the names of up to 100 controls inside the vehicle form \(never Facebook's menus or side columns around it\): ask the person to read it before sending and take out anything personal/);
+  assert.match(read('docs/help.md'), /\*\*Copy report\*\* on the result \(read it before you send it: it holds the form page's address and title and the names of the controls inside the vehicle form, never Facebook's menus around it\)/);
 });
 
 // review: the store listing's reviewer steps said the test needs no sign-in but never said how to get past the
@@ -458,7 +507,8 @@ test('the store listing tells the reviewer to skip the account step, and its pri
   const short = listing.split('\n').find((l) => l.startsWith('The answers are in `legal/chrome-web-store-privacy.md`'));
   assert.ok(short, 'the store listing has its privacy summary');
   assert.match(short, /for a colour guess up to four of its photo addresses \(Anthropic's servers fetch those photos to look at them\)/);
-  // the summary names what the answers name: the controls (Facebook's own menus among them) and the photo box's text
-  assert.match(answers, /the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/, 'the Web Store answers changed what the fields check reads: change the summary with them');
-  assert.match(short, /for Open the form and check fields only, that form page's address, title and language, the names of the fields found and of up to 100 visible controls on that page, which can include Facebook's own menus, and up to 200 characters of the text next to its photo box/);
+  // the summary names what the answers name: the controls (only those inside the vehicle form) and the photo box's text
+  assert.match(answers, /the names of the fields found and of up to 100 visible controls inside the vehicle form, taken only from the part of that page that holds the form's fields and never from Facebook's menus or side columns around it, and up to 200 characters of the text next to its photo box/, 'the Web Store answers changed what the fields check reads: change the summary with them');
+  assert.match(short, /for Open the form and check fields only, that form page's address, title and language, the names of the fields found and of up to 100 visible controls inside the vehicle form, taken only from the part of that page that holds the form's fields and never from Facebook's menus or side columns around it, and up to 200 characters of the text next to its photo box/);
+  assert.doesNotMatch(short, /which can include Facebook's own menus/, 'the summary says the fields check lists Facebook\'s menus, while it lists only the vehicle form\'s controls');
 });

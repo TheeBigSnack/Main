@@ -382,6 +382,17 @@ test('PILOT.md defines no-permission by the posts that record it', () => {
   assert.match(def, /side panel's own list asks Chrome first and records nothing/, "PILOT.md does not say a side-panel list post records nothing after a no");
 });
 
+// PILOT.md's "abandoned" names every way a car is left open: Stop this post
+// drops the post through clearFlow, which ends the open attempt as
+// abandoned, as Back, Stop queue and a panel closed on it do.
+test('PILOT.md counts Stop this post among the abandoned attempts, as the panel records it', () => {
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /async function clearFlow\([^)]*\) \{[\s\S]{0,200}endPost\(p, vin, 'abandoned'\)/, 'dropping a post no longer ends its attempt as abandoned: update PILOT.md and this test');
+  assert.match(panel, /case 'stopPost': \{[\s\S]{0,300}await clearFlow\(\);/, 'Stop this post no longer drops the post through clearFlow: update PILOT.md and this test');
+  const line = read('../PILOT.md').split('\n').find((l) => l.startsWith('- **Time per post:**'));
+  assert.match(line, /A car left open \(the panel closed on it, Back, Stop queue, Stop this post\) is recorded as abandoned/);
+});
+
 // The help said the side panel's own list is for "the website you last
 // scanned", and the data inventory said lastPostOrigin only reopens a post.
 // The panel opens its list on lastPostOrigin when that website is still
@@ -1528,25 +1539,99 @@ test('the help gives the same age for a re-read of the car as the side panel use
   assert.match(help, new RegExp(`read from the website more than ${ms / 60000} minutes ago`), 'help.md says when the car is read again');
 });
 
-// Upkeep fills the new price the last scan found (the To do item's), and
-// does not read the website again at that point (upkeep.js). The copy a
-// person reads says so, never that it is "the website's new price" as if
-// read just then, and the panel's own price banner says it too.
-test('the help, README and site say a price update fills the last scan\'s price, as the upkeep banner does', async () => {
+// Upkeep reads the car on the website again just before it opens the
+// listing (upkeep.js startUpkeep, sidepanel.js upkeepPriceNow) and fills the
+// price the website shows then, or stops and says why. The copy a person
+// reads says so, never that it fills the last scan's price without reading
+// the website again, and the panel's own price banner says it too.
+test('the help, README and site say a price update reads the website again first, as the upkeep banner does', async () => {
   const help = doc('help.md');
+  const open = help.split('\n').find((l) => l.includes('Click **Open & update price**. The panel'));
+  assert.ok(open, 'help.md describes the price update');
+  assert.match(open, /reads the car on the website again first, with the same check a post makes/);
+  assert.match(open, /stops there and says why: it opens and fills nothing/);
+  assert.match(open, /marks it sold or sale-pending, no longer calls it pre-owned, has details that need a look/);
+  assert.match(open, /A car at another store, without photos or not yet on the lot still gets its new price/);
+  // a read that fails, or that Chrome refuses from the panel, stops it too (upkeepPriceNow)
+  const priceNow = read('../extension/sidepanel.js').match(/async function upkeepPriceNow\([\s\S]*?\n\}\n/)[0];
+  assert.match(priceNow, /if \(!fresh\.ok && fresh\.needsPermission\) \{\s*return \{ ok: false,/);
+  assert.match(priceNow, /if \(!fresh\.ok\) \{[\s\S]*?return \{ ok: false,/);
+  assert.match(open, /If the website can't be read just then \(or Chrome hasn't let Lot Current read it from the panel: open the website's used inventory page and click \*\*Open & update price\*\* in the popup there\)/);
   const step = help.split('\n').find((l) => l.includes('The moment the Price box appears'));
-  assert.ok(step, 'help.md describes the price update');
-  assert.match(step, /the price the last scan found on the website/);
-  assert.match(step, /does not read the website again/);
-  assert.match(step, /\*\*Rescan website\*\* first/);
+  assert.match(step, /the price the website showed at that read/);
   for (const rel of ['../docs/help.md', '../README.md', '../site-src/pages/how-it-works.html', '../site/how-it-works/index.html']) {
-    assert.doesNotMatch(read(rel), /the website's new price/, `${rel} calls the filled price the website's new price`);
+    assert.doesNotMatch(read(rel), /the website's new price|does not read the website again|the new price the last scan found/, `${rel} says the filled price is the last scan's`);
   }
-  assert.match(read('../README.md'), /the new price the last scan found on the website in the Price box/);
+  assert.match(read('../README.md'), /reads the car on the website again just before it opens the listing/);
   const { up, upkeepHtml } = await import('../extension/upkeep.js');
-  Object.assign(up, { active: true, kind: 'price', status: 'waiting', price: 19000, listedPrice: 20000, name: 'Car A', vin: 'AAA', listingUrl: '', note: '', error: '' });
-  assert.match(upkeepHtml(), /fills in <b>\$19,000<\/b> \(was \$20,000\), the price the website showed at the last scan;[^<]*<b>Update<\/b>\. If the website's price may have changed since, rescan first\./);
+  Object.assign(up, { active: true, kind: 'price', status: 'waiting', price: 19000, scanPrice: null, listedPrice: 20000, name: 'Car A', vin: 'AAA', listingUrl: '', note: '', error: '' });
+  assert.match(upkeepHtml(), /fills in <b>\$19,000<\/b> \(was \$20,000\), the price the website shows now: Lot Current read the car on the website again just before opening the listing\. Then you click <b>Update<\/b>\./);
   up.active = false;
+});
+
+// The listing watcher (detectPost.js watchForListing) reports the first
+// listing or Your listings address the form's tab goes to and then stops;
+// the panel reads that page once more only when it is opened again. And the
+// re-read before the form opens (sidepanel.js readIsOld, readCarNow) runs
+// for a read over 10 minutes old or one a newer scan contradicts in price,
+// second price, status, availability or inventory type, and stops on any
+// failed check. The help says both as the code does them, not "whenever".
+test('the help says the panel reads the first listing page the tab goes to, and when and why the car is read again', () => {
+  const watch = read('../extension/facebook/detectPost.js');
+  assert.match(watch, /function finish\(result\) \{\s*if \(done\) return;\s*done = true;/, 'the listing watcher no longer stops at its first answer: update the help and this test');
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /same\(listed\.price, v\.price\) && same\(listed\.priceBeforeFees, v\.priceBeforeFees\) && same\(listed\.status, v\.status\) && same\(listed\.availability, v\.availability\) && same\(listed\.type, v\.inventoryType\)/, 'the re-read compares other fields now: update the help and this test');
+  assert.match(panel, /const check = recheck\(fresh\.vehicle, state\.settings\);\s*if \(!check\.ok\) \{\s*await block\(/, 'a post no longer stops on every failed check: update the help and this test');
+  const help = doc('help.md');
+  assert.doesNotMatch(help, /Whenever that tab goes to a listing page/);
+  assert.match(help, /The first time that tab goes to a listing page \(or to Your listings\) after the form opened, the panel reads the page[^\n]*It does not watch the tab after that first page/);
+  assert.match(help, /The panel notices the first listing page the tab goes to after the form opened and reads it/);
+  assert.match(help, /a scan since then no longer lists it or shows it at another price, second price, status, availability or inventory type, the panel reads and checks it again first, with the same checks as Ready to post/);
+});
+
+// Mark posted on a draft's car records the draft's price when the draft
+// kept one, else the website's (drafts.js markDraftPosted, the popup's Mark
+// posted); the help says both, and the old draft's pill as drafts.js draws it.
+test('the help says Mark posted on a draft records the draft\'s price, or the website\'s for a draft that kept none', async () => {
+  const { markDraftPosted } = await import('../extension/src/drafts.js');
+  const entry = { vin: 'AAA', name: 'Car A', price: 20000 };
+  assert.equal(markDraftPosted({}, entry, { price: 19500, basis: 'website' }, 'website', '2026-10-01T12:00:00.000Z').AAA.price, 19500);
+  assert.equal(markDraftPosted({}, entry, { savedAt: '2026-09-30T12:00:00.000Z' }, 'website', '2026-10-01T12:00:00.000Z').AAA.price, 20000);
+  assert.match(read('../extension/popup.js'), /draft \? markDraftPosted\(/, 'the popup\'s Mark posted no longer records a draft\'s price: update the help and this test');
+  const line = doc('help.md').split('\n').find((l) => l.startsWith('- A car saved as a draft shows'));
+  assert.match(line, /\*\*Mark posted\*\* records the draft's price, because that is what the listing shows \(a draft saved by an older version of Lot Current kept no price: its pill reads just "Draft on Facebook", and \*\*Mark posted\*\* records the website's price/);
+});
+
+// What has not been checked on Facebook's live pages is listed where a
+// tester and a maintainer look: the README's Limits and the form map's
+// header. The listing page's sold and removed signs (listingSigns.js, NOT
+// YET VERIFIED there) are among them while that file says so.
+test('the README Limits and the form map header name the listing page\'s unverified sold and removed signs', () => {
+  const signs = read('../extension/facebook/listingSigns.js');
+  if (!/NOT YET VERIFIED/.test(signs)) return; // checked live: the lines may go
+  const limits = read('../README.md').split('\n').find((l) => l.startsWith('- The Facebook form map was checked'));
+  assert.match(limits, /the words a listing page shows once it is sold or removed \(`extension\/facebook\/listingSigns\.js`\) have not been checked live yet/);
+  const header = read('../extension/facebook/formMap.js').split('export const FORM_MAP')[0];
+  assert.match(header, /Not checked live:[\s\S]*the sold and removed signs\s+\/\/ a listing page shows \(facebook\/listingSigns\.js, marked NOT VERIFIED there\)/);
+});
+
+// The side panel's photo button reads Attach photos until photos are on the
+// form and Attach photos again after; the places that list the clicks
+// Chrome's photo prompt comes from name both labels, and the demo script
+// names Attach photos again, not Fill again, which asks for nothing.
+test('the README, store listing and help name both labels of the photo button where they list the clicks that ask for photos', () => {
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /id="attachAgain">\$\{state\.photos && \(state\.photos\.attached \|\| state\.photos\.again\) \? 'Attach photos again' : 'Attach photos'\}/, 'the photo button\'s labels changed: update the texts and this test');
+  assert.match(panel, /case 'attachAgain':\s*await askForPhotos\(\);/, 'the photo button no longer asks Chrome first: update the texts and this test');
+  assert.match(panel, /case 'fillAgain':(?![^\n]*askForPhotos)/, 'Fill again now asks for photos: update the demo script and this test');
+  assert.match(read('../README.md'), /Fill it in now, Attach photos, which reads Attach photos again once photos are on the form, or Download photos/);
+  assert.match(read('../store/listing.md').split('\n').find((l) => l.startsWith('| `https://*/*` (optional) |')), /Fill it in now, Attach photos \(Attach photos again once photos are on the form\) or Download photos/);
+  const help = doc('help.md');
+  assert.match(help, /\*\*Fill it in now\*\*, \*\*Attach photos\*\*, which reads \*\*Attach photos again\*\* once photos are on the form, or \*\*Download photos\*\*\) for the first car with photos there/);
+  assert.match(help, /Under \*\*Photos\*\*: \*\*Download photos\*\*, \*\*Fill again\*\*, \*\*Attach photos\*\* \(it reads \*\*Attach photos again\*\* once photos are on the form\)/);
+  const demo = read('../marketing/demo-script.md');
+  assert.doesNotMatch(demo, /fill it again or download photos/i);
+  assert.match(demo, /When you open the form, attach photos again or download photos, it's permission to download this car's photos/);
 });
 
 // The cap counts this person's posts on the website today, taking the
@@ -1590,4 +1675,21 @@ test('the help says what a no to Chrome from the side panel\'s list does: nothin
   assert.match(help, /If you say no, nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button/);
   assert.match(help, /Decline and nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button again to be asked again/);
   for (const line of help.split('\n').filter((l) => /Allow reading \[website\]/.test(l))) assert.match(line, /stopped at (the|its) re-check/, `help.md ties Allow reading to a stopped post: ${line.slice(0, 80)}`);
+});
+
+test('the help says one post from a website goes at a time across Chrome windows, as the side panel holds it', () => {
+  const panel = read('../extension/sidepanel.js');
+  // startFlow checks the website's saved post for any car, and saves its own from the start of the check
+  assert.match(panel, /const elsewhere = await postElsewhere\(req\.origin\);/, 'startFlow looks at the website\'s saved post, whatever its car');
+  assert.match(panel, /state\.step = 'checking';[\s\S]{0,700}?const taken = await saveFlow\(\);[\s\S]{0,80}?if \(taken\) return giveWay\(taken[,)]/, 'the post is saved as the check begins, and gives way to one saved first');
+  assert.match(panel, /One post from a website goes at a time, so none starts here/, 'what the panel says for another car');
+  const help = doc('help.md');
+  assert.doesNotMatch(help, /A side panel never opens a second form for a car whose post is under way in another window's side panel/);
+  assert.match(help, /One post from a website goes at a time across Chrome windows\. While the side panel in one window has a post under way from a website \(a car being checked or reviewed there with that panel open, or a car whose Marketplace form is open there\), the side panel in another window starts no post from that website, for that car or another, and opens no second form/);
+  assert.doesNotMatch(help, /Finish or stop it in that window, or close the side panel there, then try again\./, 'closing that side panel frees nothing while the form\'s tab is open (liveElsewhere)');
+  assert.match(panel, /if \(form && typeof saved\.fbTabId === 'number'\) \{[\s\S]{0,200}?chrome\.tabs\.get\(saved\.fbTabId\)/, 'an open form\'s tab keeps the post under way with that window\'s side panel closed');
+  assert.match(help, /For a car being checked or reviewed there, finish or stop it in that window, or close the side panel there, then try again\. A car whose Marketplace form is open there has to be finished there first \(closing that side panel is not enough while the form's tab is open\)/);
+  // a copy in a second window replaces the post only while it is the post as it stands (saveId)
+  assert.match(panel, /const samePost = [^;]*\(saved\.saveId \|\| null\) === \(known \|\| null\);/, 'saveFlow lets a copy save only while it is the post as it stands');
+  assert.match(help, /A side panel opened in a second window while a post was under way shows that post as it stood then\. Once the first window's side panel has changed it \(text typed there, or its form opened\), nothing done in the second window's copy is saved over it, and that copy opens no form, while the first window's side panel or that form stays open\./);
 });

@@ -4,6 +4,13 @@
 // marked done when the page shows the change (or when the person says so).
 // The person clicks Edit, Update, Mark as sold or Delete; Lot Current never does.
 //
+// A price update reads the car on the website again first (ctx.priceNow, the
+// same read and check a post makes at post time) and fills the price the
+// website shows now, on the basis the listing was posted at; a car the read
+// can't find, one the website marks sold or sale-pending, no longer calls
+// pre-owned or whose details need a look, one with no price, or one whose
+// price is back to the listed one stops with the reason and nothing is filled.
+//
 // Two guards, because the tab is an ordinary tab the person can move around
 // in (and for a car with no saved link it opens on Marketplace's list of all
 // their listings):
@@ -12,8 +19,8 @@
 //     no saved link, never on the Your listings page, and elsewhere only a
 //     page that shows every word of the car's name as a whole word and the
 //     price it was listed at (or the new price), and also its VIN when
-//     another car in the posted list has every word of this car's name in
-//     its own (two identical units at one price look alike otherwise). Such
+//     another car posted or taken down lately has a name like this car's
+//     (namesakesOf: two such units at one price look alike otherwise). Such
 //     a page that is a listing gives the id, which is what counts from then
 //     on. A car with neither a link nor a listed price is never matched: the
 //     person uses I updated it / I took it down;
@@ -26,7 +33,7 @@ import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { listingLink } from './facebook/detectPost.js';
 import { resolveFlag, updatePilot } from './src/pilot.js';
 import { siteKeys } from './src/storageKeys.js';
-import { noteTakenDown } from './src/takenDown.js';
+import { noteTakenDown, takenDownList } from './src/takenDown.js';
 import { updateKey, storageErrorText } from './src/storage.js';
 import { accountsConfigured } from './src/accountConfig.js';
 import { loadSession } from './src/account.js';
@@ -35,12 +42,15 @@ export const up = {
   active: false,
   origin: null, vin: null, kind: null, price: null, listingUrl: '', name: '', listedPrice: null,
   listingId: '', // the listing's id, from its saved link or from this car's own listing page once opened (onListing)
-  tabId: null, status: 'idle', // idle | opening | waiting | filled | done | gone
+  tabId: null, status: 'idle', // idle | checking | stopped | opening | waiting | filled | done | gone
+  scanPrice: null, // a price update: the price the last scan found, when the website shows another one now
   note: '', filledShown: '', seen: null, error: '', fills: 0,
+  names: null, // the last scan's cars by VIN, read once for a take-down recorded without its name (namesakesNow)
   baseline: null, // { url, sold, unavailable } from the first read of the current page
   offTarget: false, // the tab is showing some other page
 };
 let poller = null;
+let starts = 0; // the To do item being opened: a later one (or Not now) wins over a read still under way
 const MAX_FILLS = 4; // a form that is still loading can overwrite the price once or twice
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -68,12 +78,34 @@ function stopPolling() {
 // to open the listing, instead of being sent to a page with no word about it.
 export async function startUpkeep(req, ctx) {
   stopPolling();
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, baseline: null, offTarget: false });
+  const run = ++starts;
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, price: req.price || null, scanPrice: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false });
   ctx.render();
+  if (up.kind === 'price') {
+    let now;
+    try {
+      now = typeof ctx.priceNow === 'function' ? await ctx.priceNow(req) : { ok: false, message: "Lot Current couldn't check this car's price on the website." };
+    } catch (e) {
+      now = { ok: false, message: "Lot Current couldn't check this car's price on the website just now: " + ((e && e.message) || e) };
+    }
+    if (run !== starts || !up.active) return; // another item, or Not now, meanwhile
+    const stop = priceStop(now);
+    if (stop) {
+      up.status = 'stopped';
+      up.note = stop;
+      ctx.render();
+      return;
+    }
+    if (now.price !== up.price) up.scanPrice = up.price;
+    up.price = now.price;
+    up.status = 'opening';
+    ctx.render();
+  }
   const map = ctx.map();
   const url = up.listingUrl || map.yourListingsUrl;
   try {
     const tab = await chrome.tabs.create({ url, active: true });
+    if (run !== starts || !up.active) return; // another item, or Not now, meanwhile: the tab stays as it is
     up.tabId = tab.id;
   } catch (e) {
     up.error = "Couldn't open the listing: " + ((e && e.message) || e);
@@ -85,8 +117,18 @@ export async function startUpkeep(req, ctx) {
   up.note = up.listingUrl ? '' : `No link to this car's own listing was saved, so this is Marketplace's Your listings page: open the listing for ${up.name} there.`;
   ctx.render();
   await sleep(1500);
-  if (!up.active) return; // closed meanwhile
+  if (run !== starts || !up.active) return; // closed meanwhile
   poller = setInterval(() => poll(ctx).catch(() => {}), 1500);
+}
+
+// Why a price update stops before anything is filled, from the read of the
+// car on the website (ctx.priceNow: { ok, price } or { ok: false, message });
+// '' to go on with that price.
+export function priceStop(now) {
+  if (!now || !now.ok) return `${String((now && now.message) || "Lot Current couldn't check this car's price on the website.").trim()} Nothing was filled.`;
+  if (!(typeof now.price === 'number' && now.price > 0)) return "The website shows no price for this car right now, so there is no price to fill. Nothing was filled.";
+  if (up.listedPrice && now.price === up.listedPrice) return `The website shows ${money(now.price)} again, the price your listing already has, so there is nothing to change on Facebook. Nothing was filled; the next scan clears this item.`;
+  return '';
 }
 
 // What the listing reader is told about this car's listing: its id when
@@ -97,24 +139,46 @@ const expectFor = (map) => ({ id: knownId(map), name: up.name, prices: [up.liste
 // The words of a car's name as the listing reader compares them.
 const nameWords = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase().split(' ').map((t) => t.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')).filter(Boolean);
 
-// How many other cars in the posted list have every word of this car's name
-// in their own: a listing of one of them shows this car's name too (a second
-// 2021 Jeep Grand Cherokee Laredo, or a Wrangler Unlimited Sport for a
-// Wrangler Sport), and perhaps the same price.
-export function namesakesOf(posted, vin, name) {
+// Whether a listing of a car named `theirs` (words) can show every word of
+// this car's name: every word of one name is in the other, either way round.
+// A second 2021 Jeep Grand Cherokee Laredo, a Wrangler Unlimited Sport for a
+// Wrangler Sport, and a Ram 1500 Classic for a Ram 1500 Classic 4x4 (whose
+// 4x4 that listing's description or details may well show) all do. A car
+// with no name is not counted.
+const nameLike = (mine, theirs) => theirs.length > 0 && (mine.every((w) => theirs.includes(w)) || theirs.every((w) => mine.includes(w)));
+
+// How many other cars have a name like this car's (nameLike): a listing of
+// one of them can show this car's name too, and perhaps the same price. The
+// cars are every entry of the posted list, colleagues' too (sync merges
+// theirs into it), and the posts taken off it lately (`takenDown`, the
+// take-down record, src/takenDown.js: such a listing may still be on
+// Facebook), each car once. A take-down recorded without its name takes it
+// from `names` (the last scan's cars by VIN) when the website still lists it.
+export function namesakesOf(posted, vin, name, { takenDown = null, names = null } = {}) {
   const mine = nameWords(name);
   if (mine.length < 2) return 0;
   const own = String(vin || '').toUpperCase();
-  return Object.entries(posted && typeof posted === 'object' ? posted : {})
-    .filter(([v, p]) => String(v).toUpperCase() !== own && p && mine.every((w) => nameWords(p.name).includes(w))).length;
+  const known = (v) => (names && typeof names === 'object' && names[v] && names[v].name) || '';
+  const others = new Map(); // VIN -> name
+  for (const [v, p] of Object.entries(posted && typeof posted === 'object' ? posted : {})) {
+    if (p && typeof p === 'object') others.set(String(v).toUpperCase(), p.name || known(v));
+  }
+  for (const t of takenDownList(takenDown)) if (!others.get(t.vin)) others.set(t.vin, t.name || known(t.vin));
+  return [...others].filter(([v, n]) => v !== own && nameLike(mine, nameWords(n))).length;
 }
 
 // The same, from what is stored now; null when the posted list can't be read
-// (onListing then asks for the VIN, as if there were one).
-async function namesakesNow() {
+// (onListing then asks for the VIN, as if there were one). The last scan is
+// read only for a take-down recorded before names were kept, once per item.
+export async function namesakesNow() {
   try {
-    const k = siteKeys(up.origin).posted;
-    return namesakesOf((await chrome.storage.local.get(k))[k], up.vin, up.name);
+    const k = siteKeys(up.origin);
+    const got = await chrome.storage.local.get([k.posted, k.takenDown]);
+    if (!up.names && takenDownList(got[k.takenDown]).some((t) => !t.name)) {
+      const snap = (await chrome.storage.local.get(k.snapshot))[k.snapshot];
+      up.names = (snap && snap.vehicles) || {};
+    }
+    return namesakesOf(got[k.posted], up.vin, up.name, { takenDown: got[k.takenDown], names: up.names });
   } catch (e) {
     return null;
   }
@@ -242,7 +306,7 @@ async function finish(ctx, how) {
     // car as ready
     if (!price) {
       const entry = ((await chrome.storage.local.get(k.posted))[k.posted] || {})[up.vin];
-      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true }));
+      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true, name: entry.name }));
     }
     await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
     // pilot numbers: how long the item stayed open, and whether Lot Current
@@ -271,8 +335,9 @@ export function offTargetNote(id, seen, namesakes = 0) {
   if (id) return `This tab isn't showing the listing for ${up.name}. Open that listing and Lot Current continues.`;
   if (!up.listedPrice) return `No listing link or listed price was saved for ${up.name}, so Lot Current can't tell which listing is its own and fills in or ticks off nothing. Do it on Facebook, then click ${done}.`;
   if (namesakes !== 0 && seen && seen.matchesName && seen.matchesPrice && !seen.matchesVin) {
-    const why = namesakes === null ? `Lot Current couldn't read your posted cars to check whether another one is also a ${up.name}` : `Another car you posted also has ${up.name} in its name`;
-    return `${why}, so a listing counts as this car's only when its page shows this car's VIN, ${up.vin}, and this page doesn't. Open this car's own listing (its description carries the VIN); if the VIN isn't on it, do it on Facebook, then click ${done}.`;
+    const why = namesakes === null ? `Lot Current couldn't read your posted cars to check whether another one is also a ${up.name}` : `Another car you posted or took down has a name like ${up.name}`;
+    // what the reader saw is the page's text so far: the VIN line ends the description, which the page may cut short
+    return `${why}, so a listing counts as this car's only when its page shows this car's VIN, ${up.vin}, and Lot Current couldn't find it in this page's text. Open this car's own listing (its description carries the VIN at the end; if the description is cut short with See more, click it); if Lot Current still doesn't continue, do it on Facebook, then click ${done}.`;
   }
   const looksFor = namesakes !== 0 ? `its full name, ${money(up.listedPrice)} and its VIN, ${up.vin}` : `its full name and ${money(up.listedPrice)}`;
   return `This tab isn't showing the listing for ${up.name}. Open its own listing page (Lot Current looks for ${looksFor}) and Lot Current continues; if it doesn't, click ${done} when you are done.`;
@@ -280,6 +345,7 @@ export function offTargetNote(id, seen, namesakes = 0) {
 
 export function endUpkeep() {
   stopPolling();
+  starts += 1; // a read or an opening still under way stops there
   up.active = false;
   up.status = 'idle';
 }
@@ -287,20 +353,24 @@ export function endUpkeep() {
 export function upkeepHtml() {
   const title = up.kind === 'price' ? `Update the price: ${esc(up.name)}` : `Take down: ${esc(up.name)}`;
   const error = up.error ? `<div class="banner bad">${esc(up.error)}</div>` : '';
-  const note = up.note ? `<p class="hint" id="upkeepNote">${esc(up.note)}</p>` : '';
+  const note = up.note && up.status !== 'stopped' ? `<p class="hint" id="upkeepNote">${esc(up.note)}</p>` : '';
   let body = '';
-  if (up.status === 'opening') body = '<p>Opening your listing…</p>';
+  if (up.status === 'checking') body = `<p id="priceChecking">Checking this car's price on the website first…</p>`;
+  else if (up.status === 'stopped') body = `<div class="banner warn" id="upkeepStopped">${esc(up.note)}</div>`;
+  else if (up.status === 'opening') body = '<p>Opening your listing…</p>';
   else if (up.status === 'gone') body = '<div class="banner warn">The listing tab was closed. Did you finish?</div>';
   else if (up.status === 'done') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;
   else if (up.kind === 'price') {
     body = up.status === 'filled'
       ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price.</div>`
-      : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Current fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}, the price the website showed at the last scan; then you click <b>Update</b>. If the website's price may have changed since, rescan first.</div>`;
+      : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Current fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}, the price the website shows now: Lot Current read the car on the website again just before opening the listing${up.scanPrice ? ` (the last scan had found ${money(up.scanPrice)})` : ''}. Then you click <b>Update</b>.</div>`;
   } else {
     body = `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Mark as sold</b> (or <b>Delete</b>) on this listing. Lot Current will notice and mark it done.</div>`;
   }
-  const buttons = up.status === 'done'
+  const buttons = up.status === 'done' || up.status === 'stopped'
     ? `<button type="button" class="primary" id="upkeepClose">Close</button>`
+    : up.status === 'checking'
+    ? `<button type="button" class="plain" id="upkeepCancel">Not now</button>`
     : `<button type="button" class="primary" id="upkeepDoneBtn">${up.kind === 'price' ? 'I updated it' : 'I took it down'}</button><button type="button" class="plain" id="upkeepCancel">Not now</button>`;
   return `<section class="car"><div class="name">${title}</div><div class="facts">${esc(up.vin)}${up.listingUrl ? ` · <a href="${esc(up.listingUrl)}" target="_blank" rel="noopener">listing</a>` : ''}</div></section>
     ${error}${body}${note}
@@ -312,6 +382,7 @@ export async function handleUpkeepClick(id, ctx) {
   if (!up.active) return false;
   switch (id) {
     case 'upkeepDoneBtn':
+      if (up.status === 'checking' || up.status === 'stopped') return true; // no price read to record (the button is not drawn then)
       await finish(ctx, 'manual');
       return true;
     case 'upkeepCancel':

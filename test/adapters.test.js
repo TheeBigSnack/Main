@@ -14,7 +14,7 @@ import schemaOrg, { PAGE_TEXT_LIMIT, CONCURRENCY, MAX_LIST_PAGES, MAX_SITEMAPS, 
 import { fetchVehicleDetails } from '../extension/src/vehicleDetails.js';
 import { cleanDescription } from '../extension/src/description.js';
 import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, dealerOnPath, dealerComPath, platformSearch, fakePlatformPage } from './platformSites.js';
-import { fixtures, sampleVin, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage } from './helpers.js';
+import { fixtures, sampleVin, fakeDealerPage, fakeChrome, runInPage, STANDARD_ORIGIN, standardCars, standardSite, standardCarNode, standardCarPage, standardListPage, httpError, fakeSiteSearch, fakeStandardPage, stripStrings, moduleScopeNames, freeIdentifiers } from './helpers.js';
 
 const records = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => ({ ...r, media: { ...r.media, images: ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'] } }));
 
@@ -102,98 +102,6 @@ const PLATFORM_FIXTURES = {
 const CONTRACT = ['probeInPage', 'searchInPage', 'detect', 'origins', 'scanOptions', 'scan', 'getDetails', 'normalize', 'makeDirectSearch', 'photoOrigins'];
 const IN_PAGE = ['probeInPage', 'searchInPage'];
 const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`\\])\/\/[^\n]*$/gm, '$1');
-// Strings become "", except what a template literal interpolates: the code
-// inside each ${...} is kept (scanned the same way, so a string or template
-// inside it is handled too), since a name used there is reached like any other.
-function stripStrings(src) {
-  const n = src.length;
-  const quoted = (q, j) => { // index after the closing quote (a quote string never spans lines)
-    for (j += 1; j < n && src[j] !== q && src[j] !== '\n'; j += 1) if (src[j] === '\\') j += 1;
-    return j + 1;
-  };
-  const code = (j, inInterpolation) => { // [code with strings stripped, index of the closing brace or the end]
-    let out = '';
-    let depth = 0;
-    while (j < n) {
-      const c = src[j];
-      if (c === "'" || c === '"') { out += '""'; j = quoted(c, j); continue; }
-      if (c === '`') {
-        out += '""';
-        for (j += 1; j < n && src[j] !== '`'; j += 1) {
-          if (src[j] === '\\') { j += 1; continue; }
-          if (src[j] === '$' && src[j + 1] === '{') { const [inner, end] = code(j + 2, true); out += ' (' + inner + ') '; j = end; }
-        }
-        j += 1;
-        continue;
-      }
-      if (c === '{') depth += 1;
-      if (c === '}') { if (inInterpolation && depth === 0) return [out, j]; depth -= 1; }
-      out += c;
-      j += 1;
-    }
-    return [out, j];
-  };
-  return code(0, false)[0];
-}
-const KEYWORDS = new Set('async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield true false null undefined'.split(' '));
-
-// Every name declared at the top level of a module file: what an injected
-// function must not reach for. The import lines give the imported names
-// (default, { named }, * as namespace). Every other top-level name is left to
-// the JavaScript parser itself, so a declaration of several names, a
-// destructured one, a function or a class is never missed: the file with its
-// import and export words taken out compiles as a strict script, and adding
-// `let NAME;` to it is a syntax error exactly when NAME is already declared
-// at the top. Nothing in the file runs.
-function moduleScopeNames(src) {
-  const imported = new Set();
-  for (const m of src.matchAll(/^import\s+([^'"]*?)\s*from\s*['"]/gm)) {
-    const clause = m[1];
-    const named = clause.match(/\{([^}]*)\}/);
-    if (named) for (const part of named[1].split(',')) { const n = part.trim().split(/\s+as\s+/).pop(); if (n) imported.add(n); }
-    const rest = clause.replace(/\{[^}]*\}/, '');
-    const namespace = rest.match(/\*\s*as\s+([A-Za-z_$][\w$]*)/);
-    if (namespace) imported.add(namespace[1]);
-    const byDefault = rest.match(/^\s*([A-Za-z_$][\w$]*)/);
-    if (byDefault) imported.add(byDefault[1]);
-  }
-  const script = "'use strict';\n" + src
-    .replace(/^import\s[^'"]*['"][^'"\n]*['"]\s*;?/gm, '')
-    .replace(/^export\s*\{[^}]*\}(?:\s*from\s*['"][^'"\n]*['"])?\s*;?/gm, '')
-    .replace(/^export\s*\*[^'"\n]*['"][^'"\n]*['"]\s*;?/gm, '')
-    .replace(/^export\s+default\s+(?=(?:async\s+)?function\b\s*\*?\s*[A-Za-z_$]|class\s+(?!extends\b)[A-Za-z_$])/gm, '')
-    .replace(/^export\s+default\s+/gm, 'void ')
-    .replace(/^export\s+/gm, '');
-  try {
-    new vm.Script(script);
-  } catch (e) {
-    throw new Error(`the self-containment check cannot read this file's top-level names: ${e.message}`);
-  }
-  const seen = new Map();
-  const declared = (name) => {
-    if (!/^[A-Za-z_$][\w$]*$/.test(name)) return false;
-    if (!seen.has(name)) {
-      let clash = false;
-      try {
-        new vm.Script(`${script}\nlet ${name};`);
-      } catch (e) {
-        clash = e.name === 'SyntaxError' && /already been declared/.test(e.message);
-      }
-      seen.set(name, clash);
-    }
-    return seen.get(name);
-  };
-  return { has: (name) => imported.has(name) || declared(name) };
-}
-
-// Identifiers a function body uses that are not property names.
-function freeIdentifiers(fnSrc, ownName) {
-  const code = stripStrings(stripComments(fnSrc));
-  const out = new Set();
-  for (const m of code.matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) if (!KEYWORDS.has(m[0]) && m[0] !== ownName) out.add(m[0]);
-  return out;
-}
-
 test('every adapter has a PLATFORM and every function of the contract', () => {
   assert.ok(ADAPTERS.length >= 1);
   const ids = new Set();

@@ -222,10 +222,16 @@ try {
   assert.equal(await fb.inputValue('#price'), '36,883');
   assert.equal(await publishCount(), '0', 'the extension must not publish');
   await fb.click('#publish'); // the salesperson's own click
-  await panel.waitForSelector('#detected', { timeout: 15000 });
+  // The mock lands every Publish on 424242, the Ram's listing, as a
+  // notification clicked on the form would: the single post reads the page
+  // too, and another car's listing is never offered as this car's link.
+  await panel.waitForFunction(() => /couldn't confirm that it shows 2022 Jeep Wagoneer Series III/.test(document.querySelector('#detected')?.textContent || ''), null, { timeout: 20000 });
+  assert.match(await panel.textContent('#detected'), /so its address isn't offered as this car's link/);
+  assert.equal(await panel.inputValue('#listingUrl'), '', "the Ram's listing is not in the Wagoneer's Listing link box");
   await panel.click('#confirmPosted');
   await panel.waitForSelector('#done');
   assert.match(await panel.textContent('#done'), /Recorded: 2022 Jeep Wagoneer Series III at \$36,883/);
+  assert.equal(await panel.$('#done + p a'), null, 'recorded with no listing link');
   assert.equal(await publishCount(), '1');
   await fb.close();
 

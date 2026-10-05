@@ -12,8 +12,9 @@
 // can't be found is listed in the side panel with a copy button, so re-check
 // this map after any "Couldn't fill" (README, "Try it on one real car").
 // Not checked live: yourListingsUrl and photoLimitDefault (each marked NOT
-// VERIFIED where it is), and the listing's edit page, where upkeep finds the
-// Price box by the price field's name below.
+// VERIFIED where it is), the listing's edit page, where upkeep finds the
+// Price box by the price field's name below, and the sold and removed signs
+// a listing page shows (facebook/listingSigns.js, marked NOT VERIFIED there).
 // test/e2e/mock-marketplace.mjs names its fields the same way, so the fill
 // code is proven against it in every end-to-end flow.
 //

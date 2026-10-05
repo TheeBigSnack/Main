@@ -16,7 +16,8 @@ import assert from 'node:assert/strict';
 import { readListingInPage } from '../extension/facebook/fillForm.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
-import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, offTargetNote } from '../extension/upkeep.js';
+import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
+import { noteTakenDown } from '../extension/src/takenDown.js';
 
 // A page as the reader walks it: text nodes, each inside a plain block or a
 // dialog, and an optional Price box (in a dialog or on the page).
@@ -26,6 +27,7 @@ function node(tag, attrs = {}, parent = null) {
     getAttribute(n) { return this.attrs[n] ?? null; },
     checkVisibility() { return true; },
     getBoundingClientRect() { return { width: 100, height: 20 }; },
+    matches() { return false; }, // no dropdowns on these pages
     closest(sel) {
       for (let n = this; n; n = n.parentElement) {
         if (sel === 'label' ? n.tagName === 'LABEL' : (n.attrs.role === 'dialog' || ['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT'].includes(n.tagName) || n.attrs.role === 'button')) return n;
@@ -122,10 +124,65 @@ test('upkeep finds this car\'s own listing by its id, or with no link by its who
 // listing there, and no id is taken from it. A listing's own link opens the
 // listing, with no note. Run with upkeep.js's own startUpkeep; Chrome's tabs
 // are a stand-in.
+// A name like this car's, either way round, from any car that may still have
+// a listing up: posted by this salesperson or a colleague, or taken off the
+// posted list lately (the take-down record keeps the name; an older record
+// without one takes it from the last scan).
+test('a car whose name is in this car\'s, a colleague\'s post and a take-down all count as namesakes', async () => {
+  const EXPRESS = '2019 Ram 1500 Classic Express';
+  const EXPRESS_4X4 = '2019 Ram 1500 Classic Express 4x4';
+  const [MINE, TWIN, OTHER] = ['1C6RR7FT0KS000001', '1C6RR7FT0KS000002', '1C6RR7FT0KS000003'];
+  // this car's name holds every word of the other's: the other Ram's page shows 4x4 in its details, its name and the same price
+  assert.equal(namesakesOf({ [MINE]: { name: EXPRESS_4X4 }, [TWIN]: { name: EXPRESS } }, MINE, EXPRESS_4X4), 1);
+  assert.equal(namesakesOf({ [MINE]: { name: EXPRESS }, [TWIN]: { name: EXPRESS_4X4 } }, MINE, EXPRESS), 1, 'and the other way round, as before');
+  const mine = { id: '', name: EXPRESS_4X4, prices: [27163], vin: MINE };
+  const other = readPage({ url: at(434343), texts: [EXPRESS, '$27,163', 'Drivetrain: 4x4', `VIN ${TWIN}.`] }, mine);
+  assert.deepEqual([other.matchesName, other.matchesPrice, other.matchesVin], [true, true, false], 'the other Ram\'s page reads as this car by name and price');
+  assert.equal(onListing(other, { yourListingsUrl: YOURS, namesakes: namesakesOf({ [TWIN]: { name: EXPRESS } }, MINE, EXPRESS_4X4) }), false, 'so only this car\'s VIN tells them apart');
+  // names that share words but where neither holds the other: not namesakes; nor a car with no name
+  assert.equal(namesakesOf({ [TWIN]: { name: '2019 Ram 1500 Classic Tradesman' }, [OTHER]: { name: '' } }, MINE, EXPRESS), 0);
+  assert.equal(namesakesOf({ [TWIN]: {} }, MINE, EXPRESS), 0);
+  // a colleague's post, merged in by the sync
+  assert.equal(namesakesOf({ [TWIN]: { name: EXPRESS, mine: false, userId: 'u2' } }, MINE, EXPRESS), 1);
+  // taken off the posted list: still counted while the record keeps it, by its own name or, recorded without one, the last scan's
+  const T = (h) => new Date(Date.UTC(2026, 9, 5, h)).toISOString();
+  const named = noteTakenDown(null, { vin: TWIN, postedAt: T(1), name: EXPRESS }, T(2), T(2));
+  assert.equal(named[0].name, EXPRESS, 'the record keeps the name');
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: named }), 1);
+  const unnamed = noteTakenDown(null, { vin: TWIN, postedAt: T(1) }, T(2), T(2));
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: unnamed }), 0, 'with no name anywhere it is not counted');
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: unnamed, names: { [TWIN]: { name: EXPRESS_4X4 } } }), 1);
+  // each car once, and never this car's own take-down
+  assert.equal(namesakesOf({ [TWIN]: { name: EXPRESS } }, MINE, EXPRESS, { takenDown: named }), 1);
+  assert.equal(namesakesOf({}, MINE, EXPRESS, { takenDown: noteTakenDown(null, { vin: MINE, postedAt: T(1), name: EXPRESS }, T(2), T(2)) }), 0);
+
+  // To do reads all of it from storage: the posted list, the take-down record and, for a record with no name, the last scan (once per item)
+  const o = 'https://www.example-motors.test';
+  const store = {
+    [`posted:${o}`]: { [MINE]: { name: EXPRESS_4X4 } },
+    [`takenDown:${o}`]: [...unnamed, ...noteTakenDown(null, { vin: OTHER, postedAt: T(1), name: EXPRESS }, T(3), T(3))],
+    [`snapshot:${o}`]: { vehicles: { [TWIN]: { name: '2019 Ram 1500 Classic Express 4x4 Crew Cab' } } },
+  };
+  const asked = [];
+  globalThis.chrome = { storage: { local: { get: async (keys) => { asked.push(keys); return Object.fromEntries([keys].flat().map((k) => [k, store[k]])); } } } };
+  Object.assign(up, { origin: o, vin: MINE, name: EXPRESS_4X4, names: null });
+  try {
+    assert.equal(await namesakesNow(), 2, 'the take-down named in the record, and the one named by the last scan');
+    assert.equal(await namesakesNow(), 2);
+    assert.equal(asked.filter((k) => k === `snapshot:${o}`).length, 1, 'the last scan is read once');
+    globalThis.chrome = { storage: { local: { get: async () => { throw new Error('no storage'); } } } };
+    assert.equal(await namesakesNow(), null, 'unread: unknown');
+  } finally {
+    delete globalThis.chrome;
+    endUpkeep();
+    Object.assign(up, { origin: null, vin: null, name: '', names: null });
+  }
+});
+
 test('upkeep treats a saved link that is not a listing\'s own address as no link, and says to open the listing', async () => {
   const opened = [];
   globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 9 }; } } };
-  const ctx = { render: () => {}, map: () => FORM_MAP };
+  const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: 19000 }) };
   const begin = async (listingUrl) => {
     const started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: 19000, listingUrl, name: 'Car A', listedPrice: 20000 }, ctx);
     for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -162,9 +219,9 @@ test('with another posted car of the same name, upkeep needs this car\'s VIN on 
     '1C4RJFBG5MC000004': { name: LIMITED, price: 31995 },
     '1C4RJFBG5MC000005': { name: '2019 Jeep Grand', price: 31995 },
   };
-  assert.equal(namesakesOf(posted, VIN_A, LAREDO), 2, 'the other Laredo, and the Laredo E whose name holds every word of it');
-  assert.equal(namesakesOf(posted, VIN_A.toLowerCase(), LAREDO), 2, 'never itself');
-  assert.equal(namesakesOf(posted, '1C4RJFBG5MC000004', LIMITED), 0);
+  assert.equal(namesakesOf(posted, VIN_A, LAREDO), 3, 'the other Laredo, the Laredo E whose name holds every word of it, and the Grand whose every word is in it');
+  assert.equal(namesakesOf(posted, VIN_A.toLowerCase(), LAREDO), 3, 'never itself');
+  assert.equal(namesakesOf(posted, '1C4RJFBG5MC000004', LIMITED), 1, 'the Grand: the Laredos have a word the Limited lacks, and it has one they lack');
   assert.equal(namesakesOf({}, VIN_A, LAREDO), 0);
   assert.equal(namesakesOf(null, VIN_A, LAREDO), 0);
 
@@ -197,11 +254,85 @@ test('with another posted car of the same name, upkeep needs this car\'s VIN on 
   // what the panel says on the other unit's page
   Object.assign(up, { kind: 'price', name: LAREDO, vin: VIN_A, listedPrice: 31995 });
   try {
-    assert.match(offTargetNote('', twin, 1), /Another car you posted also has 2019 Jeep Grand Cherokee Laredo in its name, so a listing counts as this car's only when its page shows this car's VIN, 1C4RJFBG5MC000001, and this page doesn't\. .*click I updated it\./);
+    assert.match(offTargetNote('', twin, 1), /Another car you posted or took down has a name like 2019 Jeep Grand Cherokee Laredo, so a listing counts as this car's only when its page shows this car's VIN, 1C4RJFBG5MC000001, and Lot Current couldn't find it in this page's text\. .*See more, click it.*click I updated it\./);
+    assert.doesNotMatch(offTargetNote('', twin, 1), /this page doesn't/, 'what the reader did not find is not stated as what the page lacks');
     assert.match(offTargetNote('', twin, null), /couldn't read your posted cars/);
     assert.match(offTargetNote('', readPage({ url: YOURS, texts: ['Your listings'] }, mine), 1), /looks for its full name, \$31,995 and its VIN, 1C4RJFBG5MC000001/);
     assert.match(offTargetNote('', readPage({ url: YOURS, texts: ['Your listings'] }, mine), 0), /looks for its full name and \$31,995\)/);
   } finally {
     endUpkeep();
+  }
+});
+
+// A price update reads the car on the website again before the listing opens
+// (ctx.priceNow: the side panel's upkeepPriceNow, the same read and check a
+// post makes at post time) and fills the price the website shows now. A read
+// that fails, a car the website no longer lists or that no longer passes the
+// check, no price, or the price back at the listed one: the listing is not
+// opened, nothing is filled, and the panel says why, with only Close. A
+// take-down reads nothing. Not now during the read opens nothing afterwards.
+test('a price update reads the car on the website again first and fills the price it shows now, or stops and says why', async () => {
+  const opened = [];
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 9 }; } } };
+  const LINK = 'https://www.facebook.com/marketplace/item/111/';
+  const item = { origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: 19000, listingUrl: LINK, name: 'Car A', listedPrice: 20000, dealerTabId: 4 };
+  const tick = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+  const begin = async (now, req = item) => {
+    opened.length = 0;
+    const asked = [];
+    const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async (r) => { asked.push(r); return typeof now === 'function' ? now(r) : now; } };
+    const started = startUpkeep(req, ctx);
+    await tick();
+    const seen = { opened: [...opened], status: up.status, price: up.price, scanPrice: up.scanPrice, note: up.note, html: upkeepHtml(), asked };
+    endUpkeep();
+    await started;
+    return seen;
+  };
+  try {
+    // the website's price moved again since the scan: that price is filled, and the panel says the scan had found another
+    const moved = await begin({ ok: true, price: 18500 });
+    assert.deepEqual([moved.opened, moved.status, moved.price, moved.scanPrice], [[LINK], 'waiting', 18500, 19000]);
+    assert.equal(moved.asked[0].dealerTabId, 4, 'read through the tab the To do item was clicked from');
+    assert.match(moved.html, /fills in <b>\$18,500<\/b> \(was \$20,000\), the price the website shows now: Lot Current read the car on the website again just before opening the listing \(the last scan had found \$19,000\)\. Then you click <b>Update<\/b>\./);
+    // the same price as the scan found
+    const same = await begin({ ok: true, price: 19000 });
+    assert.deepEqual([same.opened, same.price, same.scanPrice], [[LINK], 19000, null]);
+    assert.doesNotMatch(same.html, /last scan had found/);
+    // stops: nothing opened, nothing filled, the reason and only Close
+    for (const [what, now, said] of [
+      ['the read failed', { ok: false, message: "Lot Current reads this car on www.example-motors.test again before it fills a new price, and couldn't just now." }, /couldn't just now\. Nothing was filled\./],
+      ['gone from the website', { ok: false, message: 'www.example-motors.test no longer lists this car, so its price was not updated.' }, /no longer lists this car/],
+      ['no longer passes the check', { ok: false, message: "The website now says this is a new vehicle, so it can't go on Marketplace." }, /new vehicle/],
+      ['no price', { ok: true, price: null }, /shows no price for this car right now/],
+      ['back at the listed price', { ok: true, price: 20000 }, /shows \$20,000 again, the price your listing already has, so there is nothing to change on Facebook\. Nothing was filled; the next scan clears this item\./],
+      ['the read threw', () => { throw new Error('offline'); }, /couldn't check this car's price on the website just now: offline/],
+    ]) {
+      const r = await begin(now);
+      assert.deepEqual([r.opened, r.status], [[], 'stopped'], `${what}: the listing is not opened`);
+      assert.match(r.note, said, what);
+      assert.match(r.html, /id="upkeepStopped">[^<]*Nothing was filled/);
+      assert.match(r.html, /id="upkeepClose"/);
+      assert.doesNotMatch(r.html, /id="upkeepDoneBtn"/, `${what}: no I updated it, which would record a price`);
+    }
+    // a take-down reads nothing
+    const down = await begin(() => { throw new Error('a take-down must not read the price'); }, { ...item, kind: 'takeDown', price: null });
+    assert.deepEqual([down.opened, down.asked.length], [[LINK], 0]);
+    // while the read runs: Checking, Not now only; Not now then opens nothing
+    let answer;
+    const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: () => new Promise((resolve) => { answer = resolve; }) };
+    opened.length = 0;
+    const started = startUpkeep(item, ctx);
+    await tick();
+    assert.equal(up.status, 'checking');
+    assert.match(upkeepHtml(), /id="priceChecking"[\s\S]*id="upkeepCancel"/);
+    assert.doesNotMatch(upkeepHtml(), /id="upkeepDoneBtn"/);
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', { render: () => {} }), true, 'a stale I updated it records nothing');
+    endUpkeep();
+    answer({ ok: true, price: 18500 });
+    await started;
+    assert.deepEqual(opened, [], 'Not now during the read: the listing is not opened');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
   }
 });

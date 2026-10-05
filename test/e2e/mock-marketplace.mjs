@@ -14,6 +14,8 @@
 //     (the Year list here takes 2.5 s), and only one popup is open at a time:
 //     clicking another dropdown just closes the open one;
 //   - the price box reformats what you type ("27163" -> "27,163").
+// Above the form sits a top bar (role=banner) with a search box and two menu
+// buttons, standing in for Facebook's own: the dry run's report leaves it out.
 // It mixes control types (custom comboboxes, native selects, inputs, a
 // textarea, a file input, a checkbox). Condition and title status are on it
 // too: the website can't tell those, so the extension fills them from the
@@ -115,6 +117,7 @@ function page(lang) {
   return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${t('Create vehicle listing (mock)')}</title>
 <style>body{font:14px system-ui;max-width:640px;margin:20px auto}label{display:block;margin:8px 0}[role=listbox]{border:1px solid #999;padding:4px;width:200px;max-height:160px;overflow:auto}[role=option]{padding:2px 6px;cursor:pointer}[hidden]{display:none}[role=combobox]{border:1px solid #999;padding:4px 8px;width:200px;cursor:pointer}</style>
 </head><body>
+<div role="banner" id="topBar"><input aria-label="Search the top bar"> <div role="button" aria-haspopup="menu" aria-label="Your profile menu" tabindex="0">Profile</div> <div role="button" aria-haspopup="menu" aria-label="Notifications menu" tabindex="0">Notifications</div></div>
 <h1>${t('Create vehicle listing (mock)')}</h1>
 <p>${t('Add up to 20 photos.')}</p>
 <form action="/form-submitted" method="post" onsubmit="return false">
