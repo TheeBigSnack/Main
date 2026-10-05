@@ -408,15 +408,15 @@ test('the posted row calls postedWith a fixed marker the side panel sets and the
   assert.doesNotMatch(read('extension/src/sync.js'), /postedWith \(which build posted it\)/, 'sync.js still calls postedWith the build that posted');
 });
 
-test('the privacy texts say the take-downs and price changes on the person\'s own listings leave the browser as to-do items, with both prices', () => {
-  const [MINE, REPRICED, THEIRS] = ['1C4RJFBG5KC000001', '1C4RJFBG5KC000002', '1C4RJFBG5KC000003'];
+test('the privacy texts say the take-downs and price changes on the person\'s own listings leave the browser as to-do items, with both prices, and a take-down of a car the website retyped new does not', () => {
+  const [MINE, REPRICED, THEIRS, RETYPED] = ['1C4RJFBG5KC000001', '1C4RJFBG5KC000002', '1C4RJFBG5KC000003', '1C4RJFBG5KC000004'];
   const diff = {
-    takeDown: [{ vin: MINE, name: '2019 Jeep Grand Cherokee', why: 'sold', yours: true }, { vin: THEIRS, name: '2020 Ram 1500', why: 'sold', yours: false }],
+    takeDown: [{ vin: MINE, name: '2019 Jeep Grand Cherokee', why: 'gone', yours: true }, { vin: THEIRS, name: '2020 Ram 1500', why: 'gone', yours: false }, { vin: RETYPED, name: '2025 Jeep Compass', why: 'not-pre-owned', yours: true }],
     priceUpdates: [{ vin: REPRICED, name: '2018 Jeep Wrangler', from: 25990, to: 24990, yours: true }],
   };
   const pilot = noteFlags(null, diff, { at: '2026-09-01T12:00:00.000Z' });
   const up = syncPayload({ origin: 'https://www.example-motors.test', posted: {}, pilot, scan: null, since: null, userId: 'u' }).pilot.flags;
-  assert.deepEqual(up.map((f) => f.vin).sort(), [MINE, REPRICED].sort(), 'the person\'s own take-downs and price changes go up, a colleague\'s do not');
+  assert.deepEqual(up.map((f) => f.vin).sort(), [MINE, REPRICED].sort(), 'the person\'s own take-downs and price changes go up, a colleague\'s do not, nor one of a car the website now calls new');
   const price = up.find((f) => f.kind === 'price');
   assert.deepEqual([price.name, price.from, price.to], ['2018 Jeep Wrangler', 25990, 24990], 'a price change goes up with the car\'s name and both prices');
   const todo = schema().todo_items;
@@ -424,7 +424,7 @@ test('the privacy texts say the take-downs and price changes on the person\'s ow
   const t = tables(section(policy, '## What we collect and why'))[0];
   const row = (label) => t.rows.find((r) => r[0].startsWith(label));
   const scans = row('Scan results')[1];
-  assert.match(scans, /except the cars to take down and the price changes on the User's own listings, which become to-do items/, 'the policy says the lists of changes all stay in the browser');
+  assert.match(scans, /except, on the User's own listings, the cars to take down because they are gone from the website or marked sold or sale-pending, and the price changes, which become to-do items \(see Usage numbers\); a car to take down because the website now calls it new, demo or loaner stays in the browser\./, 'the policy says which changes leave the browser and which stay');
   assert.doesNotMatch(scans, /gets only/);
   assert.match(row('Usage numbers')[0], /to-do items \([^)]*VIN and name[^)]*old and new price\)/, 'the policy\'s Usage numbers row does not say the to-do items carry the VIN, the name and both prices');
   const usage = onlyTable(section(storeTexts, '## Usage numbers (mirrors the Privacy Policy)'), 'the Web Store usage section');

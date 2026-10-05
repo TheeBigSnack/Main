@@ -316,7 +316,7 @@ test('a lot that keeps reading more than half smaller is offered on To do after 
   assert.equal(p.local[k.diff].withheld.scans, 2);
   assert.equal(cars(), 12, 'never replaced by a scan');
   assert.match(p.panel(), /id="withheld"/);
-  assert.match(p.panel(), /each read 4 cars on the website, where the saved list has 12 cars/);
+  assert.match(p.panel(), /each read about 4 cars on the website, where the saved list has 12 cars/);
   assert.match(p.panel(), /data-action="acceptWithheld">Use the new list of 4 cars</);
 
   await p.click('acceptWithheld');

@@ -50,7 +50,7 @@ Hi [name],
 
 By now Lot Current has re-read the website a few times. Click the icon and look at **To do**:
 
-- **Take down** means a car you listed sold or went sale-pending. Click **Open listing**, then Mark as sold (or Delete) on Facebook yourself. The panel notices and ticks it off.
+- **Take down** means a car you listed sold or went sale-pending, or the website now calls it new, demo or loaner. Click **Open listing**, then on Facebook yourself: Mark as sold (or Delete) for a sold car, and Delete for a car that is no longer pre-owned, since dealers may not list those. The panel notices and ticks it off.
 - **Update price** means the website price changed. Click **Open & update price**, click Edit listing on Facebook, and the new price is in the box; click Update yourself.
 
 Same-day take-downs are the point of the pilot, so please clear To do items the day they appear.

@@ -473,7 +473,7 @@ function withheldBanner(d) {
   const w = withheldOffer(d);
   if (w) {
     const cars = (n) => `${n} ${n === 1 ? 'car' : 'cars'}`;
-    return `<div class="banner warn" id="withheld">The last ${w.scans} scans, since ${esc(when(w.since))}, each read ${cars(w.cars)} on the website, where the saved list has ${cars(w.saved ?? 0)}. Lot Current keeps the saved list and marks nothing gone, in case the website is having trouble. If the website's used-inventory page really lists only these cars now, use the new list: the next scan compares with it, and looks up each of your listings it misses on the website before calling it gone.<div class="toolbar"><button type="button" class="small go" data-action="acceptWithheld">Use the new list of ${cars(w.cars)}</button></div></div>`;
+    return `<div class="banner warn" id="withheld">The last ${w.scans} scans, since ${esc(when(w.since))}, each read about ${cars(w.cars)} on the website, where the saved list has ${cars(w.saved ?? 0)}. Lot Current keeps the saved list and marks nothing gone, in case the website is having trouble. If the website's used-inventory page really lists only these cars now, use the new list: the next scan compares with it, and looks up each of your listings it misses on the website before calling it gone.<div class="toolbar"><button type="button" class="small go" data-action="acceptWithheld">Use the new list of ${cars(w.cars)}</button></div></div>`;
   }
   const a = d && d.accepted;
   if (a && typeof a === 'object') {

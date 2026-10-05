@@ -582,7 +582,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // 5. this scan's counts (the same scan sent twice is stored once); one
     //    stamped further ahead of this clock than FUTURE_SKEW_MS is set
     //    aside and counted, like a listing. A scan held back as a likely
-    //    website hiccup comes marked withheld and is stored so
+    //    website hiccup comes marked withheld and keeps that mark (scanRow).
+    //    A scan already stored is never changed, so when the salesperson
+    //    later accepts a held-back read and it comes again unmarked with the
+    //    same time, the stored row stays marked withheld until a newer scan
     const scan = scanRow(body.scan, membership.dealership.website_origin, dealershipId);
     if (scan && (ms(scan.taken_at) ?? 0) > latest) counts.rejected += 1;
     else if (scan) {
