@@ -63,6 +63,7 @@ const state = {
   description: '', descriptionSource: 'template', note: '', guardrails: null,
   listing: null,
   fbTabId: null, fill: null, photos: null, detected: null, probe: null,
+  listingTyped: null, // what the person typed into Listing link on this form (null: nothing): kept over every redraw, whatever the listing check offers
   vinCheck: null, // { local, online } from src/vin.js
   colorGuess: null, // { exterior, interior, confidence } from the photos, or { error }
   photoPick: null, // the salesperson's pick of this car's photos, in order (src/photoPick.js); null: the website's first ones
@@ -208,7 +209,7 @@ async function clearFlow({ keepSaved = false } = {}) {
   if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, opening: false, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, listingTyped: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, map: FORM_MAP,
   });
   return run;
 }
@@ -756,6 +757,11 @@ async function resumeFlow(origin, flow) {
   state.map = applyOverrides(FORM_MAP, devOverrides);
   await loadSaved();
   if (state.step === 'checking' || state.step === 'filling') state.step = state.vehicle ? 'review' : 'idle';
+  // a listing the panel had not finished reading (the panel closed during the
+  // read, or a post saved by an older version) says nothing until it is read
+  // again: the watcher below reports it again while the tab still shows it
+  const d = state.detected;
+  if (d && d.status === 'listing' && !d.verified && !d.unverified) state.detected = null;
   render();
   // A side panel opened in a second window shows the same post with its
   // buttons and watches the same tab, so its It's posted knows the listing's
@@ -887,6 +893,7 @@ async function openForm({ probeOnly = false } = {}) {
     if (!dropped()) state.opening = false;
   }
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
+  state.listingTyped = null; // a new form: nothing typed for it yet
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
@@ -1333,6 +1340,7 @@ async function notPosted() {
   state.fill = null;
   state.photos = null;
   state.detected = null;
+  state.listingTyped = null;
   render();
   await saveFlow();
 }
@@ -1907,7 +1915,7 @@ function viewPublish() {
     <div class="actions"><button type="button" class="plain" id="downloadPhotos">Download photos</button><button type="button" class="plain" id="fillAgain">Fill again</button><button type="button" class="plain" id="attachAgain">${state.photos && (state.photos.attached || state.photos.again) ? 'Attach photos again' : 'Attach photos'}</button><button type="button" class="plain" id="copyDescription">Copy description</button></div>
   </section>
   <section>${detect}
-    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc(offeredLink(d))}" placeholder="paste the listing's own address if you have it" /></label>
+    <label class="block">Listing link (optional) <input type="url" id="listingUrl" value="${esc(state.listingTyped ?? offeredLink(d))}" placeholder="paste the listing's own address if you have it" /></label>
     <div class="actions">${outcome}</div>
   </section>`;
 }
@@ -1956,7 +1964,7 @@ function render() {
     $('panel').innerHTML = upkeepHtml();
     return;
   }
-  const kept = state.step === 'idle' && $('panelReady') ? focusNow() : null; // the list redrawn under the person
+  const kept = (state.step === 'idle' && $('panelReady')) || state.step === 'publish' ? focusNow() : null; // the list, or the publish step (the Listing link box), redrawn under the person
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
   if (kept) refocus(kept);
 }
@@ -2250,6 +2258,10 @@ function onInput(ev) {
   if (ev.target.id === 'panelSearch') {
     state.listFilter = ev.target.value;
     renderList();
+    return;
+  }
+  if (ev.target.id === 'listingUrl') {
+    state.listingTyped = ev.target.value; // the person's own link: no redraw (a listing check, a photo batch) puts another in its place
     return;
   }
   if (ev.target.id !== 'description') return;

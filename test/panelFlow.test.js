@@ -1789,14 +1789,14 @@ async function queueWatch({ queueMode, result, posted = {}, windowId = null, pan
   const shown = [];
   const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, detected, windowId, vin: 'AAA', vehicle: { vin: 'AAA', name: '2020 Make Model', price: 21000 }, price: 20000, settings: { basis: 'website' }, fill: null };
   let fns;
-  fns = compileMany(['startWatcher', 'postsWindow', 'confirmIfThisCar', 'offeredLink', 'viewPublish'], {
+  fns = compileMany(['startWatcher', 'postsWindow', 'confirmIfThisCar', 'offeredLink', 'viewPublish', 'onInput'], {
     state, watcher: null, isNewListingFromForm, showsPostedCar, namesakesOf, basisPrice, panelWindowId, flowRun: 0,
     sleep: async () => {}, VERIFY_READS: 6, VERIFY_EVERY_MS: 1500, readListingInPage: 'the listing reader', LISTING_SIGNS: 'the listing signs',
     chrome: {
       scripting: {
         executeScript: async ({ target, func, args }) => {
           reads.push({ tabId: target.tabId, func, signs: args[1], expect: args[2] });
-          if (during) during(reads.length, state);
+          if (during) during(reads.length, state, fns);
           const page = pages[Math.min(reads.length, pages.length) - 1];
           if (page instanceof Error) throw page;
           return [{ result: page }];
@@ -1980,6 +1980,56 @@ test('in a queue, a panel opened again on another car\'s listing reads it again 
     assert.match(h.shown.at(-1).banner, NOT_CONFIRMED);
     assert.equal(h.fns.offeredLink(h.state.detected), '', `${where}: It's posted with nothing typed saves no link`);
     assert.equal(h.reads.length, 12, `${where}: read again (once before it was reopened, once after)`);
+  }
+});
+
+// A link the person types into Listing link while the panel reads the listing
+// page (up to six reads, 1.5 s apart) stays there when the result is drawn,
+// whatever the read offers: It's posted saves the person's link. And a read
+// the panel never finished (it was closed during the read, or the post was
+// saved by an older version) is not shown again as under way when the panel
+// comes back with the tab on another page: nothing is reading it. Run with
+// sidepanel.js's own onInput, viewPublish and resumeFlow.
+test('a link typed into Listing link stays through the listing check, and a check cut short is not shown as still reading', async () => {
+  const ITEM = 'https://www.facebook.com/marketplace/item/555/';
+  const OWN = 'https://www.facebook.com/marketplace/item/2222222222/';
+  const fromForm = { status: 'listing', url: ITEM, id: '555', afterCreate: false };
+  const type = (fns, value) => fns.onInput({ target: { id: 'listingUrl', value } });
+  for (const [queueMode, pages, banner] of [[true, [OTHER_CAR], NOT_CONFIRMED], [false, [OTHER_CAR], NOT_CONFIRMED_SINGLE], [false, [THIS_CAR], null]]) {
+    const h = await queueWatch({ queueMode, result: fromForm, pages, during: (n, state, fns) => { if (n === 1) type(fns, OWN); } });
+    const what = `${queueMode ? 'queue' : 'single post'}, ${pages[0] === THIS_CAR ? 'this car' : 'another car'}`;
+    assert.equal(h.shown.at(-1).box, OWN, `${what}: the typed link is still in the box`);
+    if (banner) assert.match(h.shown.at(-1).banner, banner, what);
+    else assert.equal(h.shown.at(-1).banner, POSTED, what);
+    assert.equal(h.state.listingTyped, OWN);
+  }
+  // a box the person emptied stays empty: the person's word, not the offered link
+  const emptied = await queueWatch({ queueMode: false, result: fromForm, pages: [THIS_CAR], during: (n, state, fns) => { if (n === 1) type(fns, ''); } });
+  assert.deepEqual(emptied.shown.at(-1), { banner: POSTED, box: '' });
+
+  // brought back with a listing that was being read (or never read), the tab now elsewhere: waiting, not "reading"
+  for (const detected of [{ status: 'listing', url: ITEM, id: '555', checking: true }, { status: 'listing', url: ITEM, id: '555' }]) {
+    const h = await queueWatch({ queueMode: true, result: { status: 'cancelled', url: null }, detected: null });
+    const { resumeFlow } = compileMany(['resumeFlow'], {
+      state: h.state, FLOW_FIELDS, GLOBAL_KEYS: { devOverrides: 'devOverrides' }, applyOverrides, FORM_MAP,
+      chrome: { storage: { local: { get: async () => ({}) } } }, loadSaved: async () => {},
+      render: () => h.shown.push(publishShows(h.fns.viewPublish)), startWatcher: () => h.fns.startWatcher(),
+    });
+    h.shown.length = 0;
+    await resumeFlow('https://www.example-motors.test', { vin: 'AAA', step: 'publish', queueMode: true, fbTabId: 77, vehicle: h.state.vehicle, price: 20000, detected });
+    for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(h.shown, [{ banner: 'waiting', box: '' }], `${JSON.stringify(detected)}: waiting for Publish, nothing said to be reading`);
+    assert.equal(h.state.detected, null);
+  }
+  // one the panel had decided keeps what it said until the tab is read again
+  for (const detected of [{ status: 'listing', url: ITEM, id: '555', verified: true }, { status: 'listing', url: ITEM, id: '555', unverified: true, name: '2020 Make Model', price: 20000 }]) {
+    const h = await queueWatch({ queueMode: true, result: { status: 'cancelled', url: null }, detected: null });
+    const { resumeFlow } = compileMany(['resumeFlow'], {
+      state: h.state, FLOW_FIELDS, GLOBAL_KEYS: { devOverrides: 'devOverrides' }, applyOverrides, FORM_MAP,
+      chrome: { storage: { local: { get: async () => ({}) } } }, loadSaved: async () => {}, render: () => {}, startWatcher: () => {},
+    });
+    await resumeFlow('https://www.example-motors.test', { vin: 'AAA', step: 'publish', queueMode: true, fbTabId: 77, vehicle: h.state.vehicle, price: 20000, detected });
+    assert.deepEqual(h.state.detected, detected);
   }
 });
 
