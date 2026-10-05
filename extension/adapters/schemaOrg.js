@@ -1288,7 +1288,12 @@ export async function scan(search, options = {}) {
   // list's own data or the last read of the car named the kept one. Which
   // kind of address (addressPattern) gives cars is learned as the scan goes,
   // from the last scan's pages first, and that kind is tried first; a kind
-  // that twice gave no car and never one is not tried again in this scan.
+  // that twice gave no car and never one is tried last, and not at all for
+  // a car once one of its addresses of a kind that gives cars was read and
+  // was not its page (that page then answers for the car, as a car's only
+  // address does). Until then every address is read: a run of first car
+  // pages without vehicle data (cars in transit, a "no longer available"
+  // page) makes the lot's own kind of car page look like a dead end too.
   // A page of a kind that has given cars that fails ends the car's turn;
   // any other link that fails is passed over for the car's next address, and
   // a car found at one of them is not a failure. A car none of whose
@@ -1325,16 +1330,19 @@ export async function scan(search, options = {}) {
     let files = 0;
     let read = 0;
     let left = false;
+    const readHere = []; // the addresses read for this car
+    const ownKindRead = () => readHere.some((h) => gave.get(addressPattern(h)));
     const addresses = addressesOf(item);
     for (let n = 0; n < addresses.length && !found; n += 1) {
       const href = addresses[n];
-      if (n > 0 && deadEnd(href)) continue;
+      if (n > 0 && deadEnd(href) && ownKindRead()) continue;
       if (stopped) return false;
       if (read >= MAX_ADDRESSES_PER_CAR) {
         left = true;
         break;
       }
       read += 1;
+      readHere.push(href);
       const got = await site.read(href);
       const page = pageOf(got, item.vin);
       if (page.kind === 'blocked') {

@@ -1246,6 +1246,48 @@ test('schemaOrg scan: a link with a car\'s VIN that fails (another website, a 50
   assert.deepEqual(post429.calls.filter(isCarPage), [], 'the car\'s page is not asked for after the refusal');
 });
 
+test('schemaOrg scan: car pages without vehicle data first on the list never stop the later cars\' own pages being read', async () => {
+  const leadForm = html('<!doctype html><html><head><title>Get pre-approved</title></head><body><form><input name="name"></form></body></html>');
+  const inTransit = html('<!doctype html><html><head><title>Vehicle details</title></head><body><h1>This vehicle is in transit. Call for details.</h1></body></html>');
+  const isCarPage = (u) => /\/(?:vehicle|certified)-details\//.test(u);
+  // each card links a pre-approval form with the car's VIN before the car's own page; the list has no data
+  const lot = (cars, empty) => {
+    const m = standardSite({ cars, listData: false });
+    for (const [at, a] of m) {
+      if (!at.startsWith(LIST)) continue;
+      let text = a.text;
+      for (const c of cars) {
+        const own = `<a href="${c.path.replace(/&/g, '&amp;')}">`;
+        text = text.replace(own, `<a href="/finance/apply/?vin=${c.vin}">Get pre-approved</a> ` + own);
+      }
+      m.set(at, { ...a, text });
+    }
+    for (const c of cars) m.set(`${O}/finance/apply/?vin=${c.vin}`, leadForm);
+    for (const c of empty) m.set(O + c.path, inTransit);
+    return m;
+  };
+  const cars = standardCars(8).map((c) => ({ ...c, path: `/vehicle-details/?vin=${c.vin}` }));
+  for (const blank of [2, 3, 4]) {
+    const search = fakeSiteSearch(lot(cars, cars.slice(0, blank)));
+    const res = await schemaOrg.scan(search, schemaOrg.scanOptions(SERVICE));
+    assert.equal(res.ok, true, res.message);
+    assert.deepEqual(res.records.map((r) => r.node.vehicleIdentificationNumber).sort(), cars.slice(blank).map((c) => c.vin).sort(), `first ${blank} car pages without data: every other car read`);
+    assert.equal(search.calls.filter(isCarPage).length, 8, `first ${blank}: every car's own page is asked for`);
+  }
+  // two kinds of car page: once one kind has given cars, a second kind whose first pages showed no data is still read for a car none of whose pages of the first kind was read
+  const mixed = standardCars(6).map((c, n) => ({ ...c, path: n < 2 ? `/vehicle-details/?vin=${c.vin}` : `/certified-details/?vin=${c.vin}` }));
+  const mixedSearch = fakeSiteSearch(lot(mixed, mixed.slice(2, 4)));
+  const mixedRes = await schemaOrg.scan(mixedSearch, schemaOrg.scanOptions(SERVICE));
+  assert.equal(mixedRes.ok, true, mixedRes.message);
+  assert.deepEqual(mixedRes.records.map((r) => r.node.vehicleIdentificationNumber).sort(), [mixed[0], mixed[1], mixed[4], mixed[5]].map((c) => c.vin).sort());
+  assert.equal(mixedSearch.calls.filter(isCarPage).length, 6);
+  // once the lot's kind of car page is known, a car whose page of that kind shows no data has its form left alone
+  const known = fakeSiteSearch(lot(cars, [cars[6]]));
+  const knownRes = await schemaOrg.scan(known, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([knownRes.ok, knownRes.records.length], [true, 7]);
+  assert.ok(!known.calls.includes(`${O}/finance/apply/?vin=${cars[6].vin}`), 'its form is not read');
+});
+
 test('schemaOrg scan: a car page that answers plain text is a page that failed, not a file that is no car', async () => {
   const cars = standardCars(6);
   const m = standardSite({ cars, listData: false });
