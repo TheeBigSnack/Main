@@ -209,7 +209,7 @@ test('rewrite: facts with no dealership name are 400 before the model is asked, 
   assert.deepEqual([direct.ok, direct.error], [false, "the dealership's name is missing: add it in Settings"]);
 });
 
-test('rewrite: a draft that passes answers the documented shape, logs its cost with the service role, and never sends the origin or a VIN', async () => {
+test('rewrite: a draft that passes answers the documented shape, logs its cost with the service role, and sends neither the origin nor the VIN field', async () => {
   world();
   anthropic(says(GOOD));
   const handler = await load();
@@ -223,7 +223,8 @@ test('rewrite: a draft that passes answers the documented shape, logs its cost w
   assert.deepEqual([call.headers['x-api-key'], call.headers['anthropic-version']], [API_KEY, '2023-06-01']);
   assert.deepEqual([call.json.model, call.json.max_tokens, typeof call.json.system], [MODEL, 600, 'string']);
   assert.doesNotMatch(call.body, /example-motors\.test/, 'the origin is the function\'s, not a fact for the prompt');
-  assert.doesNotMatch(call.body, new RegExp(VEHICLE.vin), 'no VIN goes up');
+  // the facts carry no VIN field; this car has no write-up (narrative: []), and a VIN written in one would go as written
+  assert.doesNotMatch(call.body, new RegExp(VEHICLE.vin), 'the vehicle\'s VIN field does not go up');
   const [row] = fake.rows('rewrite_usage');
   assert.deepEqual({ ...row, id: undefined, at: undefined }, { id: undefined, at: undefined, dealership_id: D1, user_id: U1, model: MODEL, input_tokens: 1000, output_tokens: 200, cost_usd: 0.02, kind: 'rewrite' });
   for (const q of fake.queries('rewrite_usage')) assert.equal(q.key, SERVICE_KEY, `${q.op} rewrite_usage with the service role`);

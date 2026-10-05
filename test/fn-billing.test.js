@@ -550,24 +550,33 @@ test('billing: a missing, malformed, altered, stale or wrongly keyed signature i
   const handler = await load();
   const raw = JSON.stringify(subscriptionEvent());
   const now = Math.floor(Date.now() / 1000);
-  const cases = [
-    [null, 'the Stripe-Signature header is missing or malformed'],
-    ['t=abc,v1=xyz', 'the Stripe-Signature header is missing or malformed'],
-    [sign(raw, { secret: 'another-secret' }), 'the signature does not match (a different secret, or an altered body)'],
-    [sign(raw, { t: now - 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
-    [sign(raw, { t: now + 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
-  ];
-  for (const [signature, error] of cases) {
-    const r = await deliver(handler, raw, signature);
-    assert.deepEqual([r.status, r.body], [400, { ok: false, error }], String(signature));
+  // the handler reads the clock as each request arrives. Held at `now` (late in its second) for the rest of
+  // this test, 301 seconds either side of it is outside the 300-second tolerance however long a delivery
+  // takes: a free-running clock let `now + 301` become 300 when a second boundary passed, and it was accepted
+  const clock = Date.now;
+  Date.now = () => now * 1000 + 999;
+  try {
+    const cases = [
+      [null, 'the Stripe-Signature header is missing or malformed'],
+      ['t=abc,v1=xyz', 'the Stripe-Signature header is missing or malformed'],
+      [sign(raw, { secret: 'another-secret' }), 'the signature does not match (a different secret, or an altered body)'],
+      [sign(raw, { t: now - 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
+      [sign(raw, { t: now + 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
+    ];
+    for (const [signature, error] of cases) {
+      const r = await deliver(handler, raw, signature);
+      assert.deepEqual([r.status, r.body], [400, { ok: false, error }], String(signature));
+    }
+    // the same event, re-serialised after it was signed
+    const altered = await deliver(handler, JSON.stringify(JSON.parse(raw), null, 1), sign(raw));
+    assert.deepEqual([altered.status, altered.body.error], [400, 'the signature does not match (a different secret, or an altered body)']);
+    assert.equal(fake.calls.length, 0, 'nothing read before the signature holds');
+    const good = sign(raw);
+    const rolled = `t=${now},v1=${'0'.repeat(64)},${good.split(',')[1]}`;
+    assert.equal((await deliver(handler, raw, rolled)).status, 200);
+  } finally {
+    Date.now = clock;
   }
-  // the same event, re-serialised after it was signed
-  const altered = await deliver(handler, JSON.stringify(JSON.parse(raw), null, 1), sign(raw));
-  assert.deepEqual([altered.status, altered.body.error], [400, 'the signature does not match (a different secret, or an altered body)']);
-  assert.equal(fake.calls.length, 0, 'nothing read before the signature holds');
-  const good = sign(raw);
-  const rolled = `t=${now},v1=${'0'.repeat(64)},${good.split(',')[1]}`;
-  assert.equal((await deliver(handler, raw, rolled)).status, 200);
 });
 
 test('billing: the webhook without its secret is 500 naming it; a body over 1 MiB is 413 by its declared length or its real one', async () => {

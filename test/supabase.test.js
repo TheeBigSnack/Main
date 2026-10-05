@@ -95,6 +95,11 @@ test('every by-hand billing deploy in the docs applies the migrations first, in 
   const added = later.flatMap((f) => [...read(`../supabase/migrations/${f}`).matchAll(/alter table public\.(\w+) add column (?:if not exists )?(\w+)/gi)].map((m) => m[2]));
   assert.ok(added.includes('cancel_at'), 'a migration after the applied ones adds subscriptions.cancel_at');
   assert.match(billingShared, /patch\.cancel_at = /, 'and the billing function writes it');
+  // a line that applies the migrations: `supabase db push`, with or without flags, but never
+  // `--dry-run`, which only lists what would be applied and leaves the project without them
+  const pushes = (l) => /^\s*supabase db push(\s|$)/.test(l) && !/(^|\s)--dry-run(\s|=|$)/.test(l);
+  assert.ok(pushes('supabase db push') && pushes('   supabase db push --linked   # applies 0009'), 'a push, with or without flags');
+  assert.ok(!pushes('supabase db push --dry-run') && !pushes('supabase db push --linked --dry-run') && !pushes('supabase db pushed'), 'a dry run is not a push');
   const docs = ['README.md', 'supabase/README.md', ...readdirSync(new URL('../docs/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
   let deploys = 0;
   for (const doc of docs) {
@@ -103,7 +108,7 @@ test('every by-hand billing deploy in the docs applies the migrations first, in 
       const at = lines.findIndex((l) => /^\s*supabase functions deploy billing\b/.test(l));
       if (at < 0) continue;
       deploys++;
-      assert.ok(lines.slice(0, at).some((l) => /^\s*supabase db push(\s|$)/.test(l)), `${doc}: a block deploys billing without supabase db push before it, so a project without ${later.join(', ')} gets a function that writes ${added.join(', ')}`);
+      assert.ok(lines.slice(0, at).some(pushes), `${doc}: a block deploys billing without supabase db push (a dry run does not count) before it, so a project without ${later.join(', ')} gets a function that writes ${added.join(', ')}`);
     }
   }
   // the production walk-through (docs/stripe-setup.md step 5) deploys through the Supabase workflow, whose
