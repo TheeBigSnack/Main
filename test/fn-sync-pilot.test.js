@@ -305,3 +305,104 @@ test('a sighting the listing does not show yet is still an item, whichever machi
   await syncDesktop(29);
   assert.deepEqual(itemRows().filter((r) => r[0] === VIN(3)), [[VIN(3), 'price', 'manual', 24000]]);
 });
+
+// The desktop and the laptop both hold car 1 (20000) and car 2, both synced.
+// The desktop's rescan flags car 1's price drop and car 2's sale and the
+// salesperson fixes both there, but the desktop's sync after the fix does
+// not get through (offline, say); the laptop's rescan sights both changes
+// in the meantime, and only then does the desktop's sync arrive.
+async function fixedButSyncedLate() {
+  await setUp();
+  const { storage: desktop, sync: syncDesktop } = await machine();
+  const { storage: laptop, sync: syncLaptop } = await machine();
+  const posted = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: ago(3 * 24 * 60) }, [VIN(2)]: { name: 'Sold car', price: 30000, postedAt: ago(3 * 24 * 60) } };
+  desktop.data[K.posted] = structuredClone(posted);
+  laptop.data[K.posted] = structuredClone(posted);
+  await syncDesktop(900);
+  await syncLaptop(900);
+  desktop.data[K.pilot] = noteFlags(null, rescan({ takenAt: ago(300), sold: [VIN(2)], prices: [[VIN(1), 20000, 19000]] }));
+  desktop.data[K.posted] = markTakenDown(markPriceUpdated(desktop.data[K.posted], VIN(1), 19000, ago(295)), VIN(2));
+  desktop.data[K.pilot] = resolveFlag(desktop.data[K.pilot], VIN(1), null, { at: ago(295), how: 'manual' });
+  desktop.data[K.pilot] = resolveFlag(desktop.data[K.pilot], VIN(2), null, { at: ago(295), how: 'manual' });
+  laptop.data[K.pilot] = noteFlags(laptop.data[K.pilot], rescan({ takenAt: ago(240), sold: [VIN(2)], prices: [[VIN(1), 20000, 19000]] }));
+  await syncLaptop(239);
+  return { desktop, laptop, syncDesktop, syncLaptop };
+}
+const flaggedAt = () => Object.fromEntries(fake.rows('todo_items').map((t) => [`${t.vin}@${t.kind}`, Date.parse(t.flagged_at)]));
+
+test('a fix that reaches the server after the other machine sighted the change closes that sighting: one item, from the first sighting, never cleared', async () => {
+  const { desktop, laptop, syncDesktop, syncLaptop } = await fixedButSyncedLate();
+  assert.deepEqual(itemRows(), [[VIN(1), 'price', 'open', 19000], [VIN(2), 'takeDown', 'open', null]], 'the laptop\'s sightings are open items until the fix arrives');
+
+  await syncDesktop(180);
+  const fixed = [[VIN(1), 'price', 'manual', 19000], [VIN(2), 'takeDown', 'manual', null]];
+  assert.deepEqual(itemRows(), fixed, 'one item per car, closed as the desktop closed it');
+  const first = Date.parse(desktop.data[K.pilot].flags[0].flaggedAt);
+  assert.deepEqual(flaggedAt(), { [`${VIN(1)}@price`]: first, [`${VIN(2)}@takeDown`]: first }, 'its hours count from the first sighting, the desktop\'s');
+  let s = managerView();
+  assert.deepEqual([s.priceMismatches, s.soldStillListed], [[], []], 'nothing open for the manager view');
+  assert.deepEqual([s.priceUpdates.flagged, s.priceUpdates.done, s.priceUpdates.cleared, s.takeDowns.flagged, s.takeDowns.done, s.takeDowns.cleared], [1, 1, 0, 1, 1, 0]);
+  assert.ok(desktop.data[K.pilot].flags.every((f) => f.doneAt && f.how === 'manual'), 'the desktop keeps its closed flags');
+
+  // the laptop's next sync takes the fix and drops the flags it raised; its next rescan finds nothing to do
+  await syncLaptop(120);
+  assert.deepEqual(laptop.data[K.pilot].flags, [], 'the laptop\'s sightings are dropped, so none is later closed as cleared by the website');
+  assert.equal(laptop.data[K.posted][VIN(1)].price, 19000);
+  assert.equal(VIN(2) in laptop.data[K.posted], false);
+  laptop.data[K.pilot] = noteFlags(laptop.data[K.pilot], rescan({ takenAt: ago(60) }));
+  await syncLaptop(59);
+  assert.deepEqual(itemRows(), fixed, 'no cleared item, no second item');
+  s = managerView();
+  assert.deepEqual([s.priceUpdates.flagged, s.priceUpdates.cleared, s.takeDowns.flagged, s.takeDowns.cleared], [1, 0, 1, 0]);
+});
+
+test('a machine that rescans on an old registry and ticks its sighting off before it syncs adds no second item', async () => {
+  const { laptop, syncLaptop } = await fixedWhileTheLaptopWasShut();
+  const fixed = [[VIN(1), 'price', 'manual', 19000], [VIN(2), 'takeDown', 'manual', null]];
+  assert.deepEqual(itemRows(), fixed);
+  // the laptop's Scan, on its registry from before (car 1 at 20000, car 2 up), shows both on To do; before
+  // any sync gets through, upkeep finds car 1's listing at 19000 already and the salesperson clicks Taken down for car 2
+  laptop.data[K.pilot] = noteFlags(laptop.data[K.pilot], rescan({ takenAt: ago(200), sold: [VIN(2)], prices: [[VIN(1), 20000, 19000]] }));
+  laptop.data[K.posted] = markTakenDown(markPriceUpdated(laptop.data[K.posted], VIN(1), 19000, ago(195)), VIN(2));
+  laptop.data[K.pilot] = resolveFlag(laptop.data[K.pilot], VIN(1), 'price', { at: ago(195), how: 'detected' });
+  laptop.data[K.pilot] = resolveFlag(laptop.data[K.pilot], VIN(2), null, { at: ago(195), how: 'manual' });
+  await syncLaptop(100);
+  assert.deepEqual(itemRows(), fixed, 'the desktop\'s fix is the item; the laptop\'s late sighting adds none');
+  const s = managerView();
+  assert.deepEqual([s.priceUpdates.flagged, s.priceUpdates.done, s.takeDowns.flagged, s.takeDowns.done], [1, 1, 1, 1], 'each counted once');
+});
+
+test('a change that really happened again is still its own item: the website price back and down again, or a later price, while the other machine was away', async () => {
+  // the website drops car 1 to 19000 and goes back to 20000 before anyone acts: the desktop's item closes as cleared
+  await setUp();
+  const { storage: desktop, sync: syncDesktop } = await machine();
+  const { storage: laptop, sync: syncLaptop } = await machine();
+  const posted = { [VIN(1)]: { name: 'My car', price: 20000, postedAt: ago(3 * 24 * 60) } };
+  desktop.data[K.posted] = structuredClone(posted);
+  laptop.data[K.posted] = structuredClone(posted);
+  await syncDesktop(900);
+  await syncLaptop(900);
+  desktop.data[K.pilot] = noteFlags(null, rescan({ takenAt: ago(800), prices: [[VIN(1), 20000, 19000]] }));
+  desktop.data[K.pilot] = noteFlags(desktop.data[K.pilot], rescan({ takenAt: ago(700) }));
+  await syncDesktop(699);
+  assert.deepEqual(itemRows(), [[VIN(1), 'price', 'cleared', 19000]]);
+  // it drops to 19000 again: the laptop flags it and the salesperson updates the listing there before the laptop syncs
+  laptop.data[K.pilot] = noteFlags(laptop.data[K.pilot], rescan({ takenAt: ago(300), prices: [[VIN(1), 20000, 19000]] }));
+  laptop.data[K.posted] = markPriceUpdated(laptop.data[K.posted], VIN(1), 19000, ago(290));
+  laptop.data[K.pilot] = resolveFlag(laptop.data[K.pilot], VIN(1), 'price', { at: ago(290), how: 'manual' });
+  await syncLaptop(289);
+  assert.deepEqual(itemRows(), [[VIN(1), 'price', 'cleared', 19000], [VIN(1), 'price', 'manual', 19000]], 'two price drops, two items');
+
+  // later the website drops it to 18000: the desktop (synced, at 19000) flags it and the
+  // salesperson updates the listing there, but that sync does not get through; the laptop,
+  // meanwhile, sights a further drop to 17500, which the listing does not show: still an item
+  await syncDesktop(250);
+  assert.equal(desktop.data[K.posted][VIN(1)].price, 19000);
+  desktop.data[K.pilot] = noteFlags(desktop.data[K.pilot], rescan({ takenAt: ago(200), prices: [[VIN(1), 19000, 18000]] }));
+  desktop.data[K.posted] = markPriceUpdated(desktop.data[K.posted], VIN(1), 18000, ago(190));
+  desktop.data[K.pilot] = resolveFlag(desktop.data[K.pilot], VIN(1), 'price', { at: ago(190), how: 'manual' });
+  laptop.data[K.pilot] = noteFlags(laptop.data[K.pilot], rescan({ takenAt: ago(150), prices: [[VIN(1), 19000, 17500]] }));
+  await syncLaptop(149);
+  await syncDesktop(100);
+  assert.deepEqual(itemRows(), [[VIN(1), 'price', 'cleared', 19000], [VIN(1), 'price', 'manual', 19000], [VIN(1), 'price', 'manual', 18000], [VIN(1), 'price', 'open', 17500]], 'the fix to 18000 is its own item, and the drop to 17500 stays open');
+});

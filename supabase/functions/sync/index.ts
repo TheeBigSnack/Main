@@ -48,9 +48,10 @@
 //     without `known` (a machine that never synced) takes nothing down;
 //   - a to-do item is closed by an upload but never reopened, and a car
 //     has one item per kind at a time: the same sold car or price change
-//     flagged on two of the salesperson's machines is one row, and an open
-//     flag of a change the caller's listing already shows (a machine that
-//     rescanned before it heard of the fix) adds none (step 4);
+//     flagged on two of the salesperson's machines is one row, and a
+//     sighting of a change the caller's listing already shows (a machine
+//     that rescanned before it heard of the fix) adds none, whether it comes
+//     up open or ticked off, or arrived before the fix did (step 4);
 //   - take-downs and closed to-do items come back from CUTOFF_MARGIN_MS
 //     before `since`, not from `since` itself (below, step 6).
 // The rows are built the way extension/src/sync.js toServerRows() builds
@@ -423,6 +424,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (r.status === 'listed' && String(r.user_id) !== me) listedByOthers.add(vinOf(r.vin));
     }
     const inserts: ListingRow[] = [];
+    const changedHere = new Set<string>(); // VINs whose listing this request changed: a new post, a new price or a take-down (step 4)
     for (const row of incoming) {
       const have = byPost.get(`${row.vin}@${ms(row.posted_at)}`);
       if (!have) {
@@ -431,12 +433,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
           continue;
         }
         inserts.push(row);
+        changedHere.add(row.vin);
         continue;
       }
       if (String(have.user_id) !== me || have.status !== 'listed') continue;
       const patch: Row = {};
       const newer = changedAt(row) > changedAt(have);
       if (newer) {
+        if (intOrNull(have.price) !== row.price) changedHere.add(row.vin);
         patch.price = row.price;
         patch.updated_at = row.updated_at;
         if (row.listing_url) patch.listing_url = row.listing_url;
@@ -473,7 +477,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const gone: string[] = [];
       for (const part of chunk(vins, CHUNK)) {
         const mine = await selectAll('could not read listings', (from, to) => client.from('listings').select('id, vin, posted_at').eq('dealership_id', dealershipId).eq('user_id', me).eq('status', 'listed').in('vin', part).order('id').range(from, to));
-        for (const r of mine) if (wanted.has(`${vinOf(r.vin)}@${ms(r.posted_at)}`)) gone.push(String(r.id));
+        for (const r of mine) {
+          if (!wanted.has(`${vinOf(r.vin)}@${ms(r.posted_at)}`)) continue;
+          gone.push(String(r.id));
+          changedHere.add(vinOf(r.vin));
+        }
       }
       for (const part of chunk(gone, CHUNK)) {
         must(await client.from('listings').update({ status: 'taken_down', taken_down_at: new Date().toISOString() }).in('id', part), 'could not mark listings taken down');
@@ -504,13 +512,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
     //    took the car down) flags the change again, after that item closed.
     //    Such an open upload, with no row of its own and none it overlaps,
     //    is a late sighting, not a new item, when the caller's own listing
-    //    already shows the change: every listed row of theirs for the VIN is
-    //    at the flag's new price, or they have rows for it and none is up.
-    //    No row goes in for it, and mergeFlags drops that machine's flag
-    //    once its registry has the fix. A closed upload always goes in: a
-    //    flag raised and fixed on one machine between two syncs is an item.
+    //    already shows the change (`shows`): every listed row of theirs for
+    //    the VIN is at the flag's new price, or they have rows for it and
+    //    none is up. No row goes in for it, and mergeFlags drops that
+    //    machine's flag once its registry has the fix.
+    //    A closed upload with no row of its own and none it overlaps is an
+    //    item (a flag raised and fixed on one machine between two syncs),
+    //    except in the two orders that make it the same item as a row:
+    //    - the fix reached the server after another machine's sighting of
+    //      it (the fixing machine's sync after the fix did not get
+    //      through): an open row of the same VIN, kind and change (for a
+    //      price, the same new price), flagged after the upload closed,
+    //      which the listing now shows, with no posting of the car since
+    //      the upload was flagged. That row takes the upload (its earlier
+    //      flagging time, its close and how), so the item counts from the
+    //      first sighting and is not later closed as cleared by the
+    //      website; the other machine's flag is then a late sighting;
+    //    - a machine sighted the change on an old registry and ticked it
+    //      off before its first sync: the newest row of the VIN and kind is
+    //      closed (not as cleared) before the upload was flagged, with the
+    //      same change, and the listing showed it before this request (it
+    //      shows it, and this request changed nothing of it). No row goes in.
+    //    A change that really happened again (the website price back and
+    //    down again, a new price, the car posted again) is never either.
     if (todos.length) {
-      const have = await selectByVin(client, 'todo_items', 'id, vin, kind, flagged_at, done_at, from_price, to_price', dealershipId, todos.map((t) => t.vin));
+      const have = await selectByVin(client, 'todo_items', 'id, vin, kind, flagged_at, done_at, how, from_price, to_price', dealershipId, todos.map((t) => t.vin));
       const byFlag = new Map<string, Row>(); // vin@kind@ms(flagged_at) -> the row
       const byItem = new Map<string, Row[]>(); // vin@kind -> its rows
       for (const r of have) {
@@ -550,18 +576,51 @@ Deno.serve(async (req: Request): Promise<Response> => {
           counts.todoItems += 1;
         }
       }
-      const openNew = fresh.filter((t) => !t.done_at);
-      let adding = fresh;
-      if (openNew.length) {
-        const mine = (await selectByVin(client, 'listings', 'vin, user_id, price, status', dealershipId, openNew.map((t) => t.vin))).filter((r) => String(r.user_id) === me);
-        const shown = (t: TodoRow): boolean => {
-          const rows = mine.filter((r) => vinOf(r.vin) === t.vin);
-          const up = rows.filter((r) => r.status === 'listed');
-          if (t.kind === 'takeDown') return rows.length > 0 && up.length === 0;
-          return t.to_price !== null && up.length > 0 && up.every((r) => intOrNull(r.price) === t.to_price);
+      // the caller's own listing rows for the new items' VINs, as steps 1-2 left them
+      const mine = fresh.length ? (await selectByVin(client, 'listings', 'vin, user_id, price, status, posted_at', dealershipId, fresh.map((t) => t.vin))).filter((r) => String(r.user_id) === me) : [];
+      const rowsOf = (vin: string): Row[] => mine.filter((r) => vinOf(r.vin) === vin);
+      // whether the caller's listing shows a change of this kind to this price
+      const shows = (vin: string, kind: string, to: number | null): boolean => {
+        const rows = rowsOf(vin);
+        const up = rows.filter((r) => r.status === 'listed');
+        if (kind === 'takeDown') return rows.length > 0 && up.length === 0;
+        return to !== null && up.length > 0 && up.every((r) => intOrNull(r.price) === to);
+      };
+      // no posting of the car by the caller after this moment: the same listing
+      const sameListing = (vin: string, at: number): boolean => rowsOf(vin).every((r) => (ms(r.posted_at) ?? 0) <= at);
+      const sameChange = (r: Row, t: TodoRow): boolean => t.kind === 'takeDown' || (t.to_price !== null && intOrNull(r.to_price) === t.to_price);
+      // in flagging order, each new item joining its car's rows as it is
+      // taken, so "the newest row" also counts a change this request brings
+      const taken = new Set<TodoRow>();
+      for (const t of [...fresh].sort((a, b) => (ms(a.flagged_at) ?? 0) - (ms(b.flagged_at) ?? 0))) {
+        const key = `${t.vin}@${t.kind}`;
+        const item = byItem.get(key) || [];
+        const take = () => {
+          taken.add(t);
+          byItem.set(key, [...item, { ...t }]);
         };
-        adding = fresh.filter((t) => t.done_at || !shown(t));
+        if (!t.done_at) {
+          if (!shows(t.vin, t.kind, t.to_price)) take();
+          continue;
+        }
+        const flagged = ms(t.flagged_at) ?? 0;
+        const done = ms(t.done_at) ?? 0;
+        if (t.how !== 'cleared' && sameListing(t.vin, flagged) && shows(t.vin, t.kind, t.to_price)) {
+          const later = item.filter((r) => r.id && !r.done_at && (ms(r.flagged_at) ?? 0) > done && sameChange(r, t)).sort((a, b) => (ms(a.flagged_at) ?? 0) - (ms(b.flagged_at) ?? 0))[0];
+          if (later) {
+            const patch: Row = { flagged_at: t.flagged_at, done_at: t.done_at, how: t.how, from_price: t.from_price, to_price: t.to_price };
+            must(await client.from('todo_items').update(patch).eq('id', String(later.id)), 'could not update a to-do item');
+            Object.assign(later, patch);
+            counts.todoItems += 1;
+            continue;
+          }
+        }
+        const newest = item.reduce<Row | null>((a, r) => (!a || (ms(r.flagged_at) ?? 0) > (ms(a.flagged_at) ?? 0) ? r : a), null);
+        if (newest && newest.done_at && newest.how !== 'cleared' && (ms(newest.done_at) ?? 0) <= flagged && sameChange(newest, t)
+            && sameListing(t.vin, ms(newest.flagged_at) ?? 0) && shows(t.vin, t.kind, t.to_price) && !changedHere.has(t.vin)) continue;
+        take();
       }
+      const adding = fresh.filter((t) => taken.has(t));
       if (adding.length) {
         must(await client.from('todo_items').insert(adding), 'could not add to-do items');
         counts.todoItems += adding.length;
