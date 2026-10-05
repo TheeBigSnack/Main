@@ -40,7 +40,8 @@ const BRANDED = new RegExp(
       '(?:odometer|mileage)(?:[\\s-]+(?:status|brand|reading|disclosure|type))?\\s*[:\\-\u2013]\\s*not[\\s-]+actual',
       '(?:flood|hail|water|fire)[\\s-]*damag\\w*',
       'flood (?:title|vehicle|car)',
-      'flooded',
+      // "flooded with natural light" or "flooded with options" is a sales line; "flooded with water" and "flooded in a storm" are brands
+      'flooded(?![\\s-]+(?:with\\s+(?!(?:\\w+\\s+)?water\\b)|(?:in|by)\\s+(?:\\w+\\s+)?(?:sun)?light\\b))',
       'total(?:l?ed|[\\s-]*loss(?![\\s-]+(?:protection|coverage)))',
       'non[\\s-]*repairable',
       'junk title',

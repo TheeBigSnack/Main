@@ -168,6 +168,17 @@ test('a title brand or odometer line written as a label and value is read as bra
   }
 });
 
+test('"flooded with light" or "with options" is a sales line, not a flood brand; a flooded car still is', () => {
+  for (const words of ['This SUV is flooded with natural light from the panoramic roof.', 'Flooded with options!', 'A cabin flooded with sunlight.', 'An interior flooded in natural light.']) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded], ['Clean', 'yes', ''], words);
+  }
+  for (const words of ['Previously flooded.', 'This car was flooded with water.', 'Flooded with salt water.', 'Flooded in a hurricane, sold as is.']) {
+    assert.match(brandedTitleSignal({ descriptionRaw: words }), /^flooded$/i, words);
+  }
+});
+
 test('a denied mention or a program or finance offer is not a brand; the same words stated of the car still are', () => {
   // a clean car: the dealership's Clean default stands and the box is ticked
   const notBrands = [
