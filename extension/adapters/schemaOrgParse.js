@@ -647,12 +647,16 @@ function struckClasses(doc) {
 // element's `cars` is null (no car link inside), that car's key (every car
 // link inside goes to one car), or MANY (two or more cars). The page's first
 // heading (h1) counts as a link to the page's own car (HERE): the element
-// around the car's own title and price is never another car's card. `shown`
-// counts the pieces of text inside that are more than spaces.
+// around the car's own title and price is never another car's card. `others`
+// is the same for the links to cars other than the page's own (neither HERE
+// nor `own`, the key the caller gives the page's own car). `shown` counts
+// the pieces of text inside that are more than spaces, and `linkShown` those
+// inside its links to cars.
 const MANY = {};
 const HERE = {};
 const LINK = Symbol('link');
-function linkTargets(root, unseen) {
+const join = (a, b) => (a === null || a === b ? b : MANY);
+function linkTargets(root, unseen, own) {
   const order = [];
   walk(root, (n) => {
     if (n.text !== undefined) return false;
@@ -663,8 +667,11 @@ function linkTargets(root, unseen) {
   const heading = order.find((el) => el.tag === 'h1') || null;
   for (let k = order.length - 1; k >= 0; k -= 1) {
     const el = order[k];
-    let t = el === heading ? HERE : (el.tag === 'a' || el.tag === 'area') ? el.attrs[LINK] ?? null : null;
+    const link = (el.tag === 'a' || el.tag === 'area') ? el.attrs[LINK] ?? null : null;
+    let t = el === heading ? HERE : link;
+    let others = link !== null && link !== own ? link : null;
     let shown = 0;
+    let linkShown = 0;
     for (const c of el.children) {
       if (c.text !== undefined) {
         if (/\S/.test(c.text)) shown += 1;
@@ -672,11 +679,14 @@ function linkTargets(root, unseen) {
       }
       if (c.cars === undefined) continue; // not seen: hidden, crossed out, a script
       shown += c.shown;
-      if (t === MANY || c.cars === null) continue;
-      t = t === null || t === c.cars ? c.cars : MANY;
+      linkShown += c.linkShown;
+      if (c.cars !== null && t !== MANY) t = join(t, c.cars);
+      if (c.others !== null && others !== MANY) others = join(others, c.others);
     }
     el.cars = t;
+    el.others = others;
     el.shown = shown;
+    el.linkShown = link !== null ? shown : linkShown;
   }
 }
 
@@ -686,6 +696,33 @@ function linkTargets(root, unseen) {
 // and "Check availability" button all sit in its card.
 const isCard = (parent, child) => child.cars !== null && child.cars !== undefined && child.cars !== MANY && (parent.cars === MANY || parent.shown > child.shown);
 
+// Inside that largest element, when nothing around it links to a car other
+// than the page's own, the car's tile: the smallest element around its
+// links that shows something besides them (going in while exactly one child
+// holds the car's links and that child shows more than its links).
+function tileOf(el) {
+  const car = el.cars;
+  for (;;) {
+    let only = null;
+    let count = 0;
+    for (const c of el.children) {
+      if (c.text === undefined && c.cars === car) {
+        only = c;
+        count += 1;
+      }
+    }
+    if (count !== 1 || only.shown <= only.linkShown) return el;
+    el = only;
+  }
+}
+
+// The dollar amounts a piece of text shows, as numbers.
+function dollarAmounts(text) {
+  const out = new Set();
+  for (const m of String(text).matchAll(/\$\s*(\d{1,3}(?:,\d{3})+|\d{1,9})(?:\.\d{1,2})?(?![\d,])/g)) out.add(Number(m[1].replace(/,/g, '')));
+  return out;
+}
+
 /**
  * What a person sees on the page, as one string (text) and as segments of
  * it tied to the car whose card holds them (segments: { car, text }). A
@@ -693,23 +730,42 @@ const isCard = (parent, child) => child.cars !== null && child.cars !== undefine
  * inside one that also links to another car or shows something else (one
  * car's tile in a "similar vehicles" carousel, one car's card on a list);
  * its links to anything else (a contact form, financing) don't split it.
- * Which car a link goes to is the caller's carKey (parseVehiclePage);
- * without one, every address on this website is a car of its own. Text
- * outside any card, and inside the card around the page's first heading,
- * has car null. The adapter reads a car's own text from them: on its page,
- * everything but other cars' cards; on a list, its own card.
+ * When nothing around that element links to a car other than the page's
+ * own (one "you may also like" tile, the page's title in a bar of its own),
+ * the element may hold the page's own price box beside the tile: then the
+ * card is the tile (tileOf) when the tile shows a dollar amount of its own
+ * and the rest of the element shows none of the tile's amounts, and that
+ * rest is the page's own text, with car null and near the tile's car (a
+ * list's one card keeps it). Otherwise the whole element is the card, so a
+ * tile's price never escapes it. Which car a link goes to is the caller's
+ * carKey (parseVehiclePage), and carKey.own, when it gives one, is the page's
+ * own car; without a carKey, every address on this website is a car of its
+ * own. Text outside any card, and inside the card around the page's first
+ * heading, has car null. The adapter reads a car's own text from them: on
+ * its page, everything but other cars' cards; on a list, its own card.
  */
-function visibleText(root, { struck = new Set() } = {}) {
+function visibleText(root, { struck = new Set(), own = null } = {}) {
   const unseen = (n) => UNSEEN.has(n.tag) || isHidden(n.attrs) || isCrossedOut(n, struck);
-  linkTargets(root, unseen);
+  linkTargets(root, unseen, own);
   const parts = [];
   const segments = []; // { car, raw }, consecutive texts of one card together
+  const regions = [];
+  const cardFor = (parent, child) => {
+    if (!isCard(parent, child)) return null;
+    if (child.cars === HERE || child.cars === own || parent.others === MANY) return child.cars;
+    const tile = tileOf(child);
+    if (tile === child) return child.cars;
+    const region = { car: child.cars, tile, inTile: null, aroundText: '', tileText: '' };
+    region.inTile = { region };
+    regions.push(region);
+    return region;
+  };
   let size = 0;
   const nodes = [root];
   const cards = [null];
   while (nodes.length) {
     const n = nodes.pop();
-    const card = cards.pop();
+    let card = cards.pop();
     if (size > TEXT_LIMIT * 2) break; // enough read; whitespace is squeezed below
     if (n.text !== undefined) {
       parts.push(n.text);
@@ -721,17 +777,41 @@ function visibleText(root, { struck = new Set() } = {}) {
       continue;
     }
     if (n.tag !== '#document' && unseen(n)) continue;
+    if (card !== null && card.tile === n) card = card.inTile; // into the tile of a region
     for (let k = n.children.length - 1; k >= 0; k -= 1) {
       const c = n.children[k];
       nodes.push(c);
       // inside a card, everything is that card's; outside, a child may be one
-      cards.push(card !== null || c.text !== undefined ? card : isCard(n, c) ? c.cars : null);
+      cards.push(card !== null || c.text !== undefined ? card : cardFor(n, c));
     }
   }
   const squeeze = (t) => decodeEntities(t).replace(/\s+/g, ' ').trim();
+  // each region: the tile is the car's card, and the rest the page's own text when the amounts say so
+  for (const g of segments) {
+    if (g.car && g.car.inTile) g.car.aroundText += ' ' + g.raw;
+    else if (g.car && g.car.region) g.car.region.tileText += ' ' + g.raw;
+  }
+  for (const r of regions) {
+    const inTile = dollarAmounts(squeeze(r.tileText));
+    r.apart = inTile.size > 0 && ![...dollarAmounts(squeeze(r.aroundText))].some((a) => inTile.has(a));
+  }
+  const resolved = [];
+  for (const g of segments) {
+    let car = g.car;
+    let near = null;
+    if (car && car.inTile) {
+      if (car.apart) {
+        near = car.car;
+        car = null;
+      } else car = car.car;
+    } else if (car && car.region) car = car.region.car;
+    const last = resolved[resolved.length - 1];
+    if (last && last.car === car && last.near === near) last.raw += ' ' + g.raw;
+    else resolved.push({ car, near, raw: g.raw });
+  }
   return {
     text: squeeze(parts.join(' ')).slice(0, TEXT_LIMIT),
-    segments: segments.map((g) => ({ car: g.car, text: squeeze(g.raw).slice(0, TEXT_LIMIT) })).filter((g) => g.text),
+    segments: resolved.map((g) => ({ car: g.car, ...(g.near !== null ? { near: g.near } : {}), text: squeeze(g.raw).slice(0, TEXT_LIMIT) })).filter((g) => g.text),
   };
 }
 
@@ -796,7 +876,7 @@ function factsFrom(doc, pageUrl, carOf = null) {
       }
     }
   }
-  const seen = visibleText(doc.root, { struck: struckClasses(doc) });
+  const seen = visibleText(doc.root, { struck: struckClasses(doc), own: typeof carOf === 'function' && typeof carOf.own === 'string' ? carOf.own : null });
   return { title: ogTitle || title, canonical, next, prev, links, carfaxLinks, text: seen.text, segments: seen.segments };
 }
 
@@ -815,7 +895,9 @@ function factsFrom(doc, pageUrl, carOf = null) {
  *                a line-through style or a class for it: an old price),
  *                whitespace squeezed, at most TEXT_LIMIT characters
  *   segments     the same text in pieces, each with the car whose card
- *                holds it, or null (visibleText above)
+ *                holds it, or null (visibleText above); the page's own text
+ *                that sits around one other car's tile also has near, that
+ *                car
  * @param {string} html
  * @param {string} pageUrl  the page's own address
  * @param {{ carKey?: Function }} [options]  as for parseVehiclePage (given no cars)
@@ -834,8 +916,10 @@ export function pageFacts(html, pageUrl, { carKey = null } = {}) {
  * @param {{ carKey?: Function }} [options]  carKey(vehicles), given the
  *   page's vehicle nodes, returns the function that names the car a link on
  *   this website goes to (a key string), or null when it goes to no car's
- *   page; the page's text is cut into cards by it (facts.segments). Without
- *   it, every address on this website is a car of its own.
+ *   page, with the page's own car's key as its `own` property when the page
+ *   is one car's own; the page's text is cut into cards by it
+ *   (facts.segments). Without it, every address on this website is a car of
+ *   its own.
  * @returns {{ vehicles: object[], facts: ReturnType<typeof pageFacts> }}
  */
 export function parseVehiclePage(html, pageUrl, { carKey = null } = {}) {

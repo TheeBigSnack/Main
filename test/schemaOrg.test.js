@@ -567,12 +567,14 @@ test('price: a card holds all of its car\'s links, so a contact, finance or "Che
       assert.match(own, new RegExp(`Used car ${vin.slice(-3)} \\${price}`), `${extra}: the card of ${vin} holds its price`);
     }
   }
-  // a car's page with one other car's tile, the tile's price outside its link, beside a contact link
+  // a car's page with one other car's tile, the tile's price outside its link, beside a contact link:
+  // the tile is the card, and the heading around it, which shows none of its amounts, is the page's
   for (const extra of extras) {
     const one = `<html><body><header><a href="/">Home</a></header><main><h1>Used 2021 Kia Sorento LX</h1><p>Our price $14,000</p><section><h2>You may also like</h2>${card(A, '$15,000', extra.replace('VIN', A))}</section></main><footer><a href="/about/">About</a></footer></body></html>`;
     const segments = pageFacts(one, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments;
-    assert.deepEqual(segments.filter((g) => g.car === null).map((g) => g.text).join(' '), 'Home Used 2021 Kia Sorento LX Our price $14,000 About', extra);
-    assert.match(segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /You may also like Used car 102 \$15,000/, extra);
+    assert.deepEqual(segments.filter((g) => g.car === null).map((g) => g.text).join(' '), 'Home Used 2021 Kia Sorento LX Our price $14,000 You may also like About', extra);
+    assert.deepEqual(segments.find((g) => g.text === 'You may also like'), { car: null, near: A, text: 'You may also like' }, extra);
+    assert.match(segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /^Used car 102 \$15,000/, extra);
   }
   // the car's own title, price and form link next to that tile, with no heading: still not the tile's
   const plain = `<html><body><div><p>Our price $14,000</p><a href="/contact-us/?vin=${C}">Ask about this car</a></div>${card(A, '$15,000', '')}</body></html>`;
@@ -581,6 +583,37 @@ test('price: a card holds all of its car\'s links, so a contact, finance or "Che
   // a link naming two cars (a comparison) goes with neither
   const compare = `<html><body><h1>t</h1><div>${card(A, '$15,000', `<a href="/compare/?vins=${A},${B}">Compare</a>`)}${card(B, '$15,500', '')}</div></body></html>`;
   assert.match(pageFacts(compare, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /\$15,000 Compare/);
+});
+
+test('price: beside one other car\'s tile, the car\'s own price box is its own when the tile shows an amount of its own; otherwise the whole block stays the tile\'s', () => {
+  const byVin = () => (href) => {
+    const vins = href.match(/\b[a-z0-9]{17}\b/gi) || [];
+    return vins.length === 1 ? vins[0].toUpperCase() : null;
+  };
+  const A = '1HGSAMPL0JH000102';
+  const here = SITE + '/inventory/used-5xysampl6mg000114/';
+  const link = `/inventory/used-${A.toLowerCase()}/`;
+  // the car's title in a bar of its own; its price box and one similar tile side by side below it
+  const page = (main) => `<html><body><header><a href="/">Home</a></header><div class="bar"><h1>Used 2021 Kia Sorento LX</h1></div><div class="main">${main}</div><footer>Call us</footer></body></html>`;
+  const box = (price) => `<div class="price-box"><p>Our price ${price}</p><p>20,000 miles</p><a href="/contact-us/">Check availability</a> <a href="/finance/">Get financing</a></div>`;
+  const read = (main) => pageFacts(page(main), here, { carKey: byVin }).segments;
+  const own = (main) => read(main).filter((g) => g.car === null).map((g) => g.text).join(' ');
+  const tile = (main) => read(main).filter((g) => g.car === A).map((g) => g.text).join(' ');
+  const similar = (amount) => `<div class="similar"><h3>Similar</h3><a href="${link}">2018 Honda Accord ${amount}</a></div>`;
+  assert.equal(own(box('$15,000') + similar('$15,500')), 'Home Used 2021 Kia Sorento LX Our price $15,000 20,000 miles Check availability Get financing Call us');
+  assert.equal(tile(box('$15,000') + similar('$15,500')), 'Similar 2018 Honda Accord $15,500');
+  assert.deepEqual(read(box('$15,000') + similar('$15,500')).find((g) => g.text.startsWith('Our price')).near, A, 'the price box sits near the tile');
+  // the price box shows the tile's amount too: the whole block is the tile's, as before
+  assert.equal(own(box('$15,500') + similar('$15,500')), 'Home Used 2021 Kia Sorento LX Call us');
+  // the tile shows no amount of its own: the whole block is the tile's
+  assert.equal(own(box('$14,000') + similar('')), 'Home Used 2021 Kia Sorento LX Call us');
+  // the tile's price sits outside the smallest element around its link: the whole block is the tile's
+  const split = `<div class="tile"><div class="photo"><a href="${link}"><img alt=""></a><span>Low miles</span></div><div class="info"><span>$15,000</span></div></div>`;
+  assert.equal(own(box('$14,000') + split), 'Home Used 2021 Kia Sorento LX Call us');
+  // two other cars' tiles: each tile is its own card, as before
+  const B = '1FMSAMPL0HU000103';
+  const two = `<div class="similar"><a href="${link}">2018 Honda Accord $15,500</a><a href="/inventory/used-${B.toLowerCase()}/">2017 Ford Escape $16,000</a></div>`;
+  assert.equal(own(box('$15,000') + two), 'Home Used 2021 Kia Sorento LX Our price $15,000 20,000 miles Check availability Get financing Call us');
 });
 
 test('price: priceSpecification without an offer price; a strikethrough, list or MSRP entry is never the price', () => {

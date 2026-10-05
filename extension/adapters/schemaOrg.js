@@ -763,12 +763,15 @@ function carKeys(pageUrl, cars) {
       return vinPages ? null : key;
     };
     const seen = new Map(); // a page links to one car many times
-    return (href) => {
+    const carFor = (href) => {
       if (seen.has(href)) return seen.get(href);
       const car = carOf(href);
       if (seen.size < 100000) seen.set(href, car);
       return car;
     };
+    // the page's own car, so a link to it is never counted as another car's (schemaOrgParse.js visibleText)
+    carFor.own = own ? 'vin:' + nodeVin(own) : null;
+    return carFor;
   };
 }
 
@@ -807,13 +810,15 @@ function ownNode(nodes, pageUrl) {
 // car's price. For a car read from a list (list: true): its own card; a car
 // without one has no text, so the list's data shows no price and its own
 // page is read instead. A card is this car's when its car is this VIN or
-// one of this car's addresses.
+// one of this car's addresses. On a list, the text a card's tile was cut
+// from (a segment near this car: on a car's page, the page's own) is this
+// car's too.
 function factsForCar(facts, { urls = [], vin = '', list = false } = {}) {
   const out = { title: facts.title, text: facts.text, carfaxLinks: facts.carfaxLinks };
   if (!Array.isArray(facts.segments)) return out;
   const own = new Set(urls.filter((u) => typeof u === 'string' && u).map(pageKey).filter(Boolean));
   if (vin) own.add('vin:' + vin);
-  const kept = list ? facts.segments.filter((g) => g.car !== null && own.has(g.car)) : facts.segments.filter((g) => g.car === null || own.has(g.car));
+  const kept = list ? facts.segments.filter((g) => (g.car !== null && own.has(g.car)) || (g.near !== undefined && own.has(g.near))) : facts.segments.filter((g) => g.car === null || own.has(g.car));
   out.text = kept.map((g) => g.text).join(' ');
   return out;
 }

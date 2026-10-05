@@ -821,6 +821,48 @@ test('a website read from its pages: on a lot whose car addresses carry no VIN, 
   }
 });
 
+test('a website read from its pages: a car\'s own price stays its own beside one other car\'s tile when its title sits in a bar of its own, in the scan and at post time, and the tile\'s amount still never passes for it', async () => {
+  const cars = standardCars(4);
+  const [c, o] = cars;
+  const page = (price, tile) => standardCarPage(c).replace(/(<h1>[^<]*<\/h1>)<p>Our price ([^<]+)<\/p><p>([^<]+)<\/p>/, (all, h1, was, miles) => `<div class="bar">${h1}</div><div class="main"><div class="price-box"><p>Our price ${price}</p><p>${miles}</p><a href="/contact-us/">Check availability</a> <a href="/finance/">Get financing</a></div>${tile}</div>`);
+  const similar = (amount) => `<div class="similar"><h3>Similar</h3><a href="${o.path}">${o.year} ${o.make} ${o.model} ${amount}</a></div>`;
+  const read = async (html, prev = null, posted = {}) => {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STANDARD_ORIGIN + c.path, htmlAnswer(html));
+    const out = await rescanOf(site, prev, posted);
+    const one = await schemaOrg.getDetails(fakeSiteSearch(site), c.vin, { origin: STANDARD_ORIGIN, listUrl: null, url: STANDARD_ORIGIN + c.path });
+    return { out, atPost: schemaOrg.normalize(one.record) };
+  };
+  const fine = await read(page('$15,000', similar('$15,500')));
+  assert.equal(fine.out.vehicles.find((v) => v.vin === c.vin).price, 15000, 'scan');
+  assert.equal(fine.out.snapshot.vehicles[c.vin].decision, 'ready');
+  assert.equal(fine.atPost.price, 15000, 'post time');
+  assert.equal(fine.atPost.mileage, c.miles);
+  // the page now says $14,000; its markup still says $15,000, the price on the tile
+  const posted = markPosted({}, { vin: c.vin, name: 'posted car', price: c.price });
+  const first = await rescanOf(standardSite({ cars, perPage: 10 }), null, posted);
+  const split = `<div class="tile"><div class="photo"><a href="${o.path}"><img alt=""></a><span>Low miles</span></div><div class="info"><span>$15,000</span></div></div>`;
+  for (const [name, tile] of [['the tile\'s amount in its link', similar('$15,000')], ['the tile\'s amount outside the element around its link', split]]) {
+    const stale = await read(page('$14,000', tile), first.snapshot, posted);
+    assert.equal(stale.out.snapshot.vehicles[c.vin].price, null, name);
+    assert.deepEqual(stale.out.diff.needsALook.map((n) => [n.vin, n.text]), [[c.vin, 'Website no longer shows a price (the page does not show this price)']], name);
+    assert.equal(stale.atPost.price, null, `post time: ${name}`);
+  }
+});
+
+test('a website read from its pages: a one-car list\'s card keeps the text its tile was cut from, so a car read from the list keeps its mileage', async () => {
+  const cars = standardCars(1);
+  const [c] = cars;
+  const site = standardSite({ cars, perPage: 10 });
+  // the card's title and price in one block, its mileage in another; the list's data gives the mileage without a unit, so it counts only as the card shows it
+  site.set(STD.listUrl, htmlAnswer(standardListPage(cars).replace(/,"unitCode":"SMI"/g, '').replace(/<div class="card">(<a [^>]*>[^<]*<\/a>) (<span>[^<]*<\/span>) (<span>[^<]*<\/span>)/, '<div class="card"><div class="top">$1 $2</div><div class="specs">$3</div>')));
+  site.set(STANDARD_ORIGIN + c.path, htmlAnswer(noMarkup(standardCarPage(c))));
+  const out = await rescanOf(site, null);
+  assert.equal(out.vehicles[0].price, c.price);
+  assert.equal(out.vehicles[0].mileage, c.miles);
+  assert.equal(out.snapshot.vehicles[c.vin].decision, 'ready');
+});
+
 // ---------- the dates the snapshot keeps for the Ready and To do tabs ----------
 // (src/readyList.js reads them: the website's own in-stock date, and when
 // Lot Current first saw the car, carried from one saved snapshot to the next)
