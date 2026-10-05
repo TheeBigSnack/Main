@@ -308,6 +308,18 @@ function pageKey(href) {
   }
 }
 
+// The page's key without its query: a car's address with a tracking or print
+// query added ("?srp=1") is that car's page (carKeys).
+function queryless(href) {
+  try {
+    const u = new URL(String(href));
+    u.search = '';
+    return pageKey(u.href);
+  } catch (e) {
+    return '';
+  }
+}
+
 // The same without the query: where a redirect went, compared with where it started.
 function pathKey(href) {
   try {
@@ -699,21 +711,28 @@ async function twoAtATime(items, work) {
 // "Check availability" form with the VIN in its query goes with the car's
 // page; an address with several VINs, a comparison, is none of them); when
 // this page's markup names a car at that address (by its VIN, else by the
-// address); when the scan's list named it as a car page (cars.known); or
-// when it reads like a car page, new or used (readsLikeAnyCar), unless this
-// website's car addresses carry their VIN: then a VIN-less address that
-// only reads like one ("See all 2016 Honda Civic", another address of this
-// same car) goes to no car. Whether they do is the shape of the car
-// addresses the list linked to (cars.shape), else of the cars this page's
-// markup names, else this page's own address when it carries a VIN;
-// without any of those, such a link counts as a car's. Keys: "vin:" and the
-// VIN, else the page's key.
+// address); when the scan's list named it as a car page (cars.known); when
+// it is one of those addresses with a query added ("?srp=1", "?print=1"),
+// for a car whose own address has no query, so a lot whose car pages differ
+// only by their query is never read as one car; or when it reads like a car
+// page, new or used (readsLikeAnyCar), unless this website's car addresses
+// carry their VIN: then a VIN-less address that only reads like one ("See
+// all 2016 Honda Civic", another address of this same car) goes to no car.
+// Whether they do is the shape of the car addresses the list linked to
+// (cars.shape), else of the cars this page's markup names, else this page's
+// own address when it carries a VIN; without any of those, such a link
+// counts as a car's. On a page that is no one car's own (a list), a VIN-less
+// address that reads like a car page but has not the shape of this lot's car
+// addresses is no car either: a card's "More like this" search
+// ("/used-vehicles/2016-honda-civic/") does not split it. Keys: "vin:" and
+// the VIN, else the page's key.
 function carKeys(pageUrl, cars) {
   const known = cars && cars.known instanceof Map ? cars.known : null;
   return (vehicles) => {
     const origin = originOf(pageUrl);
+    const nodes = Array.isArray(vehicles) ? vehicles : [];
     const named = new Map();
-    for (const node of Array.isArray(vehicles) ? vehicles : []) {
+    for (const node of nodes) {
       const at = onSite(firstText(node && node.url), pageUrl, origin);
       const key = at ? pageKey(at.href) : '';
       const vin = nodeVin(node);
@@ -721,6 +740,7 @@ function carKeys(pageUrl, cars) {
     }
     const shape = (cars && cars.shape) || learnCarAddressShape([...named.keys()]);
     const vinPages = shape ? shape.vin : Boolean(vinInAddress(pageUrl));
+    const ownPage = Boolean(ownNode(nodes, pageUrl));
     const carOf = (href) => {
       const vins = vinsInAddress(href);
       if (vins.length) return vins.length === 1 ? 'vin:' + vins[0] : null;
@@ -728,7 +748,14 @@ function carKeys(pageUrl, cars) {
       if (!key) return null;
       if (named.has(key)) return named.get(key);
       if (known && known.has(key)) return known.get(key);
-      return !vinPages && readsLikeAnyCar(href) ? key : null;
+      const plain = queryless(href);
+      if (plain && plain !== key) {
+        if (named.has(plain)) return named.get(plain);
+        if (known && known.has(plain)) return known.get(plain);
+      }
+      if (!readsLikeAnyCar(href)) return null;
+      if (!ownPage && shape) return matchesCarAddressShape(href, shape) ? key : null;
+      return vinPages ? null : key;
     };
     const seen = new Map(); // a page links to one car many times
     return (href) => {
@@ -738,6 +765,22 @@ function carKeys(pageUrl, cars) {
       return car;
     };
   };
+}
+
+// The car whose own page this is, from its markup: the node with a VIN at
+// this page's address (or at it without the query the page was read with),
+// else the one node with a VIN and no address of its own; null on a list.
+function ownNode(nodes, pageUrl) {
+  const here = pageKey(pageUrl);
+  const plain = queryless(pageUrl);
+  const origin = originOf(pageUrl);
+  const withVin = nodes.filter((n) => nodeVin(n));
+  const at = (n) => onSite(firstText(n.url), pageUrl, origin);
+  const own = withVin.find((n) => at(n) && pageKey(at(n).href) === here)
+    || withVin.find((n) => at(n) && !at(n).search && pageKey(at(n).href) === plain);
+  if (own) return own;
+  const bare = withVin.filter((n) => !firstText(n.url));
+  return bare.length === 1 ? bare[0] : null;
 }
 
 // What normalize needs from a page besides the car's node, with the text

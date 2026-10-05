@@ -669,6 +669,49 @@ test('a website read from its pages: on a lot whose cards link to more than the 
   assert.equal(second.diff.priceUpdates.length + second.diff.needsALook.length, 0);
 });
 
+// A lot whose car addresses carry no VIN ("/used/<year>-<make>-<model>-<stock>/").
+const vinLessCars = (count) => standardCars(count).map((c) => ({ ...c, path: `/used/${c.year}-${c.make}-${c.model}-${c.stock}/`.toLowerCase() }));
+const noMarkup = (html) => html.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '');
+
+test('a website read from its pages: on a lot whose car addresses carry no VIN, a car read from the list keeps its price when its card links to its page with a query added or also links to a search for its model', async () => {
+  const cars = vinLessCars(4);
+  const edits = {
+    'the card links to the car with "?srp=1"': (list) => list.replace(/href="(\/used\/[^"]+\/)"/g, 'href="$1?srp=1"'),
+    'the card also links to "More like this", a search for its model': (list) => {
+      let k = 0;
+      return list.replace(/<\/div>/g, () => {
+        const c = cars[k++];
+        return ` <a href="${`/used-vehicles/${c.year}-${c.make}-${c.model}/`.toLowerCase()}">More like this</a></div>`;
+      });
+    },
+  };
+  for (const [name, edit] of Object.entries(edits)) {
+    const site = standardSite({ cars, perPage: 10 });
+    site.set(STD.listUrl, htmlAnswer(edit(standardListPage(cars))));
+    // the car pages carry no markup of their own: the list's data and its cards are all there is
+    for (const c of cars) {
+      site.set(STANDARD_ORIGIN + c.path, htmlAnswer(noMarkup(standardCarPage(c))));
+      site.set(STANDARD_ORIGIN + c.path + '?srp=1', htmlAnswer(noMarkup(standardCarPage(c))));
+    }
+    const out = await rescanOf(site, null);
+    assert.deepEqual(out.vehicles.map((v) => v.price), cars.map((c) => c.price), name);
+    assert.deepEqual(Object.values(out.snapshot.vehicles).map((e) => e.decision), cars.map(() => 'ready'), name);
+  }
+  // and a later scan takes the unchanged cars from the list, reading no car page again
+  const many = vinLessCars(24);
+  const site = () => {
+    const s = standardSite({ cars: many, perPage: 30 });
+    s.set(STD.listUrl, htmlAnswer(standardListPage(many).replace(/href="(\/used\/[^"]+\/)"/g, 'href="$1?srp=1"')));
+    for (const c of many) s.set(STANDARD_ORIGIN + c.path + '?srp=1', s.get(STANDARD_ORIGIN + c.path));
+    return s;
+  };
+  const first = await rescanOf(site(), null);
+  assert.equal(first.res.requests, 25);
+  const second = await rescanOf(site(), first.snapshot);
+  assert.equal(second.res.requests, 1, 'the second scan reads only the list');
+  assert.equal(second.diff.priceUpdates.length + second.diff.needsALook.length, 0);
+});
+
 test('a website read from its pages: another car\'s tile at the old price is not this car\'s price when the tile also links to a contact form or a form with its VIN, or is the only other car on the page', async () => {
   const cars = standardCars(6);
   const posted = markPosted({}, { vin: cars[0].vin, name: 'posted car', price: cars[0].price });
