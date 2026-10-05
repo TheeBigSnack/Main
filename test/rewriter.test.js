@@ -122,10 +122,27 @@ test('the website\'s write-up goes to the service as the website wrote it, a VIN
   const r = await generateDescription(args({ vehicle: v, settings: on, fetchImpl }));
   assert.ok(body, 'the service was called');
   assert.ok(!('vin' in body) && !('price' in body), 'no VIN or price field');
-  assert.deepEqual(body.narrative, r.narrative, 'the write-up the template read, unchanged');
+  assert.deepEqual(body.narrative, [r.narrative.join(' ')], 'the write-up\'s lines, unchanged, as one text');
   const sent = body.narrative.join(' ');
   for (const part of [v.vin, '$27,163', '555-201-3344', 'Local trade with new tires.']) assert.ok(sent.includes(part), `${part} goes as written`);
   assert.ok(!sent.includes('Documentation fee'), 'the lot-wide boilerplate does not');
+});
+
+// The write-up's lines go to the service as one text: a sentence the
+// website broke across paragraphs or lines reaches it whole, and the
+// services' checks (which join the list with spaces) read the same words.
+test('a sentence the website broke across paragraphs reaches the rewrite service whole', async () => {
+  const v = vehicle('usedNormal', { description: `<p>Runs great and</p><p>drives like new.</p><p>Local trade.</p><br>${DISCLAIMER}` });
+  let body = null;
+  const fetchImpl = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ ok: true, text: '' }) };
+  };
+  const r = await generateDescription(args({ vehicle: v, settings: on, fetchImpl }));
+  assert.deepEqual(r.narrative, ['Runs great and', 'drives like new.', 'Local trade.'], 'the lines as the website lays them out');
+  assert.deepEqual(body.narrative, ['Runs great and drives like new. Local trade.'], 'one text, no half sentence on its own');
+  assert.deepEqual(rewriteFacts({ vehicle: v, narrative: [] }).narrative, [], 'no write-up: nothing');
+  assert.deepEqual(rewriteFacts({ vehicle: v, narrative: ['', '  '] }).narrative, []);
 });
 
 test('the service system prompt names no real person or dealer', () => {

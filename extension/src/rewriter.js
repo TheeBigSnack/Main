@@ -43,9 +43,14 @@ export async function guessColorsWithBackend({ endpoint, key = '', photos, optio
 // data, nothing about the salesperson beyond the sign-off (their closing line
 // is added to the draft here, like the VIN). `narrative` is the website
 // description's own sentences as the website wrote them, so a VIN, a price
-// or a phone number the dealership wrote there goes with them. When the
-// salesperson picked the highlights, those are the features the service sees.
+// or a phone number the dealership wrote there goes with them. It goes as
+// one text, its lines (description.js cleanDescription) joined with spaces,
+// so a sentence the website broke across lines or paragraphs reaches the
+// service whole, never as two halves; the services' own checks read it the
+// same way (they join the list with spaces). When the salesperson picked the
+// highlights, those are the features the service sees.
 export function rewriteFacts({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [], highlights = null }) {
+  const writeUp = (Array.isArray(narrative) ? narrative : []).filter((line) => typeof line === 'string' && line.trim()).join(' ');
   return {
     year: v.year, make: v.make, model: v.model, trim: v.trim, mileage: v.mileage, stock: v.stock,
     features: Array.isArray(highlights) ? settleHighlights(highlights, v.features) : Array.isArray(v.features) ? v.features : [],
@@ -54,7 +59,7 @@ export function rewriteFacts({ vehicle: v, dealer = {}, salesperson = {}, priceN
     carfax: Boolean(v.carfaxUrl),
     exteriorColor: v.exteriorColor, interiorColor: v.interiorColor, bodyType: v.bodyType,
     engine: v.engine, transmission: v.transmission, drivetrain: v.drivetrain, fuelType: v.fuelType,
-    narrative,
+    narrative: writeUp ? [writeUp] : [],
     dealer: { name: dealer.name || '', city: dealer.city || '' },
     salesperson: { name: salesperson.name || '', title: salesperson.title || DEFAULT_SALESPERSON_TITLE },
     priceNote,

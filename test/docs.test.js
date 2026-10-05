@@ -796,7 +796,7 @@ test('the docs say the template writes the description from the car\'s listed fa
   // and the help says what the rewrite service is sent instead, and that its draft is checked
   const help = doc('help.md');
   assert.ok(help.includes("The template builds the description from the car's listed facts"), 'docs/help.md does not say what the template builds the description from');
-  assert.ok(help.includes('the write-up is sent to it as the website wrote it, a whole line at a time, from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
+  assert.ok(help.includes('the write-up is sent to it as the website wrote it, in whole lines joined into one text (so a sentence the website breaks across lines arrives whole), from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
   assert.ok(help.includes("The service's draft goes through the same checks"), "docs/help.md does not say the service's draft is checked");
 });
 
