@@ -194,7 +194,7 @@ try {
   // the person opens the OTHER Ram (same name, same price) and marks it sold: not this car's take-down
   await listing2.click('a[href="/marketplace/item/434343/"]');
   await listing2.waitForURL(/\/marketplace\/item\/434343\/$/);
-  await panel.waitForFunction(() => /Another car you posted or took down has a name like 2019 Ram 1500 Classic Express.*VIN, 1C6RR7FT0KS643289, and this page doesn't/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
+  await panel.waitForFunction(() => /Another car you posted or took down has a name like 2019 Ram 1500 Classic Express.*VIN, 1C6RR7FT0KS643289, and Lot Current couldn't find it in this page's text/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });
   assert.deepEqual(await listingActions(), ['save 515151'], 'nothing was marked sold or deleted on Your listings');
   await listing2.click('text=Mark as sold'); // the person, on the wrong Ram
   await listing2.waitForTimeout(3500);

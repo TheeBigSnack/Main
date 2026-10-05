@@ -254,7 +254,8 @@ test('with another posted car of the same name, upkeep needs this car\'s VIN on 
   // what the panel says on the other unit's page
   Object.assign(up, { kind: 'price', name: LAREDO, vin: VIN_A, listedPrice: 31995 });
   try {
-    assert.match(offTargetNote('', twin, 1), /Another car you posted or took down has a name like 2019 Jeep Grand Cherokee Laredo, so a listing counts as this car's only when its page shows this car's VIN, 1C4RJFBG5MC000001, and this page doesn't\. .*click I updated it\./);
+    assert.match(offTargetNote('', twin, 1), /Another car you posted or took down has a name like 2019 Jeep Grand Cherokee Laredo, so a listing counts as this car's only when its page shows this car's VIN, 1C4RJFBG5MC000001, and Lot Current couldn't find it in this page's text\. .*See more, click it.*click I updated it\./);
+    assert.doesNotMatch(offTargetNote('', twin, 1), /this page doesn't/, 'what the reader did not find is not stated as what the page lacks');
     assert.match(offTargetNote('', twin, null), /couldn't read your posted cars/);
     assert.match(offTargetNote('', readPage({ url: YOURS, texts: ['Your listings'] }, mine), 1), /looks for its full name, \$31,995 and its VIN, 1C4RJFBG5MC000001/);
     assert.match(offTargetNote('', readPage({ url: YOURS, texts: ['Your listings'] }, mine), 0), /looks for its full name and \$31,995\)/);
