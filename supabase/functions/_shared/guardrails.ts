@@ -204,7 +204,7 @@ export function dollarAmounts(text: unknown): Amount[] {
 const MILES = new RegExp(`(\\d[\\d,]*(?:\\.\\d+)?)(\\s?(?:k|thousand)\\b)?[\\s-]*(?:${MILE_WORDS}[\\s-]+){0,2}(?:miles?\\b|mi\\b\\.?)`, 'gi');
 const NOT_ODOMETER_BEFORE = /(?:\/|\b(?:within|up to|every|range(?: of)?|per|(?:years?|yrs?|months?|mos?)\s+(?:or|and)))\s*:?\s*$/i;
 const NOT_ODOMETER_AFTER = /^[\s-]*(?:\/|(?:from|per|an? hour|to empty)\b|(?:[\w'-]+\s+){0,2}(?:warranty|powertrain|bumper|coverage|range|radius|away|charge|tank)\b)/i;
-const ODOMETER_SAYS = /\b(gas |fuel )?(?:mileage|odometer(?: reading)?|odo)\b(?:\s+(?:is|of|reads|reading|shows|showing|says|at|now))*\s*[:\-–]?\s*(?:(?:only|just)\s+)?(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?/gi;
+const ODOMETER_SAYS = /\b(gas |fuel )?(?:mileage|odometer(?: reading)?|odo|miles(?=\s*:))\b(?:\s+(?:is|of|reads|reading|shows|showing|says|at|now))*\s*[:\-–]?\s*(?:(?:only|just)\s+)?(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?/gi;
 const ON_ODOMETER = /(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand)\b)?\s+on the (?:odometer|odo|clock)\b/gi;
 const FUEL_AFTER = /^\s*(?:mpg|mpge|miles? per|city|hwy|highway|combined|\/|%)/i;
 export function mileageClaims(text: unknown): Amount[] {
@@ -228,7 +228,7 @@ export function mileageClaims(text: unknown): Amount[] {
 }
 
 // Wording that claims a price change. Prices only ever mirror the website.
-export const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|was \$|now (?:just |only )?\$)/i;
+export const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|(?:reduced|dropped|lowered|slashed|cut) from(?= \$?\d)|was \$|now (?:just |only )?\$)/i;
 const CHANGE_LEAD = /^(?:was|now|reduced to|dropped to)\b/i;
 function priceChangeSaid(text: string): string {
   const m = PRICE_CHANGE.exec(text);
@@ -257,6 +257,44 @@ function priceAndMileageProblems(text: string, { vehicle = {}, priceNote = '', p
   }
   const change = priceChangeSaid(text);
   if (change) problems.push({ code: 'price-change', text: `Says "${change}"; a description never claims a price change` });
+  return problems;
+}
+
+// A bare amount: a number of a thousand or more with no "$" before it and
+// no unit after it ("Only 28,995!", "With 38,000 on it"). A bare amount the
+// car's record (model, trim, stock number, features, the dealership's name
+// and ZIP, the price note) does not hold comes from the write-up, where it
+// is a price or a mileage that can be out of date, so it must be the price
+// being posted, an amount in the price note or the website's mileage. A
+// year and a phone number are neither, and an amount the price and mileage
+// checks read is theirs.
+const PHONE = /(?:\+?1[\s.-]?)?\(?\b\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g;
+function bareAmountProblems(text: string, { vehicle = {}, dealer = {}, priceNote = '', price = null }: GuardrailContext, src: Set<string>): GuardrailProblem[] {
+  const v = vehicle;
+  const t = String(text ?? '');
+  const record: unknown[] = [
+    v.year, v.make, v.model, v.trim, v.name, v.stock, v.engine, v.transmission, v.drivetrain, v.exteriorColor, v.interiorColor,
+    v.bodyType, v.fuelType, ...(Array.isArray(v.features) ? v.features : []), priceNote, dealer.name, dealer.city, dealer.zip, v.location,
+  ];
+  const held = numbersIn(record.filter((b) => b !== null && b !== undefined).join(' '));
+  const posted = typeof price === 'number' && price > 0 ? Math.round(price) : null;
+  const miles = typeof v.mileage === 'number' && v.mileage >= 0 ? Math.round(v.mileage) : null;
+  const read = new Set<number | null>([posted, miles, ...[...dollarAmounts(t), ...dollarAmounts(priceNote), ...mileageClaims(t)].map((a) => a.value)]);
+  const phones = [...t.matchAll(PHONE)].map((m) => [m.index as number, (m.index as number) + m[0].length]);
+  const problems: GuardrailProblem[] = [];
+  for (const m of t.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
+    const at = m.index as number;
+    const said = m[0].replace(/,+$/, '');
+    const end = at + said.length;
+    const after = t.slice(end, end + 40);
+    const k = /^\s?k\b/i.test(after);
+    const value = amountOf(said, k ? 'k' : undefined);
+    if (value < 1000 || (!k && YEAR_SHAPED.test(said)) || MEASURE_AFTER.test(after)) continue;
+    const n = said.replace(/,/g, '');
+    if (!src.has(n) || held.has(n) || read.has(value) || phones.some(([a, b]) => at >= a && end <= b)) continue;
+    read.add(value);
+    problems.push({ code: 'unknown-number', text: `Says "${said}${k ? 'k' : ''}", which is neither the price being posted nor the website's mileage for this car` });
+  }
   return problems;
 }
 
@@ -505,6 +543,7 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
     problems.push({ code: 'unknown-number', text: `"${oneLine(q.words)}" isn't in the website's data for this car` });
   }
   problems.push(...priceAndMileageProblems(prose, { vehicle, priceNote, price }));
+  problems.push(...bareAmountProblems(prose, { vehicle, dealer, priceNote, price }, src));
   // The price note is the dealer's wording. When it quotes a dollar amount and
   // the website shows two prices for this car, the amount must be their
   // difference; a note written for one fee must not ride on a car with another.

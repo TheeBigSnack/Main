@@ -436,6 +436,39 @@ test('a stale mileage or price is caught in the usual ways a write-up states it,
   }
 });
 
+test('a bare amount from the write-up, with no "$" and no unit, must be the posted price or the website\'s mileage', async () => {
+  // the car: 20,986 miles, two prices (27,163 and 26,673), posted at 26,673; its write-up is out of date
+  const writeUp = 'Reduced from 31,995 to 28,995. Only 28,995! Miles: 38,000. With 38,000 on it. Tows 7,500 lbs. Call 555-555-0100.';
+  const v = { ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: writeUp };
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: 26673 };
+  const base = buildTemplateDescription(c);
+  assert.deepEqual(runGuardrails(base, c).problems, [], 'the template passes');
+  const codes = (sentence, ctx = c) => [...new Set(runGuardrails(`${base}\n${sentence}`, ctx).problems.map((p) => p.code))].filter((code) => !/^too-/.test(code)).sort();
+  const stale = {
+    'Reduced from 31,995 to 28,995.': ['price-change', 'unknown-number'],
+    'Only 28,995!': ['unknown-number'],
+    'Just 28,995 for this one.': ['unknown-number'],
+    'Miles: 38,000.': ['mileage-mismatch'],
+    'With 38,000 on it.': ['unknown-number'],
+    // the car's other price is not the one being posted
+    'Only 27,163!': ['unknown-number'],
+  };
+  for (const [sentence, want] of Object.entries(stale)) assert.deepEqual(codes(sentence), want, sentence);
+  assert.ok(runGuardrails(`${base}\nOnly 28,995!`, c).problems.some((p) => p.text === 'Says "28,995", which is neither the price being posted nor the website\'s mileage for this car'));
+  assert.ok(runGuardrails(`${base}\nMiles: 38,000.`, c).problems.some((p) => p.text === 'Says 38,000 miles, but the website shows 20,986 miles'));
+  // the posted price, the website's mileage, the model, a year, a weight and a phone number are fine
+  for (const sentence of ['Only 26,673!', 'With 20,986 on it.', 'A Ram 1500 from 2019.', 'Tows 7,500 lbs.', 'Call 555-555-0100.']) assert.deepEqual(codes(sentence), [], sentence);
+  // the rewrite service's own check has no price to compare: a bare amount is flagged, the mileage is not
+  assert.deepEqual(codes('Only 26,673!', { ...c, price: null }), ['unknown-number']);
+  assert.deepEqual(codes('With 20,986 on it.', { ...c, price: null }), []);
+  // a draft that copies the out-of-date write-up falls back to the template
+  const on = { myStores: [v.location], rewrite: { enabled: true, endpoint: 'http://localhost:8787/' } }; // the store the website lists the car at is the salesperson's
+  const draft = `${base}\nOnly 28,995!`;
+  const r = await generateDescription({ ...c, settings: on, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, text: draft }) }) });
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Says "28,995", which is neither the price being posted nor the website's mileage/);
+});
+
 test('a model year, fuel economy, a warranty, a range or a weight is never read as the mileage or a price', () => {
   for (const words of ['Low mileage 2019 Ram 1500.', 'Great gas mileage of 30 mpg.', 'Fuel mileage: 28 city / 36 highway.', '1 owner low miles.', 'Range: 290 Miles', 'Free Oil Changes 2 Years or 24,000 Miles', '24 months or 24,000 miles of coverage.', '5 Miles to Empty Warning', 'Towing capacity was 7,500 lbs.', 'The price includes 2 keys.', 'It was 2019 when it came in.', 'The Ram 1500 Classic saves fuel.', 'Save time with remote start.']) {
     assert.deepEqual(mileageClaims(words), [], words);
