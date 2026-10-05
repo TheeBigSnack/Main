@@ -17,7 +17,10 @@ export const AFFILIATION = [
   /\b(meta|facebook|marketplace)[- ](approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
   /\b(meta|facebook) (has|have|had) (approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
   // the present tense: "Meta approves of Lot Current", "Facebook endorses it"
-  /\b(meta|facebook|marketplace) (approves|endorses|certifies|sanctions|authori[sz]es|recommends|backs)\b/i,
+  /\b(meta|facebook|marketplace) (approves|endorses|certifies|sanctions|authori[sz]es|accredits)\b/i,
+  // verbs with honest uses ("Facebook recommends square photos", "backs up your draft", "Marketplace supports
+  // 20 photos") count only with Lot Current as the object: "Meta supports Lot Current", "Facebook OKs Lot Current"
+  /\b(meta|facebook|marketplace) (recommends|backs|supports|oks|okays|ok['’]s|vouches for|stands behind)( of)? (lot current|this (tool|extension|app|product)|the extension|our (tool|extension|app|product)|us)\b/i,
   /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|accredited) (meta|facebook|marketplace)\b/i,
   /\b(meta|facebook)['’]s (approval|endorsement|blessing)\b/i,
   /\b(meta|facebook)(['’]s)?( [a-z]+){0,2} partners?\b/i,
@@ -64,8 +67,10 @@ export const SAFETY = [
   /\bno (ban|block|restriction|suspension)s? risk\b/i,
   /\b(ban|block)[- ]?(proof|free)\b/i,
   /\b(won't|will not|never|can't|cannot|don't|doesn't) (get|be) (banned|blocked|restricted|suspended)\b/i,
-  // "post without getting banned", "avoid being blocked", "keeps you from getting restricted"
-  /\b(without|avoids?|avoiding|from) (ever )?(getting|being) (banned|blocked|restricted|suspended)\b/i,
+  // "post without getting banned", "without your account getting banned", "avoid being blocked"
+  /\b(without|avoids?|avoiding)(?: (?!(?:not|never|no)\b)[\w'’-]+){0,3} (getting|being) (banned|blocked|restricted|suspended)\b/i,
+  // "keeps you from getting restricted"; one car kept "from being blocked by another" in a queue is no promise
+  /\bfrom (ever )?(getting|being) (banned|blocked|restricted|suspended)\b(?! by (?:another|other|the other|the next|a different|one another)\b)/i,
   /\b(meta|facebook|marketplace) (won't|will not|will never|never|can't|cannot) (ban|block|restrict|suspend)\b/i,
   /\brisk[- ]free\b/i,
   /\b(no|zero|without any) risk\b/i,
@@ -98,14 +103,16 @@ export const NUMBERS = [
 // your website, in 10 seconds", "ready in about ten seconds", "10 sec", "a
 // ten-second post"): the only seconds customer copy could quote is a time per
 // post. "In seconds" and "a few seconds", with no figure, are not caught. The
-// short forms count too: "10sec", and "in 10s" or "10 s a car" (a bare "s"
-// only after a time word or before "a car", so "the 2010s" is not read).
+// short forms count too: "10sec", "in 10s", "in roughly 10s", "in ~10s", "10 s
+// a car" and "a 10s post" (a bare "s" only after a time word, before "a car"
+// or before "post", so "the 2010s" and "under 18s" are not read).
 const SECONDS = String.raw`(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|forty-five|fifty|sixty|ninety)`;
 export const TIME_PER_POST = [
   new RegExp(String.raw`\b${SECONDS}(?:\s+|-)(?:seconds?|secs?)\b`, 'i'),
   /\b\d+(?:\.\d+)?(?:seconds?|secs?)\b/i,
-  /\b(?:in|under|about|around|within|takes?|took)\s+(?:about |under |around |just |only |less than )?\d+(?:\.\d+)?\s?s\b/i,
+  /\b(?:in|about|around|within|takes?|took|roughly|approximately)\s+(?:about |under |around |just |only |less than |roughly |approximately )?~?\s?\d+(?:\.\d+)?\s?s\b/i,
   /\b\d+(?:\.\d+)?\s?s\s+(?:a|per|each|every)\s+(?:car|post|listing|vehicle)\b/i,
+  /\b\d{1,3}(?:\.\d+)?\s?s[- ](?:posts?|listings?|fills?)\b/i,
 ];
 
 // What customer-facing copy may not say either (the positioning names some

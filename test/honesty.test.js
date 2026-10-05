@@ -39,6 +39,8 @@ const AFFILIATION_CLAIMS = [
   'Meta approves of Lot Current.',
   'Facebook endorses Lot Current.',
   'Marketplace recommends Lot Current for dealers.',
+  'Meta supports Lot Current.',
+  'Facebook OKs Lot Current.',
 ];
 
 // Promises and made-up numbers that customer-facing copy may not make.
@@ -109,6 +111,10 @@ const CUSTOMER_CLAIMS = [
   'A listing takes 8s.',
   '10s a car.',
   'Filled in 10sec.',
+  'A 10s post.',
+  'Posted in roughly 10s.',
+  'Listed in ~10s.',
+  'Post without your account getting banned.',
 ];
 
 // Lines today's copy uses, which must stay allowed.
@@ -139,6 +145,16 @@ const HONEST = [
   'Cars from the 2010s are listed like any other used car.',
 ];
 
+// Honest lines the lists once caught, though no copy uses them yet: a verb with an honest use about Facebook, a
+// queue keeping one car from blocking another, an age.
+const ONCE_CAUGHT = [
+  'Facebook backs up your draft.',
+  'Facebook recommends square photos.',
+  'Marketplace supports up to 20 photos.',
+  'A queue keeps a car from being blocked by another.',
+  'Not for under 18s.',
+];
+
 test('every affiliation or approval claim fails, in any document', () => {
   for (const claim of AFFILIATION_CLAIMS) {
     assert.notDeepEqual(honestyProblems(claim, { customerFacing: false }), [], `"${claim}" passes the internal-document check`);
@@ -154,6 +170,7 @@ test('every guarantee, account-safety promise and made-up number fails in custom
 
 test('the honest lines the copy already uses pass', () => {
   for (const line of HONEST) assert.deepEqual(honestyProblems(line), [], line);
+  for (const line of ONCE_CAUGHT) assert.deepEqual(honestyProblems(line), [], line);
   // a sentence that only denies a forbidden thing passes once that denial is named
   const denial = 'Lot Current is not affiliated with, endorsed by or partnered with Meta, and no one can promise your account will never be restricted.';
   assert.notDeepEqual(honestyProblems(denial), [], 'without the denials named, the words are caught');
