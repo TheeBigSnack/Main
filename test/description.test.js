@@ -348,3 +348,23 @@ test('the code writes invisible and space-like characters as \\u escapes, never 
   }
   assert.deepEqual(found, []);
 });
+
+// A scan from before the lines were read with their entities decoded saved
+// the lot-wide lines as the website wrote them ("Tax, title &amp; tags
+// extra."), and a scan that does not read every description keeps them
+// (scanRunner.js). They are read the way the description's lines are, so
+// they still match, the disclaimer is not sent to the rewrite service, and
+// it backs no claim.
+test('lot-wide lines saved by an earlier scan with the entities as written still match the lines as they read now', async () => {
+  const { runGuardrails } = await import('../extension/src/rewriteTemplate.js');
+  const saved = 'Every vehicle comes with a warranty &amp; roadside help. Tax &amp; tags extra.';
+  const raw = `Runs great.<br>${saved}`;
+  assert.deepEqual(cleanDescription(raw, new Set([saved])), ['Runs great.']);
+  assert.deepEqual(cleanDescription(raw, [saved]), ['Runs great.'], 'a list as storage keeps it');
+  assert.deepEqual(withoutLotWide(raw, [saved]), ['Runs great.']);
+  assert.deepEqual(cleanDescription(raw, new Set(['Every vehicle comes with a warranty & roadside help. Tax & tags extra.'])), ['Runs great.'], 'as a scan saves it now');
+  assert.deepEqual(cleanDescription(`Runs great.<br>Tax &amp; tags extra.`, new Set(['Tax &amp; tags extra.'])), ['Runs great.'], 'a sentence of it too');
+  const v = { year: 2019, make: 'Ram', model: '1500', descriptionRaw: raw, features: [] };
+  const claim = runGuardrails('It comes with a warranty.', { vehicle: v, boilerplate: [saved] }).problems.filter((p) => p.code === 'unsupported-claim');
+  assert.equal(claim.length, 1, 'the lot-wide warranty line backs no claim about this car');
+});

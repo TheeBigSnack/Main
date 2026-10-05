@@ -40,7 +40,7 @@
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
-import { splitSegments, withoutLotWide } from './description.js';
+import { splitSegments, withoutLotWide, lotWideLines as plainLotWide } from './description.js';
 
 export const WORD_LIMITS = Object.freeze({ min: 60, max: 120 });
 
@@ -657,8 +657,10 @@ function writeUpText(raw, boilerplate) {
   if (typeof raw !== 'string') return raw;
   return withoutLotWide(raw, lotWideLines(boilerplate)).join('\n');
 }
-// the scan's lot-wide lines, as a list or a set; anything else is none
-const lotWideLines = (b) => (Array.isArray(b) || b instanceof Set ? [...b] : []);
+// the scan's lot-wide lines, as a list or a set, read as the write-up's
+// lines are (a line saved before entities were decoded still matches);
+// anything else is none
+const lotWideLines = (b) => [...plainLotWide(b)];
 
 // The website's own words for this car, where its claims may come from.
 function claimSource({ vehicle = {}, priceNote = '', boilerplate = [] }) {

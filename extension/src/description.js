@@ -59,6 +59,19 @@ function decodeEntities(s) {
 // space) read as the page shows them.
 const plain = (s) => decodeEntities(s.replace(/<[^>]+>/g, '')).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
 
+// The scan's lot-wide lines read the way the lines they are matched with
+// are (plain): a line saved by a scan from before entities were decoded
+// ("Tax, title &amp; tags extra.") still matches the line as it reads now.
+export function lotWideLines(boilerplate) {
+  const out = new Set();
+  if (!(Array.isArray(boilerplate) || boilerplate instanceof Set)) return out;
+  for (const part of boilerplate) {
+    const line = typeof part === 'string' ? plain(part) : '';
+    if (line) out.add(line);
+  }
+  return out;
+}
+
 // The description's lines as the website lays them out: one list of lines
 // per paragraph, division or list item, split at its plain line breaks.
 function linesOf(raw) {
@@ -168,7 +181,7 @@ export function splitSegments(raw) {
 // checks read this as the website's own words for the car
 // (rewriteTemplate.js claimSource).
 export function withoutLotWide(raw, boilerplate = NONE) {
-  const parts = [...boilerplate].filter((p) => typeof p === 'string' && p.trim() !== '').sort((a, b) => b.length - a.length);
+  const parts = [...lotWideLines(boilerplate)].sort((a, b) => b.length - a.length);
   const out = [];
   for (const segment of splitSegments(raw)) {
     let text = segment;
@@ -267,11 +280,13 @@ const leftOut = (seg, boilerplate) =>
 // accident in 2021."), and the last segment sent goes too when it may run on
 // into the one left out: it does not end with ".", "!" or "?", or the one
 // left out does not start as a sentence does (past a bullet mark). Bullets
-// and headings go as written.
+// and headings go as written. The lot-wide lines are read as the
+// description's lines are (lotWideLines).
 export function cleanDescription(raw, boilerplate = new Set()) {
+  const lot = lotWideLines(boilerplate);
   const kept = [];
-  for (const seg of segmentsOf(raw, boilerplate)) {
-    if (!leftOut(seg, boilerplate)) {
+  for (const seg of segmentsOf(raw, lot)) {
+    if (!leftOut(seg, lot)) {
       kept.push(seg.text);
       continue;
     }
