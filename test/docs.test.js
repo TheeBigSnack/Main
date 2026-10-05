@@ -1107,6 +1107,21 @@ test('no text says each scan\'s counts sync: a sync sends the newest scan\'s, an
   assert.match(store, /unless the rescan looked like a website hiccup, the scan's counts/);
 });
 
+// review: help.md said "If you already belong to that dealership, a code does nothing and says so", while
+// redeem_invite (as 0010 last defined it) turns a salesperson who redeems a manager code into a manager and
+// leaves the code unused only for a member already at the code's role or a manager.
+test('the help says an invite code can raise a member\'s role and does nothing only for a member at its role or a manager', () => {
+  const dir = new URL('../supabase/migrations/', import.meta.url);
+  const defines = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().filter((f) => /create or replace function public\.redeem_invite\(/.test(read(`../supabase/migrations/${f}`)));
+  const latest = read(`../supabase/migrations/${defines[defines.length - 1]}`);
+  const body = latest.slice(latest.indexOf('create or replace function public.redeem_invite('));
+  assert.match(body, /if found and \(member\.role = 'manager' or member\.role = inv\.role\) then/, 'redeem_invite changed who a code leaves alone: update help.md and this test');
+  assert.match(body, /on conflict \(user_id, dealership_id\) do update\s+set role = excluded\.role/, 'redeem_invite no longer raises a member\'s role: update help.md and this test');
+  const help = doc('help.md');
+  assert.doesNotMatch(help, /If you already belong to that dealership, a code does nothing/, 'help.md says a code does nothing for any member, while a manager code makes a salesperson a manager');
+  assert.match(help, /A code can raise your role, never lower it: a salesperson who enters a manager code becomes a manager\. If you already belong to that dealership with the code's role, or as a manager, the code does nothing and says so/);
+});
+
 // "It didn't post" ends the post attempt the click on Post opened, as
 // not-posted (sidepanel.js notPosted): the Numbers tab counts it under
 // "Started but not posted", and while signed in it syncs with the other post
