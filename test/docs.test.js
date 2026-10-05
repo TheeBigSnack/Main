@@ -1239,6 +1239,51 @@ test('the guides say what a deployed function answers only as what the repositor
   assert.equal(seen, 2, 'stripe-setup and website.md each say what a deployed function answers');
 });
 
+// supabase/README.md drifted from the code in eight places: the header said
+// everything stays in the browser (the profile goes to Chrome sync); "the
+// two functions" after the header named four; the sync function's
+// late-sighting rule left out that a take-down needs rows of the caller's;
+// the checkout 409 said Stripe retries an unpaid invoice (it no longer does);
+// the seat rule for an untagged price left out the fallback with no seat
+// price set; "choose whether to prorate" read as settled while the owner has
+// not set the rule; two db push comments named files step 3 already applied;
+// and /rewrite left out its 400 for a missing dealership name.
+test('supabase/README.md says what the functions and the billing code do', () => {
+  const readme = read('../supabase/README.md');
+  const flat = readme.replace(/\s+/g, ' ');
+  assert.doesNotMatch(flat, /everything stays in the browser/, 'the header says everything stays in the browser, but the profile goes to Chrome sync');
+  assert.match(flat, /the profile still goes to Chrome's synced storage/);
+
+  const functions = readdirSync(new URL('../supabase/functions/', import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name).sort();
+  assert.deepEqual(functions, ['billing', 'lead', 'rewrite', 'sync'], 'the functions changed: check how supabase/README.md names them');
+  assert.doesNotMatch(readme, /^## The two functions$|\*\*Secrets and the two functions\.\*\*/m, 'supabase/README.md calls rewrite and sync "the two functions" after its header names four');
+  assert.match(readme, /^## The rewrite and sync functions$/m);
+
+  const sync = read('../supabase/functions/sync/index.ts');
+  assert.match(sync, /if \(t\.kind === 'takeDown'\) return rows\.length > 0 && up\.length === 0;/, 'the late-sighting rule changed: check supabase/README.md');
+  assert.match(sync, /return t\.to_price !== null && up\.length > 0 && up\.every\(/);
+  assert.doesNotMatch(flat, /none of their rows for it up/, 'the late-sighting rule leaves out that a take-down needs rows of the caller\'s');
+  assert.match(flat, /for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up/);
+
+  const billing = read('../supabase/functions/_shared/billing.mjs');
+  assert.match(billing, /an invoice being retried \(past_due\) or no longer retried\n\/\/ but still payable \(unpaid\)/, 'the billing code\'s account of unpaid changed: check supabase/README.md');
+  assert.doesNotMatch(flat, /Stripe retries the open invoice/, 'supabase/README.md says Stripe retries an unpaid invoice');
+  assert.match(billing, /if \(priceSeat \? price === priceSeat : price !== priceRooftop\) extra \+= qty;/, 'the untagged seat rule changed: check supabase/README.md');
+  assert.doesNotMatch(flat, /an untagged price counts only when it is `STRIPE_PRICE_SEAT`/, 'the seat rule leaves out the fallback with no seat price set');
+  assert.match(flat, /with `STRIPE_PRICE_SEAT` unset, whenever it is not `STRIPE_PRICE_ROOFTOP`/);
+
+  if (/^- \*\*11\.2\*\*/m.test(read('../legal/questions-for-attorney.md'))) {
+    assert.doesNotMatch(flat, /choose whether to prorate/, 'supabase/README.md leaves proration to whoever adds a seat, while the owner has not set the rule');
+    assert.match(flat, /not set yet: `legal\/questions-for-attorney\.md` 11\.2/);
+  }
+  assert.doesNotMatch(readme, /db push\s+# applies 0\d{3}_/, 'a db push comment names a file step 3\'s push already applied');
+
+  const rewrite = read('../supabase/functions/rewrite/index.ts');
+  assert.match(rewrite, /if \(!dealerNameOf\(facts\)\) return json\(req, 400, \{ ok: false, error: NO_DEALER_NAME \}\);/, 'the rewrite function no longer refuses a body without the dealership\'s name: check supabase/README.md');
+  const msg = rewrite.match(/const NO_DEALER_NAME = "([^"]+)";/)[1];
+  assert.ok(flat.includes(`gets 400 \`${msg}\``), 'supabase/README.md leaves out /rewrite\'s 400 for a missing dealership name');
+});
+
 // README's Account item once sent readers to "steps 3 to 6: the functions, ..."
 // as what must go live before a sign-in completes, after production-setup's
 // step 3 said all four functions were up, and its storage line called two
