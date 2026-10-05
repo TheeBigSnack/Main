@@ -20,6 +20,7 @@ import { honestyProblems, offPricing } from './honesty.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { profileFrom } from '../extension/src/settings.js';
 import { ADAPTERS, isCheckedLive, unsupportedSiteMessage } from '../extension/adapters/index.js';
+import { normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -488,6 +489,60 @@ test('no copy says new, demo or loaner cars can never get through, and the gate 
   const LABELS = /goes by (?:your|the) website's (?:own )?labels|can only go by what your website says/;
   for (const [name, said] of [['the home page', text], ['How it works', stripTags(howPage)], ['the sales sheet', read('../marketing/sales-sheet.md')], ['the demo script', read('../marketing/demo-script.md')]]) {
     assert.match(said, LABELS, `${name} does not say the check goes by the website's labels`);
+  }
+});
+
+// review: the same claim was still made the other way round ("It only lets pre-owned cars at your store through" in
+// the pilot offer email, "lets only pre-owned cars through", "Only pre-owned cars at your store are ready to post",
+// "the cars at your store that are pre-owned", "checks every car is really pre-owned"), and the home page kept "A
+// demo or loaner flag means no." with a caveat that blamed only a website's wrong label. A reader can also lose a
+// correct label before the gate sees it: on DealerOn and Dealer.com, a car the website marks certified is read as
+// certified used whatever its inventory type says (inventoryJson.js normalizeInventoryRecord), so a certified
+// loaner passes. The copy says the cars the website marks as pre-owned, says a demo or loaner label Lot Current
+// misses can get through wherever it says a wrong label can, and names that reader gap for exactly as long as the
+// reader has it.
+test('no copy says only pre-owned cars get through as a plain fact, and the reader gap for certified loaners is named while it exists', () => {
+  const UNQUALIFIED = /\b(?:only (?:lets |let |shows |lists |posts )?(?:through )?pre-owned (?:cars|vehicles)|lets only pre-owned|(?:cars|vehicles)(?: at your store)? that are pre-owned|(?:every|each) car is (?:really |truly )?pre-owned|(?:demo|loaner) flag means no)\b/i;
+  for (const said of ['It only lets pre-owned cars at your store through.', 'It reads the inventory, lets only pre-owned cars through.', 'Only pre-owned cars at your store are ready to post.', 'It shows the cars at your store that are pre-owned.', 'It checks every car is really pre-owned.', 'A demo or loaner flag means no.']) {
+    assert.match(said, UNQUALIFIED, said);
+  }
+  for (const said of ['It lists only the cars your website marks as pre-owned.', 'Only cars the website says are pre-owned, at your store.', 'Pre-owned cars only.', 'Pre-owned cars at your store that are missing something a listing needs.']) {
+    assert.doesNotMatch(said, UNQUALIFIED, said);
+  }
+  const files = [
+    ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
+    ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+    '../README.md', '../docs/help.md', '../package.json',
+  ];
+  for (const rel of files) {
+    const said = rel.endsWith('.html') ? stripTags(read(rel)) : read(rel);
+    const hit = said.match(UNQUALIFIED);
+    assert.equal(hit, null, `${rel.slice(3)} says only pre-owned cars get through, not that it lists the cars the website marks as pre-owned: "${hit && hit[0]}"`);
+    // a caveat that a wrong label can get through also says a label Lot Current misses can
+    for (const sentence of said.split(/(?<=[.!?)])\s+/)) {
+      if (/labels wrong/.test(sentence)) assert.match(sentence, /label Lot Current misses/, `${rel.slice(3)} blames only the website's label: "${sentence}"`);
+    }
+  }
+  const card = stripTags((html.match(/<h3>Pre-owned only<\/h3>\s*<p>[\s\S]*?<\/p>/) || [''])[0]);
+  for (const [name, said] of [["the home page's Pre-owned only card", card], ['How it works', stripTags(howPage)], ['the positioning', read('../marketing/positioning.md')]]) {
+    assert.match(said, /a demo or loaner whose label Lot Current misses/, `${name} does not say a demo or loaner label Lot Current misses can get through`);
+  }
+
+  // the reader gap, read from the shipped reader and gate: a certified card whose inventory type says loaner or demo
+  const passes = (condition) => checkPreOwned(normalizeInventoryRecord({
+    vin: '1SAMPLE0000000001', condition, certified: true, link: '/used/2024-sample-suv.htm',
+    title: 'Certified Pre-Owned 2024 Sample SUV Limited', year: 2024, make: 'Sample', model: 'SUV', mileage: 4200, price: 41000,
+  }, { origin: 'https://dealer.example' })).verdict === 'pre-owned';
+  assert.equal(passes('Used'), true, 'a plain certified used card passes');
+  const gapOpen = ['Loaner', 'Demo', 'Service Loaner'].some(passes);
+  const GAP = /on DealerOn and Dealer\.com websites, a car the website marks certified is read as certified used even when its inventory type says demo or loaner/;
+  const how = stripTags((howPage.match(/<section aria-labelledby="preowned-h">[\s\S]*?<\/section>/) || [''])[0]);
+  const readme = (read('../README.md').match(/## How the pre-owned check works\n[\s\S]*?(?=\n## )/) || [''])[0];
+  for (const [name, said] of [["How it works' pre-owned check", how], ["README.md's pre-owned check", readme]]) {
+    assert.ok(said.length > 0, `${name} is there`);
+    if (gapOpen) assert.match(said, GAP, `${name} does not name the gap: a certified loaner or demo on DealerOn and Dealer.com passes the check`);
+    else assert.doesNotMatch(said, GAP, `the DealerOn and Dealer.com reader now keeps a certified car's demo or loaner type: drop the known-gap sentence from ${name} (and regenerate the site)`);
   }
 });
 

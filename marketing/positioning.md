@@ -17,7 +17,7 @@ Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here i
 
 ## What Lot Current is
 
-A Chrome extension. It reads the dealership's own website inventory, lets only pre-owned cars through, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and, with automatic rescans allowed, re-reads the website every 3 hours while Chrome is open to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
+A Chrome extension. It reads the dealership's own website inventory, lets through only the cars the website marks as pre-owned, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and, with automatic rescans allowed, re-reads the website every 3 hours while Chrome is open to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
 
 **One line:** Lot Current fills in the Marketplace listing from your website in seconds. You click Publish, and with automatic rescans on and Chrome open it tells you the same day when a car sells or its price changes.
 
@@ -39,7 +39,7 @@ Other tools in this space list at roughly $39 to $1,299 a month as of September 
 
 Say:
 - "You click Publish. Lot Current never does." (True by construction: there is no code for it and a test that fails if any appears.)
-- "Only cars your website marks as pre-owned, only at your store, only at the website price." (It goes by the website's labels: a car the website labels wrong can get through, so the salesperson still looks over each car.)
+- "Only cars your website marks as pre-owned, only at your store, only at the website price." (It goes by the website's labels as Lot Current reads them: a car the website labels wrong, or a demo or loaner whose label Lot Current misses, can get through, so the salesperson still looks over each car.)
 - "With automatic rescans on and Chrome open, sold cars flagged the same day." (With automatic rescans on, they run every 3 hours while Chrome is open. Say both conditions with the claim, not only when asked: a salesperson who skips the rescan permission is flagged only when they rescan by hand. Each salesperson installs Lot Current in their own Chrome, with their own settings, and their listings are rescanned only there: one salesperson's Chrome being open does nothing for another's listings, and nothing flags a salesperson's sold car while their own Chrome is closed.)
 - "On Facebook's live form, with a real dealership's cars, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always". Never name the store or its results without its written permission, pilot agreement section 3.)
 - "Not affiliated with Meta Platforms, Inc."

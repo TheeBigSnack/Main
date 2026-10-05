@@ -22,7 +22,7 @@ You click Publish. Lot Current never does. It fills in the form and opens pages;
 
 What it does
 
-- Scans the dealership website's used inventory and shows the cars at your store that are pre-owned, priced and photographed as ready to post.
+- Scans the dealership website's used inventory and shows the cars at your store that the website marks as pre-owned, with a price and photos, as ready to post.
 - Pre-fills the Marketplace vehicle listing: year, make, model, mileage, price, body style, colors, fuel type, transmission, location, a description written from the website's own facts, and the car's photos. You check every field and click Publish yourself.
 - Writes the description from the car's listed facts on the website only (it does not copy the website's write-up for the car), names the dealership and your role, and checks every number against the website before you see it.
 - Rescans the website, by hand or, if you allow it, every 3 hours while Chrome is open, and shows which of your listings to take down (sold, or sale-pending), which to reprice, and what's new. A button opens the right listing with the new price ready for you to apply; you click Update, Mark as sold or Delete.
@@ -63,7 +63,7 @@ Until then, `npm run screenshots` draws five draft images at 1280 x 800 from the
 
 | # | Shows | Reference from the e2e flows | Caption |
 |---|---|---|---|
-| 1 | The popup's Ready to post tab after a scan: pre-owned cars at the store with a Post button each, the counts on the tabs | `post-1-ready-post.png` (post flow) | Scan your website. Only pre-owned cars at your store are ready to post. |
+| 1 | The popup's Ready to post tab after a scan: pre-owned cars at the store with a Post button each, the counts on the tabs | `post-1-ready-post.png` (post flow) | Scan your website. The cars your website marks as pre-owned, at your store, with photos and a price, are ready to post. |
 | 2 | The side panel's review screen: the car re-checked on the website, the description drafted from the website's facts, the fields it will fill, condition and title from the dealership's defaults | `post-2-review.png` (post flow) | Read the description, then open the Marketplace form. |
 | 3 | The Marketplace vehicle-listing form filled in, photos attached, Publish untouched | `post-4-mock-form.png` (post flow; the store image comes from a live run on the real form, with the account details covered, Facebook's top bar cropped off and any Facebook-blue button covered) | Every field filled in. You check it and click Publish. |
 | 4 | The popup's To do tab after a rescan: a sold car to take down, a price change with the website's price next to the listing price, a new arrival | `5-rescan-todo.png` (popup flow) or `upkeep-1-todo.png` (upkeep flow) | Rescans flag sold cars and price changes on your listings. |
