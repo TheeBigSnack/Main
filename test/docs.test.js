@@ -1135,16 +1135,17 @@ test('texts about the daily cap say each salesperson enters the dealership\'s nu
 // The production project got its first eight migrations and all four
 // functions outside the Supabase workflow, before that workflow's first run
 // (supabase/README.md records the migrations): the setup guides say so, and
-// none still writes a done deploy as one to come. The workflow keeps its
-// "FAIL on purpose" rule for a brand-new project, so the guide says those
-// lines are real on production.
+// none still writes a done deploy as one to come. The workflow lets the
+// outside check's FAILs leave a run green only for a brand-new project (its
+// new_project box), so the guide says production runs leave it unticked.
 test('the setup guides say production already has its database and all four functions', () => {
   assert.match(read('../supabase/README.md'), /The production project has applied `0001_schema\.sql` to `0008_usage\.sql`/, 'supabase/README.md no longer records what production applied: change the guides with it');
   const setup = read('../docs/production-setup.md');
   const step3 = setup.slice(setup.indexOf('## Step 3.'), setup.indexOf('## Step 4.'));
   assert.match(step3, /\*\*Where production stands\.\*\*[^\n]*up to `0008_usage\.sql` and all four functions \(`rewrite`, `sync`, `billing` and `lead`\)/, 'production-setup step 3 does not say what production already has');
   assert.doesNotMatch(step3, /^\s*After plan and database the outside check prints some `FAIL` lines on purpose/m, 'production-setup step 3 calls a FAIL after plan or database expected on production');
-  assert.match(step3, /Production is past that[^.]*read any `FAIL` on a plan or database run there as a real one/, 'production-setup step 3 does not say a FAIL on production is real');
+  assert.match(step3, /A `FAIL` from the outside check turns any run red\./, 'production-setup step 3 does not say a FAIL on production is real');
+  assert.match(step3, /Production is past that \(its tables and functions exist\), so leave the box unticked there\./, 'production-setup step 3 does not say to leave the new-project box unticked on production');
   const stale = [
     ['../docs/website.md', /`lead` function is not deployed/],
     ['../docs/stripe-setup.md', /the webhook and the deploy wait for the project/],
