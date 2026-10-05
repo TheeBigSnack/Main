@@ -61,7 +61,7 @@ export function withDefaults(settings, site = {}) {
       titleStatus: pickDefault(ld.titleStatus, TITLE_STATUSES, DEFAULT_LISTING_DEFAULTS.titleStatus),
       condition: pickDefault(ld.condition, CONDITIONS, DEFAULT_LISTING_DEFAULTS.condition),
     },
-    // automatic rescans (set by the wizard once the host permission is granted) and the desktop notification
+    // automatic rescans (on only once Chrome granted the host permission: the wizard, the popup's allow-rescans button, or a Settings save that asks for it) and the desktop notification
     autoRescan: Boolean(s.autoRescan),
     notify: s.notify !== false,
     rulesReadAt: typeof s.rulesReadAt === 'string' ? s.rulesReadAt : '',
