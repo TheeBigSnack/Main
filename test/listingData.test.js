@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { buildListingData, vehicleKind, normalizeColor, normalizeBodyStyle, normalizeTransmission, normalizeFuelType, locationQuery, locationExpect, brandedTitleSignal, STATE_NAMES, TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from '../extension/src/listingData.js';
 import { vehicle } from './helpers.js';
 
@@ -177,6 +178,18 @@ test('"flooded with light" or "with options" is a sales line, not a flood brand;
   for (const words of ['Previously flooded.', 'This car was flooded with water.', 'Flooded with salt water.', 'Flooded in a hurricane, sold as is.']) {
     assert.match(brandedTitleSignal({ descriptionRaw: words }), /^flooded$/i, words);
   }
+});
+
+test('the CARFAX or AutoCheck buyback program line is not a brand, as the help page says; a manufacturer buyback program still is', () => {
+  const help = readFileSync(new URL('../docs/help.md', import.meta.url), 'utf8');
+  assert.match(help, /CARFAX buyback program line many websites add to every car[^.]*does not count/);
+  for (const words of ['This vehicle qualifies for the CARFAX Buyback Program.', 'Qualifies for the CARFAX\u00ae Buyback Program!', 'AutoCheck Buy Back Program eligible.']) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle, d.branded], ['Clean', 'yes', ''], words);
+  }
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Manufacturer buyback program vehicle.' }), 'buyback');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Qualifies for the CARFAX Buyback Program. Lemon law buyback.' }), 'Lemon law buyback');
 });
 
 test('a denied mention or a program or finance offer is not a brand; the same words stated of the car still are', () => {

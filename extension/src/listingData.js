@@ -63,12 +63,14 @@ const BRANDED = new RegExp(
 );
 // Mentions of those words that are about something else, read as no brand:
 // a program or a finance offer ("qualifies for the CARFAX Buyback
-// Guarantee", "3-day buyback", "lien-free title", "we pay off your lien",
-// "the lien on your trade"). A "buyback program" or a "lien payoff" stays a
+// Guarantee" or "Buyback Program", "3-day buyback", "lien-free title", "we
+// pay off your lien", "the lien on your trade"). Any other "buyback
+// program" ("manufacturer buyback program") or a "lien payoff" stays a
 // mention: either can be this car's own history.
 const NOT_A_BRAND = new RegExp(
   [
     'buy[\\s-]?back\\s+(?:guarantee|protection|pledge)',
+    '\\b(?:carfax|autocheck)[\\s\u00ae\u2122]+buy[\\s-]?back\\s+programs?',
     '\\d+[\\s-]*days?\\s+buy[\\s-]?back',
     '\\blien[\\s-]*free',
     'free\\s+(?:and|&)\\s+clear\\s+of\\s+(?:all\\s+|any\\s+)?liens?',
