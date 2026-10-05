@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { recheck, fetchVehicleDetails, fetchVehicleDetailsDirect, readCarForPost } from '../extension/src/vehicleDetails.js';
+import { probeTab } from '../extension/src/scanRunner.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
 import { vehicle, fixtures, MY_STORE, fakeDealerPage, fakeChrome, runInPage, standardSite, standardCars, standardCarPage, standardListPage, fakeStandardPage, STANDARD_ORIGIN } from './helpers.js';
 import { SITES_KEY } from '../extension/src/storageKeys.js';
 import { adapterById } from '../extension/adapters/index.js';
-import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, fakePlatformPage, answerWith } from './platformSites.js';
+import { DEALERON_ORIGIN, DEALERON_LIST, DEALERCOM_ORIGIN, DEALERCOM_LIST, platformCars, dealerOnSite, dealerComSite, dealerOnCard, dealerComRecord, dealerOnPath, fakePlatformPage, answerWith } from './platformSites.js';
 
 test('the post-time re-check lets a ready car through and nothing else', () => {
   assert.equal(recheck(vehicle('usedNormal'), MY_STORE).ok, true);
@@ -580,3 +581,37 @@ test('a dealer tab whose own list fails on its first page reads the car from the
   }
 });
 
+// The adapter the last scan used reads the car at post time, even when
+// another adapter's probe answers on the open page: a DealerOn car page that
+// shows standard vehicle data but no DealerOn mark is still read the way the
+// scan read the lot, so its price is chosen the same way (on the dealer's basis).
+test('at post time the adapter the last scan used reads the car, not another adapter whose probe answered on the page', async () => {
+  const cars = platformCars(4, { from: 1 });
+  const car = cars[1];
+  const service = { kind: 'dealerOn', origin: DEALERON_ORIGIN, inventoryUrl: DEALERON_LIST, listUrl: DEALERON_ORIGIN + '/searchused.aspx' };
+  const site = dealerOnSite({ cars });
+  const path = dealerOnPath(car);
+  // the car's page carries standard vehicle data at another price, and nothing that marks it as DealerOn's
+  const node = { '@context': 'https://schema.org', '@type': 'Car', name: `${car.year} ${car.make} ${car.model}`, vehicleIdentificationNumber: car.vin, url: DEALERON_ORIGIN + path, offers: { '@type': 'Offer', price: 1234, priceCurrency: 'USD' } };
+  const carPage = `<!doctype html><html><head><title>${car.year} ${car.make} ${car.model}</title><script type="application/ld+json">${JSON.stringify(node)}</script></head><body><h1>${car.year} ${car.make} ${car.model}</h1><p>$1,234</p></body></html>`;
+  const page = fakeStandardPage({ site, origin: DEALERON_ORIGIN, path, html: carPage });
+  const store = { [SITES_KEY]: { [DEALERON_ORIGIN]: { adapter: 'dealerOn', service } } };
+  globalThis.chrome = fakeChrome(page, store);
+  try {
+    const probe = await probeTab(1);
+    assert.equal(probe.adapterId, 'schemaOrg', 'the page itself reads as standard vehicle data');
+    const r = await fetchVehicleDetails(1, car.vin, { origin: DEALERON_ORIGIN, url: DEALERON_ORIGIN + path });
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.vehicle.vin, car.vin);
+    assert.equal(r.vehicle.price, car.base + car.fee, 'the price the last scan\'s reader chooses, not the page markup\'s');
+    assert.ok(page.fetchCalls.some((c) => c.url === DEALERON_LIST), 'read through the list the last scan read');
+    // with no last scan stored, the page's own reader is all there is
+    delete store[SITES_KEY];
+    page.fetchCalls.length = 0;
+    const alone = await fetchVehicleDetails(1, car.vin, { origin: DEALERON_ORIGIN, url: DEALERON_ORIGIN + path });
+    assert.ok(!page.fetchCalls.some((c) => c.url === DEALERON_LIST), 'no stored reader: not read through it');
+    assert.notEqual(alone.ok && alone.vehicle.price, car.base + car.fee);
+  } finally {
+    delete globalThis.chrome;
+  }
+});

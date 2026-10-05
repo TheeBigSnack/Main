@@ -127,11 +127,22 @@ export async function fetchVehicleDetails(tabId, vin, { url = null, origin = nul
   if (origin && probe.site && probe.site.origin && probe.site.origin !== origin) {
     return { ok: false, tabUnusable: true, message: `The dealership tab now shows ${hostOf(probe.site.origin)}, not ${hostOf(origin)}. Open ${hostOf(origin)}'s used inventory page and click Post again.` };
   }
+  const carPages = await lastScanPages(origin || (probe.site && probe.site.origin));
+  const entry = await storedSite(probe.site && probe.site.origin);
+  // The adapter the last scan of this website used reads the car, with the
+  // service it stored, when another adapter's probe answered on this page (a
+  // car's page that carries standard vehicle data on a website whose list
+  // another platform's reader scanned): the car's price is then chosen the
+  // way the scan chose it, on the dealer's price basis.
+  const lastAdapter = entry && entry.adapter !== adapter.PLATFORM.id && entry.service && typeof entry.service === 'object' ? adapterById(entry.adapter) : null;
+  if (lastAdapter) {
+    const r = await readOne(lastAdapter, searchViaTab(tabId, lastAdapter, entry.service), wanted, withUrl(lastAdapter, entry.service, url, carPages));
+    return r.ok ? { ...r, site: probe.site, via: 'tab' } : r;
+  }
   // What the probe could not see on this page (a car's own page has no
   // inventory list to find) comes from the service the last scan of this
   // website stored, when the same adapter read it; what the probe did see wins.
-  const { service, stored } = await withStoredService(probe, adapter);
-  const carPages = await lastScanPages(origin || (probe.site && probe.site.origin));
+  const { service, stored } = withStoredService(probe, adapter, entry);
   let r = await readOne(adapter, searchViaTab(tabId, adapter, service), wanted, withUrl(adapter, service, url, carPages));
   // A page of the website can have loaded another list than the one the
   // last scan read (the new cars, a search filtered for a customer), and the
@@ -155,20 +166,25 @@ function refusal(r) {
   return r.refused === true || /\b(?:401|403|429|503)\b|bot check/i.test(String(r.message || ''));
 }
 
+// This website's site registry entry (the last scan's adapter and service), or null.
+async function storedSite(origin) {
+  if (!origin) return null;
+  try {
+    const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
+    const entry = sites[origin];
+    return entry && typeof entry === 'object' ? entry : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // The service the read uses (the probe's, with what it could not see filled
 // from the last scan's) and the last scan's own, when the same adapter stored one.
-async function withStoredService(probe, adapter) {
+function withStoredService(probe, adapter, entry) {
   const probed = probe.service || {};
-  try {
-    const origin = probe.site && probe.site.origin;
-    const sites = (await chrome.storage.local.get(SITES_KEY))[SITES_KEY] || {};
-    const stored = origin && sites[origin];
-    if (!stored || stored.adapter !== adapter.PLATFORM.id || !stored.service || typeof stored.service !== 'object') return { service: probed, stored: null };
-    const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
-    return { service: { ...stored.service, ...seen }, stored: stored.service };
-  } catch (e) {
-    return { service: probed, stored: null };
-  }
+  if (!entry || entry.adapter !== adapter.PLATFORM.id || !entry.service || typeof entry.service !== 'object') return { service: probed, stored: null };
+  const seen = Object.fromEntries(Object.entries(probed).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+  return { service: { ...entry.service, ...seen }, stored: entry.service };
 }
 
 // Would the last scan's service read the website another way than this one?
