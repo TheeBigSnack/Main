@@ -51,8 +51,19 @@ test('the attorney\'s automated-means question says how the form is typed into a
     assert.match(row, /queue/, `${where}: the scripting row leaves out the queue's forms`);
     assert.match(row, /without another click/, `${where}: the scripting row says every form is filled from a click`);
     assert.match(row, /to-do item/, `${where}: the scripting row leaves out the listing read and the price fill`);
+    // the queue's read of the listing page after Publish, and the advance it decides (sidepanel.js: readListingInPage on the post tab)
+    assert.match(row, /publish[^;]*(?:to read|reads) (?:that|the) listing page/, `${where}: the scripting row leaves out the read of the listing page after Publish`);
+    assert.match(row, /VIN[^|;]*name and the price filled in[^|;]*sold[^|;]*listing form is still/, `${where}: the scripting row does not say what the listing read looks for`);
+    assert.match(row, /in a queue, records the post and moves on[^|;]*only when the page shows that car/, `${where}: the scripting row leaves out the queue's conditional advance`);
+    assert.match(row, /sen(?:t|ding) nowhere|sending nothing anywhere/, `${where}: the scripting row does not say the listing read is sent nowhere`);
     assert.doesNotMatch(row, /form (?:the person opened )?when (?:the user|they) click Post/, `${where}: the scripting row says the form is filled only on a click on Post`);
   }
+  // the code: after Publish the post tab's listing page is read, and in a queue the post is recorded (and the queue moves on) only when it shows the car
+  assert.match(panel, /executeScript\(\{ target: \{ tabId(?:: \w+)? \}, func: readListingInPage/, 'the listing page after Publish is no longer read: update the scripting rows and this test');
+  const store2 = rowText(read('store/listing.md'), '`https://www.facebook.com/marketplace/*`');
+  assert.match(store2, /notices when the tab shows the published listing's address and then reads that listing page/, 'store/listing.md: the Facebook host row leaves out the read of the listing page after Publish');
+  const faq = read('site-src/pages/faq.html');
+  assert.match(faq, /After you click Publish, it reads the listing page that tab goes to/, 'the FAQ leaves out the read of the listing page after Publish');
   // and the data inventory the privacy texts follow
   const inventory = rowText(read('docs/data-inventory.md'), 'Fill the Marketplace form (`facebook/fillForm.js`)');
   assert.match(inventory, /in a queue the person started, each car that passes every check, without another click/);
@@ -72,6 +83,33 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
   assert.match(what, /never acts on Facebook while the User is away/);
   assert.match(what, /If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open/);
   assert.match(what, /while the User is signed in to a Lot Current account, sends that rescan's results to the dealership's records/);
+});
+
+// The posted list keeps, for a listing the person marked posted, whether it
+// had gone up before that day (`listedBefore`: left out of the daily cap,
+// and synced as listed_before), and the day's post log keeps each post made
+// that day, so the cap still counts a listing taken down or unmarked the
+// same day. The privacy policy and the store privacy form name both, for
+// the browser's copy and for the synced one.
+test('the privacy texts name the posted list\'s before-that-day mark, and say the cap counts a listing taken down or unmarked the same day', () => {
+  // the code
+  assert.match(read('extension/src/cap.js'), /p\.listedBefore === true/, 'the cap no longer leaves out a listing marked as made before that day: update the texts and this test');
+  assert.match(read('extension/src/sync.js'), /listed_before: e\.listedBefore === true/, 'the before-that-day mark no longer syncs: update the texts and this test');
+  assert.match(read('extension/src/cap.js'), /export function dayLog\(/, 'the cap no longer keeps the day\'s post log: update the texts and this test');
+  // the privacy policy
+  const policy = read('legal/privacy-policy.md').split('\n').find((l) => l.startsWith('| Posted-listing registry'));
+  assert.ok(policy, 'the privacy policy has a row for the posted list');
+  assert.match(policy, /whether a listing the User marked posted had gone up before that day/);
+  assert.match(policy, /the daily cap still counts a listing taken down or unmarked the same day/);
+  // the store privacy form: the browser's copy and the synced one
+  const form = read('legal/chrome-web-store-privacy.md');
+  const storage = rowText(form, '`storage`');
+  assert.match(storage, /whether a listing the user marked posted had gone up before that day/, 'the storage row leaves out the before-that-day mark');
+  assert.match(storage, /the daily cap still counts a listing taken down or unmarked the same day/, 'the storage row leaves out unmarked posts');
+  const synced = form.split('\n').find((l) => l.startsWith('| While signed in:'));
+  assert.match(synced, /The user's posted list \([^)]*whether a listing the user marked posted had gone up before that day/, 'the sync row leaves out the before-that-day mark');
+  // and the data inventory they follow
+  assert.match(rowText(read('docs/data-inventory.md'), '`posted:<origin>`'), /whether the salesperson said a listing they marked had gone up before that day/);
 });
 
 // Each function the extension runs in a Facebook tab, and the words the
