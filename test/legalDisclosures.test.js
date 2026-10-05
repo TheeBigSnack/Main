@@ -162,6 +162,17 @@ test('every screenshot rule keeps Facebook\'s logo, wordmark and brand colour ou
   // the shot of the real form says it too
   const shot3 = shots.split('\n').find((l) => l.startsWith('| `3-form.png` |'));
   assert.match(shot3, /Crop below Facebook's top bar/);
+  // personal details are covered with a solid box, never blurred: the shot list says a blur can be read back, and
+  // the listing (its Screenshots section and its checklist) and the Web Store notes once said "blurs"/"blurred"
+  assert.match(shots, /solid filled box[^.]*\(a light blur can sometimes be read back\)/);
+  for (const [where, text] of [['store/screenshots.md', shots], ['store/listing.md', listing], ['legal/chrome-web-store-privacy.md notes', notes]]) {
+    const blur = text.replace(/\(a (?:light )?blur can sometimes be read back\)/g, '').match(/[^.\n]*\bblur(?:s|red|ring)?\b[^.\n]*/i);
+    assert.equal(blur, null, `${where} still asks for a blur: "${blur && blur[0].trim()}"`);
+  }
+  // the Numbers shot's caption keeps the unfilled fields out of the manager's numbers, as the home page does
+  const shot5 = listing.split('\n').find((l) => l.startsWith('| 5 |'));
+  assert.doesNotMatch(shot5, /The numbers your manager sees/);
+  assert.match(shot5, /the fields that could not be filled stay in your browser/);
 });
 
 test('the privacy texts say Anthropic\'s servers fetch and look at the colour-guess photos, not only receive their addresses', () => {
