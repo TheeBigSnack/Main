@@ -38,7 +38,7 @@ import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/p
 import { relistNotice } from './src/takenDown.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
-import { updateKey, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { currentSession, rewriteKeyFor, LAPSED_MESSAGE, LAPSED_SENTENCE } from './src/accountFlow.js';
 
@@ -188,26 +188,59 @@ const saveQueue = async () => {
 // version applies to a post saved before the update.
 const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'priceBasis', 'readAt', 'noteApplies', 'description', 'descriptionSource', 'note', 'guardrails', 'listing', 'fbTabId', 'fill', 'photos', 'detected', 'probe', 'vinCheck', 'colorGuess', 'photoPick', 'highlights', 'highlightsUsed', 'relist', 'queueMode', 'blockedOrigins', 'step', 'message', 'doneAt'];
 
+// One post is saved per website. A save never replaces the post saved there
+// when that one is under way in another window's side panel (liveElsewhere),
+// unless it is that very post (the same car, saved as that window's: a second
+// window's panel showing it). Then nothing is written, and it resolves that
+// post ({ where, vin, name }) so a post just starting or about to open its
+// form gives way (startFlow, openForm); otherwise it resolves null. The check
+// and the write run under the saved post's lock, so of two panels saving at
+// once, the second sees the first's post.
 async function saveFlow() {
-  if (!state.origin) return;
+  if (!state.origin) return null;
+  const origin = state.origin;
   const flow = {};
   for (const f of FLOW_FIELDS) flow[f] = state[f];
+  let other = null;
   try {
-    await chrome.storage.local.set({ [siteKeys(state.origin).flow]: flow, [GLOBAL_KEYS.lastPostOrigin]: state.origin });
+    await updateKey(siteKeys(origin).flow, async (saved) => {
+      const samePost = Boolean(saved) && saved.vin === flow.vin && saved.windowId === flow.windowId;
+      other = samePost ? null : await liveElsewhere(saved);
+      return other ? undefined : flow;
+    }, flowStorage(origin));
   } catch (e) {
     setStatus(storageErrorText(e), 'error'); // the quota, most likely; the post goes on from what the panel holds
   }
+  return other;
+}
+
+// A website's saved post is written together with that website as the one
+// the panel last posted from, so a reopened panel opens on it (init).
+const flowStorage = (origin) => ({ get: (key) => chrome.storage.local.get(key), set: (obj) => chrome.storage.local.set({ ...obj, [GLOBAL_KEYS.lastPostOrigin]: origin }) });
+
+// Removes the post saved for a website, unless it is under way in another
+// window's side panel (liveElsewhere): that one stays for that panel. Under
+// the saved post's lock, as saveFlow writes it.
+async function dropSavedFlow(origin) {
+  const k = siteKeys(origin).flow;
+  await withLock(k, async () => {
+    const saved = (await chrome.storage.local.get(k))[k];
+    if (await liveElsewhere(saved)) return;
+    await chrome.storage.local.remove(k);
+  });
 }
 
 // Resolves the new count (flowRun): the number of the post started next.
 // keepSaved: the saved post is left as it is (it is another panel's now).
+// Without it, the saved post is removed unless another window's side panel
+// has it under way (dropSavedFlow).
 async function clearFlow({ keepSaved = false } = {}) {
   const run = ++flowRun;
   if (watcher) watcher.cancel();
   watcher = null;
   const { vin, origin } = state;
   if (vin) await pilotNote((p) => endPost(p, vin, 'abandoned')); // only an attempt still open changes
-  if (origin && !keepSaved) await chrome.storage.local.remove(siteKeys(origin).flow);
+  if (origin && !keepSaved) await dropSavedFlow(origin);
   if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, opening: false, description: '', descriptionSource: 'template', note: '', guardrails: null,
@@ -530,10 +563,10 @@ async function stopPosted() {
 
 async function startFlow(req) {
   await chrome.storage.local.remove(GLOBAL_KEYS.postRequest);
-  // the car's post is under way in another window's side panel: it is not started (and its saved post not removed) here
-  const elsewhere = await postElsewhere(req.origin, String(req.vin || '').toUpperCase());
+  // a post from this website (this car's or another's) is under way in another window's side panel: none is started (and that saved post not removed) here
+  const elsewhere = await postElsewhere(req.origin);
   if (elsewhere) {
-    setStatus(elsewhereText(nameOf(String(req.vin || '').toUpperCase()), elsewhere), 'error');
+    setStatus(elsewhereText(elsewhere, String(req.vin || '').toUpperCase()), 'error');
     return render();
   }
   endUpkeep(); // a waiting upkeep must not keep polling and redrawing over a post
@@ -563,6 +596,13 @@ async function startFlow(req) {
   state.step = 'checking';
   setStatus('');
   render();
+  // Saved from the start of the check, as this window's: a side panel in
+  // another window sees the post from now on (postElsewhere) and starts none
+  // from this website. One that saved its own first wins (saveFlow), and this
+  // one gives way.
+  const taken = await saveFlow();
+  if (dropped()) return undefined;
+  if (taken) return giveWay(taken);
   await pilotNote((p) => beginPost(p, { vin: state.vin, name: nameOf(state.vin), salesperson: state.settings.salesperson.name, queue: state.queueMode }));
   if (dropped()) return undefined;
 
@@ -581,8 +621,9 @@ async function startFlow(req) {
   state.step = 'review';
   state.message = '';
   render();
-  await saveFlow();
+  const lost = await saveFlow(); // another window's side panel took this website's saved post meanwhile: that post goes on there, not this one
   if (dropped()) return undefined;
+  if (lost) return giveWay(lost);
   await pilotNote((p) => notePostStep(p, state.vin, 'reviewedAt'));
   if (dropped()) return undefined;
   // In a queue, a car that passes every check goes straight to the form;
@@ -901,11 +942,11 @@ async function openForm({ probeOnly = false } = {}) {
     }
     if (descriptionStopped()) return undefined;
     if (!(await carStillCurrent()) || dropped()) return undefined;
-    // its post went on in another window's side panel meanwhile (that panel opened the form, say): no second form
-    const elsewhere = await postElsewhere(state.origin, state.vin);
+    // its post went on in another window's side panel meanwhile (that panel opened the form, say), or another car's from this website did: no form here
+    const elsewhere = await postElsewhere(state.origin);
     if (dropped()) return undefined;
     if (elsewhere) {
-      setStatus(elsewhereText(state.vehicle ? state.vehicle.name : nameOf(state.vin), elsewhere), 'error');
+      setStatus(elsewhereText(elsewhere, state.vin), 'error');
       return undefined;
     }
   } finally {
@@ -918,6 +959,7 @@ async function openForm({ probeOnly = false } = {}) {
   // now on (postsWindow): a post brought back here from another window, or
   // from before Chrome restarted, is recorded by itself here, and saved as
   // this window's before the form opens.
+  const before = { windowId: state.windowId, listing: state.listing, listingTyped: state.listingTyped };
   state.windowId = panelWindowId || state.windowId;
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
   state.listingTyped = null; // a new form: nothing typed for it yet
@@ -925,8 +967,17 @@ async function openForm({ probeOnly = false } = {}) {
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
   render();
-  await saveFlow();
+  // saved as this window's before the form opens, unless another window's
+  // side panel saved a post under way from this website since the check
+  // above: then no form opens, and the review stays as it was
+  const taken = await saveFlow();
   if (dropped()) return;
+  if (taken) {
+    Object.assign(state, before, { step: 'review', message: '' });
+    setStatus(elsewhereText(taken, state.vin), 'error');
+    render();
+    return;
+  }
   await pilotNote((p) => notePostStep(p, state.vin, 'formOpenedAt'));
   if (dropped()) return;
   try {
@@ -2077,46 +2128,70 @@ function formOpen() {
 }
 const finishFirstText = (button) => `Finish or stop the current post (${state.vehicle ? state.vehicle.name : nameOf(state.vin)}) first: its Marketplace form is open. Then click ${button} again.`;
 
-// Chrome runs one side panel per window, and each can start a post. A car
-// whose post is under way in another window's side panel (being checked or
-// reviewed there, with that panel open; or with its Marketplace form open,
-// that form's tab still in that window) gets no second form from this one:
-// startFlow and openForm stop and say so (elsewhereText). It is read from the
-// post saved for the website: 'form', 'review', or '' when the post is this
-// window's, another car's, over, or left in a window whose side panel is
-// closed (this panel may then take it over), and when Chrome can't say which
-// window either is.
-async function postElsewhere(origin, vin) {
-  if (panelWindowId === null || !origin || !vin) return '';
-  let saved = null;
-  try {
-    const k = siteKeys(origin).flow;
-    saved = (await chrome.storage.local.get(k))[k];
-  } catch (e) {
-    return '';
-  }
-  if (!saved || saved.vin !== vin || !saved.windowId || saved.windowId === panelWindowId || !LIVE_STEPS.includes(saved.step)) return '';
+// Chrome runs one side panel per window, and each can start a post. One
+// post is saved per website (saveFlow), so while one window's side panel has
+// a post under way from a website, a side panel in another window starts no
+// post from that website, of that car or another, and opens no form for it:
+// startFlow and openForm stop and say so (elsewhereText). A post counts as
+// under way there while it is being checked or reviewed with that window's
+// side panel open, or while its Marketplace form is open (that panel open, or
+// the form's tab still in that window). liveElsewhere reads it from the saved
+// post: { where: 'form' | 'review', vin, name }, or null when the post is
+// this window's, over, or left in a window whose side panel is closed with no
+// form open there (this panel may then take it over), and when Chrome can't
+// say which window either is.
+async function liveElsewhere(saved) {
+  if (panelWindowId === null || !saved || !saved.vin || !saved.windowId || saved.windowId === panelWindowId || !LIVE_STEPS.includes(saved.step)) return null;
   const form = FORM_STEPS.includes(saved.step);
+  const found = { where: form ? 'form' : 'review', vin: saved.vin, name: (saved.vehicle && saved.vehicle.name) || nameOf(saved.vin) };
   try {
     const panels = await chrome.runtime.getContexts({ contextTypes: ['SIDE_PANEL'], windowIds: [saved.windowId] });
-    if (panels && panels.length) return form ? 'form' : 'review';
+    if (panels && panels.length) return found;
   } catch (e) {
     // this Chrome can't list its side panels: the open form's tab still tells
   }
   if (form && typeof saved.fbTabId === 'number') {
     try {
       const tab = await chrome.tabs.get(saved.fbTabId);
-      if (tab && tab.windowId === saved.windowId) return 'form';
+      if (tab && tab.windowId === saved.windowId) return found;
     } catch (e) {
       // the form's tab is gone
     }
   }
-  return '';
+  return null;
 }
-function elsewhereText(name, where) {
+async function postElsewhere(origin) {
+  if (panelWindowId === null || !origin) return null;
+  let saved = null;
+  try {
+    const k = siteKeys(origin).flow;
+    saved = (await chrome.storage.local.get(k))[k];
+  } catch (e) {
+    return null;
+  }
+  return liveElsewhere(saved);
+}
+// What the panel says when `other` (liveElsewhere) stops a post of `vin`.
+function elsewhereText(other, vin) {
+  const { name, where } = other;
+  if (other.vin === vin) {
+    return where === 'form'
+      ? `${name}'s Marketplace form is already open from the side panel in another Chrome window, so no second form opens here. Finish it there; opening the side panel in that window brings the post back.`
+      : `${name} is already being posted from the side panel in another Chrome window, so no second form opens here. Finish or stop it there, or close the side panel in that window, then try again here.`;
+  }
   return where === 'form'
-    ? `${name}'s Marketplace form is already open from the side panel in another Chrome window, so no second form opens here. Finish it there; opening the side panel in that window brings the post back.`
-    : `${name} is already being posted from the side panel in another Chrome window, so no second form opens here. Finish or stop it there, or close the side panel in that window, then try again here.`;
+    ? `${name}'s Marketplace form is open from the side panel in another Chrome window. One post from a website goes at a time, so none starts here: finish that one there first (opening the side panel in that window brings it back).`
+    : `${name} is being posted from the side panel in another Chrome window. One post from a website goes at a time, so none starts here: finish or stop that one there, or close the side panel in that window, then try again here.`;
+}
+
+// This panel's post gives way to `other`, a post from the same website that
+// another window's side panel saved first (saveFlow): that saved post stays
+// as it is, this panel's post is dropped, and the panel says why.
+async function giveWay(other) {
+  const vin = state.vin;
+  await clearFlow({ keepSaved: true });
+  setStatus(elsewhereText(other, vin), 'error');
+  return render();
 }
 
 // A post request from the popup (Post, or Continue in the side panel). A
@@ -2146,15 +2221,29 @@ async function postRequested(req) {
 // A form left open on Facebook when the panel closed comes back before a
 // post request is handled, so the request meets it (postRequested) instead
 // of starting over it; so does a post of the very car the request is for
-// that was still being checked or reviewed, with its typed text.
+// that was still being checked or reviewed, with its typed text, unless it
+// is still under way in another window's side panel.
 async function resumeOpenForm(origin, req = null) {
   if (!origin) return;
   const k = siteKeys(origin).flow;
   const flow = (await chrome.storage.local.get(k))[k];
   if (!flow || !flow.vin) return;
+  if (FORM_STEPS.includes(flow.step)) {
+    await resumeFlow(origin, flow);
+    return;
+  }
   const sameCar = Boolean(req) && req.origin === origin && String(req.vin || '').toUpperCase() === flow.vin;
-  if (FORM_STEPS.includes(flow.step) || (sameCar && LIVE_STEPS.includes(flow.step))) await resumeFlow(origin, flow);
+  if (!sameCar || !LIVE_STEPS.includes(flow.step)) return;
+  // a car still being read for the first time has nothing to bring back yet,
+  // and one being checked or reviewed in another window's open side panel
+  // stays there: the request then says so (startFlow)
+  if (firstRead(flow) || (await liveElsewhere(flow))) return;
+  await resumeFlow(origin, flow);
 }
+
+// A post saved as the first read of its car began (startFlow), with nothing
+// read yet: a reopened panel has nothing of it to bring back.
+const firstRead = (flow) => Boolean(flow) && flow.step === 'checking' && !flow.vehicle;
 
 let lastUpkeepAt = 0;
 async function openUpkeep(req) {
@@ -2717,7 +2806,12 @@ async function init() {
     // a post under way comes back first; an unfinished set-up only when nothing else is going on
     const k = siteKeys(lastPostOrigin).flow;
     const flow = (await chrome.storage.local.get(k))[k];
-    if (flow && flow.step && flow.step !== 'idle') return resumeFlow(lastPostOrigin, flow);
+    if (firstRead(flow)) {
+      // nothing to bring back: this window's own was left by its panel
+      // closing during that read, so it goes; another window's panel may
+      // still be reading, and it stays
+      if (panelWindowId !== null && flow.windowId === panelWindowId) await chrome.storage.local.remove(k);
+    } else if (flow && flow.step && flow.step !== 'idle') return resumeFlow(lastPostOrigin, flow);
     if (await resumeWizard(lastPostOrigin)) {
       state.origin = lastPostOrigin;
       state.dealerTabId = wiz.dealerTabId;

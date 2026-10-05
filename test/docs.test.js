@@ -1396,3 +1396,15 @@ test('the help says what a no to Chrome from the side panel\'s list does: nothin
   assert.match(help, /Decline and nothing starts: the panel stays on its list and says "Not allowed, so Lot Current can't read \[website\] from the side panel"\. Click the same button again to be asked again/);
   for (const line of help.split('\n').filter((l) => /Allow reading \[website\]/.test(l))) assert.match(line, /stopped at (the|its) re-check/, `help.md ties Allow reading to a stopped post: ${line.slice(0, 80)}`);
 });
+
+test('the help says one post from a website goes at a time across Chrome windows, as the side panel holds it', () => {
+  const panel = read('../extension/sidepanel.js');
+  // startFlow checks the website's saved post for any car, and saves its own from the start of the check
+  assert.match(panel, /const elsewhere = await postElsewhere\(req\.origin\);/, 'startFlow looks at the website\'s saved post, whatever its car');
+  assert.match(panel, /state\.step = 'checking';[\s\S]{0,700}?const taken = await saveFlow\(\);[\s\S]{0,80}?if \(taken\) return giveWay\(taken\);/, 'the post is saved as the check begins, and gives way to one saved first');
+  assert.match(panel, /One post from a website goes at a time, so none starts here/, 'what the panel says for another car');
+  const help = doc('help.md');
+  assert.doesNotMatch(help, /A side panel never opens a second form for a car whose post is under way in another window's side panel/);
+  assert.match(help, /One post from a website goes at a time across Chrome windows\. While the side panel in one window has a post under way from a website \(a car being checked or reviewed there with that panel open, or a car whose Marketplace form is open there\), the side panel in another window starts no post from that website, for that car or another, and opens no second form/);
+  assert.match(help, /Finish or stop it in that window, or close the side panel there, then try again\./);
+});
