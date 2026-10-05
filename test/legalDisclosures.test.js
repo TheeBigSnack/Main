@@ -69,7 +69,14 @@ test('the Terms say what Lot Current does with nobody at the computer: the resca
 
   const what = section(read('legal/terms-of-service.md'), '## 1. What Lot Current is');
   assert.doesNotMatch(what, /does not act while the User is away/, 'the Terms say Lot Current does nothing while the User is away');
-  assert.match(what, /never acts on Facebook while the User is away/);
+  // review: "never acts on Facebook while the User is away" was absolute too: after a Publish the queue opens and
+  // fills the next car's form with no new click, and an open to-do item reads its listing page, whoever is there
+  const panel = read('extension/sidepanel.js');
+  assert.match(panel, /if \(state\.queueMode && canAutoOpen\(\)\)[^\n]*openForm\(/, 'the queue no longer opens the next form by itself: the Terms can change');
+  assert.doesNotMatch(what, /never acts on Facebook while the User is away/, 'the Terms say Lot Current does nothing on Facebook while the User is away, while a queue opens and fills the next form by itself');
+  assert.match(what, /never posts or edits a listing in the background or while the User is away/);
+  assert.match(what, /It acts on Facebook only in a tab it opened for a post or a to-do item the User started/);
+  assert.match(what, /in a queue the User started it opens and fills the next car's form, without another click, once the User has published the previous one/);
   assert.match(what, /If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open/);
   assert.match(what, /while the User is signed in to a Lot Current account, sends that rescan's results to the dealership's records/);
 });

@@ -606,10 +606,20 @@ test('How it works and the Terms keep "while you are away" to Facebook, and name
   const terms = read('../legal/terms-of-service.md');
   const s1 = terms.slice(terms.indexOf('## 1.'), terms.indexOf('## 2.'));
   assert.doesNotMatch(s1, /does not act while the User is away/, 'the Terms say Lot Current does nothing while the User is away; the rescan runs then');
-  assert.match(s1, /never acts on Facebook while the User is away/);
+  assert.doesNotMatch(s1, /never acts on Facebook while the User is away/, 'a queue opens and fills the next form by itself, whoever is there');
+  assert.match(s1, /never posts or edits a listing in the background or while the User is away/);
   assert.match(s1, /re-reads the dealership's website every 3 hours while Chrome is open[^.]*signed in to a Lot Current account, sends that rescan's results/, 'the Terms name the rescan and its upload');
   const page = stripTags(read('../site/legal/terms/index.html'));
-  assert.match(page, /never acts on Facebook while the User is away/, 'npm run legal-pages wrote the Terms page from the Markdown');
+  assert.match(page, /never posts or edits a listing in the background or while the User is away/, 'npm run legal-pages wrote the Terms page from the Markdown');
+});
+
+// review: the home page said the listed price is the website's "on the price basis your dealership chooses",
+// while a listing keeps the basis it was posted at (src/rescan.js postedBasis) and a change of basis is for new posts.
+test('the home page says a change of price basis is for new posts, as the rescan compares a listing on its own basis', () => {
+  const rescan = read('../extension/src/rescan.js');
+  assert.match(rescan, /^export function postedBasis\(entry, basis = 'website', seen = \[\]\) \{\n  const own = entry && entry\.basis;\n  if \(PRICE_BASES\.includes\(own\)\) return own;/m, 'a posted listing no longer keeps its own basis: the home page line can change');
+  const card = stripTags((html.match(/<h3>The website price, always<\/h3>[\s\S]*?<\/p>/) || [''])[0]);
+  assert.match(card, /on the price basis your dealership chooses; a change of basis is for new posts, and a listing keeps the basis it was posted at\. Price changes only mirror the website\./);
 });
 
 // review: How it works said a car is ready only "at your store" and that cars "at a sister store" sit under Other
