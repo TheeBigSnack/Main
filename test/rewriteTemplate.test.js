@@ -454,7 +454,7 @@ test('a bare amount from the write-up, with no "$" and no unit, must be the post
     'Only 27,163!': ['unknown-number'],
   };
   for (const [sentence, want] of Object.entries(stale)) assert.deepEqual(codes(sentence), want, sentence);
-  assert.ok(runGuardrails(`${base}\nOnly 28,995!`, c).problems.some((p) => p.text === 'Says "28,995", which is neither the price being posted nor the website\'s mileage for this car'));
+  assert.ok(runGuardrails(`${base}\nOnly 28,995!`, c).problems.some((p) => p.text === 'Says "28,995" with no "$" and no unit, and it is not the price being posted or the website\'s mileage for this car; if it is not a price or a mileage, give its unit (such as "lbs") or leave it out'));
   assert.ok(runGuardrails(`${base}\nMiles: 38,000.`, c).problems.some((p) => p.text === 'Says 38,000 miles, but the website shows 20,986 miles'));
   // the posted price, the website's mileage, the model, a year, a weight and a phone number are fine
   for (const sentence of ['Only 26,673!', 'With 20,986 on it.', 'A Ram 1500 from 2019.', 'Tows 7,500 lbs.', 'Call 555-555-0100.']) assert.deepEqual(codes(sentence), [], sentence);
@@ -466,7 +466,7 @@ test('a bare amount from the write-up, with no "$" and no unit, must be the post
   const draft = `${base}\nOnly 28,995!`;
   const r = await generateDescription({ ...c, settings: on, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, text: draft }) }) });
   assert.equal(r.source, 'template');
-  assert.match(r.note, /Says "28,995", which is neither the price being posted nor the website's mileage/);
+  assert.match(r.note, /Says "28,995" with no "\$" and no unit, and it is not the price being posted or the website's mileage/);
 });
 
 test('a model year, fuel economy, a warranty, a range or a weight is never read as the mileage or a price', () => {
@@ -688,6 +688,24 @@ test('the dealership\'s own fee wording, its front desk and its owner are not pr
   assert.deepEqual(runGuardrails(`${buildTemplateDescription(c)}\nText me, not the dealer.`, c).problems.map((p) => p.text), ['Says "not the dealer"']);
 });
 
+test('"not the dealer" passes only right after where the fees go, and "the dealer\'s" only before its desk or line', () => {
+  const banned = (line) => checkClosingLine(line).problems.some((p) => p.code === 'closing-banned');
+  // a fee word earlier in the sentence is not where the fees go; the dealership's lot or team is not its desk; the owner of the business is not the owner of the truck
+  for (const line of [
+    'No hidden fees, deal with me, not the dealer.', 'Save on fees by texting me, not the dealership.', 'Skip the fees and buy from me, not the dealer.',
+    'Title and plates handled by me, not the dealer.', 'Title in hand, text me, not the dealer.', 'No dealer fees: buy from me, not the dealership.',
+    'Tax and title paperwork goes through me, not the dealership.', 'Fees go to me, not the dealer.', 'The state gets the tax and title fees and I get the deal, not the dealer.',
+    "Buy from me, not the dealer's lot.", "Deal with me, not the dealership's sales team.", 'Text me, not the dealership\u2019s sales floor.',
+    "I'm the owner of this business and this truck.", 'I am the owner of the dealership and the car.',
+  ]) assert.ok(banned(line), line);
+  // where the fees go, said a few ways; the dealership's own desk or line
+  for (const line of [
+    'Tax, title and fees go to the state, not the dealer.', 'Registration fees are paid directly to the DMV, not the dealership.', 'Taxes are collected for the state and county, not the dealer.',
+    'Tags and title fees go to the county and state, not the dealer.', "Ask for me, not the dealer's front desk.", 'Text me, not the dealership\u2019s main line.', "Call me, not the dealer's switchboard.",
+    "I'm the owner of this dealership and glad to help.",
+  ]) assert.ok(!banned(line), line);
+});
+
 // ---------- claims only the website can make ----------
 
 // A car whose write-up and features say nothing about warranty, financing,
@@ -850,6 +868,31 @@ test('one-owner wording with a comma or more words in it, the story after "owned
   const features = plainCtx({ ...PLAIN(), features: ['One-Touch Windows', "Owner's Manual", 'Single Exhaust', 'Heated Seats'] });
   assert.match(buildTemplateDescription(features), /One-Touch Windows, Owner's Manual/);
   assert.deepEqual(runGuardrails(buildTemplateDescription(features), features).problems, []);
+});
+
+test('"driven by" passes only before the engine itself, never before a person who works on, builds or likes one', () => {
+  // a person: an engine word, a maker or a size in front of who they are
+  for (const sentence of [
+    'Driven by a General Motors retiree.', 'Driven by a Ford Motor Company engineer.', 'Driven by a small engine repair shop owner.', 'Driven by a retired engine builder.',
+    'Driven by a Cummins mechanic.', 'Driven by a HEMI enthusiast.', 'Driven by a Duramax-loving rancher.', 'Driven by an EcoBoost fan.', 'Driven by a Pentastar fan.', 'Driven by a V8 lover.',
+    'Driven by a 5.7L HEMI fan.', 'Driven by a motor pool supervisor.', 'Driven by 2 retirees.',
+  ]) assert.ok(codesAfter(sentence).includes('unsupported-claim'), sentence);
+  // the engine: it ends on the engine, or the clause goes on about it
+  for (const sentence of [
+    'Driven by a 5.7L HEMI V8.', 'Driven by a 5.7L HEMI V8 engine.', 'Driven by the HEMI V8, it has plenty of power.', 'Driven by a V8.', 'Driven by a HEMI.',
+    'Driven by a Cummins turbo diesel with plenty of torque.', 'Driven by a powerful 5.7L HEMI V8 engine paired with an 8-speed automatic.', 'Driven by dual electric motors.',
+    'Driven by a 5.7L V8 and an 8-speed automatic.',
+  ]) assert.deepEqual(codesAfter(sentence), [], sentence);
+});
+
+test('the dealership\'s "locally owned" is set aside only for the business, never for an adult-owned or local car', () => {
+  for (const sentence of [
+    'Adult-owned dealer trade-in.', 'Adult owned dealer trade.', 'Adult owned dealership trade-in, ready to go.', 'Adult owned company truck.', 'Adult owned shop truck.',
+    'Adult owned and operated.', 'Locally owned dealer trade.', 'Locally owned dealership trade-in.', 'Locally owned company truck.', 'Locally owned shop truck.',
+  ]) assert.deepEqual(codesAfter(sentence), ['unsupported-claim'], sentence);
+  for (const sentence of ['We are a locally owned dealership.', 'A locally owned and operated dealership.', 'We are a local-owned business.', 'Locally owned dealer, serving the whole area.', 'One of the locally owned dealerships in the area.']) {
+    assert.deepEqual(codesAfter(sentence), [], sentence);
+  }
 });
 
 test('a denial of accidents is banned in any number, and "first owner" is a one-owner claim', () => {

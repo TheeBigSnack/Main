@@ -77,7 +77,14 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn. One careful, loving owner. One very careful adult owner. Owned by one retired teacher.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Owned by a single careful driver, owned by one family since new, driven by a diesel mechanic, driven by a twin-turbo engine, One-Touch Windows, Owner\'s Manual, a single zone owner\'s manual.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, a local trade with new tires and new brakes, plus new wipers and a new engine, new Michelin tires, new front rotors, new tires and shocks, new tires, struts, two new batteries.') + '\nVIN TESTVIN0000000001.',
-  sixty('2019 Ram 1500 Big Horn, reduced from 31,995 to 28,995, only 28.9k, miles: 38,000, with 38,000 on it, 41,230 on the clock, call 555-555-0100, since 1985, tows 7,500 lbs.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, reduced from 31,995 to 28,995, only 28.9k, miles: 38,000, with 38,000 on it, 41,230 on the clock, call 555-555-0100, since 1985, tows 7,500 lbs.') + '\nVIN TESTVIN0000000001.',  sixty('2019 Ram 1500 Big Horn. Driven by a General Motors retiree.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Driven by a 5.7L HEMI V8 engine paired with an 8-speed automatic, driven by dual electric motors, driven by a V8.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Adult-owned dealer trade-in.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Locally owned company truck; we are a locally owned dealership.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. No hidden fees, deal with me, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty("2019 Ram 1500 Big Horn. Registration fees are paid directly to the DMV, not the dealership. Call me, not the dealer's switchboard.") + '\nVIN TESTVIN0000000001.',
+  sixty("2019 Ram 1500 Big Horn. Buy from me, not the dealer's lot.") + '\nVIN TESTVIN0000000001.',
+  sixty("2019 Ram 1500 Big Horn. I'm the owner of this business and this truck.") + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

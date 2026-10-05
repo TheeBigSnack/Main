@@ -72,18 +72,24 @@ export const BANNED_PHRASES = Object.freeze([
 ]);
 
 // Wording a banned phrase is part of that says something else, so the
-// phrase is not banned there: the dealership's own fee wording ("tax, title
-// and registration, which go to the state, not the dealer"), the
-// dealership's own desk or number ("Ask for me, not the dealer's front
-// desk"), and the dealership's owner ("I'm the owner of this dealership").
-// For each phrase: what comes before it in its sentence, or right after it,
-// when it is fine. Still banned: "Text me, not the dealer.", "I'm the owner.",
-// "I'm the owner of this truck".
-const FEE_EARLIER = "\\b(?:tax(?:es)?|title|registration|tags|plates|fees?)\\b[^.!?;\\n]*";
-const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|dealer|store|business|company|lot)\\b";
+// phrase is not banned there: the dealership's own fee wording, saying
+// where the fees go right before it ("tax, title and registration, which go
+// to the state, not the dealer"; "fees are paid directly to the DMV, not the
+// dealership"), the dealership's own desk or line ("Ask for me, not the
+// dealer's front desk"; "not the dealership's main line"), and the
+// dealership's owner ("I'm the owner of this dealership"). For each phrase:
+// what comes right before it, or right after it, when it is fine. Still
+// banned: "Text me, not the dealer.", "No hidden fees, deal with me, not the
+// dealer." (a fee word is not where the fees go), "Buy from me, not the
+// dealer's lot.", "I'm the owner.", "I'm the owner of this truck", "I'm the
+// owner of this business and this truck".
+const FEE_PLACE = "(?:the\\s+|your\\s+)?(?:state|county|city|dmv|bmv|mvd|rmv|government|tax\\s+(?:office|collector|assessor)|secretary\\s+of\\s+state|department\\s+of\\s+(?:motor\\s+vehicles|revenue)|motor\\s+vehicle\\s+(?:department|division|agency))";
+const FEES_GO_TO = `\\b(?:tax(?:es)?|title|registration|tags|plates|fees?)\\b[^.!?;\\n]*\\b(?:go(?:es)?|paid|payable|collected|due|sent|remitted)(?:\\s+(?:directly|straight))?\\s+(?:to|for|by)\\s+${FEE_PLACE}(?:\\s*(?:,|and|or|&)\\s*${FEE_PLACE})*\\s*[,\u2013\u2014-]?\\s*(?:and\\s+)?`;
+const DEALERS_DESK = "['\u2019]s[\\s-]+(?:front[\\s-]+desk|reception(?:ist|[\\s-]+desk)?|switchboard|main[\\s-]+(?:line|number|phone(?:[\\s-]+(?:line|number))?)|general[\\s-]+(?:line|number)|phone[\\s-]+(?:line|number|tree)|call[\\s-]+cent(?:er|re)|answering[\\s-]+service|voicemail)\\b";
+const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|dealer|store|business|company|lot)\\b(?![\\s-]+(?:and|&|plus)[\\s-]+(?:of[\\s-]+)?(?:this|the|that|my|its|our)[\\s-]+(?:truck|car|suv|van|jeep|vehicle|one|ride)s?\\b)";
 export const BANNED_UNLESS = Object.freeze({
-  'not the dealership': Object.freeze({ before: FEE_EARLIER, after: "['\u2019]s\\b" }),
-  'not the dealer': Object.freeze({ before: FEE_EARLIER, after: "['\u2019]s\\b" }),
+  'not the dealership': Object.freeze({ before: FEES_GO_TO, after: DEALERS_DESK }),
+  'not the dealer': Object.freeze({ before: FEES_GO_TO, after: DEALERS_DESK }),
   'i am the owner': Object.freeze({ after: THE_BUSINESS }),
   "i'm the owner": Object.freeze({ after: THE_BUSINESS }),
   'i\u2019m the owner': Object.freeze({ after: THE_BUSINESS }),
@@ -291,7 +297,7 @@ function bareAmountProblems(text, { vehicle = {}, dealer = {}, priceNote = '', p
     const n = said.replace(/,/g, '');
     if (!src.has(n) || held.has(n) || read.has(value) || phones.some(([a, b]) => m.index >= a && end <= b)) continue;
     read.add(value);
-    problems.push({ code: 'unknown-number', text: `Says "${said}${k ? 'k' : ''}", which is neither the price being posted nor the website's mileage for this car` });
+    problems.push({ code: 'unknown-number', text: `Says "${said}${k ? 'k' : ''}" with no "$" and no unit, and it is not the price being posted or the website's mileage for this car; if it is not a price or a mileage, give its unit (such as "lbs") or leave it out` });
   }
   return problems;
 }
@@ -583,6 +589,24 @@ const BANNED_RE = BANNED_PHRASES.map((p) => {
 // Windows, Owner's Manual"
 const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+,?[\s-]+){0,2}(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+)?owner(?!['\u2019]s[\s-]+(?:manual|guide|handbook|portal|app)\b)|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
 
+// "Driven by" the engine is what powers the car, not who drove it ("driven
+// by a 5.7L HEMI V8", "by the turbocharged engine", "by an electric motor",
+// "by a Cummins diesel"): after "by" (and "a", "an", "the" or "its") come
+// only engine words, ending on the engine itself ("engine", "motor",
+// "powertrain", a size, a cylinder count or an engine's name), and the
+// clause stops there or goes on about the engine ("with 395 horsepower",
+// "paired with", "and an 8-speed automatic"). Anything else is who drove
+// it: "driven by a diesel mechanic", "a HEMI enthusiast", "a V8 lover", "a
+// General Motors retiree", "a retired engine builder", "2 retirees".
+const ENGINE_NAME = "\\d(?:\\.\\d)?\\s*-?\\s*(?:l|t|liters?|litres?)|v-?\\d{1,2}|i-?\\d|(?:inline|straight|flat)[\\s-]?(?:\\d|four|six)|(?:\\d{1,2}|three|four|five|six|eight|ten|twelve)[\\s-]?cyl(?:inders?)?|\\d+[\\s-]?(?:hp|horsepower)|hemi|ecoboost|ecodiesel|duramax|cummins|power[\\s-]?stroke|pentastar|vortec|ecotec|turbo(?:charged)?|twin[\\s-]turbo(?:charged)?|bi[\\s-]?turbo|supercharged|turbo[\\s-]?diesel|diesel|hybrid|plug[\\s-]in(?:[\\s-]hybrid)?|electric|gas(?:oline)?|flex[\\s-]?fuel|high[\\s-]output";
+const ENGINE_WORD = `${ENGINE_NAME}|powerful|proven|legendary|potent|(?:fuel[\\s-])?efficient|reliable|smooth|responsive|capable|strong|robust|peppy|refined|quiet|big|small|dual|twin`;
+const ENGINE_ENDS = "(?=\\s*(?:[.,;:!?)\\]\\n\u2013\u2014]|-\\s|$)|\\s+(?:with|paired|mated|making|producing|rated|that|which|and\\s+(?:(?:an?|the)\\s+)?(?:\\d+[\\s-]speed|automatic|manual|transmission|cvt|all[\\s-]wheel|four[\\s-]wheel|awd|4wd|4x4))\\b)";
+const DRIVEN_BY_ENGINE = `\\s+(?:(?:a|an|the|its)\\s+)?(?:(?:${ENGINE_WORD})[\\s-]+){0,4}(?:engines?|motors?|powertrains?|${ENGINE_NAME})${ENGINE_ENDS}`;
+// The dealership's own "locally owned (and operated) dealership", which is
+// about the business, not the car; "locally owned dealer trade", "locally
+// owned company truck" and every "adult owned" are about the car.
+const LOCALLY_OWNED = "local(?:ly)?[\\s-]owned(?![\\s-]+(?:(?:and|&)[\\s-]+operated\\b|(?:dealer(?:ship)?s?|business(?:es)?|compan(?:y|ies)|stores?)\\b(?![\\s-]+(?:trade|truck|car|suv|van|jeep|vehicle|unit|ride)\\w*)))";
+
 // ---------- claims only the website can make ----------
 // What a description says about the car's certification, warranty,
 // financing, history, care, parts, condition, owners, use, origin or keys
@@ -618,7 +642,7 @@ export const CLAIM_KINDS = Object.freeze([
   { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:(?:set of|[\\w-]+)\\s+){0,2}?(${PARTS})\\b`, 'i'), part: true },
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
   // who had it and how it was used ("one owner" has its own check, against the Carfax flag; "Pre-owned" is not a claim)
-  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned(?![\s-]+(?:(?:and|&)[\s-]+operated|dealer\w*|business|company|store|shop)\b)|driven (?:by(?!\s+(?:(?:a|an|the|its)\s+)?(?:\d|v-?\d|hemi\b|ecoboost|duramax|cummins|power[\s-]?stroke|pentastar|vortec|(?:[\w.-]+\s+){0,3}(?:engines?|motors?|powertrains?|v-?\d+)(?![\w-])))|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
+  { what: 'its owners or how it was driven', re: new RegExp(`\\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\\s-])owned by|adult[\\s-]owned|${LOCALLY_OWNED}|driven (?:by(?!${DRIVEN_BY_ENGINE})|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\\s-]family)\\b`, 'i') },
   { what: 'where it came from', re: /\b(?:local(?:ly)? trade[ds]?|traded in locally|(?:came|taken|took) in on trade|on trade from|trade[\s-]in from|lease returns?|off[\s-]lease)\b/i },
   { what: 'its keys', re: /\b(?:(?:both|spare|extra|second|two|2|three|3|(?:sets?|pairs?) of) (?:keys|key[\s-]?fobs|fobs|remotes)|(?:spare|extra|second) (?:key|key[\s-]?fob|fob|remote))\b/i },
 ]);
