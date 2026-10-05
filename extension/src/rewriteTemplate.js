@@ -756,7 +756,8 @@ function without(text, names) {
 // sentence of their own where the text puts them, as the template puts the
 // note: after the start of the text or a sentence's end (".", "!" or "?",
 // maybe a closing quote or bracket, then a space or a new line; never the dot
-// of "e.g.", "i.e.", "vs.", "cf." or "viz."), and before the end of the text
+// of "e.g.", "i.e.", "vs.", "cf.", "viz.", "incl.", "excl.", "esp." or
+// "approx."; "etc." may end one), and before the end of the text
 // or a new sentence (a stop, the note's own last one or one right after it,
 // or else a new line; then a space or a new line and a sentence that does not
 // carry the note's one on: startsOwnSentence). A line break alone ends no
@@ -772,7 +773,7 @@ const NOTE_CLOSERS = "['\"\u2019\u201d)\\]]*";
 const NOTE_OPENS = new RegExp(`(?<=(^|[.!?]${NOTE_CLOSERS})(\\s*))`, 'y');
 const NOTE_ENDS = new RegExp(`((?:[^\\S\\n]*[.!?]+)?)${NOTE_CLOSERS}(\\s*)`, 'y');
 const NOTE_OWN_STOP = new RegExp(`[.!?]${NOTE_CLOSERS}$`);
-const NOT_A_STOP = new RegExp(`(?:^|[\\s(\\[{"'\u2018\u201c])(?:e\\.g|i\\.e|vs|cf|viz)\\.${NOTE_CLOSERS}\\s*$`, 'iu');
+const NOT_A_STOP = new RegExp(`(?:^|[\\s(\\[{"'\u2018\u201c])(?:e\\.g|i\\.e|vs|cf|viz|incl|excl|esp|approx)\\.${NOTE_CLOSERS}\\s*$`, 'iu');
 // What follows a sentence's end starts a sentence of its own unless it
 // carries that one on: it starts with a mark that joins (a comma, semicolon,
 // colon, dot or ellipsis, dash, "&", "+", "/" or a closing bracket), or its

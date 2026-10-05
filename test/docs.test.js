@@ -120,6 +120,24 @@ test('help.md and README give the "vanished at once" rule with the lot size it s
   assert.match(read('../README.md'), new RegExp(`If more than half the cars of a lot of ${floor} or more vanish between scans, nothing is marked gone`));
 });
 
+// The dots that end no sentence before the price note (rewriteTemplate.js
+// NOT_A_STOP, and its port in guardrails.ts): help.md names each, so a
+// salesperson can tell why "Deal direct, incl. Tax, title ..." is refused.
+test('help.md names every abbreviation whose dot ends no sentence before the price note, as both description checkers list them', () => {
+  const listed = (src) => {
+    const m = /const NOT_A_STOP = new RegExp\(`[^`]*?\(\?:((?:[a-z]|\\\\\.)+(?:\|(?:[a-z]|\\\\\.)+)*)\)\\\\\./.exec(src);
+    assert.ok(m, 'NOT_A_STOP is found');
+    return m[1].split('|').map((w) => w.replace(/\\\\/g, '') + '.');
+  };
+  const js = listed(read('../extension/src/rewriteTemplate.js'));
+  assert.deepEqual(listed(read('../supabase/functions/_shared/guardrails.ts')), js, 'both checkers list the same ones');
+  for (const w of ['e.g.', 'vs.', 'incl.', 'esp.', 'approx.']) assert.ok(js.includes(w), `NOT_A_STOP lists "${w}"`);
+  assert.ok(!js.includes('etc.'), '"etc." may end a sentence');
+  const sentence = /the dot of ((?:"[^"]+",? (?:or )?)+)ends no sentence/.exec(doc('help.md'));
+  assert.ok(sentence, 'help.md says which dots end no sentence');
+  assert.deepEqual([...sentence[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort(), [...js].sort());
+});
+
 test('the adapter contract\'s PLATFORM row names every adapter and quotes no stale unsupported-page message', () => {
   const row = read('../extension/adapters/README.md').split('\n').find((l) => l.startsWith('| `PLATFORM` |')) || '';
   assert.ok(row, 'the PLATFORM row is there');
