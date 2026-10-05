@@ -10,7 +10,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { PILOT_RETENTION_DAYS } from '../extension/src/pilot.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
@@ -26,7 +29,9 @@ import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 
-const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+// A checkout with CRLF line ends (git's autocrlf on Windows) reads the same as
+// an LF one: every line-anchored pattern below is written for \n.
+const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
 const doc = (name) => read('../docs/' + name);
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -781,8 +786,6 @@ test('help, README and the onboarding emails say the address comes from the webs
   }
 });
 
-// node --test runs every test( and it( call site once; none of the files
-// makes tests in a loop, so the count of call sites is the count npm test prints.
 test('the docs say the template writes the description from the car\'s listed facts and does not copy the website\'s write-up', () => {
   // the template once copied the website's opening sentences, and the help kept saying so after the code stopped
   const COPIES = [/write-up line/i, /opening sentences/i, /write-up is kept/i, /\bcop(?:y|ies|ied)\b[^.]{0,40}\bsentences\b/i, /real write-up on the website/i];
@@ -798,6 +801,60 @@ test('the docs say the template writes the description from the car\'s listed fa
   assert.ok(help.includes("The template builds the description from the car's listed facts"), 'docs/help.md does not say what the template builds the description from');
   assert.ok(help.includes('the write-up is sent to it as the website wrote it, a whole line at a time, from its first line up to the first line Lot Current leaves out'), 'docs/help.md does not say what the rewrite service is sent');
   assert.ok(help.includes("The service's draft goes through the same checks"), "docs/help.md does not say the service's draft is checked");
+});
+
+// README gives the number of test( and it( call sites in test/*.test.js, and
+// node --test runs each one once only while every call site stands alone at the
+// start of a line: a test made in a loop or a callback is indented or follows
+// other code on its line, and a subtest (t.test) or a node:test describe/suite
+// adds tests the count never sees. testSiteProblems refuses all of those.
+const TEST_CALL = /(?<![.\w$])(?:test|it)(?:\.(?:only|skip|todo))?\(/g;
+const NODE_TEST_NAMES = new Set(['test', 'after', 'afterEach', 'before', 'beforeEach', 'mock']);
+function testSiteProblems(src) {
+  const problems = [];
+  src.split(/\r?\n/).forEach((line, i) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+    for (const m of line.matchAll(TEST_CALL)) if (m.index !== 0) problems.push(`line ${i + 1}: a test call not at the start of its line: ${line.trim().slice(0, 60)}`);
+    if (/\b(?:t|ctx|context)\.(?:test|it|describe|suite)\(/.test(line)) problems.push(`line ${i + 1}: a subtest: ${line.trim().slice(0, 60)}`);
+  });
+  for (const m of src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*['"]node:test['"]/gm)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/)[0];
+      if (name && !NODE_TEST_NAMES.has(name)) problems.push(`imports ${name} from node:test`);
+    }
+  }
+  for (const m of src.matchAll(/^import\b[^\n]*from\s*['"]node:test['"]/gm)) if (!/^import\s*\{[^}]*\}\s*from/.test(m[0])) problems.push(`imports node:test other than by name: ${m[0]}`);
+  return problems;
+}
+
+test('every test in test/*.test.js is one call site at the start of its line, so README\'s count is what npm test runs', () => {
+  const dir = new URL('./', import.meta.url);
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.test.js'))) {
+    assert.deepEqual(testSiteProblems(readFileSync(new URL(f, dir), 'utf8')), [], `test/${f}`);
+  }
+  // the check itself sees a test made in a loop, in a callback, as a subtest or by describe
+  // (written with TEST so this file's own lines do not hold the shapes they show)
+  const probe = (src) => testSiteProblems(src.replaceAll('TEST', 'test'));
+  assert.notDeepEqual(probe("for (const n of [1, 2]) {\n  TEST('car ' + n, () => {});\n}\n"), []);
+  assert.notDeepEqual(probe("[1, 2].forEach((n) => TEST('car ' + n, () => {}));\n"), []);
+  assert.notDeepEqual(probe("TEST('cars', async (t) => {\n  await t.TEST('one', () => {});\n});\n"), []);
+  assert.notDeepEqual(probe("import { TEST, describe } from 'node:test';\n"), []);
+  assert.notDeepEqual(probe("import * as nt from 'node:test';\n"), []);
+  assert.deepEqual(probe("import { TEST, after } from 'node:test';\n// a comment naming TEST( is fine\nTEST('one', () => { assert.ok(/x/.test('x')); });\n"), []);
+});
+
+test('a checkout with CRLF line ends reads as LF, so the CHANGELOG headings are still found', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lot-current-crlf-'));
+  try {
+    const file = join(dir, 'CHANGELOG.md');
+    writeFileSync(file, read('../CHANGELOG.md').replace(/\n/g, '\r\n'));
+    const text = read(pathToFileURL(file).href);
+    assert.ok(!text.includes('\r'), 'read() keeps the carriage returns of a CRLF file');
+    const sections = text.split(/\n(?=## )/).slice(1);
+    assert.ok(sections.some((s) => /^## Unreleased[ \t]*(\n|$)/.test(s)), 'the "## Unreleased" heading is not found in a CRLF copy of CHANGELOG.md');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('README\'s unit-test count is the number of tests npm test runs', () => {
