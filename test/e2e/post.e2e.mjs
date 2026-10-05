@@ -197,6 +197,10 @@ try {
   assert.match(probe, /Found\s*16/);
   assert.match(probe, /Not found\s*1[\s\S]*Make/); // Make only appears after a year is chosen
   assert.match(probe, /1 file input\(s\) on the page · limit 20/);
+  // the controls it lists are the form's: the page's top bar and its menus (the mock's stand-in for Facebook's) are left out
+  const listed = await panel.textContent('#probeResults details');
+  assert.match(listed, /Controls in the vehicle form \(\d+\)[\s\S]*"price"[\s\S]*"description"/);
+  assert.doesNotMatch(listed, /top bar|profile menu|notifications menu/);
   assert.equal(await fb.inputValue('#model'), '', 'the dry run fills nothing');
   assert.equal(await fb.evaluate(() => document.getElementById('makeWrap').hidden), true, 'Make is not on the page until a year is chosen');
   await panel.screenshot({ path: join(shots, 'post-3a-check-fields.png'), fullPage: true });

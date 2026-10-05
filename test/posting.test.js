@@ -7,6 +7,8 @@ import { buildListingData } from '../extension/src/listingData.js';
 import { FORM_MAP, DEV_OVERRIDE_KEYS, applyOverrides } from '../extension/facebook/formMap.js';
 import { ADAPTERS } from '../extension/adapters/index.js';
 import { probeSiteInPage } from '../extension/src/scan.js';
+import { probeFormInPage } from '../extension/facebook/fillForm.js';
+import { miniPage } from './miniDom.js';
 import { snapshot, fixtures, stripComments, commentStripperBlindSpots, strippedSourceFiles, moduleScopeNames, freeIdentifiers, stripStrings, callArguments } from './helpers.js';
 
 const VIN = fixtures.usedNormal.vin;
@@ -238,6 +240,52 @@ test('the dry run looks for each kind of field with the same controls the fill d
   for (const kind of new Set(FORM_MAP.fields.map((f) => f.kind))) assert.ok(fill[kind], `the fill has controls for ${kind} fields`);
   assert.match(probe.typeahead, /\[role="combobox"\]/, 'a dropdown in a typeahead\'s place is found');
   assert.match(probe.typeahead, /\[contenteditable="true"\]/, 'so is an editable box');
+});
+
+// The dry run's report goes into a support message when the person copies
+// it, so the controls it lists come from the vehicle form alone: the
+// smallest part of the page holding the fields it found and the photo box,
+// without a top bar, navigation or side column inside it. Facebook's own
+// menus, chats and notifications around the form (which carry names of the
+// person's friends and conversations) are never listed, and when the form
+// can't be placed, nothing is. The fields themselves are still looked for
+// page-wide, as the fill looks for them.
+test('the dry run lists only the vehicle form\'s own controls, never Facebook\'s menus around it', () => {
+  const box = (label, extra = {}) => ({ tag: 'input', attrs: { 'aria-label': label, ...extra } });
+  const menu = (label) => ({ tag: 'div', attrs: { role: 'button', 'aria-haspopup': 'menu', 'aria-label': label } });
+  const topBar = { tag: 'div', attrs: { role: 'banner' }, children: [box('Search Facebook'), menu('Your profile, Jordan Example'), menu('Messenger'), menu('Notifications')] };
+  const contacts = { tag: 'div', attrs: { role: 'complementary' }, children: [{ tag: 'div', attrs: { role: 'button', 'aria-expanded': 'false', 'aria-label': 'Chat with Sam Example' } }] };
+  const formPart = (children) => ({ tag: 'div', attrs: { role: 'main' }, children: [{ tag: 'div', attrs: { id: 'vehicleForm' }, children }] });
+  const fields = [box('Year'), box('Make'), box('Price'), { tag: 'textarea', attrs: { 'aria-label': 'Description' } }, { tag: 'input', attrs: { type: 'file', accept: 'image/*' } }, { tag: 'div', attrs: { role: 'combobox', 'aria-label': 'Fuel type' } }];
+  const map = {
+    version: 'test', fileInput: 'input[type="file"]', photoLimitDefault: 20, photoLimitTextPatterns: [], neverFill: [],
+    fields: [
+      { key: 'year', label: 'Year', kind: 'text', name: ['^year'] },
+      { key: 'make', label: 'Make', kind: 'typeahead', name: ['^make'] },
+      { key: 'price', label: 'Price', kind: 'text', name: ['^price'] },
+      { key: 'description', label: 'Description', kind: 'textarea', name: ['^description'] },
+    ],
+  };
+  const probe = (body) => miniPage({ url: 'https://www.facebook.com/marketplace/create/vehicle', title: 'Marketplace', body }).run(probeFormInPage, map);
+
+  const page = probe([topBar, formPart([...fields, { tag: 'div', attrs: { role: 'navigation' }, children: [menu('Marketplace menu')] }]), contacts]);
+  assert.deepEqual(page.found.map((f) => f.key), ['year', 'make', 'price', 'description']);
+  assert.equal(page.controlsFrom, 'the vehicle form');
+  assert.deepEqual(page.controls.map((c) => c.name), ['year', 'make', 'price', 'description', 'fuel type'], 'the form\'s controls, and only those');
+  const report = JSON.stringify(page);
+  for (const outside of ['search facebook', 'jordan example', 'messenger', 'notifications', 'sam example', 'marketplace menu']) {
+    assert.ok(!report.includes(outside), `${outside} is not in the report`);
+  }
+
+  // only one field found: the form can't be placed, so no controls at all
+  const one = probe([topBar, formPart([box('Year'), box('Kilometres')]), contacts]);
+  assert.deepEqual(one.found.map((f) => f.key), ['year']);
+  assert.deepEqual(one.controls, []);
+  assert.match(one.controlsFrom, /^none listed: Lot Current couldn't tell which part of the page is the vehicle form$/);
+  // fields so far apart that only the whole page holds them (one sits in the top bar): none either
+  const apart = probe([{ ...topBar, children: [...topBar.children, box('Price')] }, formPart([box('Year'), box('Make')]), contacts]);
+  assert.equal(apart.found.length, 3);
+  assert.deepEqual(apart.controls, []);
 });
 
 // What these source checks prove: the usual ways to click, submit, press a

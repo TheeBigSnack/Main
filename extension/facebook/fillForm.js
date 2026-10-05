@@ -591,10 +591,16 @@ export async function fillFormInPage(map, data) {
 }
 
 // Read-only check of the page against the map: which fields can be found and
-// what controls the page has. Nothing is filled and nothing is clicked. Meant
-// for the first live run, so `name` patterns in formMap.js can be fixed in
-// minutes from the report. (Helpers are repeated here on purpose: injected
-// functions must be self-contained.)
+// what controls the vehicle form has. Nothing is filled and nothing is
+// clicked. Meant for the first live run, so `name` patterns in formMap.js can
+// be fixed in minutes from the report. The fields are looked for page-wide,
+// as the fill looks for them; the other controls are listed only from the
+// form's own part of the page (the smallest element holding two or more of
+// the fields found and the photo box, never the whole page, and without any
+// top bar, navigation or side column inside it), so Facebook's own menus,
+// chats and notifications around the form are not in the report; when the
+// form can't be placed, no controls are listed. (Helpers are repeated here on
+// purpose: injected functions must be self-contained.)
 export function probeFormInPage(map) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -665,17 +671,29 @@ export function probeFormInPage(map) {
 
   const found = [];
   const missing = [];
+  const foundEls = [];
   for (const spec of map.fields) {
     const el = findField(spec);
+    if (el) foundEls.push(el);
     if (el) found.push({ key: spec.key, label: spec.label, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: accessibleName(el).slice(0, 80) });
     else if (spec.optional) found.push({ key: spec.key, label: spec.label, tag: '', role: '', name: '(optional, not on this form)' });
     else missing.push({ key: spec.key, label: spec.label, patterns: spec.name, note: 'not on the page right now; some fields only appear after an earlier one is chosen' });
   }
-  const controls = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded], [role="checkbox"], [role="switch"]')]
-    .filter(visible)
+  // the form's own part of the page (see above): null when fewer than two of
+  // its fields and photo box were found, or when they sit so far apart that
+  // only the whole page holds them all
+  const chainOf = (el) => { const out = []; for (let n = el; n; n = n.parentElement) out.push(n); return out; };
+  const anchors = [...foundEls, map.fileInput ? document.querySelector(map.fileInput) : null].filter(Boolean);
+  const holder = anchors.length >= 2 ? chainOf(anchors[0]).find((n) => anchors.every((a) => chainOf(a).includes(n))) || null : null;
+  const formArea = holder && holder !== document.body && holder !== document.documentElement ? holder : null;
+  const AROUND = '[role="banner"], [role="navigation"], [role="complementary"], [role="contentinfo"], nav';
+  const aroundForm = (el) => { for (let n = el; n && n !== formArea; n = n.parentElement) if (n.matches(AROUND)) return true; return false; };
+  const controls = (formArea ? [...formArea.querySelectorAll('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded], [role="checkbox"], [role="switch"]')] : [])
+    .filter((el) => visible(el) && !aroundForm(el))
     .map((el) => ({ tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || '', role: el.getAttribute('role') || '', name: accessibleName(el).slice(0, 80) }))
     .filter((c) => c.name)
     .slice(0, 100);
+  const controlsFrom = formArea ? 'the vehicle form' : "none listed: Lot Current couldn't tell which part of the page is the vehicle form";
   let photoLimit = { value: map.photoLimitDefault, verified: false };
   const patterns = Array.isArray(map.photoLimitTextPatterns) ? map.photoLimitTextPatterns : [map.photoLimitTextPattern].filter(Boolean);
   for (const p of patterns) {
@@ -690,7 +708,7 @@ export function probeFormInPage(map) {
     const around = input && (input.closest('section, form, div') || input.parentElement);
     return around ? (around.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   })();
-  return { url: location.href, language: document.documentElement.lang || '', title: document.title, found, missing, controls, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
+  return { url: location.href, language: document.documentElement.lang || '', title: document.title, found, missing, controls, controlsFrom, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
 }
 
 // Upkeep, step 1: once the salesperson has opened the listing's edit form,
