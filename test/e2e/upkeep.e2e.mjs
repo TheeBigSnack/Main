@@ -1,8 +1,10 @@
 // End-to-end test of listing upkeep: two cars are posted (with their listing
 // links saved); the website then sells one and drops the other's price; the
-// rescan puts both on the To do tab; "Open & update price" opens the MOCK
-// listing, the test clicks Edit as the person would, the panel fills the
-// new price, the test clicks Update, and the panel notices the new price and
+// rescan puts both on the To do tab. With the website's price back at the
+// listing's, "Open & update price" reads the car again, stops and opens
+// nothing; with the drop back, it opens the MOCK listing, the test clicks
+// Edit as the person would, the panel fills the new price, the test clicks
+// Update, and the panel notices the new price and
 // marks the item done. Along the way the tab is moved to another car's edit
 // form and to another listing of the same year, make and model: nothing is
 // filled there. The sold car's listing link is then forgotten (a car marked
@@ -122,19 +124,32 @@ try {
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '2');
   await popup.screenshot({ path: join(shots, 'upkeep-1-todo.png'), fullPage: true });
 
-  // ---- 2. Update the Wagoneer's price: open the listing, the person clicks Edit, Lot Current fills the price, the person clicks Update ----
+  // ---- 2a. Before the person gets to it, the website puts the Wagoneer back at the listing's price: Open & update price reads the car on the website again first, stops there and says why, and opens no listing ----
+  await dealer.request.get(`${origin}/scenario?name=day1`);
   await popup.click('button[data-action="upkeep"][data-kind="price"]');
   await popup.waitForFunction(() => /side panel/i.test(document.querySelector('#status').textContent));
   await popup.close();
   const panel = watch(await context.newPage());
   panelRef = panel;
-  const listingPromise = context.waitForEvent('page', { timeout: 30000 });
   await panel.goto(extUrl('sidepanel.html'));
+  await panel.waitForSelector('#upkeepStopped', { timeout: 20000 });
+  assert.match(await panel.textContent('#upkeepStopped'), /The website shows \$38,383 again, the price your listing already has[\s\S]*Nothing was filled/);
+  assert.equal(await panel.$('#upkeepDoneBtn'), null, 'nothing to record');
+  assert.ok(!context.pages().some((p) => p.url().startsWith(marketOrigin)), 'no listing opened');
+  await panel.click('#upkeepClose');
+  await dealer.request.get(`${origin}/scenario?name=day2`);
+
+  // ---- 2. Update the Wagoneer's price: open the listing, the person clicks Edit, Lot Current fills the price the website shows now, the person clicks Update ----
+  popup = await openPopup();
+  const listingPromise = context.waitForEvent('page', { timeout: 30000 });
+  await popup.click('button[data-action="upkeep"][data-kind="price"]');
+  await popup.waitForFunction(() => /side panel/i.test(document.querySelector('#status').textContent));
+  await popup.close();
   const listing = watch(await listingPromise);
   await listing.waitForLoadState();
   assert.match(listing.url(), /\/marketplace\/item\/515151\/$/, 'the saved listing link is opened');
   await panel.waitForSelector('#priceWaiting');
-  assert.match(await panel.textContent('#priceWaiting'), /\$36,883/);
+  assert.match(await panel.textContent('#priceWaiting'), /\$36,883 \(was \$38,383\), the price the website shows now: Lot Current read the car on the website again just before opening the listing\./);
   // The person opens the WRONG car's edit form in that tab: nothing may be filled there.
   await listing.goto(`${marketOrigin}/marketplace/edit/424242/`);
   await panel.waitForFunction(() => /isn't showing the listing for 2022 Jeep Wagoneer/.test(document.querySelector('#upkeepNote')?.textContent || ''), null, { timeout: 10000 });

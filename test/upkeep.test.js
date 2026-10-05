@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { readListingInPage } from '../extension/facebook/fillForm.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
-import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote } from '../extension/upkeep.js';
+import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
 import { noteTakenDown } from '../extension/src/takenDown.js';
 
 // A page as the reader walks it: text nodes, each inside a plain block or a
@@ -182,7 +182,7 @@ test('a car whose name is in this car\'s, a colleague\'s post and a take-down al
 test('upkeep treats a saved link that is not a listing\'s own address as no link, and says to open the listing', async () => {
   const opened = [];
   globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 9 }; } } };
-  const ctx = { render: () => {}, map: () => FORM_MAP };
+  const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: 19000 }) };
   const begin = async (listingUrl) => {
     const started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: 19000, listingUrl, name: 'Car A', listedPrice: 20000 }, ctx);
     for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -261,5 +261,78 @@ test('with another posted car of the same name, upkeep needs this car\'s VIN on 
     assert.match(offTargetNote('', readPage({ url: YOURS, texts: ['Your listings'] }, mine), 0), /looks for its full name and \$31,995\)/);
   } finally {
     endUpkeep();
+  }
+});
+
+// A price update reads the car on the website again before the listing opens
+// (ctx.priceNow: the side panel's upkeepPriceNow, the same read and check a
+// post makes at post time) and fills the price the website shows now. A read
+// that fails, a car the website no longer lists or that no longer passes the
+// check, no price, or the price back at the listed one: the listing is not
+// opened, nothing is filled, and the panel says why, with only Close. A
+// take-down reads nothing. Not now during the read opens nothing afterwards.
+test('a price update reads the car on the website again first and fills the price it shows now, or stops and says why', async () => {
+  const opened = [];
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 9 }; } } };
+  const LINK = 'https://www.facebook.com/marketplace/item/111/';
+  const item = { origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: 19000, listingUrl: LINK, name: 'Car A', listedPrice: 20000, dealerTabId: 4 };
+  const tick = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+  const begin = async (now, req = item) => {
+    opened.length = 0;
+    const asked = [];
+    const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async (r) => { asked.push(r); return typeof now === 'function' ? now(r) : now; } };
+    const started = startUpkeep(req, ctx);
+    await tick();
+    const seen = { opened: [...opened], status: up.status, price: up.price, scanPrice: up.scanPrice, note: up.note, html: upkeepHtml(), asked };
+    endUpkeep();
+    await started;
+    return seen;
+  };
+  try {
+    // the website's price moved again since the scan: that price is filled, and the panel says the scan had found another
+    const moved = await begin({ ok: true, price: 18500 });
+    assert.deepEqual([moved.opened, moved.status, moved.price, moved.scanPrice], [[LINK], 'waiting', 18500, 19000]);
+    assert.equal(moved.asked[0].dealerTabId, 4, 'read through the tab the To do item was clicked from');
+    assert.match(moved.html, /fills in <b>\$18,500<\/b> \(was \$20,000\), the price the website shows now: Lot Current read the car on the website again just before opening the listing \(the last scan had found \$19,000\)\. Then you click <b>Update<\/b>\./);
+    // the same price as the scan found
+    const same = await begin({ ok: true, price: 19000 });
+    assert.deepEqual([same.opened, same.price, same.scanPrice], [[LINK], 19000, null]);
+    assert.doesNotMatch(same.html, /last scan had found/);
+    // stops: nothing opened, nothing filled, the reason and only Close
+    for (const [what, now, said] of [
+      ['the read failed', { ok: false, message: "Lot Current reads this car on www.example-motors.test again before it fills a new price, and couldn't just now." }, /couldn't just now\. Nothing was filled\./],
+      ['gone from the website', { ok: false, message: 'www.example-motors.test no longer lists this car, so its price was not updated.' }, /no longer lists this car/],
+      ['no longer passes the check', { ok: false, message: "The website now says this is a new vehicle, so it can't go on Marketplace." }, /new vehicle/],
+      ['no price', { ok: true, price: null }, /shows no price for this car right now/],
+      ['back at the listed price', { ok: true, price: 20000 }, /shows \$20,000 again, the price your listing already has, so there is nothing to change on Facebook\. Nothing was filled; the next scan clears this item\./],
+      ['the read threw', () => { throw new Error('offline'); }, /couldn't check this car's price on the website just now: offline/],
+    ]) {
+      const r = await begin(now);
+      assert.deepEqual([r.opened, r.status], [[], 'stopped'], `${what}: the listing is not opened`);
+      assert.match(r.note, said, what);
+      assert.match(r.html, /id="upkeepStopped">[^<]*Nothing was filled/);
+      assert.match(r.html, /id="upkeepClose"/);
+      assert.doesNotMatch(r.html, /id="upkeepDoneBtn"/, `${what}: no I updated it, which would record a price`);
+    }
+    // a take-down reads nothing
+    const down = await begin(() => { throw new Error('a take-down must not read the price'); }, { ...item, kind: 'takeDown', price: null });
+    assert.deepEqual([down.opened, down.asked.length], [[LINK], 0]);
+    // while the read runs: Checking, Not now only; Not now then opens nothing
+    let answer;
+    const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: () => new Promise((resolve) => { answer = resolve; }) };
+    opened.length = 0;
+    const started = startUpkeep(item, ctx);
+    await tick();
+    assert.equal(up.status, 'checking');
+    assert.match(upkeepHtml(), /id="priceChecking"[\s\S]*id="upkeepCancel"/);
+    assert.doesNotMatch(upkeepHtml(), /id="upkeepDoneBtn"/);
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', { render: () => {} }), true, 'a stale I updated it records nothing');
+    endUpkeep();
+    answer({ ok: true, price: 18500 });
+    await started;
+    assert.deepEqual(opened, [], 'Not now during the read: the listing is not opened');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
   }
 });

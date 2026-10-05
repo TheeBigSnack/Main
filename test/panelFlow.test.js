@@ -21,8 +21,8 @@ import { updateKey } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData, listingChanges } from '../extension/src/listingData.js';
 import { recheck } from '../extension/src/vehicleDetails.js';
-import { basisPrice, snapshotEntry } from '../extension/src/rescan.js';
-import { assessVehicle } from '../extension/src/classify.js';
+import { basisPrice, snapshotEntry, listingWebsitePrice, pendingText } from '../extension/src/rescan.js';
+import { assessVehicle, DECISION } from '../extension/src/classify.js';
 import { draftRecord, draftPill } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
@@ -2997,4 +2997,62 @@ test('a second window\'s side panel opens no second form for a car whose post is
   await o.fns.openForm();
   assert.equal(o.forms.length, 1);
   assert.equal(o.state.windowId, 2);
+});
+
+// A price update's read of the car on the website before its listing opens
+// (upkeepPriceNow, handed to upkeep.js as ctx.priceNow): the post-time read
+// (readCarForPost, through the To do item's dealer tab) and check (recheck),
+// and the website's price now on the basis the listing was posted at. What
+// stops it is what the rescan raises for a posted car (gone, sold or
+// sale-pending, not pre-owned, needs a look), each saying why in the side
+// panel's words for a price update; what only holds back a new post (another
+// store, no photos, not on the lot yet) does not stop it.
+test('a price update reads the car on the website the way a post does, on the listing\'s own price basis', async () => {
+  const ORIGIN = 'https://www.example-motors.test';
+  const v = vehicle('usedNormal'); // $27,163 on the website, $26,673 before fees
+  const run = async ({ read, entry = { name: v.name, price: 27500 }, basis = 'website', car = v, myStores = [] }) => {
+    const asked = [];
+    const state = { siteInfo: { adapter: 'dealerInspire', service: {} }, snapshotVehicles: { [car.vin]: { url: 'https://www.example-motors.test/car/1', price: car.price } }, posted: { [car.vin]: entry }, settings: { basis, myStores } };
+    const upkeepPriceNow = compile('upkeepPriceNow', {
+      state, recheck, listingWebsitePrice, pendingText, DECISION, hostOf: (o) => new URL(o).host,
+      readCarForPost: async (req) => { asked.push(req); return typeof read === 'function' ? read(req) : read; },
+    });
+    const r = await upkeepPriceNow({ origin: ORIGIN, vin: car.vin.toLowerCase(), kind: 'price', price: 27000, dealerTabId: 4 });
+    return { r, asked };
+  };
+  const ok = await run({ read: { ok: true, vehicle: { ...v } } });
+  assert.deepEqual(ok.r, { ok: true, price: 27163 });
+  assert.deepEqual(ok.asked, [{ tabId: 4, origin: ORIGIN, info: { adapter: 'dealerInspire', service: {} }, vin: v.vin, url: 'https://www.example-motors.test/car/1' }], 'through the To do item\'s dealer tab, as a post reads');
+  // a listing posted on the before-fees basis: the website's before-fees price, whatever Settings says now
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'beforeFees' } })).r, { ok: true, price: 26673 });
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'website' }, basis: 'beforeFees' })).r, { ok: true, price: 27163 });
+  // stops, each saying why
+  const stops = [
+    [{ ok: false, needsPermission: true, origins: [ORIGIN + '/*'], message: 'To re-check this car...' }, /^Lot Current reads this car on www\.example-motors\.test again before it fills a new price, and Chrome hasn't let it read www\.example-motors\.test from here\. Open www\.example-motors\.test's used inventory page, then click Open & update price in the popup there\.$/],
+    [{ ok: false, notFound: true, message: 'This car is no longer on the website.' }, /^www\.example-motors\.test no longer lists this car, so its price was not updated\. Rescan the website: if it sold, To do lists it to take down\.$/],
+    [{ ok: false, message: 'The dealership tab now shows example.org, not www.example-motors.test. Open www.example-motors.test\'s used inventory page and click Post again.' }, /couldn't just now\. The dealership tab now shows example\.org, not www\.example-motors\.test\. Open www\.example-motors\.test's used inventory page and click Open & update price in the popup\.$/],
+  ];
+  for (const [read, said] of stops) {
+    const { r } = await run({ read });
+    assert.equal(r.ok, false);
+    assert.match(r.message, said);
+    assert.doesNotMatch(r.message, /click Post/, 'the button a price update has, not a post\'s');
+  }
+  // the website now calls it new, or its details no longer add up: the check's reason
+  const turned = await run({ read: { ok: true, vehicle: { ...vehicle('newNormal') } }, car: vehicle('newNormal') });
+  assert.equal(turned.r.ok, false);
+  assert.match(turned.r.message, /new vehicle[\s\S]*Its price was not updated: rescan the website to see what to do with this listing\.$/);
+  const odd = await run({ read: { ok: true, vehicle: { ...v, isDemo: true } } });
+  assert.equal(odd.r.ok, false, 'pre-owned but also flagged a demo: needs a look');
+  assert.match(odd.r.message, /needs a look first[\s\S]*Its price was not updated/);
+  // the website marks it sold or sale-pending: To do's Take down, not a new price
+  const pending = await run({ read: { ok: true, vehicle: { ...v, statusLabel: 'Sale Pending' } } });
+  assert.deepEqual(pending.r, { ok: false, message: 'Sale pending on the website, so its price was not updated. Rescan the website: To do then lists it to take down.' });
+  assert.match((await run({ read: { ok: true, vehicle: { ...v, statusLabel: 'Sold' } } })).r.message, /^Marked sold on the website, so its price was not updated\./);
+  // held back from a new post only: the listing is up, so its price follows the website
+  const elsewhere = await run({ read: { ok: true, vehicle: { ...v, location: 'Another Store', photoCount: 0, inTransit: true } }, myStores: ['Our Store'] });
+  assert.equal(recheck({ ...v, location: 'Another Store', photoCount: 0, inTransit: true }, { myStores: ['Our Store'] }).ok, false, 'a post would stop here');
+  assert.deepEqual(elsewhere.r, { ok: true, price: 27163 });
+  // no price on the website now: upkeep.js says so (priceStop)
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v, price: null, priceLabel: 'Call for price' } } })).r, { ok: true, price: null });
 });

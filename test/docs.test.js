@@ -1253,24 +1253,28 @@ test('the help gives the same age for a re-read of the car as the side panel use
   assert.match(help, new RegExp(`read from the website more than ${ms / 60000} minutes ago`), 'help.md says when the car is read again');
 });
 
-// Upkeep fills the new price the last scan found (the To do item's), and
-// does not read the website again at that point (upkeep.js). The copy a
-// person reads says so, never that it is "the website's new price" as if
-// read just then, and the panel's own price banner says it too.
-test('the help, README and site say a price update fills the last scan\'s price, as the upkeep banner does', async () => {
+// Upkeep reads the car on the website again just before it opens the
+// listing (upkeep.js startUpkeep, sidepanel.js upkeepPriceNow) and fills the
+// price the website shows then, or stops and says why. The copy a person
+// reads says so, never that it fills the last scan's price without reading
+// the website again, and the panel's own price banner says it too.
+test('the help, README and site say a price update reads the website again first, as the upkeep banner does', async () => {
   const help = doc('help.md');
+  const open = help.split('\n').find((l) => l.includes('Click **Open & update price**. The panel'));
+  assert.ok(open, 'help.md describes the price update');
+  assert.match(open, /reads the car on the website again first, with the same check a post makes/);
+  assert.match(open, /stops there and says why: it opens and fills nothing/);
+  assert.match(open, /marks it sold or sale-pending, no longer calls it pre-owned, has details that need a look/);
+  assert.match(open, /A car at another store, without photos or not yet on the lot still gets its new price/);
   const step = help.split('\n').find((l) => l.includes('The moment the Price box appears'));
-  assert.ok(step, 'help.md describes the price update');
-  assert.match(step, /the price the last scan found on the website/);
-  assert.match(step, /does not read the website again/);
-  assert.match(step, /\*\*Rescan website\*\* first/);
+  assert.match(step, /the price the website showed at that read/);
   for (const rel of ['../docs/help.md', '../README.md', '../site-src/pages/how-it-works.html', '../site/how-it-works/index.html']) {
-    assert.doesNotMatch(read(rel), /the website's new price/, `${rel} calls the filled price the website's new price`);
+    assert.doesNotMatch(read(rel), /the website's new price|does not read the website again|the new price the last scan found/, `${rel} says the filled price is the last scan's`);
   }
-  assert.match(read('../README.md'), /the new price the last scan found on the website in the Price box/);
+  assert.match(read('../README.md'), /reads the car on the website again just before it opens the listing/);
   const { up, upkeepHtml } = await import('../extension/upkeep.js');
-  Object.assign(up, { active: true, kind: 'price', status: 'waiting', price: 19000, listedPrice: 20000, name: 'Car A', vin: 'AAA', listingUrl: '', note: '', error: '' });
-  assert.match(upkeepHtml(), /fills in <b>\$19,000<\/b> \(was \$20,000\), the price the website showed at the last scan;[^<]*<b>Update<\/b>\. If the website's price may have changed since, rescan first\./);
+  Object.assign(up, { active: true, kind: 'price', status: 'waiting', price: 19000, scanPrice: null, listedPrice: 20000, name: 'Car A', vin: 'AAA', listingUrl: '', note: '', error: '' });
+  assert.match(upkeepHtml(), /fills in <b>\$19,000<\/b> \(was \$20,000\), the price the website shows now: Lot Current read the car on the website again just before opening the listing\. Then you click <b>Update<\/b>\./);
   up.active = false;
 });
 

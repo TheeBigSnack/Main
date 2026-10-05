@@ -119,8 +119,8 @@ Only cars marked as posted are watched: cars posted through the panel or marked 
 
 **A price change.** The **To do** tab lists it under **Update price**, with the old price, the new price and the difference.
 
-1. Click **Open & update price**. The panel opens your listing.
-2. On Facebook, click **Edit listing**. The moment the Price box appears on this car's form, Lot Current puts the new price in it and the panel tells you what the box shows. That is the price the last scan found on the website (the **To do** tab says when that scan was); Lot Current does not read the website again at this point. If the price may have changed since, close the item with **Not now**, click **Rescan website** first, and then use the new **To do** item.
+1. Click **Open & update price**. The panel reads the car on the website again first, with the same check a post makes, and then opens your listing. If the website no longer lists the car, marks it sold or sale-pending, no longer calls it pre-owned, has details that need a look, shows no price, or shows the price your listing already has, the panel stops there and says why: it opens and fills nothing. A car at another store, without photos or not yet on the lot still gets its new price: the listing is up.
+2. On Facebook, click **Edit listing**. The moment the Price box appears on this car's form, Lot Current puts in the price the website showed at that read, on the price basis the car was posted at, and the panel tells you what the box shows (and, when the website's price moved again after the last scan, the price that scan had found).
 3. Click **Update** yourself. The panel notices the new price on the listing and ticks the item off. If not, click **I updated it**.
 4. Updated it some other way? **Updated** in the popup ticks it off by hand.
 

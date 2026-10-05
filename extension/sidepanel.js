@@ -11,7 +11,8 @@
 //
 // This file never clicks anything on the Facebook page.
 
-import { markPosted, basisPrice } from './src/rescan.js';
+import { markPosted, basisPrice, listingWebsitePrice, pendingText } from './src/rescan.js';
+import { DECISION } from './src/classify.js';
 import { draftRecord, draftPill } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
@@ -2019,9 +2020,44 @@ function renderList() {
   box.innerHTML = queueOfferHtml(list, cap) + listBodyHtml(list, cap);
 }
 
+// A price update's read of the car on the website, just before its listing
+// opens (upkeep.js startUpkeep): the same read and check a post makes at post
+// time (readCarForPost, recheck), through the dealer tab the To do item was
+// clicked from while it still shows this website, else straight from the
+// extension with the website permission. What stops it is what the rescan
+// raises for a posted car (rescan.js diffScans): gone from the website,
+// marked sold or sale-pending, no longer called pre-owned, or details that
+// need a look. Another store, no photos or not yet on the lot hold back a
+// new post but not this: the listing is up, and its price should match the
+// website. The price is the website's now, on the basis the listing was
+// posted at (listingWebsitePrice), as the To do item's was. Resolves
+// { ok, price } or { ok: false, message }; upkeep.js fills nothing on a
+// stop or when there is no price.
+async function upkeepPriceNow(req) {
+  const vin = String(req.vin || '').toUpperCase();
+  const host = hostOf(req.origin);
+  const fresh = await readCarForPost({ tabId: req.dealerTabId ?? null, origin: req.origin, info: state.siteInfo, vin, url: state.snapshotVehicles[vin]?.url });
+  if (!fresh.ok && fresh.needsPermission) {
+    return { ok: false, message: `Lot Current reads this car on ${host} again before it fills a new price, and Chrome hasn't let it read ${host} from here. Open ${host}'s used inventory page, then click Open & update price in the popup there.` };
+  }
+  if (!fresh.ok && fresh.notFound) {
+    return { ok: false, message: `${host} no longer lists this car, so its price was not updated. Rescan the website: if it sold, To do lists it to take down.` };
+  }
+  if (!fresh.ok) {
+    const said = String(fresh.message || '').replace(/click Post( again| in the popup)?/g, 'click Open & update price in the popup').trim();
+    return { ok: false, message: `Lot Current reads this car on ${host} again before it fills a new price, and couldn't just now.${said ? ' ' + said : ''}` };
+  }
+  const held = pendingText(fresh.vehicle);
+  if (held) return { ok: false, message: `${held}, so its price was not updated. Rescan the website: To do then lists it to take down.` };
+  const check = recheck(fresh.vehicle, state.settings);
+  if (!check.ok && check.assessment.decision !== DECISION.NOT_READY) return { ok: false, message: `${check.message} Its price was not updated: rescan the website to see what to do with this listing.` };
+  return { ok: true, price: listingWebsitePrice(state.posted[vin], fresh.vehicle, state.settings.basis, [state.snapshotVehicles[vin], fresh.vehicle]) };
+}
+
 const upkeepCtx = {
   render: () => { if (state.step === 'upkeep') render(); }, // a late poll never redraws another step's view
   map: () => state.map || FORM_MAP,
+  priceNow: (req) => upkeepPriceNow(req),
   onClose: () => { state.step = 'idle'; render(); },
 };
 
