@@ -1307,6 +1307,11 @@ test('supabase/README.md says what the functions and the billing code do', () =>
   const sync = read('../supabase/functions/sync/index.ts');
   assert.match(sync, /if \(kind === 'takeDown'\) return rows\.length > 0 && up\.length === 0;/, 'the late-sighting rule changed: check supabase/README.md');
   assert.match(sync, /return to !== null && up\.length > 0 && up\.every\(\(r\) => intOrNull\(r\.price\) === to\)/);
+  // the comment above step 4 says the same rule as the code and the README:
+  // a price change counts as shown only when the caller has a listed row
+  const syncComments = sync.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('//')).map((l) => l.replace(/^\/\/\s?/, '')).join(' ').replace(/\s+/g, ' ');
+  assert.doesNotMatch(syncComments, /every listed row of theirs for the VIN is at the flag's new price/, 'the sync comment leaves out that a price change needs a listed row of the caller\'s');
+  assert.match(syncComments, /\(`shows`\): for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up\./);
   assert.doesNotMatch(flat, /none of their rows for it up/, 'the late-sighting rule leaves out that a take-down needs rows of the caller\'s');
   assert.match(flat, /for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up/);
 
