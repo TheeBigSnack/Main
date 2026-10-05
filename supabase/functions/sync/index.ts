@@ -42,6 +42,9 @@
 //   - a listing's price basis (basis, migration 0013: which of the
 //     website's two prices it was posted at) is written on insert, and
 //     later only into a row that has none, never over one already there;
+//   - a scan held back as a likely website hiccup (scan.withheld, migration
+//     0014) is stored marked withheld; the manager's page shows it as held
+//     back, never as the last scan (manager/data.js);
 //   - a listing row of another user, or one already taken down, is never
 //     changed by an upload (a stale machine cannot relist a sold car);
 //   - the caller's listed rows whose key (VIN@postedAt) is in `known` (the
@@ -130,6 +133,7 @@ interface ScanRow {
   ready: number | null;
   take_down_count: number | null;
   price_update_count: number | null;
+  withheld: boolean;
 }
 
 // ---------- the same normalisers as extension/src/sync.js ----------
@@ -270,6 +274,7 @@ function scanRow(scan: unknown, origin: string, dealershipId: string): ScanRow |
     ready: intOrNull(scan.ready),
     take_down_count: intOrNull(scan.takeDownCount),
     price_update_count: intOrNull(scan.priceUpdateCount),
+    withheld: scan.withheld === true,
   };
 }
 
@@ -576,7 +581,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // 5. this scan's counts (the same scan sent twice is stored once); one
     //    stamped further ahead of this clock than FUTURE_SKEW_MS is set
-    //    aside and counted, like a listing
+    //    aside and counted, like a listing. A scan held back as a likely
+    //    website hiccup comes marked withheld and is stored so
     const scan = scanRow(body.scan, membership.dealership.website_origin, dealershipId);
     if (scan && (ms(scan.taken_at) ?? 0) > latest) counts.rejected += 1;
     else if (scan) {

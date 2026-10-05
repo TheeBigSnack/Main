@@ -327,7 +327,7 @@ test('scanFromStored turns the stored snapshot and diff into the sync function\'
   assert.equal(scanFromStored(), null);
 });
 
-test('scanFromStored sends no counts for a scan judged a website hiccup, from the worker or from storage', () => {
+test('scanFromStored sends no lot counts for a scan judged a website hiccup, from the worker or from storage: its own read goes up marked withheld, or nothing', () => {
   // the hiccup scan read 8 of a 20-car lot; its snapshot was not saved
   const hiccup = { takenAt: T(9), vehicles: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`V${i}`, { decision: 'ready' }])) };
   const saved = { takenAt: T(0), vehicles: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`V${i}`, { decision: 'ready' }])) };
@@ -335,6 +335,11 @@ test('scanFromStored sends no counts for a scan judged a website hiccup, from th
   assert.equal(scanFromStored({ snapshot: hiccup, diff }), null, 'the worker\'s own scan: never the short count');
   assert.equal(scanFromStored({ snapshot: saved, diff }), null, 'the stored pair: never the old count under the hiccup\'s time');
   assert.equal(scanFromStored({ snapshot: saved, diff: { ...diff, unreliable: false } }).cars, 20);
+  // a diff that holds the read back (src/rescan.js withWithheld): the read's own counts, marked withheld, whichever snapshot comes with it
+  const held = { ...diff, withheld: { since: T(9), scans: 1, cars: 8, saved: 20, snapshot: hiccup } };
+  const want = { takenAt: T(9), cars: 8, ready: 8, takeDownCount: 0, priceUpdateCount: 0, withheld: true };
+  assert.deepEqual(scanFromStored({ snapshot: hiccup, diff: held }), want);
+  assert.deepEqual(scanFromStored({ snapshot: saved, diff: held }), want, 'never the saved lot\'s count');
 });
 
 // A small model of the sync function (supabase/functions/sync/index.ts):
@@ -497,7 +502,7 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   assert.deepEqual(calls[2].body.pilot, { posts: [], flags: [] }, 'nothing in the pilot changed since');
 });
 
-test('syncOnce: after a scan judged a website hiccup, no scan counts go up, so the manager keeps the last trusted scan', async () => {
+test('syncOnce: after a scan judged a website hiccup, no lot counts go up, so the manager keeps the last trusted scan; a held-back read goes up marked withheld', async () => {
   const server = fakeSyncServer();
   const { fetchImpl, calls } = fakeFetch({ sync: server.handler });
   const saved = { takenAt: T(0), vehicles: { [VIN_A]: { decision: 'ready' }, [VIN_B]: { decision: 'ready' } } };
@@ -507,6 +512,12 @@ test('syncOnce: after a scan judged a website hiccup, no scan counts go up, so t
   assert.equal(r.ok, true, r.error);
   assert.equal(calls[0].body.scan, null);
   assert.equal(r.counts.scans, 0);
+  // with the read held back, it goes up marked withheld: the manager sees scans are running and held back
+  const read = { takenAt: T(9), vehicles: { [VIN_A]: { decision: 'ready' } } };
+  const held = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.snapshot]: saved, [K.diff]: { ...hiccup, withheld: { since: T(9), scans: 1, cars: 1, saved: 2, snapshot: read } } });
+  const r2 = await syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage: held }) });
+  assert.equal(r2.ok, true, r2.error);
+  assert.deepEqual(calls[1].body.scan, { takenAt: T(9), cars: 1, ready: 1, takeDownCount: 0, priceUpdateCount: 0, withheld: true });
 });
 
 test('syncOnce: a token the function rejects signs the person out; not a member and a network failure write nothing', async () => {

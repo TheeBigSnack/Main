@@ -102,3 +102,40 @@ test('a rescan keeps the to-do items the salesperson ticked off while it ran, an
     globalThis.fetch = realFetch;
   }
 });
+
+test('a rescan that reads most of the lot gone holds the read back with the diff, counts agreeing reads on, and never saves it as the snapshot', async () => {
+  for (const key of Object.keys(store)) delete store[key];
+  const cars = standardCars(12);
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = schemaOrg.scanOptions(SERVICE);
+  const full = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars })), site, settings, options });
+  assert.equal(Object.keys(full.snapshot.vehicles).length, 12);
+  Object.assign(store, {
+    [SITES_KEY]: { [O]: { name: 'Sample Motors', adapter: 'schemaOrg', service: SERVICE, site, auto: true } },
+    [k.settings]: settings, [k.snapshot]: full.snapshot, [k.posted]: {}, [k.boilerplate]: full.boilerplate,
+  });
+  // the website now lists 4 of the 12
+  const short = standardSite({ cars: cars.slice(0, 4) });
+  for (const c of cars.slice(4)) short.set(O + c.path, httpError(404));
+  const search = fakeSiteSearch(short);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const got = await search({ url });
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+  };
+  try {
+    assert.equal((await runRescan(O, { reason: 'alarm' })).ok, true);
+    const first = store[k.diff];
+    assert.equal(first.unreliable, true);
+    assert.deepEqual([first.withheld.scans, first.withheld.cars, first.withheld.saved], [1, 4, 12]);
+    assert.equal(Object.keys(store[k.snapshot].vehicles).length, 12, 'the saved list stays');
+    assert.equal((await runRescan(O, { reason: 'alarm' })).ok, true);
+    const second = store[k.diff];
+    assert.deepEqual([second.withheld.scans, second.withheld.since], [2, first.withheld.since], 'the second agreeing read counts on from the first');
+    assert.equal(Object.keys(second.withheld.snapshot.vehicles).length, 4);
+    assert.equal(Object.keys(store[k.snapshot].vehicles).length, 12, 'no rescan replaces the saved list; only the salesperson\'s click in To do does');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

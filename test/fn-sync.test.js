@@ -399,6 +399,16 @@ test('sync: a scan stamped more than 5 minutes ahead of the server is not stored
   assert.equal(fake.rows('scan_summaries').length, 1);
 });
 
+test('sync: a scan held back as a likely website hiccup is stored marked withheld, any other scan is not', async () => {
+  world();
+  const handler = await load();
+  const held = await sync(handler, TOKEN.u1, { scan: { takenAt: at(-60), cars: 4, ready: 3, takeDownCount: 0, priceUpdateCount: 0, withheld: true } });
+  assert.equal(held.status, 200);
+  const trusted = await sync(handler, TOKEN.u1, { scan: { takenAt: at(-30), cars: 12, ready: 9, withheld: 'yes' } });
+  assert.equal(trusted.status, 200);
+  assert.deepEqual(fake.rows('scan_summaries').map((x) => [x.cars, x.withheld]).sort((a, b) => a[0] - b[0]), [[4, true], [12, false]]);
+});
+
 test('sync: postsToday counts the caller\'s own rows posted inside the day they sent, any status, after the upload; no usable day gives null', async () => {
   const today = { from: at(-6 * 60), to: at(6 * 60) };
   const hourAgo = at(-60);

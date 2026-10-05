@@ -83,9 +83,9 @@ const SCHEMA = {
     check: (r) => (!['takeDown', 'price'].includes(r.kind) ? 'todo_items_kind_check' : r.how !== null && !['detected', 'manual', 'cleared'].includes(r.how) ? 'todo_items_how_check' : ''),
   },
   scan_summaries: {
-    columns: { id: 'uuid!', dealership_id: 'uuid!', website_origin: 'text!', taken_at: 'ts!', cars: 'int', ready: 'int', take_down_count: 'int', price_update_count: 'int' },
+    columns: { id: 'uuid!', dealership_id: 'uuid!', website_origin: 'text!', taken_at: 'ts!', cars: 'int', ready: 'int', take_down_count: 'int', price_update_count: 'int', withheld: 'bool!' },
     keys: [['id'], ['dealership_id', 'website_origin', 'taken_at']],
-    defaults: { id: NEW_UUID },
+    defaults: { id: NEW_UUID, withheld: false },
   },
   post_attempts: {
     columns: {

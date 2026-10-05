@@ -20,7 +20,7 @@ import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
-import { withPostedBasis } from './src/rescan.js';
+import { withPostedBasis, withWithheld } from './src/rescan.js';
 import { updateKey, storageErrorText, isStorageFull, STORAGE_FULL } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
@@ -169,7 +169,7 @@ async function runScan(ctx) {
     ctx.render();
     return false;
   }
-  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate]);
+  const data = await chrome.storage.local.get([k.snapshot, k.posted, k.boilerplate, k.diff]);
   wiz.ownListings = Object.values(data[k.posted] || {}).filter((e) => e && typeof e === 'object' && e.mine !== false).length; // the Price step says a change is for new posts
   let r;
   try {
@@ -192,13 +192,16 @@ async function runScan(ctx) {
   wiz.site = r.site;
   await keepGrantedRescans();
   // Like the popup and the background rescan: a scan that lost most of the
-  // lot at once is a website hiccup, so the last good snapshot is kept.
+  // lot at once is a website hiccup, so the last good snapshot is kept, and
+  // the read is held back with the diff (src/rescan.js withWithheld) for the
+  // popup's To do to offer once scans agree.
   const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
+  const diff = withWithheld(r.diff, r.snapshot, data[k.diff]);
   const stores = storeNames(r.vehicles);
   // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
   const scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
   try {
-    await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: r.diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
+    await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
   } catch (e) {
     wiz.error = storageErrorText(e); // the quota, most likely: the step says what to clear, and Read the website is there again
     ctx.render();

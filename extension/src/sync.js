@@ -241,17 +241,19 @@ export function toServerRows({ origin = '', posted = {}, pilot = null, dealershi
 }
 
 // One scan's counts (the popup's diff plus the snapshot's size), or null.
+// withheld: the scan was judged a website hiccup and its read held back
+// (src/accountFlow.js scanFromStored); sent only when true.
 export function scanSummary(scan) {
   if (!isObject(scan)) return null;
   const takenAt = isoOrNull(scan.takenAt);
   if (!takenAt) return null;
-  return { takenAt, cars: intOrNull(scan.cars), ready: intOrNull(scan.ready), takeDownCount: intOrNull(scan.takeDownCount), priceUpdateCount: intOrNull(scan.priceUpdateCount) };
+  return { takenAt, cars: intOrNull(scan.cars), ready: intOrNull(scan.ready), takeDownCount: intOrNull(scan.takeDownCount), priceUpdateCount: intOrNull(scan.priceUpdateCount), ...(scan.withheld === true ? { withheld: true } : {}) };
 }
 
 export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
   const s = scanSummary(scan);
   if (!s) return null;
-  return { dealership_id: dealershipId, website_origin: String(origin || ''), taken_at: s.takenAt, cars: s.cars, ready: s.ready, take_down_count: s.takeDownCount, price_update_count: s.priceUpdateCount };
+  return { dealership_id: dealershipId, website_origin: String(origin || ''), taken_at: s.takenAt, cars: s.cars, ready: s.ready, take_down_count: s.takeDownCount, price_update_count: s.priceUpdateCount, withheld: s.withheld === true };
 }
 
 /**

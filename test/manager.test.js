@@ -50,7 +50,7 @@ test('the definitions are the pilot\'s, sentence for sentence (both files read a
 // either, not only that nobody had Chrome open. The website and the
 // onboarding email say so; the manager view and its CSV say so too.
 test('every rescan line on the manager view names the condition: automatic rescans allowed', () => {
-  assert.equal(SCAN_STALE_WHY, 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one that looks like a website hiccup (most of the lot gone at once) is not recorded here');
+  assert.equal(SCAN_STALE_WHY, 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one held back as a likely website hiccup (most of the lot gone at once) is never the last scan');
   assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_WHY\}`\)/);
   assert.equal(DEFINITIONS.at(-1), 'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.');
   for (const file of ['manager/manager.js', 'manager/data.js', 'extension/src/pilot.js']) {
@@ -157,10 +157,36 @@ test('summarize on the sample: the last scan line', () => {
   const stale = summarize({ ...sample(), scans: [{ taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 }] });
   assert.equal(stale.lastScan.stale, true);
   assert.equal(stale.lastScan.line, 'Last scan 2026-11-16 06:00: 1 car on the website, 0 ready to post, 0 to take down, 0 price changes');
-  // a stale scan's note gives both reasons: no rescan ran, or the ones that ran looked like a website hiccup and were never sent
+  // a stale scan's note gives both reasons: no rescan ran, or the ones that ran looked like a website hiccup and were held back
   assert.match(SCAN_STALE_WHY, /every 3 hours only while a salesperson's Chrome is open/);
-  assert.match(SCAN_STALE_WHY, /website hiccup .* not recorded here/);
+  assert.match(SCAN_STALE_WHY, /held back as a likely website hiccup .* never the last scan/);
   assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_WHY\}`\)/);
+});
+
+test('summarize: scans held back as a likely website hiccup are told beside the last trusted scan, never as it, and nothing is called checked', () => {
+  const trusted = { taken_at: ago(2), cars: 41, ready: 29, take_down_count: 2, price_update_count: 1 };
+  const held = (hours, cars) => ({ taken_at: ago(hours), cars, ready: 3, take_down_count: 0, price_update_count: 0, withheld: true });
+  const input = { ...sample(), scans: [trusted, held(1.5, 5), held(1, 4)] };
+  const s = summarize(input);
+  assert.equal(s.lastScan.takenAt, trusted.taken_at, 'the last scan is the trusted one, not the newer short reads');
+  assert.equal(s.lastScan.cars, 41);
+  assert.deepEqual(s.lastScan.withheld, { scans: 2, newestAt: ago(1), cars: 4 });
+  assert.equal(s.lastScan.stale, true, 'two hours old, but nothing it missed has been flagged since');
+  assert.equal(s.lastScan.line, 'Last scan 2026-11-16 13:00: 41 cars on the website, 29 ready to post, 2 to take down, 1 price change. 2 later scans (the newest 2026-11-16 14:00: 4 cars on the website) were held back as a likely website hiccup, with most of the lot missing at once, so nothing they missed is flagged. If the website really lists fewer cars now, a salesperson can accept the smaller list on the extension\'s To do tab.');
+  assert.equal(s.clear.sold.tone, 'warn');
+  assert.match(s.clear.sold.line, /The scans since the last trusted one were held back as a likely website hiccup, so a car sold since then is not flagged yet\./);
+  assert.match(managerCsv(input, { now: NOW, timeZone: 'UTC' }), /Last scan.*2 later scans .*held back as a likely website hiccup/);
+  // a held-back scan older than the trusted one is history, not news
+  const after = summarize({ ...sample(), scans: [held(3, 4), trusted] });
+  assert.equal(after.lastScan.withheld, null);
+  assert.equal(after.lastScan.stale, false);
+  assert.doesNotMatch(after.lastScan.line, /held back/);
+  // only held-back scans recorded: no trusted scan is made up from them
+  const only = summarize({ ...sample(), scans: [held(1, 4)] });
+  assert.equal(only.lastScan.takenAt, null);
+  assert.equal(only.lastScan.cars, null);
+  assert.match(only.lastScan.line, /^No trusted scan is recorded yet\. One scan \(the newest 2026-11-16 14:00: 4 cars on the website\) was held back/);
+  assert.match(only.clear.price.line, /The one scan recorded was held back as a likely website hiccup, so a price that changed since then is not flagged yet\./);
 });
 
 test('summarize: a scan stamped more than 5 minutes ahead of now (a machine whose clock ran ahead) does not pin the last scan line or hide its stale warning', () => {

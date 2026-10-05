@@ -86,6 +86,66 @@ test('more than half the lot vanishing at once is treated as a website hiccup', 
   assert.match(d.warnings.join(' '), /disappeared at once/);
 });
 
+test('a lot that really shrinks by more than half: held back scan after scan, offered once two agree, and saved only by the salesperson\'s click', () => {
+  const big = [];
+  for (let i = 0; i < 12; i += 1) big.push(['usedNormal', { vin: `1C6RR7FT0KS64${String(1000 + i)}` }]);
+  const vins = big.map(([, p]) => p.vin);
+  const saved = snapshot(big, undefined, '2026-09-26T09:00:00.000Z');
+  const posted = { [vins[11]]: { name: 'Ram', price: 27163, basis: 'website', postedAt: '2026-09-20T12:00:00.000Z' } };
+  const at = (h) => `2026-09-26T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const read = (h, n = 4, from = 0) => snapshot(big.slice(from, from + n), undefined, at(h));
+  // what a save does: the diff, settled, with the read held back against the diff saved before it
+  const scanAt = (snap, before, confirm = null) => {
+    const d = diffScans(saved, snap, { posted, confirm });
+    d.takenAt = snap.takenAt;
+    return rescan.withWithheld(settleDiff(d, posted), snap, before);
+  };
+
+  // the first short read: held back, not offered, nothing to accept
+  const first = scanAt(read(12), null);
+  assert.equal(first.unreliable, true);
+  assert.deepEqual({ ...first.withheld, snapshot: undefined }, { since: at(12), scans: 1, cars: 4, saved: 12, snapshot: undefined });
+  assert.equal(rescan.withheldOffer(first), null);
+  assert.equal(rescan.acceptWithheld(first), null);
+  assert.equal(first.takeDown.length, 0, 'nothing marked gone');
+  // the second agreeing read: offered, counted from the first
+  const second = scanAt(read(15), first);
+  assert.equal(second.withheld.scans, 2);
+  assert.equal(second.withheld.since, at(12));
+  assert.equal(rescan.withheldOffer(second).cars, 4);
+  assert.equal(second.withheld.snapshot.takenAt, at(15), 'the newest read is the one offered');
+  // a car sold between two scans hours apart still agrees; another part of the lot does not
+  assert.equal(scanAt(read(18, 3), second).withheld.scans, 3);
+  assert.equal(scanAt(read(18, 4, 4), second).withheld.scans, 1);
+  // an empty list, or one the website itself says is not whole, is never offered
+  const empty = snapshot([], undefined, at(18));
+  assert.equal(scanAt(empty, scanAt(empty, null)).withheld.scans, 1);
+  const part = { ...read(18), complete: false };
+  assert.equal(scanAt(part, second).withheld.scans, 1);
+  // a scan that is saved holds nothing back, and starts the count again
+  const whole = rescan.withWithheld(diffScans(saved, saved, { posted }), saved, second);
+  assert.equal(whole.unreliable, false);
+  assert.equal('withheld' in whole, false);
+  assert.equal(scanAt(read(21), whole).withheld.scans, 1);
+
+  // the click: the read becomes the saved list, the hiccup warning goes, the items stay
+  const took = rescan.acceptWithheld(second, '2026-09-26T16:00:00.000Z');
+  assert.equal(took.snapshot, second.withheld.snapshot);
+  assert.equal(took.diff.unreliable, false);
+  assert.equal('withheld' in took.diff, false);
+  assert.doesNotMatch(took.diff.warnings.join(' '), /disappeared at once/);
+  assert.deepEqual(took.diff.accepted, { at: '2026-09-26T16:00:00.000Z', cars: 4, saved: 12 });
+  assert.equal(took.diff.takeDown.length, 0, 'still nothing marked gone');
+  assert.ok(took.diff.needsALook.some((n) => n.vin === vins[11] && n.yours), 'the posted car it missed stays a question');
+  assert.notEqual(scanFromStored({ snapshot: took.snapshot, diff: took.diff }), null, 'and the scan now counts as a trusted one');
+  // the next scan compares with the new list: no hiccup, and the posted car
+  // it misses is gone only once the website's own search cannot find it
+  const next = diffScans(took.snapshot, read(18), { posted, confirm: confirmed(vins[11]) });
+  assert.equal(next.unreliable, false);
+  assert.deepEqual(next.takeDown.map((t) => [t.vin, t.why]), [[vins[11], 'gone']]);
+  assert.equal(diffScans(took.snapshot, read(18), { posted, confirm: { checked: [], notFound: [], error: 'timeout' } }).takeDown.length, 0);
+});
+
 test('price drop on a car you posted: update from your listing price', () => {
   const posted = { [VIN.ram]: { name: 'Ram', price: 27163 } };
   const curr = snapshot([['usedNormal', { extra_fields: { lightning: { pricing: { low: { value: '26163' } } } } }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']]);

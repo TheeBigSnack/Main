@@ -66,8 +66,12 @@ test('scan summary and row', () => {
   assert.equal(scanSummary(null), null);
   assert.equal(scanSummary({ cars: 3 }), null, 'a scan without a time is not a scan');
   assert.deepEqual(scanRow({ takenAt: T(0), cars: 41, ready: 29, takeDownCount: 2, priceUpdateCount: '1' }, { origin: ORIGIN, dealershipId: D }), {
-    dealership_id: D, website_origin: ORIGIN, taken_at: T(0), cars: 41, ready: 29, take_down_count: 2, price_update_count: 1,
+    dealership_id: D, website_origin: ORIGIN, taken_at: T(0), cars: 41, ready: 29, take_down_count: 2, price_update_count: 1, withheld: false,
   });
+  // a read held back as a likely website hiccup says so; anything but true is a trusted scan
+  assert.deepEqual(scanSummary({ takenAt: T(0), cars: 4, withheld: true }), { takenAt: T(0), cars: 4, ready: null, takeDownCount: null, priceUpdateCount: null, withheld: true });
+  assert.equal('withheld' in scanSummary({ takenAt: T(0), cars: 4, withheld: 'yes' }), false);
+  assert.equal(scanRow({ takenAt: T(0), cars: 4, withheld: true }, { origin: ORIGIN, dealershipId: D }).withheld, true);
 });
 
 test('syncPayload: the caller\'s whole registry, only the pilot entries that changed since the last sync (by this machine\'s clock), the scan and since', () => {

@@ -276,6 +276,44 @@ test("a person's choice of every store survives the website's first scan; a Save
   }
 });
 
+// A lot of 10 or more that really shrinks by more than half: each scan is
+// held back as a likely website hiccup, and once two in a row read the same
+// smaller list, To do says so with a button; only that click saves it.
+test('a lot that keeps reading more than half smaller is offered on To do after two scans that agree, and only the click saves the smaller list', async () => {
+  const records = Array.from({ length: 12 }, (_, i) => ({ ...structuredClone(fixtures.usedNormal), vin: sampleVin(i + 1), stock: `S${i + 1}` }));
+  const p = await loadPopup({ records });
+  await p.scan();
+  const cars = () => Object.keys(p.local[k.snapshot].vehicles).length;
+  assert.equal(cars(), 12);
+
+  records.splice(4); // the website now lists 4 of the 12
+  await p.scan();
+  assert.equal(p.local[k.diff].unreliable, true);
+  assert.equal(cars(), 12, 'the saved list stays');
+  assert.equal(p.local[k.diff].withheld.scans, 1);
+  assert.doesNotMatch(p.panel(), /acceptWithheld/, 'one short read is not offered');
+
+  await p.scan();
+  assert.equal(p.local[k.diff].withheld.scans, 2);
+  assert.equal(cars(), 12, 'never replaced by a scan');
+  assert.match(p.panel(), /id="withheld"/);
+  assert.match(p.panel(), /each read 4 cars on the website, where the saved list has 12 cars/);
+  assert.match(p.panel(), /data-action="acceptWithheld">Use the new list of 4 cars</);
+
+  await p.click('acceptWithheld');
+  assert.equal(cars(), 4, 'the click saves the smaller list');
+  assert.equal(p.local[k.diff].unreliable, false);
+  assert.equal('withheld' in p.local[k.diff], false);
+  assert.doesNotMatch(p.panel(), /acceptWithheld|disappeared at once/);
+  assert.match(p.panel(), /id="withheldAccepted"/);
+
+  // the next scan compares with the new list: no hiccup
+  await p.scan();
+  assert.equal(p.local[k.diff].unreliable, false);
+  assert.equal(cars(), 4);
+  assert.doesNotMatch(p.panel(), /withheld/);
+});
+
 // Clear the numbers is what the storage-full message sends people to. An
 // open to-do item is still on To do, and its synced copy on the manager's
 // list closes only when this computer closes it, so it stays.

@@ -15,14 +15,18 @@
 // A car is only called gone when the website's own search can't find its VIN.
 // If more than half of a lot of 10 or more disappears at once, nothing is
 // marked gone: that is almost always a website hiccup, not a sales record.
+// That scan is not saved; it is held back with the diff (withWithheld), and
+// when scans in a row keep reading the same smaller list, To do offers to
+// use it. Only the salesperson's click does (acceptWithheld).
 
 import { DECISION } from './classify.js';
 
 export const MASS_DISAPPEARANCE_SHARE = 0.5;
 // The share rule applies from this many cars in the last scan up. Below it a
-// lot that really sells half its cars in one rescan would otherwise never be
-// saved again (an unreliable scan is not saved); a small lot relies on the
-// adapter refusing an answer that is not a list (adapters/README.md).
+// lot that really sells half its cars in one rescan would otherwise wait for
+// the salesperson to accept its new list (an unreliable scan is not saved:
+// withWithheld, acceptWithheld); a small lot relies on the adapter refusing
+// an answer that is not a list (adapters/README.md).
 export const MASS_DISAPPEARANCE_MIN_LOT = 10;
 
 // The price to post. 'beforeFees' means the lower second price the website
@@ -247,7 +251,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
   if (massDisappearance) {
     out.unreliable = true;
     out.warnings.push(
-      `${missingFromLastScan} of ${out.counts.previous} cars disappeared at once. That's usually a website hiccup, so nothing was marked as gone. Check the website before taking anything down.`
+      `${missingFromLastScan} of ${out.counts.previous} cars ${HICCUP_WORDS}, so nothing was marked as gone. Check the website before taking anything down.`
     );
   }
 
@@ -346,6 +350,82 @@ export function settleDiff(diff, posted) {
   for (const list of ['takeDown', 'needsALook']) if (Array.isArray(diff[list])) out[list] = diff[list].filter(keep);
   if (Array.isArray(diff.priceUpdates)) out.priceUpdates = diff.priceUpdates.filter((u) => keep(u) && !(u && u.yours && now[u.vin].price === u.to));
   return out;
+}
+
+// A scan judged a website hiccup (diff.unreliable) is not saved. So a lot of
+// MASS_DISAPPEARANCE_MIN_LOT or more that really did shrink by more than half
+// would read as a hiccup on every scan for good: the saved list would never
+// move on, and the manager's Last scan would stop. Each such scan is kept
+// with its diff instead, held back (diff.withheld): its snapshot, how many
+// cars it read, how many the saved list has, since when and in how many
+// scans in a row the website has read that same smaller list. Once
+// WITHHELD_AGREE_SCANS have, To do says so and offers to use the new list
+// (acceptWithheld). Only that click replaces the saved list: no scan does it
+// on its own.
+export const WITHHELD_AGREE_SCANS = 2;
+
+// Two held-back reads agree when both read some cars, both got the website's
+// whole list (complete), and they differ by no more than a tenth of the
+// larger, or two cars: a car sold or arrived between two scans hours apart
+// still agrees, a read of another part of the lot does not. A read with no
+// cars never agrees, so an empty list is never offered.
+export function sameRead(a, b) {
+  const x = Object.keys((a && a.vehicles) || {});
+  const y = new Set(Object.keys((b && b.vehicles) || {}));
+  if (!x.length || !y.size || a.complete === false || b.complete === false) return false;
+  const shared = x.filter((vin) => y.has(vin)).length;
+  return x.length - shared + (y.size - shared) <= Math.max(2, Math.floor(Math.max(x.length, y.size) / 10));
+}
+
+/**
+ * The diff to save for a scan, with its read held back when it was judged a
+ * website hiccup. `snapshot` is this scan's (not saved when the scan is
+ * unreliable), `before` the diff saved before this scan: its held-back read,
+ * when this one agrees with it (sameRead), carries the count on. A scan that
+ * is saved holds nothing back.
+ */
+export function withWithheld(diff, snapshot, before = null) {
+  if (!diff || typeof diff !== 'object') return diff;
+  const { withheld: _gone, ...out } = diff;
+  if (!diff.unreliable || !snapshot || typeof snapshot !== 'object' || !snapshot.vehicles || typeof snapshot.vehicles !== 'object') return out;
+  const last = before && typeof before === 'object' && before.withheld && typeof before.withheld === 'object' ? before.withheld : null;
+  const agree = Boolean(last && sameRead(last.snapshot, snapshot));
+  out.withheld = {
+    since: agree && typeof last.since === 'string' ? last.since : snapshot.takenAt || diff.takenAt || null,
+    scans: agree ? (Number(last.scans) || 1) + 1 : 1,
+    cars: Object.keys(snapshot.vehicles).length,
+    saved: diff.counts && typeof diff.counts.previous === 'number' ? diff.counts.previous : null,
+    snapshot,
+  };
+  return out;
+}
+
+// The held-back read To do offers to use: WITHHELD_AGREE_SCANS or more in a row agree.
+export function withheldOffer(diff) {
+  const w = diff && typeof diff === 'object' ? diff.withheld : null;
+  if (!w || typeof w !== 'object' || !(Number(w.scans) >= WITHHELD_AGREE_SCANS)) return null;
+  const vehicles = w.snapshot && w.snapshot.vehicles;
+  return vehicles && typeof vehicles === 'object' && Object.keys(vehicles).length ? w : null;
+}
+
+// The words of the hiccup warning that stay the same whatever the counts.
+export const HICCUP_WORDS = "disappeared at once. That's usually a website hiccup";
+
+/**
+ * The salesperson's Use the new list: the held-back read becomes the saved
+ * snapshot, and the diff no longer calls the scan a hiccup (its warning
+ * goes, `accepted` says what was chosen). Its to-do items stay as they were:
+ * the cars it missed stay under Needs a look, none marked gone. The next scan
+ * compares with the new list; a posted car missing from it is looked up on
+ * the website before it is called gone, as always. null when there is
+ * nothing to accept (a scan since saved the list, or no reads agree yet).
+ */
+export function acceptWithheld(diff, now = new Date().toISOString()) {
+  const w = withheldOffer(diff);
+  if (!w) return null;
+  const { withheld: _taken, ...rest } = diff;
+  const warnings = (Array.isArray(diff.warnings) ? diff.warnings : []).filter((x) => !String(x).includes(HICCUP_WORDS));
+  return { snapshot: w.snapshot, diff: { ...rest, unreliable: false, warnings, accepted: { at: now, cars: w.cars, saved: w.saved } } };
 }
 
 // Posted-listing bookkeeping. `posted` is a plain object so it stores cleanly.
