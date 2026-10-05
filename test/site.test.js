@@ -703,6 +703,13 @@ test('For managers says the free pilot starts with no card, and only Subscribe a
   assert.doesNotMatch(page, /Start the free pilot\s*,\s*Subscribe and Manage billing open Stripe/i, 'For managers says Start the free pilot opens Stripe\'s pages');
   assert.match(page, /start the free pilot here, with no card/, 'For managers says the pilot needs no card');
   assert.match(page, /Subscribe and Manage billing open Stripe's own pages for the card and the invoices/);
+  // Getting started's first step is the free pilot alone while billing is closed (manager/data.js
+  // PLAN_STEP_CLOSED_TITLE), and the page no longer groups the pilot with subscribing as one Stripe step
+  const { GETTING_STARTED, PLAN_STEP_CLOSED_TITLE } = await import('../manager/data.js');
+  assert.equal(PLAN_STEP_CLOSED_TITLE, 'Start the free pilot');
+  assert.equal(GETTING_STARTED.plan.title, 'Start the free pilot or subscribe');
+  const start = ((page.match(/Four steps above the other cards(.*?)Once all four are done/) || [])[1] || '').replace(/\s+([,;)])/g, '$1');
+  assert.match(start, /^[^;]*: Start the free pilot, which asks for no card \(once paying by card opens, the step reads Start the free pilot or subscribe, and only subscribing goes to Stripe's pages\);/, 'For managers groups the free pilot with subscribing');
 });
 
 // review: the demo form's fields were drawn with --line (#e2e5e1 on white, #2f3531 on #161917: 1.27:1 and
