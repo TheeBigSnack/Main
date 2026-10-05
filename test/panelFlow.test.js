@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { currentVin, advance } from '../extension/src/queue.js';
+import { currentVin, advance, describe as describeQueue } from '../extension/src/queue.js';
 import { markPosted, diffScans } from '../extension/src/rescan.js';
 import { logPost, capStatus, capCount } from '../extension/src/cap.js';
 import { updateKey } from '../extension/src/storage.js';
@@ -1475,6 +1475,59 @@ test('It\'s posted records the price the form was filled with on the basis it wa
 // car's listing in the manager's view. Such an address is recorded as no link,
 // the post is recorded all the same, and the panel says no link was saved.
 // Run with sidepanel.js's own confirmPosted and the real listingLink and markPosted.
+// In a queue, It's posted with an address in Listing link that is not a
+// listing's own records the car with no link and says so; the next car's
+// steps (or the queue's end) then clear the status line at once. The queue
+// bar keeps saying which of this queue's cars have no link, until another
+// queue starts. Run with sidepanel.js's own confirmPosted and queueBar.
+test('in a queue, the cars recorded with no listing link stay named in the queue bar after the next car loads', async () => {
+  const store = { 'posted:o': {}, 'postLog:o': [] };
+  const statuses = [];
+  const state = {
+    origin: 'o', vin: 'AAA', step: 'publish', vehicle: { vin: 'AAA', name: 'Car A', price: 20000 }, settings: { basis: 'website', salesperson: { name: 'Pat' } }, detected: null, queueMode: true, posted: {}, postLog: [], map: FORM_MAP,
+    queue: { vins: ['AAA', 'BBB', 'CCC'], index: 0, status: 'running', results: {}, startedAt: '2026-10-05T09:00:00.000Z' },
+  };
+  const names = { AAA: 'Car A', BBB: 'Car B', CCC: 'Car C' };
+  let typed = FORM_MAP.yourListingsUrl;
+  // compiled again for each car: each car's post is a new run (clearFlow's flowRun), confirmed once
+  const panel = () => compileMany(['confirmPosted', 'offeredLink', 'queueBar'], {
+    state, $: (id) => (id === 'listingUrl' ? { value: typed } : null), watcher: null, flowRun: 0, confirmedRun: -1, listingLink, markPosted,
+    siteKeys: (o) => ({ posted: 'posted:' + o, postLog: 'postLog:' + o }),
+    logPost: (log, vin, at) => [...log, { vin, at }],
+    updateKey: async (key, change) => (store[key] = change(store[key])),
+    panelStorage: {}, storageErrorText: (e) => String(e), setStatus: (text) => statuses.push(text),
+    pilotNote: async () => {}, endPost: () => {}, accountsConfigured: () => false, nameOf: (vin) => names[vin] || vin,
+    esc: (t) => String(t ?? ''), describeQueue, currentVin, formOpen: () => false,
+    // the queue moves on: the next car loads up to its Publish step (its steps clear the status line), or the queue ends
+    afterQueueStep: async (outcome, vin) => {
+      state.queue = advance(state.queue, outcome, vin);
+      const next = currentVin(state.queue);
+      Object.assign(state, { vin: next, step: next ? 'publish' : 'queueDone', vehicle: next ? { vin: next, name: names[next], price: 20000 } : null, queueMode: Boolean(next) });
+      statuses.push('');
+    },
+    render: () => {}, saveFlow: async () => {}, savedFlowIs: async () => true,
+  }, ['queueKey']);
+  const bar = () => panel().queueBar();
+  // Car A: Your listings typed in; recorded with no link; Car B loads and clears the status line
+  await panel().confirmPosted();
+  assert.equal(store['posted:o'].AAA.listingUrl, undefined);
+  assert.deepEqual([statuses.at(-2).slice(0, 31), statuses.at(-1)], ['No listing link was saved for C', ''], 'the status line says it, then the next car clears it');
+  assert.match(bar(), /<p class="hint" id="queueUnlinked">No listing link was saved for Car A: the address in Listing link wasn't a Marketplace listing's own address\. Its To do items open Your listings, where you pick the listing\.<\/p>/);
+  // Car B: a listing's own address: nothing more to say
+  typed = 'https://www.facebook.com/marketplace/item/1234567890/';
+  await panel().confirmPosted();
+  assert.equal(store['posted:o'].BBB.listingUrl, typed);
+  assert.match(bar(), /No listing link was saved for Car A:/);
+  // Car C, the last: no link again; the finished queue's bar names both
+  typed = 'https://www.facebook.com/marketplace/you/selling';
+  await panel().confirmPosted();
+  assert.equal(state.queue.status, 'done');
+  assert.match(bar(), /No listing link was saved for Car A, Car C: [^<]*Their To do items open Your listings/);
+  // another queue: none of the last queue's cars
+  state.queue = { vins: ['DDD'], index: 0, status: 'running', results: {}, startedAt: '2026-10-05T11:00:00.000Z' };
+  assert.doesNotMatch(bar(), /queueUnlinked/);
+});
+
 test('It\'s posted keeps a listing link only when it is a listing\'s own address; the post is recorded either way', async () => {
   const run = async ({ typed = '', detected = null, queueMode = false } = {}) => {
     const store = { 'posted:o': {}, 'postLog:o': [] };
@@ -1488,7 +1541,7 @@ test('It\'s posted keeps a listing link only when it is a listing\'s own address
       panelStorage: {}, storageErrorText: (e) => String(e), setStatus: (text) => said.push(text),
       pilotNote: async () => {}, endPost: () => {}, accountsConfigured: () => false, nameOf: (vin) => (vin === 'AAA' ? 'Car A' : vin),
       afterQueueStep: async () => said.push('next car'), render: () => {}, saveFlow: async () => {}, savedFlowIs: async () => true,
-    });
+    }, ['queueKey']);
     await confirmPosted();
     return { entry: store['posted:o'].AAA, said, state };
   };

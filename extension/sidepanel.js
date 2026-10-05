@@ -72,6 +72,7 @@ const state = {
   relist: null, // this car's take-down while the website still listed it (src/takenDown.js relistNotice): the review says so, a queue waits
   queue: null, // the batch queue (src/queue.js), shared with the popup
   queueMode: false, // this car is being posted as part of the queue
+  unlinked: null, // { queue, names }: the cars this queue recorded with no listing link, said in the queue bar (the next car's steps clear the status line)
   drafts: {}, // cars the person saved as drafts on Facebook: { vin: { name, savedAt, price, basis } } (src/drafts.js)
   snapshotVehicles: {}, // names for the queue bar
   syncState: null, // this website's sync state (src/sync.js nextSyncState): the server's count of today's posts feeds the cap
@@ -720,9 +721,16 @@ async function savedDraft() {
   return undefined;
 }
 
+// Which queue a note belongs to: a new queue (or none) shows none of the last one's.
+const queueKey = (q) => (q ? String(q.startedAt || (q.vins || []).join(',')) : '');
+
 function queueBar() {
   const q = state.queue;
   if (!q) return '';
+  const unlinked = state.unlinked && state.unlinked.queue === queueKey(q) ? state.unlinked.names : [];
+  const note = unlinked.length
+    ? `<p class="hint" id="queueUnlinked">No listing link was saved for ${esc(unlinked.join(', '))}: the address in Listing link wasn't a Marketplace listing's own address. ${unlinked.length === 1 ? 'Its' : 'Their'} To do items open Your listings, where you pick the listing.</p>`
+    : '';
   const next = currentVin(q);
   const active = state.queueMode && state.vin && state.step !== 'idle' && state.step !== 'queueDone';
   let buttons = '';
@@ -734,7 +742,7 @@ function queueBar() {
     if (next) buttons += `<button type="button" class="plain" id="queueSkip">Skip this car</button>`;
     buttons += `<button type="button" class="plain" id="queueStop">Stop queue</button>`;
   }
-  return `<div class="banner info queuebar" id="queueBar"><b>${esc(describeQueue(q))}</b>${next && !active ? ` · next: ${esc(nameOf(next))}` : ''}<div class="actions">${buttons}</div></div>`;
+  return `<div class="banner info queuebar" id="queueBar"><b>${esc(describeQueue(q))}</b>${next && !active ? ` · next: ${esc(nameOf(next))}` : ''}${note}<div class="actions">${buttons}</div></div>`;
 }
 
 function viewQueueDone() {
@@ -1319,7 +1327,13 @@ async function confirmPosted() {
   if (run !== flowRun) return undefined; // dropped meanwhile: recorded, and the post now under way is not touched
   if (watcher) watcher.cancel();
   if (state.queueMode) {
-    if (linkNote) setStatus(linkNote, 'error');
+    if (linkNote) {
+      setStatus(linkNote, 'error');
+      // the next car (or the queue's end) clears the status line: the queue bar keeps saying it
+      const key = queueKey(state.queue);
+      const names = state.unlinked && state.unlinked.queue === key ? state.unlinked.names : [];
+      state.unlinked = { queue: key, names: [...names.filter((n) => n !== nameOf(vin)), nameOf(vin)] };
+    }
     // the queue could not be saved: the car is recorded, and clicking again only moves the queue
     if ((await afterQueueStep('posted', vin)) === false) confirmedRun = -1;
     return undefined;
