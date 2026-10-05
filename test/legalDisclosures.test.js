@@ -53,6 +53,18 @@ test('the attorney\'s automated-means question says how the form is typed into a
     assert.match(row, /to-do item/, `${where}: the scripting row leaves out the listing read and the price fill`);
     assert.doesNotMatch(row, /form (?:the person opened )?when (?:the user|they) click Post/, `${where}: the scripting row says the form is filled only on a click on Post`);
   }
+  // review: Q1 and the scripting row named "Post selected", the label the popup's button shows while it is disabled,
+  // and left out Queue all N ready arrivals on the To do tab, which starts the same queue
+  const popup = read('extension/popup.js');
+  assert.match(popup, /: 'Post selected'\);/, 'the popup\'s queue button changed its idle label: check these texts');
+  assert.match(popup, /`Post \$\{state\.picked\.size\} car\$\{/, 'the popup\'s queue button no longer reads Post N cars');
+  assert.match(popup, />Queue all \$\{ready\.length\} ready arrivals</, 'the To do tab no longer has Queue all N ready arrivals');
+  assert.match(panel, />Post the next \$\{vins\.length\}</, 'the side panel no longer has Post the next N');
+  const scripting = rowText(read('legal/chrome-web-store-privacy.md'), '`scripting`');
+  for (const [where, text] of [['questions-for-attorney.md 1', q1], ['the Web Store scripting row', scripting]]) {
+    assert.doesNotMatch(text, /Post selected/, `${where} names Post selected, the label of a button that starts nothing`);
+    for (const label of [/Post N cars/, /Queue all N ready arrivals/, /Post the next N/]) assert.match(text, label, `${where} does not name ${label} among the queue's starts`);
+  }
   // and the data inventory the privacy texts follow
   const inventory = rowText(read('docs/data-inventory.md'), 'Fill the Marketplace form (`facebook/fillForm.js`)');
   assert.match(inventory, /in a queue the person started, each car that passes every check, without another click/);
