@@ -520,6 +520,28 @@ test('price: a guide or estimate value, a class that strikes the old price throu
   assert.equal(pageFacts('<html><head><style>' + '{'.repeat(20000) + '.a{text-decoration:line-through}</style></head><body><span class="a">$1</span></body></html>', civicUrl).text, '', 'a long run of braces is read in one pass');
 });
 
+test('price: when the page\'s only price carries a guide\'s or an old price\'s label, it is still not taken, and the reason quotes the label for a person to check', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['2019 Honda Civic EX Market Price $24,995 Call us', 'Market Price'],
+    ['2019 Honda Civic EX Our Market Price: $24,995', 'Market Price'],
+    ['Fair Market Price $24,995', 'Fair Market Price'],
+    ['Dealer Cash Offer price $24,995', 'Cash Offer price'],
+    ['Market Value $24,995 \u00b7 Market Value $24,995', 'Market Value'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // the same label next to a current price is a stale or guide value, as before
+  const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };
+  assert.deepEqual(at('Market Price $24,995 Our price $23,995'), notShown);
+  assert.deepEqual(at('Was $24,995 Now $23,995'), notShown);
+  assert.deepEqual(at('Our price $23,995'), notShown);
+  assert.equal(at('Market Price $26,000 Our price $24,995').value, 24995, 'the current price is still read');
+  // the car is not ready, and the To do reason says why
+  const v = flat({ offers: { '@type': 'Offer', price: 24995, priceCurrency: 'USD', availability: 'https://schema.org/InStock' } }, shown('Market Price $24,995 \u00b7 41,230 miles'));
+  assert.equal(v.price, null);
+  assert.deepEqual(assessVehicle(v, {}).blockers.map((b) => b.text), ['No price on the website (the page labels its only price "Market Price", which Lot Current does not read as the selling price)']);
+});
+
 test('price: the page text comes in segments, each tied to the car whose card holds it', () => {
   const page = `<html><body><h1>Used 2019 Honda Civic EX</h1><div class="price-box"><p>Our price $20,995</p><a href="/finance/">Payments</a></div>
   <aside><a href="/inventory/used-2018-honda-accord-1hgsampl0jh000102/">2018 Accord $21,995</a><div class="tile"><a href="/inventory/used-2017-ford-escape-1fmsampl0hu000103/"><img alt="">2017 Escape</a> <span>$19,000</span></div></aside>
@@ -648,7 +670,9 @@ test('price: no currency counts as US dollars only when the page shows that amou
   assert.deepEqual(bare('Price USD 27,163'), notDollars, 'US dollars in words, but no dollar sign');
   const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };
   for (const text of ['Price 27,163', 'Price CA$27,163', 'Price C$27,163', 'Price $27,163.50', 'Price $127,163', 'Stock 27163', '']) assert.deepEqual(bare(text), notShown, text);
-  for (const text of ['Was $27,163 Now $25,999', 'MSRP $27,163 Sale Price $25,999', 'List Price: $27,163']) assert.deepEqual(bare(text), notShown, text);
+  for (const text of ['Was $27,163 Now $25,999', 'MSRP $27,163 Sale Price $25,999']) assert.deepEqual(bare(text), notShown, text);
+  assert.equal(bare('List Price: $27,163').value, null, 'the only price, labelled a list price');
+  assert.match(bare('List Price: $27,163').reason, /^the page labels its only price "List Price"/);
   assert.deepEqual(bare('Was $27,163 Now $27,163'), { value: 27163, label: 'Price', reason: '' }, 'shown once as the current price');
   assert.deepEqual(priceFromOffers(car({ offers: { '@type': 'Offer', price: 27163 } }), null), notShown, 'no page text');
   // an explicit currency other than US dollars is never a price, whatever the page shows
