@@ -916,7 +916,7 @@ test('a post dropped while its form loads, fills or gets its photos, or while it
       fill: null, photos: null,
     };
     const fns = compileMany(['runFill', 'attachPhotos', 'clearFlow', 'formTabShows', 'pageOf'], {
-      state, flowRun: 0, watcher: null, FORM_MAP, VERSION: '0.0.0', onCreatePage, FORM_GONE_TEXT: 'gone',
+      state, flowRun: 0, fillsUnderWay: 0, watcher: null, FORM_MAP, VERSION: '0.0.0', onCreatePage, FORM_GONE_TEXT: 'gone',
       carStillCurrent: async () => true, fillBlocker: () => '', // a fresh read and a description that passes (their own tests are below)
       fillFormInPage: () => {}, attachPhotosInPage: () => {},
       chrome: {
@@ -988,7 +988,7 @@ function formTabPanel({ photos = 6 } = {}) {
     fill: { url: FORM_MAP.createUrl, filled: [{ key: 'vin' }], partial: [], blocked: [], photoLimit: { value: 20, verified: true } }, photos: null, probe: null,
   };
   const fns = compileMany(['runFill', 'attachPhotos', 'formTabShows', 'pageOf'], {
-    state, flowRun: 0, FORM_MAP, VERSION: '0.0.0', onCreatePage, FORM_GONE_TEXT: 'form gone',
+    state, flowRun: 0, fillsUnderWay: 0, FORM_MAP, VERSION: '0.0.0', onCreatePage, FORM_GONE_TEXT: 'form gone',
     carStillCurrent: async () => true, fillBlocker: () => '', // a fresh read and a description that passes (their own tests are below)
     fillFormInPage: 'fill', attachPhotosInPage: 'photos',
     chrome: {
@@ -1977,6 +1977,71 @@ test('Stop queue and Clear queue never drop a Marketplace form that is open, nor
   }
 });
 
+// Skip this car on the queue bar while a queued car's form is being opened
+// and filled, or filled again (Fill it in now, Fill again): a fill already
+// sent lands in that tab whatever the panel does next, so the queue must not
+// move past the car and leave its form filled and unrecorded. Once the form
+// is on screen and no fill is under way, Skip moves on as before. onClick and
+// runFill as written, in one scope; Chrome's injection waits for the test.
+test('Skip this car waits while a queued car\'s Marketplace form is being opened or filled', async () => {
+  const calls = [];
+  const answers = [];
+  const FORM_STEPS = new Function(`return ${/const FORM_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)();
+  const v = vehicle('usedNormal');
+  const state = {
+    origin: 'https://www.example-motors.test', vin: v.vin, vehicle: v, step: 'filling', queueMode: true, fbTabId: 77, map: FORM_MAP, settings: { basis: 'website' },
+    listing: { fields: { description: 'x' }, photos: [] }, fill: null, detected: null, queue: { vins: [v.vin, 'BBB'], index: 0, status: 'running', results: {} },
+  };
+  const fns = compileMany(['formOpen', 'onClick', 'runFill'], {
+    state, FORM_STEPS, promptOpen: false, flowRun: 0, fillsUnderWay: 0, VERSION: '0.0.0', nameOf: (vin) => vin,
+    formTabShows: async () => true, FORM_GONE_TEXT: 'gone', carStillCurrent: async () => true, fillBlocker: () => '', fillFormInPage: 'fill',
+    chrome: { scripting: { executeScript: () => new Promise((resolve) => answers.push(() => resolve([{ result: { filled: [], partial: [], blocked: [], photoLimit: { value: 20, verified: true } } }]))) } },
+    render: () => {}, saveFlow: async () => {}, pilotNote: async () => {}, noteFill: (p) => p, notePostStep: (p) => p,
+    startWatcher: () => {}, attachPhotos: async () => {},
+    afterQueueStep: async (outcome) => calls.push('afterQueueStep ' + outcome),
+    setStatus: (text, kind) => calls.push(`status(${kind}): ${text}`),
+    advance, saveQueue: async () => {},
+  });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const skip = () => fns.onClick({ target: { closest: () => ({ id: 'queueSkip', dataset: {} }) } });
+  const skipped = () => calls.filter((c) => c.startsWith('afterQueueStep')).length;
+  const WAIT = new RegExp(`^status\\(error\\): Lot Current is still working on ${v.name}'s Marketplace form\\. Wait until the panel shows the form, then click Skip this car`);
+
+  // the form is being opened (openForm's step, before the fill): Skip waits, and says so
+  await skip();
+  assert.equal(skipped(), 0, 'the queue stays on the car whose form is being opened');
+  assert.match(calls.at(-1), WAIT);
+  // the fill is sent into the tab: Skip waits until it answers
+  const first = fns.runFill({ opened: true });
+  await tick();
+  assert.equal(answers.length, 1, 'the fill is under way');
+  await skip();
+  assert.equal(skipped(), 0, 'not while the form is being filled');
+  answers.shift()();
+  await first;
+  assert.equal(state.step, 'publish');
+  // Fill again on the filled form (Fill it in now on the dry run's is the same fill): Skip waits for it too
+  for (const step of ['publish', 'probe']) {
+    state.step = step;
+    const again = fns.runFill();
+    await tick();
+    await skip();
+    assert.equal(skipped(), 0, `${step}: not while the form is being filled again`);
+    assert.match(calls.at(-1), WAIT);
+    answers.shift()();
+    await again;
+  }
+  // the form is on screen and nothing is being filled: Skip moves on, as before
+  assert.equal(state.step, 'publish');
+  await skip();
+  assert.deepEqual(calls.filter((c) => c.startsWith('afterQueueStep')), ['afterQueueStep skipped']);
+  // a single post being filled is not the queue's car: the queue bar's Skip moves the paused queue only, as before
+  Object.assign(state, { queueMode: false, step: 'filling', queue: { vins: ['CCC', 'DDD'], index: 0, status: 'paused', results: {} } });
+  await skip();
+  assert.equal(currentVin(state.queue), 'DDD');
+  assert.deepEqual([state.vin, state.step, skipped()], [v.vin, 'filling', 1], 'the post is left as it is');
+});
+
 // The review screen's buttons follow the description's checks: drawn off
 // (viewReview) and switched off or on as the person types (onInput, through
 // setFormButtons) while a posting rule is broken, and off at the day's cap.
@@ -2146,7 +2211,7 @@ function dealerChecks() {
 // runFill as sidepanel.js writes it, on a form that is still on screen and a
 // read of the car that is still current; checks: the rest of the checks.
 function fillerFor(state, { said, typed, filled = async () => { throw new Error('filled'); }, current = async () => true, checks = PASSING_CHECKS }) {
-  const names = ['state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', 'flowRun', 'formTabShows', 'FORM_GONE_TEXT', 'carStillCurrent', ...PASSING_CHECKS_NAMES, 'usableClosingLine'];
+  const names = ['state', 'setStatus', 'render', 'chrome', 'saveFlow', 'fillFormInPage', 'flowRun', 'fillsUnderWay', 'formTabShows', 'FORM_GONE_TEXT', 'carStillCurrent', ...PASSING_CHECKS_NAMES, 'usableClosingLine'];
   return new Function(...names, `${dealerChecks()}\n${fnText('runFill')}\nreturn runFill;`)(
     state,
     (text, tone) => said.push([text, tone]),
@@ -2154,6 +2219,7 @@ function fillerFor(state, { said, typed, filled = async () => { throw new Error(
     { scripting: { executeScript: async (inj) => { typed.push(inj.args[1].fields.description); return [{ result: {} }]; } } },
     filled, // the first step after the form is filled
     function fillFormInPage() {},
+    0,
     0,
     async () => true,
     'gone',

@@ -91,6 +91,11 @@ let watcher = null;
 // first and goes no further when it changed meanwhile, so a post left behind
 // never writes into the post that took over, and never opens or fills a form.
 let flowRun = 0;
+// Fills of the Marketplace form under way (runFill, from the injection until
+// it answers). A fill already sent lands in the tab whatever the panel does
+// next, so a queued car's Skip this car waits for it (onClick): a form left
+// filled for a car the queue moved past would never be recorded.
+let fillsUnderWay = 0;
 
 // ---------- saved data ----------
 // The keys are named in src/storageKeys.js (siteKeys(origin) for this
@@ -978,6 +983,7 @@ async function runFill({ opened = false, photos = true } = {}) {
   state.message = 'Filling in the form…';
   render();
   let fill;
+  fillsUnderWay += 1;
   try {
     const [inj] = await chrome.scripting.executeScript({ target: { tabId }, func: fillFormInPage, args: [state.map, { fields: state.listing.fields, match: state.listing.match || {} }] });
     fill = (inj && inj.result) || { filled: [], partial: [], blocked: [], photoLimit: { value: map.photoLimitDefault, verified: false } };
@@ -988,6 +994,8 @@ async function runFill({ opened = false, photos = true } = {}) {
       blocked: map.fields.map((f) => ({ key: f.key, label: f.label, value: listing.fields[f.key] || '', reason: "couldn't run on this page: " + ((e && e.message) || e) })),
       photoLimit: { value: map.photoLimitDefault, verified: false },
     };
+  } finally {
+    fillsUnderWay -= 1;
   }
   if (run !== flowRun || state.fbTabId !== tabId) return; // the post was dropped while the form filled: nothing of it lands in the next car's, and no photos follow
   state.fill = fill;
@@ -2351,6 +2359,10 @@ async function onClick(ev) {
       if (!state.vin || state.step === 'idle' || state.step === 'queueDone') return startNextInQueue();
       return render();
     case 'queueSkip':
+      // a queued car's form being opened and filled (or filled again) is finished first (fillsUnderWay)
+      if (state.queueMode && state.vin && (state.step === 'filling' || fillsUnderWay > 0)) {
+        return setStatus(`Lot Current is still working on ${state.vehicle ? state.vehicle.name : nameOf(state.vin)}'s Marketplace form. Wait until the panel shows the form, then click Skip this car to move on without posting it.`, 'error');
+      }
       if (state.queueMode && state.vin && state.step !== 'idle') return afterQueueStep('skipped');
       state.queue = advance(state.queue, 'skipped');
       await saveQueue();
