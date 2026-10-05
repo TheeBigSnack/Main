@@ -41,6 +41,24 @@ const AFFILIATION_CLAIMS = [
   'Marketplace recommends Lot Current for dealers.',
   'Meta supports Lot Current.',
   'Facebook OKs Lot Current.',
+  // Meta, Facebook or Marketplace backing Lot Current, us or our product, in any tense, with an adverb, or in the passive
+  'Meta sponsors Lot Current.',
+  'Facebook backs our extension.',
+  'Marketplace stands behind this tool.',
+  'Meta has backed Lot Current.',
+  'Facebook okayed Lot Current.',
+  "Meta OK'd the Lot Current extension.",
+  'Meta officially supports Lot Current.',
+  'Facebook fully endorsed us.',
+  'Facebook has partnered with Lot Current.',
+  'Meta teamed up with Lot Current.',
+  'Meta allows Lot Current.',
+  'Lot Current is supported by Meta.',
+  'Lot Current is sponsored by Facebook.',
+  'We are proudly backed by Meta.',
+  'Our product was okayed by Facebook Marketplace.',
+  'Sponsored by Facebook.',
+  'Backed by Meta.',
 ];
 
 // Promises and made-up numbers that customer-facing copy may not make.
@@ -155,6 +173,21 @@ const ONCE_CAUGHT = [
   'Not for under 18s.',
 ];
 
+// What Meta's products support, and plain denials of any backing: the backing verbs
+// count only with Lot Current, us or our product, and never after a negation.
+const NOT_BACKING = [
+  'Marketplace supports vehicle listings from personal profiles.',
+  'Facebook supports drafts.',
+  'Meta allows dealers to list used cars from personal profiles.',
+  'Meta does not allow new vehicles on Marketplace.',
+  'Meta does not endorse or sponsor Lot Current.',
+  'Facebook has not approved, backed or okayed Lot Current.',
+  'Meta never supported Lot Current.',
+  'Lot Current is not supported by Meta or Facebook.',
+  "Lot Current isn't backed by Meta.",
+  'Not sponsored by Facebook.',
+];
+
 test('every affiliation or approval claim fails, in any document', () => {
   for (const claim of AFFILIATION_CLAIMS) {
     assert.notDeepEqual(honestyProblems(claim, { customerFacing: false }), [], `"${claim}" passes the internal-document check`);
@@ -171,6 +204,7 @@ test('every guarantee, account-safety promise and made-up number fails in custom
 test('the honest lines the copy already uses pass', () => {
   for (const line of HONEST) assert.deepEqual(honestyProblems(line), [], line);
   for (const line of ONCE_CAUGHT) assert.deepEqual(honestyProblems(line), [], line);
+  for (const line of NOT_BACKING) assert.deepEqual(honestyProblems(line), [], line);
   // a sentence that only denies a forbidden thing passes once that denial is named
   const denial = 'Lot Current is not affiliated with, endorsed by or partnered with Meta, and no one can promise your account will never be restricted.';
   assert.notDeepEqual(honestyProblems(denial), [], 'without the denials named, the words are caught');

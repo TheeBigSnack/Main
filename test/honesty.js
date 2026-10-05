@@ -11,6 +11,16 @@
 
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 
+// Lot Current, us or our product: the object of a verb that says Meta stands
+// behind it, or the subject of the same verb in the passive.
+const OURS = String.raw`(?:the )?(?:lot current|this (?:tool|extension|app|product)|the extension|our (?:tool|extension|app|product|company)|us)\b`;
+const WE = String.raw`\b(?:lot current|this (?:tool|extension|app|product)|the extension|our (?:tool|extension|app|product|company)|we)`;
+// Meta's backing, in any tense: "supports", "has backed", "sponsored", "OK'd",
+// "partnered with", "stands behind".
+const BACKING = String.raw`(?:recommend(?:s|ed)?|back(?:s|ed)?|support(?:s|ed)?|sponsor(?:s|ed)?|fund(?:s|ed)?|ok(?:s|['’]s|['’]d|ed)?|okay(?:s|ed)?|endors(?:es|ed)|approv(?:es|ed)|certifi(?:es|ed)|authori[sz](?:es|ed)|allow(?:s|ed)|permit(?:s|ted)|vouch(?:es|ed)? for|stand(?:s)? behind|stood behind|partner(?:s|ed)? with|team(?:s|ed)? up with|work(?:s|ed)? with)`;
+// The same backing said of us in the passive: "Lot Current is sponsored by Meta".
+const BACKED = String.raw`(?:recommended|backed|supported|sponsored|funded|ok['’]d|okayed|endorsed|approved|certified|authori[sz]ed|allowed|permitted|vouched for)`;
+
 // Saying Lot Current is affiliated with, approved by or a partner of Meta.
 export const AFFILIATION = [
   /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed) (by|for|on) (meta|facebook|marketplace)\b/i,
@@ -19,8 +29,14 @@ export const AFFILIATION = [
   // the present tense: "Meta approves of Lot Current", "Facebook endorses it"
   /\b(meta|facebook|marketplace) (approves|endorses|certifies|sanctions|authori[sz]es|accredits)\b/i,
   // verbs with honest uses ("Facebook recommends square photos", "backs up your draft", "Marketplace supports
-  // 20 photos") count only with Lot Current as the object: "Meta supports Lot Current", "Facebook OKs Lot Current"
-  /\b(meta|facebook|marketplace) (recommends|backs|supports|oks|okays|ok['’]s|vouches for|stands behind)( of)? (lot current|this (tool|extension|app|product)|the extension|our (tool|extension|app|product)|us)\b/i,
+  // 20 photos") count only with Lot Current as the object: "Meta supports Lot Current", "Facebook OKs Lot Current",
+  // "Meta sponsors us", "Facebook has partnered with Lot Current", "Meta fully backs the Lot Current extension"; a
+  // negation in between ("Meta does not support Lot Current", "has not backed") is no claim
+  new RegExp(String.raw`\b(?:meta|facebook|marketplace)(?: (?:itself|also))?(?: (?:has|have|had))?(?: [a-z]+ly)? ${BACKING}(?: of)? ${OURS}`, 'i'),
+  // and in the passive: "Lot Current is supported by Meta", "We are proudly backed by Facebook"
+  new RegExp(String.raw`${WE}(?: (?:is|are|was|were|has been|have been|gets|got))?(?: [a-z]+ly)? ${BACKED} by (?:meta|facebook|marketplace)\b`, 'i'),
+  // a slogan with no subject: "Sponsored by Facebook", "Backed by Meta"
+  /(?<!\bnot |n['’]t |\bnever )\b(sponsored|backed|funded) by (meta|facebook)\b/i,
   /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|accredited) (meta|facebook|marketplace)\b/i,
   /\b(meta|facebook)['’]s (approval|endorsement|blessing)\b/i,
   /\b(meta|facebook)(['’]s)?( [a-z]+){0,2} partners?\b/i,
