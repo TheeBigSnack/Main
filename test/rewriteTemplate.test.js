@@ -688,22 +688,61 @@ test('the dealership\'s own fee wording, its front desk and its owner are not pr
   assert.deepEqual(runGuardrails(`${buildTemplateDescription(c)}\nText me, not the dealer.`, c).problems.map((p) => p.text), ['Says "not the dealer"']);
 });
 
-test('"not the dealer" passes only right after where the fees go, and "the dealer\'s" only before its desk or line', () => {
+test('"not the dealer" passes only in the dealership\'s price note, right after where the fees go, and "the dealer\'s" only before its desk or line', () => {
   const banned = (line) => checkClosingLine(line).problems.some((p) => p.code === 'closing-banned');
   // a fee word earlier in the sentence is not where the fees go; the dealership's lot or team is not its desk; the owner of the business is not the owner of the truck
-  for (const line of [
+  const steers = [
     'No hidden fees, deal with me, not the dealer.', 'Save on fees by texting me, not the dealership.', 'Skip the fees and buy from me, not the dealer.',
     'Title and plates handled by me, not the dealer.', 'Title in hand, text me, not the dealer.', 'No dealer fees: buy from me, not the dealership.',
     'Tax and title paperwork goes through me, not the dealership.', 'Fees go to me, not the dealer.', 'The state gets the tax and title fees and I get the deal, not the dealer.',
-    "Buy from me, not the dealer's lot.", "Deal with me, not the dealership's sales team.", 'Text me, not the dealership\u2019s sales floor.',
-    "I'm the owner of this business and this truck.", 'I am the owner of the dealership and the car.',
-  ]) assert.ok(banned(line), line);
-  // where the fees go, said a few ways; the dealership's own desk or line
+    // a steer before where the fees go, in the same sentence or before ":" or ";"
+    'Deal direct with me: fees go to the state, not the dealer.', 'Buy from me and the fees go to the state, not the dealer.',
+    'Pay me directly; the fees go to the state, not the dealer.', 'Text me and the tax and title go to the state, not the dealer.',
+  ];
   for (const line of [
-    'Tax, title and fees go to the state, not the dealer.', 'Registration fees are paid directly to the DMV, not the dealership.', 'Taxes are collected for the state and county, not the dealer.',
-    'Tags and title fees go to the county and state, not the dealer.', "Ask for me, not the dealer's front desk.", 'Text me, not the dealership\u2019s main line.', "Call me, not the dealer's switchboard.",
-    "I'm the owner of this dealership and glad to help.",
+    ...steers, "Buy from me, not the dealer's lot.", "Deal with me, not the dealership's sales team.", 'Text me, not the dealership\u2019s sales floor.',
+    // the salesperson's line is theirs, not the dealership's fee wording: where the fees go is said in the price note (Settings), and there only
+    'Tax, title and fees go to the state, not the dealer.', 'Registration fees are paid directly to the DMV, not the dealership.',
+    // the owner of the business is not the owner of the truck: anything joined on after the business may be the truck
+    "I'm the owner of this business and this truck.", 'I am the owner of the dealership and the car.', "I'm the owner of this business, and this truck.",
+    "I'm the owner of this business and also this truck.", "I'm the owner of this business and the Ram.", "I'm the owner of the store and this pickup.",
+    "I'm the owner of this lot, and this truck is mine.", "I'm the owner of this dealership and glad to help.", "I'm the owner of the dealer's truck.",
+    "I'm the owner of the company that owns this truck.",
+  ]) assert.ok(banned(line), line);
+  // the dealership's own desk or line, and its owner
+  for (const line of [
+    "Ask for me, not the dealer's front desk.", 'Text me, not the dealership\u2019s main line.', "Call me, not the dealer's switchboard.",
+    "I'm the owner of this dealership; glad to help.", "I'm the owner of this dealership, text me.",
   ]) assert.ok(!banned(line), line);
+
+  // the dealership's price note: where the fees go, said a few ways, passes on every car
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const withNote = (priceNote) => ({ vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote, price: v.price });
+  for (const note of [
+    'Plus tax, title and registration, which go to the state, not the dealer.', 'Tax, title and fees go to the state, not the dealer.',
+    'Registration fees are paid directly to the DMV, not the dealership.', 'Taxes are collected for the state and county, not the dealer.',
+    'Tags and title fees go to the county and state, not the dealer.', 'Price excludes tax, title and registration, which go to the state, not the dealer.',
+    'Price does not include tax and title fees, which are paid to the state, not the dealer.', 'Sales tax goes to the state, not the dealer.',
+  ]) {
+    const c = withNote(note);
+    assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], note);
+  }
+  // a steer in the note, before where the fees go or anywhere in its sentence, is the note's to change
+  for (const note of [
+    ...steers, 'Deal direct and the fees go to the state, not the dealer.', 'Taxes, which I never touch, go to the state, not the dealer.',
+    'Fees paid to the state, not the dealer - I sell it myself.', "Tax and title go to the DMV, not the dealer's pocket, so text me.", 'Taxes go to the state, not the dealer; text me.',
+  ]) {
+    const c = withNote(note);
+    assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems.map((p) => p.code), ['banned-phrase'], note);
+    assert.match(runGuardrails(buildTemplateDescription(c), c).problems[0].text, /^Your dealership's price note says "not the dealer(?:ship)?"; change the note in Settings$/, note);
+  }
+  // the description's own words, beside a note with the fee wording, are refused, fee wording or not
+  const c = withNote('Plus tax, title and registration, which go to the state, not the dealer.');
+  for (const sentence of ['Buy from me and the fees go to the state, not the dealer.', 'Taxes and fees go to the state, not the dealer.']) {
+    assert.deepEqual(runGuardrails(`${buildTemplateDescription(c)}\n${sentence}`, c).problems.map((p) => p.text), ['Says "not the dealer"'], sentence);
+  }
+  const plain = withNote('');
+  assert.deepEqual(runGuardrails(`${buildTemplateDescription(plain)}\nTaxes and fees go to the state, not the dealer.`, plain).problems.map((p) => p.text), ['Says "not the dealer"']);
 });
 
 // ---------- claims only the website can make ----------
@@ -889,8 +928,17 @@ test('the dealership\'s "locally owned" is set aside only for the business, neve
   for (const sentence of [
     'Adult-owned dealer trade-in.', 'Adult owned dealer trade.', 'Adult owned dealership trade-in, ready to go.', 'Adult owned company truck.', 'Adult owned shop truck.',
     'Adult owned and operated.', 'Locally owned dealer trade.', 'Locally owned dealership trade-in.', 'Locally owned company truck.', 'Locally owned shop truck.',
+    // any word after the business that is not one of the few the dealership's own wording goes on with is about the car: a vehicle word, a person, "'s", a comma
+    'Locally owned company pickup.', 'Locally owned company fleet truck.', 'Locally owned business work truck.', 'Locally owned company 4x4.',
+    "Locally owned business owner's truck.", "Locally owned store manager's truck.", "Locally owned dealer principal's truck.", 'Locally owned business owner traded it in.',
+    'Local owned business fleet truck.', "Locally owned dealership's trade.", 'Locally owned company, fleet truck.', 'Locally owned and operated by a retired couple.',
+    'This one was locally owned.',
   ]) assert.deepEqual(codesAfter(sentence), ['unsupported-claim'], sentence);
-  for (const sentence of ['We are a locally owned dealership.', 'A locally owned and operated dealership.', 'We are a local-owned business.', 'Locally owned dealer, serving the whole area.', 'One of the locally owned dealerships in the area.']) {
+  for (const sentence of [
+    'We are a locally owned dealership.', 'A locally owned and operated dealership.', 'We are a local-owned business.', 'Locally owned dealer, serving the whole area.',
+    'One of the locally owned dealerships in the area.', 'We are locally owned and operated.', 'A locally owned and operated dealership, serving the whole area.',
+    'We are a locally owned store located on Main Street.', 'A locally owned business here in town.', 'Locally owned and operated since the start.',
+  ]) {
     assert.deepEqual(codesAfter(sentence), [], sentence);
   }
 });

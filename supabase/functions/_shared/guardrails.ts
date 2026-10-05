@@ -121,27 +121,45 @@ export const BANNED_PHRASES: readonly string[] = Object.freeze([
 ]);
 
 // Wording a banned phrase is part of that says something else, so the
-// phrase is not banned there: the dealership's own fee wording, saying
-// where the fees go right before it ("tax, title and registration, which go
-// to the state, not the dealer"; "fees are paid directly to the DMV, not the
-// dealership"), the dealership's own desk or line ("Ask for me, not the
-// dealer's front desk"; "not the dealership's main line"), and the
-// dealership's owner ("I'm the owner of this dealership"). For each phrase:
-// what comes right before it, or right after it, when it is fine. Still
-// banned: "Text me, not the dealer.", "No hidden fees, deal with me, not the
-// dealer." (a fee word is not where the fees go), "Buy from me, not the
+// phrase is not banned there: the dealership's own desk or line ("Ask for
+// me, not the dealer's front desk"; "not the dealership's main line"), and
+// the dealership's owner ("I'm the owner of this dealership.", "I'm the
+// owner of the store, text me."), with nothing joined on after the
+// business in the same sentence ("and", "&", "plus", "also", "too", "as
+// well", "my", "mine", "own", "owns"), since that may be the truck. For
+// each phrase: what comes right before it, or right after it, when it is
+// fine. Still banned: "Text me, not the dealer.", "Buy from me, not the
 // dealer's lot.", "I'm the owner.", "I'm the owner of this truck", "I'm the
-// owner of this business and this truck".
-const FEE_PLACE = "(?:the\\s+|your\\s+)?(?:state|county|city|dmv|bmv|mvd|rmv|government|tax\\s+(?:office|collector|assessor)|secretary\\s+of\\s+state|department\\s+of\\s+(?:motor\\s+vehicles|revenue)|motor\\s+vehicle\\s+(?:department|division|agency))";
-const FEES_GO_TO = `\\b(?:tax(?:es)?|title|registration|tags|plates|fees?)\\b[^.!?;\\n]*\\b(?:go(?:es)?|paid|payable|collected|due|sent|remitted)(?:\\s+(?:directly|straight))?\\s+(?:to|for|by)\\s+${FEE_PLACE}(?:\\s*(?:,|and|or|&)\\s*${FEE_PLACE})*\\s*[,\u2013\u2014-]?\\s*(?:and\\s+)?`;
+// owner of this business, and this truck", "I'm the owner of the store and
+// the Ram".
 const DEALERS_DESK = "['\u2019]s[\\s-]+(?:front[\\s-]+desk|reception(?:ist|[\\s-]+desk)?|switchboard|main[\\s-]+(?:line|number|phone(?:[\\s-]+(?:line|number))?)|general[\\s-]+(?:line|number)|phone[\\s-]+(?:line|number|tree)|call[\\s-]+cent(?:er|re)|answering[\\s-]+service|voicemail)\\b";
-const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|dealer|store|business|company|lot)\\b(?![\\s-]+(?:and|&|plus)[\\s-]+(?:of[\\s-]+)?(?:this|the|that|my|its|our)[\\s-]+(?:truck|car|suv|van|jeep|vehicle|one|ride)s?\\b)";
+const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|dealer|store|business|company|lot)\\b(?!['\u2019]|[^.!?;\\n]*(?:\\b(?:and|plus|also|too|as\\s+well|my|mine|own\\w*)\\b|&))";
 export const BANNED_UNLESS: Readonly<Record<string, Readonly<{ before?: string; after?: string }>>> = Object.freeze({
-  'not the dealership': Object.freeze({ before: FEES_GO_TO, after: DEALERS_DESK }),
-  'not the dealer': Object.freeze({ before: FEES_GO_TO, after: DEALERS_DESK }),
+  'not the dealership': Object.freeze({ after: DEALERS_DESK }),
+  'not the dealer': Object.freeze({ after: DEALERS_DESK }),
   'i am the owner': Object.freeze({ after: THE_BUSINESS }),
   "i'm the owner": Object.freeze({ after: THE_BUSINESS }),
   'i\u2019m the owner': Object.freeze({ after: THE_BUSINESS }),
+});
+
+// In the dealership's price note only (Settings; it goes into every
+// description whole), "not the dealer" may also end a sentence that says
+// where the fees go: "Plus tax, title and registration, which go to the
+// state, not the dealer."; "Registration fees are paid directly to the DMV,
+// not the dealership." The sentence starts with the fees, or with a few
+// words from a short list before them ("Plus", "Price excludes", "Sales"),
+// with no ":" or ";" before the phrase and no "I", "me" or "my" anywhere in
+// the sentence ("Fees go to the state, not the dealer - I sell it myself."
+// is refused). The same words anywhere else (a draft, an edit, the
+// salesperson's closing line) are refused: there they steer the buyer from
+// the dealership ("Buy from me and the fees go to the state, not the
+// dealer."; "Pay me directly; the fees go to the state, not the dealer.").
+const FEE_PLACE = "(?:the\\s+|your\\s+)?(?:state|county|city|dmv|bmv|mvd|rmv|government|tax\\s+(?:office|collector|assessor)|secretary\\s+of\\s+state|department\\s+of\\s+(?:motor\\s+vehicles|revenue)|motor\\s+vehicle\\s+(?:department|division|agency))";
+const FEES_OPENING = "(?:(?:plus|and|also|note|all|any|applicable|the|sales|state|local|government|price|prices|pricing|excludes?|excluding|includes?|including|(?:does\\s+not|doesn['\u2019]t|do\\s+not|don['\u2019]t)\\s+include|not\\s+including|before|without)[\\s,]+){0,6}";
+const FEES_GO_TO = `(?:^|[.!?\\n])\\s*${FEES_OPENING}\\b(?:tax(?:es)?|title|registration|tags|plates|fees?)\\b(?:(?!\\b(?:i|me|my|mine|myself)\\b)[^.!?;:\\n])*\\b(?:go(?:es)?|paid|payable|collected|due|sent|remitted)(?:\\s+(?:directly|straight))?\\s+(?:to|for|by)\\s+${FEE_PLACE}(?:\\s*(?:,|and|or|&)\\s*${FEE_PLACE})*\\s*[,\u2013\u2014-]?\\s*(?:and\\s+)?(?![^.!?\\n]*\\b(?:i|me|my|mine|myself)\\b)`;
+export const PRICE_NOTE_UNLESS: Readonly<Record<string, Readonly<{ before?: string; after?: string }>>> = Object.freeze({
+  'not the dealership': Object.freeze({ before: FEES_GO_TO }),
+  'not the dealer': Object.freeze({ before: FEES_GO_TO }),
 });
 
 export function wordCount(text: unknown): number {
@@ -369,10 +387,10 @@ function emojiCount(text: unknown): number {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const oneLine = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim();
-const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => {
-  const unless: { before?: string; after?: string } = BANNED_UNLESS[p] || {};
-  return [p, new RegExp((unless.before ? `(?<!${unless.before})` : '') + '\\b' + escapeRe(p).replace(/[\s-]+/g, '[\\s-]+') + '\\b' + (unless.after ? `(?!${unless.after})` : ''), 'i')];
-});
+const phraseRe = (p: string, { before, after }: { before?: string; after?: string } = {}): RegExp => new RegExp((before ? `(?<!${before})` : '') + '\\b' + escapeRe(p).replace(/[\s-]+/g, '[\\s-]+') + '\\b' + (after ? `(?!${after})` : ''), 'i');
+const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, phraseRe(p, BANNED_UNLESS[p])]);
+// the same phrases as the dealership's price note may say them (PRICE_NOTE_UNLESS)
+const NOTE_BANNED_RE: Map<string, RegExp> = new Map(BANNED_PHRASES.map((p) => [p, phraseRe(p, { ...BANNED_UNLESS[p], ...PRICE_NOTE_UNLESS[p] })]));
 // "one owner", "1-owner", "single-owner", "one careful owner", "one
 // careful, loving owner", "one very careful adult owner" (up to three words
 // between, a comma after any but the last), "only one previous owner", "its
@@ -394,9 +412,17 @@ const ENGINE_WORD = `${ENGINE_NAME}|powerful|proven|legendary|potent|(?:fuel[\\s
 const ENGINE_ENDS = "(?=\\s*(?:[.,;:!?)\\]\\n\u2013\u2014]|-\\s|$)|\\s+(?:with|paired|mated|making|producing|rated|that|which|and\\s+(?:(?:an?|the)\\s+)?(?:\\d+[\\s-]speed|automatic|manual|transmission|cvt|all[\\s-]wheel|four[\\s-]wheel|awd|4wd|4x4))\\b)";
 const DRIVEN_BY_ENGINE = `\\s+(?:(?:a|an|the|its)\\s+)?(?:(?:${ENGINE_WORD})[\\s-]+){0,4}(?:engines?|motors?|powertrains?|${ENGINE_NAME})${ENGINE_ENDS}`;
 // The dealership's own "locally owned (and operated) dealership", which is
-// about the business, not the car; "locally owned dealer trade", "locally
-// owned company truck" and every "adult owned" are about the car.
-const LOCALLY_OWNED = "local(?:ly)?[\\s-]owned(?![\\s-]+(?:(?:and|&)[\\s-]+operated\\b|(?:dealer(?:ship)?s?|business(?:es)?|compan(?:y|ies)|stores?)\\b(?![\\s-]+(?:trade|truck|car|suv|van|jeep|vehicle|unit|ride)\\w*)))";
+// about the business, not the car: "locally owned" then "and operated", a
+// business ("dealership", "dealer", "business", "company", "store") or both,
+// and then the end of the sentence or one of a few words the dealership's
+// own wording goes on with ("serving", "since", "in", "located", "here",
+// after a comma or not). Any other word after it may be about the car:
+// "locally owned dealer trade", "locally owned company pickup", "locally
+// owned business owner's truck", "locally owned dealership's trade",
+// "locally owned and operated by a retired couple". Every "adult owned" is
+// about the car.
+const LOCAL_BUSINESS = "(?:dealer(?:ship)?s?|business(?:es)?|compan(?:y|ies)|stores?)";
+const LOCALLY_OWNED = `local(?:ly)?[\\s-]owned(?!(?:[\\s-]+(?:and|&)[\\s-]+operated(?:[\\s-]+${LOCAL_BUSINESS})?|[\\s-]+${LOCAL_BUSINESS})(?:\\s*(?:[.;!?)\\n]|$)|,?\\s+(?:serving|since|in|located|here)\\b))`;
 
 // ---------- claims only the website can make ----------
 // What a description says about the car's certification, warranty,
@@ -703,11 +729,13 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   }
   const vin = String(vehicle.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (vin && !t.toUpperCase().includes(vin)) problems.push({ code: 'no-vin', text: "Doesn't include the VIN" });
-  // a banned phrase only the dealership's price note says is the note's to change, in Settings: no edit or template can drop the note
+  // a banned phrase only the dealership's price note says is the note's to change, in Settings: no edit or template can drop the note;
+  // the note alone may say where the fees go (PRICE_NOTE_UNLESS), and a phrase across the note's edge is the description's
   const besideNote = noteSaid ? without(t, [noteSaid]) : t;
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
-    else if (re.test(t)) problems.push({ code: 'banned-phrase', text: `Your dealership's price note says "${phrase}"; change the note in Settings` });
+    else if (noteSaid && (NOTE_BANNED_RE.get(phrase) as RegExp).test(noteSaid)) problems.push({ code: 'banned-phrase', text: `Your dealership's price note says "${phrase}"; change the note in Settings` });
+    else if (re.test(t) && !(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
   }
   if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });

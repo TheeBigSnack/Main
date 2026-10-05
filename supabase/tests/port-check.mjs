@@ -13,9 +13,9 @@
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';
 import { buildRewritePrompt as jsPrompt } from '../../backend/rewritePrompt.js';
-import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn } from '../functions/_shared/guardrails.ts';
+import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, PRICE_NOTE_UNLESS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn } from '../functions/_shared/guardrails.ts';
 import { buildRewritePrompt as tsPrompt, SYSTEM_PROMPT } from '../functions/_shared/rewritePrompt.ts';
-import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn } from '../../extension/src/rewriteTemplate.js';
+import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, PRICE_NOTE_UNLESS as JS_NOTE_UNLESS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn } from '../../extension/src/rewriteTemplate.js';
 import { SYSTEM_PROMPT as JS_SYSTEM } from '../../backend/rewritePrompt.js';
 
 const vehicle = {
@@ -77,7 +77,8 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn. One careful, loving owner. One very careful adult owner. Owned by one retired teacher.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Owned by a single careful driver, owned by one family since new, driven by a diesel mechanic, driven by a twin-turbo engine, One-Touch Windows, Owner\'s Manual, a single zone owner\'s manual.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, a local trade with new tires and new brakes, plus new wipers and a new engine, new Michelin tires, new front rotors, new tires and shocks, new tires, struts, two new batteries.') + '\nVIN TESTVIN0000000001.',
-  sixty('2019 Ram 1500 Big Horn, reduced from 31,995 to 28,995, only 28.9k, miles: 38,000, with 38,000 on it, 41,230 on the clock, call 555-555-0100, since 1985, tows 7,500 lbs.') + '\nVIN TESTVIN0000000001.',  sixty('2019 Ram 1500 Big Horn. Driven by a General Motors retiree.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, reduced from 31,995 to 28,995, only 28.9k, miles: 38,000, with 38,000 on it, 41,230 on the clock, call 555-555-0100, since 1985, tows 7,500 lbs.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Driven by a General Motors retiree.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Driven by a 5.7L HEMI V8 engine paired with an 8-speed automatic, driven by dual electric motors, driven by a V8.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Adult-owned dealer trade-in.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Locally owned company truck; we are a locally owned dealership.') + '\nVIN TESTVIN0000000001.',
@@ -85,6 +86,9 @@ const texts = [
   sixty("2019 Ram 1500 Big Horn. Registration fees are paid directly to the DMV, not the dealership. Call me, not the dealer's switchboard.") + '\nVIN TESTVIN0000000001.',
   sixty("2019 Ram 1500 Big Horn. Buy from me, not the dealer's lot.") + '\nVIN TESTVIN0000000001.',
   sixty("2019 Ram 1500 Big Horn. I'm the owner of this business and this truck.") + '\nVIN TESTVIN0000000001.',
+  sixty("2019 Ram 1500 Big Horn. Locally owned company pickup, locally owned dealership's trade; a locally owned dealer, serving the area; locally owned and operated since the start.") + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Buy from me and the fees go to the state, not the dealer. Pay me directly; the fees go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty("2019 Ram 1500 Big Horn. I'm the owner of this business, and this truck. I'm the owner of the store and the Ram. I'm the owner of this dealership, text me.") + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -103,6 +107,8 @@ const contexts = [
   { vehicle: { ...vehicle, carfaxOneOwner: true, descriptionRaw: 'One adult owner, garage kept.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, carfaxOneOwner: true, descriptionRaw: 'One careful, loving owner. Owned by a retired teacher.' }, dealer, priceNote: '', price: 28995 },
   { vehicle, dealer, priceNote: 'Plus tax, title and registration, which go to the state, not the dealer.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Deal direct with me: fees go to the state, not the dealer.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price excludes tax, title and registration, which are paid to the state, not the dealership.', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Sold as-is, no warranty. Carfax shows one accident reported. All loans are subject to bank approval. No rust. Driven by its previous owner. We are a locally owned dealership.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Comes with the rest of the factory warranty. Clean Carfax. Financing for all credit types. Runs great. Non-smoker.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, features: [...vehicle.features, 'ABS Brakes', 'Remote Engine Start', 'Variable Intermittent Wipers'], descriptionRaw: 'Local trade with new tires.' }, dealer, priceNote: '', price: 28995 },
@@ -120,6 +126,7 @@ for (const text of texts) {
 }
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
 assert.deepEqual(JSON.parse(JSON.stringify(BANNED_UNLESS)), JSON.parse(JSON.stringify(JS_UNLESS)));
+assert.deepEqual(JSON.parse(JSON.stringify(PRICE_NOTE_UNLESS)), JSON.parse(JSON.stringify(JS_NOTE_UNLESS)));
 assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]));
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);
