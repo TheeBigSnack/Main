@@ -1320,11 +1320,18 @@ export async function scan(search, options = {}) {
   // page) makes the lot's own kind of car page look like a dead end too.
   // A page of a kind that has given cars that fails ends the car's turn;
   // any other link that fails is passed over for the car's next address, and
-  // a car found at one of them is not a failure. A car none of whose
-  // addresses gave it, one of them failing, keeps its last reading, makes
-  // the scan not complete and counts towards MAX_FAILED_IN_A_ROW. A car some
-  // of whose addresses were left unread, none of the others its page, keeps
-  // its last reading and makes the scan not complete.
+  // a car found at one of them is not a failure. Nor is a car whose page of
+  // a kind that gives cars answered without it (a car in transit) or as gone
+  // while its other link failed (a form that answers 500): that page answers
+  // for it. Which kind gives cars is known only once one has, so a car read
+  // before then, one link failing and another answering, is settled when the
+  // reading is done and never counts towards MAX_FAILED_IN_A_ROW. A car none
+  // of whose addresses gave it, one of them failing and none of a kind that
+  // gives cars answering, keeps its last reading and makes the scan not
+  // complete; while the reading goes on it counts towards MAX_FAILED_IN_A_ROW
+  // unless another of its addresses answered. A car some of whose addresses
+  // were left unread, none of the others its page, keeps its last reading
+  // and makes the scan not complete.
   let stopped = null;
   let readErrors = 0;
   let failedInARow = 0;
@@ -1343,6 +1350,54 @@ export async function scan(search, options = {}) {
   const deadEnd = (href) => !gave.get(addressPattern(href)) && (gaveNone.get(addressPattern(href)) || 0) >= 2;
   const likely = (href) => (gave.get(addressPattern(href)) ? 0 : deadEnd(href) ? 2 : 1);
   const noCar = (href) => gaveNone.set(addressPattern(href), (gaveNone.get(addressPattern(href)) || 0) + 1);
+  const gives = (href) => Boolean(href && gave.get(addressPattern(href)));
+  // A car whose addresses were read, none of them its page: what that means
+  // for the scan. during: while the reading goes on, when a run of failing
+  // cars stops it; after it, a car is counted and nothing stops.
+  const settle = (o, { during }) => {
+    const { item } = o;
+    if (o.error) {
+      // the scan is not complete, and the car is still on the list
+      readErrors += 1;
+      standIn(item);
+      if (!during) return true;
+      failedInARow += 1;
+      if (failedInARow >= MAX_FAILED_IN_A_ROW && !stopped) {
+        stopped = { error: 'failing', message: `The website's car pages failed ${failedInARow} times in a row (the last: ${o.error.message}), so the scan stopped. Nothing was retried; try again later.` };
+        return false;
+      }
+      return true;
+    }
+    if (during) failedInARow = 0;
+    if (o.left) {
+      // the addresses read were not its page and some were not read: not known this time
+      untried += 1;
+      standIn(item);
+      return true;
+    }
+    if (o.goneAt) return true; // its page is gone: a car from the last scan is checked below
+    if (o.html) {
+      if (item.vin) pagesRead.add(item.vin);
+      if (item.listedCar && item.listedCar.vin) item.record = listRecord(item.listedCar, item.href, true); // the page doesn't mark the car up; the list does
+      else if (o.html.page.truncated) readErrors += 1;
+      else noneShown += 1;
+      return true;
+    }
+    if (o.files && !item.listedCar && !(item.vin && lastSeen[item.vin])) {
+      // only files (a window sticker, a brochure) at addresses neither the
+      // list's data nor the last scan knows a car by: links that are not a
+      // car's page, so not a car and not the website failing
+      notCarPages += 1;
+      return true;
+    }
+    // a car the list or the last scan knows whose page is a file: not read this time
+    readErrors += 1;
+    standIn(item);
+    return true;
+  };
+  // a failing link beside an address of the car's that answered: settled when the reading is done
+  const doubtful = [];
+  const answeredOwnKind = (o) => gives(o.html && o.html.href) || gives(o.goneAt);
   const addressesOf = (item) => {
     if (item.named || item.lastPage || !item.others.length) return [item.href];
     return [item.href, ...item.others].map((href, n) => ({ href, n })).sort((a, b) => likely(a.href) - likely(b.href) || a.n - b.n).map((a) => a.href);
@@ -1352,7 +1407,8 @@ export async function scan(search, options = {}) {
     let found = null; // { got, page, node, href }
     let html = null; // the first page that read but showed no node for this car
     let error = null; // the first page that failed
-    let gone = false;
+    let errorAt = ''; // its address
+    let goneAt = ''; // the first address that answered 404 or 410
     let files = 0;
     let read = 0;
     let left = false;
@@ -1375,13 +1431,17 @@ export async function scan(search, options = {}) {
         stopped = { error: 'blocked', message: page.message };
         return false;
       }
-      if (page.kind === 'gone') gone = true;
-      else if (page.kind !== 'html') {
+      if (page.kind === 'gone') {
+        if (!goneAt) goneAt = href;
+      } else if (page.kind !== 'html') {
         if (page.file) {
           files += 1;
           noCar(href);
         } else {
-          if (!error) error = page;
+          if (!error) {
+            error = page;
+            errorAt = href;
+          }
           // the lot's own kind of car page failing is the website failing:
           // nothing more is asked about this car
           if (gave.get(addressPattern(href))) break;
@@ -1411,45 +1471,26 @@ export async function scan(search, options = {}) {
       item.record = { node: found.node, url: found.got.finalUrl, facts: factsForCar(found.page.parsed.facts, { urls: [found.got.finalUrl, found.href], vin: nodeVin(found.node) }) };
       return true;
     }
-    if (error) {
-      // the scan is not complete, and the car is still on the list
-      readErrors += 1;
-      standIn(item);
-      failedInARow += 1;
-      if (failedInARow >= MAX_FAILED_IN_A_ROW && !stopped) {
-        stopped = { error: 'failing', message: `The website's car pages failed ${failedInARow} times in a row (the last: ${error.message}), so the scan stopped. Nothing was retried; try again later.` };
-        return false;
+    const o = { item, html, error, goneAt, files, left };
+    if (error && (html || goneAt) && !gives(errorAt)) {
+      // a link that failed, of a kind that has given no car, beside an
+      // address of the car's that answered: when that one is of a kind that
+      // gives cars it is the car's page and answers for it; until a kind has
+      // given cars, which was the car's page is not known yet
+      if (!answeredOwnKind(o)) {
+        doubtful.push({ ...o, errorAt });
+        return true;
       }
-      return true;
+      o.error = null;
     }
-    failedInARow = 0;
-    if (left) {
-      // the addresses read were not its page and some were not read: not known this time
-      untried += 1;
-      standIn(item);
-      return true;
-    }
-    if (gone) return true; // its page is gone: a car from the last scan is checked below
-    if (html) {
-      if (item.vin) pagesRead.add(item.vin);
-      if (item.listedCar && item.listedCar.vin) item.record = listRecord(item.listedCar, item.href, true); // the page doesn't mark the car up; the list does
-      else if (html.page.truncated) readErrors += 1;
-      else noneShown += 1;
-      return true;
-    }
-    if (files && !item.listedCar && !(item.vin && lastSeen[item.vin])) {
-      // only files (a window sticker, a brochure) at addresses neither the
-      // list's data nor the last scan knows a car by: links that are not a
-      // car's page, so not a car and not the website failing
-      notCarPages += 1;
-      return true;
-    }
-    // a car the list or the last scan knows whose page is a file: not read this time
-    readErrors += 1;
-    standIn(item);
-    return true;
+    return settle(o, { during: true });
   });
   if (stopped) return fail(stopped.error, stopped.message);
+  // the cars whose failing link and answering page were read before the
+  // kind of page that gives cars was known: the answering page is the car's
+  // when it is of that kind and the failing link is not; else the car was
+  // not read this time
+  for (const o of doubtful) settle(!gives(o.errorAt) && answeredOwnKind(o) ? { ...o, error: null } : o, { during: false });
   // pages the limit left for the next scan: the same stand-ins
   const leftForLater = toRead.length - reading.length;
   for (const item of toRead.slice(reading.length)) standIn(item);

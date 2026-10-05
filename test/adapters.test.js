@@ -1269,6 +1269,60 @@ test('schemaOrg scan: a link with a car\'s VIN that fails (another website, a 50
   assert.deepEqual(post429.calls.filter(isCarPage), [], 'the car\'s page is not asked for after the refusal');
 });
 
+test('schemaOrg scan: a car whose own page answers (no vehicle data, or gone) while its form fails is not a failed car, whenever it is read', async () => {
+  const leadForm = html('<!doctype html><html><head><title>Get pre-approved</title></head><body><form><input name="name"></form></body></html>');
+  const inTransit = html('<!doctype html><html><head><title>Vehicle details</title></head><body><h1>This vehicle is in transit. Call for details.</h1></body></html>');
+  const isCarPage = (u) => u.includes('/vehicle-details/');
+  const cars = standardCars(8).map((c) => ({ ...c, path: `/vehicle-details/?vin=${c.vin}` }));
+  const vins = (res) => res.records.map((r) => r.node.vehicleIdentificationNumber).sort();
+  const except = (...n) => cars.filter((c, i) => !n.includes(i)).map((c) => c.vin).sort();
+  // each card links a pre-approval form with the car's VIN before the car's own page; the list has no data
+  const lot = (formAnswer, pages = {}) => {
+    const m = standardSite({ cars, listData: false });
+    for (const [at, a] of m) {
+      if (!at.startsWith(LIST)) continue;
+      let text = a.text;
+      for (const c of cars) text = text.replace(`<a href="${c.path}">`, `<a href="/finance/apply/?vin=${c.vin}">Get pre-approved</a> <a href="${c.path}">`);
+      m.set(at, { ...a, text });
+    }
+    for (const c of cars) m.set(`${O}/finance/apply/?vin=${c.vin}`, formAnswer);
+    for (const [n, answer] of Object.entries(pages)) m.set(O + cars[n].path, answer);
+    return m;
+  };
+  const fails = httpError(500, 'error');
+  // the forms answer 500 and the first car pages are cars in transit: read before any page gave a car, they are
+  // still pages that show no car, as on the same lot whose forms answer a web page, and never stop the scan
+  for (const blank of [2, 3, 4]) {
+    const pages = Object.fromEntries(cars.slice(0, blank).map((c, n) => [n, inTransit]));
+    const search = fakeSiteSearch(lot(fails, pages));
+    const res = await schemaOrg.scan(search, schemaOrg.scanOptions(SERVICE));
+    assert.equal(res.ok, true, `first ${blank} in transit: ${res.message}`);
+    assert.deepEqual([res.total, res.complete, vins(res)], [8, true, cars.slice(blank).map((c) => c.vin).sort()], `first ${blank} in transit`);
+    assert.equal(search.calls.filter(isCarPage).length, 8, `first ${blank}: every car's own page is asked for`);
+    const html200 = await schemaOrg.scan(fakeSiteSearch(lot(leadForm, pages)), schemaOrg.scanOptions(SERVICE));
+    assert.deepEqual([html200.total, html200.complete, vins(html200)], [res.total, res.complete, vins(res)], `first ${blank}: the same as with forms that answer a web page`);
+  }
+  // after the lot's kind of car page is known, the same: the form's 500 is not the website failing
+  const late = await schemaOrg.scan(fakeSiteSearch(lot(fails, { 6: inTransit })), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([late.ok, late.complete, vins(late)], [true, true, except(6)]);
+  // a car whose own page is gone (404) beside a form that fails: gone, early or late, not a failed car
+  const gone = await schemaOrg.scan(fakeSiteSearch(lot(fails, { 0: httpError(404, 'not found'), 6: httpError(404, 'not found') })), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([gone.ok, gone.complete, vins(gone), gone.unread], [true, true, except(0, 6), undefined]);
+  // the other way round: the first car pages fail and the forms answer a web page. Those cars are not read
+  // (the scan is not complete, and a car the last scan read keeps that reading), but the cars after them are
+  const ownFails = Object.fromEntries([0, 1, 2].map((n) => [n, fails]));
+  const mirror = await schemaOrg.scan(fakeSiteSearch(lot(leadForm, ownFails)), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([mirror.ok, mirror.complete, vins(mirror)], [true, false, except(0, 1, 2)], mirror.message);
+  // a posted car (read first) last read at an address the website no longer uses
+  const lastSeen = { [cars[1].vin]: { url: `${O}/old-details/${cars[1].vin}/`, pageReadAt: '2026-10-01T00:00:00.000Z' } };
+  const again = await schemaOrg.scan(fakeSiteSearch(lot(leadForm, { 1: fails })), { ...schemaOrg.scanOptions(SERVICE), lastSeen, postedVins: [cars[1].vin] });
+  assert.deepEqual([again.ok, again.complete, vins(again), again.unread], [true, false, except(1), [cars[1].vin]], 'a car whose own page failed keeps the last reading');
+  // once the lot's kind of car page is known, car pages that fail in a row still stop the scan
+  const later = Object.fromEntries([4, 5, 6, 7].map((n) => [n, fails]));
+  const stopped = await schemaOrg.scan(fakeSiteSearch(lot(leadForm, later)), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([stopped.ok, stopped.error], [false, 'failing']);
+});
+
 test('schemaOrg scan: car pages without vehicle data first on the list never stop the later cars\' own pages being read', async () => {
   const leadForm = html('<!doctype html><html><head><title>Get pre-approved</title></head><body><form><input name="name"></form></body></html>');
   const inTransit = html('<!doctype html><html><head><title>Vehicle details</title></head><body><h1>This vehicle is in transit. Call for details.</h1></body></html>');
