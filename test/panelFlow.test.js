@@ -647,7 +647,7 @@ test('an old read of the car is read and checked again before the form opens or 
   assert.deepEqual(opened(drop.calls), []);
   assert.equal(drop.state.step, 'review');
   assert.equal(drop.state.price, v.price - 1500);
-  assert.ok(drop.calls.some((c) => c.startsWith('status(error): The website changed this car since it was read (price $' + v.price.toLocaleString('en-US') + ' to $' + (v.price - 1500).toLocaleString('en-US') + ')')), drop.calls.join(' | '));
+  assert.ok(drop.calls.includes('status(error): The website changed this car since it was read (Price $' + v.price.toLocaleString('en-US') + ' → $' + (v.price - 1500).toLocaleString('en-US') + '). Check the review, then click Open the Marketplace form again.'), drop.calls.join(' | '));
   // and the next click goes on from the new read, with the new price
   await drop.fns.openForm();
   assert.deepEqual(opened(drop.calls), ['tabs.create', `runFill: ${description}`]);
@@ -656,7 +656,7 @@ test('an old read of the car is read and checked again before the form opens or 
   // the mileage went up: the description's number no longer matches, so the checks stop the next click until it is fixed
   const miles = formOpener({ description, readAt: hourAgo, read: as({ mileage: v.mileage + 250 }) });
   await miles.fns.openForm();
-  assert.ok(miles.calls.some((c) => /^status\(error\): The website changed this car since it was read \(mileage\)/.test(c)), miles.calls.join(' | '));
+  assert.ok(miles.calls.some((c) => c.startsWith(`status(error): The website changed this car since it was read (Mileage ${v.mileage} → ${v.mileage + 250}).`)), miles.calls.join(' | '));
   assert.ok(ruleProblems(miles.state.guardrails).some((p) => p.code === 'unknown-number'));
   await miles.fns.openForm();
   assert.deepEqual(opened(miles.calls), [], 'the old mileage in the text is not filled');
@@ -2438,7 +2438,7 @@ test('a post whose car was read a while ago (or before the panel was closed) rea
   assert.equal(state.price, 26163);
   assert.equal(state.vehicle.price, 26163);
   assert.equal(state.listing, null, 'the listing is built again from the new read');
-  assert.match(dropped.calls.said.at(-1)[0], /^The website changed this car since it was read \(price \$27,163 to \$26,163\)\./);
+  assert.match(dropped.calls.said.at(-1)[0], /^The website changed this car since it was read \(Price \$27,163 → \$26,163\)\. Check the review, then click Open the Marketplace form again\.$/);
   assert.equal(dropped.calls.said.at(-1)[1], 'error');
   assert.ok(dropped.calls.saved >= 1);
 
@@ -2446,8 +2446,18 @@ test('a post whose car was read a while ago (or before the panel was closed) rea
   const miles = reviewState({ readAt: '', description: '2019 Ram 1500 Classic Express with 20,986 miles.' });
   const moved = staleReader(miles, () => ({ ok: true, vehicle: { ...FRESH_CAR(), mileage: 21500 } }));
   assert.equal(await moved.run(), false);
-  assert.match(moved.calls.said.at(-1)[0], /The website changed this car since it was read \(mileage\)/);
+  assert.match(moved.calls.said.at(-1)[0], /^The website changed this car since it was read \(Mileage 20986 → 21500\)\. The description no longer matches it: [^.]+\. Fix the description, then click Open the Marketplace form again\.$/);
   assert.ok(miles.guardrails.problems.some((p) => p.code === 'mileage-mismatch'));
+
+  // Fill again (the form filled earlier) and Fill it in now (the dry run's form) come from a form already open:
+  // the review's button opens a new one, and the old form is to be closed unpublished
+  for (const step of ['publish', 'probe']) {
+    const open = reviewState({ readAt: '', step });
+    const r = staleReader(open, () => ({ ok: true, vehicle: { ...FRESH_CAR(), price: 26163, priceBeforeFees: 25673, mileage: 21500 } }));
+    assert.equal(await r.run(), false, step);
+    assert.equal(open.step, 'review');
+    assert.match(r.calls.said.at(-1)[0], /^The website changed this car since it was read \(Mileage 20986 → 21500; Price \$27,163 → \$26,163\)\. The description no longer matches it: [^]+\. Fix the description, then click Open the Marketplace form for a new form, and close the form opened before without publishing it\.$/, step);
+  }
 });
 
 test('a car that sold, went sale-pending, turned new or lost its price since it was read is stopped before the form is filled', async () => {

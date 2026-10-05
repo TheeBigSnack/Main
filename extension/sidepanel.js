@@ -469,7 +469,7 @@ async function carStillCurrent() {
   if (!readIsOld()) return true;
   const run = flowRun;
   const was = state.step;
-  const before = { price: state.price, values: formValues() };
+  const before = { values: formValues() };
   state.step = 'checking';
   state.message = 'Checking the car on the website again before the form opens…';
   setStatus('');
@@ -480,8 +480,8 @@ async function carStillCurrent() {
   takeCar(car);
   const after = formValues();
   const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
-  const changed = listingChanges(before.values, after).map((c) => c.key); // every form field but the description (src/listingData.js)
-  if (before.values.photos.join(' ') !== after.photos.join(' ')) changed.push('photos');
+  const changed = listingChanges(before.values, after); // every form field but the description (src/listingData.js)
+  if (before.values.photos.join(' ') !== after.photos.join(' ')) changed.push({ key: 'photos' });
   state.guardrails = runGuardrails(state.description, ctx());
   const stops = ruleProblems(state.guardrails);
   state.message = '';
@@ -491,14 +491,21 @@ async function carStillCurrent() {
     await saveFlow();
     return run === flowRun; // false when the post was dropped while it saved
   }
-  const said = changed.map((k) => (k === 'price' ? `price ${money(before.price)} to ${money(state.price)}` : k === 'photos' ? 'photos' : (labels[k] || k).toLowerCase()));
+  // each field as it was read and as it reads now (the photos only by name)
+  const shown = (key, value) => (key === 'price' && value ? money(Number(value)) : value) || 'nothing';
+  const said = changed.map((c) => (c.key === 'photos' ? 'photos' : `${labels[c.key] || c.key} ${shown(c.key, c.was)} → ${shown(c.key, c.now)}`));
   state.listing = null;
   state.step = 'review';
   render();
-  const what = said.length ? ` (${said.join(', ')})` : '';
+  const what = said.length ? ` (${said.join('; ')})` : '';
+  // the review's button opens a new form; Fill again and Fill it in now
+  // came from one already open, which is not filled again
+  const reopen = was === 'publish' || was === 'probe'
+    ? 'click Open the Marketplace form for a new form, and close the form opened before without publishing it'
+    : 'click Open the Marketplace form again';
   const next = stops.length
-    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then click Open the Marketplace form again.`
-    : ' Check the review, then click Open the Marketplace form again.';
+    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then ${reopen}.`
+    : ` Check the review, then ${reopen}.`;
   setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
   await saveFlow();
   return false;
