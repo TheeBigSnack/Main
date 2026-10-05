@@ -41,7 +41,6 @@ test('the posted registry can carry the listing link and who posted, without bre
     price: 26673,
     basis: 'beforeFees',
     postedAt: '2026-09-26T21:00:00.000Z',
-    basis: 'beforeFees',
     listingUrl: 'https://www.facebook.com/marketplace/item/424242/',
     salesperson: 'Roger',
   });
