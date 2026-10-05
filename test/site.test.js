@@ -19,7 +19,7 @@ import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing } from './honesty.js';
 import { checkPreOwned } from '../extension/src/classify.js';
 import { profileFrom } from '../extension/src/settings.js';
-import { ADAPTERS, isCheckedLive } from '../extension/adapters/index.js';
+import { ADAPTERS, isCheckedLive, unsupportedSiteMessage } from '../extension/adapters/index.js';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -790,21 +790,27 @@ test('the FAQ and the support page name every part of the profile Chrome syncs, 
 // reader only, so a DealerOn dealer reading the website would conclude theirs was never tried. Each place now
 // names every reader in extension/adapters/index.js, and every reader not checked on a real dealership website
 // comes with the caveat that it has been tested only on sample websites.
-test('the FAQ, How it works and the sales sheet name every website reader, each unchecked one with its caveat', () => {
+// The sales sheet and the store listing then said "Other platforms come later", a promise with no date behind it;
+// they now say what a dealer on another platform sees.
+test('the FAQ, How it works, the sales sheet and the store listing name every website reader, each unchecked one with its caveat', () => {
   const faqText = stripTags(faqPage);
   const places = {
     'the FAQ\'s Which websites work?': (faqText.match(/Which websites work\? (.*?) How do updates arrive\?/) || [])[1],
     'How it works, What it needs': stripTags((howPage.match(/<li>A dealership website[\s\S]*?<\/li>/) || [''])[0]),
     'the sales sheet, What it needs': (read('../marketing/sales-sheet.md').match(/^- A dealership website[^\n]*/m) || [])[0],
+    'the store listing, What it needs': (read('../store/listing.md').match(/^- A dealership website[^\n]*/m) || [])[0],
   };
   const nameOf = (a) => (a.PLATFORM.id === 'schemaOrg' ? /standard vehicle data/i : new RegExp(a.PLATFORM.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   for (const [place, said] of Object.entries(places)) {
     assert.ok(said, `${place} is still there`);
     for (const a of ADAPTERS) assert.match(said, nameOf(a), `${place} does not name the ${a.PLATFORM.name} reader`);
-    if (ADAPTERS.some(isCheckedLive)) assert.match(said, /checked on a live site/, `${place} says which reader has been checked on a live site`);
+    if (ADAPTERS.some(isCheckedLive)) assert.match(said, /checked on a live site|checked on a real dealership website/i, `${place} says which reader has been checked on a live site`);
     if (ADAPTERS.some((a) => !isCheckedLive(a))) assert.match(said, /tested only on sample websites/, `${place} names readers that have not read a real website without saying so`);
-    assert.doesNotMatch(said, /on the way/, `${place} promises platforms instead of naming the readers there are`);
+    assert.doesNotMatch(said, /on the way|come later|coming soon/i, `${place} promises platforms instead of naming the readers there are`);
   }
+  // what a website no reader can read gets is the extension's own message (adapters/index.js unsupportedSiteMessage)
+  assert.match(unsupportedSiteMessage(), /^Lot Current can't read the cars on this page\./, 'the unsupported-site message changed: change the sales sheet and the store listing with it');
+  for (const place of ['the sales sheet, What it needs', 'the store listing, What it needs']) assert.match(places[place], /Lot Current says it can't read the cars on that page/, place);
 });
 
 // review: the home page said "Your dealership sets how many posts a day each salesperson may make", and For

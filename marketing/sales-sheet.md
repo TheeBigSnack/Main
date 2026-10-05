@@ -22,7 +22,7 @@ Lot Current is a Chrome extension for dealership salespeople. It reads your deal
 ## What it needs
 
 - Google Chrome on the salesperson's computer.
-- A dealership website on Dealer Inspire, which is where Lot Current has been checked on a live site. It also has readers for DealerOn and Dealer.com websites and for websites that publish standard vehicle data; those have been tested only on sample websites so far. Other platforms come later.
+- A dealership website on Dealer Inspire, which is where Lot Current has been checked on a live site. It also has readers for DealerOn and Dealer.com websites and for websites that publish standard vehicle data; those have been tested only on sample websites so far. On a website none of these readers can read, Lot Current says it can't read the cars on that page.
 - The salesperson's own Facebook account. Marketplace stopped taking vehicle listings from dealer Pages in 2023, which is why salespeople post.
 
 ## Straight talk
