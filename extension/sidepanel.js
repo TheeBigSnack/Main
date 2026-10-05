@@ -2502,7 +2502,8 @@ function adoptChanges(changes) {
     capLine.outerHTML = capHtml(cap);
     setFormButtons(cap);
   }
-  if (settingsChanged && state.step === 'review') reviewAfterSettings();
+  // when the template can't be written again, the review stays as it was: its last checks still set the form buttons
+  if (settingsChanged && state.step === 'review') reviewAfterSettings().catch(() => {});
 }
 
 // Settings saved while the review screen is open (a dealership name added

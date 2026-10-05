@@ -338,7 +338,7 @@ test('the code writes invisible and space-like characters as \\u escapes, never 
   };
   for (const dir of ['extension', 'backend', 'supabase/functions']) walk(dir);
   assert.ok(files.includes(join('extension', 'src', 'description.js')));
-  const hidden = /[\p{Cf}\p{Zl}\p{Zp}   -   　︀-️]/u;
+  const hidden = /[\p{Cf}\p{Zl}\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufe00-\ufe0f]/u;
   const found = [];
   for (const rel of files) {
     readFileSync(join(root, rel), 'utf8').split('\n').forEach((line, i) => {
