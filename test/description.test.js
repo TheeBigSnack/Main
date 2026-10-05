@@ -316,3 +316,35 @@ test('the write-up without its lot-wide text: each line the scan found is cut ou
   assert.deepEqual(withoutLotWide('Runs great.', new Set(['', '  ', null])), ['Runs great.']);
   assert.deepEqual(withoutLotWide(null, lot), []);
 });
+
+// Characters that can't be seen in an editor (zero-width spaces and joiners,
+// variation selectors, soft hyphens, non-breaking and other odd spaces) are
+// written as \u escapes in the code, so a regular expression or a table that
+// holds one can be read, and isn't changed by accident when the line is
+// edited. STARTS_SENTENCE's emoji joiners and the entity table's spaces once
+// slipped in as the characters themselves.
+test('the code writes invisible and space-like characters as \\u escapes, never as the characters', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const root = new URL('..', import.meta.url).pathname;
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(join(root, dir))) {
+      const rel = join(dir, name);
+      if (name === 'node_modules') continue;
+      if (statSync(join(root, rel)).isDirectory()) walk(rel);
+      else if (/\.(?:js|mjs|ts)$/.test(name)) files.push(rel);
+    }
+  };
+  for (const dir of ['extension', 'backend', 'supabase/functions']) walk(dir);
+  assert.ok(files.includes(join('extension', 'src', 'description.js')));
+  const hidden = /[\p{Cf}\p{Zl}\p{Zp}   -   　︀-️]/u;
+  const found = [];
+  for (const rel of files) {
+    readFileSync(join(root, rel), 'utf8').split('\n').forEach((line, i) => {
+      const m = line.match(hidden);
+      if (m) found.push(`${rel}:${i + 1} U+${m[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
+    });
+  }
+  assert.deepEqual(found, []);
+});
