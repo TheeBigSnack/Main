@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateDescription, rewriteFacts, rewriteWithBackend, guessColorsWithBackend } from '../extension/src/rewriter.js';
 import { SYSTEM_PROMPT, buildRewritePrompt } from '../backend/rewritePrompt.js';
 import { vehicle } from './helpers.js';
+import { readFileSync } from 'node:fs';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
 const ME = { name: 'Roger', title: 'sales consultant' };
@@ -343,4 +344,28 @@ test('on a website whose cars are all at one store, the service is asked even wh
   const two = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors', 'Jones Ford Shelbyville'], fetchImpl: counting });
   assert.equal(calls, 1);
   assert.match(two.note, /lists this car at Smith Motors, which may not be at your dealership's address/);
+});
+
+// README and help said a car's description names its store "never your
+// dealership's town"; on a website whose cars are all at one store the
+// service is asked, and it knows the dealership's name and town, not the
+// store's, so its draft can say the car is at the dealership in its town.
+test('the README and help say the template names a car\'s store, and when the rewrite service writes from the dealership\'s name and town instead', async () => {
+  const site = { name: 'Smith Auto Sales', city: 'Springfield', zip: '00000' };
+  const car = args({ vehicle: { ...args().vehicle, location: 'Smith Motors' }, dealer: site, priceNote: '' });
+  const template = (await generateDescription({ ...car, settings: { myStores: [] } })).text;
+  assert.match(template, /at Smith Motors\./);
+  assert.doesNotMatch(template, /Springfield/);
+  const draft = template.replace('at Smith Motors.', 'at Smith Auto Sales in Springfield.');
+  const r = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors'], fetchImpl: reply(200, { ok: true, text: draft }) });
+  assert.equal(r.source, 'claude', JSON.stringify(r.guardrails.problems));
+  assert.match(r.text, /at Smith Auto Sales in Springfield\./, "the one store's car is described at the dealership in its town");
+  const said = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').split(/(?<=[.;])\s/).filter((x) => /names the store the website lists/.test(x));
+  for (const rel of ['../README.md', '../docs/help.md']) {
+    const text = readFileSync(new URL(rel, import.meta.url), 'utf8');
+    assert.doesNotMatch(text, /never (?:your|this) dealership's town/, `${rel} says a description never names the dealership's town`);
+    assert.ok(said(rel).length, `${rel} says which description names the car's store`);
+    for (const x of said(rel)) assert.match(x, /the template's description/, `${rel}: ${x}`);
+    assert.match(text, /otherwise \(the store's name names your town, or every car on the website is at that one store\) the rewrite service, when it is on, writes the draft, and it knows your dealership's name and town, not the store's/i, `${rel} says when the rewrite service writes the draft`);
+  }
 });
