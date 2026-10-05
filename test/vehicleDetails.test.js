@@ -594,6 +594,8 @@ test('at post time the adapter the last scan used reads the car, not another ada
   // the car's page carries standard vehicle data at another price, and nothing that marks it as DealerOn's
   const node = { '@context': 'https://schema.org', '@type': 'Car', name: `${car.year} ${car.make} ${car.model}`, vehicleIdentificationNumber: car.vin, url: DEALERON_ORIGIN + path, offers: { '@type': 'Offer', price: 1234, priceCurrency: 'USD' } };
   const carPage = `<!doctype html><html><head><title>${car.year} ${car.make} ${car.model}</title><script type="application/ld+json">${JSON.stringify(node)}</script></head><body><h1>${car.year} ${car.make} ${car.model}</h1><p>$1,234</p></body></html>`;
+  // the website serves that page at the car's address too, so the page's own reader can read the car from it
+  site.set(DEALERON_ORIGIN + path, { ok: true, status: 200, contentType: 'text/html', text: carPage });
   const page = fakeStandardPage({ site, origin: DEALERON_ORIGIN, path, html: carPage });
   const store = { [SITES_KEY]: { [DEALERON_ORIGIN]: { adapter: 'dealerOn', service } } };
   globalThis.chrome = fakeChrome(page, store);
@@ -610,7 +612,7 @@ test('at post time the adapter the last scan used reads the car, not another ada
     page.fetchCalls.length = 0;
     const alone = await fetchVehicleDetails(1, car.vin, { origin: DEALERON_ORIGIN, url: DEALERON_ORIGIN + path });
     assert.ok(!page.fetchCalls.some((c) => c.url === DEALERON_LIST), 'no stored reader: not read through it');
-    assert.notEqual(alone.ok && alone.vehicle.price, car.base + car.fee);
+    assert.deepEqual([alone.ok, alone.vehicle && alone.vehicle.price], [true, 1234], alone.message);
   } finally {
     delete globalThis.chrome;
   }
