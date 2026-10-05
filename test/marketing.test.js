@@ -26,13 +26,47 @@ const legal = (rel) => read('../legal/' + rel);
 const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
 const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// "hypothesis" stays true until a dealer agrees to a price in writing. Setting
+// it to false is docs/launch-checklist.md's "Pricing confirmed" step, and the
+// file then records when that happened ("confirmedOn", the agreement's date),
+// so npm test passes on the step the checklist and docs/stripe-setup.md
+// describe and fails on a bare flip with no record.
+function pricingRecordRule(p) {
+  assert.equal(typeof p.hypothesis, 'boolean', '"hypothesis" is true or false');
+  if (p.hypothesis) {
+    assert.ok(!('confirmedOn' in p), 'a hypothesis carries no confirmation date');
+    return;
+  }
+  assert.match(String(p.confirmedOn), /^\d{4}-\d{2}-\d{2}$/, 'a confirmed price says when a dealer agreed to it in writing ("confirmedOn": "YYYY-MM-DD")');
+  const t = Date.parse(p.confirmedOn + 'T00:00:00Z');
+  assert.ok(Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === p.confirmedOn, 'confirmedOn is a real date');
+}
+
 test('the pricing hypothesis is one config with the fields the docs quote', () => {
-  assert.equal(pricing.hypothesis, true, 'it stays a hypothesis until a dealer agrees to a price in writing (docs/launch-checklist.md, Pricing confirmed)');
+  pricingRecordRule(pricing);
   for (const k of ['perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'pilotDays', 'foundingDealerMonthly', 'foundingDealerMonths', 'foundingDealerCount']) {
     assert.ok(Number.isInteger(pricing[k]) && pricing[k] > 0, `${k} is a whole number`);
   }
   assert.match(pricing.asOf, /^\d{4}-\d{2}-\d{2}$/);
   assert.ok(Array.isArray(pricing.wouldChangeIt) && pricing.wouldChangeIt.length >= 2, 'says what would change it');
+});
+
+test('pricing.json can be marked confirmed the way the launch checklist says, and only with the agreement\'s date', () => {
+  const { confirmedOn: _, ...numbers } = pricing;
+  // the step docs/launch-checklist.md ("Pricing confirmed") and docs/stripe-setup.md describe passes
+  pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-01' });
+  pricingRecordRule({ ...numbers, hypothesis: true });
+  // a bare flip, a date that does not exist, a hypothesis with a date, a string for the flag: each fails
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false }), /confirmedOn/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }), /real date/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: true, confirmedOn: '2026-12-01' }), /no confirmation date/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: 'false' }), /true or false/);
+  // and both documents name the date with the flag, and say npm test passes after it
+  const checklist = read('../docs/launch-checklist.md');
+  const item = checklist.slice(checklist.indexOf('**Pricing confirmed.**'));
+  assert.match(item.split('\n')[0], /"hypothesis": false`[^\n]*`"confirmedOn"[^\n]*`npm test` (still )?passes/, 'the checklist item names confirmedOn and npm test');
+  const stripe = read('../docs/stripe-setup.md');
+  for (const para of stripe.split('\n').filter((l) => l.includes('"hypothesis": false'))) assert.match(para, /"confirmedOn"/, `docs/stripe-setup.md: ${para.slice(0, 60)}`);
 });
 
 test('the sales sheet and the positioning quote the pricing config, not their own numbers', () => {

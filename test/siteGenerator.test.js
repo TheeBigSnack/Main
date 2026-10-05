@@ -303,17 +303,17 @@ test('renderPage writes the document in the fixed order, with the absolute tags 
 
 test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (LocalBusiness and an Offer only from config.js and pricing.json), crumb pages a BreadcrumbList, the FAQ a FAQPage', () => {
   const faqBody = render(read(page('faq').source), templateVars(page('faq'), ctxOf()));
-  // the state as committed: no address, no business, prices a hypothesis
-  const home = jsonLdFor(page('home'), ctxOf());
+  // no address, no business, prices a hypothesis (whatever pricing.json says today)
+  const guess = { pricing: { ...pricing, hypothesis: true } };
+  const home = jsonLdFor(page('home'), ctxOf({}, guess));
   assert.equal(home['@context'], 'https://schema.org');
   assert.deepEqual(home['@graph'], [
     { '@type': 'Organization', name: 'Lot Current' },
     { '@type': 'WebSite', name: 'Lot Current' },
     { '@type': 'SoftwareApplication', name: 'Lot Current', applicationCategory: 'BusinessApplication', operatingSystem: 'Chrome', description: page('home').description },
   ]);
-  assert.equal(pricing.hypothesis, true, 'pricing.json is still a hypothesis: no Offer is written');
   // siteUrl set: addresses, the logo, the breadcrumb items
-  const live = jsonLdFor(page('home'), ctxOf({ siteUrl: FIXTURE_URL }))['@graph'];
+  const live = jsonLdFor(page('home'), ctxOf({ siteUrl: FIXTURE_URL }, guess))['@graph'];
   assert.deepEqual(live[0], { '@type': 'Organization', name: 'Lot Current', url: FIXTURE_URL, logo: `${FIXTURE_URL}/apple-touch-icon.png` });
   assert.equal(live[1].url, FIXTURE_URL);
   assert.equal(live[2].url, FIXTURE_URL);
@@ -336,7 +336,7 @@ test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (Local
   assert.deepEqual(Object.keys(bare), ['@type', 'name', 'url', 'address'], 'optional fields left out; url falls back to siteUrl');
   assert.equal(bare.url, FIXTURE_URL);
   assert.equal(jsonLdFor(page('home'), ctxOf({ business: { ...BUSINESS, url: 'https://fixture.lotcurrent.com/store' } }))['@graph'][0].url, 'https://fixture.lotcurrent.com/store');
-  for (const node of jsonLdFor(page('home'), ctxOf())['@graph']) {
+  for (const node of jsonLdFor(page('home'), ctxOf({}, guess))['@graph']) {
     for (const key of ['aggregateRating', 'review', 'telephone', 'address', 'offers', 'openingHours', 'url', 'logo', 'email']) assert.ok(!(key in node), `${node['@type']}.${key}: nothing that is not in config.js or pricing.json`);
   }
   // breadcrumbs
