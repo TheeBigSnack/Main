@@ -471,12 +471,20 @@ test('a car missing from a list the website did not give whole is not called gon
     const partial = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
     assert.equal(partial.ok, false);
     assert.equal(partial.notFound, undefined, 'not "not on the website any more"');
-    assert.match(partial.message, /Couldn't read the website's whole list of cars just now, so this car couldn't be checked\. Try again in a minute\./);
+    // the cause can last (a next link that loops, paging the website ignores): no "try again in a minute", and no "turning Lot Current away"
+    assert.equal(partial.message, "Couldn't read the website's whole list of cars, so this car couldn't be checked. Open the website's used inventory page, click Scan website in the popup, then post this car from the popup there.");
     adapter.getDetails = async () => ({ ok: true, record: null, complete: true, fetchedAt: new Date().toISOString() });
     const whole = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
     assert.deepEqual([whole.ok, whole.notFound], [false, true], 'a whole list without the car: gone, as before');
     adapter.getDetails = async () => ({ ok: true, record: null, fetchedAt: new Date().toISOString() });
     assert.equal((await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true })).notFound, true, 'an adapter that does not say: as before');
+    // a page with no vehicle data is not the website turning Lot Current away; a failing page may be
+    adapter.getDetails = async () => ({ ok: false, message: "The car's page on the website has no vehicle data Lot Current can read.", carPage: true, noData: true });
+    const blank = await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true });
+    assert.deepEqual([blank.ok, blank.notFound, blank.carPage, blank.noData], [false, undefined, true, true]);
+    assert.equal(blank.message, "The car's page on the website has no vehicle data Lot Current can read.");
+    adapter.getDetails = async () => ({ ok: false, message: "Couldn't read the car's page on the website (HTTP 500).", carPage: true });
+    assert.match((await fetchVehicleDetailsDirect(DEALERON_ORIGIN, info, vin, { contains: async () => true })).message, /HTTP 500\)\. If the website keeps turning Lot Current away/);
   } finally {
     adapter.getDetails = real;
   }
@@ -522,7 +530,7 @@ test('a car missing from the part of another list the website gave is read from 
     cutShort.add(DEALERCOM_LIST);
     const both = await readCarForPost({ tabId: 1, origin: DEALERCOM_ORIGIN, info, vin: platformCars(1, { from: 90 })[0].vin, contains: async () => false });
     assert.deepEqual([both.ok, both.notFound, both.incomplete], [false, undefined, true]);
-    assert.match(both.message, /Couldn't read the website's whole list of cars just now/);
+    assert.match(both.message, /^Couldn't read the website's whole list of cars, so this car couldn't be checked\. Open the website's used inventory page/);
 
     // with nothing stored for the website, the page's own part-read list says only that
     delete store[SITES_KEY];
@@ -533,3 +541,4 @@ test('a car missing from the part of another list the website gave is read from 
     delete globalThis.chrome;
   }
 });
+

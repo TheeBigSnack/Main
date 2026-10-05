@@ -1529,7 +1529,13 @@ async function carFromPage(site, vin, href) {
  * off the website or back to a page already read, a page cut at
  * PAGE_TEXT_LIMIT, a first page firstListPage could not walk back to), the
  * same ways the scan calls a list not clean, adds complete: false, so a car
- * on the unread part is never called gone.
+ * on the unread part is never called gone. A car the list still links to
+ * whose page shows no vehicle data for it is not gone either: it can't be
+ * checked (ok false, noData). An answer that is not the car carries why:
+ * refused (a 403, 429, 503 or bot check: nothing more may be asked of the
+ * website now) or carPage (the car's own page or links failed or showed no
+ * data; reading another list would not change that); a list that could not
+ * be read carries neither.
  */
 export async function getDetails(search, vin, options = {}) {
   const wanted = String(vin || '').toUpperCase();
@@ -1549,11 +1555,13 @@ export async function getDetails(search, vin, options = {}) {
     site.cars.shape = learnCarAddressShape([...known.keys()]);
   }
   const done = (record) => ({ ok: true, record, fetchedAt: new Date().toISOString() });
+  const pageFailed = (r) => ({ ok: false, message: r.error, ...(r.blocked ? { refused: true } : { carPage: true }) });
+  const noData = "The website still lists this car, but its page has no vehicle data Lot Current can read, so the car couldn't be checked.";
   let pageWithoutData = false;
   const own = onSite(typeof opts.url === 'string' ? opts.url : '', null, origin);
   if (own) {
     const r = await carFromPage(site, wanted, own.href);
-    if (r.error) return { ok: false, message: r.error };
+    if (r.error) return pageFailed(r);
     if (r.record) return done(r.record);
     if (r.gone) return done(null);
     pageWithoutData = true;
@@ -1561,11 +1569,11 @@ export async function getDetails(search, vin, options = {}) {
   const start = onSite(opts.listUrl, null, origin);
   if (!start) {
     return pageWithoutData
-      ? { ok: false, message: "The car's page on the website has no vehicle data Lot Current can read." }
+      ? { ok: false, message: "The car's page on the website has no vehicle data Lot Current can read.", carPage: true, noData: true }
       : { ok: false, message: "Lot Current doesn't know where this car's page is. Scan the website again, then post." };
   }
   const first = await firstListPage(site, start.href, origin, MAX_LIST_PAGES);
-  if (first.stopped) return { ok: false, message: `Couldn't read the inventory page (${first.stopped}).` };
+  if (first.stopped) return { ok: false, message: `Couldn't read the inventory page (${first.stopped}).`, refused: true };
   const visited = new Set();
   let whole = false;
   let cut = !first.clean; // a list whose first page could not be found is read only in part, as the scan's listClean says
@@ -1573,14 +1581,14 @@ export async function getDetails(search, vin, options = {}) {
     visited.add(pageKey(at));
     const got = await site.read(at);
     const page = pageOf(got);
-    if (page.kind !== 'html') return { ok: false, message: `Couldn't read the inventory page (${page.message || `HTTP ${page.status}`}).` };
+    if (page.kind !== 'html') return { ok: false, message: `Couldn't read the inventory page (${page.message || `HTTP ${page.status}`}).`, ...(page.kind === 'blocked' ? { refused: true } : {}) };
     if (page.truncated) cut = true;
     const listedNode = page.parsed.vehicles.find((x) => nodeVin(x) === wanted) || null;
     const listPage = got.finalUrl;
     const named = listedNode ? onSite(firstText(listedNode.url), listPage, origin) : null;
     if (named) {
       const r = await carFromPage(site, wanted, named.href);
-      if (r.error) return { ok: false, message: r.error };
+      if (r.error) return pageFailed(r);
       if (r.record) return done(r.record);
       return done(listRecord({ node: listedNode, page: listPage, facts: page.parsed.facts }, named.href, false));
     }
@@ -1590,21 +1598,27 @@ export async function getDetails(search, vin, options = {}) {
     // shows the car. A file is passed over, and so is a link that fails (a
     // report link that sends Lot Current to another website, a form's 500):
     // when no link shows the car, the first failure is the answer, since the
-    // car's own page may be the one failing. A refusal stops at once.
+    // car's own page may be the one failing. A refusal stops at once. The
+    // car is gone only when a link said so (404 or 410) and none was a page
+    // without its data or a file: a car the list still links to is not.
     const withVin = page.parsed.facts.links.map((h) => onSite(h, null, origin)).filter((u) => u && !fileAddress(u.href) && vinInAddress(u.href) === wanted);
     const ordered = [...withVin.filter((u) => vinInPath(u.href) === wanted), ...withVin.filter((u) => vinInPath(u.href) !== wanted)];
     const links = ordered.slice(0, MAX_ADDRESSES_PER_CAR);
     let failed = null;
+    let shown = false; // a page or a file at one of its links, without the car's data
+    let goneLink = false;
     for (const link of links) {
       const r = await carFromPage(site, wanted, link.href);
       if (r.record) return done(r.record);
-      if (r.blocked) return { ok: false, message: r.error };
-      if (r.error && !r.file && !failed) failed = r.error;
+      if (r.blocked) return pageFailed(r);
+      if (r.error && !r.file && !failed) failed = r;
+      if (r.none || r.file) shown = true;
+      if (r.gone) goneLink = true;
     }
-    if (failed) return { ok: false, message: failed };
+    if (failed) return pageFailed(failed);
     // links left unread may hold its page: never "gone" on that
-    if (ordered.length > links.length && !listedNode) return { ok: false, message: "Couldn't tell which of this car's links on the website is its page. Scan the website again, then post." };
-    if (links.length && !listedNode) return done(null);
+    if (ordered.length > links.length && !listedNode) return { ok: false, message: "Couldn't tell which of this car's links on the website is its page. Scan the website again, then post.", carPage: true };
+    if (links.length && !listedNode) return goneLink && !shown ? done(null) : { ok: false, message: noData, carPage: true, noData: true };
     if (listedNode) return done(listRecord({ node: listedNode, page: listPage, facts: page.parsed.facts }, links.length ? links[0].href : listPage, false));
     if (!page.parsed.facts.next) {
       whole = !cut; // the list ended where it says it ends

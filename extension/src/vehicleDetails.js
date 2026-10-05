@@ -32,7 +32,12 @@ const hostOf = (origin) => {
   }
 };
 
-// The adapter's answer for one car, as both ways report it.
+// The adapter's answer for one car, as both ways report it. A failure keeps
+// what the adapter says of it (adapters/README.md getDetails): refused (the
+// website turned the read away: nothing more is asked of it now), carPage
+// (the car's own page failed or showed no data: another list would not
+// change that) and noData (the website still lists the car but its page
+// shows no vehicle data).
 async function readOne(adapter, search, wanted, options) {
   let r;
   try {
@@ -40,10 +45,18 @@ async function readOne(adapter, search, wanted, options) {
   } catch (e) {
     return { ok: false, message: "Couldn't read the dealership website: " + errText(e) };
   }
-  if (!r.ok) return { ok: false, message: r.message || "Couldn't read the dealership website." };
-  // a list the website did not give whole can't say a car is gone
+  if (!r.ok) {
+    const out = { ok: false, message: r.message || "Couldn't read the dealership website." };
+    for (const flag of ['refused', 'carPage', 'noData']) if (r[flag] === true) out[flag] = true;
+    return out;
+  }
+  // A list the website did not give whole can't say a car is gone. The
+  // cause can last (a next link that loops, more list pages than one read
+  // follows, paging the website ignores), so waiting is not the advice:
+  // a scan from the used inventory page records the car's own page, and a
+  // post from the popup there reads the list that page loads.
   if (!r.record && r.complete === false) {
-    return { ok: false, incomplete: true, message: "Couldn't read the website's whole list of cars just now, so this car couldn't be checked. Try again in a minute." };
+    return { ok: false, incomplete: true, message: "Couldn't read the website's whole list of cars, so this car couldn't be checked. Open the website's used inventory page, click Scan website in the popup, then post this car from the popup there." };
   }
   if (!r.record) {
     return { ok: false, notFound: true, message: "This car isn't on the website any more (sold, removed or hidden). Rescan before posting anything." };
@@ -194,7 +207,8 @@ export async function fetchVehicleDetailsDirect(origin, info, vin, { url = null,
     };
   }
   const r = await readOne(adapter, adapter.makeDirectSearch(info.service), wanted, withUrl(adapter, info.service, url, await lastScanPages(origin)));
-  if (!r.ok && !r.notFound) return { ...r, message: `${sentence(r.message)} If the website keeps turning Lot Current away, open its used inventory page and click Post in the popup.` };
+  // a list that can't be read whole, or a page with no vehicle data, is not the website turning Lot Current away
+  if (!r.ok && !r.notFound && !r.incomplete && !r.noData) return { ...r, message: `${sentence(r.message)} If the website keeps turning Lot Current away, open its used inventory page and click Post in the popup.` };
   return r.ok ? { ...r, site: info.site || { origin, name: info.name || host }, via: 'direct' } : r;
 }
 

@@ -1426,7 +1426,38 @@ test('schemaOrg getDetails: a car missing from a list read only in part is not c
   try {
     const r = await fetchVehicleDetails(1, missing);
     assert.deepEqual([r.ok, r.notFound], [false, undefined]);
-    assert.match(r.message, /Couldn't read the website's whole list of cars just now/);
+    assert.match(r.message, /^Couldn't read the website's whole list of cars, so this car couldn't be checked\. Open the website's used inventory page, click Scan website in the popup, then post this car from the popup there\.$/);
+  } finally {
+    delete globalThis.chrome;
+  }
+});
+
+test('schemaOrg getDetails: a car the list still links to whose page shows no vehicle data is not called gone', async () => {
+  const cars = standardCars(6).map((c) => ({ ...c, path: `/vehicle-details/?vin=${c.vin}` }));
+  const m = standardSite({ cars, listData: false });
+  m.set(O + cars[2].path, html('<!doctype html><html><head><title>Vehicle details</title></head><body><h1>This vehicle is in transit. Call for details.</h1></body></html>'));
+  const d = await schemaOrg.getDetails(fakeSiteSearch(m), cars[2].vin, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([d.ok, d.record, d.carPage, d.noData], [false, undefined, true, true]);
+  assert.match(d.message, /still lists this car, but its page has no vehicle data/);
+  // a car whose only link answers 404 is gone, as before
+  m.set(O + cars[3].path, httpError(404));
+  const gone = await schemaOrg.getDetails(fakeSiteSearch(m), cars[3].vin, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([gone.ok, gone.record], [true, null]);
+  // a refusal says so, and a list page that fails says neither refused nor carPage
+  const refused = standardSite({ cars });
+  refused.set(LIST, httpError(429));
+  const r429 = await schemaOrg.getDetails(fakeSiteSearch(refused), cars[0].vin, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([r429.ok, r429.refused, r429.carPage], [false, true, undefined]);
+  const broken = standardSite({ cars });
+  broken.set(LIST, httpError(500));
+  const r500 = await schemaOrg.getDetails(fakeSiteSearch(broken), cars[0].vin, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([r500.ok, r500.refused, r500.carPage], [false, undefined, undefined]);
+  // the side panel is told the page has no data, never that the car is sold
+  globalThis.chrome = fakeChrome(fakeStandardPage({ site: m, path: '/used-vehicles/' }));
+  try {
+    const r = await fetchVehicleDetails(1, cars[2].vin);
+    assert.deepEqual([r.ok, r.notFound], [false, undefined]);
+    assert.match(r.message, /its page has no vehicle data/);
   } finally {
     delete globalThis.chrome;
   }
