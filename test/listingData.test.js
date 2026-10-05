@@ -365,3 +365,41 @@ test('the listing\'s location is listed as assumed when the website puts the car
   assert.deepEqual(carStore({ location: '  Sample Ford ' }, { stores: ['Sample Ford'] }), { store: '', away: false });
   assert.deepEqual(carStore({}, { stores: [] }), { store: '', away: false });
 });
+
+test('on a website whose cars are all at one store, no car is away, ticked or not; a second store brings the check back', async () => {
+  const { carStore } = await import('../extension/src/listingData.js');
+  const { defaultSettings } = await import('../extension/src/settings.js');
+  const { storeNames } = await import('../extension/src/normalize.js');
+  // a one-store website whose own name differs from the store name its cars carry: nothing is ticked
+  const site = { name: 'Smith Auto Sales', title: 'Used cars | Smith Auto Sales', host: 'www.smithautosales.test', address: { city: 'Springfield', state: 'OH', zip: '45505' } };
+  const cars = [1, 2, 3].map(() => ({ ...vehicle('usedNormal'), location: 'Smith Motors' }));
+  const s = defaultSettings(site, cars);
+  assert.deepEqual(s.myStores, [], 'nothing stands out, so nothing is ticked');
+  const opts = (lot) => ({ dealer: s.dealer, defaults: s.defaults, price: 20000, stores: s.myStores, lot });
+  const location = (d) => d.assumed.find((a) => a.key === 'location');
+  assert.equal(location(buildListingData(cars[0], opts(storeNames(cars)))), undefined, 'the one store is the dealership: its address is where the car is');
+  assert.deepEqual(carStore(cars[0], { stores: [], dealer: s.dealer, lot: storeNames(cars) }), { store: 'Smith Motors', away: false });
+  // a second store on the website, or a car at a store the last scan did not list: check the location
+  const two = [...cars, { ...vehicle('usedNormal'), location: 'Jones Ford Shelbyville' }];
+  assert.ok(location(buildListingData(cars[0], opts(storeNames(two)))));
+  assert.ok(location(buildListingData({ ...cars[0], location: 'Jones Ford Shelbyville' }, opts(storeNames(cars)))));
+  // the side panel passes the last scan as it is stored: its cars by VIN
+  const snapshot = Object.fromEntries(cars.map((c, i) => [`VIN${i}`, { name: c.name, location: c.location }]));
+  assert.equal(location(buildListingData(cars[0], opts(snapshot))), undefined);
+  assert.ok(location(buildListingData(cars[0], opts({ ...snapshot, VIN9: { location: 'Jones Ford Shelbyville' } }))));
+  // with no lot to go on (no scan yet), it may be anywhere, as before
+  assert.ok(location(buildListingData(cars[0], opts(null))));
+  assert.ok(location(buildListingData(cars[0], opts([]))));
+  assert.ok(location(buildListingData(cars[0], opts({}))));
+  // every listing and description the side panel builds is given the last scan
+  const panel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
+  const calls = panel.split('\n').filter((line) => /\b(?:buildListingData|generateDescription)\(/.test(line) && !/^\s*(?:import|\/\/)/.test(line));
+  assert.ok(calls.length >= 4, calls.join('\n'));
+  for (const line of calls) assert.match(line, /lot: state\.snapshotVehicles\b/, line);
+  // the README and the help page say so wherever they say when the location is listed as assumed
+  for (const doc of ['../README.md', '../docs/help.md']) {
+    const said = readFileSync(new URL(doc, import.meta.url), 'utf8').split(/(?<=[.;])\s/).filter((x) => /does not name your town/.test(x));
+    assert.ok(said.length, `${doc} says when the location is listed as assumed`);
+    for (const x of said) assert.match(x, /more than one store/, `${doc}: ${x}`);
+  }
+});

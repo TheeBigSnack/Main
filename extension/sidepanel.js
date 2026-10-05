@@ -451,7 +451,7 @@ function readIsOld() {
 // What the form would get from the car as it stands: every field but the
 // description (the person's own text), and the photos in order.
 function formValues() {
-  return buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
+  return buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
 }
 
 // Before Open the Marketplace form or Fill it in now: with a read older than
@@ -814,7 +814,7 @@ async function generate({ useClaude } = {}) {
   const rewrite = await rewriteWithKey(useClaude === undefined ? s.rewrite : { ...s.rewrite, enabled: useClaude });
   if (run !== flowRun) return;
   const settings = { ...s, rewrite };
-  const r = await generateDescription({ vehicle: state.vehicle, dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights }); // the origin tells the service which store this is
+  const r = await generateDescription({ vehicle: state.vehicle, dealer: s.dealer, salesperson: s.salesperson, priceNote: noteFor(), price: state.price, boilerplate: state.boilerplate, settings, origin: state.origin, highlights: state.highlights, lot: state.snapshotVehicles }); // the origin tells the service which store this is; the last scan, whether the website has one store (carStore)
   if (run !== flowRun) return; // a dropped post's text never lands in the next car's
   state.highlightsUsed = settleHighlights(state.highlights, state.vehicle.features);
   state.description = r.text;
@@ -882,7 +882,7 @@ async function openForm({ probeOnly = false } = {}) {
     // open (a queue's, as soon as its car is read) is not turned away by this one
     if (!dropped()) state.opening = false;
   }
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
+  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
   setStatus('');
@@ -1520,7 +1520,7 @@ function viewBlocked() {
   return `<div class="banner bad" id="blocked">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
-const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores });
+const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
 
 function fieldsTable() {
   const l = currentListing();

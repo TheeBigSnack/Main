@@ -86,10 +86,11 @@ export async function rewriteWithBackend({ endpoint, key = '', facts, fetchImpl 
  * facts, so a person who belongs to two stores is billed and capped against
  * the right one. `highlights` is the salesperson's pick of the car's
  * features (null: the usual pick); `salesperson.closingLine` ends every
- * description when it passes its checks.
+ * description when it passes its checks. `lot` is the website's cars from
+ * the last scan (the snapshot's map by VIN), when known, for carStore.
  * @returns {{ text, source: 'template'|'claude', model?, guardrails, narrative, note? }}
  */
-export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, fetchImpl }) {
+export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, lot = null, fetchImpl }) {
   // the write-up up to the first part it leaves out (lot-wide text, a label, an award line, a list): the rewrite
   // service gets it; the template writes from the car's listed facts and never copies it
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
@@ -105,7 +106,8 @@ export async function generateDescription({ vehicle, dealer = {}, salesperson = 
   // The service knows the dealership's name and town, not the car's store, so
   // for a car the website lists at a store in another town it could only say
   // the car is somewhere it isn't: the template, which names the car's store, is used.
-  const where = carStore(vehicle, { stores, dealer });
+  // On a website whose cars are all at one store (lot), that store is the dealership.
+  const where = carStore(vehicle, { stores, dealer, lot });
   if (where.away) return { ...fallback, note: `The website lists this car at ${where.store}, which may not be at your dealership's address, so the template wrote the description: it names the car's own store. If it is your store, tick it in Settings.` };
   const facts = { ...rewriteFacts({ vehicle, dealer, salesperson, priceNote, narrative, highlights }), ...(origin ? { origin: String(origin) } : {}) };
   try {

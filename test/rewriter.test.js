@@ -313,3 +313,17 @@ test('for a car the website lists at a store in another town, the template names
   await generateDescription({ ...away, settings: { ...on, myStores: ['Sample Chevrolet Shelbyville'] }, fetchImpl: counting });
   assert.equal(calls, 2);
 });
+
+test('on a website whose cars are all at one store, the service is asked even when the store name does not name the town', async () => {
+  const site = { name: 'Smith Auto Sales', city: 'Springfield', zip: '00000' };
+  let calls = 0;
+  const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: false }) }; };
+  const car = args({ vehicle: { ...args().vehicle, location: 'Smith Motors' }, dealer: site, priceNote: '' });
+  const r = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors'], fetchImpl: counting });
+  assert.equal(calls, 1, 'the one store is the dealership: the service was asked');
+  assert.doesNotMatch(r.note || '', /may not be at your dealership's address/);
+  // a second store on the website: the template, as for any car that may be elsewhere
+  const two = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors', 'Jones Ford Shelbyville'], fetchImpl: counting });
+  assert.equal(calls, 1);
+  assert.match(two.note, /lists this car at Smith Motors, which may not be at your dealership's address/);
+});

@@ -435,28 +435,36 @@ export function locationExpect(dealer = {}) {
 // car is at the one store ticked, or the website names no store. `away` is
 // true when that store's name does not name the dealership's town either, so
 // the dealership's address, which the listing's location is typed from, may
-// not be where the car is.
+// not be where the car is. `lot` is the website's cars from the last scan
+// (a list, or the snapshot's map by VIN; each a car with its location, or a
+// store name), when the caller has them: on a website whose cars are all at
+// one store, that store is the dealership the address came from, whatever
+// its name says, so its cars are never away. With no lot to go on, a store
+// whose name does not name the town may be anywhere.
 const placeWords = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+/g) || [];
-export function carStore(v = {}, { stores = [], dealer = {} } = {}) {
+export function carStore(v = {}, { stores = [], dealer = {}, lot = null } = {}) {
   const at = typeof v.location === 'string' ? v.location.trim() : '';
   const mine = (Array.isArray(stores) ? stores : []).map((st) => String(st || '').trim()).filter(Boolean);
   const store = at && !(mine.length === 1 && mine[0] === at) ? at : '';
   const name = placeWords(store);
   const town = placeWords(dealer && dealer.city);
   const inTown = town.length > 0 && name.some((_, i) => town.every((w, j) => name[i + j] === w));
-  return { store, away: Boolean(store) && !inTown };
+  const listed = Object.values(lot && typeof lot === 'object' ? lot : {}).map((c) => String((c && typeof c === 'object' ? c.location : c) || '').trim()).filter(Boolean);
+  const oneStore = listed.length > 0 && new Set([...listed, store]).size === 1;
+  return { store, away: Boolean(store) && !inTown && !oneStore };
 }
 
 /**
  * @param {object} vehicle   normalised vehicle
- * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition}, stores }
+ * @param {object} options   { dealer: {city, state, zip}, description, photos, price, defaults: {titleStatus, condition}, stores, lot }
  *   price is the number to post (the caller applies the dealer's price basis);
  *   defaults are the dealership's answers for the fields the website can't give;
  *   guesses ({ exterior, interior, confidence }) are colors read from the photos,
  *   used only where the website gives no usable color;
- *   stores are the salesperson's ticked stores (settings.myStores), for carStore
+ *   stores are the salesperson's ticked stores (settings.myStores), and lot the website's cars
+ *   from the last scan (the snapshot's map by VIN, when known), for carStore
  */
-export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null, stores = [] } = {}) {
+export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null, stores = [], lot = null } = {}) {
   const v = vehicle || {};
   const d = defaults || {};
   const g = guesses || {};
@@ -514,7 +522,7 @@ export function buildListingData(vehicle, { dealer = {}, description = '', photo
   if (extGuess) assumed.push({ key: 'exteriorColor', label: 'Exterior color', value: extGuess, why: guessWhy(v.exteriorColor) });
   if (intGuess) assumed.push({ key: 'interiorColor', label: 'Interior color', value: intGuess, why: guessWhy(v.interiorColor) });
   // the location is the dealership's address; a car the website lists at a store in another town may be elsewhere
-  const where = carStore(v, { stores, dealer });
+  const where = carStore(v, { stores, dealer, lot });
   if (fields.location && where.away) assumed.push({ key: 'location', label: 'Location', value: fields.location, why: `your dealership's address; the website lists this car at ${where.store}, so check the location on the form` });
   if (fields.condition) assumed.push({ key: 'condition', label: 'Vehicle condition', value: fields.condition, why: "your dealership's default; change it on the form if this car is different" });
   else leftBlank.push({ key: 'condition', label: 'Vehicle condition', why: 'no default set in Settings; pick it on the form' });
