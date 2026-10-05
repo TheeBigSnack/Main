@@ -6,11 +6,14 @@
 // writes them into the website as site/legal/terms/index.html,
 // site/legal/privacy/index.html and site/legal/posting-rules/index.html
 // (served at /legal/terms/, /legal/privacy/ and /legal/posting-rules/; the
-// old .html addresses redirect there), each marked as a draft that is not in
-// effect while legal/legal-status.json says draft. Until site/ is deployed
-// (docs/website.md) and those pages are no longer drafts, these addresses
-// stay placeholders: recording that a person accepted a text marked "not in
-// effect" would be a false record. Then they become
+// old .html addresses redirect there). While legal/legal-status.json says
+// draft, each page opens with a draft banner: the Terms and the Privacy
+// Policy say they are not in effect, and the posting rules, which the
+// extension already asks every salesperson to follow, say their wording may
+// change (scripts/legal-pages.mjs DRAFT_BANNER, RULES_DRAFT_BANNER). Until
+// site/ is deployed (docs/website.md) and those pages are no longer drafts,
+// these addresses stay placeholders: recording that a person accepted a
+// text marked "not in effect" would be a false record. Then they become
 // https://<the site's host>/legal/terms/,
 // https://<the site's host>/legal/privacy/ and
 // https://<the site's host>/legal/posting-rules/ (the host is the one in
@@ -20,6 +23,12 @@
 // record next to the acceptance time (settings.legal); after a change
 // Settings shows everyone's acceptance as out of date (legalIsCurrent), so
 // bump it whenever the texts change in a way people must accept again.
+// While the addresses are placeholders nobody can accept anything
+// (legalHosted() is false, and no acceptance has ever been recorded), so the
+// draft texts change without a bump; the change that makes the addresses
+// real must also set an edition that is not a draft's, after every draft
+// change before it (test/legalPages.test.js and test/sitePages.test.js
+// refuse real addresses with a draft's edition).
 
 export const LEGAL = Object.freeze({
   version: '2026-09-28-draft',

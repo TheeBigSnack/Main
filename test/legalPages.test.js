@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PAGES, REDIRECTS, STATUS_FILE, CSP, REDIRECT_CSP, FOOTER_LINE, USAGE, escapeHtml, safeHref, renderInline, renderMarkdown, readStatus, renderPage, renderRedirect, stalePages, main,
+  PAGES, REDIRECTS, STATUS_FILE, CSP, REDIRECT_CSP, FOOTER_LINE, USAGE, DRAFT_BANNER, RULES_DRAFT_BANNER, escapeHtml, safeHref, renderInline, renderMarkdown, readStatus, renderPage, renderRedirect, stalePages, main,
 } from '../scripts/legal-pages.mjs';
 import { NAV, NO_SCRIPT_CSP, fullTitle, rootFor, ancestorsOf, readContext } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
@@ -466,6 +466,12 @@ test('legalLinks.js names real pages only once legal-status.json says the texts 
   assert.match(linkProblems({ ...live, rulesUrl: placeholders.rulesUrl }, false).join('\n'), /all three go live together/);
   // and on what is committed
   assert.deepEqual(linkProblems(LEGAL, status.draft), [], `extension/src/legalLinks.js and ${STATUS_FILE} disagree`);
+  // review: the module's comment said every page is "marked as a draft that is not in effect", while the posting
+  // rules' page has its own banner (the extension already asks salespeople to follow them)
+  const links = read('extension/src/legalLinks.js');
+  assert.ok(RULES_DRAFT_BANNER !== DRAFT_BANNER, 'the posting rules share the not-in-effect banner again: the comment can change');
+  assert.doesNotMatch(links, /each marked as a draft that is not in\s*\/\/\s*effect/, 'legalLinks.js says every legal page is marked not in effect, the posting rules\' page included');
+  assert.match(links, /RULES_DRAFT_BANNER/, 'legalLinks.js does not point at the posting rules\' own banner');
   if (status.draft) assert.equal(legalHosted(), false, 'while the texts are drafts nobody can accept them');
 });
 
