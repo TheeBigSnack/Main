@@ -773,6 +773,19 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     [FEES, lowerFirst(FEES)],
     // a label, a bracket, an opening word or an emoji before it on its line
     [FEES, `Price note: ${FEES}`], [FEES, `(${FEES})`], [FEES, `Plus ${lowerFirst(FEES)}`], [FEES, `\u{1F697} ${FEES}`],
+    // a stop that never ends a sentence before it ("e.g.", "i.e.", "vs.", "cf."), the note in capitals or not
+    [FEES, `Deal direct with the salesperson, e.g. ${FEES}`], [FEES, `Deal direct with the salesperson, i.e. ${FEES}`],
+    [FEES, `Taxes are lower dealing direct with the salesperson vs. ${FEES}`], [FEES, `Deal direct with the salesperson (I.E.) ${FEES}`],
+    [FEES, `Deal direct with the salesperson, cf. ${lowerFirst(FEES)}`],
+    // after its stop, words that carry its sentence on: a mark that joins, or a small first letter past a bracket, quote or emoji
+    [SHORT, `${SHORT} , so deal direct with the salesperson.`], [SHORT, `${SHORT} \u2013 so deal direct with the salesperson.`],
+    [SHORT, `${SHORT} (so deal direct with the salesperson)`], [SHORT, `${SHORT} \u201cso deal direct with the salesperson\u201d`],
+    [SHORT, `${SHORT} \u{1F697} so deal direct with the salesperson.`], [SHORT, `${SHORT} & deal direct with the salesperson.`],
+    // on the next line, the same, after a bullet too, or a bullet with nothing after it on its line
+    [SHORT, `${SHORT}\n\u2013 so deal direct with the salesperson.`], [SHORT, `${SHORT}\n- \nso deal direct with the salesperson.`],
+    [NO_STOP, `${NO_STOP}\n\u2013 so deal direct with the salesperson.`], [NO_STOP, `${NO_STOP}\n, so deal direct with the salesperson.`],
+    [NO_STOP, `${NO_STOP}\n...so deal direct with the salesperson.`], [NO_STOP, `${NO_STOP}\n\u2026 so deal direct with the salesperson.`],
+    [NO_STOP, `${NO_STOP}\n(so deal direct with the salesperson)`], [NO_STOP, `${NO_STOP}\n- so deal direct with the salesperson.`],
   ]) {
     const c = withNote(note);
     const template = buildTemplateDescription(c);
@@ -791,6 +804,10 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     [FEES, `"Runs like a dream." ${FEES}`], [FEES, `${FEES} Message me any time.`], [FEES, `${FEES}\n${FEES}`],
     [NO_STOP, `${NO_STOP}.`], [NO_STOP, `${NO_STOP}. Message me any time.`], [SHORT, `Deal direct with me. ${SHORT}`],
     [LOWER, LOWER], [LOWER, `${LOWER} Message me.`],
+    // a new sentence or line after it that starts with an emoji, a quote, a bracket or a bullet before its capital
+    [FEES, `${FEES}\n\u{1F697} Come see it today!`], [FEES, `${FEES}\n\u201cAsk me anything.\u201d`], [FEES, `${FEES} (Message me any time.)`],
+    [FEES, `${FEES}\n- Heated seats`], [FEES, `${FEES}\n\u2022 Heated seats`], [NO_STOP, `${NO_STOP}\n\u{1F697} Come see it today!`],
+    [NO_STOP, `${NO_STOP}\n- Heated seats`], [NO_STOP, `${NO_STOP}\n"Ask me anything."`], [FEES, `Deal direct with the salesperson etc. ${FEES}`],
   ]) {
     const c = withNote(note);
     assert.deepEqual(runGuardrails(buildTemplateDescription(c).replace(note, own), c).problems, [], own);
@@ -817,6 +834,37 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
   }
   const plain = withNote('');
   assert.deepEqual(runGuardrails(`${buildTemplateDescription(plain)}\nTaxes and fees go to the state, not the dealer.`, plain).problems.map((p) => p.text), ['Says "not the dealer"']);
+});
+
+test('the template passes its own checks beside a "not the dealer" price note, whatever its sign-off\'s title starts with', () => {
+  // the sign-off is the line right after the note; with no name it starts with the title, and the note's
+  // sentence check must read it as a new sentence, or the salesperson could post no car at all
+  const v = vehicle('usedNormal', { features: FEATURES });
+  const notes = ['Plus tax, title and registration, which go to the state, not the dealer.', 'Plus tax, title and registration, which go to the state, not the dealer',
+    'plus tax and tags, which go to the state, not the dealer.', 'Registration fees are paid directly to the DMV, not the dealership.'];
+  const titles = ['sales consultant', '(BDC) rep', '\u201cInternet\u201d sales', '\u{1F697} sales pro', '\uc601\uc5c5 \ub2f4\ub2f9', '(bdc) rep', '"internet" sales', '[BDC] rep',
+    '- sales', '\u2013 sales', '-sales', ', sales', '...sales', '& sales', '\u0138 sales', '\u00dfales', '\u{10428} sales', '\u00bfventas?'];
+  for (const note of notes) {
+    for (const title of titles) {
+      for (const name of ['', 'Sam']) {
+        const c = { vehicle: v, dealer: EXAMPLE, salesperson: { name, title }, priceNote: note, price: v.price };
+        const text = buildTemplateDescription(c);
+        assert.deepEqual(runGuardrails(text, c).problems, [], `${JSON.stringify(title)} ${name || 'no name'}: ${note}`);
+      }
+    }
+  }
+  // the sign-off with no name: the title as typed, its first letter a capital; "I'm the <title>" when it can't start a sentence
+  const signOff = (title) => buildTemplateDescription({ vehicle: v, dealer: EXAMPLE, salesperson: { name: '', title }, priceNote: notes[0], price: v.price }).split('\n')
+    .find((l, i, all) => all[i - 1] === notes[0]);
+  assert.equal(signOff('(BDC) rep'), '(BDC) rep at Example Motors.');
+  assert.equal(signOff('\u201cInternet\u201d sales'), '\u201cInternet\u201d sales at Example Motors.');
+  assert.equal(signOff('\u{1F697} sales pro'), '\u{1F697} Sales pro at Example Motors.');
+  assert.equal(signOff('\uc601\uc5c5 \ub2f4\ub2f9'), '\uc601\uc5c5 \ub2f4\ub2f9 at Example Motors.');
+  assert.equal(signOff('- sales'), '- Sales at Example Motors.');
+  assert.equal(signOff(', sales'), "I'm the , sales at Example Motors.");
+  assert.equal(signOff('\u0138 sales'), "I'm the \u0138 sales at Example Motors.");
+  assert.equal(signOff('\u00dfales'), "I'm the \u00dfales at Example Motors.");
+  assert.equal(signOff('sales consultant'), 'Sales consultant at Example Motors.');
 });
 
 // ---------- claims only the website can make ----------

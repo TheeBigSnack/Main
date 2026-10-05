@@ -535,21 +535,56 @@ function without(text: unknown, names: unknown[]): string {
 // The text with only the copies of the price note set aside that stand as a
 // sentence of their own where the text puts them, as the template puts the
 // note: after the start of the text or a sentence's end (".", "!" or "?",
-// maybe a closing quote or bracket, then a space or a new line), and before
-// the end of the text or a new sentence (a stop, the note's own last one or
-// one right after it, or else a new line; then a space or a new line and a
-// capital or a digit). A line break alone ends no sentence ("..., and" at the
-// end of a line carries on), and a copy that starts in lower case where the
-// note does not ("etc. tax, title and fees go ...") carries one on; a note the
-// dealership starts in lower case may start a line after a stop. Any other
-// copy has words joined to it in its sentence ("Taxes are lower when you deal
-// direct, and tax, title and fees go to the state, not the dealer."; "..., not
-// the dealer, so deal direct with the salesperson."; "Price note: ...";
-// "Plus tax, title ...") and stays in the text.
+// maybe a closing quote or bracket, then a space or a new line; never the dot
+// of "e.g.", "i.e.", "vs.", "cf." or "viz."), and before the end of the text
+// or a new sentence (a stop, the note's own last one or one right after it,
+// or else a new line; then a space or a new line and a sentence that does not
+// carry the note's one on: startsOwnSentence). A line break alone ends no
+// sentence ("..., and" at the end of a line carries on), and a copy that
+// starts in lower case where the note does not ("etc. tax, title and fees go
+// ...") carries one on; a note the dealership starts in lower case may start
+// a line after a stop. Any other copy has words joined to it in its sentence
+// ("Taxes are lower when you deal direct, and tax, title and fees go to the
+// state, not the dealer."; "..., not the dealer, so deal direct with the
+// salesperson."; "Price note: ..."; "Plus tax, title ...") and stays in the
+// text.
 const NOTE_CLOSERS = "['\"\u2019\u201d)\\]]*";
 const NOTE_OPENS = new RegExp(`(?<=(^|[.!?]${NOTE_CLOSERS})(\\s*))`, 'y');
 const NOTE_ENDS = new RegExp(`((?:[^\\S\\n]*[.!?]+)?)${NOTE_CLOSERS}(\\s*)`, 'y');
 const NOTE_OWN_STOP = new RegExp(`[.!?]${NOTE_CLOSERS}$`);
+const NOT_A_STOP = new RegExp(`(?:^|[^\\p{L}])(?:e\\.g|i\\.e|vs|cf|viz)\\.${NOTE_CLOSERS}\\s*$`, 'iu');
+// What follows a sentence's end starts a sentence of its own unless it
+// carries that one on: it starts with a mark that joins (a comma, semicolon,
+// colon, dot or ellipsis, dash, "&", "+", "/" or a closing bracket), or its
+// first letter, past any opening bracket, quote or emoji on its line, is in
+// lower case ("(so deal direct ...)"). At the start of a line, a bullet ("- ",
+// "• ", "* ") may come first.
+const CARRIES_ON = /^[,;:.\u2026&+/)\]}\-\u2010-\u2015]/;
+const LINE_BULLET = /^[-*\u2022\u2013\u2014][^\S\n]+(?=\S)/;
+function startsOwnSentence(rest: string, onNewLine: boolean): boolean {
+  const r = onNewLine ? rest.replace(LINE_BULLET, '') : rest;
+  if (CARRIES_ON.test(r)) return false;
+  const first = r.split('\n')[0].match(/[\p{L}\p{N}]/u);
+  return !first || !/\p{Ll}/u.test(first[0]);
+}
+
+// The title with its first letter a capital, past any bracket, quote or emoji
+// before it ("(BDC) rep", "“Internet” sales"); a letter whose capital is
+// more than one letter ("ß") is kept, so the title is still said as typed.
+const sentenceCase = (s: string): string => s.replace(/[\p{L}\p{N}]/u, (c) => (c.toUpperCase().length === c.length ? c.toUpperCase() : c));
+// The sign-off the template writer puts right after the price note
+// (extension/src/rewriteTemplate.js signOffLine): with no name, the title
+// starts it, so a title the note's sentence check would read as carrying the
+// note on (one that starts with a comma, a dot, a dash with no space after it
+// or a letter with no capital) is said as "I'm the <title>" instead. The
+// hosted rewrite prompt asks for the same line (rewritePrompt.ts).
+export function signOffLine(person: string, title: string, dealerName: string): string {
+  const at = dealerName ? ` at ${dealerName}` : '';
+  if (person) return `I'm ${person}, ${title}${at}.`;
+  const line = `${sentenceCase(title)}${at}.`;
+  return startsOwnSentence(line, true) ? line : `I'm the ${title}${at}.`;
+}
+
 function withoutOwnSentenceNote(text: unknown, note: unknown): string {
   const t = String(text || '');
   const said = oneLine(note);
@@ -562,13 +597,13 @@ function withoutOwnSentenceNote(text: unknown, note: unknown): string {
     const index = m.index ?? 0;
     const end = index + m[0].length;
     const before = at(NOTE_OPENS, index);
-    const opens = Boolean(before) && (before![1] === '' || before![2] !== '')
+    const opens = Boolean(before) && (before![1] === '' || before![2] !== '') && !NOT_A_STOP.test(t.slice(Math.max(0, index - 16), index))
       && (!lower(m[0]) || (lower(said) && (before![1] === '' || before![2].includes('\n'))));
     const after = opens ? at(NOTE_ENDS, end) : null;
     const next = after ? end + after[0].length : -1;
     const stopped = Boolean(after) && (after![1] !== '' || NOTE_OWN_STOP.test(m[0]));
     const ends = Boolean(after) && (next >= t.length
-      || (after![2] !== '' && (stopped || after![2].includes('\n')) && /^[\p{Lu}\p{N}]/u.test(t.slice(next, next + 2))));
+      || (after![2] !== '' && (stopped || after![2].includes('\n')) && startsOwnSentence(t.slice(next), after![2].includes('\n'))));
     if (!ends) continue;
     out += `${t.slice(from, index)} `;
     from = end;

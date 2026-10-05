@@ -102,6 +102,11 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.') + '\nVIN TESTVIN0000000001.\nplus tax and tags, which go to the state, not the dealer.',
   sixty('2019 Ram 1500 Big Horn. Plus tax, title and registration, which go to the state, not the dealer Text the salesperson.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Price note: Plus tax, title and registration, which go to the state, not the dealer. Questions? Plus tax, title and registration, which go to the state, not the dealer') + '\nVIN TESTVIN0000000001.',
+  // what follows the note: a line that starts its own sentence (an emoji, a quote, a bullet), or words that carry the note's one on
+  sixty('2019 Ram 1500 Big Horn.\nPlus tax, title and registration, which go to the state, not the dealer.\n\u{1F697} Come see it today!\n- Heated seats\n\u201cAsk me anything.\u201d') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn.\nPlus tax, title and registration, which go to the state, not the dealer. (so deal direct with the salesperson) Plus tax, title and registration, which go to the state, not the dealer \u2013 so text the salesperson.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn.\nPlus tax, title and registration, which go to the state, not the dealer\n, so deal direct.\nPlus tax, title and registration, which go to the state, not the dealer\n- \nso deal direct.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, e.g. Plus tax, title and registration, which go to the state, not the dealer. Text the salesperson vs. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -152,7 +157,9 @@ const facts = {
   year: 2019, make: 'Ram', model: '1500', trim: 'Big Horn', mileage: 41230, features: ['Heated seats'], carfaxOneOwner: false, carfax: true,
   narrative: ['A well kept truck.'], dealer: { name: 'Example Motors', city: 'Springfield' }, salesperson: { name: 'Alex', title: 'sales consultant' }, priceNote: '',
 };
-for (const f of [facts, { ...facts, salesperson: { name: '', title: '' } }, { ...facts, salesperson: undefined, dealer: undefined }]) {
+// the sign-off with no name, for titles the note's sentence check reads in each way (see signOffLine)
+const titled = ['\u{1F697} sales pro', '(bdc) rep', '- sales', '\u2013 sales', ', sales', '...sales', '\u0138 sales', '\u00dfales', '\u{10428} sales'].map((title) => ({ ...facts, salesperson: { name: '', title } }));
+for (const f of [facts, { ...facts, salesperson: { name: '', title: '' } }, { ...facts, salesperson: undefined, dealer: undefined }, ...titled]) {
   for (const fixes of [[], ['"3.92" isn\'t in the website\'s data for this car', 'Says "no accidents"']]) {
     assert.deepEqual(tsPrompt(f, fixes), jsPrompt(f, fixes));
     checks += 1;

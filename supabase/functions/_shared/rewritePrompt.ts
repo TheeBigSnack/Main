@@ -7,6 +7,8 @@
 // Keep this file equal to backend/rewritePrompt.js in what it produces;
 // supabase/tests/port-check.mjs compares the two.
 
+import { signOffLine } from './guardrails.ts';
+
 export interface RewriteFacts {
   [key: string]: unknown;
   salesperson?: { name?: unknown; title?: unknown };
@@ -29,17 +31,15 @@ Rules, all of them strict:
 - Do not mention Facebook, Meta or Marketplace.
 - Output only the description text, nothing else.`;
 
-const capitalize = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
-
-// The same sign-off the template writer builds (extension/src/rewriteTemplate.js),
-// so both writers agree and no name is baked into the system prompt.
+// The same sign-off the template writer builds (extension/src/rewriteTemplate.js,
+// ported in guardrails.ts), so both writers agree and no name is baked into the
+// system prompt.
 function signOff(facts: RewriteFacts): string {
   const who = (facts && facts.salesperson) || {};
   const name = String(who.name || '').trim();
   const title = String(who.title || 'sales consultant').trim();
   const dealer = String((facts && facts.dealer && facts.dealer.name) || '').trim();
-  const at = dealer ? ` at ${dealer}` : '';
-  return name ? `I'm ${name}, ${title}${at}.` : `${capitalize(title)}${at}.`;
+  return signOffLine(name, title, dealer);
 }
 
 export function buildRewritePrompt(facts: RewriteFacts, fixes: string[] = []): { system: string; user: string } {

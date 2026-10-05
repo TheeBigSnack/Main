@@ -165,6 +165,9 @@ test('the service user prompt tells Claude the exact sign-off, built from the fa
   // no name: the same form the template writer uses
   const anon = buildRewritePrompt({ ...facts, salesperson: { name: '', title: 'sales consultant' } });
   assert.match(anon.user, /Sign off with exactly: "Sales consultant at Test Motors\."/);
+  // a title that starts with an emoji or a mark: the template's line too (signOffLine)
+  assert.match(buildRewritePrompt({ ...facts, salesperson: { name: '', title: '\u{1F697} sales pro' } }).user, /Sign off with exactly: "\u{1F697} Sales pro at Test Motors\."/u);
+  assert.match(buildRewritePrompt({ ...facts, salesperson: { name: '', title: ', sales' } }).user, /Sign off with exactly: "I'm the , sales at Test Motors\."/);
   // the line survives a regeneration with fixes
   const again = buildRewritePrompt(facts, ['too long']);
   assert.match(again.user, /I'm Dana, sales consultant at Test Motors\./);

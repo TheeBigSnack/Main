@@ -3,6 +3,8 @@
 // extension/src/rewriteTemplate.js, so the rules here are for quality; the
 // guardrails are the safety net.
 
+import { signOffLine } from '../extension/src/rewriteTemplate.js';
+
 export const SYSTEM_PROMPT = `You write Facebook Marketplace descriptions for a car dealership salesperson, from a JSON object of facts about one pre-owned vehicle.
 
 Rules, all of them strict:
@@ -19,8 +21,6 @@ Rules, all of them strict:
 - Do not mention Facebook, Meta or Marketplace.
 - Output only the description text, nothing else.`;
 
-const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-
 // The same sign-off the template writer builds (extension/src/rewriteTemplate.js),
 // so both writers agree and no name is baked into the system prompt.
 function signOff(facts) {
@@ -28,8 +28,7 @@ function signOff(facts) {
   const name = String(who.name || '').trim();
   const title = String(who.title || 'sales consultant').trim();
   const dealer = String((facts && facts.dealer && facts.dealer.name) || '').trim();
-  const at = dealer ? ` at ${dealer}` : '';
-  return name ? `I'm ${name}, ${title}${at}.` : `${capitalize(title)}${at}.`;
+  return signOffLine(name, title, dealer);
 }
 
 export function buildRewritePrompt(facts, fixes = []) {
