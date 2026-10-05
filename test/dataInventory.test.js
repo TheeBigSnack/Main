@@ -601,6 +601,19 @@ test('the Web Store answers name every company the extension\'s sign-in email pa
   }
 });
 
+// review: the privacy policy said Cloudflare "serves the manager view" before the manager view is deployed there;
+// the inventory's row says it applies once production setup step 6 has run.
+test('while the inventory says the manager view goes to Cloudflare only once step 6 has run, the privacy policy says it in the future tense', () => {
+  const row = inventory.split('\n').find((l) => l.startsWith('| Cloudflare |'));
+  assert.ok(row, 'no Cloudflare row');
+  const line = section(policy, '## Processors').split('\n').find((l) => l.startsWith('- **Cloudflare**'));
+  assert.ok(line, 'no Cloudflare line in the privacy policy');
+  if (/once `docs\/production-setup\.md` step 6 has run/.test(row)) {
+    assert.doesNotMatch(line, /^- \*\*Cloudflare\*\*: serves the manager view/, 'the privacy policy says Cloudflare serves the manager view, which is not deployed there yet');
+    assert.match(line, /will serve the manager view \(Cloudflare Pages\) once it is deployed there/);
+  }
+});
+
 test('every Recipient cell names a recipient of the list, and every recipient receives something', () => {
   const names = new Set(recipients().map((r) => r.name));
   const used = new Set();

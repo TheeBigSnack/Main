@@ -30,7 +30,7 @@ We do **not** collect Facebook passwords, cookies, session tokens, messages or b
 - **Stripe**: billing. It receives the dealership's name and website address and a manager's email, and collects the card and billing details itself.
 - **Google**: Chrome's sync storage keeps the profile under the User's own Google account, and the Chrome Web Store distributes the extension; Google's terms apply. [Pending attorney answer: questions-for-attorney.md 8.8]
 - **GitHub**: serves our website (GitHub Pages); its access logs see visitors' IP addresses and browsers.
-- **Cloudflare**: serves the manager view (Cloudflare Pages); its access logs see the IP addresses and browsers of the people who open it.
+- **Cloudflare**: will serve the manager view (Cloudflare Pages) once it is deployed there; its access logs will then see the IP addresses and browsers of the people who open it.
 - **Resend**: sends the sign-in emails, with the email address and the code or link (our database host's own sender does until we set this up).
 - **GoDaddy**: provides our inbox, a Microsoft 365 mailbox, which holds the email people send us (support requests and emailed demo requests). [Owner: confirm which company runs this mailbox, GoDaddy or Microsoft, and list Microsoft here too if it holds the mail.]
 
