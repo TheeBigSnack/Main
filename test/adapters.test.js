@@ -1532,6 +1532,14 @@ test('schemaOrg getDetails: a car the list still links to whose page shows no ve
   const d = await schemaOrg.getDetails(fakeSiteSearch(m), cars[2].vin, schemaOrg.scanOptions(SERVICE));
   assert.deepEqual([d.ok, d.record, d.carPage, d.noData], [false, undefined, true, true]);
   assert.match(d.message, /still lists this car, but its page has no vehicle data/);
+  // a car whose own page answers 404 beside a form that shows a web page: not gone, and the message says what each link answered
+  const formFirst = standardSite({ cars, listData: false });
+  for (const [at, a] of formFirst) if (at.startsWith(LIST)) formFirst.set(at, { ...a, text: a.text.replace(`<a href="${cars[4].path}">`, `<a href="/finance/apply/?vin=${cars[4].vin}">Get pre-approved</a> <a href="${cars[4].path}">`) });
+  formFirst.set(`${O}/finance/apply/?vin=${cars[4].vin}`, html('<!doctype html><html><head><title>Apply</title></head><body><form><input name="name"></form></body></html>'));
+  formFirst.set(O + cars[4].path, httpError(404));
+  const unsure = await schemaOrg.getDetails(fakeSiteSearch(formFirst), cars[4].vin, schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([unsure.ok, unsure.record, unsure.carPage, unsure.noData], [false, undefined, true, true]);
+  assert.match(unsure.message, /one of its links says the page is gone \(HTTP 404 or 410\) and another shows no vehicle data/);
   // a car whose only link answers 404 is gone, as before
   m.set(O + cars[3].path, httpError(404));
   const gone = await schemaOrg.getDetails(fakeSiteSearch(m), cars[3].vin, schemaOrg.scanOptions(SERVICE));

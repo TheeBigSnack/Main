@@ -1685,7 +1685,12 @@ export async function getDetails(search, vin, options = {}) {
     if (failed) return pageFailed(failed);
     // links left unread may hold its page: never "gone" on that
     if (ordered.length > links.length && !listedNode) return { ok: false, message: "Couldn't tell which of this car's links on the website is its page. Scan the website again, then post.", carPage: true };
-    if (links.length && !listedNode) return goneLink && !shown ? done(null) : { ok: false, message: noData, carPage: true, noData: true };
+    if (links.length && !listedNode) {
+      if (goneLink && !shown) return done(null);
+      // one link gone and another a page without its data: which was its page is not known
+      const message = goneLink ? "The website still lists this car, but one of its links says the page is gone (HTTP 404 or 410) and another shows no vehicle data Lot Current can read, so the car couldn't be checked." : noData;
+      return { ok: false, message, carPage: true, noData: true };
+    }
     if (listedNode) return done(listRecord({ node: listedNode, page: listPage, facts: page.parsed.facts }, links.length ? links[0].href : listPage, false));
     if (!page.parsed.facts.next) {
       whole = !cut; // the list ended where it says it ends
