@@ -228,7 +228,7 @@ test('the side panel asks Chrome for photo servers only from the click handler, 
     assert.match(click, new RegExp(`case '${id}':\\s*await askForPhotos\\(\\);`), `${id} asks first`);
   }
   // Fill again fills the fields only: no photos, so nothing to ask Chrome for
-  assert.match(click, /case 'fillAgain': return runFill\(\{ photos: false \}\);/);
+  assert.match(click, /case 'fillAgain': return state\.step === 'publish' \? oneAtATime\(\(\) => runFill\(\{ photos: false \}\)\) : undefined;/);
   // the photo branches of the click handler come before anything the wizard or upkeep await
   assert.ok(click.indexOf('btn.dataset.allowPhotos') < click.indexOf('await handleWizardClick'), 'Allow photos asks before any other await');
 });

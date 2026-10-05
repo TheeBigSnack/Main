@@ -1087,7 +1087,7 @@ test('Fill again leaves the photos on the form as they are; Attach photos again 
   assert.deepEqual(injected(), ['inject 77: fill', 'inject 77: photos 1.jpg,2.jpg', 'inject 77: fill']);
   assert.equal(count(), 2, 'the form still holds each photo once');
   assert.equal(p.state.photos, sent, 'the photo count on screen is the one for the photos on the form');
-  assert.match(src, /case 'fillAgain': return runFill\(\{ photos: false \}\);/, 'the Fill again button fills the fields only');
+  assert.match(src, /case 'fillAgain': return state\.step === 'publish' \? oneAtATime\(\(\) => runFill\(\{ photos: false \}\)\) : undefined;/, 'the Fill again button fills the fields only');
 
   // Attach photos again: every photo is sent once more, and the panel says the form may hold two of each
   const again = p.fns.attachPhotos(null, { again: true });
@@ -1097,7 +1097,8 @@ test('Fill again leaves the photos on the form as they are; Attach photos again 
   assert.deepEqual([p.state.photos.attached, p.state.photos.again], [2, true]);
   const photosHtml = compile('photosHtml', { state: p.state, blockedPatterns: () => [], esc: (x) => String(x), patternCovers: () => false, patternHost: (x) => x, allowButton: () => '' });
   assert.match(photosHtml(), /each is on it twice now: remove the extra copies on Facebook before you publish/);
-  assert.match(src, /case 'attachAgain':\s*await askForPhotos\(\);\s*return state\.step === 'publish' \? attachPhotos\(null, \{ again: true \}\)/, 'the Attach photos again button sends them all again');
+  assert.match(src, /case 'attachAgain':\s*await askForPhotos\(\);\s*return state\.step === 'publish' \? oneAtATime\(\(\) => attachAgain\(\)\)/, 'the Attach photos again button sends them all again');
+  assert.match(fnText('attachAgain'), /return attachPhotos\(null, \{ again: true \}\);/);
 
   // the first photos of a form (It didn't post, then a new form) are not "again", whatever the button
   const fresh = formTabPanel({ photos: 1 });
@@ -1108,6 +1109,69 @@ test('Fill again leaves the photos on the form as they are; Attach photos again 
   const kept = compile('photosHtml', { state: fresh.state, blockedPatterns: () => [], esc: (x) => String(x), patternCovers: () => false, patternHost: (x) => x, allowButton: () => '' })();
   assert.match(kept, /Fill again<\/b> fills the fields only and leaves these photos on the form/);
   assert.doesNotMatch(kept, /twice/);
+});
+
+// Fill again and Attach photos again on a form left open (overnight, say):
+// the car is read again first when its last read is old, so the form is
+// never filled again, nor given photos, from the old read; and a double click
+// acts once. onClick as written, with the panel's own helpers it calls
+// (oneAtATime, attachAgain); the fill, the photos and the read are stand-ins
+// (runFill's own read again is checked with the other fills, below).
+test('Fill again and Attach photos again act once per click, and Attach photos again reads the car again first', async () => {
+  const calls = [];
+  const holds = [];
+  const hold = (what) => new Promise((resolve) => { calls.push(what); holds.push(resolve); });
+  let same = true; // what the read again finds: the same car, or a change (the panel goes back to the review)
+  const state = { step: 'publish', vin: 'AAA', fbTabId: 77, queueMode: false };
+  const onClick = compileWithOwnHelpers('onClick', {
+    state, flowRun: 0, listBusy: false, promptOpen: false,
+    askForPhotos: async () => calls.push('askForPhotos'),
+    carStillCurrent: async () => { calls.push('carStillCurrent'); if (!same) state.step = 'review'; return same; },
+    runFill: (opts) => hold(`runFill ${JSON.stringify(opts)}`),
+    attachPhotos: (only, opts) => hold(`attachPhotos ${JSON.stringify(opts)}`),
+    setStatus: never('setStatus'), render: never('render'),
+  });
+  const click = (id) => onClick({ target: { closest: () => ({ id, dataset: {} }) } });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const release = async () => { while (holds.length) holds.shift()(); await tick(); };
+
+  // Attach photos again: Chrome is asked first (in the click), then the car is read again, then the photos go
+  click('attachAgain'); // not awaited: the photos are held until release()
+  await tick();
+  assert.deepEqual(calls, ['askForPhotos', 'carStillCurrent', 'attachPhotos {"again":true}']);
+  // a second click while they are still being sent sends nothing more
+  click('attachAgain');
+  await tick();
+  assert.equal(calls.filter((c) => c.startsWith('attachPhotos')).length, 1, `one photo run (${calls.join(' | ')})`);
+  await release();
+  // the website changed the car since the form was filled: back to the review, no photo sent
+  calls.length = 0;
+  same = false;
+  await click('attachAgain');
+  await tick();
+  assert.deepEqual(calls, ['askForPhotos', 'carStillCurrent']);
+  assert.equal(state.step, 'review');
+
+  // Fill again: one fill at a time (runFill reads the car again itself)
+  calls.length = 0;
+  same = true;
+  state.step = 'publish';
+  click('fillAgain');
+  click('fillAgain');
+  await tick();
+  assert.deepEqual(calls, ['runFill {"photos":false}'], 'a double click fills the form once');
+  await release();
+  click('fillAgain');
+  await tick();
+  assert.deepEqual(calls, ['runFill {"photos":false}', 'runFill {"photos":false}'], 'the next click once the fill is done fills it again');
+  await release();
+  // neither acts on a form that is not at the publish step any more
+  calls.length = 0;
+  state.step = 'review';
+  await click('fillAgain');
+  await click('attachAgain');
+  await tick();
+  assert.deepEqual(calls, ['askForPhotos']);
 });
 
 // A post request (the popup's Post, its Continue in the side panel, the queue

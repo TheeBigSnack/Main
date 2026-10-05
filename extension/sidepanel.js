@@ -1130,6 +1130,18 @@ async function attachPhotos(only = null, { again = false } = {}) {
   await saveFlow();
 }
 
+// Attach photos again, on a form opened earlier: like Fill again (runFill),
+// the car is read again first when its last read is old (carStillCurrent),
+// so no photo goes onto a form left open overnight for a car that sold or
+// changed since; a change takes the panel back to the review, and a car that
+// no longer passes stops there (block says why).
+async function attachAgain() {
+  const run = flowRun;
+  const tabId = state.fbTabId;
+  if (!(await carStillCurrent()) || run !== flowRun || state.fbTabId !== tabId || state.step !== 'publish') return undefined;
+  return attachPhotos(null, { again: true });
+}
+
 // Whether this side panel is in the window the post under way belongs to
 // (or Chrome could not say which window either is). Chrome runs one side
 // panel per window, and a panel opened in a second window brings back the
@@ -1437,11 +1449,13 @@ async function askForSite(origins = siteMissing()) {
   return true;
 }
 
-// One list action at a time (Post, Post the next N, Allow reading). The step
-// stays idle while Chrome's prompt and the first reads run, so a second click
-// (Post and then Post the next N, or a double click) would otherwise start a
-// second flow over the same state. Called straight from the click, so the
-// action's own first call, Chrome's prompt, still runs inside it.
+// One list action at a time (Post, Post the next N, Allow reading), and one
+// action on an open form (Fill it in now, Fill again, Attach photos again).
+// The step stays idle while Chrome's prompt and the first reads run, so a
+// second click (Post and then Post the next N, or a double click) would
+// otherwise start a second flow over the same state, or fill the same form
+// twice at once. Called straight from the click, so the action's own first
+// call, Chrome's prompt, still runs inside it.
 let listBusy = false;
 function oneAtATime(action) {
   if (listBusy) return undefined;
@@ -2300,7 +2314,7 @@ async function onClick(ev) {
     case 'fillNow':
       await askForPhotos(); // with nothing ticked there is nothing to ask about, so no prompt
       if (noPhotosPicked()) return setStatus(NO_PHOTOS_TEXT, 'error');
-      return fillFromProbe();
+      return oneAtATime(() => fillFromProbe()); // one fill of the dry run's form, as for Fill again below
     case 'probeAgain': return runProbe();
     case 'copyReport': return copy(JSON.stringify(state.probe, null, 2));
     case 'backToReview':
@@ -2336,10 +2350,14 @@ async function onClick(ev) {
       render();
       return saveFlow();
     case 'copyDescription': return copy(state.description);
-    case 'fillAgain': return runFill({ photos: false }); // the fields only: the photos stay as they are on the form
+    // Fill again and Attach photos again act on the open form one click at a
+    // time (oneAtATime): a double click never fills the form twice at once
+    // or sends every photo twice more. Both read the car again first when
+    // its last read is old (runFill, attachAgain: carStillCurrent).
+    case 'fillAgain': return state.step === 'publish' ? oneAtATime(() => runFill({ photos: false })) : undefined; // the fields only: the photos stay as they are on the form
     case 'attachAgain':
       await askForPhotos();
-      return state.step === 'publish' ? attachPhotos(null, { again: true }) : undefined;
+      return state.step === 'publish' ? oneAtATime(() => attachAgain()) : undefined;
     case 'downloadPhotos':
       await askForPhotos();
       return downloadPhotos();
