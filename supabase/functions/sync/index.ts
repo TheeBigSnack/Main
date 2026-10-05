@@ -521,13 +521,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     //    except in the two orders that make it the same item as a row:
     //    - the fix reached the server after another machine's sighting of
     //      it (the fixing machine's sync after the fix did not get
-    //      through): an open row of the same VIN, kind and change (for a
-    //      price, the same new price), flagged after the upload closed,
-    //      which the listing now shows, with no posting of the car since
-    //      the upload was flagged. That row takes the upload (its earlier
+    //      through): the first row of the VIN and kind flagged after the
+    //      upload closed, counting this request's other uploads, is of the
+    //      same change (for a price, the same new price), the listing now
+    //      shows it, and the car was not posted since the upload was
+    //      flagged. That row may still be open, or the other machine may
+    //      have closed it since (upkeep found the listing already changed,
+    //      the salesperson ticked it off, or the website went back and its
+    //      rescan closed it as cleared). It takes the upload (its earlier
     //      flagging time, its close and how), so the item counts from the
-    //      first sighting and is not later closed as cleared by the
-    //      website; the other machine's flag is then a late sighting;
+    //      first sighting and is not left closed as cleared; the other
+    //      machine's flag is then a late sighting. A different change
+    //      first in between (the price moved on and back) means the row is
+    //      a change of its own, and nothing merges;
     //    - a machine sighted the change on an old registry and ticked it
     //      off before its first sync: the newest row of the VIN and kind is
     //      closed (not as cleared) before the upload was flagged, with the
@@ -606,7 +612,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const flagged = ms(t.flagged_at) ?? 0;
         const done = ms(t.done_at) ?? 0;
         if (t.how !== 'cleared' && sameListing(t.vin, flagged) && shows(t.vin, t.kind, t.to_price)) {
-          const later = item.filter((r) => r.id && !r.done_at && (ms(r.flagged_at) ?? 0) > done && sameChange(r, t)).sort((a, b) => (ms(a.flagged_at) ?? 0) - (ms(b.flagged_at) ?? 0))[0];
+          // the first sighting of the car and kind after the fix, among its
+          // rows and this request's other uploads: a row of the same change
+          // takes the upload, whether it is still open or the other machine
+          // has closed it since; anything else first means the change moved
+          // on in between, and nothing merges
+          const after: Row[] = [...item, ...fresh.filter((f) => f !== t && f.vin === t.vin && f.kind === t.kind).map((f) => ({ ...f }))];
+          const next = after.filter((r) => (ms(r.flagged_at) ?? 0) > done).sort((a, b) => (ms(a.flagged_at) ?? 0) - (ms(b.flagged_at) ?? 0))[0];
+          const later = next && next.id && sameChange(next, t) ? next : null;
           if (later) {
             const patch: Row = { flagged_at: t.flagged_at, done_at: t.done_at, how: t.how, from_price: t.from_price, to_price: t.to_price };
             must(await client.from('todo_items').update(patch).eq('id', String(later.id)), 'could not update a to-do item');
