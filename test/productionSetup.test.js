@@ -497,6 +497,26 @@ test('the Stripe test runs on a test dealership made for it, and the sync check 
 // sends that browser's real posts into the test dealership, and Clear everything then deletes the real
 // posted list and Numbers, so nothing flags a real listing when its car sells. The check runs in a Chrome
 // profile made for it, records its car without publishing it, and that profile is deleted afterwards.
+// Whether the popup's Mark posted records a post timing: the pilot numbers'
+// beginPost and endPost run only in the side panel's flow.
+function popupMarkPosted() {
+  const popup = read('extension/popup.js');
+  return popup.includes("from './src/pilot.js'") ? popup.split('\n').filter((l) => /from '\.\/src\/pilot\.js'/.test(l)).join('\n') : '';
+}
+
+// review: step 6.7 sets MANAGER_URL on production, and from then on the
+// workflow's check tries the manager view's billing preflight, which FAILs
+// until stripe-setup step 5 puts the address in ALLOWED_ORIGINS. The step
+// says so, so a red run there is expected rather than a surprise.
+test('step 6 says the workflow\'s billing preflight line fails until stripe-setup step 5', () => {
+  const setup = read('docs/production-setup.md');
+  const item = setup.split('\n').find((l) => l.startsWith('7. **[Owner]** On the `manager-view` environment add the **Environment variable** `MANAGER_URL`'));
+  assert.ok(item, 'step 6 no longer has MANAGER_URL as its item 7');
+  assert.ok(read('scripts/check-deploy.mjs').includes(`export const MANAGER_CORS_CHECK = "billing: answers the manager view's CORS preflight";`), 'the check line changed: update step 6');
+  assert.match(item, /Until that step, the check's line `billing: answers the manager view's CORS preflight` reads `FAIL` and every \*\*functions\*\*, \*\*verify\*\* or \*\*check\*\* run of the Supabase workflow \(step 3\) ends red/);
+  assert.match(read('.github/workflows/supabase.yml'), /continue-on-error: \$\{\{ inputs\.step == 'plan' \|\| inputs\.step == 'database' \}\}/, 'which runs end red changed: update step 6');
+});
+
 test('the sync check runs in Chrome profiles made for it, never in a browser with real listings, and leaves nothing behind', () => {
   const setup = read('docs/production-setup.md');
   const step7 = setup.slice(setup.indexOf('## Step 7.'), setup.indexOf('\n---', setup.indexOf('## Step 7.')));
@@ -508,6 +528,13 @@ test('the sync check runs in Chrome profiles made for it, never in a browser wit
   assert.match(check, /Never run the check in a browser that has used Lot Current on the store's website, such as your own at the store\. The check would send that browser's real posts and post timings into the test dealership, to be deleted with it\./);
   assert.match(check, /\*\*Clear everything for this website\*\* removes everything Lot Current holds for the website in that browser, the real posted list and Numbers included, after which nothing flags those listings when a car sells or its price changes\./, 'clearing a browser is said to delete its real data too');
   assert.match(check, /If the check already ran in such a browser, stop and ask Claude before clearing anything or deleting the dealership\./);
+  // review: the emailed code read in the test profile's mailbox makes Chrome offer to sign that profile in;
+  // the manager view's test sign-in belongs in a test profile too; Mark posted records no post timing
+  assert.match(check, /Read the emailed sign-in codes on your phone, not in that profile: if Chrome offers to sign the profile in \(it does when you sign in to a Google mailbox there\), say no\./);
+  assert.match(check, /Open the manager view for the check in one of those test profiles too/);
+  assert.doesNotMatch(check, /posts, scans and post timings land/, 'the check records its car with Mark posted, which records no post timing');
+  assert.match(check, /a car recorded with \*\*Mark posted\*\* records no post timing/);
+  assert.doesNotMatch(popupMarkPosted(), /beginPost|endPost/, 'Mark posted now records a post timing: the check can say timings land');
   assert.match(check, /\*\*Record the test's car with Mark posted\*\* \(Ready to post tab\), not by publishing it on Marketplace\. If a test car was published, take that listing down on Facebook yourself before the profile goes: nothing will flag it afterwards\./);
   const done = check.indexOf('**When the check is done**, before the store\'s manager first signs in, **delete the Chrome profile made for the check on each test computer**. That removes everything Lot Current kept in it.');
   const remake = check.indexOf('**Delete the dealership**');
