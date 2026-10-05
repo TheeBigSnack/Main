@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { shortLocation, storeNames, matchStore, conditionFromSchemaOrg, conditionWordFromPath } from '../extension/src/normalize.js';
-import { conditionWordFromUrl } from '../extension/adapters/dealerInspireNormalize.js';
+import { shortLocation, storeNames, matchStore, conditionFromSchemaOrg, conditionWordFromPath, toNumber } from '../extension/src/normalize.js';
+import { conditionWordFromUrl, websitePrice, normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { fixtures } from './helpers.js';
 
 // The pilot dealer's store names, as a worked example of a group whose
@@ -111,6 +111,33 @@ test('when nothing stands out, nothing is ticked', () => {
   assert.equal(matchStore(null, GROUP), null);
   assert.equal(matchStore(pilotSite, []), null);
   assert.equal(matchStore({}, GROUP), null);
+});
+
+// ---------- numbers ----------
+
+test('toNumber reads one amount, and text with two amounts in it is no number', () => {
+  for (const [text, n] of [['$24,995', 24995], ['24995', 24995], ['24,995.00', 24995], ['$ 24,995', 24995], [' 41,230 ', 41230], ['27163.5', 27163.5], ['-3', -3], ['0', 0]]) assert.equal(toNumber(text), n, text);
+  assert.equal(toNumber(24995), 24995);
+  // a was/now pair in one field is never run together into one number
+  for (const text of ['$24,995 $25,495', '24995 25495', '$24,995$25,495', '24,995 / 25,495', '24 995', '1,2345', '12,34', '', '$', 'Call', '1e5']) assert.equal(toNumber(text), null, text);
+  assert.equal(toNumber(NaN), null);
+  assert.equal(toNumber(null), null);
+});
+
+test('a Dealer Inspire price field with two amounts in it is no price, and the second line never stands in for it', () => {
+  const display = (pricing) => ({ extra_fields: { lightning: { pricing } } });
+  const two = '$24,995 $25,495';
+  assert.deepEqual(websitePrice(display({ low: { label: 'Price', value: two }, high: { label: 'Was', value: '26673' } })), { value: null, label: 'the price shows more than one amount' });
+  assert.deepEqual(websitePrice(display({ low: false, high: { label: 'Price', value: two } })), { value: null, label: 'the price shows more than one amount' });
+  assert.deepEqual(websitePrice({ pricing: { our_price: two, price: 24995 } }), { value: null, label: 'the price shows more than one amount' }, 'the hidden fields never stand in either');
+  assert.deepEqual(websitePrice({ pricing: { our_price: '$24,995', price: 23995 } }), { value: 24995, label: 'Price' });
+  // and a car with such a price is not ready to post: it goes to To do with the reason
+  const raw = structuredClone(fixtures.usedNormal);
+  raw.extra_fields.lightning.pricing.low.value = two;
+  const v = normalizeVehicle(raw);
+  assert.equal(v.price, null);
+  assert.equal(v.priceBeforeFees, null);
+  assert.equal(v.priceLabel, 'the price shows more than one amount');
 });
 
 // ---------- pre-owned signs any website can carry ----------
