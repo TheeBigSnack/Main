@@ -29,7 +29,8 @@
 -- matches subscription_state(); the rows come busiest first, then by name;
 -- a dealership with no activity has its row, with zeros; a scan stamped
 -- more than 5 minutes ahead of the database's clock is never
--- last_synced_scan_at; public, anon,
+-- last_synced_scan_at; a listing marked as made by hand before that day
+-- (listed_before) is no post and makes no one active; public, anon,
 -- authenticated and service_role cannot execute it, and it runs as its
 -- caller with an empty search_path.
 
@@ -316,6 +317,40 @@ begin
     raise exception 'a scan stamped 5 minutes ahead (ordinary drift) is not the last synced scan: %', r.last_synced_scan_at;
   end if;
   raise notice 'ok: last_synced_scan_at leaves out a scan more than 5 minutes ahead of the database''s clock';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- A listing marked as made by hand before that day (listed_before,
+-- 0012_posting_listed_before.sql) is not a post: it adds nothing to posts
+-- and makes no one an active salesperson, but the car is listed now. a_s2
+-- (not active in the window) marks two such listings an hour ago, a_s1 one
+-- (already active); B's b_s1 marks one. Then the rows go.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  a uuid := '00000000-0000-4000-8000-0000000000d1';
+  b uuid := '00000000-0000-4000-8000-0000000000d2';
+  a_s1 uuid := '00000000-0000-4000-8000-0000000000a1';
+  a_s2 uuid := '00000000-0000-4000-8000-0000000000a3';
+  b_s1 uuid := '00000000-0000-4000-8000-0000000000b1';
+  r record;
+begin
+  insert into public.listings (dealership_id, user_id, vin, name, price, posted_at, salesperson, status, taken_down_at, listed_before) values
+    (a, a_s2, 'TESTVINA00000011', 'Car A11', 25000, now() - interval '1 hour', 'Casey', 'listed', null, true),
+    (a, a_s2, 'TESTVINA00000012', 'Car A12', 26000, now() - interval '1 hour', 'Casey', 'listed', null, true),
+    (a, a_s1, 'TESTVINA00000013', 'Car A13', 27000, now() - interval '1 hour', 'Alex',  'taken_down', now() - interval '5 minutes', true),
+    (b, b_s1, 'TESTVINB00000011', 'Car B11', 35000, now() - interval '1 hour', 'Robin', 'listed', null, true);
+  select * into r from public.usage_report() u where u.dealership_id = a;
+  if (r.active_salespeople, r.posts, r.cars_listed_now) is distinct from (2, 5, 5) then
+    raise exception 'listings marked as made before that day count as posts: A reads % active, % posts, % cars listed (want 2, 5, 5)', r.active_salespeople, r.posts, r.cars_listed_now;
+  end if;
+  select * into r from public.usage_report(null) u where u.dealership_id = b;
+  if (r.active_salespeople, r.posts, r.cars_listed_now) is distinct from (3, 5, 5) then
+    raise exception 'listings marked as made before that day count as posts: B reads % active, % posts, % cars listed (want 3, 5, 5)', r.active_salespeople, r.posts, r.cars_listed_now;
+  end if;
+  delete from public.listings l where l.listed_before;
+  raise notice 'ok: a listing marked as made before that day is no post and makes no one active; its car is listed';
 end;
 $$;
 

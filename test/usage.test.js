@@ -97,7 +97,8 @@ test('active_salespeople counts current members with the salesperson role; the r
   const active = body.match(/\(select count\(distinct l\.user_id\)([^]*?)\)::integer as active_salespeople/);
   assert.ok(active, 'active_salespeople counts distinct people');
   assert.match(active[1], /join public\.memberships m on m\.dealership_id = l\.dealership_id and m\.user_id = l\.user_id and m\.role = 'salesperson'/);
-  assert.match(active[1], /where l\.dealership_id = d\.id and l\.posted_at >= w\.since$/);
+  assert.match(active[1], /where l\.dealership_id = d\.id and l\.posted_at >= w\.since and not l\.listed_before$/, 'a listing marked as made before that day makes no one active');
+  assert.match(body, /\(select count\(\*\) from public\.listings l where l\.dealership_id = d\.id and l\.posted_at >= w\.since and not l\.listed_before\)::integer as posts,/, 'a listing marked as made before that day is no post');
   // every subquery is tied to the row's dealership
   const subqueries = [...body.matchAll(/\(select [^]*? from public\.(\w+) (\w+)\b([^]*?)\)(?:::integer)? as (\w+)/g)];
   assert.equal(subqueries.length, 10, subqueries.map((m) => m[4]).join(', '));
@@ -119,6 +120,7 @@ test('tests/usage.sql checks both dealerships, the edges, the zeros and every AP
     '% says % where subscription_state() says %', 'a dealership with no activity has no row', 'a dealership with no activity does not read zeros',
     'a signed-in manager ran the usage report', 'anon ran the usage report', 'the service role ran the usage report',
     'a scan stamped just over 5 minutes ahead is the last synced scan: %', 'a scan stamped 5 minutes ahead (ordinary drift) is not the last synced scan: %',
+    'listings marked as made before that day count as posts: A reads %', 'listings marked as made before that day count as posts: B reads %',
   ]) {
     assert.ok(sqlTest.includes(words), `usage.sql does not check: ${words}`);
   }
