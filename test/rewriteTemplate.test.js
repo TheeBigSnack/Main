@@ -707,7 +707,8 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     "I'm the owner of this business and this truck.", 'I am the owner of the dealership and the car.', "I'm the owner of this business, and this truck.",
     "I'm the owner of this business and also this truck.", "I'm the owner of this business and the Ram.", "I'm the owner of the store and this pickup.",
     "I'm the owner of this lot, and this truck is mine.", "I'm the owner of this dealership and glad to help.", "I'm the owner of the dealer's truck.",
-    "I'm the owner of the company that owns this truck.",
+    "I'm the owner of the company that owns this truck.", "I'm the owner of the business, this truck included.", "I'm the owner of this dealership, text me about my truck.",
+    "I'm the owner of this store, the Ram is ours.",
   ]) assert.ok(banned(line), line);
   // the dealership's own desk or line, and its owner
   for (const line of [
@@ -723,9 +724,35 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     'Registration fees are paid directly to the DMV, not the dealership.', 'Taxes are collected for the state and county, not the dealer.',
     'Tags and title fees go to the county and state, not the dealer.', 'Price excludes tax, title and registration, which go to the state, not the dealer.',
     'Price does not include tax and title fees, which are paid to the state, not the dealer.', 'Sales tax goes to the state, not the dealer.',
+    'Our price excludes tax, title and registration, which go to the state, not the dealer.', 'Advertised price excludes taxes and fees, which go to the state, not the dealer.',
+    'Price is plus tax, title and license. Those fees go to the state, not the dealer.',
   ]) {
     const c = withNote(note);
     assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], note);
+  }
+  // the note's sentence is read where the description puts it: words the description joins to it make it the description's steer
+  const joinedNote = 'Says "not the dealer" with words joined to your price note\'s sentence; keep the note as a sentence of its own';
+  for (const [note, joined] of [
+    ['Tax, title and fees go to the state, not the dealer.', 'Deal direct with me: tax, title and fees go to the state, not the dealer.'],
+    ['Tax, title and fees go to the state, not the dealer.', 'Buy from me and tax, title and fees go to the state, not the dealer.'],
+    ['Tax, title and fees go to the state, not the dealer.', 'Pay me directly; tax, title and fees go to the state, not the dealer.'],
+    ['Tax, title and fees go to the state, not the dealer.', 'Text me and tax, title and fees go to the state, not the dealer.'],
+    ['Plus tax, title and registration, which go to the state, not the dealer.', 'Buy direct from me, plus tax, title and registration, which go to the state, not the dealer.'],
+    ['Sales tax goes to the state, not the dealer.', 'Deal with me, sales tax goes to the state, not the dealer.'],
+    ['Tax, title and fees go to the state, not the dealer', 'Tax, title and fees go to the state, not the dealer, so text me.'],
+    ['Tax, title and fees go to the state, not the dealer.', 'Tax, title and fees go to the state, not the dealer.\nText me rather than the dealership; tax, title and fees go to the state, not the dealer.'],
+  ]) {
+    const c = withNote(note);
+    const text = buildTemplateDescription(c).replace(note, joined);
+    assert.deepEqual(runGuardrails(text, c).problems.map((p) => p.text), [joinedNote], joined);
+  }
+  // as a sentence of its own, with the description's own sentence before it, it passes
+  for (const [note, own] of [
+    ['Tax, title and fees go to the state, not the dealer.', 'Message me with any question. Tax, title and fees go to the state, not the dealer.'],
+    ['Tax, title and fees go to the state, not the dealer.', 'Plus tax, title and fees go to the state, not the dealer.'],
+  ]) {
+    const c = withNote(note);
+    assert.deepEqual(runGuardrails(buildTemplateDescription(c).replace(note, own), c).problems, [], own);
   }
   // a steer in the note, before where the fees go or anywhere in its sentence, is the note's to change
   for (const note of [
@@ -924,7 +951,7 @@ test('"driven by" passes only before the engine itself, never before a person wh
   ]) assert.deepEqual(codesAfter(sentence), [], sentence);
 });
 
-test('the dealership\'s "locally owned" is set aside only for the business, never for an adult-owned or local car', () => {
+test('the dealership\'s "locally owned" is set aside only when the dealership says it of itself, never for an adult-owned or local car', () => {
   for (const sentence of [
     'Adult-owned dealer trade-in.', 'Adult owned dealer trade.', 'Adult owned dealership trade-in, ready to go.', 'Adult owned company truck.', 'Adult owned shop truck.',
     'Adult owned and operated.', 'Locally owned dealer trade.', 'Locally owned dealership trade-in.', 'Locally owned company truck.', 'Locally owned shop truck.',
@@ -933,14 +960,32 @@ test('the dealership\'s "locally owned" is set aside only for the business, neve
     "Locally owned business owner's truck.", "Locally owned store manager's truck.", "Locally owned dealer principal's truck.", 'Locally owned business owner traded it in.',
     'Local owned business fleet truck.', "Locally owned dealership's trade.", 'Locally owned company, fleet truck.', 'Locally owned and operated by a retired couple.',
     'This one was locally owned.',
+    // the words before it may be about the car too: who had it, or a business word that ends the sentence or goes on with "in", "since" or "serving"
+    'This truck belonged to a locally owned business.', 'Traded in by a locally owned company.', 'Came to us from a locally owned business.',
+    'Previously used by a locally owned company.', 'It was a work truck for a locally owned business.', 'Bought new by a locally owned company.',
+    'Locally owned company in town used it as a fleet truck.', 'Locally owned company in-house fleet truck.', 'Locally owned company since new.',
+    'Locally owned company serving as a fleet truck.', 'Locally owned business; one driver.', 'This Ram was locally owned and operated.', 'Locally owned and operated since new.',
+    'We bought it from a locally owned business.', 'It came from a business we are sure was a locally owned company.', 'We are a locally owned company truck.',
+    // so is the dealership's own wording without "We are" or "Our dealership is" before it (the checks can't tell it from the car's story)
+    'A locally owned and operated dealership.', 'Locally owned dealer, serving the whole area.', 'One of the locally owned dealerships in the area.',
+    'A locally owned business here in town.', 'Locally owned and operated since the start.', 'Example Motors is a locally owned dealership.',
   ]) assert.deepEqual(codesAfter(sentence), ['unsupported-claim'], sentence);
+  // the dealership speaking of itself at the start of the sentence or clause
   for (const sentence of [
-    'We are a locally owned dealership.', 'A locally owned and operated dealership.', 'We are a local-owned business.', 'Locally owned dealer, serving the whole area.',
-    'One of the locally owned dealerships in the area.', 'We are locally owned and operated.', 'A locally owned and operated dealership, serving the whole area.',
-    'We are a locally owned store located on Main Street.', 'A locally owned business here in town.', 'Locally owned and operated since the start.',
+    'We are a locally owned dealership.', 'We are a local-owned business.', 'We are locally owned and operated.', 'We are a locally owned store located on Main Street.',
+    "We're a locally owned dealership, serving the whole area.", 'We\u2019re a locally owned business.', 'We have been locally owned and operated since the start.',
+    'Here at Example Motors, we are a locally owned dealership.', 'Our dealership is locally owned and operated.', 'We are your locally owned business here in town.',
+    'We are proudly locally owned and operated.',
   ]) {
     assert.deepEqual(codesAfter(sentence), [], sentence);
   }
+  // in the website's own words, a business word after it is enough to read it as the dealership's: it never backs an owner story there,
+  // so a write-up that tells the car's story that way does not back a description that repeats it
+  for (const raw of ['Example Motors is a locally owned dealership.', 'A locally owned business here in town.', 'Traded in by a locally owned company.']) {
+    const c = plainCtx({ ...PLAIN(), descriptionRaw: raw });
+    assert.deepEqual(codesAfter('Driven by a retired teacher.', c), ['unsupported-claim'], raw);
+  }
+  assert.deepEqual(codesAfter('Traded in by a locally owned company.', plainCtx({ ...PLAIN(), descriptionRaw: 'Traded in by a locally owned company.' })), ['unsupported-claim']);
 });
 
 test('a denial of accidents is banned in any number, and "first owner" is a one-owner claim', () => {

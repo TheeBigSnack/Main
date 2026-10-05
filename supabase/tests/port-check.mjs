@@ -89,6 +89,9 @@ const texts = [
   sixty("2019 Ram 1500 Big Horn. Locally owned company pickup, locally owned dealership's trade; a locally owned dealer, serving the area; locally owned and operated since the start.") + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Buy from me and the fees go to the state, not the dealer. Pay me directly; the fees go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
   sixty("2019 Ram 1500 Big Horn. I'm the owner of this business, and this truck. I'm the owner of the store and the Ram. I'm the owner of this dealership, text me.") + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Buy direct from me, plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Traded in by a locally owned company, locally owned company since new. Here, we are a locally owned dealership; our store is locally owned and operated.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. We\u2019re a locally owned business. Driven by a retired teacher.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -113,6 +116,7 @@ const contexts = [
   { vehicle: { ...vehicle, descriptionRaw: 'Comes with the rest of the factory warranty. Clean Carfax. Financing for all credit types. Runs great. Non-smoker.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, features: [...vehicle.features, 'ABS Brakes', 'Remote Engine Start', 'Variable Intermittent Wipers'], descriptionRaw: 'Local trade with new tires.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks and a new battery.' }, dealer, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, descriptionRaw: 'Traded in by a locally owned company. Example Motors is a locally owned dealership.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Reduced from 31,995 to 28,995. Only 28.9k! Miles: 38,000. With 38,000 on it. Call 555-555-0100. Since 1985. Tows 7,500 lbs.' }, dealer, priceNote: '', price: 27995 },
   {},
 ];
@@ -127,7 +131,7 @@ for (const text of texts) {
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
 assert.deepEqual(JSON.parse(JSON.stringify(BANNED_UNLESS)), JSON.parse(JSON.stringify(JS_UNLESS)));
 assert.deepEqual(JSON.parse(JSON.stringify(PRICE_NOTE_UNLESS)), JSON.parse(JSON.stringify(JS_NOTE_UNLESS)));
-assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge)]));
+assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]));
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);
 assert.deepEqual({ ...WORD_LIMITS }, { ...JS_LIMITS });
