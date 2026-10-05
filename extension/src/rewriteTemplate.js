@@ -581,7 +581,7 @@ export const CLAIM_KINDS = Object.freeze([
   { what: 'accident, damage or title history', re: /\b(?:accidents?|collisions?|wreck(?:s|ed)?|damaged?|flood\w*|salvage|rebuilt|titles?|clean (?:carfax|autocheck|history|record|report))\b/i },
   { what: 'smoking or pets', re: /\b(?:non[\s-]?smok\w*|smok(?:er|ers|ing|ed)|smoke[\s-]?free|pet[\s-]?free|no pets)\b/i },
   { what: 'service history, inspection or upkeep', re: /\b(?:inspect\w*|serviced|service (?:history|records?)|records|maintenance|maintained|oil changes?|tune[\s-]?up|reconditioned|(?:fully|freshly|just|professionally|recently) detailed|garage[\s-]kept|garaged|well[\s-](?:kept|cared)|taken care of)\b/i },
-  { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:set of\\s+)?(${PARTS})\\b`, 'i'), part: true },
+  { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:(?:set of|[\\w-]+)\\s+){0,2}?(${PARTS})\\b`, 'i'), part: true },
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
   // who had it and how it was used ("one owner" has its own check, against the Carfax flag; "Pre-owned" is not a claim)
   { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned(?![\s-]+(?:and|&)[\s-]+operated)|driven (?:by(?!\s+(?:(?:a|an|the|its)\s+)?(?:\d|v-?\d|hemi\b|turbo|twin[\s-]turbo|supercharged|diesel\b|hybrid\b|electric\b|ecoboost|duramax|cummins|power[\s-]?stroke|pentastar|vortec))|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
@@ -627,24 +627,54 @@ function without(text, names) {
   return out;
 }
 
+// The parts a text says are new or replaced, each with the words that say
+// so: "new tires", "new Michelin tires", "a new set of tires", "replaced
+// brakes", and each part joined straight on to one with "and" ("new tires
+// and brakes"). In the website's own words a list with commas counts too
+// ("new tires, brakes and rotors"); in the text it does not, since the
+// highlights line lists the website's features with commas ("New Tires,
+// Brake Assist").
+const AND_PARTS = new RegExp(`^\\s+(?:and|&|plus)\\s+(?:(?:front|rear)\\s+)?(${PARTS})\\b`, 'i');
+const LISTED_PARTS = new RegExp(`^(?:\\s*,\\s*(?:and\\s+|&\\s+)?|\\s+(?:and|&|plus)\\s+)(?:(?:front|rear)\\s+)?(${PARTS})\\b`, 'i');
+const partKey = (part) => oneLine(part).toLowerCase().replace(/(?:ies|ys|s|y)$/, '');
+function newPartsSaid(text, re, more) {
+  const t = String(text ?? '');
+  const out = [];
+  for (const m of t.matchAll(new RegExp(re.source, 'gi'))) {
+    out.push({ said: m[0], part: partKey(m[1]) });
+    let end = m.index + m[0].length;
+    for (let next = more.exec(t.slice(end)); next; next = more.exec(t.slice(end))) {
+      end += next[0].length;
+      out.push({ said: t.slice(m.index, end), part: partKey(next[1]) });
+    }
+  }
+  return out;
+}
+
 // Every claim in the text, not only the first of each kind: one part the
-// website names ("new tires") never covers another the text adds ("new
-// brakes"). Each kind the sources don't make is said once; each new part
-// they don't name is said once.
+// website says is new ("new tires") never covers another the text adds
+// ("new brakes"), and a part the website only names ("ABS Brakes", "Remote
+// Engine Start") is not one it says is new. Each kind the sources don't
+// make is said once; each new part they don't say is new is said once.
 function claimProblems(text, ctx) {
   const source = claimSource(ctx);
   const problems = [];
   for (const kind of CLAIM_KINDS) {
     if (kind.what === 'certification' && listedCertified(ctx.vehicle)) continue;
-    const sourced = kind.re.test(source);
-    const said = new Set();
-    for (const m of String(text).matchAll(new RegExp(kind.re.source, 'gi'))) {
-      const part = kind.part ? m[1].replace(/(?:ies|s)$/i, '').toLowerCase() : '';
-      if (sourced && (!kind.part || new RegExp(`\\b${escapeRe(part)}`, 'i').test(source))) continue;
-      if (said.has(part)) continue;
-      said.add(part);
-      problems.push({ code: 'unsupported-claim', text: `Says "${m[0]}", but the website says nothing about ${kind.what} for this car` });
+    if (kind.part) {
+      const said = new Set();
+      // a part passes only when the website's own words say that part is new: naming it ("ABS Brakes") is not enough
+      const named = new Set(newPartsSaid(source, kind.re, LISTED_PARTS).map((p) => p.part));
+      for (const p of newPartsSaid(text, kind.re, AND_PARTS)) {
+        if (named.has(p.part) || said.has(p.part)) continue;
+        said.add(p.part);
+        problems.push({ code: 'unsupported-claim', text: `Says "${p.said}", but the website says nothing about ${kind.what} for this car` });
+      }
+      continue;
     }
+    if (kind.re.test(source)) continue;
+    const m = new RegExp(kind.re.source, 'i').exec(String(text));
+    if (m) problems.push({ code: 'unsupported-claim', text: `Says "${m[0]}", but the website says nothing about ${kind.what} for this car` });
   }
   return problems;
 }

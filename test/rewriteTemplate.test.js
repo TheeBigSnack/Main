@@ -725,6 +725,8 @@ test('a draft that invents warranty, financing, certification, history, care, ne
     'Says "Clean Carfax", but the website says nothing about accident, damage or title history for this car',
     'Says "smoked", but the website says nothing about smoking or pets for this car',
     'Says "new tires", but the website says nothing about new or replaced parts for this car',
+    // the brakes in "new tires and brakes" are said to be new too
+    'Says "new tires and brakes", but the website says nothing about new or replaced parts for this car',
   ]);
   const thirty = runGuardrails(`${buildTemplateDescription(c)}\nOnly thirty thousand miles.`, c).problems.find((p) => p.code === 'unknown-number');
   assert.equal(thirty.text, '"thirty thousand" isn\'t in the website\'s data for this car');
@@ -858,6 +860,24 @@ test('every claimed part is checked: a part the website names never covers one t
     'Says "New tires", but the website says nothing about new or replaced parts for this car',
     'Says "new battery", but the website says nothing about new or replaced parts for this car',
   ]);
+});
+
+test('a part the website only names is not one it says is new: its own words must say that part is new', () => {
+  const v = { ...PLAIN(), features: [...FEATURES, 'ABS Brakes', 'Remote Engine Start', 'Variable Intermittent Wipers'], descriptionRaw: 'Local trade with new tires.' };
+  const c = plainCtx(v);
+  assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], 'the template passes');
+  const said = (sentence, ctx = c) => runGuardrails(`${buildTemplateDescription(ctx)}\n${sentence}`, ctx).problems.filter((p) => p.code === 'unsupported-claim').map((p) => p.text.replace(/^Says "|", but the website says nothing about new or replaced parts for this car$/g, ''));
+  assert.deepEqual(said('Local trade with new tires and new brakes, plus new wipers and a new engine.'), ['new brakes', 'new wipers', 'new engine']);
+  // the tires the website says are new, however the text puts it
+  for (const sentence of ['New tires all around.', 'A new set of tires.', 'New Michelin tires.']) assert.deepEqual(said(sentence), [], sentence);
+  // a part joined on to one with "and" is said to be new too; a part named with a word or two before it is a part
+  assert.deepEqual(said('New tires and brakes.'), ['New tires and brakes']);
+  assert.deepEqual(said('New front brakes.'), ['New front brakes']);
+  // a list in the website's own words says each of its parts is new
+  const listed = plainCtx({ ...v, descriptionRaw: 'Recent service: new tires, brakes and rotors. Comes with new brake pads.' });
+  for (const sentence of ['New rotors and brakes.', 'Fresh brakes.', 'New brake pads.']) assert.deepEqual(said(sentence, listed), [], sentence);
+  assert.deepEqual(said('A new battery.', listed), ['new battery']);
+  assert.deepEqual(said('Two new batteries.', plainCtx({ ...v, descriptionRaw: 'Comes with a new battery.' })), []);
 });
 
 test('certified passes when the website lists the car as certified, whatever its write-up says', () => {

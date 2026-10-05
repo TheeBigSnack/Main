@@ -66,6 +66,7 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, only 2,019 dollars down, save 1,500 today, 1500 bucks off, driven by a 5.7L V8, never driven in winter, came in on trade from a local customer, full airbag coverage.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, 1,000 down, get 1500 off, 2,500 cash back, a rebate of 3,500, discount of 4,000, 4,500 in savings, an off-road 1500 off the lot.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Save 1,500 today.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, a local trade with new tires and new brakes, plus new wipers and a new engine, new Michelin tires, new front rotors, new tires and shocks, new tires, struts, two new batteries.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn, reduced from 31,995 to 28,995, only 28.9k, miles: 38,000, with 38,000 on it, 41,230 on the clock, call 555-555-0100, since 1985, tows 7,500 lbs.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
@@ -84,6 +85,8 @@ const contexts = [
   { vehicle: { ...vehicle, make: 'GMC', model: 'SIERRA 2500HD', trim: 'SLE EXT CAB', features: [...vehicle.features, 'AWD', 'ABS', 'USB'], interiorColor: 'BLK/GRY', location: 'SAMPLE CDJR' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, carfaxOneOwner: true, descriptionRaw: 'One adult owner, garage kept.' }, dealer, priceNote: '', price: 28995 },
   { vehicle, dealer, priceNote: 'Plus tax, title and registration, which go to the state, not the dealer.', price: 28995 },
+  { vehicle: { ...vehicle, features: [...vehicle.features, 'ABS Brakes', 'Remote Engine Start', 'Variable Intermittent Wipers'], descriptionRaw: 'Local trade with new tires.' }, dealer, priceNote: '', price: 28995 },
+  { vehicle: { ...vehicle, descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks and a new battery.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Reduced from 31,995 to 28,995. Only 28.9k! Miles: 38,000. With 38,000 on it. Call 555-555-0100. Since 1985. Tows 7,500 lbs.' }, dealer, priceNote: '', price: 27995 },
   {},
 ];
