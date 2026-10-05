@@ -18,11 +18,14 @@ export const DEFAULT_LISTING_DEFAULTS = Object.freeze({ titleStatus: 'Clean', co
 // shows up, the title default is NOT applied, the clean-title box is
 // unticked, the panel says why, and a queued car waits at review. Each word
 // is read in its usual forms ("Salvaged", "Flood-damaged", "Totaled",
-// "Previously flooded", "Title Status: Branded"). A bare "title", "damage"
-// or "branded" is never one ("tax, title and license extra", "no frame
-// damage", "Mopar-branded mats"), "flood lights" is equipment, "total loss
+// "Previously flooded", "Title Status: Branded"), and as a label and value
+// from a specs list ("Title Brand: Flood", "Title Type: Branded", "Title:
+// Hail", "Odometer: Not Actual"). A bare "title", "damage" or "branded" is
+// never one ("tax, title and license extra", "no frame damage",
+// "Mopar-branded mats"), "flood lights" is equipment, "total loss
 // protection" or "coverage" is an insurance product, and "odometer exempt"
-// is an age exemption, not a brand.
+// ("Odometer: Exempt") is an age exemption, not a brand.
+const TITLE_LABEL = 'title(?:[\\s-]+(?:brands?|type|status|designation))?';
 const BRANDED = new RegExp(
   '\\b(' +
     [
@@ -31,7 +34,10 @@ const BRANDED = new RegExp(
       'reconstructed',
       'branded[\\s-]+title',
       'title (?:is |was )?branded',
-      'title(?:\\s+status)?\\s*[:-]\\s*branded',
+      `${TITLE_LABEL}\\s*[:\\-\u2013]\\s*branded`,
+      // a label's value: after a bare "Title" only a colon makes it a label ("Clean title - fire red" is paint); "hail-free" is no brand
+      `(?:${TITLE_LABEL}\\s*:|title[\\s-]+(?:brands?|type|status|designation)\\s*[-\u2013])\\s*(?:flood(?:ed)?|hail|fire|water|junk|theft|stolen)(?:[\\s-]+(?:damag\\w*|recover\\w*))?(?![\\s-]*free\\b)`,
+      '(?:odometer|mileage)(?:[\\s-]+(?:status|brand|reading|disclosure|type))?\\s*[:\\-\u2013]\\s*not[\\s-]+actual',
       '(?:flood|hail|water|fire)[\\s-]*damag\\w*',
       'flood (?:title|vehicle|car)',
       'flooded',

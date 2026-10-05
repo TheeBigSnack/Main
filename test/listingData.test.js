@@ -141,6 +141,33 @@ test('a branded title is caught in the usual ways a website writes it, and ordin
   }
 });
 
+test('a title brand or odometer line written as a label and value is read as branded; a clean or exempt value is not', () => {
+  const branded = {
+    'Title Brand: Flood': 'Title Brand: Flood',
+    'Title Type: Branded': 'Title Type: Branded',
+    'Odometer: Not Actual': 'Odometer: Not Actual',
+    'Title: Flood': 'Title: Flood',
+    'Title Brand: Hail': 'Title Brand: Hail',
+    'Title Brands: Water Damage': 'Title Brands: Water Damage',
+    'Title Brand - Fire': 'Title Brand - Fire',
+    'Title Status: Junk': 'Title Status: Junk',
+    'Title: Theft Recovery': 'Title: Theft Recovery',
+    'Odometer Status: Not Actual': 'Odometer Status: Not Actual',
+    'Mileage - Not Actual': 'Mileage - Not Actual',
+  };
+  for (const [words, signal] of Object.entries(branded)) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), signal, words);
+    assert.equal(brandedTitleSignal({ features: ['Backup Camera', words] }), signal, `${words} as a feature`);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle], ['', 'no'], words);
+  }
+  for (const words of ['Title: Clean', 'Title Brand: None', 'Title Brand: Not Branded', 'Title Type: Clean', 'Odometer: Actual', 'Odometer: Exempt', 'Title: In hand', 'Clean title - fire red paint', 'Clean title: hail-free, garage kept']) {
+    assert.equal(brandedTitleSignal({ descriptionRaw: words }), '', words);
+    const d = buildListingData({ descriptionRaw: words }, { defaults: { titleStatus: 'Clean', condition: 'Good' } });
+    assert.deepEqual([d.fields.titleStatus, d.fields.cleanTitle], ['Clean', 'yes'], words);
+  }
+});
+
 test('a denied mention or a program or finance offer is not a brand; the same words stated of the car still are', () => {
   // a clean car: the dealership's Clean default stands and the box is ticked
   const notBrands = [
