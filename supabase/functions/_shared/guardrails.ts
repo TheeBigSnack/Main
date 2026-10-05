@@ -126,14 +126,16 @@ export const BANNED_PHRASES: readonly string[] = Object.freeze([
 // the dealership's owner ("I'm the owner of this dealership.", "I'm the
 // owner of the store, text me."), where the business ends the sentence or
 // clause or only "text me", "call me", "message me", "email me" or "ask for
-// me" follows it, since anything else joined on may be the truck. For each
+// me" follows it (after a comma or a dash, maybe with "so" before it and
+// "anytime", "by name" or "today" after it), since anything else joined on
+// may be the truck. For each
 // phrase: what comes right before it, or right after it, when it is fine.
 // Still banned: "Text me, not the dealer.", "Buy from me, not the dealer's
 // lot.", "I'm the owner.", "I'm the owner of this truck", "I'm the owner of
 // this business, and this truck", "I'm the owner of the store and the Ram",
 // "I'm the owner of the business, this truck included".
 const DEALERS_DESK = "['\u2019]s[\\s-]+(?:front[\\s-]+desk|reception(?:ist|[\\s-]+desk)?|switchboard|main[\\s-]+(?:line|number|phone(?:[\\s-]+(?:line|number))?)|general[\\s-]+(?:line|number)|phone[\\s-]+(?:line|number|tree)|call[\\s-]+cent(?:er|re)|answering[\\s-]+service|voicemail)\\b";
-const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|dealer|store|business|company|lot)(?=\\s*(?:[.!?;\\n]|$)|\\s*,\\s*(?:text|call|message|email|ask\\s+for)\\s+me\\s*(?:[.!?;\\n]|$))";
+const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|dealer|store|business|company|lot)(?=\\s*(?:[.!?;\\n]|$)|\\s*[,\u2013\u2014-]\\s*(?:so\\s+)?(?:text|call|message|email|ask\\s+for)\\s+me(?:\\s+(?:any\\s*time|by\\s+name|today))?\\s*(?:[.!?;\\n]|$))";
 export const BANNED_UNLESS: Readonly<Record<string, Readonly<{ before?: string; after?: string }>>> = Object.freeze({
   'not the dealership': Object.freeze({ after: DEALERS_DESK }),
   'not the dealer': Object.freeze({ after: DEALERS_DESK }),
@@ -530,6 +532,50 @@ function without(text: unknown, names: unknown[]): string {
   return out;
 }
 
+// The text with only the copies of the price note set aside that stand as a
+// sentence of their own where the text puts them, as the template puts the
+// note: after the start of the text or a sentence's end (".", "!" or "?",
+// maybe a closing quote or bracket, then a space or a new line), and before
+// the end of the text or a new sentence (a stop, the note's own last one or
+// one right after it, or else a new line; then a space or a new line and a
+// capital or a digit). A line break alone ends no sentence ("..., and" at the
+// end of a line carries on), and a copy that starts in lower case where the
+// note does not ("etc. tax, title and fees go ...") carries one on; a note the
+// dealership starts in lower case may start a line after a stop. Any other
+// copy has words joined to it in its sentence ("Taxes are lower when you deal
+// direct, and tax, title and fees go to the state, not the dealer."; "..., not
+// the dealer, so deal direct with the salesperson."; "Price note: ...";
+// "Plus tax, title ...") and stays in the text.
+const NOTE_CLOSERS = "['\"\u2019\u201d)\\]]*";
+const NOTE_OPENS = new RegExp(`(?<=(^|[.!?]${NOTE_CLOSERS})(\\s*))`, 'y');
+const NOTE_ENDS = new RegExp(`((?:[^\\S\\n]*[.!?]+)?)${NOTE_CLOSERS}(\\s*)`, 'y');
+const NOTE_OWN_STOP = new RegExp(`[.!?]${NOTE_CLOSERS}$`);
+function withoutOwnSentenceNote(text: unknown, note: unknown): string {
+  const t = String(text || '');
+  const said = oneLine(note);
+  if (!said) return t;
+  const at = (re: RegExp, i: number): RegExpExecArray | null => { re.lastIndex = i; return re.exec(t); };
+  const lower = (s: string): boolean => /^\p{Ll}/u.test(s);
+  let out = '';
+  let from = 0;
+  for (const m of t.matchAll(new RegExp(escapeRe(said).replace(/ /g, '\\s+'), 'gi'))) {
+    const index = m.index ?? 0;
+    const end = index + m[0].length;
+    const before = at(NOTE_OPENS, index);
+    const opens = Boolean(before) && (before![1] === '' || before![2] !== '')
+      && (!lower(m[0]) || (lower(said) && (before![1] === '' || before![2].includes('\n'))));
+    const after = opens ? at(NOTE_ENDS, end) : null;
+    const next = after ? end + after[0].length : -1;
+    const stopped = Boolean(after) && (after![1] !== '' || NOTE_OWN_STOP.test(m[0]));
+    const ends = Boolean(after) && (next >= t.length
+      || (after![2] !== '' && (stopped || after![2].includes('\n')) && /^[\p{Lu}\p{N}]/u.test(t.slice(next, next + 2))));
+    if (!ends) continue;
+    out += `${t.slice(from, index)} `;
+    from = end;
+  }
+  return out + t.slice(from);
+}
+
 // The parts a text says are new or replaced, each with the words that say
 // so: "new tires", "new Michelin tires", "a new set of tires", "replaced
 // brakes", and each part joined straight on to one with "and" ("new tires
@@ -716,7 +762,8 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   }
   // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
   const role = roleOf(salesperson);
-  const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]);
+  // with each run of spaces read as one, so "Driven  by" is read like "Driven by"
+  const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]).replace(/[^\S\n]+/g, ' ');
   const sourceWords = claimSource({ vehicle, priceNote });
   const spelled = new Set<string>();
   for (const q of spelledQuantities(aboutCar)) {
@@ -754,15 +801,17 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   if (vin && !t.toUpperCase().includes(vin)) problems.push({ code: 'no-vin', text: "Doesn't include the VIN" });
   // a banned phrase only the dealership's price note says is the note's to change, in Settings: no edit or template can drop the note;
   // the note alone may say where the fees go (PRICE_NOTE_UNLESS), and a phrase across the note's edge is the description's.
-  // Where the fees go is fine only as the note's own sentence, read where the text puts it: words the description joins
-  // to that sentence ("Buy from me and tax, title and fees go to the state, not the dealer.") make it the description's
+  // Where the fees go is fine only where the note stands as a sentence of its own in the text (withoutOwnSentenceNote):
+  // words the description joins to the note's sentence ("Taxes are lower when you deal direct, and tax, title and fees go
+  // to the state, not the dealer.") make it the description's
   const besideNote = noteSaid ? without(t, [noteSaid]) : t;
+  const besideOwnNote = noteSaid ? withoutOwnSentenceNote(t, noteSaid) : t;
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (noteSaid && (NOTE_BANNED_RE.get(phrase) as RegExp).test(noteSaid)) problems.push({ code: 'banned-phrase', text: `Your dealership's price note says "${phrase}"; change the note in Settings` });
     else if (!re.test(t)) continue;
     else if (!(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
-    else if ((NOTE_BANNED_RE.get(phrase) as RegExp).test(t)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own` });
+    else if (re.test(besideOwnNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter` });
   }
   if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });

@@ -92,6 +92,16 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn. Buy direct from me, plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Traded in by a locally owned company, locally owned company since new. Here, we are a locally owned dealership; our store is locally owned and operated.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. We\u2019re a locally owned business. Driven by a retired teacher.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Driven  by a retired  teacher, a locally\towned company truck, never\u00a0smoked in, thirty  thousand miles.') + '\nVIN TESTVIN0000000001.',
+  // the price note read where the text puts it: as a sentence of its own, or with words joined to it
+  sixty('2019 Ram 1500 Big Horn. Taxes are lower when you deal direct with the salesperson, and plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn.\nPlus tax, title and registration, which go to the state, not the dealer, so deal direct with the salesperson.') + '\nVIN TESTVIN0000000001.',
+  'Plus tax, title and registration, which go to the state, not the dealer\n' + sixty('2019 Ram 1500 Big Horn with 41,230 miles.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, and\nPlus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn etc. plus tax and tags, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.') + '\nVIN TESTVIN0000000001.\nplus tax and tags, which go to the state, not the dealer.',
+  sixty('2019 Ram 1500 Big Horn. Plus tax, title and registration, which go to the state, not the dealer Text the salesperson.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Price note: Plus tax, title and registration, which go to the state, not the dealer. Questions? Plus tax, title and registration, which go to the state, not the dealer') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -112,6 +122,8 @@ const contexts = [
   { vehicle, dealer, priceNote: 'Plus tax, title and registration, which go to the state, not the dealer.', price: 28995 },
   { vehicle, dealer, priceNote: 'Deal direct with me: fees go to the state, not the dealer.', price: 28995 },
   { vehicle, dealer, priceNote: 'Price excludes tax, title and registration, which are paid to the state, not the dealership.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Plus tax, title and registration, which go to the state, not the dealer', price: 28995 },
+  { vehicle, dealer, priceNote: 'plus tax and tags, which go to the state, not the dealer.', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Sold as-is, no warranty. Carfax shows one accident reported. All loans are subject to bank approval. No rust. Driven by its previous owner. We are a locally owned dealership.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Comes with the rest of the factory warranty. Clean Carfax. Financing for all credit types. Runs great. Non-smoker.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, features: [...vehicle.features, 'ABS Brakes', 'Remote Engine Start', 'Variable Intermittent Wipers'], descriptionRaw: 'Local trade with new tires.' }, dealer, priceNote: '', price: 28995 },

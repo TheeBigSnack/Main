@@ -708,12 +708,16 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     "I'm the owner of this business and also this truck.", "I'm the owner of this business and the Ram.", "I'm the owner of the store and this pickup.",
     "I'm the owner of this lot, and this truck is mine.", "I'm the owner of this dealership and glad to help.", "I'm the owner of the dealer's truck.",
     "I'm the owner of the company that owns this truck.", "I'm the owner of the business, this truck included.", "I'm the owner of this dealership, text me about my truck.",
-    "I'm the owner of this store, the Ram is ours.",
+    "I'm the owner of this store, the Ram is ours.", "I'm the owner of this dealership, call me anytime about my truck.",
+    "I'm the owner of this dealership \u2014 and this truck.", "I'm the owner of this dealership, so the truck is mine.", "I'm the owner of this lot - call me, it is my truck.",
   ]) assert.ok(banned(line), line);
   // the dealership's own desk or line, and its owner
   for (const line of [
     "Ask for me, not the dealer's front desk.", 'Text me, not the dealership\u2019s main line.', "Call me, not the dealer's switchboard.",
     "I'm the owner of this dealership; glad to help.", "I'm the owner of this dealership, text me.",
+    // or a way to reach the owner, after a comma or a dash
+    "I'm the owner of this dealership, call me anytime.", "I'm the owner of this dealership, ask for me by name.", "I'm the owner of the dealership \u2014 call me.",
+    "I'm the owner of the dealership, so call me.", "I'm the owner of this store - text me today.",
   ]) assert.ok(!banned(line), line);
 
   // the dealership's price note: where the fees go, said a few ways, passes on every car
@@ -730,29 +734,72 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     const c = withNote(note);
     assert.deepEqual(runGuardrails(buildTemplateDescription(c), c).problems, [], note);
   }
-  // the note's sentence is read where the description puts it: words the description joins to it make it the description's steer
-  const joinedNote = 'Says "not the dealer" with words joined to your price note\'s sentence; keep the note as a sentence of its own';
+  // the note's sentence is read where the description puts it: only a copy of the note that stands as a sentence of its own
+  // (after the start of the text or a sentence's end, and before a new sentence or the end) is the dealership's; words the
+  // description joins to it, before or after, in the same sentence, make it the description's steer
+  const joinedNote = /^Says "not the dealer" with words joined to your price note's sentence; keep the note as a sentence of its own/;
+  const FEES = 'Tax, title and fees go to the state, not the dealer.';
+  const NO_STOP = 'Plus tax, title and registration, which go to the state, not the dealer';
+  const SHORT = 'Fees go to the state, not the dealer.';
+  const LOWER = 'plus tax and tags, which go to the state, not the dealer.';
+  const lowerFirst = (s) => s[0].toLowerCase() + s.slice(1);
   for (const [note, joined] of [
-    ['Tax, title and fees go to the state, not the dealer.', 'Deal direct with me: tax, title and fees go to the state, not the dealer.'],
-    ['Tax, title and fees go to the state, not the dealer.', 'Buy from me and tax, title and fees go to the state, not the dealer.'],
-    ['Tax, title and fees go to the state, not the dealer.', 'Pay me directly; tax, title and fees go to the state, not the dealer.'],
-    ['Tax, title and fees go to the state, not the dealer.', 'Text me and tax, title and fees go to the state, not the dealer.'],
+    [FEES, 'Deal direct with me: tax, title and fees go to the state, not the dealer.'],
+    [FEES, 'Buy from me and tax, title and fees go to the state, not the dealer.'],
+    [FEES, 'Pay me directly; tax, title and fees go to the state, not the dealer.'],
+    [FEES, 'Text me and tax, title and fees go to the state, not the dealer.'],
     ['Plus tax, title and registration, which go to the state, not the dealer.', 'Buy direct from me, plus tax, title and registration, which go to the state, not the dealer.'],
     ['Sales tax goes to the state, not the dealer.', 'Deal with me, sales tax goes to the state, not the dealer.'],
     ['Tax, title and fees go to the state, not the dealer', 'Tax, title and fees go to the state, not the dealer, so text me.'],
-    ['Tax, title and fees go to the state, not the dealer.', 'Tax, title and fees go to the state, not the dealer.\nText me rather than the dealership; tax, title and fees go to the state, not the dealer.'],
+    [FEES, `${FEES}\nText me rather than the dealership; tax, title and fees go to the state, not the dealer.`],
+    // joined words with no "I", "me" or "my" in them, before the note (the sentence still opening with a fee word) or after it
+    [FEES, `Taxes are lower when you deal direct with the salesperson, and ${lowerFirst(FEES)}`],
+    [FEES, `Plus, tax is lower when you buy direct from the salesperson and ${lowerFirst(FEES)}`],
+    [SHORT, `Fees are lower dealing straight with the salesperson, and ${lowerFirst(SHORT)}`],
+    [SHORT, `Tax savings when you deal direct with us, and ${lowerFirst(SHORT)}`],
+    [SHORT, `Tax savings when you deal direct with us, and ${SHORT}`],
+    [NO_STOP, `${NO_STOP}, so deal direct with the salesperson.`],
+    [NO_STOP, `${NO_STOP} or the sales office, so skip the paperwork and deal direct.`],
+    [NO_STOP, `${NO_STOP} - deal direct.`],
+    [SHORT, `${SHORT} so deal direct with the salesperson.`],
+    [SHORT, `${SHORT} — deal direct with the salesperson.`],
+    // a line break alone ends no sentence, and a stop that starts no new sentence (lower case after it) ends none
+    [FEES, `Taxes are lower when you deal direct with the salesperson, and\n${FEES}`],
+    [FEES, `Taxes are lower when you deal direct with the salesperson -\n\n${FEES}`],
+    [NO_STOP, `${NO_STOP}\nso deal direct with the salesperson.`],
+    [SHORT, `${SHORT}\nso deal direct with the salesperson.`],
+    [FEES, `Deal direct w/ me evenings, no paperwork etc. ${lowerFirst(FEES)}`],
+    [LOWER, `Deal direct w/ me etc. ${LOWER}`],
+    [FEES, lowerFirst(FEES)],
+    // a label, a bracket, an opening word or an emoji before it on its line
+    [FEES, `Price note: ${FEES}`], [FEES, `(${FEES})`], [FEES, `Plus ${lowerFirst(FEES)}`], [FEES, `\u{1F697} ${FEES}`],
   ]) {
     const c = withNote(note);
-    const text = buildTemplateDescription(c).replace(note, joined);
-    assert.deepEqual(runGuardrails(text, c).problems.map((p) => p.text), [joinedNote], joined);
+    const template = buildTemplateDescription(c);
+    assert.ok(template.includes(note), note);
+    const problems = runGuardrails(template.replace(note, joined), c).problems.map((p) => p.text);
+    assert.equal(problems.length, 1, joined);
+    assert.match(problems[0], joinedNote, joined);
   }
-  // as a sentence of its own, with the description's own sentence before it, it passes
+  assert.deepEqual(runGuardrails(buildTemplateDescription(withNote(FEES)).replace(FEES, `Buy from me and ${lowerFirst(FEES)}`), withNote(FEES)).problems, [{
+    code: 'banned-phrase', text: 'Says "not the dealer" with words joined to your price note\'s sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter',
+  }]);
+  // as a sentence of its own it passes: after the description's own sentence (".", "!", "?", a closing quote, a blank line),
+  // before a new one, with a stop added after a note that has none, at the start or the end of the text, or twice
   for (const [note, own] of [
-    ['Tax, title and fees go to the state, not the dealer.', 'Message me with any question. Tax, title and fees go to the state, not the dealer.'],
-    ['Tax, title and fees go to the state, not the dealer.', 'Plus tax, title and fees go to the state, not the dealer.'],
+    [FEES, `Message me with any question. ${FEES}`], [FEES, `Questions? ${FEES}`], [FEES, `Great truck!\n\n${FEES}`],
+    [FEES, `"Runs like a dream." ${FEES}`], [FEES, `${FEES} Message me any time.`], [FEES, `${FEES}\n${FEES}`],
+    [NO_STOP, `${NO_STOP}.`], [NO_STOP, `${NO_STOP}. Message me any time.`], [SHORT, `Deal direct with me. ${SHORT}`],
+    [LOWER, LOWER], [LOWER, `${LOWER} Message me.`],
   ]) {
     const c = withNote(note);
     assert.deepEqual(runGuardrails(buildTemplateDescription(c).replace(note, own), c).problems, [], own);
+  }
+  for (const note of [FEES, NO_STOP]) {
+    const c = withNote(note);
+    const rest = buildTemplateDescription(c).replace(`${note}\n`, '');
+    assert.deepEqual(runGuardrails(`${note}\n${rest}`, c).problems, [], `${note} first`);
+    assert.deepEqual(runGuardrails(`${rest}\n${note}`, c).problems, [], `${note} last`);
   }
   // a steer in the note, before where the fees go or anywhere in its sentence, is the note's to change
   for (const note of [
@@ -839,6 +886,21 @@ test('a draft that invents warranty, financing, certification, history, care, ne
   ]);
   const thirty = runGuardrails(`${buildTemplateDescription(c)}\nOnly thirty thousand miles.`, c).problems.find((p) => p.code === 'unknown-number');
   assert.equal(thirty.text, '"thirty thousand" isn\'t in the website\'s data for this car');
+});
+
+test('a claim with more than one space, a tab or a no-break space between its words is read like one with a single space', () => {
+  for (const sentence of [
+    'Driven  by a retired teacher.', 'Driven by a retired  teacher.', 'Locally  owned company since new.', 'Driven\tby a retired teacher.',
+    'Comes with a  warranty.', 'Never smoked in.', 'Only thirty  thousand miles.',
+  ]) {
+    const single = codesAfter(sentence.replace(/[^\S\n]+/g, ' '));
+    assert.ok(single.length > 0, sentence);
+    assert.deepEqual(codesAfter(sentence), single, sentence);
+  }
+  // the website's own words back the same claim however it spaces them
+  const v = { ...PLAIN(), descriptionRaw: 'Driven  by a retired teacher.' };
+  assert.deepEqual(codesAfter('Driven by a retired teacher.', plainCtx(v)), []);
+  assert.deepEqual(codesAfter('Driven  by a retired  teacher.', plainCtx(v)), []);
 });
 
 test('a claim the website itself makes passes, and the template built for a car with such a write-up passes its own checks without copying it', async () => {
