@@ -954,6 +954,34 @@ test('while accounts are configured, no text says the posted list stays only in 
   assert.match(profile, /\*\*Account\*\*/, "README's profile line does not point at the Account item");
 });
 
+// README's profile line once named only the name, role and listing defaults as
+// what follows the person, and said the account gets the posted list "from then
+// on", while settingsFromProfile carries the closing line, the Terms acceptance
+// and the rewrite-service address too, and the first sync sends the posts and
+// numbers recorded before the sign-in (syncPayload sends every own post, and
+// every post attempt when nothing has synced yet).
+test('README and the help name every part of the profile that follows the person, and say earlier posts sync too', () => {
+  const code = read('../extension/src/settings.js');
+  const person = code.match(/const person = \{([^\n]*)\};/);
+  assert.ok(person, 'settingsFromProfile no longer builds the person part in one line: check what follows the person');
+  assert.deepEqual([...person[1].matchAll(/(\w+): /g)].map((m) => m[1]).filter((k) => k !== 'key'), ['salesperson', 'defaults', 'legal', 'rewrite'], 'the person part of the profile changed: update README and docs/help.md');
+  assert.match(code, /rewrite: \{ \.\.\.\(profile\.rewrite \|\| \{\}\), key: '' \}/, 'the rewrite-service key follows the profile now: the texts say it stays on the computer');
+  const PERSON = { salesperson: /\bname, role, closing line\b/, defaults: /listing defaults/, legal: /Terms acceptance/, rewrite: /rewrite-service address/ };
+  const texts = { 'README.md': read('../README.md').split('\n').find((l) => l.startsWith('- **Your profile follows you.**')), 'docs/help.md': doc('help.md').split('\n').find((l) => l.startsWith('Your profile follows you.')) };
+  for (const [name, line] of Object.entries(texts)) {
+    assert.ok(line, `${name} no longer says what follows the person`);
+    const follows = line.slice(0, line.search(/follow you\b/));
+    for (const [key, re] of Object.entries(PERSON)) assert.match(follows, re, `${name}: what follows the person leaves out ${key}`);
+    assert.match(line, /dealership part \(name, address, stores, price basis, price note and daily cap\)/, `${name} does not list the dealership part`);
+    assert.match(line, /rewrite-service key stays on the computer/, `${name} does not say the rewrite-service key stays behind`);
+  }
+  assert.doesNotMatch(texts['README.md'], /from then on/, "README's profile line says only posts after the sign-in reach the account");
+  assert.match(texts['README.md'], /including the ones from before you signed in/, "README's profile line does not say earlier posts sync too");
+  const sync = read('../extension/src/sync.js');
+  assert.match(sync, /const isOwn = \(entry, userId\) => entry\.mine !== false && \(!entry\.userId \|\|/, 'a post recorded before the sign-in (no userId) may no longer sync: check README');
+  assert.match(sync, /const cutoff = last === null \? null :/, 'the first sync may no longer send every post attempt: check README');
+});
+
 // Two rewrite services read an Anthropic API key: the standalone backend/
 // (backend/.env) and the accounts' rewrite function (a function secret).
 // supabase/README.md once called the function secret "the only place it

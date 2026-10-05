@@ -170,7 +170,7 @@ Click **Settings** at the top of the popup, with your dealership's website open 
 - **Terms and privacy**: today, a note that the Terms of Service and the Privacy Policy are being finalised and can be read and accepted here once they are published. From then on: links to both documents, the date and edition you accepted, and the tick "I have read and accept the Terms of Service and the Privacy Policy" until you have accepted the current edition.
 - **Saved data**: **Clear everything for this website** and **Forget my synced profile**. See "Where the data lives" below.
 
-Your profile follows you. Your name, role, closing line and listing defaults follow you to any dealership website. The dealership part (name, address, stores, price basis, price note and daily cap) belongs to that dealership's website and does not travel to another site. Both are kept in Chrome's synced storage under your own Google account, so they come back after clearing a website's data or reloading the extension.
+Your profile follows you. Your name, role, closing line, listing defaults, Terms acceptance and rewrite-service address follow you to any dealership website (the rewrite-service key stays on the computer it was typed on). The dealership part (name, address, stores, price basis, price note and daily cap) belongs to that dealership's website and does not travel to another site. Both are kept in Chrome's synced storage under your own Google account, so they come back after clearing a website's data or reloading the extension.
 
 ## When a field could not be filled
 
