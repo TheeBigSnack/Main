@@ -190,12 +190,18 @@ function peopleOf(memberships, listings, attempts) {
 /**
  * @param {object} input
  *   listings, todoItems, postAttempts, scans, memberships: rows as above
+ *   heldScans: how many scans were held back as a likely website hiccup
+ *             since the newest trusted scan in `scans`, when the rows hold
+ *             only the newest of them (manager.js reads the newest trusted
+ *             scan, and the newest held-back one since it with a count of
+ *             them all); default and floor: the held-back rows `scans` has
+ *             since that trusted scan
  *   role:     the signed-in viewer's role in the dealership; only for
  *             'manager' is notOnTeam a list (else null: not known)
  *   now:      ISO time the ages count from (default: the clock)
  *   timeZone: IANA zone for the last-scan line (default: this computer's)
  */
-export function summarize({ listings, todoItems, postAttempts, scans, memberships, role = '', now = nowIso(), timeZone } = {}) {
+export function summarize({ listings, todoItems, postAttempts, scans, heldScans, memberships, role = '', now = nowIso(), timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
@@ -322,7 +328,8 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
 
   // ----- the last scan: the newest trusted one that has run by now
   // (FUTURE_SKEW_MS), with the scans held back as a likely website hiccup
-  // since it (withheld) -----
+  // since it (withheld): how many, from heldScans when the page counted them
+  // apart from the rows it read -----
   let last = null;
   const heldRows = [];
   for (const s of S) {
@@ -331,7 +338,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     else if (!last || ms(s.taken_at) > ms(last.taken_at)) last = s;
   }
   const heldSince = heldRows.filter((s) => !last || ms(s.taken_at) > ms(last.taken_at));
-  const lastScan = last || heldSince.length ? scanLine(last, nowAt, zone, heldSince) : null;
+  const lastScan = last || heldSince.length ? scanLine(last, nowAt, zone, heldSince, Math.max(heldSince.length, count(heldScans) ?? 0)) : null;
 
   return {
     now: nowAt,
@@ -388,14 +395,15 @@ export function clearLine(kind, lastScan, notOnTeamCount = 0) {
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
 // The last scan line: the newest trusted scan `s` (null when none is
-// recorded), and the scans held back since it (`held`, withheld rows): how
+// recorded), and the scans held back since it (`held`, the withheld rows
+// read, and `heldCount`, how many there are, read or not): how
 // many, the newest one's time and car count, and that nothing they missed
 // is flagged until the website recovers or a salesperson accepts the smaller
 // list. With held-back scans the line is stale whatever the trusted scan's
 // age: nothing it missed has been flagged since.
-function scanLine(s, nowAt, zone, held = []) {
+function scanLine(s, nowAt, zone, held = [], heldCount = held.length) {
   const newest = held.reduce((a, h) => (!a || ms(h.taken_at) > ms(a.taken_at) ? h : a), null);
-  const withheld = newest ? { scans: held.length, newestAt: newest.taken_at, cars: num(newest.cars) ?? 0 } : null;
+  const withheld = newest ? { scans: heldCount, newestAt: newest.taken_at, cars: num(newest.cars) ?? 0 } : null;
   const heldLine = withheld
     ? `${withheld.scans === 1 ? `One${s ? ' later' : ''} scan` : `${withheld.scans}${s ? ' later' : ''} scans`} (the newest ${fmtLocal(withheld.newestAt, zone)}: ${plural(withheld.cars, 'car')} on the website) ${withheld.scans === 1 ? 'was' : 'were'} held back as a likely website hiccup, with most of the lot missing at once, so nothing ${withheld.scans === 1 ? 'it' : 'they'} missed is flagged. If the website really lists fewer cars now, a salesperson can accept the smaller list on the extension's To do tab.`
     : '';

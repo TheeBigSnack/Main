@@ -189,6 +189,27 @@ test('summarize: scans held back as a likely website hiccup are told beside the 
   assert.match(only.clear.price.line, /The one scan recorded was held back as a likely website hiccup, so a price that changed since then is not flagged yet\./);
 });
 
+test('summarize: held-back scans counted apart from the rows read (the page reads the newest one and a count) are told at their full count', () => {
+  const trusted = { taken_at: ago(72), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0, withheld: false };
+  const newest = { taken_at: ago(1), cars: 4, ready: 3, take_down_count: 0, price_update_count: 0, withheld: true };
+  const s = summarize({ ...sample(), scans: [trusted, newest], heldScans: 73 });
+  assert.equal(s.lastScan.takenAt, trusted.taken_at);
+  assert.deepEqual(s.lastScan.withheld, { scans: 73, newestAt: newest.taken_at, cars: 4 });
+  assert.match(s.lastScan.line, /^Last scan 2026-11-13 15:00: 40 cars on the website, 30 ready to post, 0 to take down, 0 price changes\. 73 later scans \(the newest 2026-11-16 14:00: 4 cars on the website\) were held back/);
+  assert.match(s.clear.sold.line, /The scans since the last trusted one were held back/);
+  assert.match(managerCsv({ ...sample(), scans: [trusted, newest], heldScans: 73 }, { now: NOW, timeZone: 'UTC' }), /Last scan.*73 later scans/);
+  // the count never says fewer than the held-back rows read, and a count that is not one is left out
+  assert.equal(summarize({ ...sample(), scans: [trusted, newest, { ...newest, taken_at: ago(2) }], heldScans: 1 }).lastScan.withheld.scans, 2);
+  assert.equal(summarize({ ...sample(), scans: [trusted, newest], heldScans: 'many' }).lastScan.withheld.scans, 1);
+  // with no held-back row read, a count alone makes nothing up
+  assert.equal(summarize({ ...sample(), scans: [trusted], heldScans: 5 }).lastScan.withheld, null);
+  // 50 held-back rows and the trusted one before them: the trusted one is the last scan
+  const fifty = Array.from({ length: 50 }, (_, i) => ({ ...newest, taken_at: ago(1 + i) }));
+  const many = summarize({ ...sample(), scans: [...fifty, trusted] });
+  assert.equal(many.lastScan.takenAt, trusted.taken_at);
+  assert.equal(many.lastScan.withheld.scans, 50);
+});
+
 test('summarize: a scan stamped more than 5 minutes ahead of now (a machine whose clock ran ahead) does not pin the last scan line or hide its stale warning', () => {
   const later = (hours) => ago(-hours);
   const real = { taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 };
@@ -1511,8 +1532,8 @@ test('the page: Getting started first, for managers only, redrawn with the cards
     assert.match(body, /renderGettingStarted\(\);/, `${fn} redraws Getting started too`);
   }
   // no query was added for it: the page reads the same tables as before
-  const reads = [...js.matchAll(/(?:read|latest)\('([a-z_]+)'/g)].map((m) => m[1]);
-  assert.deepEqual(reads, ['dealerships', 'memberships', 'listings', 'todo_items', 'post_attempts', 'scan_summaries']);
+  const reads = [...new Set([...js.matchAll(/(?:read|latest|counted)\('([a-z_]+)'/g)].map((m) => m[1]))].sort();
+  assert.deepEqual(reads, ['dealerships', 'listings', 'memberships', 'post_attempts', 'scan_summaries', 'todo_items']);
   assert.match(read('manager/manager.css'), /\.steps \{/);
 });
 

@@ -77,7 +77,7 @@ const state = {
   session: null,
   dealerships: [],
   dealershipId: null, // the dealership on screen, whose rows state.data holds: every button acts on it (loadLive sets it with the rows, never before)
-  data: null, // { dealership, memberships, listings, todoItems, postAttempts, scans }
+  data: null, // { dealership, memberships, listings, todoItems, postAttempts, scans, heldScans }
   billing: null, // { status, error }: GET .../billing/status's answer for the chosen dealership (the sample data carries its own)
   billingNote: '', // one line in the Billing card: back from Stripe, the pilot just started, or what a sample button would do
   billingNoteFor: '', // the dealership a note from Stripe's return is about ('' = the one on screen)
@@ -862,7 +862,8 @@ async function connect() {
 // Every table is read whole, page by page (data.js readAll: the API answers
 // at most its row cap per request and drops the rest silently), in an order
 // that ends on a unique column so the pages neither overlap nor skip; only
-// the scans stop at the latest 50, which is all the page shows of them.
+// the scans are not: the page shows the last trusted scan and the scans held
+// back since it, so it reads those (readScans below).
 //
 // `wanted` is the dealership to open (the picker's choice, a new sign-up's);
 // by default the one on screen, else the first by name. Loads can overlap (a
@@ -907,6 +908,15 @@ async function loadDealership(wanted, current) {
     if (error) throw new Error(`Couldn't read ${table}: ${error.message}`);
     return data || [];
   };
+  // the rows asked for and how many rows match in all (count: 'exact'), or
+  // null when the database has no column the read names (Postgres's 42703,
+  // PostgREST's PGRST204): a migration not applied yet
+  const counted = async (table, build) => {
+    const { data, error, count } = await build(supabase.from(table).select('*', { count: 'exact' }));
+    if (error && (error.code === '42703' || error.code === 'PGRST204')) return null;
+    if (error) throw new Error(`Couldn't read ${table}: ${error.message}`);
+    return { rows: data || [], count: Number.isInteger(count) ? count : null };
+  };
   const dealerships = await read('dealerships', (q) => q.order('name').order('id'));
   if (!current()) return;
   if (!dealerships.length) {
@@ -924,12 +934,32 @@ async function loadDealership(wanted, current) {
   }
   const dealership = dealerships.find((d) => d.id === wanted) || dealerships[0];
   const own = (q) => q.eq('dealership_id', dealership.id);
-  const [memberships, listings, todoItems, postAttempts, scans, billing] = await Promise.all([
+  // The last scan line rests on two reads, so no run of scans held back as a
+  // likely website hiccup can push the last trusted scan out of what the page
+  // reads (a lot that keeps reading most of its cars gone sends one at every
+  // rescan until a salesperson accepts the smaller list): the newest trusted
+  // scan that has run by now (FUTURE_SKEW_MS), and the newest scan held back
+  // since it with a count of every one held back since it (data.js
+  // summarize, heldScans). A database without the withheld column (migration
+  // 0014 not applied yet; this page can deploy before it) holds no held-back
+  // scan, since the sync function that writes one deploys only after it: its
+  // newest scan is the last trusted one.
+  const readScans = async () => {
+    const until = new Date(Date.now() + FUTURE_SKEW_MS).toISOString();
+    const newest = (q) => q.lte('taken_at', until).order('taken_at', { ascending: false }).limit(1);
+    const trusted = await counted('scan_summaries', (q) => newest(own(q).eq('withheld', false)));
+    if (!trusted) return { scans: await latest('scan_summaries', (q) => newest(own(q))), heldScans: 0 };
+    const since = trusted.rows.length ? trusted.rows[0].taken_at : null;
+    const held = await counted('scan_summaries', (q) => newest(since ? own(q).eq('withheld', true).gt('taken_at', since) : own(q).eq('withheld', true)));
+    if (!held) throw new Error('Couldn\'t read scan_summaries: its withheld column is missing');
+    return { scans: [...trusted.rows, ...held.rows], heldScans: held.count ?? held.rows.length };
+  };
+  const [memberships, listings, todoItems, postAttempts, { scans, heldScans }, billing] = await Promise.all([
     read('memberships', (q) => own(q).order('user_id')),
     read('listings', (q) => own(q).order('posted_at', { ascending: false }).order('id')),
     read('todo_items', (q) => own(q).order('flagged_at', { ascending: false }).order('id')),
     read('post_attempts', (q) => own(q).order('started_at', { ascending: false }).order('id')),
-    latest('scan_summaries', (q) => own(q).lte('taken_at', new Date(Date.now() + FUTURE_SKEW_MS).toISOString()).order('taken_at', { ascending: false }).limit(50)),
+    readScans(),
     loadBilling(dealership.id),
   ]);
   if (!current()) return;
@@ -942,7 +972,7 @@ async function loadDealership(wanted, current) {
   state.billingNoteFor = '';
   state.dealerships = dealerships;
   state.dealershipId = dealership.id;
-  state.data = { dealership, memberships, listings, todoItems, postAttempts, scans };
+  state.data = { dealership, memberships, listings, todoItems, postAttempts, scans, heldScans };
   state.billing = withRole(billing, role);
   state.invites = invites.invites;
   state.inviteError = invites.error;

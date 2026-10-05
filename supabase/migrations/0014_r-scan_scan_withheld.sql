@@ -24,8 +24,13 @@
 -- they cover the others (0002_rls.sql). The owner's usage report counts a
 -- held-back scan as a scan the extension synced (0010_backend_review_fixes.sql
 -- last_synced_scan_at), which it is. Apply this before deploying the sync
--- function that writes it. A change made after the project applied 0001 to
--- 0008; it applies on top of 0009 to 0013 as on a fresh build.
+-- function that writes it. The manager view reads the newest scan with
+-- withheld false, and counts the ones held back since it, in reads of their
+-- own, so no run of held-back scans pushes the last trusted one out of what
+-- it reads; on a database without this column it reads the newest scan, as
+-- before (manager/manager.js readScans).
+-- A change made after the project applied 0001 to 0008; it applies on top
+-- of 0009 to 0013 as on a fresh build.
 
 alter table public.scan_summaries add column if not exists withheld boolean not null default false;
 comment on column public.scan_summaries.withheld is 'True for a scan the extension held back as a likely website hiccup (more than half of a lot of 10 or more gone at once); its counts are of its own read, not of the lot as last saved.';
