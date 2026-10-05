@@ -936,8 +936,9 @@ test('every text that says what Clear the numbers deletes says the items closed 
 // made in the popup waits for the next sync.
 test('every text that lists when the extension syncs counts the scans, take-downs and price updates recorded in the popup and the side panel', () => {
   const popup = read('../extension/popup.js');
-  assert.match(popup, /resolveFlag\(p, vin, null, \{ how: 'manual' \}\)\)\.then\(syncInBackground\)/, 'Taken down no longer asks for a sync: these texts can say it waits for the next one');
-  assert.match(popup, /resolveFlag\(p, vin, 'price', \{ how: 'manual' \}\)\)\.then\(syncInBackground\)/, 'Updated no longer asks for a sync');
+  // the flag closes, then (when it was saved) the diff, then the sync
+  assert.match(popup, /resolveFlag\(p, vin, null, \{ how: 'manual' \}\)\)\)\) break;\n[^\n]*\n\s*syncInBackground\(\);/, 'Taken down no longer asks for a sync: these texts can say it waits for the next one');
+  assert.match(popup, /resolveFlag\(p, vin, 'price', \{ how: 'manual' \}\)\)\)\) break;\n[^\n]*\n\s*syncInBackground\(\);/, 'Updated no longer asks for a sync');
   assert.match(popup, /recordFlags\(state\.origin, (?:r|state)\.diff, (?:r|state)\.diff\.takenAt\)[^\n]*\n\s*syncInBackground\(\);/, 'the popup\'s Scan no longer asks for a sync');
   assert.match(read('../extension/upkeep.js'), /type: 'syncNow', origin: up\.origin/, 'the side panel\'s take-downs and price updates no longer ask for a sync');
   assert.match(popup, /Lot Current also syncs after every rescan and after each post, take-down or price update you record\./, 'Settings says when it syncs');

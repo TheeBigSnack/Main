@@ -13,6 +13,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { siteKeys, SITES_KEY, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
 import { sessionFromTokenResponse } from '../extension/src/account.js';
+import { noteFlags } from '../extension/src/pilot.js';
+import { STORAGE_FULL } from '../extension/src/storage.js';
 
 const ORIGIN = 'https://www.example-motors.test';
 const k = siteKeys(ORIGIN);
@@ -245,3 +247,50 @@ test('a take-down or price update recorded in the side panel asks the worker to 
   assert.deepEqual(messages.filter((m) => m.type === 'syncNow'), [], 'nothing to sync with');
   assert.ok(messages.some((m) => m.type === 'updateBadge'), 'the badge is still updated');
 });
+
+// The item's flag in the pilot numbers closes before the item leaves the
+// diff, inside the writes whose failure leaves it open: a fix on the posted
+// list whose flag stayed open would be lost at the next sync (the sync
+// function files no item for an open flag the listing already shows, and
+// mergeFlags drops that flag). So a flag that cannot be saved (storage full)
+// is shown, the item stays, nothing syncs, and I updated it / I took it down
+// closes it once there is room.
+test('upkeep whose to-do flag cannot be saved says why, leaves the item to do and syncs nothing; the same click closes it once there is room', async () => {
+  for (const kind of ['takeDown', 'price']) {
+    const flagKind = kind === 'price' ? 'price' : 'takeDown';
+    const pilot = noteFlags(null, { takeDown: kind === 'takeDown' ? [{ vin: VIN_A, name: 'Car A', yours: true, why: 'gone' }] : [], priceUpdates: kind === 'price' ? [{ vin: VIN_A, name: 'Car A', yours: true, from: 10000, to: 9500 }] : [], warnings: [] }, { at: '2026-10-01T09:00:00.000Z' });
+    const local = {
+      [GLOBAL_KEYS.account]: session(),
+      [k.posted]: { [VIN_A]: { name: 'Car A', price: 10000, postedAt: '2026-10-01T08:00:00.000Z' } },
+      [k.diff]: { takeDown: kind === 'takeDown' ? [{ vin: VIN_A, name: 'Car A' }] : [], priceUpdates: kind === 'price' ? [{ vin: VIN_A, name: 'Car A', from: 10000, to: 9500 }] : [] },
+      [k.pilot]: pilot,
+    };
+    const area = localArea(local);
+    const set = area.set;
+    let full = true;
+    area.set = async (obj) => {
+      if (full && k.pilot in obj) throw new Error('QUOTA_BYTES quota exceeded');
+      return set(obj);
+    };
+    globalThis.chrome.storage.local = area;
+    messages.length = 0;
+    Object.assign(up, { active: true, origin: ORIGIN, vin: VIN_A, kind, price: kind === 'price' ? 9500 : null, listingUrl: '', name: 'Car A', listedPrice: 10000, tabId: null, status: 'waiting', note: '', error: '', fills: 0, baseline: null, offTarget: false });
+    const item = () => (area.data[k.diff][kind === 'price' ? 'priceUpdates' : 'takeDown'] || []).some((x) => x.vin === VIN_A);
+    const flag = () => area.data[k.pilot].flags.find((f) => f.vin === VIN_A && f.kind === flagKind);
+
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
+    assert.equal(up.error, STORAGE_FULL, `${kind}: the reason is shown`);
+    assert.notEqual(up.status, 'done', `${kind}: not marked done`);
+    assert.ok(item(), `${kind}: the item stays to do`);
+    assert.equal(flag().doneAt, undefined, `${kind}: its flag is still open`);
+    assert.deepEqual(messages.filter((m) => m.type === 'syncNow'), [], `${kind}: nothing synced`);
+
+    full = false;
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
+    assert.equal(up.status, 'done', up.error);
+    assert.equal(flag().how, 'manual', `${kind}: the flag closes`);
+    assert.ok(!item(), `${kind}: and the item leaves the diff`);
+    assert.deepEqual(messages.filter((m) => m.type === 'syncNow'), [{ type: 'syncNow', origin: ORIGIN }], `${kind}: then it syncs`);
+  }
+});
+

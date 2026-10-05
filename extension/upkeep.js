@@ -222,10 +222,16 @@ function dropFromDiff(diff, lists) {
 
 async function finish(ctx, how) {
   stopPolling();
-  // The posted list and the diff are changed from what is stored now, each
-  // under its key's lock (src/storage.js): the popup and the worker write
-  // them too. A write that fails (the quota) leaves the item open, with the
-  // reason shown, so "I updated it" can be clicked again once there is room.
+  // The posted list, the item's flag in the pilot numbers and the diff are
+  // changed from what is stored now, each under its key's lock
+  // (src/storage.js): the popup and the worker write them too. A write that
+  // fails (the quota) leaves the item open, with the reason shown, so "I
+  // updated it" can be clicked again once there is room. The flag closes
+  // before the item leaves the diff: a fix on the posted list with its flag
+  // left open would be lost at the next sync (the sync function files no
+  // item for an open flag the listing already shows, and mergeFlags drops
+  // that flag, src/sync.js), so the item would be in neither the numbers nor
+  // the manager view.
   const k = siteKeys(up.origin);
   const price = up.kind === 'price';
   try {
@@ -239,6 +245,8 @@ async function finish(ctx, how) {
       if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true }));
     }
     await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
+    // pilot numbers: how long the item stayed open, and whether Lot Current saw the change itself
+    await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, price ? 'price' : 'takeDown', { how }));
     await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook']));
   } catch (e) {
     up.error = storageErrorText(e);
@@ -246,8 +254,6 @@ async function finish(ctx, how) {
     return;
   }
   up.error = '';
-  // pilot numbers: how long the item stayed open, and whether Lot Current saw the change itself
-  await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, up.kind === 'price' ? 'price' : 'takeDown', { how })).catch(() => null);
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   // signed in: the worker syncs the change, so the manager view and colleagues see it now (fire and forget; Settings shows how it went)
   if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin: up.origin }).catch(() => {});

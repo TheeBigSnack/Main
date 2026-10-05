@@ -1099,8 +1099,23 @@ async function keepTakenDown(vin) {
   return update('takenDown', (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed, listedBefore: entry.listedBefore === true }));
 }
 
-// Pilot numbers: an item the person ticked off by hand, or a car unmarked.
-const notePilot = (change) => updatePilot(state.origin, change).then((p) => { state.pilot = p; }).catch(() => null);
+// Pilot numbers: an item the person ticked off by hand, or a car unmarked,
+// closes its to-do flag. Awaited, and a write that fails (the quota) is shown
+// and answered false. A fix whose posted-list write landed while its flag
+// stayed open would be lost at the next sync: the sync function files no
+// item for an open flag the listing already shows, and mergeFlags then drops
+// that flag (src/sync.js), so the item would be in neither the numbers nor
+// the manager view.
+async function notePilot(change) {
+  try {
+    const next = await updatePilot(state.origin, change);
+    if (next !== undefined) state.pilot = next;
+    return true;
+  } catch (e) {
+    setStatus(storageErrorText(e), 'error');
+    return false;
+  }
+}
 
 // After a change recorded here (a scan, a car marked or unmarked, taken
 // down or updated), the worker syncs this website with the dealership's
@@ -1289,23 +1304,30 @@ async function onPanelClick(ev) {
       // take-down, so unmarking never hands a post back under the daily cap.
       // It is kept in the take-down record first, as Taken down keeps it.
       if (!(await keepTakenDown(vin))) break;
-      const unmarked = await update('posted', (p) => markTakenDown(p || {}, vin));
-      // fire-and-forget: the redraw must not wait for the pilot bookkeeping; the sync goes after it, so it carries both
-      notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' })).then(() => { if (unmarked) syncInBackground(); });
+      if (!(await update('posted', (p) => markTakenDown(p || {}, vin)))) break;
+      // its open to-do items close as cleared; the sync goes after, so it
+      // carries both, and goes even when that write failed (the status says
+      // why): the car is unmarked, and colleagues see it is free
+      await notePilot((p) => resolveFlag(p, vin, null, { how: 'cleared' }));
+      syncInBackground();
       break;
     }
-    // Two keys, two writes: stop at the first that fails (the status says
-    // why) so the item stays open and can be ticked again once there is room.
+    // The posted list, the item's flag (pilot numbers), then the diff: stop
+    // at the first write that fails (the status says why), so the item stays
+    // on To do and can be ticked again once there is room, and the flag is
+    // closed before the item leaves To do.
     case 'takenDown':
       if (!(await keepTakenDown(vin))) break;
       if (!(await update('posted', (p) => markTakenDown(p || {}, vin)))) break;
+      if (!(await notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' })))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['takeDown', 'priceUpdates', 'needsALook'])))) break;
-      notePilot((p) => resolveFlag(p, vin, null, { how: 'manual' })).then(syncInBackground);
+      syncInBackground();
       break;
     case 'priceUpdated':
       if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
+      if (!(await notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
-      notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })).then(syncInBackground);
+      syncInBackground();
       break;
     case 'pilotCsv': {
       // A file for the manager, saved by the browser like any download.
