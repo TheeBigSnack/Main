@@ -374,6 +374,26 @@ test('while the subscription agreement says nothing about seats added during the
   assert.match(item, /prorated from the day it is added or only from the next billing period is the owner's commercial choice, not yet made/);
 });
 
+// review: Stripe, set up as docs/stripe-setup.md step 3 says, cancels a subscription by itself once the retries of a
+// failed payment run out, and the plan counts as lapsed from the first failed payment; the Terms and the
+// subscription agreement describe only cancelling on purpose, and the attorney was not asked about it.
+test('while the agreements say nothing of a failed payment, the attorney is asked about the subscription Stripe ends by itself', async () => {
+  // the code and the setup: a past-due subscription is lapsed, and Stripe is told to cancel after the retries
+  const { subscriptionState } = await import('../supabase/functions/_shared/billing.mjs');
+  assert.equal(subscriptionState({ status: 'past_due', pilot_ends_at: null }), 'lapsed', 'a failed payment no longer lapses the plan: update question 11.3 and this test');
+  assert.match(read('docs/stripe-setup.md'), /set \*\*If all retries for a payment fail\*\* to \*\*Cancel the subscription\*\*/, 'Stripe is no longer set to cancel after the retries: update question 11.3 and this test');
+
+  const terms = section(read('legal/terms-of-service.md'), '## 7. Fees, billing and cancellation');
+  const dsa = section(read('legal/dealer-subscription-agreement.md'), '## 6. Term and termination');
+  if (/fail(?:s|ed)? payment|non-?payment|not paid|unpaid/i.test(terms + dsa)) return; // the agreements now say it: drop question 11.3 with this test
+  const q11 = section(read('legal/questions-for-attorney.md'), '## 11. Where the agreements disagree or say nothing');
+  const item = q11.split('\n').find((l) => l.startsWith('- **11.3**'));
+  assert.ok(item, 'questions-for-attorney.md 11 does not ask about ending a subscription for non-payment');
+  assert.match(item, /when every retry has failed, cancels the subscription by itself, with no notice from Lot Current/);
+  assert.match(item, /From the first failed payment the dealership's plan counts as lapsed: syncing and the description writer stop/);
+  assert.match(item, /its database records are deleted within 30 days/);
+});
+
 // The dry run (Open the form and check fields only) reads the Marketplace
 // form page: its address, title and language, the names of up to 100 visible
 // controls anywhere on it and 200 characters next to the photo box. The side
