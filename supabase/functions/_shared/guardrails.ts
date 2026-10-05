@@ -346,9 +346,12 @@ function emojiCount(text: unknown): number {
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const oneLine = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim();
 const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, new RegExp('\\b' + escapeRe(p).replace(/[\s-]+/g, '[\\s-]+') + '\\b', 'i')]);
-// "one owner", "1-owner", "single-owner", "one careful owner", "only one
-// previous owner", "its sole owner", "its first owner", "owned by one family"
-const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+){0,2}owner|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
+// "one owner", "1-owner", "single-owner", "one careful owner", "one
+// careful, loving owner", "one very careful adult owner" (up to three words
+// between, a comma after any but the last), "only one previous owner", "its
+// sole owner", "its first owner", "owned by one family"; not "One-Touch
+// Windows, Owner's Manual"
+const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+,?[\s-]+){0,2}(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+)?owner(?!['\u2019]s[\s-]+(?:manual|guide|handbook|portal|app)\b)|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
 
 // ---------- claims only the website can make ----------
 // What a description says about the car's certification, warranty,
@@ -377,7 +380,7 @@ export const CLAIM_KINDS: readonly ClaimKind[] = Object.freeze([
   { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:(?:set of|[\\w-]+)\\s+){0,2}?(${PARTS})\\b`, 'i'), part: true },
   { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
   // who had it and how it was used ("one owner" has its own check, against the Carfax flag; "Pre-owned" is not a claim)
-  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned(?![\s-]+(?:and|&)[\s-]+operated)|driven (?:by(?!\s+(?:(?:a|an|the|its)\s+)?(?:\d|v-?\d|hemi\b|turbo|twin[\s-]turbo|supercharged|diesel\b|hybrid\b|electric\b|ecoboost|duramax|cummins|power[\s-]?stroke|pentastar|vortec))|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
+  { what: 'its owners or how it was driven', re: /\b(?:(?:previous|prior|past|former|original) owners?|(?<!pre[\s-])owned by|(?:adult|local|locally)[\s-]owned(?![\s-]+(?:and|&)[\s-]+operated)|driven (?:by(?!\s+(?:(?:a|an|the|its)\s+)?(?:\d|v-?\d|hemi\b|ecoboost|duramax|cummins|power[\s-]?stroke|pentastar|vortec|(?:[\w.-]+\s+){0,3}(?:engines?|motors?|powertrains?|v-?\d+)(?![\w-])))|only|mostly|mainly|gently|sparingly|carefully)|never driven|drove it (?:to|only|mostly|mainly|gently|sparingly|carefully)|(?:grand(?:ma|mother|pa|father)|granny)['\u2019]s (?:car|truck|suv|van|jeep|vehicle|ride)|(?:adult|gently|lightly|carefully|rarely|barely)[\s-]driven|babied|pampered|weekend (?:driver|car|cruiser|only)|(?:highway|freeway) miles|one[\s-]family)\b/i },
   { what: 'where it came from', re: /\b(?:local(?:ly)? trade[ds]?|traded in locally|(?:came|taken|took) in on trade|on trade from|trade[\s-]in from|lease returns?|off[\s-]lease)\b/i },
   { what: 'its keys', re: /\b(?:(?:both|spare|extra|second|two|2|three|3|(?:sets?|pairs?) of) (?:keys|key[\s-]?fobs|fobs|remotes)|(?:spare|extra|second) (?:key|key[\s-]?fob|fob|remote))\b/i },
 ]);
@@ -489,17 +492,35 @@ const ONE_OWNER_ALL = new RegExp(ONE_OWNER.source, 'gi');
 const OWNER_COUNT_WORDS = /^(?:previous|prior|original|registered|recorded|reported|listed|carfax|autocheck)$/i;
 const betweenOneAndOwner = (said: string): string => (String(said).match(/^(?:one|1|single)[\s-]+(.*?)[\s-]*owner$/i) || [])[1] || '';
 const withoutOneOwner = (text: string): string => String(text).replace(ONE_OWNER_ALL, (said) => ` ${betweenOneAndOwner(said)} `);
+// After "owned by one" or "owned by a single", the words that say who, up
+// to the first word that only carries the sentence on ("owned by one
+// retired teacher", "a single careful driver", "one family since new");
+// "family", "person", "driver" and the like only restate the count.
+const STORY_ENDS = /^(?:since|from|for|and|or|but|with|in|on|at|who|that|which|until|to|of|the|a|an|its|it|this)$/i;
+const COUNT_NOUNS = /^(?:family|families|household|owner|person|individual|party|driver|buyer|customer)$/i;
+function ownerStory(text: string, m: RegExpMatchArray): { said: string; words: string[] } {
+  if (!/^owned by/i.test(m[0])) return { said: m[0], words: betweenOneAndOwner(m[0]).split(/[\s,-]+/).filter((w) => w && !OWNER_COUNT_WORDS.test(w)) };
+  const tail = (String(text).slice((m.index as number) + m[0].length).match(/^(?:[\s-]+[a-z'\u2019]+){1,4}/i) || [''])[0];
+  const words: string[] = [];
+  for (const w of tail.split(/[\s-]+/).filter(Boolean)) {
+    if (STORY_ENDS.test(w)) break;
+    words.push(w);
+  }
+  return { said: `${m[0]} ${words.join(' ')}`, words: words.filter((w) => !COUNT_NOUNS.test(w) && !OWNER_COUNT_WORDS.test(w)) };
+}
 function ownerStoryProblems(text: string, source: string): GuardrailProblem[] {
   const problems: GuardrailProblem[] = [];
   const said = new Set<string>();
   for (const m of String(text).matchAll(ONE_OWNER_ALL)) {
-    const words = betweenOneAndOwner(m[0]).split(/[\s-]+/).filter((w) => w && !OWNER_COUNT_WORDS.test(w));
+    const { said: wording, words } = ownerStory(text, m);
     const story = words.join(' ').toLowerCase();
     // a word of another kind ("damage-free", "non-smoking") is that kind's claim, checked with the rest
     if (!story || said.has(story) || CLAIM_KINDS.some((k) => k.re.test(story))) continue;
-    if (new RegExp(`\\b${words.map(escapeRe).join('[\\s-]+')}[\\s-]+(?:[a-z']+[\\s-]+)?own(?:er|ed)\\b`, 'i').test(source)) continue;
+    // the website tells the same story: "one careful, loving owner", "adult owned", "owned by a retired teacher"
+    const phrase = words.map(escapeRe).join('[\\s,-]+');
+    if (new RegExp(`\\b${phrase}[\\s,-]+(?:[a-z']+[\\s-]+)?own(?:er|ed)\\b|\\bowned by (?:(?:one|a single|a|an)[\\s-]+)?${phrase}\\b`, 'i').test(source)) continue;
     said.add(story);
-    problems.push({ code: 'unsupported-claim', text: `Says "${oneLine(m[0])}", but the website says nothing about its owners or how it was driven for this car` });
+    problems.push({ code: 'unsupported-claim', text: `Says "${oneLine(wording)}", but the website says nothing about its owners or how it was driven for this car` });
   }
   return problems;
 }

@@ -802,6 +802,31 @@ test('one-owner wording on a one-owner car never hides a claim written inside it
   assert.deepEqual(codesAfter('One retired teacher owner.', told), ['unsupported-claim']);
 });
 
+test('one-owner wording with a comma or more words in it, the story after "owned by one", and who drove it are all checked', () => {
+  // without the Carfax flag, each is one-owner wording
+  for (const sentence of ['One careful, loving owner.', 'One very careful adult owner.', 'Owned by one retired teacher.', 'Owned by a single careful driver.']) {
+    assert.ok(codesAfter(sentence).includes('one-owner'), sentence);
+  }
+  // with it, who the owner was is owner history the website's own words must tell
+  const one = plainCtx({ ...PLAIN(), carfaxOneOwner: true });
+  const said = (sentence, c = one) => runGuardrails(`${buildTemplateDescription(c)}\n${sentence}`, c).problems.filter((p) => p.code === 'unsupported-claim').map((p) => p.text);
+  for (const sentence of ['One careful, loving owner.', 'One very careful adult owner.', 'Owned by one retired teacher.', 'Owned by one local family.', 'Owned by a single careful driver.']) {
+    assert.deepEqual(said(sentence), [`Says "${sentence.slice(0, -1)}", but the website says nothing about its owners or how it was driven for this car`], sentence);
+  }
+  // the count alone, however it is put
+  for (const sentence of ['Owned by one family.', 'Owned by one family since new.', 'Owned by a single owner.']) assert.deepEqual(codesAfter(sentence, one), [], sentence);
+  // the website telling the same story makes it its own
+  const told = plainCtx({ ...PLAIN(), carfaxOneOwner: true, descriptionRaw: 'One careful, loving owner. Owned by a retired teacher.' });
+  for (const sentence of ['One careful, loving owner.', 'Owned by one retired teacher.']) assert.deepEqual(codesAfter(sentence, told), [], sentence);
+  // "driven by" a person is how it was driven; "driven by" an engine is not
+  for (const sentence of ['Driven by a diesel mechanic.', 'Driven by a hybrid enthusiast.', 'Driven by a turbo-loving retiree.']) assert.deepEqual(codesAfter(sentence), ['unsupported-claim'], sentence);
+  for (const sentence of ['Driven by a 5.7L HEMI V8.', 'Driven by the turbocharged engine.', 'Driven by a twin-turbo engine.', 'Driven by an electric motor.', 'Driven by a Cummins diesel.']) assert.deepEqual(codesAfter(sentence), [], sentence);
+  // two features side by side in the highlights are not one-owner wording
+  const features = plainCtx({ ...PLAIN(), features: ['One-Touch Windows', "Owner's Manual", 'Single Exhaust', 'Heated Seats'] });
+  assert.match(buildTemplateDescription(features), /One-Touch Windows, Owner's Manual/);
+  assert.deepEqual(runGuardrails(buildTemplateDescription(features), features).problems, []);
+});
+
 test('a denial of accidents is banned in any number, and "first owner" is a one-owner claim', () => {
   const v = { ...PLAIN(), descriptionRaw: 'Carfax shows one accident reported.' };
   for (const sentence of ['No accident on record.', 'No reported accidents.', 'It has never had an accident.', 'Never in an accident.']) {
