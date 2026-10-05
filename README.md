@@ -75,7 +75,7 @@ Each salesperson's scans, settings, posted list and numbers are kept in their ow
 ## What Lot Current won't do
 
 - Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it and a test that fails if any appears.
-- Post new, demo or loaner cars, or anything the pre-owned check can't confirm.
+- Post cars the pre-owned check reads as new, demo or loaner, or anything it can't confirm.
 - Invent prices or price drops. The listed price is the website price, and price changes only mirror the website.
 - Make claims the website's data doesn't support, or hide that the car is at a dealership.
 - Ask for, read or store your Facebook password, cookies or tokens; use fake delays, proxies or spoofing; or run more than your one account.
@@ -102,7 +102,7 @@ To pass, at least two of them must say pre-owned, or one must and the car's page
 ## For development
 
 ```
-npm test              # 1456 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 1457 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # eight e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel

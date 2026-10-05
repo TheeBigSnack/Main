@@ -21,7 +21,7 @@ Click the Lot Current icon, then **Rescan website**.
 
 Show: the count of used cars read, **Ready to post**, **Other stores** (group websites only: cars at the group's other rooftops, kept off this list; the tab is hidden on a single-store site), **Needs a look** (anything the website doesn't add up on, like a used car showing 0 miles).
 
-Say: "It only lets through cars your website itself says are pre-owned, at this store, with photos and a price. New, demo and loaner cars can't get in."
+Say: "It only lets through cars your website itself says are pre-owned, at this store, with photos and a price, and anything that doesn't add up goes to Needs a look. It goes by your website's labels, so your salespeople still look over each car before they post it."
 
 ## 2:00 Post one car
 

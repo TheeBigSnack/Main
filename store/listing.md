@@ -16,7 +16,7 @@ Pre-fills Marketplace listings from your dealership's pre-owned inventory for yo
 
 ## Detailed description
 
-Lot Current is for car dealership salespeople who list their store's used cars on Facebook Marketplace from their own accounts. It reads your dealership website's used inventory, checks that every car is really pre-owned, pre-fills a Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
+Lot Current is for car dealership salespeople who list their store's used cars on Facebook Marketplace from their own accounts. It reads your dealership website's used inventory, checks that the website marks each car as pre-owned, pre-fills a Marketplace vehicle listing for you to review and publish, and on each rescan tells you what to take down, what to reprice and what's new.
 
 You click Publish. Lot Current never does. It fills in the form and opens pages; a person publishes every post and every edit, and nothing is posted or edited in the background or while you're away. On its own, and only if you allow it, it re-reads your dealership's website every 3 hours while Chrome is open to keep your to-do count current and, while you are signed in to a Lot Current account, sends that rescan's results (your posted list, post records, to-do items and the scan's counts) to your dealership's account; it never opens or reads Marketplace then.
 
@@ -31,7 +31,7 @@ What it does
 What it won't do
 
 - Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it and a test that fails if any appears.
-- Post new, demo or loaner cars, or anything the pre-owned check can't confirm.
+- Post cars the pre-owned check reads as new, demo or loaner, or anything it can't confirm.
 - Invent prices or price drops. The listed price is the website price, and price changes only mirror the website.
 - Make claims the website's data doesn't support, or hide that the car is at a dealership.
 - Ask for, read or store your Facebook password, cookies or tokens; use fake delays, proxies or spoofing; or run more than your one account.
@@ -115,7 +115,7 @@ Everything after the line below goes into the dashboard's "Test instructions" bo
 Lot Current needs no account or sign-in for this test.
 
 1. Open this dealership's used-inventory page: [a public used-inventory page on a Dealer Inspire website that uses the Cars Commerce inventory search, picked by the owner with that dealership's OK]. Please use that page: Dealer Inspire is the one website platform Lot Current has been checked on with a real dealership website, and its readers for other platforms have been tested only on sample websites so far.
-2. Click the Lot Current icon in the toolbar. The first time, click Set up Lot Current and follow the few steps in the side panel (the website, the store, a name and role for the listing's sign-off; any test name works). Set-up reads the website and ends with one more read, so when it is done, click the Lot Current icon again: the Ready to post tab already lists the pre-owned cars at that store (Rescan website, at the top of the popup, reads the website again). New, demo and loaner cars never appear under Ready to post.
+2. Click the Lot Current icon in the toolbar. The first time, click Set up Lot Current and follow the few steps in the side panel (the website, the store, a name and role for the listing's sign-off; any test name works). Set-up reads the website and ends with one more read, so when it is done, click the Lot Current icon again: the Ready to post tab already lists the pre-owned cars at that store (Rescan website, at the top of the popup, reads the website again). Only cars the website marks as pre-owned appear under Ready to post; a car whose details don't add up is under Needs a look.
 3. Click Post on any car. The side panel opens, re-checks that car on the website and shows the description it wrote from the website's facts, with the dealership's name.
 4. To see the form fill, sign in to your own Facebook account in the same window and click "Open the Marketplace form" in the side panel. Lot Current opens the vehicle listing page and fills in the fields and photos. It does not click Publish, and there is no code for it to do so. Close the tab without publishing; nothing is posted unless a person clicks Publish.
 5. Settings (a button at the top of the popup) shows the daily post cap and what is kept in the browser. Background rescans happen only for a website you allow, in the set-up wizard or in Settings (Chrome asks for the permission first), every 3 hours while Chrome is open; while you are signed in each one also syncs your posted list, post timings and to-do items with your dealership's account, and none opens or reads Marketplace.

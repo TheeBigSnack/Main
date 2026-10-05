@@ -464,6 +464,33 @@ test('the pre-owned check is described as the gate decides it: two signs, or one
   for (const [name, doc] of [['How it works', how], ['README.md', readme]]) assert.match(doc, /only one sign and no Carfax report goes to \**Needs a look/, `${name} says one sign alone goes to Needs a look`);
 });
 
+// review: the home page, How it works, the sales sheet, the demo script and the store's test steps said new, demo
+// and loaner cars "never get through", "can't get in" or "never appear under Ready to post", and the home page that
+// a demo or loaner flag "always means no". The gate reads the website's own labels (classify.js), so a car the
+// website labels wrong passes it, and a reader that drops a demo or loaner word before the gate sees it lets that car
+// through too. The copy says what the gate lets through and that it goes by the website's labels.
+test('no copy says new, demo or loaner cars can never get through, and the gate is said to go by the website\'s labels', () => {
+  const ABSOLUTE = /\b(?:new|demo|loaner)\b[^.;:]*\b(?:never (?:get|gets|got) (?:through|in)|can(?:no|['’])t get (?:through|in)|never (?:appear|show) (?:under|on|in)|always means no)\b/i;
+  for (const said of ['New, demo and loaner cars never get through.', "New, demo and loaner cars can't get in.", 'New, demo and loaner cars never appear under Ready to post.', 'A demo or loaner flag always means no.']) {
+    assert.match(said, ABSOLUTE, said);
+  }
+  const files = [
+    ...PAGES.filter((p) => p.kind !== 'legal').map((p) => `../${p.file}`),
+    ...readdirSync(new URL('../marketing/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+    '../README.md', '../docs/help.md',
+  ];
+  for (const rel of files) {
+    const said = rel.endsWith('.md') ? read(rel) : stripTags(read(rel));
+    const hit = said.match(ABSOLUTE);
+    assert.equal(hit, null, `${rel.slice(3)} says the gate can never let such a car through: "${hit && hit[0]}"`);
+  }
+  const LABELS = /goes by (?:your|the) website's (?:own )?labels|can only go by what your website says/;
+  for (const [name, said] of [['the home page', text], ['How it works', stripTags(howPage)], ['the sales sheet', read('../marketing/sales-sheet.md')], ['the demo script', read('../marketing/demo-script.md')]]) {
+    assert.match(said, LABELS, `${name} does not say the check goes by the website's labels`);
+  }
+});
+
 // review: the FAQ (sent to search engines as FAQPage data) said Lot Current reads back only the
 // create-listing form and keeps nothing from Facebook beyond the links a person saves. The upkeep flow
 // (upkeep.js) also reads a listing the person opens to update or take down, and a queue records the
