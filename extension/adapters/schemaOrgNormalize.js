@@ -117,10 +117,16 @@ const saysCondition = (title) => readCondition(titleConditionWords(title)) !== '
 // year and model are in it), so a list page's title never lends its words
 // to the cars on it. A name that calls the car a demo or a loaner after the
 // model year ("2019 Honda Civic EX Demo") is always kept, so the gate reads
-// those words even when the page title says "Used".
+// those words even when the page title says "Used". A demo or loaner word
+// only the page title about this car has ("2019 Honda Civic EX Demo |
+// Sample Motors") is never dropped either: the page title is taken, after
+// the name when only the name has the condition word.
 function siteTitleOf(name, pageTitle, year, model) {
-  if (name && (saysCondition(name) || unitWordAfterYear({ siteTitle: name }))) return name;
   const about = Boolean(pageTitle && year && model) && pageTitle.includes(String(year)) && pageTitle.toLowerCase().includes(model.toLowerCase());
+  if (name && about && !unitWordAfterYear({ siteTitle: name }) && unitWordAfterYear({ siteTitle: pageTitle })) {
+    return saysCondition(name) && !saysCondition(pageTitle) ? `${name} | ${pageTitle}` : pageTitle;
+  }
+  if (name && (saysCondition(name) || unitWordAfterYear({ siteTitle: name }))) return name;
   if (about && (!name || saysCondition(pageTitle))) return pageTitle;
   return name || null;
 }

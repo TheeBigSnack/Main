@@ -70,14 +70,17 @@ export function titleConditionWords(title) {
 // Grand Cherokee Limited Demo", ".../2024-jeep-grand-cherokee-demo-<vin>/".
 // The car's words are read: its title from the model year on, its trim, and
 // its page address from the model year on. "Courtesy" counts only as
-// "courtesy car", "courtesy vehicle" or "courtesy loaner", and only in the
-// title's part with the model year: on its own it is a common word in
-// dealership names, and a page title's later parts (after " | " or " - ")
-// often hold the dealership's name ("... Limited | Courtesy Motors"). Those
-// later parts are still read for demo, demonstrator and loaner, which no
-// dealership name uses ("... Limited - Demo", "... | Service Loaner").
+// "courtesy car", "courtesy vehicle" or "courtesy loaner": on its own it is
+// a common word in dealership names, and a page title's later parts (after
+// " | " or " - ") often hold the dealership's name ("... Limited | Courtesy
+// Motors", "... | Courtesy Cars of Springfield"). Those later parts are read
+// for demo, demonstrator and loaner, which no dealership name uses ("...
+// Limited - Demo", "... | Service Loaner"), and for a courtesy car, vehicle
+// or loaner that ends its part ("... - Courtesy Vehicle", "... | Courtesy
+// Car | Example Motors"), never one a name goes on from ("Courtesy Car
+// Center").
 const UNIT_WORD = /\b(demo(?:nstrator)?|(?:service )?loaner|courtesy (?:car|vehicle|loaner))s?\b/i;
-const UNIT_WORD_LATER = /\b(demo(?:nstrator)?|(?:service )?loaner)s?\b/i;
+const UNIT_WORD_LATER = /\b(demo(?:nstrator)?|(?:service )?loaner|courtesy (?:car|vehicle|loaner)(?![\s'\u2019]*[a-z0-9]))s?\b/i;
 const YEAR_WORD = /^(?:19|20)\d{2}$/;
 const TITLE_PARTS = /\s+[|–—-]\s+/;
 const wordsOf = (text) => String(text || '').split(/[^a-z0-9]+/i).filter(Boolean);

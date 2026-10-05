@@ -188,6 +188,35 @@ test('a demo or loaner named after the model year is never Ready: in the title, 
   assert.equal(assessVehicle({ ...used, siteTitle: 'Used 2024 Jeep Grand Cherokee Limited Demolition Package' }, {}).decision, DECISION.READY);
 });
 
+test('a courtesy car, vehicle or loaner after a title separator is never Ready; a dealership name that starts with Courtesy still is', () => {
+  const vin = '1C4RJFBG0RC000001';
+  const used = {
+    vin, year: 2024, make: 'Jeep', model: 'Grand Cherokee', trim: 'Limited', inventoryType: 'Used', readableType: null, isDemo: false, isLoaner: false,
+    siteTitle: 'Used 2024 Jeep Grand Cherokee Limited', url: `https://www.example-dealer.test/used/2024-jeep-grand-cherokee-limited-${vin.toLowerCase()}/`, urlConditionWord: 'used',
+    carfaxUrl: 'https://www.carfax.com/x', mileage: 3120, price: 40000, photoCount: 10, availability: 'In-Stock',
+  };
+  for (const [siteTitle, word] of [
+    ['Used 2024 Jeep Grand Cherokee Limited - Courtesy Vehicle', 'Courtesy Vehicle'],
+    ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Car', 'Courtesy Car'],
+    ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Loaner | Example Motors', 'Courtesy Loaner'],
+  ]) {
+    const a = assessVehicle({ ...used, siteTitle }, {});
+    assert.equal(a.decision, DECISION.REVIEW, siteTitle);
+    assert.match(a.reason, new RegExp(`its title says "${word}"`), siteTitle);
+  }
+  assert.equal(assessVehicle({ ...used, inventoryType: null, urlConditionWord: null, url: null, siteTitle: '2024 Jeep Grand Cherokee Limited - Courtesy Vehicle' }, {}).decision, DECISION.SKIP);
+  for (const siteTitle of ['Used 2024 Jeep Grand Cherokee Limited | Courtesy Car Center', 'Used 2024 Jeep Grand Cherokee Limited - Courtesy Cars', 'Used 2024 Jeep Grand Cherokee Limited – Courtesy Cars of Springfield', 'Used 2024 Jeep Grand Cherokee Limited | Courtesy Motors']) {
+    assert.equal(assessVehicle({ ...used, siteTitle }, {}).decision, DECISION.READY, siteTitle);
+  }
+  // the README's list of words holds after a separator too
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const listed = readme.match(/so does the word (.+?), in the car's own title/);
+  assert.ok(listed, 'README names the demo and loaner words');
+  const words = [...listed[1].matchAll(/"([^"]+)"|\b(demo|demonstrator|loaner)\b/g)].map((m) => m[1] || m[2]);
+  assert.deepEqual(words.sort(), ['courtesy car', 'courtesy loaner', 'courtesy vehicle', 'demo', 'demonstrator', 'loaner']);
+  for (const word of words) assert.equal(assessVehicle({ ...used, siteTitle: `Used 2024 Jeep Grand Cherokee Limited - ${word}` }, {}).decision, DECISION.REVIEW, word);
+});
+
 test('new car with a Carfax link is still skipped, with a note to fix its type', () => {
   const a = assess('newNormal', { history_report: { carfax_url: 'https://www.carfax.com/vehiclehistory/ar20/x' } });
   assert.equal(a.decision, DECISION.SKIP);

@@ -745,6 +745,25 @@ test('the gate: a schema.org car called a demo or loaner after its model year wa
   assert.equal(assessVehicle(store, {}).decision, DECISION.READY);
 });
 
+test('the gate: a demo or loaner word only the page title has is read, with the name\'s condition word kept', () => {
+  const carfax = { carfaxLinks: ['https://www.carfax.com/r?vin=2HGSAMPL8KH000101'] };
+  // the name is plain; the page title about this car says Demo
+  const plain = flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX Demo | Sample Motors' }));
+  assert.equal(plain.siteTitle, '2019 Honda Civic EX Demo | Sample Motors');
+  const a = assessVehicle(plain, {});
+  assert.equal(a.decision, DECISION.REVIEW);
+  assert.match(a.reason, /its title says "Demo"/);
+  // the name says Used and the page title says Courtesy Vehicle: both are read
+  const used = flat({ name: 'Used 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX - Courtesy Vehicle | Sample Motors' }));
+  assert.equal(used.siteTitle, 'Used 2019 Honda Civic EX | 2019 Honda Civic EX - Courtesy Vehicle | Sample Motors');
+  const b = assessVehicle(used, {});
+  assert.equal(b.decision, DECISION.REVIEW);
+  assert.match(b.reason, /^Listed as pre-owned but its title says "Courtesy Vehicle"/);
+  // a page title about another car lends no words; a plain page title changes nothing
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2021 Kia Sorento LX Demo | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
+});
+
 // ---------- parity with the Dealer Inspire reader ----------
 
 const DRIVE_MEMBERS = { '4WD': 'FourWheelDriveConfiguration', AWD: 'AllWheelDriveConfiguration', FWD: 'FrontWheelDriveConfiguration', RWD: 'RearWheelDriveConfiguration' };
