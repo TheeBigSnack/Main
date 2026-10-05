@@ -35,6 +35,10 @@ const AFFILIATION_CLAIMS = [
   'Meta has approved Lot Current.',
   'Lot Current is an authorized Facebook Marketplace tool.',
   'Recognized by Meta.',
+  // the present tense
+  'Meta approves of Lot Current.',
+  'Facebook endorses Lot Current.',
+  'Marketplace recommends Lot Current for dealers.',
 ];
 
 // Promises and made-up numbers that customer-facing copy may not make.
@@ -66,6 +70,12 @@ const CUSTOMER_CLAIMS = [
   'Ban protection included.',
   'Completely secure.',
   'Undetectable by Facebook.',
+  "Your account's safe.",
+  'Your profile’s always secure.',
+  'Post without getting banned.',
+  'List every car without ever being blocked.',
+  'Helps you avoid getting restricted.',
+  'Keeps salespeople from getting banned.',
   'Salespeople post 30 cars a day with Lot Current.',
   'Dealerships sell their used cars 3 days faster.',
   'Trusted by 140 dealerships.',
@@ -93,6 +103,12 @@ const CUSTOMER_CLAIMS = [
   'The form is ready in about ten seconds.',
   'Listed in about 10 sec.',
   'Thirty seconds a car.',
+  // the short forms
+  'Listed in 10s.',
+  'Posted in under 15 s.',
+  'A listing takes 8s.',
+  '10s a car.',
+  'Filled in 10sec.',
 ];
 
 // Lines today's copy uses, which must stay allowed.
@@ -119,6 +135,8 @@ const HONEST = [
   "The median seconds per post is the time from Post to It's posted, their own review and Publish click included.",
   'Facebook sometimes puts a saved draft back onto a new listing form a few seconds after it opens.',
   'Enter the six-digit code from the email; it works for one hour.',
+  'Facebook decides what happens to any account; Lot Current makes no promise about it.',
+  'Cars from the 2010s are listed like any other used car.',
 ];
 
 test('every affiliation or approval claim fails, in any document', () => {

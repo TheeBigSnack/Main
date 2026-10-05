@@ -16,6 +16,8 @@ export const AFFILIATION = [
   /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed) (by|for|on) (meta|facebook|marketplace)\b/i,
   /\b(meta|facebook|marketplace)[- ](approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
   /\b(meta|facebook) (has|have|had) (approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
+  // the present tense: "Meta approves of Lot Current", "Facebook endorses it"
+  /\b(meta|facebook|marketplace) (approves|endorses|certifies|sanctions|authori[sz]es|recommends|backs)\b/i,
   /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|accredited) (meta|facebook|marketplace)\b/i,
   /\b(meta|facebook)['’]s (approval|endorsement|blessing)\b/i,
   /\b(meta|facebook)(['’]s)?( [a-z]+){0,2} partners?\b/i,
@@ -51,7 +53,7 @@ const UP_TO_THREE_WORDS = String.raw`(?: (?!(?:not|never|no)\b|\w*n['’]t\b)[\w
 // that names one only to deny it is passed to honestyProblems as a denial.
 export const SAFETY = [
   /never (be|get) restricted/i,
-  new RegExp(String.raw`\b(account|profile)s? (is|are|stays?|will|remains?|should|would)\b${UP_TO_THREE_WORDS} (safe|protected|secure)\b`, 'i'),
+  new RegExp(String.raw`\b(account|profile)(s? (is|are|stays?|will|remains?|should|would)\b|['’]s\b)${UP_TO_THREE_WORDS} (safe|protected|secure)\b`, 'i'),
   /\b(keeps?|keeping|kept)( [\w'’-]+){0,3} (account|profile)s? (safe|protected|secure|in good standing|from)\b/i,
   /\b(protects?|protecting|shields?|shielding|safeguards?|safeguarding)( [\w'’-]+){0,3} (account|profile)s?\b(?! (data|information|details|settings)\b)/i,
   /\b(safe|safer|protected|secure) (for|on|with|to use (on|with|for)) (your |their |a |the )?((facebook|meta|marketplace) )?(account|profile|facebook|meta|marketplace)s?\b/i,
@@ -62,6 +64,8 @@ export const SAFETY = [
   /\bno (ban|block|restriction|suspension)s? risk\b/i,
   /\b(ban|block)[- ]?(proof|free)\b/i,
   /\b(won't|will not|never|can't|cannot|don't|doesn't) (get|be) (banned|blocked|restricted|suspended)\b/i,
+  // "post without getting banned", "avoid being blocked", "keeps you from getting restricted"
+  /\b(without|avoids?|avoiding|from) (ever )?(getting|being) (banned|blocked|restricted|suspended)\b/i,
   /\b(meta|facebook|marketplace) (won't|will not|will never|never|can't|cannot) (ban|block|restrict|suspend)\b/i,
   /\brisk[- ]free\b/i,
   /\b(no|zero|without any) risk\b/i,
@@ -93,10 +97,15 @@ export const NUMBERS = [
 // Any figure in seconds is refused, wherever it stands in the sentence ("from
 // your website, in 10 seconds", "ready in about ten seconds", "10 sec", "a
 // ten-second post"): the only seconds customer copy could quote is a time per
-// post. "In seconds" and "a few seconds", with no figure, are not caught.
+// post. "In seconds" and "a few seconds", with no figure, are not caught. The
+// short forms count too: "10sec", and "in 10s" or "10 s a car" (a bare "s"
+// only after a time word or before "a car", so "the 2010s" is not read).
 const SECONDS = String.raw`(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|forty-five|fifty|sixty|ninety)`;
 export const TIME_PER_POST = [
   new RegExp(String.raw`\b${SECONDS}(?:\s+|-)(?:seconds?|secs?)\b`, 'i'),
+  /\b\d+(?:\.\d+)?(?:seconds?|secs?)\b/i,
+  /\b(?:in|under|about|around|within|takes?|took)\s+(?:about |under |around |just |only |less than )?\d+(?:\.\d+)?\s?s\b/i,
+  /\b\d+(?:\.\d+)?\s?s\s+(?:a|per|each|every)\s+(?:car|post|listing|vehicle)\b/i,
 ];
 
 // What customer-facing copy may not say either (the positioning names some
