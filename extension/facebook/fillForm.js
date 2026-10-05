@@ -755,11 +755,12 @@ export function fillPriceInPage(map, price) {
 // page's boxes (the form's VIN box, the description, which carries it).
 // For the queue's check that a page is the listing just published, it also
 // says whether the VIN is in the page's static text (vinInText: a published
-// listing shows its description as text), and whether a visible box one of
-// the map's typed fields is found by is on the page (formOnPage: the create
-// or edit form, which a published listing page never has; the create form
-// still drawn under another listing's address carries the car in its boxes
-// and its preview).
+// listing shows its description as text), and whether the create or edit
+// form is on the page (formOnPage: a visible control the fill code would find
+// one of the map's typed fields by, or a visible box holding this car's VIN;
+// a published listing page has neither, and the create form still drawn
+// under another listing's address carries the car in its boxes and its
+// preview).
 export function readListingInPage(map, signs, expect) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -826,15 +827,34 @@ export function readListingInPage(map, signs, expect) {
   const matchesPrice = wanted.some((p) => prices.includes(p) || priceBoxValue.replace(/\D/g, '') === p);
   // what tells two listings of the same name and price apart
   const vin = String(want.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const boxes = [...document.querySelectorAll('input:not([type="hidden"]), textarea, [role="textbox"]')].filter(visible).map((el) => String(el.value || text(el) || ''));
+  const boxes = [...document.querySelectorAll('input:not([type="hidden"]), textarea, [role="textbox"], [contenteditable="true"]')].filter(visible).map((el) => String(el.value || text(el) || ''));
   const vinRe = vin.length >= 11 ? new RegExp('(^|[^A-Z0-9])' + vin + '($|[^A-Z0-9])') : null;
   const matchesVin = Boolean(vinRe) && vinRe.test([document.title, body, ...boxes].join(' ').toUpperCase());
   const vinInText = Boolean(vinRe) && vinRe.test([document.title, body].join(' ').toUpperCase());
-  // the create or edit form: a visible box found by a typed field's name (VIN, Make, Model, Mileage, Price, Location, Description)
-  const fieldNames = (map.fields || []).filter((f) => f.kind === 'text' || f.kind === 'textarea' || f.kind === 'typeahead').flatMap((f) => f.name.map(re)).filter(Boolean);
-  const formOnPage = Boolean(box) || [...document.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"]), textarea, [role="textbox"], [role="combobox"]')]
-    .filter(visible)
-    .some((c) => { const n = accessibleName(c); return fieldNames.some((r) => r.test(n)); });
+  // the create or edit form: a visible control the fill code would find one
+  // of the map's typed fields by (VIN, Make, Model, Mileage, Price, Location,
+  // Description), found as fillFormInPage's findFieldNow finds it (its
+  // selectors, the name with its title and a dropdown's text, the map's
+  // patterns and then the field's label as a whole word); or a visible box
+  // holding this car's VIN (the form's VIN or description box, whatever the
+  // form's language)
+  const TEXT_INPUTS = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"])';
+  const CHOICES = 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]';
+  const TYPED = {
+    text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
+    textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
+    typeahead: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
+    either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
+  };
+  const fillName = (el) => norm([accessibleName(el), el.getAttribute('title') || '', el.matches('[role="combobox"],[role="button"],button,[aria-haspopup]') ? text(el) : ''].join(' '));
+  const neverNames = (map.neverFill || []).flatMap((f) => f.name).map(re).filter(Boolean);
+  const fillFinds = (spec) => {
+    const names = [...document.querySelectorAll(TYPED[spec.kind])].filter(visible).map(fillName).filter((n) => n && !neverNames.some((r) => r.test(n)));
+    const label = re('\\b' + String(spec.label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+    return [(spec.name || []).map(re).filter(Boolean), [label].filter(Boolean)].some((patterns) => names.some((n) => patterns.some((r) => r.test(n))));
+  };
+  const vinInBox = Boolean(vinRe) && vinRe.test(boxes.join(' ').toUpperCase());
+  const formOnPage = Boolean(box) || vinInBox || (map.fields || []).some((f) => Boolean(TYPED[f.kind]) && fillFinds(f));
   return {
     url: location.href,
     title: document.title,

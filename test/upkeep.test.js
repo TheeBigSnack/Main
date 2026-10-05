@@ -27,6 +27,7 @@ function node(tag, attrs = {}, parent = null) {
     getAttribute(n) { return this.attrs[n] ?? null; },
     checkVisibility() { return true; },
     getBoundingClientRect() { return { width: 100, height: 20 }; },
+    matches() { return false; }, // no dropdowns on these pages
     closest(sel) {
       for (let n = this; n; n = n.parentElement) {
         if (sel === 'label' ? n.tagName === 'LABEL' : (n.attrs.role === 'dialog' || ['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT'].includes(n.tagName) || n.attrs.role === 'button')) return n;

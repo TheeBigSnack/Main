@@ -5,6 +5,7 @@ import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { readListingInPage } from '../extension/facebook/fillForm.js';
 import { readFileSync } from 'node:fs';
+import { miniPage } from './miniDom.js';
 
 test('a listing address means it posted; the "your listings" page probably does; anything else is nothing', () => {
   assert.deepEqual(classifyUrl('https://www.facebook.com/marketplace/item/1234567890/', FORM_MAP), { status: 'listing', url: 'https://www.facebook.com/marketplace/item/1234567890/', id: '1234567890' });
@@ -216,6 +217,7 @@ function readPage({ url, title = 'Marketplace', texts = [], dialog = [], boxes =
     getAttribute(n) { return this.attrs[n] ?? null; },
     checkVisibility() { return true; },
     getBoundingClientRect() { return { width: 100, height: 20 }; },
+    matches() { return false; }, // no dropdowns on these pages
     closest(sel) {
       for (let n = this; n; n = n.parentElement) {
         if (sel === 'label' ? n.tagName === 'LABEL' : (n.attrs.role === 'dialog' || ['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT'].includes(n.tagName))) return n;
@@ -283,4 +285,48 @@ test('the create form still drawn under another listing\'s address is never take
   // this car's VIN typed into a message box on another listing's page: a box, not the page's text
   const typed = readPage({ url, texts: ['2022 Jeep Wagoneer Series II', '$41,500'], boxes: [{ label: 'Send seller a message', tag: 'textarea', value: `Is this like ${VIN}?` }] }, expect);
   assert.deepEqual([typed.matchesVin, typed.vinInText, showsPostedCar(typed, { namesakes: 0 })], [true, false, false]);
+});
+
+// The create form still drawn under a listing's address counts as the form
+// whenever the fill code could find one of the map's typed fields on it
+// (fillFormInPage's findFieldNow: a title, a bare editable box, a dropdown in
+// a typeahead's place, the field's label as a whole word when the map's
+// patterns miss), and whenever a visible box holds this car's VIN (the form's
+// VIN or description box, in any language): then its preview, which shows the
+// VIN as text, is never taken for the published listing. Run on a page whose
+// selectors mean what they say (test/miniDom.js).
+test('the listing reader knows the create form by any field the fill code can find there, or a box holding the car\'s VIN', () => {
+  const VIN = '1C4SJVDT7NS142834';
+  const NAME = '2022 Jeep Wagoneer Series III';
+  const expect = { id: '616161', name: NAME, prices: [38383], vin: VIN };
+  const url = 'https://www.facebook.com/marketplace/item/616161/';
+  const preview = { tag: 'div', children: ['Vehicle for sale', 'Preview', NAME, '$38,383', `Offered by the dealership. VIN ${VIN}`] };
+  const over = { tag: 'div', attrs: { role: 'dialog' }, children: ['2022 Jeep Wagoneer Series II', '$41,500', 'Listed by someone else'] };
+  const read = (boxes) => miniPage({ url, body: [{ tag: 'form', children: boxes }, preview, over] }).run(readListingInPage, FORM_MAP, LISTING_SIGNS, expect);
+  const forms = {
+    'labels the map\'s patterns miss, found by the field\'s label': [{ tag: 'input', attrs: { 'aria-label': 'Vehicle price' }, value: '$38,383' }, { tag: 'input', attrs: { 'aria-label': 'Vehicle mileage' }, value: '41,233' }],
+    'a box named only by its title': [{ tag: 'input', attrs: { title: 'Price' }, value: '$38,383' }],
+    'a bare editable box': [{ tag: 'div', attrs: { contenteditable: 'true', 'aria-label': 'Description' }, text: 'Offered by the dealership.' }],
+    'a dropdown in the Make box\'s place': [{ tag: 'div', attrs: { role: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' }, text: 'Make' }],
+    'a form in another language, its description box holding the VIN': [{ tag: 'input', attrs: { 'aria-label': 'Precio' }, value: '38383' }, { tag: 'textarea', attrs: { 'aria-label': 'Descripción' }, value: `Ofrecido por el concesionario. VIN ${VIN}` }],
+  };
+  for (const [what, boxes] of Object.entries(forms)) {
+    const seen = read(boxes);
+    assert.deepEqual([seen.matchesId, seen.vinInText], [true, true], `${what}: the preview shows the VIN as text`);
+    assert.equal(seen.formOnPage, true, `${what}: the form is on the page`);
+    assert.equal(showsPostedCar(seen, { namesakes: 2 }), false, `${what}: never taken for the published listing`);
+  }
+  // the published listing: its description as text, a box to message the seller, the page's own menus and buttons
+  const listing = miniPage({
+    url: 'https://www.facebook.com/marketplace/item/515151/',
+    title: `${NAME} | Marketplace`,
+    body: [
+      { tag: 'div', children: [NAME, '$38,383', 'Listed a minute ago', `Offered by the dealership. VIN ${VIN}`] },
+      { tag: 'div', attrs: { role: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'More options for this listing' }, text: 'More' },
+      { tag: 'div', attrs: { role: 'button' }, text: 'Share' },
+      { tag: 'textarea', attrs: { 'aria-label': 'Send seller a message' }, value: 'Hi, is this available?' },
+    ],
+  }).run(readListingInPage, FORM_MAP, LISTING_SIGNS, { ...expect, id: '515151' });
+  assert.deepEqual([listing.matchesId, listing.formOnPage, listing.hasPriceBox, listing.vinInText], [true, false, false, true]);
+  assert.equal(showsPostedCar(listing, { namesakes: 2 }), true, 'the published listing still counts');
 });
