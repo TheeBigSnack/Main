@@ -286,6 +286,12 @@ test('the dry run lists only the vehicle form\'s own controls, never Facebook\'s
   const apart = probe([{ ...topBar, children: [...topBar.children, box('Price')] }, formPart([box('Year'), box('Make')]), contacts]);
   assert.equal(apart.found.length, 3);
   assert.deepEqual(apart.controls, []);
+  // another file input earlier on the page (a chat's, outside any landmark) and the whole app in one wrapper: the form's part is still the form's
+  const chat = { tag: 'div', attrs: { id: 'chatTab' }, children: [{ tag: 'input', attrs: { type: 'file', 'aria-label': 'Attach a file to the chat with Sam Example' } }, menu('Chat settings')] };
+  const app = probe([{ tag: 'div', attrs: { id: 'app' }, children: [chat, topBar, formPart([...fields]), menu('Create new listing menu'), contacts] }]);
+  assert.equal(app.controlsFrom, 'the vehicle form');
+  assert.deepEqual(app.controls.map((c) => c.name), ['year', 'make', 'price', 'description', 'fuel type']);
+  for (const outside of ['sam example', 'chat settings', 'create new listing menu']) assert.ok(!JSON.stringify(app).includes(outside), `${outside} is not in the report`);
 });
 
 // What these source checks prove: the usual ways to click, submit, press a

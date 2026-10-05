@@ -683,8 +683,14 @@ export function probeFormInPage(map) {
   // its fields and photo box were found, or when they sit so far apart that
   // only the whole page holds them all
   const chainOf = (el) => { const out = []; for (let n = el; n; n = n.parentElement) out.push(n); return out; };
-  const anchors = [...foundEls, map.fileInput ? document.querySelector(map.fileInput) : null].filter(Boolean);
-  const holder = anchors.length >= 2 ? chainOf(anchors[0]).find((n) => anchors.every((a) => chainOf(a).includes(n))) || null : null;
+  const holderOf = (els) => (els.length ? chainOf(els[0]).find((n) => els.every((a) => chainOf(a).includes(n))) || null : null);
+  // the photo box nearest the fields found: another file input earlier on
+  // the page (a chat's, say) must not stretch the form's part to the whole app
+  const photoBox = (map.fileInput ? [...document.querySelectorAll(map.fileInput)] : [])
+    .map((f) => ({ f, depth: chainOf(holderOf([...foundEls, f])).length }))
+    .reduce((best, c) => (!best || c.depth > best.depth ? c : best), null);
+  const anchors = [...foundEls, photoBox ? photoBox.f : null].filter(Boolean);
+  const holder = anchors.length >= 2 ? holderOf(anchors) : null;
   const formArea = holder && holder !== document.body && holder !== document.documentElement ? holder : null;
   const AROUND = '[role="banner"], [role="navigation"], [role="complementary"], [role="contentinfo"], nav';
   const aroundForm = (el) => { for (let n = el; n && n !== formArea; n = n.parentElement) if (n.matches(AROUND)) return true; return false; };
