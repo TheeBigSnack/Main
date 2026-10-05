@@ -462,6 +462,13 @@ test('the pre-owned check is described as the gate decides it: two signs, or one
     assert.match(doc, /none may say new/, `${name} says a new sign stops the car`);
   }
   for (const [name, doc] of [['How it works', how], ['README.md', readme]]) assert.match(doc, /only one sign and no Carfax report goes to \**Needs a look/, `${name} says one sign alone goes to Needs a look`);
+  // "a missing Carfax report never holds back a car whose signs agree" was true only of two agreeing signs: a car with one
+  // pre-owned sign and none against it (rule.oneAlone) is held back for the missing report
+  for (const [name, doc] of [['the home page\'s Pre-owned only card', card], ['How it works', how], ['README.md', readme]]) {
+    assert.doesNotMatch(doc, /Carfax report never holds back|never holds back a car/i, `${name} says a missing Carfax report never holds a car back`);
+  }
+  assert.match(how, /and none may say new; a car with only one sign and no Carfax report goes to Needs a look ?\./, 'How it works says what README says');
+  assert.match(readme, /and none may say new; a car with only one sign and no Carfax report goes to \*\*Needs a look\*\*\./);
 });
 
 // review: the FAQ (sent to search engines as FAQPage data) said Lot Current reads back only the
