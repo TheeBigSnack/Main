@@ -576,9 +576,15 @@ test('the site never puts the form fields that could not be filled in the manage
   assert.ok(numbers.length > 100, 'For managers has its numbers section');
   assert.doesNotMatch(numbers, /numbers the salespeople's own Numbers tab keeps: how long each post took, which form fields/, 'the manager view does not show the form fields');
   assert.match(numbers, /Which form fields could not be filled is not synced: it stays in each salesperson's own browser/);
-  const caption = stripTags((html.match(/<figcaption><b>The numbers you can share[\s\S]*?<\/figcaption>/) || [''])[0]);
+  const caption = stripTags((html.match(/<figcaption><b>Your Numbers tab\.[\s\S]*?<\/figcaption>/) || [''])[0]);
   assert.ok(caption, 'the home page has its Numbers caption');
-  if (/dealership's account/.test(caption)) assert.match(caption, /fields that could not be filled, which stay in your browser/, 'the caption says the fields stay in the browser');
+  // the caption once put the fields in a list whose lead said the numbers go to the dealership's account; the
+  // account and the manager view are named only in a sentence that leaves the fields out
+  for (const sentence of caption.split(/(?<=\.)\s+/)) {
+    if (/dealership's account|manager/.test(sentence)) assert.doesNotMatch(sentence, /fields/, `the caption puts the form fields in the account or the manager view: "${sentence}"`);
+  }
+  assert.match(caption, /The fields that could not be filled stay in your browser only\./);
+  assert.doesNotMatch(stripTags(html), /The numbers (?:you can share with your manager|your manager sees)/, 'a lead that offers every number on the tab, the fields included, to the manager');
   assert.doesNotMatch(text, /managers will see the same numbers for the whole store/, 'managers see the post and to-do numbers, not the form fields');
 });
 
@@ -854,5 +860,8 @@ test('the daily cap is described as the code has it: the dealership chooses, eac
     assert.doesNotMatch(page, /dealership (sets|changes)|cap you set\b/i, `${name} says the dealership sets the cap, but each salesperson enters it`);
   }
   assert.match(home, /Your dealership chooses how many posts a day each salesperson may make, and each salesperson enters that number in their own Settings\./);
+  // the card's heading said "A daily cap you choose", which a salesperson reads as their own choice
+  assert.doesNotMatch(home, /A daily cap you choose/);
+  assert.match(html, /<h3>A daily cap your dealership picks<\/h3>/);
   assert.match(managers, new RegExp(`posts a day, ${DEFAULT_DAILY_CAP} unless changed\\. Your dealership chooses the number, and each salesperson enters it in their own extension's Settings \\(Safety, Posts per day, per salesperson\\), up to 100; the manager view does not set or lock it\\.`));
 });
