@@ -39,14 +39,16 @@ export const LATER = Object.freeze({
 // The Terms step's summary of what Lot Current keeps, in plain text. With
 // accounts configured a person can be signed in (here or later under
 // Settings, Account), and then their posted list, post timings, to-do items
-// and scan counts go to the dealership's account (src/sync.js syncPayload),
-// so the summary says so in the words Settings' Saved data uses, and who
+// and scan counts go to the dealership's account (src/sync.js syncPayload:
+// every field of a posted-list entry it sends, the price basis and the
+// before-that-day mark among them, and a scan's held-back mark), so the
+// summary says so in the words Settings' Saved data uses, and who
 // sees what there (every member the posted list and the to-do items; the
 // person and the managers their post timings: 0011_ui_post_attempts_read.sql);
 // it never says the data stays in the browser alone.
 export function termsSummary(configured = false) {
   const synced = configured
-    ? " While you are signed in, your posted list (each car's VIN, name and price, when you posted and updated it, the listing link and your name), your post timings, your to-do items (with the old and new price of a price change) and the newest scan's counts also sync to your dealership's account in Lot Current's database. There everyone at your dealership sees the posted list and the to-do items, and only you and your managers see your post timings."
+    ? " While you are signed in, your posted list (each car's VIN, name and price, whether that is the website's main price or its lower second price, when you posted and updated it and when you took it off the list, whether a listing you marked posted had gone up before that day, the listing link and your name), your post timings, your to-do items (with the old and new price of a price change) and the newest scan's counts (marked as held back when that scan looked like a website hiccup) also sync to your dealership's account in Lot Current's database. There everyone at your dealership sees the posted list and the to-do items, and only you and your managers see your post timings."
     : '';
   return "In short: Lot Current reads your dealership's website and the Marketplace form you open, keeps its data in your browser, records the usage numbers for the pilot (how long each post took, which fields it couldn't fill, how long sold cars and price changes stayed listed, each with the car's VIN and name, your name from Settings and, for a price change, the website's old and new price), and never your Facebook login."
     + synced
