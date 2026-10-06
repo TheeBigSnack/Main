@@ -1774,6 +1774,22 @@ test('the help says one post from a website goes at a time across Chrome windows
   // a copy in a second window replaces the post only while it is the post as it stands (saveId)
   assert.match(panel, /const samePost = [^;]*\(saved\.saveId \|\| null\) === \(known \|\| null\);/, 'saveFlow lets a copy save only while it is the post as it stands');
   assert.match(help, /A side panel opened in a second window while a post was under way shows that post as it stood then\. Once the first window's side panel has changed it \(text typed there, or its form opened\), nothing done in the second window's copy is saved over it, and that copy opens no form, while the first window's side panel or that form stays open\./);
+  // review: the help and the data inventory said a second window's copy never replaces the saved post, and nothing
+  // said a refused save goes unsaid: typing saves without reading the answer (onInput), and once the first window's
+  // panel is closed with no form open there (liveElsewhere null) the second window's save replaces the post
+  assert.match(panel, /setFormButtons\(\);\n    saveFlow\(\);\n  \}, 250\);/, 'typing in the review now reads whether its save was refused: the help can say what the panel shows');
+  assert.match(panel, /other = samePost \? null : await liveElsewhere\(saved\);\n      if \(other\) return undefined;/, 'a refused save no longer writes nothing: update the help and the data inventory');
+  assert.match(panel, /const panels = await chrome\.runtime\.getContexts\(\{ contextTypes: \['SIDE_PANEL'\], windowIds: \[saved\.windowId\] \}\);\n    if \(panels && panels\.length\) return found;/);
+  assert.match(help, /The second window's panel does not say when a change made there was not saved: text typed into its copy then stays only on that screen, is kept nowhere, and is gone once that side panel closes, so type in the window whose side panel has the post\./);
+  assert.match(help, /Once the first window's side panel is closed with no Marketplace form of that post open there, the side panel in the second window takes the post over: its next save replaces the saved post with its own copy as it stands/);
+  const single = help.slice(help.indexOf('## Post one car'), help.indexOf('## Post several (the queue)'));
+  assert.match(single, /Side panels open in two Chrome windows: one post from a website goes at a time, and a change made in the second window's copy of a post may not be saved\. The point under "Post several \(the queue\)" that starts "Each car is recorded once" says how; it holds for a single post too\./, 'the single-post section does not point to what happens in a second window');
+  assert.match(help, /^- Each car is recorded once[^\n]*The second window's panel does not say when a change made there was not saved/m, 'the pointer names the point that says it');
+  const flowRow = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `postFlow:<origin>` |'));
+  assert.doesNotMatch(flowRow, /never replaces it/, 'the data inventory says a second window\'s copy never replaces the saved post, while it takes the post over once the first window\'s panel is closed with no form open');
+  assert.doesNotMatch(flowRow, /\(in a queue, with whether its page was seen to show the car\)/, 'the data inventory says the listing page is read only in a queue, while it is read after every post');
+  assert.match(flowRow, /the listing address detected, with whether its page was seen to show the car \(read after every post, in a queue or not\)/);
+  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written, the panel does not say so, and what was typed there is kept nowhere/);
 });
 
 // The help said a price "with or without $" and a mileage "however it is
