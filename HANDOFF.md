@@ -10,7 +10,7 @@ The owner's first message will be something like "read HANDOFF.md and continue" 
 
 1. **Product and name:** a Chrome extension (Manifest V3, plain JavaScript ES modules, no build step) for car-dealership salespeople. It reads the dealership website's used inventory, holds back the cars its pre-owned check reads as new, demo or loaner or as needing a look (a label it misses can still let one through, so the salesperson looks over each car), pre-fills a Facebook Marketplace vehicle listing that the salesperson publishes by hand, and rescans the website to flag sold cars and price changes on the listings they made. **The business and the product are now called Lot Current** (owner's decision 2026-10-01, after "Lot Sync" turned out to be an existing dealership-software company; section 15.5). **The rename landed with pull request #1** (section 16, merged 2026-10-01): everything a person reads says Lot Current; internal identifiers keep `lotsync`.
 2. **State:** version 0.5.0 plus the unreleased rounds in CHANGELOG "Unreleased": the standard-vehicle-data reader for any dealer website and per-server photo permission (round J), the site survey tool, honest field words and vehicle kinds (round K1), the Ready to post list with sort orders, New pills, days on the lot and search (round K2), and the multi-page website with SEO plumbing and GitHub Pages hosting (round W; section 15.7 says whether it landed). Milestones 1 and 2 were verified live on 2026-09-27; everything since has met only sample sites and mocks. Milestone 4 (accounts, sync, manager view, billing, sign-up) is built and tested. The Supabase project exists (section 17) and holds the database up to `0008_usage.sql` and all four functions, deployed outside the workflow before its first run; still to do there are migrations 0009 to 0016 and a verify run (section 22.4), the sign-in sender, the hosted manager view and the first dealership. No Stripe account exists (section 19). The review round (section 22) changed much of the code and the texts since. Since 2026-10-01 the default branch also carries photo picking and the closing line (15.12), the production setup (17), the Web Store preflight (18), the Stripe setup script (19), the DealerOn and Dealer.com readers (PR #6) and posting from the side panel (15.13); section 20 lists them.
-3. **Tests:** 914 unit tests after the 2026-10-01 merges, 1604 at `d031ec2`, the review round's last lane merge (section 22) (`npm test`, node:test, no dependencies; README states the count and `test/docs.test.js` checks it), eight Playwright end-to-end flows against mock sites (popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn and Dealer.com, posting from the side panel), the sandbox drive, the accessibility walk, the SQL tests and a CI job against a real local Supabase stack. CI (`.github/workflows/ci.yml`) was green on every push of this session up to `5f295d8`; check run 20+ for `0a8e90a` and later. Never run anything against the real facebook.com.
+3. **Tests:** 914 unit tests after the 2026-10-01 merges, 1604 at `d031ec2`, the review round's last lane merge, and 1611 at `015820a`, the merge of the lead's last fixes (section 22) (`npm test`, node:test, no dependencies; README states the count and `test/docs.test.js` checks it), eight Playwright end-to-end flows against mock sites (popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn and Dealer.com, posting from the side panel), the sandbox drive, the accessibility walk, the SQL tests and a CI job against a real local Supabase stack. CI (`.github/workflows/ci.yml`) was green on every push of this session up to `5f295d8`; check run 20+ for `0a8e90a` and later. Never run anything against the real facebook.com.
 4. **Where the code is:** GitHub, `TheeBigSnack/Main`, branch `claude/fervent-fermi-exkhz9`, which is also the repository's only and default branch (the repo is public). The owner's `E:\LotSync` copy on the Windows machine stops at `2a52640` (2026-09-27) and must be brought up to the branch (section 3.2). **Infrastructure now exists:** `lotcurrent.com` is registered at GoDaddy, its DNS points at GitHub Pages, the domain is verified on the owner's GitHub account, the repository's Pages source is GitHub Actions with the custom domain saved and HTTPS enforced; the GoDaddy mailbox `blawrence@lotcurrent.com` receives mail (MX checked in section 16.2).
 5. **Next, in order:** first the owner's steps and the open items of the review round (sections 22.4 and 22.5); then, from before it, (a) check the live site that merging #1 deployed and run the cut-short website review on it (section 16.4); (b) the open items in section 20.3; (c) the survey of the five local dealer groups' websites (section 15.2): on 2026-10-01 the owner allowed the dealer sites in the cloud environment's network policy for building purposes only, so a cloud session started after that change can run `npm run survey`; (d) the rest of round L (section 9 item 4); (e) the owner's live checks of everything since 2026-09-27. The owner's direction stands: product development first, no dealer outreach yet.
 
@@ -546,7 +546,7 @@ The owner (Brandon) wrote in the project: "Merge 1, 2, 4, 3, 6, 7". In the same 
 
 ## 22. The full review round (2026-10-01 to 2026-10-06)
 
-A cloud session in the Lot Current project ran this round on the integration branch `claude/project-thread-ijg7ld`. Its base was `8a09dc1`: the default branch at `2275b97` with PR #8 merged in. This section was written at `6fd911c` and brought up to `d031ec2`, after the last two lane merges (r-scan at `7039d81`, r-gate at `d031ec2`). It is numbered 22 because the survey thread's open PR #9 adds a section 21 of its own. The detailed record is CHANGELOG "Unreleased": its "Review round" groups under Added and Changed, the Fixed heading and the "Owner steps before release" list.
+A cloud session in the Lot Current project ran this round on the integration branch `claude/project-thread-ijg7ld`. Its base was `8a09dc1`: the default branch at `2275b97` with PR #8 merged in. This section was written at `6fd911c` and brought up to `d031ec2`, after the last two lane merges (r-scan at `7039d81`, r-gate at `d031ec2`), and then to `015820a`, the merge of the lead's last fixes (branch `fix/lead2`: the review's last 15 findings and two follow-ups to them). It is numbered 22 because the survey thread's open PR #9 adds a section 21 of its own. The detailed record is CHANGELOG "Unreleased": its "Review round" groups under Added and Changed, the Fixed heading and the "Owner steps before release" list.
 
 ### 22.1 What was reviewed and how
 
@@ -565,7 +565,7 @@ A cloud session in the Lot Current project ran this round on the integration bra
   - lead-file items (this section, the CHANGELOG, CLAUDE.md);
   - owner questions.
 
-  The residual lanes merged are r-backend, r-docs, r-posting, r-scan and r-gate. Their merges brought the unit count to 1604 and the migrations to 0016.
+  The residual lanes merged are r-backend, r-docs, r-posting, r-scan and r-gate. Their merges brought the unit count to 1604 and the migrations to 0016. The lead's last fixes (`fix/lead2`, merged in `015820a`) closed the review's last 15 findings, added no migration and brought the unit count to 1611.
 - **Lessons for the next round:**
   - `.git/info/attributes` held `*.md merge=union`, which duplicated Markdown on merges. It was cleared and the merged Markdown checked; keep it cleared.
   - Never resume a workflow that runs several lanes in parallel after a restart: it re-ran old steps on newer trees. Run one lane per workflow run.
@@ -590,6 +590,8 @@ New in this area:
 - Facebook drafts that keep their filled price (`src/drafts.js`).
 
 Upkeep reads the car again before Open & update price (`upkeepPriceNow`). It acts only on the car's own listing (`onListing`, `namesakesOf` in `extension/upkeep.js`). Decision kept at the merges: each listing keeps the price basis it was posted at (`postedBasis`, `withPostedBasis` in `src/rescan.js`), and a change of Price to post applies to new posts only. The last two lanes made that one rule for scans and sync alike. The basis now goes up with the listing (migration 0015) and the server keeps the first one a row gets. A listing that has none takes it only from a scan taken once the listing had its price (`scanCar`, `withSeenBasis`, `keepSeenBasis`), and the panel's price update reads the last scan the same way (`upkeepPriceNow`). When a car changed since it was read, the panel now names each old and new value. A dealership name added in Settings during a review turns the form buttons back on (`reviewAfterSettings`).
+
+The lead's last fixes stopped a scan held back as a website hiccup from recording a basis on any listing (`keepSeenBasis` now takes the scan's diff, in the popup, the wizard and the background rescan), so the next trusted scan reads it only while one of the website's two prices still equals the listed price. They also made the re-check's status line say what waits for it: the form opening, being filled or filled again, or the photos attached again (`carStillCurrent`).
 
 **Website reading.** The pre-owned gate (`src/classify.js`) now sends these cars to Needs a look:
 - a demo or loaner named in the title, trim or page address;
@@ -645,7 +647,7 @@ The r-gate lane tightened both ports again (`rewriteTemplate.js` and `supabase/f
 - With no name set, the sign-off always starts a sentence, so the template passes its own price-note check; both rewrite prompts ask for the same line.
 - The rewrite service is no longer sent a lot-wide line that an older scan saved with HTML entities, or a write-up line that ends on an abbreviation before a line left out. It gets the write-up as one joined text.
 
-The hosted rewrite function checks drafts by the old rules until it is redeployed (22.4).
+The lead's last fixes made both checkers read the dots of "eg.", "ie.", "incl.", "excl.", "esp." and "approx." as no sentence end before the price note, as they did for "e.g.", "i.e.", "vs.", "cf." and "viz." ("etc." may still end one); a docs test keeps help's list equal to both. The hosted rewrite function checks drafts by the old rules until it is redeployed (22.4).
 
 **Sync and accounts.** A signed-in extension syncs right after each change. It runs one more sync for a change made during a sync, and retries a minute after a "too often" answer (`sync-retry:<origin>`). Colleagues' listings sit apart from your own, and refused posts are named. Sign out ends only this browser's session and forgets every website's sync state on this computer. Set-up and Settings start from what is already saved. Clear the numbers keeps open items. Extension sign-in emails carry a code only (a PKCE challenge nobody answers). The sandbox never reaches the account server.
 
@@ -656,6 +658,8 @@ Who reads post timings follows the owner's answer of 2026-10-02, "Only them and 
 - forgetting a person reaches colleagues;
 - a listing's price basis is kept with the listing (0015), written into a row that has none and never over one;
 - a held-back scan is recorded as held back (0016).
+
+The lead's last fixes corrected the late-sighting comment in `supabase/functions/sync/index.ts` (a price change counts as already shown only when the caller has a listed row for the VIN), named the basis and the held-back mark in `supabase/README.md`'s `/sync` body, and added a test that pins the README's sentence on the two orders in which a closed flag joins an existing item.
 
 **Manager view and billing.** A cancelled plan says so (`subscriptions.cancel_at`, 0009). Until the `billing` switch in `manager/config.js` is on, the Billing card says billing is not open and offers the free pilot. A manager sees the listings nobody watches. The manager's Last scan keeps the last scan the extension trusted and counts the scans held back since it (`readScans` in `manager/manager.js`, `summarize` in `manager/data.js`). The owner has statements for pilots and for clean-up (`supabase/README.md`).
 
@@ -669,6 +673,8 @@ The page:
 - cleans sign-in links out of its address;
 - loads supabase-js from its own folder (`manager/vendor/`) under a self-only script policy.
 
+The lead's last fixes took Before today listings out of the manager view's All time figure and the CSV's Posted counts. They are counted apart, in a line under the Salespeople table and in a CSV summary row and Salespeople column of their own (`summarize`, `beforeTodayNote`, `BEFORE_TODAY_COLUMN` in `manager/data.js`), and the website's page for managers says so.
+
 **Legal texts and website.** The texts now say:
 - what runs on its own: 3-hourly rescans and, while signed in, sync;
 - who sees what;
@@ -676,14 +682,21 @@ The page:
 
 They describe the pre-owned check as it decides, and name the known gap for DealerOn and Dealer.com certified cards typed demo or loaner. Customer copy uses only honest numbers: "in seconds", a cap each salesperson enters (up to 100), month to month, and prices written into the pages from `marketing/pricing.json` by `npm run site-pages`. Readers are named as tested on a real website or only on samples. New attorney questions cover sections 5, 9, 10.1, 10.2, 11 and 11.3. Pilot records stay in the owner's private spreadsheet. The store listing and screenshot rules were tightened. How it works says a person starts every step that touches Facebook and clicks Publish, Update, Mark as sold or Delete themselves.
 
+The lead's last fixes brought these texts in line with the code:
+- The Web Store answers, the data inventory and set-up's Terms summary (`src/wizardSteps.js`) named every listing field sync sends, the price basis and the Before today mark among them; a test reads the columns sync writes.
+- Attorney question 1, the data inventory's `postFlow` row and the help said the listing page is read after every post, not only in a queue; the data inventory and the help also said what a second window's side panel saves (it can take the post over once the first window's panel is closed with no form open).
+- The help said the take-down record keeps the car's name, for the namesake check.
+- `PILOT.md`'s flag definition said which take-downs raise no flag and which flags a finished take-down closes.
+- The help and the store onboarding email said how the basis and Before today listings are counted.
+
 **CI and ops.** Each workflow change:
 - `supabase.yml` runs only from the default branch, gained the read-only verify step, turns red on an outside-check FAIL and refuses functions while a migration is pending (17 has the detail).
 - `manager.yml` deploys on push after `npm test`, refuses another project and reads the real pages.dev address.
-- The Pages deploy runs `npm test`, and `site-pages --check` refuses stray files.
+- The Pages deploy runs `npm test`, and `site-pages --check` refuses stray files. The lead's last fixes made its stray-file message (`strayAdvice`), `--help` and `docs/website.md` say what `--check` counts (a src, href, srcset or CSS url() from a page or the stylesheet).
 - `npm run release` refuses while Unreleased holds entries.
-- Stripe live mode waits for `"hypothesis": false` with `"confirmedOn"` in `marketing/pricing.json`.
+- Stripe live mode waits for `"hypothesis": false` with `"confirmedOn"` in `marketing/pricing.json`. The lead's last fixes made it refuse a `"confirmedOn"` that is not a real date or is after today, and name what is missing (`pricingUnconfirmed` in `scripts/stripe-setup-lib.mjs`); `test/marketing.test.js` refuses the same file.
 - check-deploy never prints a key, and store-check catches more injected-code shapes.
-- The owner's guides record what production holds.
+- The owner's guides record what production holds. The lead's last fixes had `docs/production-setup.md` pick the Supabase region by where the dealerships are, not the pilot's state; the docs check now reads every guide under `docs/` for pilot values.
 
 **Tests.** `test/posting.test.js` now checks against an allow-list. It covers:
 - known form-map keys, run against Facebook's action wordings in English and Spanish;
@@ -698,7 +711,9 @@ Text checks can still be beaten by deliberate obfuscation. Other new checks:
 - in `test/e2e/`, decoy action buttons on the mock form and a listing-action log that five flows check (panel, post, queue, standard, upkeep; not platforms);
 - every e2e flow blocking the real Facebook and failing if anything asks for it.
 
-`test/brandName.test.js` now reads the files git shows. The unit count went from 915 at the base to 1604 after the last lane merge.
+The lead's last fixes widened the affiliation tripwire in `test/honesty.js`: Meta, Facebook or Marketplace backing, sponsoring or funding Lot Current or our product in any tense, after up to four helper words (modals included), in the passive, as a slogan behind a heading or bullet mark, and as a noun ("Meta's backing"); plain denials pass. It is still a word list, not a proof.
+
+`test/brandName.test.js` now reads the files git shows. The unit count went from 915 at the base to 1604 after the last lane merge, and to 1611 after the lead's last fixes.
 
 ### 22.3 Migrations added (apply in number order; 0001 to 0008 are already in production)
 
@@ -745,8 +760,7 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - Bare amounts under 1,000 are not checked. In a draft, a comma list after "new" checks only its first part. The price note itself may still carry a steer that uses no "I", "me" or "my".
 - A role with a digit ("2nd shift sales") makes the template fail its own number check, so that salesperson's forms stay shut until the role changes.
 - The VIN check's Chevrolet City Express prefix (3N63M in `src/vin.js`) was written from memory and not checked against a decoder. A wrong prefix only fails to accept a real City Express, and never flags a correct record.
-- The manager view's All time figure and the CSV's Posted counts still include Before today listings. The website's page for managers does not mention Before today.
-- A save refused in a second window, because another window's post is newer, is not reported, and text typed there is lost.
+- A save refused in a second window, because another window's post is newer, is not reported, and text typed there is lost. The help and the data inventory now say so; the side panel still does not.
 - On Dealer Inspire, DealerOn and Dealer.com websites, a failed check of one missing car still holds back every missing car that scan.
 - On standard-data websites, a changed disclaimer is learned only once 30% of the lot is re-read, and a line wrongly learned never expires.
 - If the included salespeople in `marketing/pricing.json` change, existing subscribers get the new number.
@@ -758,13 +772,6 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - The Playwright browser trick of 16.3 is still needed in this cloud environment.
 
 **Docs follow-ups:**
-- `legal/questions-for-attorney.md` section 1 says the listing page is read in a queue; it is read after every post.
-- `docs/data-inventory.md`, `postFlow` row: "in a queue" should say every post. "never replaces it" overstates: a second window can take over when the first window's panel is closed and no form is open.
-- `docs/help.md`'s take-down record line leaves out that the record keeps the car's name, for the namesake check.
-- Set-up's Terms summary (`src/wizardSteps.js`) lists what syncs without the Before today mark.
-- `docs/website.md` and `strayAdvice` in `scripts/site-pages.mjs` say "no page shows" a stray file, which is narrower than what `--check` tests.
-- No test pins `supabase/README.md`'s `/sync` order sentence.
-- The late-sighting comment in `supabase/functions/sync/index.ts` (near line 514) leaves out that the caller must have a listed row.
 - `LEGAL.version` in `src/legalLinks.js` is still `2026-09-28-draft` after the round changed the drafts. Check its rule before the texts go live.
 - When the certified demo and loaner fix lands (R-3), take the known-gap sentence out of README and How it works (`test/site.test.js` reads it).
 
