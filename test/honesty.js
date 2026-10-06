@@ -14,8 +14,14 @@ import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 // Lot Current or our product, as the object of a verb that says Meta stands
 // behind it ("Meta sponsors the Lot Current extension") or the subject of the
 // same verb in the passive ("Our tool is backed by Facebook").
-const PRODUCT = String.raw`(?:(?:the )?lot current(?: for chrome)?(?: (?:chrome )?(?:extension|tool|app|product|team|company))?|(?:this|our|lot current['’]s) (?:[a-z]+ )?(?:tool|extension|app|product|company|team)|the (?:tool|extension|app))`;
-const OURS = String.raw`(?:${PRODUCT}|us)\b`;
+// A bare "the tool" or "the app" counts only as the subject: as the object it
+// is as often Facebook's own app or another tool ("Facebook supports the app",
+// "Marketplace recommends the tool for photos"). "The extension" counts in
+// both places: "Marketplace allows the extension to fill the form" claims
+// Meta's permission.
+const NAMED = String.raw`(?:(?:the )?lot current(?: for chrome)?(?: (?:chrome )?(?:extension|tool|app|product|team|company))?|(?:this|our|lot current['’]s) (?:[a-z]+(?:-[a-z]+)* )?(?:tool|extension|app|product|company|team))`;
+const PRODUCT = String.raw`(?:${NAMED}|the (?:tool|extension|app))`;
+const OURS = String.raw`(?:${NAMED}|the extension|us)\b`;
 const WE = String.raw`\b(?:${PRODUCT}|we)`;
 // Meta, Facebook or Marketplace as the subject.
 const META = String.raw`\b(?:meta(?: platforms)?|facebook|marketplace)`;
@@ -23,8 +29,11 @@ const META = String.raw`\b(?:meta(?: platforms)?|facebook|marketplace)`;
 // up to four helper verbs or adverbs ("will", "can", "is", "does", "has been",
 // "officially", "also"). "not", "never", a "n't" word and the negating
 // adverbs ("hardly", "barely") are not among them, so "Meta does not support
-// Lot Current" and "Meta hardly supports Lot Current" are no claim.
-const HELPERS = String.raw`(?: (?:itself|also|too|now|still|always|already|even|just|has|have|had|been|be|being|will|would|can|could|may|might|must|shall|should|does|did|do|is|are|was|were|gets|got|(?!(?:hardly|scarcely|barely|rarely|seldom)\b)[a-z]+ly)){0,4}`;
+// Lot Current" and "Meta hardly supports Lot Current" are no claim. "Not only",
+// "not merely", "not simply", "not solely" and "not surprisingly" (or the same
+// after a "n't" word) affirm, so they are helpers: "Lot Current is not merely
+// supported by Meta" is a claim.
+const HELPERS = String.raw`(?: (?:itself|also|too|now|still|always|already|even|just|has|have|had|been|be|being|will|would|can|could|may|might|must|shall|should|does|did|do|is|are|was|were|gets|got|(?:not|[a-z]+n['’]t) (?:only|merely|simply|solely|surprisingly)|(?!(?:hardly|scarcely|barely|rarely|seldom)\b)[a-z]+ly)){0,4}`;
 // Meta's backing as a verb, in the base, -s, past and -ing forms: "support",
 // "sponsors", "backed", "OK'd", "is funding", "partnered with", "stands behind".
 const BACKING = String.raw`(?:recommend(?:s|ed|ing)?|back(?:s|ed|ing)?|support(?:s|ed|ing)?|sponsor(?:s|ed|ing)?|fund(?:s|ed|ing)?|ok(?:s|['’]s|['’]d|ed|ing)?|okay(?:s|ed|ing)?|endors(?:e|es|ed|ing)|approv(?:e|es|ed|ing)|certif(?:y|ies|ied|ying)|authori[sz](?:e|es|ed|ing)|allow(?:s|ed|ing)?|permit(?:s|ted|ting)?|vouch(?:es|ed|ing)? for|stand(?:s|ing)? behind|stood behind|partner(?:s|ed|ing)? with|team(?:s|ed|ing)? up with|work(?:s|ed|ing)? with)`;
@@ -60,10 +69,15 @@ export const AFFILIATION = [
   // funded by Facebook"; a denial ("not sponsored or backed by Meta", "Neither sponsored nor backed by Meta",
   // "isn't backed by Meta") is no claim
   new RegExp(String.raw`(?<!${DENIED})\b(?:sponsored|backed|funded|ok['’]d|okayed|vouched for) by (?:meta|facebook|marketplace)\b`, 'i'),
-  // and the milder ones as a slogan, at the start of a sentence or line, past any heading or bullet mark,
-  // opening bracket, quote or HTML tag, or inside brackets or quotes: "Supported by Meta.", "Proudly supported
-  // by Facebook.", "## Powered by Meta", "- Supported by Meta", "(supported by Meta)", "<p>Supported by Meta</p>"
-  /(?:^|[.!?:;•*|–—(\["'“‘>]\s*)(?:[#>*\-–—•(\["'“‘]+\s*|<[a-z][^>]*>\s*)*(?:[a-z]+ly )?(?:supported|powered) by (?:meta|facebook|marketplace)\b/im,
+  // and the milder ones as a slogan, at the start of a sentence or line (indented or not), past any heading,
+  // bullet or number mark, quote or HTML tag: "Supported by Meta.", "Proudly supported by
+  // Facebook.", "## Powered by Meta", "  - Supported by Meta", "1) Supported by Meta", "<p>Supported by Meta</p>".
+  // Each mark is one character (or one number) before its own spaces, so a long run of them ("|----|" in a
+  // table) is read once, never in every way it could be split.
+  /(?:^[ \t]*|[.!?:;•*|–—"'“‘>]\s*)(?:(?:[#>*+\-–—•"'“‘]|\d+[.)]|<[a-z][^>]*>)\s*)*(?:[a-z]+ly )?(?:supported|powered) by (?:meta|facebook|marketplace)\b/im,
+  // and as a whole bracket: "(Supported by Meta)", "[powered by Facebook]" ("(supported by Marketplace: JPG
+  // and PNG)" is about photos, not Lot Current)
+  /[(\[]\s*(?:[a-z]+ly )?(?:supported|powered) by (?:meta|facebook|marketplace)\s*[)\]]/i,
   // Meta as Lot Current's sponsor, as a noun: "Meta is a sponsor of Lot Current", "Facebook, an early backer",
   // "our sponsor, Meta"
   /\b(?:meta(?: platforms)?|facebook|marketplace)(?:,| is| was| has been| became| as)? (?:a|an|the|our|one of our|lot current['’]s)(?: [a-z]+){0,2} (?:sponsor|backer|funder|investor|supporter)s?\b/i,

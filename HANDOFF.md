@@ -711,7 +711,7 @@ Text checks can still be beaten by deliberate obfuscation. Other new checks:
 - in `test/e2e/`, decoy action buttons on the mock form and a listing-action log that five flows check (panel, post, queue, standard, upkeep; not platforms);
 - every e2e flow blocking the real Facebook and failing if anything asks for it.
 
-The lead's last fixes widened the affiliation tripwire in `test/honesty.js`: Meta, Facebook or Marketplace backing, sponsoring or funding Lot Current or our product in any tense, after up to four helper words (modals included), in the passive, as a slogan behind a heading or bullet mark, and as a noun ("Meta's backing"); plain denials pass. It is still a word list, not a proof.
+The lead's last fixes widened the affiliation tripwire in `test/honesty.js`: Meta, Facebook or Marketplace backing, sponsoring or funding Lot Current or our product in any tense, after up to four helper words (modals included), in the passive, as a slogan behind a heading, bullet or number mark or as a whole bracket, and as a noun ("Meta's backing"); plain denials pass. It is still a word list, not a proof.
 
 `test/brandName.test.js` now reads the files git shows. The unit count went from 915 at the base to 1604 after the last lane merge, and to 1611 after the lead's last fixes.
 
@@ -760,7 +760,7 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - Bare amounts under 1,000 are not checked. In a draft, a comma list after "new" checks only its first part. The price note itself may still carry a steer that uses no "I", "me" or "my".
 - A role with a digit ("2nd shift sales") makes the template fail its own number check, so that salesperson's forms stay shut until the role changes.
 - The VIN check's Chevrolet City Express prefix (3N63M in `src/vin.js`) was written from memory and not checked against a decoder. A wrong prefix only fails to accept a real City Express, and never flags a correct record.
-- A save refused in a second window, because another window's post is newer, is not reported, and text typed there is lost. The help and the data inventory now say so; the side panel still does not.
+- A save refused in a second window, because another window's post is newer, is not reported, and anything done there (typing, picks, a rewrite, a colour guess or VIN check) is lost. The help and the data inventory now say so; the side panel still does not.
 - On Dealer Inspire, DealerOn and Dealer.com websites, a failed check of one missing car still holds back every missing car that scan.
 - On standard-data websites, a changed disclaimer is learned only once 30% of the lot is re-read, and a line wrongly learned never expires.
 - If the included salespeople in `marketing/pricing.json` change, existing subscribers get the new number.

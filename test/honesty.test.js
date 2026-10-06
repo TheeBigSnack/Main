@@ -110,6 +110,19 @@ const AFFILIATION_CLAIMS = [
   'Not merely backed by Meta, but loved by dealers.',
   'Not simply sponsored by Facebook.',
   'Not surprisingly backed by Meta.',
+  // an indented, plus or numbered bullet, a hyphenated word before the product, a square bracket, and "not
+  // merely" or "not surprisingly" (which affirm) with every backing verb, active or passive
+  '  - Supported by Meta',
+  '+ Supported by Meta',
+  '1) Supported by Meta',
+  '2. Powered by Facebook',
+  '[powered by Facebook]',
+  'Our one-click tool is supported by Meta.',
+  'Lot Current is not merely supported by Meta.',
+  "Lot Current isn't merely supported by Meta.",
+  'Lot Current is not surprisingly supported by Meta.',
+  'Meta does not merely support Lot Current.',
+  "Facebook doesn't only recommend Lot Current.",
   'Meta-backed listing tool.',
   'A Facebook-sponsored tool.',
   // as a noun
@@ -273,6 +286,14 @@ const NOT_BACKING = [
   'Meta now allows vehicle listings from personal profiles.',
   'Facebook is supporting more photo sizes now.',
   'Meta is backing away from vehicle feeds.',
+  // a bare "the app" or "the tool" after the verb is as often Facebook's own, and a bracket that goes on
+  // past the slogan is about something else
+  'Facebook supports the app on phones and computers.',
+  'Marketplace recommends the tool for cropping photos.',
+  'Photo types (supported by Marketplace: JPG and PNG) are listed in the form.',
+  'Photos supported by Facebook upload in the order you pick.',
+  "Lot Current's tool is not supported by Meta.",
+  'The app is not supported by Facebook on every phone.',
 ];
 
 test('every affiliation or approval claim fails, in any document', () => {
@@ -296,6 +317,16 @@ test('the honest lines the copy already uses pass', () => {
   const denial = 'Lot Current is not affiliated with, endorsed by or partnered with Meta, and no one can promise your account will never be restricted.';
   assert.notDeepEqual(honestyProblems(denial), [], 'without the denials named, the words are caught');
   assert.deepEqual(honestyProblems(denial, { denials: [/not affiliated with, endorsed by or partnered with Meta/g, /no one can promise your account will never be restricted/g] }), []);
+});
+
+test('a long run of marks (a wide table\'s separator row) is read at once, not in every way it could be split', () => {
+  // The slogan pattern once let a run of hyphens be split in exponentially many ways, so a table row like
+  // "|----...|" hung the check instead of failing it.
+  for (const run of ['|' + '-'.repeat(200) + '|', '-- ' + '-'.repeat(200), '*'.repeat(200), '"'.repeat(200), '1.'.repeat(100), '| ' + '- '.repeat(100), '<a '.repeat(100)]) {
+    const started = Date.now();
+    assert.deepEqual(honestyProblems(run, { customerFacing: false }), [], JSON.stringify(run.slice(0, 12)));
+    assert.ok(Date.now() - started < 1000, `"${run.slice(0, 12)}..." took ${Date.now() - started} ms`);
+  }
 });
 
 test('the copy tests use these lists and keep no shorter copy of their own', () => {
