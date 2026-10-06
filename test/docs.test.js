@@ -156,7 +156,7 @@ test('the adapter contract and help.md say a car whose own page could not be che
   assert.match(contract, /A refusal \(403, 429, 503, a bot check\) sets `confirm\.error`/);
   assert.doesNotMatch(contract, /Anything else \(403, 429, 5xx/, 'the old whole-check rule for a 5xx is gone');
   assert.match(doc('help.md'), /whose own page could not be checked .* stays under \*\*Needs a look\*\* with the reason/);
-  assert.match(read('../PILOT.md'), /neither does a scan that keeps the sold car under Needs a look because its page could not be checked/);
+  assert.match(read('../PILOT.md'), /Nor does a scan that lists the car under Needs a look as the salesperson's \(still missing but its page could not be checked, say\)/);
 });
 
 // The rescan raises a posted car the website marks sale-pending or sold on
@@ -167,6 +167,38 @@ test('PILOT.md says a take-down flag on a car the website still marks sale-pendi
   assert.ok(cleared, 'PILOT.md defines "cleared"');
   assert.match(cleared[1], /for sale again after a sale-pending or sold mark/);
   assert.match(cleared[1], /a car the website still marks sale-pending or sold stays open/);
+});
+
+// review: the flag definition left out that a take-down of a car the website
+// retyped as new, demo or loaner raises no flag and keeps an open one open
+// (pilot.js noteFlags), and that finishing a take-down closes every open flag
+// of that car, the price one too (upkeep.js finish, the popup's Taken down).
+test('PILOT.md says which take-downs raise no flag, which keep one open, and which flags a finished take-down, price update or unmarking closes', async () => {
+  const { noteFlags, resolveFlag } = await import('../extension/src/pilot.js');
+  const vin = 'TESTVIN00000000P1';
+  const at = (h) => `2026-11-16T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const retyped = { takenAt: at(9), takeDown: [{ vin, yours: true, why: 'not-pre-owned', name: 'A' }], priceUpdates: [], needsALook: [] };
+  assert.equal(noteFlags(null, retyped).flags.length, 0, 'a take-down of a car the website retyped raises a flag now: PILOT.md changes with it');
+  const sold = noteFlags(null, { takenAt: at(8), takeDown: [{ vin, yours: true, why: 'sale-pending', name: 'A' }], priceUpdates: [{ vin, yours: true, from: 20000, to: 19000, name: 'A' }], needsALook: [] });
+  const kept = noteFlags(sold, { ...retyped, priceUpdates: [{ vin, yours: true, from: 20000, to: 19000, name: 'A' }] });
+  assert.ok(kept.flags.find((f) => f.kind === 'takeDown' && !f.doneAt), 'an open sold-car flag no longer stays open when the website retypes the car: PILOT.md changes with it');
+  const done = resolveFlag(kept, vin, null, { at: at(12), how: 'manual' });
+  assert.deepEqual(done.flags.map((f) => [f.kind, f.how, f.hours]).sort(), [['price', 'manual', 4], ['takeDown', 'manual', 4]], 'a finished take-down no longer closes and times every open flag of the car');
+  assert.deepEqual(resolveFlag(kept, vin, 'price', { at: at(12) }).flags.filter((f) => f.doneAt).map((f) => f.kind), ['price']);
+  // where each closes them
+  assert.match(read('../extension/upkeep.js'), /resolveFlag\(p, up\.vin, price \? 'price' : null, \{ how \}\)/, 'upkeep no longer closes every flag of the car on a take-down: PILOT.md changes with it');
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /case 'takenDown':[\s\S]{0,300}?resolveFlag\(p, vin, null, \{ how: 'manual' \}\)/);
+  assert.match(popup, /case 'priceUpdated':[\s\S]{0,300}?resolveFlag\(p, vin, 'price', \{ how: 'manual' \}\)/);
+  assert.match(popup, /case 'unpost': \{[\s\S]{0,700}?resolveFlag\(p, vin, null, \{ how: 'cleared' \}\)/);
+
+  const line = read('../PILOT.md').split('\n').find((l) => l.startsWith('- **Sold cars and price changes:**'));
+  assert.ok(line, 'PILOT.md no longer defines the to-do flags');
+  assert.match(line, /A car to take down because the website now calls it new, demo or loaner \(it was not sold\) gets no flag/);
+  assert.match(line, /A take-down finished either way \(in upkeep, seen or \*\*I took it down\*\*, or \*\*Taken down\*\* in the popup\) closes every open flag of that car, the sold one and any price change, each timed from its own flagging scan/);
+  assert.match(line, /a price update closes only the price flag/);
+  assert.match(line, /unmarking \*\*Posted ✓\*\* closes the car's open flags as "cleared"/);
+  assert.match(line, /or under Take down because the website now calls it new, demo or loaner: an open sold-car flag of that car stays open/);
 });
 
 test('the adapter contract says what the standard-data reader does with robots.txt, as the code does it', () => {
