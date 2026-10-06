@@ -109,6 +109,7 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn, e.g. Plus tax, title and registration, which go to the state, not the dealer. Text the salesperson vs. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
   sixty('Deal direct with the salesperson, incl. Plus tax, title and registration, which go to the state, not the dealer. Text the salesperson esp. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
   sixty('Deal direct, approx. Plus tax, title and registration, which go to the state, not the dealer. Fees (excl.) Plus tax, title and registration, which go to the state, not the dealer. Ask me etc. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  sixty('Deal direct with the salesperson, ie. Plus tax, title and registration, which go to the state, not the dealer. Text the salesperson eg. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

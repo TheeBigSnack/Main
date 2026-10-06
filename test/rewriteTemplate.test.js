@@ -781,6 +781,9 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     [FEES, `Deal direct with the salesperson, incl. ${FEES}`], [FEES, `Deal direct with the salesperson, esp. ${FEES}`],
     [FEES, `Deal direct with the salesperson, approx. ${FEES}`], [FEES, `Deal direct with the salesperson (excl.) ${FEES}`],
     [FEES, `Text the salesperson, INCL. ${FEES}`], [SHORT, `Deal direct with the salesperson esp.\n${SHORT}`],
+    // nor "ie." or "eg.", "i.e." and "e.g." written without their inner dot
+    [FEES, `Deal direct with the salesperson, ie. ${FEES}`], [FEES, `Deal direct with the salesperson, eg. ${FEES}`],
+    [FEES, `Text the salesperson (IE.) ${FEES}`],
     // after its stop, words that carry its sentence on: a mark that joins, or a small first letter past a bracket, quote or emoji
     [SHORT, `${SHORT} , so deal direct with the salesperson.`], [SHORT, `${SHORT} \u2013 so deal direct with the salesperson.`],
     [SHORT, `${SHORT} (so deal direct with the salesperson)`], [SHORT, `${SHORT} \u201cso deal direct with the salesperson\u201d`],
@@ -827,8 +830,8 @@ test('"not the dealer" passes only in the dealership\'s price note, right after 
     assert.deepEqual(runGuardrails(`${note}\n${rest}`, c).problems, [], `${note} first`);
     assert.deepEqual(runGuardrails(`${rest}\n${note}`, c).problems, [], `${note} last`);
   }
-  // "vs", "cf", "incl" or "esp" at the end of a stock number is no "vs.", "cf.", "incl." or "esp.": a car with no VIN, whose stock line sits right before the note, passes
-  for (const stock of ['U1234VS', '23-CF', 'P5521-VS', 'A1VIZ', 'U77INCL', '23-ESP', 'P9APPROX', 'B2-EXCL']) {
+  // "vs", "cf", "incl", "esp", "ie" or "eg" at the end of a stock number is no "vs.", "cf.", "incl.", "esp.", "ie." or "eg.": a car with no VIN, whose stock line sits right before the note, passes
+  for (const stock of ['U1234VS', '23-CF', 'P5521-VS', 'A1VIZ', 'U77INCL', '23-ESP', 'P9APPROX', 'B2-EXCL', 'A1IE', '7-EG']) {
     const sparse = { ...vehicle('usedNormal'), vin: '', stock, features: [], engine: '', transmission: '', drivetrain: '', exteriorColor: '', interiorColor: '', carfaxUrl: '' };
     const c = { ...withNote(FEES), vehicle: sparse, price: sparse.price };
     const text = buildTemplateDescription(c);
