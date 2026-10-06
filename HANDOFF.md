@@ -739,7 +739,7 @@ CHANGELOG "Unreleased" ends with the full list. In short:
 5. At Stripe step 5: `ALLOWED_ORIGINS`, `billing: true` and the Dashboard's "Cancel the subscription".
 6. Leave CAPTCHA off.
 7. Optional: limit `production` to the default branch and add a required reviewer.
-8. Refresh the attorney packet.
+8. Copy the legal texts into the attorney packet again if they change before it is sent (it was rebuilt from this branch on 2026-10-06).
 
 The privacy texts say a salesperson sees only their own post timings. That is true in production only once 0011 is applied, and the website deploys with the default branch.
 
@@ -775,11 +775,12 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - `LEGAL.version` in `src/legalLinks.js` is still `2026-09-28-draft` after the round changed the drafts. Check its rule before the texts go live.
 - When the certified demo and loaner fix lands (R-3), take the known-gap sentence out of README and How it works (`test/site.test.js` reads it).
 
-**Outside the repository** (the project folder):
-- R-156, R-157: the attorney packet's drafts, questions and PDF predate the round. Also out of date: the governing-law sentence in its guide to choosing an attorney, and the Terms cell of `checks/live-check-walkthrough.md`.
-- R-154: `launch/stripe-checklist.md`, steps 6 and 7 and its opening lines.
-- R-155: `launch/launch-plan.md`'s sync row. Test computers use Chrome profiles made for the check, never Clear everything.
-- R-158: the survey notes' reader status.
+**Outside the repository** (the project folder), done on 2026-10-06:
+- R-156, R-157: the attorney packet (`launch/attorney/`) was rebuilt from this branch: its drafts are the `legal/` texts and the data inventory as they stand here, `2-questions.md` follows `legal/questions-for-attorney.md` section by section, and the PDF is 48 pages. A later change to those texts needs the packet copied again. The guide to choosing an attorney and the Terms cell of `checks/live-check-walkthrough.md` were brought up to date.
+- R-154: `launch/stripe-checklist.md` steps 2, 3, 5, 6 and 7, and live mode waiting on a dealer-confirmed price.
+- R-155: `launch/launch-plan.md`'s sync row: test computers use Chrome profiles made for the check, never Clear everything.
+- R-158: the survey notes' reader status was already current.
+- The owner decisions this round needs: `reviews/2026-10-06-owner-decisions.md`.
 
 **Asked of the survey thread** (session "Dealer site survey run"). Its PR #9, from `claude/project-thread-9c3h7h`, was at `b5aedf1` when last seen and is not merged. It adds its own HANDOFF section 21; this section was renumbered 22 so the two no longer collide. Its `extension/adapters/README.md` edit will conflict. The asks:
 - R-3: DealerOn and Dealer.com cards typed Loaner, Demo or Courtesy and marked certified must not become Certified Used.
