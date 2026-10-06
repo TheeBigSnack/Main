@@ -32,7 +32,7 @@ Why not the alternatives:
 3. Create a project:
    - Name: `lot-current`
    - Database password: press **Generate a password**, save it in your password manager. You'll paste it once into GitHub (step 2). Don't send it to anyone.
-   - Region: **East US (North Virginia)**, the closest to Pennsylvania dealers.
+   - Region: the one closest to the dealerships Lot Current will serve; for stores on the US East Coast, **East US (North Virginia)**.
 4. When the project is ready, open **Project settings, API Keys**. Copy the **publishable** key (starts `sb_publishable_`). If the page only shows the legacy "anon" key, use that for now; it works until Supabase retires it, and switching later is one command.
 5. Open **Project settings, Data API** (older Dashboards: API) and copy the **Project URL** (`https://<20 letters and digits>.supabase.co`).
 

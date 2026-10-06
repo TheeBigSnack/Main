@@ -41,6 +41,89 @@ const AFFILIATION_CLAIMS = [
   'Marketplace recommends Lot Current for dealers.',
   'Meta supports Lot Current.',
   'Facebook OKs Lot Current.',
+  // Meta, Facebook or Marketplace backing Lot Current, us or our product, in any tense, with an adverb, or in the passive
+  'Meta sponsors Lot Current.',
+  'Facebook backs our extension.',
+  'Marketplace stands behind this tool.',
+  'Meta has backed Lot Current.',
+  'Facebook okayed Lot Current.',
+  "Meta OK'd the Lot Current extension.",
+  'Meta officially supports Lot Current.',
+  'Facebook fully endorsed us.',
+  'Facebook has partnered with Lot Current.',
+  'Meta teamed up with Lot Current.',
+  'Meta allows Lot Current.',
+  'Lot Current is supported by Meta.',
+  'Lot Current is sponsored by Facebook.',
+  'We are proudly backed by Meta.',
+  'Our product was okayed by Facebook Marketplace.',
+  'Sponsored by Facebook.',
+  'Backed by Meta.',
+  // with a helper verb before the verb, in the -ing form, or two verbs in a row
+  'Meta will sponsor Lot Current.',
+  'Meta would sponsor Lot Current.',
+  'Meta is sponsoring Lot Current.',
+  'Meta has been sponsoring Lot Current.',
+  'Meta was funding Lot Current.',
+  'Meta does support Lot Current.',
+  'Facebook did approve the Lot Current extension.',
+  'Meta is now officially sponsoring the extension.',
+  'Facebook will be partnering with Lot Current.',
+  'Meta Platforms sponsors Lot Current.',
+  'Meta Platforms has been backing us since day one.',
+  'Meta supports and endorses Lot Current.',
+  // the passive after Lot Current or our product, whatever stands between
+  'The Lot Current extension is supported by Meta.',
+  'The Lot Current team is backed by Meta.',
+  'Lot Current, supported by Meta.',
+  'Lot Current is supported and allowed by Meta.',
+  'Our tool has been okayed by Facebook.',
+  'We got funded by Meta.',
+  // the strongest verbs anywhere, the milder ones as a slogan, and a hyphen
+  'Sponsored by Marketplace.',
+  'Not only backed by Meta, but loved by dealers.',
+  'Lot Current — backed by Facebook.',
+  'Supported by Meta.',
+  'Proudly supported by Facebook.',
+  'Officially supported by Facebook Marketplace.',
+  'Powered by Facebook.',
+  // with a modal helper, four helpers, a wider name for the product, or a slogan behind a heading, bullet, bracket, quote or tag
+  'Meta can vouch for Lot Current.',
+  'Meta may sponsor Lot Current.',
+  'Facebook could back Lot Current.',
+  'Meta should support Lot Current.',
+  'Meta must approve Lot Current.',
+  'Meta might fund Lot Current.',
+  'Facebook shall endorse Lot Current.',
+  'Lot Current is now also proudly supported by Meta.',
+  'Our listing tool is supported by Meta.',
+  "Lot Current's extension is supported by Meta.",
+  'Lot Current for Chrome is supported by Meta.',
+  'The tool is supported by Meta.',
+  '## Supported by Meta',
+  '- Supported by Meta',
+  '# Powered by Facebook',
+  '(Supported by Meta)',
+  '"Supported by Meta"',
+  '<p>Supported by Meta</p>',
+  'Lot Current (supported by Meta) fills the form.',
+  'Not merely backed by Meta, but loved by dealers.',
+  'Not simply sponsored by Facebook.',
+  'Not surprisingly backed by Meta.',
+  'Meta-backed listing tool.',
+  'A Facebook-sponsored tool.',
+  // as a noun
+  'Meta is a sponsor of Lot Current.',
+  'Facebook, an early backer of Lot Current.',
+  'Our sponsor, Meta.',
+  "Lot Current's backers include Facebook.",
+  "With Meta's backing.",
+  "Meta's sponsorship of Lot Current.",
+  "Meta's support for Lot Current.",
+  'With the blessing of Meta.',
+  // Meta letting our product do something is a claim of its permission, so "allows" counts with us as the object
+  'Marketplace allows the extension to fill the form.',
+  'Meta allows us to post for you.',
 ];
 
 // Promises and made-up numbers that customer-facing copy may not make.
@@ -155,6 +238,43 @@ const ONCE_CAUGHT = [
   'Not for under 18s.',
 ];
 
+// What Meta's products support, and plain denials of any backing: the backing verbs
+// count only with Lot Current, us or our product, and never after a negation. (A
+// denial with "endorsed by", "approved by" or "officially" in it is still caught,
+// and copy names it in honestyProblems' denials, as the last test below does.)
+const NOT_BACKING = [
+  'Marketplace supports vehicle listings from personal profiles.',
+  'Facebook supports drafts.',
+  'Meta allows dealers to list used cars from personal profiles.',
+  'Meta does not allow new vehicles on Marketplace.',
+  'Meta does not endorse or sponsor Lot Current.',
+  'Facebook has not approved, backed or okayed Lot Current.',
+  'Meta never supported Lot Current.',
+  'Lot Current is not supported by Meta or Facebook.',
+  "Lot Current isn't backed by Meta.",
+  'Not sponsored by Facebook.',
+  'Lot Current is not sponsored or backed by Meta.',
+  'Neither sponsored nor backed by Meta.',
+  "Lot Current isn't sponsored, backed or funded by Meta.",
+  'Lot Current is in no way backed by Meta.',
+  "We aren't backed by Meta.",
+  'Never sponsored by Facebook.',
+  "Meta doesn't sponsor Lot Current.",
+  'Meta would never support Lot Current.',
+  'Meta hardly supports Lot Current.',
+  'Facebook is not a sponsor of Lot Current.',
+  // the same verbs and nouns about something else
+  'Facebook backed up the draft.',
+  "Facebook's backing up the draft as you type.",
+  "Facebook's support pages explain the vehicle form.",
+  'Our support team answers within a day.',
+  'The photos supported by Marketplace are JPEG and PNG.',
+  'Marketplace allows up to 20 photos.',
+  'Meta now allows vehicle listings from personal profiles.',
+  'Facebook is supporting more photo sizes now.',
+  'Meta is backing away from vehicle feeds.',
+];
+
 test('every affiliation or approval claim fails, in any document', () => {
   for (const claim of AFFILIATION_CLAIMS) {
     assert.notDeepEqual(honestyProblems(claim, { customerFacing: false }), [], `"${claim}" passes the internal-document check`);
@@ -171,6 +291,7 @@ test('every guarantee, account-safety promise and made-up number fails in custom
 test('the honest lines the copy already uses pass', () => {
   for (const line of HONEST) assert.deepEqual(honestyProblems(line), [], line);
   for (const line of ONCE_CAUGHT) assert.deepEqual(honestyProblems(line), [], line);
+  for (const line of NOT_BACKING) assert.deepEqual(honestyProblems(line), [], line);
   // a sentence that only denies a forbidden thing passes once that denial is named
   const denial = 'Lot Current is not affiliated with, endorsed by or partnered with Meta, and no one can promise your account will never be restricted.';
   assert.notDeepEqual(honestyProblems(denial), [], 'without the denials named, the words are caught');

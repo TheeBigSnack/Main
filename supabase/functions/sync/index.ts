@@ -523,9 +523,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     //    took the car down) flags the change again, after that item closed.
     //    Such an open upload, with no row of its own and none it overlaps,
     //    is a late sighting, not a new item, when the caller's own listing
-    //    already shows the change (`shows`): every listed row of theirs for
-    //    the VIN is at the flag's new price, or they have rows for it and
-    //    none is up. No row goes in for it, and mergeFlags drops that
+    //    already shows the change (`shows`): for a price change, they have a
+    //    listed row for the VIN and every one is at the flag's new price;
+    //    for a take-down, they have rows for it and none is up. No row goes
+    //    in for it, and mergeFlags drops that
     //    machine's flag once its registry has the fix.
     //    A closed upload with no row of its own and none it overlaps is an
     //    item (a flag raised and fixed on one machine between two syncs),

@@ -29,7 +29,8 @@
 // written by hand, a page the map no longer has, a stray screenshot) is
 // named by both modes and refused by --check: nothing under site/ goes live
 // unless a generator writes it, it is kept by hand in KEPT_FILES, or a page
-// shows it.
+// or a stylesheet points at it (a src, an href, a srcset or a CSS url(), so
+// a plain link to a file counts as much as a picture shown).
 //
 // Run:  npm run site-pages                     -> writes the pages and files
 //       node scripts/site-pages.mjs --check    -> writes nothing; exit 1 when an
@@ -951,7 +952,7 @@ export function strayFiles(ctx, built = buildSite(ctx)) {
   ]);
   return filesUnder(ctx.dir, 'site').filter((file) => !known.has(file));
 }
-export const strayAdvice = (file) => `${file} is not part of the site (no generator writes it, it is not kept by hand and no page shows it), so the deploy would publish it unchecked: delete it, or add it to the site map in scripts/site-pages.mjs`;
+export const strayAdvice = (file) => `${file} is not part of the site (no generator writes it, it is not kept by hand, and no page or stylesheet points at it with a src, href, srcset or CSS url()), so the deploy would publish it unchecked: delete it, or add it to the site map in scripts/site-pages.mjs`;
 
 /** Writes every output and removes the files that must not exist; answers what it did. */
 export function writeSite(ctx) {
@@ -976,7 +977,8 @@ export const USAGE = [
   '       node scripts/site-pages.mjs --check',
   '                                       write nothing; exit 1 when an output is missing, differs, or exists although it must not,',
   '                                       or a file under site/ is none of the site\'s (no generator writes it, it is not kept',
-  '                                       by hand, no page shows it): the deploy publishes site/ whole',
+  '                                       by hand, and no page or stylesheet points at it with a src, href, srcset or CSS url()):',
+  '                                       the deploy publishes site/ whole',
   '',
   ...FRAGMENT_PAGES.map((p) => `  ${p.source.padEnd(32)}-> ${p.file}`),
   '  (always)                        -> site/robots.txt, site/llms.txt',

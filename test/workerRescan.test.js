@@ -181,3 +181,51 @@ test('a rescan records the price basis the last saved scan shows for a listing w
     globalThis.fetch = realFetch;
   }
 });
+
+// A rescan held back as a website hiccup records no price basis at all: the
+// basis goes up with the next sync and becomes every computer's, so none is
+// taken off a read the extension does not trust. The saved list stays, so
+// the next trusted rescan reads it from the same last scan.
+test('a rescan held back as a website hiccup records no price basis, even one the last saved scan shows', async () => {
+  for (const key of Object.keys(store)) delete store[key];
+  const cars = standardCars(12);
+  const [car] = cars;
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = schemaOrg.scanOptions(SERVICE);
+  const full = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars })), site, settings, options });
+  // the last saved scan, taken after the post, showed a second price $500 below the car's main price
+  const last = structuredClone(full.snapshot);
+  last.takenAt = '2020-01-02T12:00:00.000Z';
+  last.vehicles[car.vin].priceBeforeFees = car.price - 500;
+  const posted = { [car.vin]: { name: 'Posted car', price: car.price - 500, postedAt: '2020-01-01T12:00:00.000Z' } }; // synced with no basis
+  Object.assign(store, {
+    [SITES_KEY]: { [O]: { name: 'Sample Motors', adapter: 'schemaOrg', service: SERVICE, site, auto: true } },
+    [k.settings]: settings, [k.snapshot]: last, [k.posted]: posted, [k.boilerplate]: full.boilerplate,
+  });
+  // the website now lists 4 of the 12: held back
+  const short = standardSite({ cars: cars.slice(0, 4) });
+  for (const c of cars.slice(4)) short.set(O + c.path, httpError(404));
+  const search = fakeSiteSearch(short);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const got = await search({ url });
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+  };
+  try {
+    assert.equal((await runRescan(O, { reason: 'alarm' })).ok, true);
+    assert.equal(store[k.diff].unreliable, true);
+    assert.equal(store[k.posted][car.vin].basis, undefined, 'nothing recorded from a held-back rescan');
+    assert.equal(store[k.snapshot].takenAt, last.takenAt, 'the last saved scan stays, for the next trusted rescan to read');
+    // the website lists the whole lot again: that trusted rescan records the basis the last saved scan shows
+    globalThis.fetch = async (url) => {
+      const got = await fakeSiteSearch(standardSite({ cars }))({ url });
+      return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+    };
+    assert.equal((await runRescan(O, { reason: 'alarm' })).ok, true);
+    assert.equal(store[k.diff].unreliable, false);
+    assert.equal(store[k.posted][car.vin].basis, 'beforeFees');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

@@ -43,6 +43,11 @@ test('the attorney\'s automated-means question says how the form is typed into a
   assert.match(q1, /queue/);
   assert.match(q1, /without another click/);
   assert.match(q1, /does the queue's opening and filling of the next car's form without a click change the answer\?/, 'the attorney is asked about the queue itself');
+  // review: Q1 described the listing-page read as part of the queue only, while the panel reads the listing page
+  // after every post (sidepanel.js startWatcher: confirmIfThisCar for every listing) to offer its address as the car's link
+  assert.match(panel, /if \(r\.status === 'listing'\) \{[\s\S]{0,300}?return confirmIfThisCar\(/, 'the listing page a post reached is no longer read after every post: update questions-for-attorney.md 1 and this test');
+  assert.match(q1, /After every post, in a queue or not, once the tab it opened for the post reaches a Marketplace listing page \(normally the listing just published, but it is whichever listing page that tab reaches first\), it reads that page a few times while it loads, clicking nothing on it: whether its text holds the car's VIN, or the car's name and the price filled in, a sold or unavailable sign, and whether a listing form is still on the page\. It reads it again when the side panel is reopened or opened in another window\./);
+  assert.match(q1, /What it reads is kept with the post under way in the browser's own storage and sent nowhere; when the page shows this car, the side panel offers that address as the car's listing link, and once the user keeps it, the address is part of the posted list that sync sends when the user is signed in\. In a queue, it then records the car and moves on/);
 
   // what Google's reviewer reads for the scripting permission
   const store = rowText(read('legal/chrome-web-store-privacy.md'), '`scripting`');
@@ -129,6 +134,55 @@ test('the privacy texts name the posted list\'s before-that-day mark, and say th
   assert.match(synced, /The user's posted list \([^)]*whether a listing the user marked posted had gone up before that day/, 'the sync row leaves out the before-that-day mark');
   // and the data inventory they follow
   assert.match(rowText(read('docs/data-inventory.md'), '`posted:<origin>`'), /whether the salesperson said a listing they marked had gone up before that day/);
+});
+
+// What sync writes for a listing, column by column (src/sync.js toServerRows,
+// the function's own copy in supabase/functions/sync/index.ts), and for a
+// scan (scanRow). Review: the store form's sync row named the before-that-day
+// mark but not the price basis (migration 0015), and the data inventory's
+// sync row the basis but not the before-that-day mark. A new column fails
+// here until the texts that list what sync sends name it.
+const LISTING_COLUMN_WORDS = {
+  dealership_id: null, // whose records: each row says "for the user's dealership" / "Our database (Supabase)"
+  user_id: null, // the signed-in person's own entries
+  vin: /\bVIN\b/,
+  name: /car name/,
+  price: /price/,
+  posted_at: /times|when posted/,
+  updated_at: /times|updated/,
+  status: /times|when posted/, // 'listed' until the entry leaves the list; the function then marks it taken down, with the time
+  taken_down_at: /times|when posted/,
+  listed_before: /whether a listing (?:the user|they) marked posted had gone up before that day/,
+  basis: /website's main price or its lower second price|which of the website's two prices/,
+  listing_url: /listing link/,
+  salesperson: /salesperson name/,
+};
+
+test('the texts that list what sync sends name every column it writes for a listing, the price basis and the before-that-day mark among them, and a scan\'s held-back mark', async () => {
+  const { toServerRows, scanRow } = await import('../extension/src/sync.js');
+  const entry = { name: 'A', price: 1, basis: 'beforeFees', postedAt: '2026-11-16T09:00:00.000Z', updatedAt: '2026-11-16T10:00:00.000Z', listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Sam', listedBefore: true };
+  const [row] = toServerRows({ posted: { TESTVIN00000000A1: entry }, dealershipId: 'd', userId: 'u' }).listings;
+  assert.deepEqual(Object.keys(row).sort(), Object.keys(LISTING_COLUMN_WORDS).sort(), 'sync writes a listing column these texts are not checked for: name it in the store form\'s sync row and the data inventory\'s, then here');
+  // the function writes the same columns (its copy of toServerRows)
+  const fn = read('supabase/functions/sync/index.ts');
+  for (const col of Object.keys(LISTING_COLUMN_WORDS)) assert.match(fn, new RegExp(`\\b${col}:`), `the sync function no longer writes ${col}`);
+  const scan = scanRow({ takenAt: '2026-11-16T11:00:00.000Z', cars: 3, ready: 2, takeDownCount: 0, priceUpdateCount: 0, withheld: true }, { origin: 'https://dealer.test', dealershipId: 'd' });
+  assert.equal(scan.withheld, true, 'a held-back scan no longer goes up marked: update the texts and this test');
+
+  const store = read('legal/chrome-web-store-privacy.md').split('\n').find((l) => l.startsWith('| While signed in:'));
+  const inventory = rowText(read('docs/data-inventory.md'), 'Sync (`src/accountFlow.js` `syncOnce`, `src/sync.js` `syncPayload`)');
+  const lists = [
+    ['legal/chrome-web-store-privacy.md (sync row)', store.match(/The user's posted list \(([^)]*)\)/)?.[1]],
+    ['docs/data-inventory.md (Sync row)', inventory.match(/`posted` \(the person's own entries: ([^)]*)\)/)?.[1]],
+  ];
+  for (const [where, listed] of lists) {
+    assert.ok(listed, `${where}: no list of the posted-list fields sync sends`);
+    for (const [col, words] of Object.entries(LISTING_COLUMN_WORDS)) if (words) assert.match(listed, words, `${where} does not name the listing column ${col} that sync writes`);
+  }
+  assert.match(store, /scan's counts \(marked as held back for a scan that looked like a website hiccup\)/, 'the store form\'s sync row leaves out the held-back mark');
+  assert.match(inventory, /`withheld` for a scan held back as a likely website hiccup/, 'the data inventory\'s sync row leaves out the held-back mark');
+  // the browser's copy of the posted list keeps the basis too (src/rescan.js markPosted)
+  assert.match(rowText(read('legal/chrome-web-store-privacy.md'), '`storage`'), /posted list \(each car's VIN, name, posted price and whether it is the website's main price or its lower second price,/, 'the storage row leaves out the price basis each listing was posted at');
 });
 
 // Each function the extension runs in a Facebook tab, and the words the

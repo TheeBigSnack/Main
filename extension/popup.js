@@ -272,8 +272,8 @@ async function scan() {
       return save('snapshot', 'diff', 'settings', 'boilerplate');
     });
     if (!saved) return; // the status says why (the quota); the read stays on screen
-    // the price basis this read shows for a listing that has none, kept on it (src/scanRunner.js keepSeenBasis)
-    state.posted = (await keepSeenBasis(state.origin, last, r.snapshot, popupStorage).catch(() => undefined)) || state.posted;
+    // the price basis this read shows for a listing that has none, kept on it unless the read was held back (src/scanRunner.js keepSeenBasis)
+    state.posted = (await keepSeenBasis(state.origin, last, r.snapshot, r.diff, popupStorage).catch(() => undefined)) || state.posted;
     state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
     syncInBackground(); // the scan's counts (marked withheld after a website hiccup) and the to-do items it flagged
     // the scan registered the website for background rescans; show its state

@@ -335,6 +335,34 @@ test('a lot that keeps reading more than half smaller is offered on To do after 
   assert.doesNotMatch(p.panel(), /withheld/);
 });
 
+// A posted listing with no price basis (brought by a sync from a computer
+// on an older version) gets the one a scan reads its price on, and that
+// basis goes up with the next sync to every computer. A read held back as a
+// website hiccup records none, even when it is the only read since the post
+// that shows the price on one basis: the next trusted read records it.
+test('a scan held back as a website hiccup records no price basis for a listing; a trusted read after it does', async () => {
+  const records = Array.from({ length: 12 }, (_, i) => ({ ...structuredClone(fixtures.usedNormal), vin: sampleVin(i + 1), stock: `S${i + 1}` }));
+  const p = await loadPopup({ records });
+  await p.scan();
+  const vin = sampleVin(1);
+  assert.equal(p.local[k.snapshot].vehicles[vin].priceBeforeFees, 26673, 'each car shows $27,163, or $26,673 before the fee');
+  // posted at the lower second price after that scan, on another computer, and brought here by a sync with no basis
+  await new Promise((r) => setTimeout(r, 5));
+  p.local[k.posted] = { [vin]: { name: 'Ram', price: 26673, postedAt: new Date().toISOString() } };
+  await new Promise((r) => setTimeout(r, 5));
+
+  records.splice(4); // the website now lists 4 of the 12: a likely hiccup
+  await p.scan();
+  assert.equal(p.local[k.diff].unreliable, true);
+  assert.equal(p.local[k.posted][vin].basis, undefined, 'nothing recorded from a read held back as a hiccup');
+
+  await p.scan();
+  await p.click('acceptWithheld'); // the salesperson uses the new list
+  await p.scan();
+  assert.equal(p.local[k.diff].unreliable, false);
+  assert.equal(p.local[k.posted][vin].basis, 'beforeFees', 'the next trusted read records it');
+});
+
 // Clear the numbers is what the storage-full message sends people to. An
 // open to-do item is still on To do, and its synced copy on the manager's
 // list closes only when this computer closes it, so it stays.

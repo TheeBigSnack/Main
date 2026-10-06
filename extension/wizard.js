@@ -209,7 +209,7 @@ async function runScan(ctx) {
     return false;
   }
   wiz.scan = scan; // only a read that was kept counts as done
-  await keepSeenBasis(wiz.origin, data[k.snapshot] || null, r.snapshot).catch(() => null); // the price basis this read shows for a listing that has none
+  await keepSeenBasis(wiz.origin, data[k.snapshot] || null, r.snapshot, diff).catch(() => null); // the price basis this read shows for a listing that has none; none from a held-back read
   await recordFlags(wiz.origin, r.diff, r.diff.takenAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   await persist();

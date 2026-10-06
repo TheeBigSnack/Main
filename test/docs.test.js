@@ -120,6 +120,24 @@ test('help.md and README give the "vanished at once" rule with the lot size it s
   assert.match(read('../README.md'), new RegExp(`If more than half the cars of a lot of ${floor} or more vanish between scans, nothing is marked gone`));
 });
 
+// The dots that end no sentence before the price note (rewriteTemplate.js
+// NOT_A_STOP, and its port in guardrails.ts): help.md names each, so a
+// salesperson can tell why "Deal direct, incl. Tax, title ..." is refused.
+test('help.md names every abbreviation whose dot ends no sentence before the price note, as both description checkers list them', () => {
+  const listed = (src) => {
+    const m = /const NOT_A_STOP = new RegExp\(`[^`]*?\(\?:((?:[a-z]|\\\\\.)+(?:\|(?:[a-z]|\\\\\.)+)*)\)\\\\\./.exec(src);
+    assert.ok(m, 'NOT_A_STOP is found');
+    return m[1].split('|').map((w) => w.replace(/\\\\/g, '') + '.');
+  };
+  const js = listed(read('../extension/src/rewriteTemplate.js'));
+  assert.deepEqual(listed(read('../supabase/functions/_shared/guardrails.ts')), js, 'both checkers list the same ones');
+  for (const w of ['e.g.', 'vs.', 'incl.', 'esp.', 'approx.']) assert.ok(js.includes(w), `NOT_A_STOP lists "${w}"`);
+  assert.ok(!js.includes('etc.'), '"etc." may end a sentence');
+  const sentence = /the dot of ((?:"[^"]+",? (?:or )?)+)ends no sentence/.exec(doc('help.md'));
+  assert.ok(sentence, 'help.md says which dots end no sentence');
+  assert.deepEqual([...sentence[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort(), [...js].sort());
+});
+
 test('the adapter contract\'s PLATFORM row names every adapter and quotes no stale unsupported-page message', () => {
   const row = read('../extension/adapters/README.md').split('\n').find((l) => l.startsWith('| `PLATFORM` |')) || '';
   assert.ok(row, 'the PLATFORM row is there');
@@ -138,7 +156,7 @@ test('the adapter contract and help.md say a car whose own page could not be che
   assert.match(contract, /A refusal \(403, 429, 503, a bot check\) sets `confirm\.error`/);
   assert.doesNotMatch(contract, /Anything else \(403, 429, 5xx/, 'the old whole-check rule for a 5xx is gone');
   assert.match(doc('help.md'), /whose own page could not be checked .* stays under \*\*Needs a look\*\* with the reason/);
-  assert.match(read('../PILOT.md'), /neither does a scan that keeps the sold car under Needs a look because its page could not be checked/);
+  assert.match(read('../PILOT.md'), /Nor does a scan that lists the car under Needs a look as the salesperson's \(still missing but its page could not be checked, say\)/);
 });
 
 // The rescan raises a posted car the website marks sale-pending or sold on
@@ -149,6 +167,38 @@ test('PILOT.md says a take-down flag on a car the website still marks sale-pendi
   assert.ok(cleared, 'PILOT.md defines "cleared"');
   assert.match(cleared[1], /for sale again after a sale-pending or sold mark/);
   assert.match(cleared[1], /a car the website still marks sale-pending or sold stays open/);
+});
+
+// review: the flag definition left out that a take-down of a car the website
+// retyped as new, demo or loaner raises no flag and keeps an open one open
+// (pilot.js noteFlags), and that finishing a take-down closes every open flag
+// of that car, the price one too (upkeep.js finish, the popup's Taken down).
+test('PILOT.md says which take-downs raise no flag, which keep one open, and which flags a finished take-down, price update or unmarking closes', async () => {
+  const { noteFlags, resolveFlag } = await import('../extension/src/pilot.js');
+  const vin = 'TESTVIN00000000P1';
+  const at = (h) => `2026-11-16T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const retyped = { takenAt: at(9), takeDown: [{ vin, yours: true, why: 'not-pre-owned', name: 'A' }], priceUpdates: [], needsALook: [] };
+  assert.equal(noteFlags(null, retyped).flags.length, 0, 'a take-down of a car the website retyped raises a flag now: PILOT.md changes with it');
+  const sold = noteFlags(null, { takenAt: at(8), takeDown: [{ vin, yours: true, why: 'sale-pending', name: 'A' }], priceUpdates: [{ vin, yours: true, from: 20000, to: 19000, name: 'A' }], needsALook: [] });
+  const kept = noteFlags(sold, { ...retyped, priceUpdates: [{ vin, yours: true, from: 20000, to: 19000, name: 'A' }] });
+  assert.ok(kept.flags.find((f) => f.kind === 'takeDown' && !f.doneAt), 'an open sold-car flag no longer stays open when the website retypes the car: PILOT.md changes with it');
+  const done = resolveFlag(kept, vin, null, { at: at(12), how: 'manual' });
+  assert.deepEqual(done.flags.map((f) => [f.kind, f.how, f.hours]).sort(), [['price', 'manual', 4], ['takeDown', 'manual', 4]], 'a finished take-down no longer closes and times every open flag of the car');
+  assert.deepEqual(resolveFlag(kept, vin, 'price', { at: at(12) }).flags.filter((f) => f.doneAt).map((f) => f.kind), ['price']);
+  // where each closes them
+  assert.match(read('../extension/upkeep.js'), /resolveFlag\(p, up\.vin, price \? 'price' : null, \{ how \}\)/, 'upkeep no longer closes every flag of the car on a take-down: PILOT.md changes with it');
+  const popup = read('../extension/popup.js');
+  assert.match(popup, /case 'takenDown':[\s\S]{0,300}?resolveFlag\(p, vin, null, \{ how: 'manual' \}\)/);
+  assert.match(popup, /case 'priceUpdated':[\s\S]{0,300}?resolveFlag\(p, vin, 'price', \{ how: 'manual' \}\)/);
+  assert.match(popup, /case 'unpost': \{[\s\S]{0,700}?resolveFlag\(p, vin, null, \{ how: 'cleared' \}\)/);
+
+  const line = read('../PILOT.md').split('\n').find((l) => l.startsWith('- **Sold cars and price changes:**'));
+  assert.ok(line, 'PILOT.md no longer defines the to-do flags');
+  assert.match(line, /A car to take down because the website now calls it new, demo or loaner \(it was not sold\) gets no flag/);
+  assert.match(line, /A take-down finished either way \(in upkeep, seen or \*\*I took it down\*\*, or \*\*Taken down\*\* in the popup\) closes every open flag of that car, the sold one and any price change, each timed from its own flagging scan/);
+  assert.match(line, /a price update closes only the price flag/);
+  assert.match(line, /unmarking \*\*Posted ✓\*\* closes the car's open flags as "cleared"/);
+  assert.match(line, /or under Take down because the website now calls it new, demo or loaner: an open sold-car flag of that car stays open/);
 });
 
 test('the adapter contract says what the standard-data reader does with robots.txt, as the code does it', () => {
@@ -210,6 +260,16 @@ test('no docs/ file carries a pilot-dealer value or Meta-affiliation wording', (
     assert.deepEqual(copyProblems(text, { customerFacing: name === 'help.md' }), [], `docs/${name}`);
     assert.deepEqual(honestyProblems(text, { customerFacing: name === 'help.md' }), [], `docs/${name}`);
   }
+  // every guide under docs/, the owner's set-up guides too: region is data (CLAUDE.md), so none gives the pilot's
+  // state as the reason for a choice (review: the Supabase region was "the closest to Pennsylvania dealers")
+  const every = readdirSync(new URL('../docs/', import.meta.url)).filter((f) => f.endsWith('.md'));
+  assert.ok(every.includes('production-setup.md'));
+  for (const name of every) {
+    const hit = doc(name).match(new RegExp(`${PILOT.source}|Pennsylvania`, 'i'));
+    assert.equal(hit, null, `docs/${name} contains the pilot value "${hit && hit[0]}"`);
+  }
+  const region = doc('production-setup.md').split('\n').find((l) => /^\s*- Region:/.test(l));
+  assert.match(region, /the one closest to the dealerships Lot Current will serve/, 'the set-up guide does not say how to pick the Supabase region for any dealer');
 });
 
 test('support.md has the inbox, what to ask for, the one-business-day answer, the log, the severity words and what is never done', () => {
@@ -1283,8 +1343,19 @@ test('supabase/README.md says what the functions and the billing code do', () =>
   const sync = read('../supabase/functions/sync/index.ts');
   assert.match(sync, /if \(kind === 'takeDown'\) return rows\.length > 0 && up\.length === 0;/, 'the late-sighting rule changed: check supabase/README.md');
   assert.match(sync, /return to !== null && up\.length > 0 && up\.every\(\(r\) => intOrNull\(r\.price\) === to\)/);
+  // the comment above step 4 says the same rule as the code and the README:
+  // a price change counts as shown only when the caller has a listed row
+  const syncComments = sync.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('//')).map((l) => l.replace(/^\/\/\s?/, '')).join(' ').replace(/\s+/g, ' ');
+  assert.doesNotMatch(syncComments, /every listed row of theirs for the VIN is at the flag's new price/, 'the sync comment leaves out that a price change needs a listed row of the caller\'s');
+  assert.match(syncComments, /\(`shows`\): for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up\./);
   assert.doesNotMatch(flat, /none of their rows for it up/, 'the late-sighting rule leaves out that a take-down needs rows of the caller\'s');
   assert.match(flat, /for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up/);
+  // a closed flag with no row goes in as its own item, except in the two orders the function merges into a row it
+  // holds (review: an older "a closed flag with no row always goes in" came back in a merge and nothing failed)
+  assert.match(sync, /const later = next && next\.id && sameChange\(next, t\) \? next : null;/, 'the fix-after-a-later-sighting merge changed: check supabase/README.md');
+  assert.match(sync, /if \(newest && newest\.done_at && newest\.how !== 'cleared' && \(ms\(newest\.done_at\) \?\? 0\) <= flagged && sameChange\(newest, t\)/, 'the ticked-off-after-the-close merge changed: check supabase/README.md');
+  assert.doesNotMatch(flat, /closed flag with no row always goes in/, 'supabase/README.md says a closed flag with no row always goes in, while the function merges it in two orders');
+  assert.match(flat, /a closed flag with no row goes in as its own item \(a change flagged and fixed on one machine between two syncs\), except in two orders that make it the same item as a row the server holds: the fix reached the server after another machine sighted the same change[\s\S]{0,800}?, or a machine that rescanned on an old registry ticked the change off before its first sync, after the item was closed already/);
 
   const billing = read('../supabase/functions/_shared/billing.mjs');
   assert.match(billing, /an invoice being retried \(past_due\) or no longer retried\n\/\/ but still payable \(unpaid\)/, 'the billing code\'s account of unpaid changed: check supabase/README.md');
@@ -1692,6 +1763,20 @@ test('the help says what a no to Chrome from the side panel\'s list does: nothin
   for (const line of help.split('\n').filter((l) => /Allow reading \[website\]/.test(l))) assert.match(line, /stopped at (the|its) re-check/, `help.md ties Allow reading to a stopped post: ${line.slice(0, 80)}`);
 });
 
+// review: the help said the record of listings taken off the posted list keeps
+// the VIN and times, while it keeps the car's name too (src/takenDown.js
+// noteTakenDown), which the listing reader's namesake check reads.
+test('the help says what the take-down record keeps, the car\'s name among it, and what each part is for', async () => {
+  const { noteTakenDown } = await import('../extension/src/takenDown.js');
+  const [kept] = noteTakenDown([], { vin: 'TESTVIN00000000T1', postedAt: '2026-11-16T09:00:00.000Z', stillListed: true, listedBefore: true, name: '2021 Make Model' }, '2026-11-16T12:00:00.000Z');
+  assert.deepEqual(Object.keys(kept).sort(), ['listedBefore', 'name', 'postedAt', 'stillListed', 'takenDownAt', 'vin'], 'the take-down record keeps something else now: update the help and this test');
+  assert.match(read('../extension/upkeep.js'), /for \(const t of takenDownList\(takenDown\)\) if \(!others\.get\(t\.vin\)\) others\.set\(t\.vin, t\.name/, 'the namesake check no longer reads the take-down record\'s names: the help can change');
+  const browser = doc('help.md').split('\n').find((l) => l.startsWith('**In this browser, per website:**'));
+  assert.ok(browser, 'the help no longer says what is kept in this browser');
+  assert.doesNotMatch(browser, /the VIN and times of each listing you took off/, 'the help leaves the car\'s name out of the take-down record');
+  assert.match(browser, /the VIN, the car's name and the times of each listing you took off your posted list in the last 30 days, with whether the website still listed the car then and whether you had marked it as gone up before that day \(for the re-post notice, so the daily cap counts a post taken down the same day, and so a listing of that car is not taken for another car with a name like it\)/);
+});
+
 test('the help says one post from a website goes at a time across Chrome windows, as the side panel holds it', () => {
   const panel = read('../extension/sidepanel.js');
   // startFlow checks the website's saved post for any car, and saves its own from the start of the check
@@ -1707,6 +1792,22 @@ test('the help says one post from a website goes at a time across Chrome windows
   // a copy in a second window replaces the post only while it is the post as it stands (saveId)
   assert.match(panel, /const samePost = [^;]*\(saved\.saveId \|\| null\) === \(known \|\| null\);/, 'saveFlow lets a copy save only while it is the post as it stands');
   assert.match(help, /A side panel opened in a second window while a post was under way shows that post as it stood then\. Once the first window's side panel has changed it \(text typed there, or its form opened\), nothing done in the second window's copy is saved over it, and that copy opens no form, while the first window's side panel or that form stays open\./);
+  // review: the help and the data inventory said a second window's copy never replaces the saved post, and nothing
+  // said a refused save goes unsaid: typing saves without reading the answer (onInput), and once the first window's
+  // panel is closed with no form open there (liveElsewhere null) the second window's save replaces the post
+  assert.match(panel, /setFormButtons\(\);\n    saveFlow\(\);\n  \}, 250\);/, 'typing in the review now reads whether its save was refused: the help can say what the panel shows');
+  assert.match(panel, /other = samePost \? null : await liveElsewhere\(saved\);\n      if \(other\) return undefined;/, 'a refused save no longer writes nothing: update the help and the data inventory');
+  assert.match(panel, /const panels = await chrome\.runtime\.getContexts\(\{ contextTypes: \['SIDE_PANEL'\], windowIds: \[saved\.windowId\] \}\);\n    if \(panels && panels\.length\) return found;/);
+  assert.match(help, /The second window's panel does not say when a change made there was not saved: text typed into its copy then stays only on that screen, is kept nowhere, and is gone once that side panel closes, so type in the window whose side panel has the post\./);
+  assert.match(help, /Once the first window's side panel is closed with no Marketplace form of that post open there, the side panel in the second window takes the post over: its next save replaces the saved post with its own copy as it stands/);
+  const single = help.slice(help.indexOf('## Post one car'), help.indexOf('## Post several (the queue)'));
+  assert.match(single, /Side panels open in two Chrome windows: one post from a website goes at a time, and a change made in the second window's copy of a post may not be saved\. The point under "Post several \(the queue\)" that starts "Each car is recorded once" says how; it holds for a single post too\./, 'the single-post section does not point to what happens in a second window');
+  assert.match(help, /^- Each car is recorded once[^\n]*The second window's panel does not say when a change made there was not saved/m, 'the pointer names the point that says it');
+  const flowRow = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `postFlow:<origin>` |'));
+  assert.doesNotMatch(flowRow, /never replaces it/, 'the data inventory says a second window\'s copy never replaces the saved post, while it takes the post over once the first window\'s panel is closed with no form open');
+  assert.doesNotMatch(flowRow, /\(in a queue, with whether its page was seen to show the car\)/, 'the data inventory says the listing page is read only in a queue, while it is read after every post');
+  assert.match(flowRow, /the listing address detected, with whether its page was seen to show the car \(read after every post, in a queue or not\)/);
+  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written: opening the form or starting a post there says that the post is under way in another window, while text typed or picks made there are dropped without a word/);
 });
 
 // The help said a price "with or without $" and a mileage "however it is

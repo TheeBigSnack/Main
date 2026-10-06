@@ -563,17 +563,33 @@ test('a scan from before a listing got its price never decides its basis: a webs
 });
 
 // Every place that saves a scan records the basis it read (scanRunner.js
-// keepSeenBasis): the popup's Scan, set-up's read and the background rescan.
-test('the popup, set-up and the background rescan each record the basis a scan reads', async () => {
-  for (const file of ['popup.js', 'wizard.js', 'background.js']) {
+// keepSeenBasis): the popup's Scan, set-up's read and the background rescan,
+// each handing over the scan's diff. A read held back as a website hiccup
+// (diff.unreliable) records nothing: the recorded basis goes up with the next
+// sync and becomes every computer's, so it comes only from a read the
+// extension trusts, and the next trusted scan reads it again.
+test('the popup, set-up and the background rescan each record the basis a scan reads, and none from a read held back as a hiccup', async () => {
+  for (const [file, diff] of [['popup.js', 'r.diff'], ['wizard.js', 'diff'], ['background.js', 'diff']]) {
     const src = readFileSync(new URL(`../extension/${file}`, import.meta.url), 'utf8');
-    assert.match(src, /keepSeenBasis\(/, `${file} records it`);
+    const calls = [...src.matchAll(/keepSeenBasis\(([^;]*)\)\.catch/g)].map((m) => m[1].split(',').map((x) => x.trim()));
+    assert.equal(calls.length, 1, `${file} records it once`);
+    assert.equal(calls[0][3], diff, `${file} hands over this scan's diff`);
   }
   const { keepSeenBasis } = await import('../extension/src/scanRunner.js');
-  const store = { ['posted:' + STANDARD_ORIGIN]: { [VIN.ram]: { name: 'Ram', price: 27163, postedAt: AT } } };
-  const storage = { get: async (key) => ({ [key]: store[key] }), set: async (obj) => Object.assign(store, obj), lock: (name, fn) => fn() };
-  await keepSeenBasis(STANDARD_ORIGIN, snapshot(LOT), snapshot(LOT), storage);
-  assert.equal(store['posted:' + STANDARD_ORIGIN][VIN.ram].basis, 'website');
+  const fresh = () => ({ ['posted:' + STANDARD_ORIGIN]: { [VIN.ram]: { name: 'Ram', price: 26673, postedAt: AT } } });
+  const storageOf = (store) => ({ get: async (key) => ({ [key]: store[key] }), set: async (obj) => Object.assign(store, obj), lock: (name, fn) => fn() });
+  const lot = snapshot(LOT); // the Ram: $27,163, or $26,673 before the fee
+  const trusted = diffScans(snapshot(LOT), lot, { confirm: confirmed() });
+  assert.equal(trusted.unreliable, false);
+  const store = fresh();
+  await keepSeenBasis(STANDARD_ORIGIN, null, lot, trusted, storageOf(store));
+  assert.equal(store['posted:' + STANDARD_ORIGIN][VIN.ram].basis, 'beforeFees', 'a trusted read records the basis it shows');
+  // the same read, judged a website hiccup and held back: nothing recorded
+  for (const diff of [{ ...trusted, unreliable: true }, null, undefined, {}]) {
+    const held = fresh();
+    assert.equal(await keepSeenBasis(STANDARD_ORIGIN, null, lot, diff, storageOf(held)), undefined);
+    assert.equal(held['posted:' + STANDARD_ORIGIN][VIN.ram].basis, undefined, `nothing recorded with the diff ${JSON.stringify(diff && { unreliable: diff.unreliable })}`);
+  }
 });
 
 // My listings (popup.js viewMine), as written, with the page around it

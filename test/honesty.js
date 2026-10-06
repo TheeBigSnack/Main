@@ -11,18 +11,68 @@
 
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
 
+// Lot Current or our product, as the object of a verb that says Meta stands
+// behind it ("Meta sponsors the Lot Current extension") or the subject of the
+// same verb in the passive ("Our tool is backed by Facebook").
+const PRODUCT = String.raw`(?:(?:the )?lot current(?: for chrome)?(?: (?:chrome )?(?:extension|tool|app|product|team|company))?|(?:this|our|lot current['’]s) (?:[a-z]+ )?(?:tool|extension|app|product|company|team)|the (?:tool|extension|app))`;
+const OURS = String.raw`(?:${PRODUCT}|us)\b`;
+const WE = String.raw`\b(?:${PRODUCT}|we)`;
+// Meta, Facebook or Marketplace as the subject.
+const META = String.raw`\b(?:meta(?: platforms)?|facebook|marketplace)`;
+// What may stand between the subject and the verb without denying anything:
+// up to four helper verbs or adverbs ("will", "can", "is", "does", "has been",
+// "officially", "also"). "not", "never", a "n't" word and the negating
+// adverbs ("hardly", "barely") are not among them, so "Meta does not support
+// Lot Current" and "Meta hardly supports Lot Current" are no claim.
+const HELPERS = String.raw`(?: (?:itself|also|too|now|still|always|already|even|just|has|have|had|been|be|being|will|would|can|could|may|might|must|shall|should|does|did|do|is|are|was|were|gets|got|(?!(?:hardly|scarcely|barely|rarely|seldom)\b)[a-z]+ly)){0,4}`;
+// Meta's backing as a verb, in the base, -s, past and -ing forms: "support",
+// "sponsors", "backed", "OK'd", "is funding", "partnered with", "stands behind".
+const BACKING = String.raw`(?:recommend(?:s|ed|ing)?|back(?:s|ed|ing)?|support(?:s|ed|ing)?|sponsor(?:s|ed|ing)?|fund(?:s|ed|ing)?|ok(?:s|['’]s|['’]d|ed|ing)?|okay(?:s|ed|ing)?|endors(?:e|es|ed|ing)|approv(?:e|es|ed|ing)|certif(?:y|ies|ied|ying)|authori[sz](?:e|es|ed|ing)|allow(?:s|ed|ing)?|permit(?:s|ted|ting)?|vouch(?:es|ed|ing)? for|stand(?:s|ing)? behind|stood behind|partner(?:s|ed|ing)? with|team(?:s|ed|ing)? up with|work(?:s|ed|ing)? with)`;
+// The same backing in the passive: "sponsored", "backed", "OK'd".
+const BACKED = String.raw`(?:recommended|backed|supported|sponsored|funded|ok['’]d|okayed|endorsed|approved|certified|authori[sz]ed|allowed|permitted|vouched for)`;
+// Two to four of them in a row: "supports and endorses", "sponsored, backed or funded".
+const AND = String.raw`(?:,| and| or| &|, and|, or)`;
+// A denial just before a slogan's verb: "not", "never", "neither", "nor", "in
+// no way" or a "n't" word, then at most one adverb ("not officially") and the other verbs
+// of a list ("not sponsored or", "neither sponsored nor"). "Not only", "not merely",
+// "not simply", "not solely" and "not surprisingly" affirm, so they are no such adverb.
+const DENIED = String.raw`(?:\b(?:not|never|neither|nor|in no way)|n['’]t)(?: (?!(?:only|merely|simply|solely|surprisingly)\b)[a-z]+ly)?(?: ${BACKED}(?:,| or| nor|, or|, nor)){0,3} `;
+
 // Saying Lot Current is affiliated with, approved by or a partner of Meta.
 export const AFFILIATION = [
   /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed) (by|for|on) (meta|facebook|marketplace)\b/i,
   /\b(meta|facebook|marketplace)[- ](approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
+  // "Meta-backed", "Facebook-sponsored" (with a hyphen only: "Facebook backed up the draft" is no claim)
+  /\b(meta|facebook|marketplace)-(backed|sponsored|funded|supported|okayed)\b/i,
   /\b(meta|facebook) (has|have|had) (approved|endorsed|certified|sanctioned|authori[sz]ed|verified|recommended|recogni[sz]ed)\b/i,
   // the present tense: "Meta approves of Lot Current", "Facebook endorses it"
   /\b(meta|facebook|marketplace) (approves|endorses|certifies|sanctions|authori[sz]es|accredits)\b/i,
   // verbs with honest uses ("Facebook recommends square photos", "backs up your draft", "Marketplace supports
-  // 20 photos") count only with Lot Current as the object: "Meta supports Lot Current", "Facebook OKs Lot Current"
-  /\b(meta|facebook|marketplace) (recommends|backs|supports|oks|okays|ok['’]s|vouches for|stands behind)( of)? (lot current|this (tool|extension|app|product)|the extension|our (tool|extension|app|product)|us)\b/i,
+  // 20 photos") count only with Lot Current, us or our product as the object: "Meta supports Lot Current",
+  // "Facebook OKs Lot Current", "Meta sponsors us", "Meta will sponsor Lot Current", "Meta is sponsoring Lot
+  // Current", "Meta has been sponsoring Lot Current", "Meta does support Lot Current", "Meta officially supports
+  // Lot Current", "Meta supports and endorses Lot Current", "Facebook has partnered with Lot Current"
+  new RegExp(String.raw`${META}${HELPERS} ${BACKING}(?:${AND} ${BACKING}){0,3}(?: of)? ${OURS}`, 'i'),
+  // and in the passive, Lot Current or our product as the subject: "Lot Current is supported by Meta", "The Lot
+  // Current extension has been backed by Facebook", "We are proudly backed by Meta", "Lot Current, supported by Meta"
+  new RegExp(String.raw`${WE}(?:,| [–—-])?${HELPERS} ${BACKED}(?:${AND} ${BACKED}){0,3} by (?:meta|facebook|marketplace)\b`, 'i'),
+  // the strongest of them anywhere, a slogan included: "Backed by Meta", "Sponsored by Marketplace", "proudly
+  // funded by Facebook"; a denial ("not sponsored or backed by Meta", "Neither sponsored nor backed by Meta",
+  // "isn't backed by Meta") is no claim
+  new RegExp(String.raw`(?<!${DENIED})\b(?:sponsored|backed|funded|ok['’]d|okayed|vouched for) by (?:meta|facebook|marketplace)\b`, 'i'),
+  // and the milder ones as a slogan, at the start of a sentence or line, past any heading or bullet mark,
+  // opening bracket, quote or HTML tag, or inside brackets or quotes: "Supported by Meta.", "Proudly supported
+  // by Facebook.", "## Powered by Meta", "- Supported by Meta", "(supported by Meta)", "<p>Supported by Meta</p>"
+  /(?:^|[.!?:;•*|–—(\["'“‘>]\s*)(?:[#>*\-–—•(\["'“‘]+\s*|<[a-z][^>]*>\s*)*(?:[a-z]+ly )?(?:supported|powered) by (?:meta|facebook|marketplace)\b/im,
+  // Meta as Lot Current's sponsor, as a noun: "Meta is a sponsor of Lot Current", "Facebook, an early backer",
+  // "our sponsor, Meta"
+  /\b(?:meta(?: platforms)?|facebook|marketplace)(?:,| is| was| has been| became| as)? (?:a|an|the|our|one of our|lot current['’]s)(?: [a-z]+){0,2} (?:sponsor|backer|funder|investor|supporter)s?\b/i,
+  /\b(?:our|lot current['’]s) (?:[a-z]+ )?(?:sponsor|backer|funder|investor|supporter)s?(?:,| is| are| include)? (?:meta|facebook)\b/i,
   /\b(approved|endorsed|certified|sanctioned|authori[sz]ed|accredited) (meta|facebook|marketplace)\b/i,
-  /\b(meta|facebook)['’]s (approval|endorsement|blessing)\b/i,
+  // "Meta's approval", "with Facebook's backing", "Meta's sponsorship of Lot Current", "Meta's support for us",
+  // "with the blessing of Meta" ("Facebook's backing up the draft" is no claim)
+  new RegExp(String.raw`\b(?:meta|facebook|marketplace)['’]s (?:approval|endorsement|blessing|backing(?! up\b)|sponsorship|funding|seal of approval|stamp of approval|support (?:for|of) ${OURS})`, 'i'),
+  /\bwith (?:the )?(?:[a-z]+ )?(?:approval|endorsement|blessing|backing|sponsorship|funding|support) of (?:meta|facebook|marketplace)\b/i,
   /\b(meta|facebook)(['’]s)?( [a-z]+){0,2} partners?\b/i,
   /\bpartner(ed|ship|s)? (with|of) (meta|facebook)\b/i,
   /\bin partnership with\b/i,

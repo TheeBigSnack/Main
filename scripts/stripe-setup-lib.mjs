@@ -34,9 +34,10 @@
 // (existing subscriptions keep the price they were sold).
 //
 // A live key (sk_live_, rk_live_) is refused unless live is given, and live
-// mode is refused while pricing.json still says "hypothesis": true: real
-// prices wait for docs/launch-checklist.md, "Pricing confirmed" (a dealer
-// has agreed to a price in writing). The key
+// mode is refused until pricing.json says "hypothesis": false with
+// "confirmedOn", a real date not after today: real prices wait for
+// docs/launch-checklist.md, "Pricing confirmed" (a dealer has agreed to a
+// price in writing); the refusal names what is missing. The key
 // goes out only as the bearer on calls to api.stripe.com and is never
 // printed. The webhook's signing secret is printed once, when the endpoint
 // is created, because Stripe shows it only then.
@@ -60,13 +61,19 @@ export const FAILED_PAYMENTS_NOTE = 'not read or set here: in the Stripe Dashboa
 
 const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 // A price a dealer agreed to in writing: "hypothesis": false with "confirmedOn",
-// the real date of that agreement (docs/launch-checklist.md, "Pricing confirmed")
-function pricingConfirmed(pricing) {
-  if (!isRecord(pricing) || pricing.hypothesis !== false) return false;
+// the real date of that agreement (docs/launch-checklist.md, "Pricing
+// confirmed"), written YYYY-MM-DD and not after today (UTC): an agreement
+// that has not happened yet confirms nothing. What is missing, or '' when
+// nothing is.
+export function pricingUnconfirmed(pricing, now = Date.now()) {
+  if (!isRecord(pricing) || pricing.hypothesis !== false) return 'it still says "hypothesis": true (anything but false counts as true)';
   const day = pricing.confirmedOn;
-  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
-  const t = Date.parse(day + 'T00:00:00Z');
-  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === day;
+  if (day === undefined || day === null || day === '') return 'it says "hypothesis": false but has no "confirmedOn" date';
+  const t = typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(day + 'T00:00:00Z') : NaN;
+  if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== day) return `its "confirmedOn" (${JSON.stringify(day)}) is not a real date written YYYY-MM-DD`;
+  const today = new Date(now).toISOString().slice(0, 10);
+  if (day > today) return `its "confirmedOn" (${day}) is after today (${today}), and it must be the date a dealer has already agreed to the price in writing`;
+  return '';
 }
 const cents = (dollars) => Math.round(Number(dollars) * 100);
 
@@ -237,13 +244,13 @@ export function webhookMismatch(endpoint, events) {
 
 // ---------- the run ----------
 
-// { key, apply, live, reprice, webhookUrl, pricing, productName, siteUrl, fetchImpl }
+// { key, apply, live, reprice, webhookUrl, pricing, productName, siteUrl, fetchImpl, now }
 // -> { ok, mode, lines: [{ check, ok, note?, detail }], secrets: { NAME: value }, webhookSecret }
 // A line is ok, FAIL (ok false) or a note (ok false, note true; does not fail
 // the run). secrets holds the ids the function needs; webhookSecret is set
 // only when this run created the endpoint.
 export async function runSetup(opts) {
-  const { key, apply = false, live = false, reprice = false, pricing, productName, siteUrl = '', fetchImpl } = opts;
+  const { key, apply = false, live = false, reprice = false, pricing, productName, siteUrl = '', fetchImpl, now = Date.now() } = opts;
   const lines = [];
   const secrets = {};
   let webhookSecret = '';
@@ -262,8 +269,9 @@ export async function runSetup(opts) {
     return done();
   }
   // Live prices charge real money: not from a file that still calls itself a guess
-  if (mode === 'live' && !pricingConfirmed(pricing)) {
-    fail('marketing/pricing.json', 'it still says "hypothesis": true, or has no "confirmedOn" date, so nothing was read or changed in live mode. Live prices wait for docs/launch-checklist.md, "Pricing confirmed": a dealer has agreed to a price in writing, pricing.json has "hypothesis": false, "confirmedOn" set to the date of that agreement and those numbers, and test/marketing.test.js passes');
+  const unconfirmed = mode === 'live' ? pricingUnconfirmed(pricing, now) : '';
+  if (unconfirmed) {
+    fail('marketing/pricing.json', `${unconfirmed}, so nothing was read or changed in live mode. Live prices wait for docs/launch-checklist.md, "Pricing confirmed": a dealer has agreed to a price in writing, pricing.json has "hypothesis": false, "confirmedOn" set to the date of that agreement (YYYY-MM-DD, not after today) and those numbers, and test/marketing.test.js passes`);
     return done();
   }
   // A --site-url that is given but unusable would leave the portal with no

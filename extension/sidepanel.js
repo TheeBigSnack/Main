@@ -516,14 +516,17 @@ function formValues() {
 // same), goes back to the review screen with the new values and checks, and
 // the status line says what changed and what to fix: the person sees it
 // before anything is filled. A post dropped during the read (readCarNow)
-// goes no further. Resolves true to go on.
-async function carStillCurrent() {
+// goes no further. Resolves true to go on. `waiting` is what waits for the
+// check, for the status line: the form opening (Open the Marketplace form),
+// the form being filled (Fill it in now, a fill), filled again (Fill again)
+// or the photos attached again (Attach photos again).
+async function carStillCurrent(waiting = 'the form opens') {
   if (!readIsOld()) return true;
   const run = flowRun;
   const was = state.step;
   const before = { values: formValues() };
   state.step = 'checking';
-  state.message = 'Checking the car on the website again before the form opens…';
+  state.message = `Checking the car on the website again before ${waiting}…`;
   setStatus('');
   render();
   const car = await readCarNow();
@@ -1074,7 +1077,7 @@ async function runFill({ opened = false, photos = true } = {}) {
     return undefined;
   }
   if (run !== flowRun || state.fbTabId !== tabId) return undefined;
-  if (!(await carStillCurrent()) || run !== flowRun || state.fbTabId !== tabId) return undefined;
+  if (!(await carStillCurrent(photos ? 'the form is filled' : 'the form is filled again')) || run !== flowRun || state.fbTabId !== tabId) return undefined;
   const blocked = fillBlocker(listing && listing.fields && listing.fields.description);
   if (blocked) {
     if (state.step === 'filling') {
@@ -1130,7 +1133,7 @@ async function fillFromProbe() {
     return render();
   }
   if (descriptionStopped()) return undefined;
-  if (!(await carStillCurrent())) return undefined;
+  if (!(await carStillCurrent('the form is filled'))) return undefined;
   return runFill();
 }
 
@@ -1242,7 +1245,7 @@ async function attachPhotos(only = null, { again = false } = {}) {
 async function attachAgain() {
   const run = flowRun;
   const tabId = state.fbTabId;
-  if (!(await carStillCurrent()) || run !== flowRun || state.fbTabId !== tabId || state.step !== 'publish') return undefined;
+  if (!(await carStillCurrent('the photos are attached again')) || run !== flowRun || state.fbTabId !== tabId || state.step !== 'publish') return undefined;
   return attachPhotos(null, { again: true });
 }
 

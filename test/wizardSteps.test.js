@@ -196,13 +196,18 @@ test('the Terms step\'s summary says what syncs to the dealership\'s account whe
     assert.match(s, /You publish every post yourself\. Lot Current is not affiliated with Meta Platforms, Inc\.$/);
   }
   assert.doesNotMatch(off, /sync|database|account/i, 'without accounts nothing leaves the browser, and the summary says nothing of an account');
-  assert.match(on, /While you are signed in, your posted list \([^)]*\), your post timings, your to-do items \(with the old and new price of a price change\) and the newest scan's counts also sync to your dealership's account in Lot Current's database\./);
+  assert.match(on, /While you are signed in, your posted list \([^)]*\), your post timings, your to-do items \(with the old and new price of a price change\) and the newest scan's counts \(marked as held back when that scan looked like a website hiccup\) also sync to your dealership's account in Lot Current's database\./);
   // every field of a posted-list entry that sync sends is named in the parentheses
-  const sent = syncPayload({ origin: ORIGIN, posted: { TESTVIN00000000A1: { name: 'A', price: 1, postedAt: '2026-11-16T09:00:00.000Z', updatedAt: '2026-11-16T10:00:00.000Z', listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Sam' } } }).posted.TESTVIN00000000A1;
-  const words = { name: 'name', price: 'price', postedAt: 'when you posted', updatedAt: 'and updated it', listingUrl: 'the listing link', salesperson: 'your name' };
+  // (review: the price basis and the before-that-day mark were left out, because this entry had neither)
+  const payload = syncPayload({ origin: ORIGIN, posted: { TESTVIN00000000A1: { name: 'A', price: 1, basis: 'beforeFees', postedAt: '2026-11-16T09:00:00.000Z', updatedAt: '2026-11-16T10:00:00.000Z', listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Sam', listedBefore: true } }, scan: { takenAt: '2026-11-16T11:00:00.000Z', cars: 3, ready: 2, takeDownCount: 0, priceUpdateCount: 0, withheld: true } });
+  const sent = payload.posted.TESTVIN00000000A1;
+  const words = { name: 'name', price: 'price', basis: "whether that is the website's main price or its lower second price", postedAt: 'when you posted', updatedAt: 'and updated it', listingUrl: 'the listing link', salesperson: 'your name', listedBefore: 'whether a listing you marked posted had gone up before that day' };
   const listed = on.match(/your posted list \(([^)]*)\)/)[1];
   assert.match(listed, /\bVIN\b/);
   for (const field of Object.keys(sent)) assert.ok(words[field] && listed.includes(words[field]), `the summary does not name the posted-list field ${field} that sync sends`);
+  // the sync function marks a listing taken down when it leaves the list (status, taken_down_at), and keeps a scan's held-back mark
+  assert.match(listed, /when you took it off the list/);
+  assert.equal(payload.scan.withheld, true, 'a held-back scan no longer goes up marked: the summary can change');
   // the step shows the summary for this build's config
   const { wiz, wizardHtml } = await import('../extension/wizard.js');
   wiz.step = 'terms';

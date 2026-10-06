@@ -270,7 +270,13 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
 // read its price on, the last scan's or this one's (src/rescan.js
 // withSeenBasis), so the reading still stands once the website moves the
 // price. Written under the posted list's lock; nothing when nothing is read.
-export function keepSeenBasis(origin, previous, snapshot, storage) {
+// `diff` is the scan's saved diff: only a read it trusts (unreliable: false)
+// records anything. A read judged a website hiccup is held back (withWithheld)
+// and records nothing: the basis goes up with the next sync and becomes every
+// computer's, and the next trusted scan reads it again from the same saved
+// snapshot. A missing diff records nothing either.
+export async function keepSeenBasis(origin, previous, snapshot, diff, storage) {
+  if (!diff || typeof diff !== 'object' || diff.unreliable !== false) return undefined;
   return updateKey(siteKeys(origin).posted, (posted) => withSeenBasis(posted, previous, snapshot), storage);
 }
 

@@ -2750,7 +2750,7 @@ import { vehicle as fixtureVehicle } from './helpers.js';
 // carStillCurrent as sidepanel.js writes it (with readIsOld, readCarNow,
 // takeCar and formValues), over the real checks, with the website read stubbed.
 function staleReader(state, read) {
-  const calls = { reads: 0, blocked: [], said: [], saved: 0 };
+  const calls = { reads: 0, blocked: [], said: [], saved: 0, checking: [] };
   const scope = {
     state, flowRun: 0, READ_MAX_AGE_MS,
     readCarForPost: async (req) => { calls.reads += 1; calls.req = req; return read(); },
@@ -2767,7 +2767,7 @@ function staleReader(state, read) {
     pickedPhotos: () => (state.vehicle && state.vehicle.photos) || [],
     block: async (message, code) => { calls.blocked.push(code); state.step = 'blocked'; state.message = message; },
     setStatus: (text, tone) => calls.said.push([text, tone]),
-    render: () => {},
+    render: () => { if (state.step === 'checking') calls.checking.push(state.message); },
     saveFlow: async () => { calls.saved += 1; },
   };
   const fns = compileMany(['carStillCurrent', 'readIsOld', 'readCarNow', 'takeCar', 'formValues'], scope, ['money', 'ctx', 'noteFor']);
@@ -2791,6 +2791,16 @@ test('a post whose car was read a while ago (or before the panel was closed) rea
   const now = staleReader(reviewState({ readAt: new Date().toISOString() }), () => { throw new Error('read'); });
   assert.equal(await now.run(), true);
   assert.equal(now.calls.reads, 0);
+
+  // while it reads, the status line says what waits for the check: the form opening, or (Fill again, Attach
+  // photos again, a fill of a form already open) no form opening at all
+  for (const [next, said] of [[undefined, 'Checking the car on the website again before the form opens…'],
+    ['the form is filled again', 'Checking the car on the website again before the form is filled again…'],
+    ['the photos are attached again', 'Checking the car on the website again before the photos are attached again…']]) {
+    const r = staleReader(reviewState({ readAt: null, step: 'publish' }), () => ({ ok: true, vehicle: FRESH_CAR() }));
+    assert.equal(await r.run(next), true);
+    assert.deepEqual(r.calls.checking, [said]);
+  }
 
   // a flow saved before reads were timed, or one left at review for days: read again; unchanged, the fill goes on
   for (const readAt of [undefined, null, new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString()]) {
@@ -2853,10 +2863,13 @@ test('a car that sold, went sale-pending, turned new or lost its price since it 
 });
 
 test('Open the Marketplace form and every fill read the car again first; a post started now records when it read the car', async () => {
+  // each says what waits for the check: the form opening (the default), the form filled, filled again, or the photos attached again
+  assert.match(fnText('carStillCurrent'), /^async function carStillCurrent\(waiting = 'the form opens'\)/);
   assert.match(fnText('openForm'), /if \(descriptionStopped\(\)\) return undefined;\n\s*if \(!\(await carStillCurrent\(\)\) \|\| dropped\(\)\) return undefined;/);
+  assert.match(fnText('attachAgain'), /if \(!\(await carStillCurrent\('the photos are attached again'\)\) \|\| run !== flowRun/);
   assert.match(fnText('descriptionStopped'), /const why = fillBlocker\(state\.description\);/);
-  assert.match(fnText('fillFromProbe'), /if \(descriptionStopped\(\)\) return undefined;\n\s*if \(!\(await carStillCurrent\(\)\)\) return undefined;\n\s*return runFill\(\);/);
-  assert.match(fnText('runFill'), /if \(!\(await carStillCurrent\(\)\) \|\| run !== flowRun \|\| state\.fbTabId !== tabId\) return undefined;\n\s*const blocked = fillBlocker\(listing && listing\.fields && listing\.fields\.description\);/);
+  assert.match(fnText('fillFromProbe'), /if \(descriptionStopped\(\)\) return undefined;\n\s*if \(!\(await carStillCurrent\('the form is filled'\)\)\) return undefined;\n\s*return runFill\(\);/);
+  assert.match(fnText('runFill'), /if \(!\(await carStillCurrent\(photos \? 'the form is filled' : 'the form is filled again'\)\) \|\| run !== flowRun \|\| state\.fbTabId !== tabId\) return undefined;\n\s*const blocked = fillBlocker\(listing && listing\.fields && listing\.fields\.description\);/);
   assert.match(fnText('startFlow'), /const car = await readCarNow\(\);[\s\S]*takeCar\(car\);/);
   assert.match(fnText('readCarNow'), /readAt: new Date\(\)\.toISOString\(\)/);
   assert.match(fnText('takeCar'), /state\.readAt = car\.readAt;/);
