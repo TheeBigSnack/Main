@@ -202,6 +202,9 @@ _Review round: manager view and billing_
 - **The numbers and their words** (`manager/data.js`): empty to-do cards say "No open take-down items" or "No open price items"; the pill is plain, not green, with no scan, an old scan or listings nobody watches; an open price item shows the website's current price; flagged equals done plus still open plus cleared; Two salespeople posting counts only current salespeople; the stale-scan pill and the definitions say rescans run every 3 hours only with automatic rescans allowed; and the CSV definitions no longer describe form-field numbers. A person signed in but in no dealership is told where an invite code goes.
 - **The page loads its library from its own folder** (`manager/vendor/`, `manager/_headers`): supabase-js 2.117.2 is served from the page's own folder and the Content-Security-Policy allows scripts from the page's own origin only; jsDelivr is gone from the privacy policy's processors and the data inventory.
 
+_Review round: tests_
+- **The stack test's last-manager check** (`test/stack/03-last-manager.stack.mjs`): it looks for the Team card's error line as `onTeam` builds it now (the sentence is made once, then shown on the Team card or, when another dealership was picked meanwhile, in the status line). It still looked for the older single line, so CI's `stack` job failed on that one check while the page behaved as intended.
+
 Not proven until a real website is scanned
 - Which dealer platforms publish markup this reader can use, and whether their list pages link their cars without scripts. A list drawn by scripts shows Lot Current few or no cars.
 - Whether real websites answer a background rescan's reads (sent without cookies) as they answer the tab.
