@@ -8,14 +8,19 @@
 // member inside their own dealership; this file trusts what it is given):
 //   listings        id, dealership_id, user_id, vin, name, price, posted_at,
 //                   listing_url, salesperson, updated_at, taken_down_at,
-//                   status 'listed' | 'taken_down'
+//                   status 'listed' | 'taken_down', listed_before (a listing
+//                   made by hand before the day it was marked posted:
+//                   posted_at is when it was marked, so it is no post, this
+//                   week or all time; it is counted apart)
 //   todo_items      id, dealership_id, vin, kind 'takeDown' | 'price', name,
 //                   flagged_at, done_at, how 'detected' | 'manual' | 'cleared',
 //                   from_price, to_price
 //   post_attempts   id, dealership_id, user_id, vin, name, salesperson, queue,
 //                   started_at, ended_at, outcome, seconds, reason
 //   scan_summaries  id, dealership_id, website_origin, taken_at, cars, ready,
-//                   take_down_count, price_update_count
+//                   take_down_count, price_update_count, withheld (a scan
+//                   the extension held back as a likely website hiccup: its
+//                   counts are of its own short read, migration 0016)
 //   memberships     user_id, dealership_id, role 'salesperson' | 'manager', name
 //
 // The Billing card (Milestone 5) is drawn from GET .../billing/status's
@@ -44,7 +49,11 @@
 //   - "Sold cars still listed" are the open take-down items (todo_items, kind
 //     takeDown, no done_at). A scan summary carries counts, not VINs, so
 //     "listings the latest scan no longer has" cannot be derived here; the
-//     extension's rescan decides that and writes the to-do item.
+//     extension's rescan decides that and writes the to-do item, and only
+//     for the salesperson's own listings. So an empty list says only that
+//     nothing is flagged, never that every sold car is off Marketplace:
+//     clearLine() words it, with what it rests on (no scan yet, an old
+//     scan, cars still listed by people no longer on the team).
 //   - A to-do item names no salesperson; the listing with the same VIN does,
 //     so each item is joined to its listing for the name and the link.
 //   - Posts are counted from listings (the posted registry: one row per
@@ -57,14 +66,85 @@
 
 export const WEEK_MS = 7 * 24 * 3600 * 1000; // "this week" is the last 7 days
 export const OVERDUE_HOURS = 24; // an open item past this is shown in red
-export const SCAN_STALE_HOURS = 6; // rescans run every 3 hours while Chrome is open; twice that and something is off
+export const SCAN_STALE_HOURS = 6; // with automatic rescans allowed they run every 3 hours while Chrome is open; twice that and something is off
+// What the stale pill says after the hours: why a scan can be that old. No
+// rescan ran (Chrome closed, or automatic rescans not allowed), or the ones
+// that ran looked like a website hiccup: those are held back, never the last
+// scan (an extension of this build sends them marked withheld, and the line
+// says how many there were; an older one sends none; accountFlow.js
+// scanFromStored).
+export const SCAN_STALE_WHY = 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one held back as a likely website hiccup (most of the lot gone at once) is never the last scan';
+// A scan stamped further ahead of this computer's clock than this ran on a
+// machine whose clock was ahead: /sync refuses such a scan (the same margin,
+// FUTURE_SKEW_MS in supabase/functions/sync/index.ts), and the last scan line
+// leaves out one stored before it did, so it cannot stay "0 hours ago" and
+// hide the stale warning until its date comes.
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
+// The listing links the page and the CSV show: a Marketplace listing's own
+// address only, by the rule the extension saves links by (extension/
+// facebook/detectPost.js listingLink, with formMap.js's listingUrlPattern
+// and the create form's origin; this file is not imported from there, and
+// test/manager.test.js holds the two equal). Another spelling of the website
+// (m., web. or no www) becomes the form's origin. A link saved before the
+// extension checked it (the Your listings page Facebook lands on after
+// Publish, another page, text that is not an address) is shown as none: it
+// would open the wrong page.
+export const LISTING_URL_PATTERN = '^https://www\\.facebook\\.com/marketplace/item/(\\d+)';
+export const LISTING_ORIGIN = 'https://www.facebook.com';
+export function listingHref(url) {
+  const t = typeof url === 'string' ? url.trim() : '';
+  if (!t) return '';
+  let u;
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : 'https://' + t);
+  } catch (e) {
+    return '';
+  }
+  const domain = new URL(LISTING_ORIGIN).hostname.replace(/^www\./i, '');
+  const host = u.hostname.toLowerCase();
+  const tries = /^https?:$/.test(u.protocol) && (host === domain || host.endsWith('.' + domain)) ? [LISTING_ORIGIN + u.pathname, LISTING_ORIGIN + u.pathname + u.search] : [u.href];
+  const pattern = new RegExp(LISTING_URL_PATTERN, 'i');
+  return tries.find((link) => { const m = pattern.exec(link); return Boolean(m && m[1]); }) || '';
+}
+
+// What the to-do cards say, claiming only what the items show: an item opens
+// only on the poster's own computer, when their extension's rescan finds the
+// car gone from the website or its price changed. So no open item does not
+// mean every sold car is down: the poster's Chrome may be closed, or they
+// may have left the team (summarize's notOnTeam lists those cars for a
+// manager).
+export const EMPTY_TAKE_DOWNS = 'No open take-down items. One opens when a rescan on the poster\'s own computer finds their car gone from the website.';
+export const EMPTY_PRICE_ITEMS = 'No open price items. One opens when a rescan on the poster\'s own computer finds the website price changed.';
+export const NOT_ON_TEAM_TITLE = 'Listed by people no longer on the team';
+export const NOT_ON_TEAM_HINT = 'Their extension no longer syncs, and sold-car and price items come only from the poster\'s own extension, so nobody is told when these cars sell or change price. Check each one against the website, and have the person who posted it take it down or update the price on Facebook: the listing is on their own profile.';
+// The CSV's line in place of that list when the viewer is not a manager:
+// only a manager reads the whole team, so nobody else can be told apart.
+export const NOT_ON_TEAM_UNKNOWN = 'Left out: only a manager reads the whole team, so only a manager\'s download lists these cars.';
+
+// The CSV's count of listings marked posted as "Before today" (listed_before),
+// apart from the posts: the summary row and the Salespeople column. The
+// page says the same under its Salespeople table (manager.js).
+export const BEFORE_TODAY_COLUMN = 'Marked posted as Before today (not posts)';
+
+// The page's line under its Salespeople table when listings were marked
+// posted as "Before today": they are left out of the posts (this week and
+// All time) and counted under Listings up or Taken down. '' when none were.
+export function beforeTodayNote(n) {
+  if (!(Number.isInteger(n) && n > 0)) return '';
+  const one = n === 1;
+  return `"This week" and "All time" count posts only: ${one ? 'one listing' : `${n} listings`} marked posted as "Before today" (on Facebook before ${one ? 'it was' : 'they were'} marked) ${one ? 'is' : 'are'} left out of them and counted under Listings up or Taken down.`;
+}
+
+// What each number in the CSV means: the pilot's definitions
+// (extension/src/pilot.js) less its form-fields sentence, because the
+// records of which form fields filled stay on each salesperson's Numbers
+// tab and never sync, so the manager's numbers have none.
 export const DEFINITIONS = Object.freeze([
   'Time per post runs from the click on Post to "It\'s posted", the salesperson\'s review and their own Publish click included; abandoned attempts are not in the median.',
-  'Form fields count one entry per fill of the Marketplace form (a dry run is not a fill), by field name only: never the values or the description.',
   'A sold car\'s flag starts at the scan that first put the item on To do for the salesperson\'s own listing and ends when Lot Current sees the listing changed, the person ticks it off, or a clean scan no longer lists it, which counts as "cleared by the website".',
   'A price change\'s flag starts and ends the same way.',
-  'Hours run from the flagging scan, and rescans happen every 3 hours while Chrome is open.',
+  'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.',
 ]);
 
 // ---------- time ----------
@@ -137,7 +217,7 @@ function peopleOf(memberships, listings, attempts) {
     const key = keyOf(r);
     let p = people.get(key);
     if (!p) {
-      p = { key, userId: r.user_id || null, name: '', postedThisWeek: 0, postedAllTime: 0, listed: 0, takenDown: 0, postedAttempts: 0, seconds: [] };
+      p = { key, userId: r.user_id || null, name: '', postedThisWeek: 0, postedAllTime: 0, listedBefore: 0, listed: 0, takenDown: 0, postedAttempts: 0, seconds: [] };
       people.set(key, p);
     }
     if (!p.name && r.salesperson) p.name = text(r.salesperson, 60);
@@ -154,10 +234,18 @@ function peopleOf(memberships, listings, attempts) {
 /**
  * @param {object} input
  *   listings, todoItems, postAttempts, scans, memberships: rows as above
+ *   heldScans: how many scans were held back as a likely website hiccup
+ *             since the newest trusted scan in `scans`, when the rows hold
+ *             only the newest of them (manager.js reads the newest trusted
+ *             scan, and the newest held-back one since it with a count of
+ *             them all); default and floor: the held-back rows `scans` has
+ *             since that trusted scan
+ *   role:     the signed-in viewer's role in the dealership; only for
+ *             'manager' is notOnTeam a list (else null: not known)
  *   now:      ISO time the ages count from (default: the clock)
  *   timeZone: IANA zone for the last-scan line (default: this computer's)
  */
-export function summarize({ listings, todoItems, postAttempts, scans, memberships, now = nowIso(), timeZone } = {}) {
+export function summarize({ listings, todoItems, postAttempts, scans, heldScans, memberships, role = '', now = nowIso(), timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
@@ -169,13 +257,22 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
   const M = rows(memberships);
 
   // ----- salespeople -----
+  // A listing marked posted as "Before today" (listed_before: it was on
+  // Facebook before the day it was marked, and posted_at is that marking) is
+  // no post, this week or all time: it counts apart (listedBefore), and
+  // under listings up or taken down like any other listing.
   const { people, get } = peopleOf(M, L, A);
+  const posts = L.filter((l) => l.listed_before !== true);
   for (const l of L) {
     const p = get(l);
+    if (isTakenDown(l)) p.takenDown += 1; else p.listed += 1;
+    if (l.listed_before === true) {
+      p.listedBefore += 1;
+      continue;
+    }
     p.postedAllTime += 1;
     const at = ms(l.posted_at);
     if (at !== null && at >= t - WEEK_MS && at <= t) p.postedThisWeek += 1;
-    if (isTakenDown(l)) p.takenDown += 1; else p.listed += 1;
   }
   const posted = A.filter((a) => a.outcome === 'posted');
   for (const a of posted) {
@@ -185,12 +282,13 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     if (s !== null) p.seconds.push(s);
   }
   const salespeople = [...people.values()]
-    .map((p) => ({ name: p.name || NO_NAME, userId: p.userId, postedThisWeek: p.postedThisWeek, postedAllTime: p.postedAllTime, listed: p.listed, takenDown: p.takenDown, postedAttempts: p.postedAttempts, medianSeconds: median(p.seconds) }))
+    .map((p) => ({ name: p.name || NO_NAME, userId: p.userId, postedThisWeek: p.postedThisWeek, postedAllTime: p.postedAllTime, listedBefore: p.listedBefore, listed: p.listed, takenDown: p.takenDown, postedAttempts: p.postedAttempts, medianSeconds: median(p.seconds) }))
     .sort((a, b) => b.postedThisWeek - a.postedThisWeek || b.postedAllTime - a.postedAllTime || a.name.localeCompare(b.name));
   const totals = {
     salespeople: salespeople.length,
     postedThisWeek: salespeople.reduce((n, p) => n + p.postedThisWeek, 0),
-    postedAllTime: L.length,
+    postedAllTime: posts.length,
+    listedBefore: L.length - posts.length,
     listed: L.filter(isListed).length,
     takenDown: L.filter(isTakenDown).length,
     postedAttempts: posted.length,
@@ -216,7 +314,7 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
       vin,
       name: text(f.name, 80) || (l && text(l.name, 80)) || vin,
       salesperson: nameOf(l),
-      listingUrl: l && l.listing_url ? String(l.listing_url) : '',
+      listingUrl: listingHref(l && l.listing_url),
       listedPrice: l ? num(l.price) : null,
       flaggedAt: f.flagged_at || null,
       hoursOpen,
@@ -224,27 +322,104 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     };
   };
   const longestFirst = (a, b) => (b.hoursOpen ?? -1) - (a.hoursOpen ?? -1) || a.name.localeCompare(b.name);
-  const soldStillListed = T.filter((f) => f.kind === 'takeDown' && isOpen(f)).map(item).sort(longestFirst);
-  const priceMismatches = T.filter((f) => f.kind === 'price' && isOpen(f)).map((f) => ({ ...item(f), fromPrice: num(f.from_price), toPrice: num(f.to_price) })).sort(longestFirst);
+  // One open item per car and kind, the first flagged: the sync function
+  // keeps one, but two machines of one salesperson that synced the same
+  // sighting at the same moment (or before it kept one) can each have left
+  // a row, and the car is still one car to fix.
+  const openOf = (kind) => {
+    const first = new Map();
+    for (const f of T) {
+      if (f.kind !== kind || !isOpen(f)) continue;
+      const have = first.get(vinOf(f));
+      if (!have || (ms(f.flagged_at) ?? Infinity) < (ms(have.flagged_at) ?? Infinity)) first.set(vinOf(f), f);
+    }
+    return [...first.values()];
+  };
+  const soldStillListed = openOf('takeDown').map(item).sort(longestFirst);
+  const priceMismatches = openOf('price').map((f) => ({ ...item(f), fromPrice: num(f.from_price), toPrice: num(f.to_price) })).sort(longestFirst);
 
+  // ----- listings no rescan looks after -----
+  // A to-do item comes only from the poster's own extension (its rescan
+  // flags the salesperson's own listings, extension/src/pilot.js noteFlags),
+  // so a car still listed by someone who is no longer a member is checked by
+  // nobody: no item ever opens for it, whatever the website does. They are
+  // listed here, oldest first, for the manager to chase. Only a manager
+  // reads every membership of the dealership; row-level security shows a
+  // salesperson their own row alone (0002_rls.sql) while they read every
+  // listing, so for anyone else each colleague's car would look left
+  // behind. For a viewer who is not a manager, or without the memberships,
+  // notOnTeam is null: not known, never a list.
+  const memberIds = new Set(M.map((m) => String(m.user_id || '')).filter(Boolean));
+  const notOnTeam = role === 'manager' && memberIds.size
+    ? L.filter((l) => isListed(l) && l.user_id && !memberIds.has(String(l.user_id)))
+      .map((l) => ({
+        vin: vinOf(l),
+        name: text(l.name, 80) || vinOf(l),
+        salesperson: nameOf(l),
+        listingUrl: listingHref(l.listing_url),
+        listedPrice: num(l.price),
+        postedAt: l.posted_at || null,
+        hoursListed: hoursBetween(l.posted_at, nowAt),
+      }))
+      .sort((a, b) => (b.hoursListed ?? -1) - (a.hoursListed ?? -1) || a.name.localeCompare(b.name))
+    : null;
+
+  // Each count is of items, not rows: rows of one car whose times overlap
+  // (flagged before the other closed) are one item, the sync function's
+  // rule, which keeps one row per item but can be raced into two. Open rows
+  // of a car always overlap, so a car has at most one open item, as the
+  // lists above. An item is open while any of its rows is; else done when a
+  // row closed it other than as cleared (the first such close, its hours
+  // from the item's first sighting); else cleared. So flagged = done + open
+  // + cleared, as the CSV says.
   const flagStats = (flags) => {
-    const done = flags.filter((f) => f.done_at && f.how !== 'cleared');
-    const hours = done.map((f) => hoursBetween(f.flagged_at, f.done_at)).filter((h) => typeof h === 'number');
+    const items = [];
+    const byCar = new Map();
+    for (const f of flags) byCar.set(vinOf(f), [...(byCar.get(vinOf(f)) || []), f]);
+    for (const carRows of byCar.values()) {
+      let item = null;
+      let end = -Infinity;
+      for (const f of [...carRows].sort((a, b) => (ms(a.flagged_at) ?? 0) - (ms(b.flagged_at) ?? 0))) {
+        const stop = isOpen(f) ? Infinity : ms(f.done_at) ?? Infinity;
+        if (item && (ms(f.flagged_at) ?? 0) <= end) item.push(f);
+        else items.push((item = [f]));
+        end = Math.max(end, stop);
+      }
+    }
+    const done = [];
+    let open = 0;
+    let cleared = 0;
+    for (const item of items) {
+      if (item.some(isOpen)) { open += 1; continue; }
+      const fix = item.filter((f) => f.how !== 'cleared').sort((a, b) => (ms(a.done_at) ?? Infinity) - (ms(b.done_at) ?? Infinity))[0];
+      if (fix) done.push({ how: fix.how, hours: hoursBetween(item[0].flagged_at, fix.done_at) });
+      else cleared += 1;
+    }
+    const hours = done.map((d) => d.hours).filter((h) => typeof h === 'number');
     return {
-      flagged: flags.length,
+      flagged: items.length,
       done: done.length,
-      detected: done.filter((f) => f.how === 'detected').length,
-      cleared: flags.filter((f) => f.how === 'cleared').length,
-      open: flags.filter(isOpen).length,
+      detected: done.filter((d) => d.how === 'detected').length,
+      cleared,
+      open,
       medianHours: median(hours),
       longestHours: hours.length ? Math.max(...hours) : null,
     };
   };
 
-  // ----- the last scan -----
+  // ----- the last scan: the newest trusted one that has run by now
+  // (FUTURE_SKEW_MS), with the scans held back as a likely website hiccup
+  // since it (withheld): how many, from heldScans when the page counted them
+  // apart from the rows it read -----
   let last = null;
-  for (const s of S) if (ms(s.taken_at) !== null && (!last || ms(s.taken_at) > ms(last.taken_at))) last = s;
-  const lastScan = last ? scanLine(last, nowAt, zone) : null;
+  const heldRows = [];
+  for (const s of S) {
+    if (ms(s.taken_at) === null || ms(s.taken_at) > t + FUTURE_SKEW_MS) continue;
+    if (s.withheld === true) heldRows.push(s);
+    else if (!last || ms(s.taken_at) > ms(last.taken_at)) last = s;
+  }
+  const heldSince = heldRows.filter((s) => !last || ms(s.taken_at) > ms(last.taken_at));
+  const lastScan = last || heldSince.length ? scanLine(last, nowAt, zone, heldSince, Math.max(heldSince.length, count(heldScans) ?? 0)) : null;
 
   return {
     now: nowAt,
@@ -256,14 +431,67 @@ export function summarize({ listings, todoItems, postAttempts, scans, membership
     totals,
     soldStillListed,
     priceMismatches,
+    notOnTeam,
+    clear: { sold: clearLine('sold', lastScan, notOnTeam ? notOnTeam.length : 0), price: clearLine('price', lastScan, notOnTeam ? notOnTeam.length : 0) },
     takeDowns: flagStats(T.filter((f) => f.kind === 'takeDown')),
     priceUpdates: flagStats(T.filter((f) => f.kind === 'price')),
   };
 }
 
+// What an empty "Sold cars still listed" or "Price changes not yet updated"
+// says, and its pill's tone. Only what the rows support: what an item is
+// (EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS: one opens only on the poster's own
+// computer), and why an empty card is worth less when there is no scan yet,
+// the last one is old, or some cars are still listed by people no longer on
+// the team (notOnTeam, a manager's view only). An empty card is never an
+// all-clear, so its tone is never 'good': '' (the plain pill) unless an old
+// scan or such cars make it 'warn'.
+const CLEAR_WORDS = Object.freeze({
+  sold: { none: EMPTY_TAKE_DOWNS, since: 'a car sold since then' },
+  price: { none: EMPTY_PRICE_ITEMS, since: 'a price that changed since then' },
+});
+export function clearLine(kind, lastScan, notOnTeamCount = 0) {
+  const w = CLEAR_WORDS[kind] || CLEAR_WORDS.sold;
+  const parts = [w.none];
+  let tone = '';
+  if (!lastScan) {
+    parts.push('No scan is recorded yet, so nothing has been checked.');
+  } else if (lastScan.withheld) {
+    const one = lastScan.withheld.scans === 1;
+    const which = lastScan.takenAt ? (one ? 'The scan since the last trusted one was' : 'The scans since the last trusted one were') : (one ? 'The one scan recorded was' : 'Every scan recorded was');
+    parts.push(`${which} held back as a likely website hiccup, so ${w.since} is not flagged yet.`);
+    tone = 'warn';
+  } else if (lastScan.stale) {
+    parts.push(`The last scan is ${typeof lastScan.hoursAgo === 'number' ? `${lastScan.hoursAgo} h` : 'hours'} old, so ${w.since} is not flagged yet.`);
+    tone = 'warn';
+  }
+  const n = count(notOnTeamCount) || 0;
+  if (n) {
+    parts.push(`${n === 1 ? 'One car is' : `${n} cars are`} still listed by people no longer on the team, and no rescan checks ${n === 1 ? 'it' : 'them'} (below).`);
+    tone = 'warn';
+  }
+  return { tone, line: parts.join(' ') };
+}
+
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-function scanLine(s, nowAt, zone) {
+// The last scan line: the newest trusted scan `s` (null when none is
+// recorded), and the scans held back since it (`held`, the withheld rows
+// read, and `heldCount`, how many there are, read or not): how
+// many, the newest one's time and car count, and that nothing they missed
+// is flagged until the website recovers or a salesperson accepts the smaller
+// list. With held-back scans the line is stale whatever the trusted scan's
+// age: nothing it missed has been flagged since.
+function scanLine(s, nowAt, zone, held = [], heldCount = held.length) {
+  const newest = held.reduce((a, h) => (!a || ms(h.taken_at) > ms(a.taken_at) ? h : a), null);
+  const withheld = newest ? { scans: heldCount, newestAt: newest.taken_at, cars: num(newest.cars) ?? 0 } : null;
+  const heldLine = withheld
+    ? `${withheld.scans === 1 ? `One${s ? ' later' : ''} scan` : `${withheld.scans}${s ? ' later' : ''} scans`} (the newest ${fmtLocal(withheld.newestAt, zone)}: ${plural(withheld.cars, 'car')} on the website) ${withheld.scans === 1 ? 'was' : 'were'} held back as a likely website hiccup, with most of the lot missing at once, so nothing ${withheld.scans === 1 ? 'it' : 'they'} missed is flagged. If the website really lists fewer cars now, a salesperson can accept the smaller list on the extension's To do tab.`
+    : '';
+  if (!s) {
+    const hoursAgo = hoursBetween(newest.taken_at, nowAt);
+    return { takenAt: null, websiteOrigin: newest.website_origin || '', cars: null, ready: null, takeDownCount: null, priceUpdateCount: null, hoursAgo, stale: true, withheld, line: `No trusted scan is recorded yet. ${heldLine}` };
+  }
   const cars = num(s.cars) ?? 0;
   const ready = num(s.ready) ?? 0;
   const takeDown = num(s.take_down_count) ?? 0;
@@ -274,9 +502,105 @@ function scanLine(s, nowAt, zone) {
     websiteOrigin: s.website_origin || '',
     cars, ready, takeDownCount: takeDown, priceUpdateCount: price,
     hoursAgo,
-    stale: typeof hoursAgo === 'number' && hoursAgo > SCAN_STALE_HOURS,
-    line: `Last scan ${fmtLocal(s.taken_at, zone)}: ${plural(cars, 'car')} on the website, ${ready} ready to post, ${takeDown} to take down, ${plural(price, 'price change')}`,
+    stale: Boolean(withheld) || (typeof hoursAgo === 'number' && hoursAgo > SCAN_STALE_HOURS),
+    withheld,
+    line: `Last scan ${fmtLocal(s.taken_at, zone)}: ${plural(cars, 'car')} on the website, ${ready} ready to post, ${takeDown} to take down, ${plural(price, 'price change')}${withheld ? `. ${heldLine}` : ''}`,
   };
+}
+
+// ---------- reading every row ----------
+
+// The hosted API answers at most its "Max rows" per request (1,000 unless
+// the owner changed it) and drops the rest without an error, and a
+// dealership's listings, to-do items and post attempts are kept until the
+// dealership is deleted, so a table read in one request would lose its
+// oldest rows, and the numbers and the CSV with them. readAll() asks page
+// after page: `page(from, to)` is one request for that range of rows,
+// answering as supabase-js does ({ data, error, count }). It stops once it
+// holds `count` rows (the first page asks for it) or a page comes back
+// empty, so a server cap below PAGE_ROWS loses nothing either. A row with an
+// id is kept once (a row added between two requests shifts the order by
+// one). A failed page is an error, never a short list.
+export const PAGE_ROWS = 1000;
+export const MAX_PAGES = 1000;
+export async function readAll(page, { pageRows = PAGE_ROWS, maxPages = MAX_PAGES } = {}) {
+  const out = [];
+  const seen = new Set();
+  let total = null;
+  let offset = 0;
+  for (let n = 0; ; n += 1) {
+    if (n >= maxPages) throw new Error(`more than ${maxPages} pages of rows; the page stops reading rather than show part of them`);
+    const { data, error, count } = (await page(offset, offset + pageRows - 1)) || {};
+    if (error) throw new Error((error && error.message) || String(error));
+    const got = Array.isArray(data) ? data : [];
+    if (typeof count === 'number' && count >= 0) total = count;
+    for (const r of got) {
+      const id = r && typeof r === 'object' && r.id !== null && r.id !== undefined ? String(r.id) : null;
+      if (id !== null) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      out.push(r);
+    }
+    offset += got.length;
+    if (!got.length || (total !== null && offset >= total)) return out;
+  }
+}
+
+// ---------- a sign-in answer this page did not ask for ----------
+
+// The page signs in with the PKCE flow: its own link comes back with a
+// one-time ?code= that supabase-js exchanges with the verifier this browser
+// kept. Two other answers can land here, because the project's Site URL is
+// this page: #access_token=...&refresh_token=... from an implicit-flow link
+// (an email asked for elsewhere without a PKCE challenge: an extension from
+// before it sent one, or a call made by hand), and #error=... when the auth
+// server refused a link. supabase-js refuses either with no word on the
+// page and leaves the fragment, tokens and all, in the address bar (the
+// pinned copy keeps a session this browser already has; older versions
+// removed it). authFragment() reads the fragment so the page can take it
+// out of the address before supabase-js starts, end the session those
+// tokens opened, and say one sentence. The sentences never quote the
+// address: anyone can write words into a link.
+export const STRAY_LINK_NOTE = 'That link was not asked for on this page, so it does not sign you in here. Asked from the Lot Current extension? Ask it for a new code: opening the link used this one up. To sign in here, send yourself a link below.';
+export const FAILED_LINK_NOTE = 'That sign-in link did not work: it may have expired, been used already, or been replaced by a newer email. Send yourself a new one below.';
+export const UNUSED_CODE_NOTE = 'That sign-in link did not sign you in here. A link asked for on this page works once, in the browser that asked for it. One asked for in the Lot Current extension never signs in here, and opening it used up its code: ask the extension for a new one. To sign in here, send yourself a link below.';
+
+/**
+ * @param {string} hash  location.hash, with or without the leading #
+ * @returns {null | { accessToken: string, note: string }}  null when the
+ *   fragment carries neither a token nor an auth error
+ */
+export function authFragment(hash) {
+  const raw = String(hash ?? '').replace(/^#/, '');
+  if (!raw) return null;
+  const p = new URLSearchParams(raw);
+  const accessToken = p.get('access_token') || '';
+  const tokens = Boolean(accessToken || p.get('refresh_token') || p.get('provider_token'));
+  const failed = Boolean(p.get('error') || p.get('error_code') || p.get('error_description'));
+  if (!tokens && !failed) return null;
+  return { accessToken, note: tokens ? STRAY_LINK_NOTE : FAILED_LINK_NOTE };
+}
+
+// A link the auth server refused (expired, used, replaced by a newer email)
+// on this page's own PKCE flow comes back with the error in the query as
+// well as in the fragment: ?error=...&error_code=...&error_description=...
+// supabase-js reads the query too and takes an error_description there for
+// a failed sign-in, says nothing on the page, and leaves the words in the
+// address bar (older versions also removed a session this browser already
+// had; the pinned copy keeps it). authQueryError() names the error
+// parameters the query carries, so the page takes them out before
+// supabase-js starts, and says FAILED_LINK_NOTE.
+export const AUTH_ERROR_PARAMS = Object.freeze(['error', 'error_code', 'error_description']);
+/**
+ * @param {string} search  location.search, with or without the leading ?
+ * @returns {null | { params: string[], note: string }}  null when the query
+ *   carries no auth error
+ */
+export function authQueryError(search) {
+  const p = new URLSearchParams(String(search ?? '').replace(/^\?/, ''));
+  const params = AUTH_ERROR_PARAMS.filter((k) => p.has(k));
+  return params.length ? { params, note: FAILED_LINK_NOTE } : null;
 }
 
 // ---------- billing ----------
@@ -320,8 +644,8 @@ const salespeopleIn = (s) => (s.role === 'manager' ? count(s.salespeople) : null
  * The seats Subscribe asks Checkout for: one per salesperson now, never
  * fewer than the plan includes (the rooftop price covers those, and the
  * billing function bills only the seats above them). Null when the answer
- * has no count; Subscribe then sends none and the function keeps the
- * included count, or the seats the row already had.
+ * has no count; Subscribe then sends none and the billing function bills the
+ * included count, never the seats of a subscription that has ended.
  * @param {object} status   GET .../billing/status's answer
  * @param {object} options  pricing: { includedSalespeople } fallback, as billingCard takes it
  * @returns {number|null}
@@ -367,6 +691,48 @@ export function billingBody(route, status, { returnUrl = '', dealershipId = '' }
   return body;
 }
 
+// Before billing opens (manager/config.js billing false: the billing
+// function comes with Stripe, docs/stripe-setup.md step 5) the page does not
+// call it. It reads the plan as row-level security lets a member, the row and
+// subscription_state() (the word /sync serves by), and closedBillingStatus()
+// shapes them like the function's answer with `open: false`. The free pilot
+// needs no billing function (start_pilot() is the database's), so a manager
+// of a dealership with no plan yet still gets Start the free pilot, on the
+// function's own rule (pilotAvailable); Subscribe and Manage billing wait for
+// billing. The card says paying by card is not open yet, a pilot the owner
+// recorded by agreement shows with its end date, and a lapsed plan says whom
+// to ask, since nothing on the page can renew it yet.
+export const BILLING_CLOSED_NOTE = 'Paying by card is not open yet, so nothing is charged; to carry on after the free pilot, ask your Lot Current contact.';
+export const BILLING_CLOSED_ASK = 'Billing is not open yet: ask your Lot Current contact.';
+// While the billing function runs on a Stripe test-mode key (the status
+// answer's testMode, docs/stripe-setup.md before the live switch), the card
+// says so to everyone who reads it: Checkout takes only Stripe's test cards,
+// and what test mode writes is reset when billing goes live.
+export const BILLING_TEST_MODE_NOTE = 'Billing is in Stripe test mode: only Stripe\'s test cards work, nothing is charged, and a subscription started now does not carry over when real billing starts.';
+// A pilot can start when there is no row, or only the shell of one (a Stripe
+// customer from a checkout that never finished: no status, no pilot): the
+// billing function's pilotAvailable(), word for word (test/billing.test.js
+// holds the two equal), which start_pilot() applies in SQL too.
+export function pilotAvailable(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return true;
+  return (row.status === null || row.status === undefined) && (row.pilot_ends_at === null || row.pilot_ends_at === undefined);
+}
+export function closedBillingStatus(word, row, { role = '' } = {}) {
+  const subscription = row && typeof row === 'object' && !Array.isArray(row) ? row : null;
+  return {
+    state: PLAN_STATES.includes(word) ? word : 'unknown',
+    open: false,
+    role: typeof role === 'string' ? role : '',
+    subscription,
+    canStartPilot: role === 'manager' && pilotAvailable(subscription),
+    canSubscribe: false,
+    canManageBilling: false,
+    pilotDays: null,
+    includedSalespeople: null,
+    salespeople: null,
+  };
+}
+
 // Why a plan has lapsed, from the Stripe status on the row; a pilot that
 // ran out is worded from its end date instead.
 const LAPSED_WHY = Object.freeze({
@@ -377,6 +743,28 @@ const LAPSED_WHY = Object.freeze({
   canceled: 'The subscription was cancelled.',
   paused: 'The subscription is paused.',
 });
+
+// What renews a lapsed plan that Stripe still holds open (hasOpenSubscription:
+// a payment that did not go through, a first payment not finished, a pause).
+// Subscribe is not it: the billing function refuses a second Checkout next to
+// an open subscription and offers no Subscribe button. A failed renewal is
+// fixed by the card in Manage billing; a pause or an unfinished first payment
+// promises no retry. `card` follows the Billing card's why-line, `step` is the
+// Getting started line; with no Manage billing to offer, both say whom to ask.
+const LAPSED_OPEN = Object.freeze({
+  past_due: Object.freeze({ card: 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.', step: 'The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.' }),
+  unpaid: Object.freeze({ card: 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.', step: 'The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.' }),
+  incomplete: Object.freeze({ card: 'Open Manage billing to check the card, or ask your Lot Current contact.', step: 'The first payment did not go through: open Manage billing in the Billing card, or ask your Lot Current contact.' }),
+  paused: Object.freeze({ card: 'Ask your Lot Current contact, or open Manage billing.', step: 'The subscription is paused: ask your Lot Current contact, or open Manage billing in the Billing card.' }),
+});
+const LAPSED_ASK = Object.freeze({ card: 'Ask your Lot Current contact.', step: 'The plan has lapsed: ask your Lot Current contact.' });
+// The renewal words for a lapsed status answer, or null when Subscribe is
+// the way (the plan is not held open and the answer offers Subscribe).
+function lapsedRenewal(s) {
+  const sub = s.subscription && typeof s.subscription === 'object' ? s.subscription : {};
+  if (hasOpenSubscription(sub)) return (s.canManageBilling && LAPSED_OPEN[sub.status]) || LAPSED_ASK;
+  return s.canSubscribe ? null : LAPSED_ASK;
+}
 
 // The local calendar date alone (2026-12-05), for a plan line.
 export function fmtLocalDate(iso, timeZone) {
@@ -404,7 +792,9 @@ export function fmtLocalDate(iso, timeZone) {
  *   now:      ISO time the days left count from (default: the clock)
  *   timeZone: IANA zone for the dates (default: this computer's)
  *   pricing:  { pilotDays, includedSalespeople } fallback
- * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, salespeople, seatsPaid, seatLine, seatNote, seatTone, subscribeSeats, buttons: { action, label, does }[] }}
+ * modeNote is BILLING_TEST_MODE_NOTE while the answer says the billing
+ * function runs on a Stripe test-mode key, else empty.
+ * @returns {{ state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, salespeople, seatsPaid, seatLine, seatNote, seatTone, subscribeSeats, modeNote, buttons: { action, label, does }[] }}
  */
 export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) {
   const s = status && typeof status === 'object' ? status : {};
@@ -415,17 +805,19 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
   const date = (iso) => fmtLocalDate(iso, zone);
   const manager = s.role === 'manager';
   const state = PLAN_STATES.includes(s.state) ? s.state : 'unknown';
+  const billingOpen = s.open !== false; // closedBillingStatus: billing not open yet
   const pilotDays = num(s.pilotDays) ?? num(p.pilotDays);
   const includedSalespeople = num(s.includedSalespeople) ?? num(p.includedSalespeople);
   const salespeople = salespeopleIn(s);
 
   // buttons only for a manager and a state this page knows: a word the page
   // cannot read is a page and a function that disagree, and nothing to press
+  // (before billing opens only the pilot, which is the database's own call)
   const buttons = [];
   if (manager && state !== 'unknown') {
     if (s.canStartPilot) buttons.push({ ...BILLING_BUTTONS.pilot });
-    if (s.canSubscribe) buttons.push({ ...BILLING_BUTTONS.subscribe });
-    if (s.canManageBilling) buttons.push({ ...BILLING_BUTTONS.portal });
+    if (billingOpen && s.canSubscribe) buttons.push({ ...BILLING_BUTTONS.subscribe });
+    if (billingOpen && s.canManageBilling) buttons.push({ ...BILLING_BUTTONS.portal });
   }
 
   let label = 'Unknown';
@@ -443,6 +835,7 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
       'no card',
     ].filter(Boolean).join(', ');
     line = `No plan yet. ${manager ? 'Start' : 'A manager can start'} the free pilot: ${terms}.`;
+    if (manager && !billingOpen) detail = BILLING_CLOSED_NOTE;
   } else if (state === 'pilot') {
     label = 'Free pilot';
     const end = ms(sub.pilot_ends_at);
@@ -450,25 +843,51 @@ export function billingCard(status, { now = nowIso(), timeZone, pricing } = {}) 
     tone = daysLeft !== null && daysLeft <= PILOT_WARN_DAYS ? 'warn' : 'good';
     line = daysLeft === null ? 'Free pilot running.' : `Free pilot: ${plural(daysLeft, 'day')} left (ends ${date(sub.pilot_ends_at)}).`;
     // Checkout during a pilot with more than two days left starts the subscription as a trial to the pilot's end (the billing function)
-    if (manager && s.canSubscribe) detail = 'Subscribe any time: with more than two days of pilot left, the card is first charged when the pilot ends.';
+    if (manager && !billingOpen) detail = BILLING_CLOSED_NOTE;
+    else if (manager && s.canSubscribe) detail = 'Subscribe any time: with more than two days of pilot left, the card is first charged when the pilot ends.';
   } else if (state === 'active') {
     label = 'Subscribed';
     tone = 'good';
     const seats = seatsPaid(sub);
     const who = seats !== null ? `: ${plural(seats, 'seat')}` : '';
-    const when = sub.current_period_end ? `, ${sub.status === 'trialing' ? 'first charge' : 'renews'} ${date(sub.current_period_end)}` : '';
-    line = `Subscribed${who}${when}.`;
+    const verb = sub.status === 'trialing' ? 'first charge' : 'renews';
+    // cancelled in the portal: the date Stripe ends it (0009_cancel_at.sql), null while it renews
+    const ends = ms(sub.cancel_at) !== null ? sub.cancel_at : null;
+    const periodEnd = ms(sub.current_period_end);
+    if (ends === null) {
+      const when = sub.current_period_end ? `, ${verb} ${date(sub.current_period_end)}` : '';
+      line = `Subscribed${who}${when}.`;
+    } else if (periodEnd !== null && ms(ends) > periodEnd) {
+      // cancelled from a date after this period: the period still renews (or the trial still ends in a charge) first
+      label = 'Cancelled';
+      tone = 'warn';
+      line = `Subscribed${who}, ${verb} ${date(sub.current_period_end)}; cancelled from ${date(ends)}.`;
+    } else {
+      // cancelled in the portal: Stripe keeps the status until the end, and nothing renews or charges after it
+      label = 'Cancelled';
+      tone = 'warn';
+      // the end can be past while Stripe's last event is still on its way (the row then still says active): it ended, and nothing runs until then
+      const over = ms(ends) <= t;
+      const until = `${over ? 'ended' : 'ends'} ${date(ends)}`;
+      line = sub.status === 'trialing'
+        ? `Cancelled${who}, ${until} before the first charge.`
+        : `Cancelled${who}, ${until}${over ? '' : ' and does not renew'}.`;
+      if (manager && s.canManageBilling && !over) detail = 'Everything works as it does now until then; Manage billing can renew it.';
+    }
   } else if (state === 'lapsed') {
     label = 'Lapsed';
     tone = 'bad';
     line = 'The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed.';
     const pilotEnd = ms(sub.pilot_ends_at);
     detail = LAPSED_WHY[sub.status] || (pilotEnd !== null && pilotEnd <= t ? `The free pilot ended ${date(sub.pilot_ends_at)}.` : '');
+    if (!billingOpen) detail = [detail, BILLING_CLOSED_ASK].filter(Boolean).join(' '); // nothing here can renew it yet
+    else if (manager && hasOpenSubscription(sub)) detail = [detail, lapsedRenewal(s).card].filter(Boolean).join(' '); // held open: Manage billing, never Subscribe
   }
 
   const open = hasOpenSubscription(sub);
   const seatInfo = seatLines({ state, salespeople, includedSalespeople, paid: state === 'active' || open ? seatsPaid(sub) : null, subscribing: !open && buttons.some((b) => b.action === 'subscribe'), toBuy: subscribeSeats(s, { pricing: p }) });
-  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, buttons };
+  const modeNote = billingOpen && s.testMode === true ? BILLING_TEST_MODE_NOTE : '';
+  return { state, label, tone, line, detail, daysLeft, pilotDays, includedSalespeople, ...seatInfo, modeNote, buttons };
 }
 
 // What the card says when there are more salespeople than paid seats, in
@@ -587,7 +1006,7 @@ export function inviteCard(invites, { role, dealershipId, now = nowIso(), timeZo
 // ---------- the Team card ----------
 
 export const TEAM_LINE = 'Everyone in this dealership\'s Lot Current account. A manager can invite, bill and change the team; a salesperson posts.';
-export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
+export const TEAM_HINT = 'Removing someone stops their extension from syncing and cancels the invite codes they made; the cars they posted stay in the numbers, and any they still have listed show under "Listed by people no longer on the team", because no one\'s rescans check them any more. Making a manager a salesperson cancels the unused codes they made, too. A dealership always keeps at least one manager.';
 export const TEAM_UNCHANGED = 'Nothing changed: the team was changed elsewhere.';
 
 // The Team card's line after Make manager, Make salesperson or Remove, from
@@ -735,14 +1154,25 @@ const PLAN_STEP_LINES = Object.freeze({
   lapsed: 'The plan has lapsed: subscribe in the Billing card and syncing starts again.',
   unknown: 'The plan could not be read just now; the Billing card says more.',
 });
+// Before billing opens the first step is the free pilot alone (start_pilot()
+// needs no billing function), and a lapsed plan is renewed by asking.
+export const PLAN_STEP_CLOSED_TITLE = 'Start the free pilot';
+const PLAN_STEP_CLOSED_LINES = Object.freeze({
+  none: 'No plan yet: start the free pilot in the Billing card.',
+  lapsed: 'The plan has lapsed, and billing is not open yet: ask your Lot Current contact.',
+});
 
 /**
  * The Getting started card's four steps.
  *   1. a plan: the billing state is pilot or active;
  *   2. someone invited: an open invite code, or more than one member;
- *   3. a car posted and synced: any listing;
- *   4. two salespeople posting: at least two different people, not managers
- *      of the dealership, with a listing posted in the past 7 days.
+ *   3. a car posted and synced: any listing but one marked as made by hand
+ *      before the day it was marked posted (listed_before: no post);
+ *   4. two salespeople posting: at least two different people who hold the
+ *      salesperson role in the dealership now, with a listing posted in the
+ *      past 7 days (a manager, or someone who has left, does not count, and
+ *      neither does a listing marked as made before that day, as in
+ *      summarize's posted this week).
  * @param {object} input
  *   billing:      GET .../billing/status's answer (or the sample's); null when it could not be read
  *   invites:      the open codes the page holds (list_invites plus the ones made since)
@@ -750,14 +1180,20 @@ const PLAN_STEP_LINES = Object.freeze({
  *   listings:     the dealership's listings
  *   dealershipId: the chosen dealership; rows of another one are left out
  *   now:          ISO time "the past 7 days" counts back from (default: the clock)
+ *   billingOpen:  false before billing opens (manager/config.js billing):
+ *                 step 1 is the free pilot alone, and a lapsed plan says
+ *                 whom to ask
  * @returns {{ steps: { key, title, done, line, action: { target, label } | null }[], done, total, allDone, line }}
  */
-export function gettingStarted({ billing, invites, memberships, listings, dealershipId = '', now = nowIso() } = {}) {
+export function gettingStarted({ billing, invites, memberships, listings, dealershipId = '', now = nowIso(), billingOpen = true } = {}) {
   const t = ms(now) ?? Date.now();
   const nowAt = new Date(t).toISOString();
   const ours = (r) => !dealershipId || !r.dealership_id || r.dealership_id === dealershipId;
   const M = rows(memberships).filter((m) => m.user_id && INVITE_ROLES.includes(m.role) && ours(m));
   const L = rows(listings).filter(ours);
+  // a listing marked as made by hand before the day it was marked posted is not a post: its posted_at is when it was marked
+  const posts = L.filter((l) => l.listed_before !== true);
+  const before = L.length - posts.length;
   const step = (key, done, line) => {
     const s = GETTING_STARTED[key];
     return { key, title: s.title, done, line, action: !done && s.target ? { target: s.target, label: s.button } : null };
@@ -771,13 +1207,15 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
     : open > 1 ? `${open} invite codes are open, waiting to be used.`
     : 'Nobody else is in the dealership yet: make an invite code for each salesperson in the Invite codes card.';
 
-  // who posted in the past 7 days, by account, else by the name the extension recorded; a manager's own posts do not count
-  const managers = new Set(M.filter((m) => m.role === 'manager').map((m) => m.user_id));
+  // who posted in the past 7 days, by account, else by the name the extension recorded. An account counts only
+  // while it holds the salesperson role here, as usage_report's active_salespeople (0008_usage.sql): a manager's
+  // own posts do not count, nor do those of someone no longer in the dealership (their cars stay on the page)
+  const salespeople = new Set(M.filter((m) => m.role === 'salesperson').map((m) => m.user_id));
   const posting = new Set();
-  for (const l of L) {
+  for (const l of posts) {
     const at = ms(l.posted_at);
     if (at === null || at < t - WEEK_MS || at > t) continue;
-    if (l.user_id && managers.has(l.user_id)) continue;
+    if (l.user_id && !salespeople.has(l.user_id)) continue;
     posting.add(l.user_id ? `id:${l.user_id}` : `name:${text(l.salesperson, 60).toLowerCase() || NO_NAME}`);
   }
   const n = posting.size;
@@ -785,10 +1223,19 @@ export function gettingStarted({ billing, invites, memberships, listings, dealer
     : n === 1 ? `One salesperson posted in the past 7 days; this step needs ${ACTIVE_SALESPEOPLE}.`
     : 'No salesperson has posted in the past 7 days.';
 
+  const closed = billingOpen === false;
+  // a lapsed plan says "subscribe" only when the Billing card offers Subscribe; one Stripe holds open is renewed in Manage billing
+  const renewal = !closed && plan === 'lapsed' ? lapsedRenewal(billing) : null;
+  const planStep = step('plan', plan === 'pilot' || plan === 'active', (closed && PLAN_STEP_CLOSED_LINES[plan]) || renewal?.step || PLAN_STEP_LINES[plan]);
+  if (closed) planStep.title = PLAN_STEP_CLOSED_TITLE;
+
   const steps = [
-    step('plan', plan === 'pilot' || plan === 'active', PLAN_STEP_LINES[plan]),
+    planStep,
     step('invite', M.length > 1 || open > 0, inviteLine),
-    step('firstCar', L.length > 0, L.length ? `${plural(L.length, 'car')} posted and synced so far.` : 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs.'),
+    step('firstCar', posts.length > 0, [
+      posts.length ? `${plural(posts.length, 'car')} posted and synced so far.` : 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs.',
+      before ? `${plural(before, 'listing')} marked as made by hand before ${before === 1 ? 'it was' : 'they were'} marked posted ${before === 1 ? 'is' : 'are'} not counted.` : '',
+    ].filter(Boolean).join(' ')),
     step('twoPosting', n >= ACTIVE_SALESPEOPLE, postingLine),
   ];
   const done = steps.filter((s) => s.done).length;
@@ -813,15 +1260,16 @@ const kindLabel = (k) => (k === 'price' ? 'price change' : 'sold / take down');
 /**
  * @param {object} input   listings, todoItems, postAttempts, scans, memberships
  * @param {object} options
+ *   role:     the signed-in viewer's role, as summarize takes it
  *   now:      ISO time of the export
  *   dealer:   the dealership's name
  *   origin:   the dealership's website origin
  *   timeZone: IANA zone for every time in the file; default: this computer's
  */
-export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '', timeZone } = {}) {
+export function managerCsv(input = {}, { role = '', now = nowIso(), dealer = '', origin = '', timeZone } = {}) {
   const zone = resolveTimeZone(timeZone);
   const local = (iso) => fmtLocal(iso, zone);
-  const s = summarize({ ...input, now, timeZone: zone });
+  const s = summarize({ ...input, role, now, timeZone: zone });
   const L = rows(input.listings);
   const T = rows(input.todoItems);
   const A = rows(input.postAttempts);
@@ -837,6 +1285,7 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Salespeople', s.totals.salespeople]));
   out.push(csvRow(['Posted', s.totals.postedAllTime]));
   out.push(csvRow(['Posted in the last 7 days', s.totals.postedThisWeek]));
+  out.push(csvRow([BEFORE_TODAY_COLUMN, s.totals.listedBefore]));
   out.push(csvRow(['Listings up', s.totals.listed]));
   out.push(csvRow(['Taken down', s.totals.takenDown]));
   out.push(csvRow(['Median seconds per post', s.totals.medianSeconds]));
@@ -850,14 +1299,15 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Price changes still open', s.priceUpdates.open]));
   out.push(csvRow(['Price changes cleared by the website', s.priceUpdates.cleared]));
   out.push(csvRow(['Median hours from the flagging scan until updated', s.priceUpdates.medianHours]));
+  out.push(csvRow([NOT_ON_TEAM_TITLE, s.notOnTeam ? s.notOnTeam.length : null])); // blank when not known
   out.push(csvRow(['Last scan', s.lastScan ? s.lastScan.line : 'none yet']));
   out.push('');
   out.push(csvRow(['Definitions']));
   for (const d of DEFINITIONS) out.push(csvRow([d]));
   out.push('');
   out.push(csvRow(['Salespeople']));
-  out.push(csvRow(['Salesperson', 'Posted in the last 7 days', 'Posted', 'Listings up', 'Taken down', 'Median seconds per post']));
-  for (const p of s.salespeople) out.push(csvRow([p.name, p.postedThisWeek, p.postedAllTime, p.listed, p.takenDown, p.medianSeconds]));
+  out.push(csvRow(['Salesperson', 'Posted in the last 7 days', 'Posted', BEFORE_TODAY_COLUMN, 'Listings up', 'Taken down', 'Median seconds per post']));
+  for (const p of s.salespeople) out.push(csvRow([p.name, p.postedThisWeek, p.postedAllTime, p.listedBefore, p.listed, p.takenDown, p.medianSeconds]));
   out.push('');
   out.push(csvRow(['Sold cars still listed']));
   out.push(csvRow(['Flagged', 'Car', 'VIN', 'Salesperson', 'Hours open', 'Listing link']));
@@ -867,10 +1317,19 @@ export function managerCsv(input = {}, { now = nowIso(), dealer = '', origin = '
   out.push(csvRow(['Flagged', 'Car', 'VIN', 'Salesperson', 'Hours open', 'Price from', 'Price to', 'Listing link']));
   for (const o of s.priceMismatches) out.push(csvRow([local(o.flaggedAt), o.name, o.vin, o.salesperson, o.hoursOpen, o.fromPrice, o.toPrice, o.listingUrl]));
   out.push('');
+  out.push(csvRow([NOT_ON_TEAM_TITLE]));
+  if (s.notOnTeam) {
+    out.push(csvRow(['Posted', 'Car', 'VIN', 'Salesperson', 'Hours listed', 'Price', 'Listing link']));
+    for (const o of s.notOnTeam) out.push(csvRow([local(o.postedAt), o.name, o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]));
+  } else {
+    out.push(csvRow([NOT_ON_TEAM_UNKNOWN]));
+  }
+  out.push('');
   out.push(csvRow(['Listings']));
-  out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link']));
+  // a listing marked as made by hand before that day: Posted is when it was marked, and it is not one of the posts in the last 7 days
+  out.push(csvRow(['Posted', 'Salesperson', 'Car', 'VIN', 'Price', 'Status', 'Taken down', 'Listing link', 'Listed by hand before (Posted is when it was marked)']));
   for (const l of [...L].sort((a, b) => (ms(b.posted_at) ?? 0) - (ms(a.posted_at) ?? 0))) {
-    out.push(csvRow([local(l.posted_at), who(l), l.name, vinOf(l), num(l.price), isTakenDown(l) ? 'taken down' : 'listed', local(l.taken_down_at), l.listing_url || '']));
+    out.push(csvRow([local(l.posted_at), who(l), l.name, vinOf(l), num(l.price), isTakenDown(l) ? 'taken down' : 'listed', local(l.taken_down_at), listingHref(l.listing_url), l.listed_before === true ? 'yes' : '']));
   }
   out.push('');
   out.push(csvRow(['To-do items']));

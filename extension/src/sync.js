@@ -3,12 +3,15 @@
 // touches the network or chrome.storage. The caller (the popup, the side
 // panel or the worker, wired in with the Settings UI) does:
 //
-//   const body = syncPayload({ origin, posted, pilot, scan, since, known: state.known, userId });
+//   const localSince = new Date().toISOString(); // this machine's clock, before reading storage
+//   const body = syncPayload({ origin, posted, pilot, scan, since, localSince: state.localSince, known: state.known, userId });
 //   POST <project>/functions/v1/sync with authHeaders(session) (account.js)
 //   posted = mergeRegistry(posted, response, { since, userId, sent: body.posted });
-//   pilot  = mergeFlags(pilot, response);
-//   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId })
-//            // since, known, dealership id and role, the plan, the server's count of today's posts
+//   pilot  = mergeFlags(pilot, response, { posted, userId }); // posted: the merged registry: a flag of a fix made
+//            // elsewhere goes, and an open item on an own listing this machine does not hold comes in
+//   state  = nextSyncState(state, response, { today: body.today, sent: body.posted, userId, localSince })
+//            // since, localSince, known, dealership id and role, the plan, the server's count of today's posts,
+//            // and the person's posts the dealership's list does not hold (notShared)
 //
 // The state is per website; the wiring keeps it under a `sync` entry added
 // to SITE_KEY_NAMES in src/storageKeys.js, so clearing a website removes it.
@@ -32,7 +35,8 @@
 // (the function's and the database's) and two transactions never decide it.
 //
 // What travels: the salesperson's own entries of posted:<origin> (VIN, name,
-// price, times, the listing link they saved, their name), the post attempts
+// price and the price basis it was posted at, times, the listing link they
+// saved, their name), the post attempts
 // and to-do flags from pilot.js, and one scan summary (counts only). Never a
 // description, a photo, a buyer or anything from the Facebook account. The
 // fill records (which form fields could not be filled) stay in the browser.
@@ -41,7 +45,7 @@
 // writes them, so the mapping is unit-tested in Node; the function's own copy
 // of it (supabase/functions/sync/index.ts) must stay the same.
 
-import { withPilotDefaults, hoursBetween, FLAG_KINDS, FLAG_HOWS } from './pilot.js';
+import { withPilotDefaults, hoursBetween, clearNumbers, FLAG_KINDS, FLAG_HOWS } from './pilot.js';
 
 export const SYNC_VERSION = 1;
 
@@ -49,10 +53,27 @@ export const SYNC_VERSION = 1;
 // has never synced (it cannot have the entry anyway).
 export const TAKEN_DOWN_WINDOW_DAYS = 90;
 
+// The pilot's post attempts and closed flags go up when one of their stamps
+// is later than this long before `localSince`: the machine's own clock when
+// its last successful sync began, so the stamps and the cutoff come from one
+// clock however far it is from the server's. The margin covers an entry
+// stamped just before that sync read storage and written just after, and a
+// clock set back a little between two syncs. Sending one again is harmless:
+// attempts are upserted on their key and a closed item is never reopened.
+export const UPLOAD_MARGIN_MS = 10 * 60 * 1000;
+
 // At most this many keys in `known`: the sync function's cap on the rows of
 // one request (MAX_ROWS), which a registry that syncs at all stays under. A
 // key left out only means its take-down is missed and can be repeated.
 export const MAX_KNOWN = 2000;
+
+// How far ahead of the server's clock a stamp may be: the sync function's
+// FUTURE_SKEW_MS (supabase/functions/sync/index.ts). A price change stamped
+// further ahead than this comes from a clock that runs ahead; the function
+// writes it as made at its own time, and mergeRegistry takes the server's
+// stamp for it (below). A post stamped further ahead is set aside there
+// (counts.rejected), and notSharedFrom tells the person.
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const ms = (x) => {
   if (x === null || x === undefined || x === '') return null;
@@ -66,12 +87,20 @@ const isoOrNull = (x) => {
 const isObject = (x) => Boolean(x) && typeof x === 'object' && !Array.isArray(x);
 const text = (s, max) => String(s ?? '').trim().slice(0, max);
 const vinOf = (v) => text(v, 17).toUpperCase();
+// A whole number for an integer column (Postgres integer, 4 bytes), or
+// null: the sync function's intOrNull, which stores a number outside that
+// range as unknown rather than fail every sync of this machine.
+const INT_MIN = -2147483648;
+const INT_MAX = 2147483647;
 const intOrNull = (v) => {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Math.round(Number(v));
-  return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r >= INT_MIN && r <= INT_MAX ? r : null;
 };
 const httpsUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u.trim()) ? u.trim().slice(0, 500) : null);
+// which of the website's prices a listing was posted at (src/rescan.js PRICE_BASES), or null
+const basisOf = (b) => (b === 'website' || b === 'beforeFees' ? b : null);
 const sameMoment = (a, b) => {
   const x = ms(a);
   const y = ms(b);
@@ -84,6 +113,10 @@ const changedAfter = (since, ...stamps) => {
   const l = latest(...stamps);
   return l === null || l > s;
 };
+// A to-do flag that changed after `from` (a time in ms, or null for all):
+// the ones a sync picks to send.
+const flagChangedAfter = (from) => (f) => changedAfter(from, f.flaggedAt, f.doneAt);
+
 // An entry merged in from a colleague carries their userId and `mine: false`; it is theirs to sync.
 const isOwn = (entry, userId) => entry.mine !== false && (!entry.userId || !userId || entry.userId === userId);
 // A server row of somebody else than the caller (with both known).
@@ -132,7 +165,11 @@ export function localDayRange(now = new Date()) {
  * The rows the sync function writes, from the local registry and pilot lists.
  * @param {object} args
  *   origin:       the dealer website's origin (posted:<origin>)
- *   posted:       the registry { [vin]: { name, price, postedAt, listingUrl?, salesperson?, updatedAt?, userId? } }
+ *   posted:       the registry { [vin]: { name, price, basis?, postedAt, listingUrl?, salesperson?, updatedAt?, listedBefore?, userId? } }
+ *                 (listedBefore: a listing made by hand before the day it was
+ *                 marked posted; the server leaves it out of postsToday;
+ *                 basis: which of the website's prices it was posted at,
+ *                 src/rescan.js postedBasis)
  *   pilot:        { posts, flags } from pilot.js (fills are never sent)
  *   dealershipId: the dealership's id (the function fills it in from the membership; here for the tests)
  *   userId:       the signed-in user's id; entries of other users are left out
@@ -158,6 +195,8 @@ export function toServerRows({ origin = '', posted = {}, pilot = null, dealershi
       updated_at: isoOrNull(e.updatedAt),
       status: 'listed',
       taken_down_at: null,
+      listed_before: e.listedBefore === true,
+      basis: basisOf(e.basis),
     });
   }
   const p = withPilotDefaults(pilot);
@@ -202,17 +241,19 @@ export function toServerRows({ origin = '', posted = {}, pilot = null, dealershi
 }
 
 // One scan's counts (the popup's diff plus the snapshot's size), or null.
+// withheld: the scan was judged a website hiccup and its read held back
+// (src/accountFlow.js scanFromStored); sent only when true.
 export function scanSummary(scan) {
   if (!isObject(scan)) return null;
   const takenAt = isoOrNull(scan.takenAt);
   if (!takenAt) return null;
-  return { takenAt, cars: intOrNull(scan.cars), ready: intOrNull(scan.ready), takeDownCount: intOrNull(scan.takeDownCount), priceUpdateCount: intOrNull(scan.priceUpdateCount) };
+  return { takenAt, cars: intOrNull(scan.cars), ready: intOrNull(scan.ready), takeDownCount: intOrNull(scan.takeDownCount), priceUpdateCount: intOrNull(scan.priceUpdateCount), ...(scan.withheld === true ? { withheld: true } : {}) };
 }
 
 export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
   const s = scanSummary(scan);
   if (!s) return null;
-  return { dealership_id: dealershipId, website_origin: String(origin || ''), taken_at: s.takenAt, cars: s.cars, ready: s.ready, take_down_count: s.takeDownCount, price_update_count: s.priceUpdateCount };
+  return { dealership_id: dealershipId, website_origin: String(origin || ''), taken_at: s.takenAt, cars: s.cars, ready: s.ready, take_down_count: s.takeDownCount, price_update_count: s.priceUpdateCount, withheld: s.withheld === true };
 }
 
 /**
@@ -222,14 +263,20 @@ export function scanRow(scan, { origin = '', dealershipId = null } = {}) {
  *           received at its last sync (the state's `known`, nextSyncState);
  *           the function takes down only those missing from `posted`, so a
  *           machine that never synced takes nothing down
- *   pilot:  posts and flags that changed after `since` (all of them the first time)
+ *   pilot:  every open flag, and the posts and closed flags with a stamp
+ *           later than UPLOAD_MARGIN_MS before `localSince` (all of them
+ *           when there is none: the first sync, or the first one after an
+ *           update from a build that kept no `localSince`)
  *   scan:   this scan's counts, or null when nothing was scanned
- *   since:  the serverTime of the last answer, or null
+ *   since:  the serverTime of the last answer, or null; it only picks what
+ *           comes back down, never what goes up, since the stamps above are
+ *           this machine's clock and the server's clock is another
+ *   localSince: this machine's clock when its last successful sync began
  *   today:  the caller's local calendar day ({ from, to }, localDayRange), so
  *           the function can count their posts in it (postsToday); `now` is
  *           the moment, a parameter for the tests
  */
-export function syncPayload({ origin = '', posted = {}, known = null, pilot = null, scan = null, since = null, userId = '', now = new Date() } = {}) {
+export function syncPayload({ origin = '', posted = {}, known = null, pilot = null, scan = null, since = null, localSince = null, userId = '', now = new Date() } = {}) {
   const own = {};
   for (const [key, e] of Object.entries(isObject(posted) ? posted : {})) {
     if (!isObject(e) || !isOwn(e, userId)) continue;
@@ -242,12 +289,46 @@ export function syncPayload({ origin = '', posted = {}, known = null, pilot = nu
       ...(httpsUrl(e.listingUrl) ? { listingUrl: httpsUrl(e.listingUrl) } : {}),
       ...(text(e.salesperson, 60) ? { salesperson: text(e.salesperson, 60) } : {}),
       ...(isoOrNull(e.updatedAt) ? { updatedAt: isoOrNull(e.updatedAt) } : {}),
+      ...(e.listedBefore === true ? { listedBefore: true } : {}),
+      ...(basisOf(e.basis) ? { basis: basisOf(e.basis) } : {}),
     };
   }
   const p = withPilotDefaults(pilot);
-  const posts = p.posts.filter((a) => changedAfter(since, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
-  const flags = p.flags.filter((f) => changedAfter(since, f.flaggedAt, f.doneAt));
+  const last = ms(localSince);
+  const cutoff = last === null ? null : last - UPLOAD_MARGIN_MS;
+  const posts = p.posts.filter((a) => changedAfter(cutoff, a.startedAt, a.endedAt, a.reviewedAt, a.formOpenedAt, a.filledAt));
+  // An open flag goes up on every sync: its prices change in place when the
+  // website price moves again while it is open (noteFlags), with no new
+  // stamp, and the function's step 4 applies the new prices to the open item
+  // or changes nothing. A closed flag goes up again after it closed.
+  const flags = p.flags.filter((f) => !f.doneAt || flagChangedAfter(cutoff)(f));
   return { version: SYNC_VERSION, origin: String(origin || ''), posted: own, known: keyList(known), pilot: { posts, flags }, scan: scanSummary(scan), since: isoOrNull(since), today: localDayRange(now) };
+}
+
+/**
+ * The closed to-do flags the next sync still has to send, picked as
+ * syncPayload picks them: a stamp later than UPLOAD_MARGIN_MS before the
+ * state's `localSince` (this machine's clock when its last sync began), or
+ * every closed flag when the state keeps no `localSince` (synced by a build
+ * that kept none). Once synced, the dealership's copy of an item closes only
+ * when an upload carries this flag closed, so a flag closed here (Taken down,
+ * Updated, or seen on the listing) and dropped before that upload would
+ * leave the item open on the manager's list for good. With no last sync
+ * (this website never synced, a first sync still pending, or Sign out
+ * forgot the state) none is held for one.
+ */
+export function flagsAwaitingSync(pilot, syncState) {
+  if (!isObject(syncState) || ms(syncState.since) === null) return [];
+  const last = ms(syncState.localSince);
+  const cutoff = last === null ? null : last - UPLOAD_MARGIN_MS;
+  return withPilotDefaults(pilot).flags.filter((f) => f.doneAt).filter(flagChangedAfter(cutoff));
+}
+
+// "Clear the numbers" for a website with this sync state: clearNumbers
+// (src/pilot.js), which keeps the open to-do items and a post under way, also
+// keeping the closed items the next sync still has to send.
+export function clearNumbersKeepingUnsynced(pilot, syncState) {
+  return clearNumbers(pilot, { keep: flagsAwaitingSync(pilot, syncState) });
 }
 
 // ---------- what comes down ----------
@@ -260,17 +341,26 @@ function ownership(r, userId) {
   return userId && id !== String(userId) ? { userId: id, mine: false } : { userId: id };
 }
 
-// A server row as a registry entry. Only the keys markPosted() would set
-// are written; postedWith (which build posted it) is kept from the local
-// entry when there is one.
+// A server row as a registry entry: what the row holds of the post (the
+// keys markPosted() and Mark posted set: name, price, the price basis it was
+// posted at, when, the listing link, who posted, whether it was listed
+// before that day) and when its price changed. postedWith (a fixed marker
+// that the side panel recorded the post; never synced) is kept from the
+// local entry when there is one. A row with no basis (posted by a build that
+// did not send one) brings none: a rescan reads it from the entry's price and
+// records it, only off a scan taken once the listing had its price
+// (rescan.js postedBasis, withSeenBasis); for the person's own listing, the
+// next sync sends it to the row, which takes it while it has none.
 function entryFromRow(r, prev = {}, userId = '') {
   return {
     name: text(r.name, 80) || text(prev.name, 80),
     price: intOrNull(r.price),
+    ...(basisOf(r.basis) ? { basis: basisOf(r.basis) } : {}),
     postedAt: isoOrNull(r.posted_at),
     ...(httpsUrl(r.listing_url) ? { listingUrl: httpsUrl(r.listing_url) } : {}),
     ...(text(r.salesperson, 60) ? { salesperson: text(r.salesperson, 60) } : {}),
     ...(isoOrNull(r.updated_at) ? { updatedAt: isoOrNull(r.updated_at) } : {}),
+    ...(r.listed_before === true ? { listedBefore: true } : {}),
     ...(prev.postedWith ? { postedWith: prev.postedWith } : {}),
     ...ownership(r, userId),
   };
@@ -289,7 +379,12 @@ const rowsOf = (remote, key) => (Array.isArray(remote) ? remote : isObject(remot
  *   - the same post on both sides: the newest change (updatedAt, else
  *     postedAt) wins for the price; a change made here after `since` is
  *     therefore kept unless the server's is newer still; a listing link or a
- *     name that is missing on one side is filled from the other.
+ *     name that is missing on one side is filled from the other. A stamp
+ *     more than FUTURE_SKEW_MS ahead of the answer's serverTime comes from a
+ *     clock that runs ahead: the server's row wins over a local change that
+ *     the request carried as it stands (the function wrote it as made at its
+ *     own time, so the row holds it with a true stamp), and a server stamp
+ *     that far ahead counts as no change time (the posting time stands in).
  * Before all of that, with the caller's `userId` given: a colleague's newer
  * post is never the row an entry the caller owns is judged by. The caller's
  * own latest row for the VIN stands in for it (so their own take-down
@@ -318,6 +413,10 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
   void since; // the newest-change rule covers it; kept in the signature so callers can say when they last synced
   const base = isObject(local) ? local : {};
   const removedHere = sentKeys(sent);
+  // the server's clock, and each sent entry's change stamp as the request carried it (VIN@postedAt -> ISO or null)
+  const serverNow = isObject(remote) ? ms(remote.serverTime) : null;
+  const tooLate = (t) => serverNow !== null && t !== null && t > serverNow + FUTURE_SKEW_MS;
+  const sentChange = new Map(Object.entries(isObject(sent) ? sent : {}).filter(([, e]) => isObject(e)).map(([key, e]) => [postKey(e.vin || key, e.postedAt), isoOrNull(e.updatedAt)]));
   const current = new Map(); // vin -> the latest post the server knows for it
   const own = new Map(); // vin -> the caller's own latest post there
   const later = (r, have) => !have || ms(r.posted_at) > ms(have.posted_at) || (ms(r.posted_at) === ms(have.posted_at) && r.status !== 'listed');
@@ -366,16 +465,27 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
     }
     if (r.status !== 'listed') continue; // taken down elsewhere
     const lStamp = ms(e.updatedAt) ?? localPosted;
-    const rStamp = ms(r.updated_at) ?? remotePosted;
-    const remoteNewer = rStamp > lStamp;
+    const rStamp = (tooLate(ms(r.updated_at)) ? null : ms(r.updated_at)) ?? remotePosted;
+    // a change made here on a clock that runs ahead, which this request carried as it stands: the server took it as made at its own time
+    const aheadHere = tooLate(ms(e.updatedAt)) && sentChange.get(postKey(e.vin || key, e.postedAt)) === isoOrNull(e.updatedAt);
+    const remoteNewer = aheadHere || rStamp > lStamp;
     const merged = { ...e };
     if (remoteNewer) {
       merged.price = intOrNull(r.price);
       if (r.updated_at) merged.updatedAt = isoOrNull(r.updated_at);
+      else if (aheadHere) delete merged.updatedAt;
       if (httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
     }
     if (!merged.listingUrl && httpsUrl(r.listing_url)) merged.listingUrl = httpsUrl(r.listing_url);
-    if (!merged.salesperson && text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
+    // the price the post went up at, as the server holds it: the posting machine's record, or the first one sent for a row without
+    if (basisOf(r.basis)) merged.basis = basisOf(r.basis);
+    if (isTheirs(r, userId)) {
+      // a colleague's post: the server's name stands, an empty one too, so a
+      // name the owner cleared there (forget_person, 0006_privacy.sql) or
+      // corrected leaves this copy at its next sync
+      if (text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
+      else delete merged.salesperson;
+    } else if (!merged.salesperson && text(r.salesperson, 60)) merged.salesperson = text(r.salesperson, 60);
     if (!merged.name && text(r.name, 80)) merged.name = text(r.name, 80);
     if (r.user_id) {
       delete merged.mine; // the server says whose it is
@@ -392,29 +502,156 @@ export function mergeRegistry(local, remote, { since = null, userId = '', sent =
 }
 
 /**
- * Closes local to-do flags that were closed on another machine (the same
- * VIN, kind and flagging time, done on the server). Nothing is added or
- * reopened: a flag belongs to the salesperson's own listing and only their
- * machines carry it. Returns the pilot record (unchanged when nothing matched).
- * `remote` is the sync answer ({ todoItems: [...] }) or a plain array.
+ * Follows the server's to-do items for the local open flags. Each of a
+ * salesperson's machines flags the same sold car or price change at its own
+ * scan time, and the server keeps one item per car and kind (the sync
+ * function's step 4), so a local open flag is the same item as a server row
+ * of its VIN and kind that is open, or that closed after the flag was
+ * raised:
+ *   - closed there (its own row, the same VIN, kind and flagging time, or
+ *     that later-closed row): closed here too, with the server's time and
+ *     how, so a fix ticked off on one machine is off the other's list;
+ *   - open there with another flagging time (the other machine's sighting):
+ *     the flag takes that row's time (the earliest, if there are several),
+ *     so both machines carry one key and the hours count from it.
+ * With neither, and with `posted` (the registry this sync merged) showing
+ * the change already (the salesperson's own entry for the car is at the
+ * flag's new price, or, for a take-down, there is no own entry for it any
+ * more), the flag was raised from a registry that had not yet heard of a
+ * fix made on another machine (a rescan that ran before this sync), and the
+ * sync function filed no item for it: it is dropped, so it is never closed
+ * later as cleared by the website, and the item stays as the machine that
+ * fixed it closed it. Nothing is reopened: a flag belongs to the
+ * salesperson's own listing and only their machines carry it.
+ *
+ * With `posted` and the caller's `userId`, an open item on one of the
+ * caller's own listings that this machine does not hold (it was cleared
+ * here, with Clear everything for this website, or this machine never had
+ * it) is taken in with its flagging time: the server closes an item only
+ * when an upload closes that flag, so without it the item would stay open on
+ * the manager's list for good while the next scan here opened a second one.
+ * An item is held already when this machine has an open flag of the car and
+ * kind (its time followed above), or one with the item's flagging time, or
+ * one it closed after the item was raised (that close goes up next sync).
+ * Returns the pilot record (unchanged when nothing matched). `remote` is the
+ * sync answer ({ todoItems: [...] }) or a plain array.
  */
-export function mergeFlags(pilot, remote) {
+export function mergeFlags(pilot, remote, { posted = null, userId = '' } = {}) {
   const p = withPilotDefaults(pilot);
-  const done = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && t.done_at);
-  if (!done.length || !p.flags.length) return p;
+  const rows = rowsOf(remote, 'todoItems').filter((t) => isObject(t) && ms(t.flagged_at) !== null);
+  const shown = isObject(posted) ? showsChange(posted) : null;
+  if (!rows.length && !(shown && p.flags.length)) return p;
   let touched = false;
-  const flags = p.flags.map((f) => {
-    if (f.doneAt) return f;
-    const t = done.find((d) => vinOf(d.vin) === vinOf(f.vin) && d.kind === f.kind && sameMoment(d.flagged_at, f.flaggedAt));
-    if (!t) return f;
+  const flags = [];
+  for (const f of p.flags) {
+    if (f.doneAt) {
+      flags.push(f);
+      continue;
+    }
+    const item = rows.filter((t) => vinOf(t.vin) === vinOf(f.vin) && t.kind === f.kind);
+    const t = item.find((d) => d.done_at && (sameMoment(d.flagged_at, f.flaggedAt) || (ms(d.done_at) ?? -Infinity) >= (ms(f.flaggedAt) ?? Infinity)));
+    if (t) {
+      touched = true;
+      const at = isoOrNull(t.done_at);
+      flags.push({ ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) });
+      continue;
+    }
+    const open = item.filter((d) => !d.done_at);
+    if (open.length) {
+      if (open.some((d) => sameMoment(d.flagged_at, f.flaggedAt))) {
+        flags.push(f);
+        continue;
+      }
+      const first = open.reduce((a, b) => (ms(b.flagged_at) < ms(a.flagged_at) ? b : a));
+      touched = true;
+      flags.push({ ...f, flaggedAt: isoOrNull(first.flagged_at) });
+      continue;
+    }
+    if (shown && shown(f)) {
+      touched = true; // a late sighting of a change already made: dropped
+      continue;
+    }
+    flags.push(f);
+  }
+  // the caller's own listings, by VIN, with when each was posted: an item
+  // flagged before that post was made belongs to an earlier listing of the car
+  const own = new Map(Object.entries(isObject(posted) ? posted : {}).filter(([, e]) => isObject(e) && isOwn(e, userId)).map(([key, e]) => [vinOf(e.vin || key), ms(e.postedAt)]));
+  const held = (vin, kind, flaggedAt) => flags.some((f) => vinOf(f.vin) === vin && f.kind === kind && (!f.doneAt || sameMoment(f.flaggedAt, flaggedAt) || (ms(f.doneAt) ?? -Infinity) >= ms(flaggedAt)));
+  for (const t of rows) {
+    const vin = vinOf(t.vin);
+    const flaggedAt = isoOrNull(t.flagged_at);
+    if (t.done_at || !own.has(vin) || !flaggedAt || !FLAG_KINDS.includes(t.kind)) continue;
+    if (own.get(vin) !== null && ms(flaggedAt) < own.get(vin)) continue;
+    if (held(vin, t.kind, flaggedAt)) continue;
     touched = true;
-    const at = isoOrNull(t.done_at);
-    return { ...f, doneAt: at, how: FLAG_HOWS.includes(t.how) ? t.how : 'manual', hours: hoursBetween(f.flaggedAt, at) };
-  });
+    flags.push({
+      vin,
+      kind: t.kind,
+      name: text(t.name, 80),
+      flaggedAt,
+      ...(t.kind === 'price' ? { from: intOrNull(t.from_price), to: intOrNull(t.to_price) } : {}),
+    });
+  }
   return touched ? { ...p, flags } : p;
 }
 
-// The plan words the sync function answers (subscription_state() on the server).
+// Whether a registry already shows a flag's change, as the sync function
+// judges it from the listing rows (step 4): the salesperson's own entry for
+// the car is at the flag's new price, or, for a take-down, there is no own
+// entry for the car.
+function showsChange(registry) {
+  const own = new Map();
+  for (const [key, e] of Object.entries(registry)) if (isObject(e) && e.mine !== false) own.set(vinOf(e.vin || key), e);
+  return (f) => {
+    const e = own.get(vinOf(f.vin));
+    if (f.kind === 'takeDown') return !e;
+    const to = intOrNull(f.to);
+    return Boolean(e) && to !== null && intOrNull(e.price) === to;
+  };
+}
+
+/**
+ * The caller's own posts the dealership's list does not hold after a sync,
+ * and why, so the person is told rather than left to find out: the sync
+ * function skips an upload of a VIN another member has up (counts.conflicts)
+ * and sets aside one stamped more than FUTURE_SKEW_MS ahead of its clock
+ * (counts.rejected). The answer carries every listing that is up, so both
+ * are read off it: an own entry of `held` (the registry after the merge)
+ * whose post has no row of the caller's in the answer is 'clock' when it is
+ * stamped past serverTime plus the skew, and 'colleague' (with their name)
+ * when a colleague's row of the VIN is listed. An entry made while the
+ * request was out and with no colleague's row goes up next time: not listed.
+ * Returns [{ vin, postedAt, reason: 'colleague' | 'clock', by? }].
+ */
+export function notSharedFrom(held, response, { userId = '' } = {}) {
+  const r = isObject(response) ? response : {};
+  const server = ms(r.serverTime);
+  if (!userId || server === null) return [];
+  const rows = rowsOf(r, 'listings').filter(isObject);
+  const theirs = new Map(); // vin -> a colleague's listed row of it
+  const mine = new Set(); // the caller's posts the answer holds, listed or taken down
+  for (const row of rows) {
+    if (isTheirs(row, userId)) {
+      if (row.status === 'listed' && !theirs.has(vinOf(row.vin))) theirs.set(vinOf(row.vin), row);
+    } else if (row.user_id && String(row.user_id) === String(userId)) mine.add(postKey(row.vin, row.posted_at));
+  }
+  const out = [];
+  for (const [key, e] of Object.entries(isObject(held) ? held : {})) {
+    if (!isObject(e) || !isOwn(e, userId)) continue;
+    const vin = vinOf(e.vin || key);
+    const at = isoOrNull(e.postedAt);
+    const k = postKey(vin, at);
+    if (!k || mine.has(k)) continue;
+    if (ms(at) > server + FUTURE_SKEW_MS) out.push({ vin, postedAt: at, reason: 'clock' });
+    else if (theirs.has(vin)) {
+      const by = text(theirs.get(vin).salesperson, 60);
+      out.push({ vin, postedAt: at, reason: 'colleague', ...(by ? { by } : {}) });
+    }
+  }
+  return out;
+}
+
+// The plan words the sync function answers (planOf() on the server, the same rule as subscription_state() in SQL).
 export const PLAN_STATES = Object.freeze(['none', 'pilot', 'active', 'lapsed']);
 
 // The dealership's plan as the function answers it ({ state, pilotEndsAt,
@@ -445,7 +682,12 @@ export function planFrom(plan) {
 // known and never taken down from here. Without `held` (direct callers), the
 // caller's own listed rows in the answer stand in. Only an answer that
 // synced (it carries a serverTime) replaces it; a 402 keeps the last one.
-export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null } = {}) {
+// `localSince` is this machine's clock when the sync began (before it read
+// storage); only an answer that synced keeps it, for the next syncPayload.
+// `notShared` is notSharedFrom over `held` (else `sent`): the person's posts
+// the dealership's list does not hold, for My listings and Settings; it too
+// is replaced only by an answer that synced.
+export function nextSyncState(previous, response, { today = null, sent = null, userId = '', held = null, localSince = null } = {}) {
   const prev = isObject(previous) ? previous : {};
   const r = isObject(response) ? response : {};
   const d = isObject(r.dealership) ? r.dealership : {};
@@ -457,6 +699,7 @@ export function nextSyncState(previous, response, { today = null, sent = null, u
   return {
     version: SYNC_VERSION,
     since: isoOrNull(r.serverTime) || prev.since || null,
+    localSince: (synced && isoOrNull(localSince)) || isoOrNull(prev.localSince) || null,
     known: synced ? keyList([...sentKeys(sent), ...received]) : keyList(prev.known),
     dealershipId: d.id || prev.dealershipId || null,
     dealershipName: d.name || prev.dealershipName || '',
@@ -464,5 +707,6 @@ export function nextSyncState(previous, response, { today = null, sent = null, u
     lastSyncAt: isoOrNull(r.serverTime) || prev.lastSyncAt || null,
     plan: planFrom(r.plan) || planFrom(prev.plan),
     postsToday: day && Number.isInteger(r.postsToday) && r.postsToday >= 0 ? { count: r.postsToday, ...day } : null,
+    notShared: synced ? notSharedFrom(isObject(held) ? held : sent, r, { userId }) : Array.isArray(prev.notShared) ? prev.notShared : [],
   };
 }

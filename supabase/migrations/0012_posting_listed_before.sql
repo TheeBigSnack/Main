@@ -1,0 +1,33 @@
+-- Lot Current: a listing the salesperson made by hand before the day they
+-- marked it posted.
+--
+-- Mark posted (the popup) records a listing that is already live on
+-- Facebook, so rescans watch it. A salesperson who starts with Lot Current
+-- marks the listings they made by hand earlier, and each was stamped as
+-- posted at the moment of marking: on their first day a dozen old listings
+-- counted toward the day's post cap (the sync function's postsToday) and the
+-- manager's "Posted this week" (manager/data.js), and could stop them posting
+-- a single new car that day.
+--
+-- listed_before  true when the salesperson said, at Mark posted, that the
+--                listing went up before that day. posted_at stays the
+--                moment of marking (it is part of the row's unique key and
+--                the sync key, and no earlier time is known), so the row
+--                says when it was recorded, not a made-up posting time.
+--                The sync function leaves such rows out of postsToday, and
+--                the manager view out of "Posted this week". A listing
+--                published today and marked afterwards (a Facebook draft,
+--                say) is not one: the salesperson says "Posted today" and it
+--                counts. The sync function writes it on insert only and
+--                never changes it afterwards (supabase/functions/sync).
+--
+-- The flag is the salesperson's own word, like the rest of the row they
+-- write; the cap is a safety setting, not a control on what they may say.
+-- The table's grants and row-level security policies cover the new column
+-- as they cover the others (0002_rls.sql). Apply this before deploying the
+-- sync function that writes it. A change made after the project applied
+-- 0001 to 0008; it is numbered 0012 because 0009 to 0011 are taken by other
+-- changes, and it applies on top of them as on a fresh build.
+
+alter table public.listings add column if not exists listed_before boolean not null default false;
+comment on column public.listings.listed_before is 'True when the salesperson marked a listing they had made by hand before that day; posted_at is then when it was marked. Left out of the day''s post count and the manager''s posted this week.';

@@ -3,8 +3,14 @@
 // outside its own body). Fills the fields listed in formMap.js and reports
 // what it could and couldn't fill. Never fails silently.
 //
-// The only things this code ever clicks are a dropdown control (to open it)
-// and one of that dropdown's options. It has no way to reach Publish.
+// The only things this code ever clicks are a dropdown control (to open it),
+// one of that dropdown's options, and a checkbox the form map names (the
+// clean-title box): one click each, in openDropdown, chooseOption and
+// setCheckbox. It has no selector for Publish or any other button.
+// test/posting.test.js checks the source for the usual ways to click, submit,
+// press a key or inject, and the e2e mock form records any event that reaches
+// its decoy Next, Post, Save draft, Update, Delete and Mark as sold controls;
+// code written to slip past both is for review to catch.
 //
 // Lessons from the first live run (2026-09-27): Facebook draws a dropdown's
 // option list slowly and leaves it open until something closes it, and a
@@ -585,10 +591,16 @@ export async function fillFormInPage(map, data) {
 }
 
 // Read-only check of the page against the map: which fields can be found and
-// what controls the page has. Nothing is filled and nothing is clicked. Meant
-// for the first live run, so `name` patterns in formMap.js can be fixed in
-// minutes from the report. (Helpers are repeated here on purpose: injected
-// functions must be self-contained.)
+// what controls the vehicle form has. Nothing is filled and nothing is
+// clicked. Meant for the first live run, so `name` patterns in formMap.js can
+// be fixed in minutes from the report. The fields are looked for page-wide,
+// as the fill looks for them; the other controls are listed only from the
+// form's own part of the page (the smallest element holding two or more of
+// the fields found and the photo box, never the whole page, and without any
+// top bar, navigation or side column inside it), so Facebook's own menus,
+// chats and notifications around the form are not in the report; when the
+// form can't be placed, no controls are listed. (Helpers are repeated here on
+// purpose: injected functions must be self-contained.)
 export function probeFormInPage(map) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -623,7 +635,9 @@ export function probeFormInPage(map) {
   const KIND_SELECTORS = {
     text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
     textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
-    typeahead: TEXT_INPUTS + ', [role="textbox"]',
+    // the same controls the fill looks at (fillFormInPage): a dropdown or an
+    // editable box in a typeahead's place is found and filled, so it is found here too
+    typeahead: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
     choice: CHOICES,
     either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
     checkbox: 'input[type="checkbox"], [role="checkbox"], [role="switch"]',
@@ -657,17 +671,35 @@ export function probeFormInPage(map) {
 
   const found = [];
   const missing = [];
+  const foundEls = [];
   for (const spec of map.fields) {
     const el = findField(spec);
+    if (el) foundEls.push(el);
     if (el) found.push({ key: spec.key, label: spec.label, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: accessibleName(el).slice(0, 80) });
     else if (spec.optional) found.push({ key: spec.key, label: spec.label, tag: '', role: '', name: '(optional, not on this form)' });
     else missing.push({ key: spec.key, label: spec.label, patterns: spec.name, note: 'not on the page right now; some fields only appear after an earlier one is chosen' });
   }
-  const controls = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded], [role="checkbox"], [role="switch"]')]
-    .filter(visible)
+  // the form's own part of the page (see above): null when fewer than two of
+  // its fields and photo box were found, or when they sit so far apart that
+  // only the whole page holds them all
+  const chainOf = (el) => { const out = []; for (let n = el; n; n = n.parentElement) out.push(n); return out; };
+  const holderOf = (els) => (els.length ? chainOf(els[0]).find((n) => els.every((a) => chainOf(a).includes(n))) || null : null);
+  // the photo box nearest the fields found: another file input earlier on
+  // the page (a chat's, say) must not stretch the form's part to the whole app
+  const photoBox = (map.fileInput ? [...document.querySelectorAll(map.fileInput)] : [])
+    .map((f) => ({ f, depth: chainOf(holderOf([...foundEls, f])).length }))
+    .reduce((best, c) => (!best || c.depth > best.depth ? c : best), null);
+  const anchors = [...foundEls, photoBox ? photoBox.f : null].filter(Boolean);
+  const holder = anchors.length >= 2 ? holderOf(anchors) : null;
+  const formArea = holder && holder !== document.body && holder !== document.documentElement ? holder : null;
+  const AROUND = '[role="banner"], [role="navigation"], [role="complementary"], [role="contentinfo"], nav';
+  const aroundForm = (el) => { for (let n = el; n && n !== formArea; n = n.parentElement) if (n.matches(AROUND)) return true; return false; };
+  const controls = (formArea ? [...formArea.querySelectorAll('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="textbox"], [contenteditable="true"], [aria-haspopup], [role="button"][aria-expanded], button[aria-expanded], [role="checkbox"], [role="switch"]')] : [])
+    .filter((el) => visible(el) && !aroundForm(el))
     .map((el) => ({ tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || '', role: el.getAttribute('role') || '', name: accessibleName(el).slice(0, 80) }))
     .filter((c) => c.name)
     .slice(0, 100);
+  const controlsFrom = formArea ? 'the vehicle form' : "none listed: Lot Current couldn't tell which part of the page is the vehicle form";
   let photoLimit = { value: map.photoLimitDefault, verified: false };
   const patterns = Array.isArray(map.photoLimitTextPatterns) ? map.photoLimitTextPatterns : [map.photoLimitTextPattern].filter(Boolean);
   for (const p of patterns) {
@@ -676,13 +708,16 @@ export function probeFormInPage(map) {
       if (m && Number(m[1]) > 0) { photoLimit = { value: Number(m[1]), verified: true }; break; }
     } catch (e) { /* next pattern */ }
   }
-  // the words near the photo control, so the limit wording can be added to the map
+  // the words near the form's photo box (the one nearest the fields found;
+  // with no field found, only a page's one and only file input), never
+  // another file input's (a chat's), so the limit wording can be added to the map
   const photoText = (() => {
-    const input = document.querySelector(map.fileInput);
+    const all = map.fileInput ? document.querySelectorAll(map.fileInput) : [];
+    const input = foundEls.length ? photoBox && photoBox.f : all.length === 1 ? all[0] : null;
     const around = input && (input.closest('section, form, div') || input.parentElement);
     return around ? (around.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   })();
-  return { url: location.href, language: document.documentElement.lang || '', title: document.title, found, missing, controls, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
+  return { url: location.href, language: document.documentElement.lang || '', title: document.title, found, missing, controls, controlsFrom, fileInputs: document.querySelectorAll(map.fileInput).length, photoLimit, photoText, mapVersion: map.version };
 }
 
 // Upkeep, step 1: once the salesperson has opened the listing's edit form,
@@ -738,8 +773,21 @@ export function fillPriceInPage(map, price) {
 // page's static text counts: text inside buttons, links, menus, tabs and
 // dialogs is skipped, so a "Mark as sold" button never reads as a sold
 // listing, and the sold sign is looked for in short standalone labels only,
-// never in prose such as a description. `expect` ({ id, name }) says which
-// listing the panel is working on; the result reports whether this page is it.
+// never in prose such as a description. `expect` ({ id, name, prices, vin })
+// says which listing the panel is working on; the result reports what on
+// this page says it is: its id in the address (matchesId), every word of its
+// name as a whole word (matchesName), one of its prices (matchesPrice: the
+// price it is listed at, or the new one), on the page or in the Price box,
+// and its VIN as a whole word (matchesVin), on the page or in one of the
+// page's boxes (the form's VIN box, the description, which carries it).
+// For the queue's check that a page is the listing just published, it also
+// says whether the VIN is in the page's static text (vinInText: a published
+// listing shows its description as text), and whether the create or edit
+// form is on the page (formOnPage: a visible control the fill code would find
+// one of the map's typed fields by, or a visible box holding this car's VIN;
+// a published listing page has neither, and the create form still drawn
+// under another listing's address carries the car in its boxes and its
+// preview).
 export function readListingInPage(map, signs, expect) {
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -787,16 +835,53 @@ export function readListingInPage(map, signs, expect) {
   const unavailable = Boolean(unavailableRe) && unavailableRe.test(body);
   // is this the listing the panel is working on?
   const want = expect || {};
-  const matchesId = Boolean(want.id) && new RegExp('(^|\\D)' + String(want.id).replace(/\D/g, '') + '(\\D|$)').test(location.href);
-  const tokens = String(want.name || '').toLowerCase().split(/\s+/).filter((t) => t.length >= 2).slice(0, 4);
-  const hay = (document.title + ' ' + body.slice(0, 2000)).toLowerCase();
-  const matchesName = tokens.length >= 2 && tokens.every((t) => hay.includes(t));
+  const id = String(want.id || '').replace(/\D/g, '');
+  const matchesId = Boolean(id) && new RegExp('(^|\\D)' + id + '(\\D|$)').test(location.href);
+  // every word of the name, each as a whole word: "2019 Jeep Grand Cherokee
+  // Limited" is not on a page that names only the Laredo, and "1500" is not "15000"
+  const hay = norm(document.title + ' ' + body);
+  const tokens = norm(want.name).split(' ').map((t) => t.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')).filter(Boolean);
+  const whole = (t) => new RegExp('(^|[^a-z0-9])' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])').test(hay);
+  const matchesName = tokens.length >= 2 && tokens.every(whole);
   // the edit form's Price box, found the same way fillPriceInPage finds it
   const spec = (map.fields || []).find((f) => f.key === 'price');
   const patterns = spec ? spec.name.map((p) => new RegExp(p, 'i')) : [/\bprice\b/i];
   const box = [...document.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"]), [role="textbox"]')]
     .filter(visible)
     .find((c) => patterns.some((re) => re.test(accessibleName(c))));
+  const priceBoxValue = box ? String(box.value || '') : '';
+  const wanted = (Array.isArray(want.prices) ? want.prices : []).filter((p) => typeof p === 'number' && p > 0).map((p) => String(Math.round(p)));
+  const matchesPrice = wanted.some((p) => prices.includes(p) || priceBoxValue.replace(/\D/g, '') === p);
+  // what tells two listings of the same name and price apart
+  const vin = String(want.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const boxes = [...document.querySelectorAll('input:not([type="hidden"]), textarea, [role="textbox"], [contenteditable="true"]')].filter(visible).map((el) => String(el.value || text(el) || ''));
+  const vinRe = vin.length >= 11 ? new RegExp('(^|[^A-Z0-9])' + vin + '($|[^A-Z0-9])') : null;
+  const matchesVin = Boolean(vinRe) && vinRe.test([document.title, body, ...boxes].join(' ').toUpperCase());
+  const vinInText = Boolean(vinRe) && vinRe.test([document.title, body].join(' ').toUpperCase());
+  // the create or edit form: a visible control the fill code would find one
+  // of the map's typed fields by (VIN, Make, Model, Mileage, Price, Location,
+  // Description), found as fillFormInPage's findFieldNow finds it (its
+  // selectors, the name with its title and a dropdown's text, the map's
+  // patterns and then the field's label as a whole word); or a visible box
+  // holding this car's VIN (the form's VIN or description box, whatever the
+  // form's language)
+  const TEXT_INPUTS = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="image"])';
+  const CHOICES = 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], [role="button"][aria-expanded], button[aria-expanded]';
+  const TYPED = {
+    text: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"]',
+    textarea: 'textarea, [role="textbox"], [contenteditable="true"]',
+    typeahead: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
+    either: TEXT_INPUTS + ', [role="textbox"], [contenteditable="true"], ' + CHOICES,
+  };
+  const fillName = (el) => norm([accessibleName(el), el.getAttribute('title') || '', el.matches('[role="combobox"],[role="button"],button,[aria-haspopup]') ? text(el) : ''].join(' '));
+  const neverNames = (map.neverFill || []).flatMap((f) => f.name).map(re).filter(Boolean);
+  const fillFinds = (spec) => {
+    const names = [...document.querySelectorAll(TYPED[spec.kind])].filter(visible).map(fillName).filter((n) => n && !neverNames.some((r) => r.test(n)));
+    const label = re('\\b' + String(spec.label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+    return [(spec.name || []).map(re).filter(Boolean), [label].filter(Boolean)].some((patterns) => names.some((n) => patterns.some((r) => r.test(n))));
+  };
+  const vinInBox = Boolean(vinRe) && vinRe.test(boxes.join(' ').toUpperCase());
+  const formOnPage = Boolean(box) || vinInBox || (map.fields || []).some((f) => Boolean(TYPED[f.kind]) && fillFinds(f));
   return {
     url: location.href,
     title: document.title,
@@ -805,8 +890,12 @@ export function readListingInPage(map, signs, expect) {
     unavailable,
     matchesId,
     matchesName,
+    matchesPrice,
+    matchesVin,
+    vinInText,
+    formOnPage,
     hasPriceBox: Boolean(box),
-    priceBoxValue: box ? String(box.value || '') : '',
+    priceBoxValue,
   };
 }
 

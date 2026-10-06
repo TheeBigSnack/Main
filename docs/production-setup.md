@@ -32,7 +32,7 @@ Why not the alternatives:
 3. Create a project:
    - Name: `lot-current`
    - Database password: press **Generate a password**, save it in your password manager. You'll paste it once into GitHub (step 2). Don't send it to anyone.
-   - Region: **East US (North Virginia)**, the closest to Pennsylvania dealers.
+   - Region: the one closest to the dealerships Lot Current will serve; for stores on the US East Coast, **East US (North Virginia)**.
 4. When the project is ready, open **Project settings, API Keys**. Copy the **publishable** key (starts `sb_publishable_`). If the page only shows the legacy "anon" key, use that for now; it works until Supabase retires it, and switching later is one command.
 5. Open **Project settings, Data API** (older Dashboards: API) and copy the **Project URL** (`https://<20 letters and digits>.supabase.co`).
 
@@ -40,12 +40,14 @@ Why not the alternatives:
 
 **[Claude] then:** runs `npm run set-project -- <project URL> <publishable key>`, which writes both values into `extension/src/accountConfig.js` and `manager/config.js` (it refuses a secret key and never prints it), runs the tests and commits.
 
+**From then on every build offers sign-in.** With the project named in `extension/src/accountConfig.js`, set-up has its account step and Settings its sign-in, and both reach this project. Until steps 3 to 5 are done and `npm run check-deploy` shows no `FAIL`, a sign-in cannot complete: the email that arrives is Supabase's stock one, not the six-digit code the extension asks for, and the built-in sender mails only the project's own team. So no build goes to a pilot tester before then (the launch checklist's "No tester build before sign-in works"), unless the owner decides otherwise and the tester is told to click **Skip for now**. The test drive (`demo/`) never reaches the project: its `chrome-shim.js` answers every request to it.
+
 ## Step 2. Let GitHub deploy to it [Owner]
 
 1. In Supabase: your avatar, **Account preferences, Access Tokens**, **Generate new token**, name it `github-deploy`. Copy it.
 2. In GitHub: the repository, **Settings, Environments, New environment**, name it `production`:
-   - **Deployment branches and tags**: choose **Selected branches and tags** and add the default branch only.
-   - **Required reviewers**: tick it and add yourself. Every deploy to the real database then waits for your click.
+   - **Deployment branches and tags**: choose **Selected branches and tags** and add the default branch only. Until this is set, a workflow on any branch that names this environment can read the secrets below.
+   - **Required reviewers**: tick it and add yourself. Every deploy to the real database then waits for your click. Without it nothing waits: a run of the Supabase workflow starts the moment anyone who can start it (you, or a session working with your GitHub access) does. Only an admin of the repository can turn it on, and it is off until one does. To check it, start the workflow's **plan** step: the run should stop at "Waiting for review" until you approve it. The approval is yours to give: a session working with your GitHub access could approve a run through GitHub's API too, and leaves that to you.
    - **Environment secrets**, Add secret: `SUPABASE_ACCESS_TOKEN` = the token from 1; `SUPABASE_DB_PASSWORD` = the database password from step 1.
    - **Environment variables**, Add variable: `SUPABASE_PROJECT_REF` = the 20 lower-case letters and digits between `https://` and `.supabase.co`.
 
@@ -53,16 +55,19 @@ Put them on the environment, not under the repository's own Secrets: a repositor
 
 ## Step 3. The database and the functions [Claude, with the owner's go]
 
-The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, from the repository's **Actions** tab or by Claude through GitHub. It refuses to start unless the committed config files name the project in `SUPABASE_PROJECT_REF`, and it ends every run with `npm run check-deploy`.
+The **Supabase** workflow (`.github/workflows/supabase.yml`) runs by hand only, from the repository's **Actions** tab or by Claude through GitHub, and only on the default branch: started on any other branch, its job is skipped and nothing is deployed. That guards against a mistake only (a branch's own copy of the workflow could leave the check out), so step 2's branch limit on the `production` environment is still what keeps the secrets from other branches. It refuses to start unless the committed config files name the project in `SUPABASE_PROJECT_REF`, and it ends every run with `npm run check-deploy`.
 
-1. **plan**: shows the eight migrations it would apply. Changes nothing.
-2. **database**: applies them.
+**Where production stands.** The production project already has the database up to `0008_usage.sql` and all four functions (`rewrite`, `sync`, `billing` and `lead`): they were deployed outside this workflow, before its first run (a **plan** on 2026-10-01 that found nothing to apply). So this step is no longer a first deploy but the order for every later change: **plan** lists the migrations production has not applied (those after `0008_usage.sql`, until **database** applies them), and a function changed in the repository goes up with **functions** after that. Run **verify** before the first deploy from here: what was deployed by hand has not been compared with the repository yet.
 
-   After plan and database the outside check prints some `FAIL` lines on purpose (no tables yet, then no functions yet); the run stays green. From functions on, a `FAIL` turns the run red.
-3. **functions** with `rewrite sync`: deploys the description writer and the sync between machines. (`billing` comes with Stripe, `lead` when the website's demo form opens.)
-4. **check**: the outside check on its own, any time.
+1. **plan**: shows the migrations in `supabase/migrations` the project has not applied yet. Changes nothing.
+2. **database**: applies them. When a change brings a new migration, run this before **functions**: a function may write the column it adds (`0009_cancel_at.sql` and the `billing` function, for one). **functions** checks: it deploys nothing while a migration is still to be applied.
 
-After step 3, `check-deploy` should show no `FAIL`; the billing and lead lines read `note` until those functions are deployed.
+   A `FAIL` from the outside check turns any run red. On a brand-new project some of its lines fail after plan and database on purpose (no tables yet, then no functions yet): start those two runs with **new project** ticked, and their `FAIL` lines still print but leave the run green. Production is past that (its tables and functions exist), so leave the box unticked there.
+3. **functions**: deploys the functions named in the box. The default is all four: `rewrite` (the description writer), `sync` (the sync between machines), `billing` (Stripe) and `lead` (the website's demo form). Each one's settings stay where `supabase/README.md` puts them; a function without its secrets answers with what is missing. Until billing has its secrets and the manager view's address in `ALLOWED_ORIGINS` (`docs/stripe-setup.md` step 5), `billing: false` in `manager/config.js` keeps the manager view from calling it: a manager can still start the free pilot there (`start_pilot()` is in the database), the Billing card says paying by card is not open yet, and that step turns it on.
+4. **verify**: compares production with the repository and changes nothing. It fails, and prints the difference, when production has applied other migrations than the ones in `supabase/migrations`, when its public schema differs from the one those migrations build (a table, column, policy or function changed by hand), or when a deployed function's source differs from `supabase/functions`. Run it before the first deploy from this workflow, and again after anything is changed outside it: a deploy from a laptop with the Supabase CLI, or an edit in the Dashboard's SQL editor or Table editor. `check-deploy` cannot see any of that: it only looks at the project from the outside.
+5. **check**: the outside check on its own, any time.
+
+After step 3, `check-deploy` should show no `FAIL`; the billing webhook line reads `note` until `STRIPE_WEBHOOK_SECRET` is set. The line for the manager view's billing preflight stays a `note` until the workflow's check has the manager view's address to try it from (the `MANAGER_URL` variable on the `production` environment, step 6), or until you run that check from your own terminal with `LOTSYNC_MANAGER_ORIGIN`, as `docs/stripe-setup.md` step 5 says.
 
 The description writer needs an Anthropic API key only if you turn Claude-written descriptions on; the built-in template writer works without it. That is a separate money decision (capped at $25 a month in the settings); without the key the extension simply uses the template.
 
@@ -71,12 +76,14 @@ The description writer needs an Anthropic API key only if you turn Claude-writte
 In the Supabase Dashboard, **Authentication**:
 
 1. **URL Configuration**: Site URL `https://app.lotcurrent.com/`; under Redirect URLs add `https://app.lotcurrent.com/`. (Never leave the Site URL on `localhost`.)
-2. **Email Templates**: paste `supabase/templates/magic_link.html` into **Magic link or OTP** and `supabase/templates/confirmation.html` into **Confirm sign up**, each with the subject in `supabase/config.toml`. Claude will give you the exact text to paste; the rename to Lot Current changes the wording, so paste after it lands.
+2. **Email Templates**: paste `supabase/templates/magic_link.html` into **Magic link or OTP** and `supabase/templates/confirmation.html` into **Confirm sign up**, each with the subject in `supabase/config.toml` ("Your Lot Current sign-in code"). Both templates already carry the Lot Current name, so they can be pasted now; Claude will give you the exact text.
 3. **Sign In / Providers, Email**: leave it on; check the email OTP length is **6** and the expiry **3600** seconds.
-4. **Rate limits**: emails sent about **30 an hour**; sign-ups and sign-ins about **30 per 5 minutes**.
-5. Later, once the manager view is public: **Attack protection**, turn on CAPTCHA.
+4. **Rate limits**: emails sent about **30 an hour**; sign-ups and sign-ins about **30 per 5 minutes**. These cap the email bill; they do not stop a lockout. Anyone can use up the hour's emails from one address in minutes, and new sign-ins then wait for the hour to roll over (people already signed in stay signed in; `supabase/README.md` step 3).
+5. **Attack protection**: leave CAPTCHA off. Neither the extension nor the manager view sends a captcha token, so with CAPTCHA on every new sign-in would be refused. The two rate limits above and your own email sender (Step 5 below) cap what sign-in email costs; CAPTCHA can come later, once both send a token.
 
 ## Step 5. The sign-in email sender [Owner]
+
+Resend sees every sign-in email (the address and the code or link), so it is a processor: `legal/privacy-policy.md` (Processors) and `docs/data-inventory.md` (Who receives data) already name it. Using another sender means changing both first, in the same commit, before it is switched on.
 
 1. Sign up at resend.com (Free plan).
 2. **Domains, Add domain**: `mail.lotcurrent.com`. If it asks for a region, pick **North Virginia (us-east-1)**, next to the Supabase project. A subdomain keeps sign-in mail separate from your own mailbox's reputation and leaves the GoDaddy mailbox's records untouched.
@@ -95,24 +102,38 @@ In the Supabase Dashboard, **Authentication**:
    - Sender email `sign-in@mail.lotcurrent.com`, sender name `Lot Current`
    - Host `smtp.resend.com`, port `465`, username `resend`, password = the API key from 5 (Resend's SMTP page, checked 2026-10-01)
 7. In GitHub, on the `manager-view` environment of step 6 (create it now if step 6 isn't done yet), add the **Environment variable** `SENDER_DOMAIN` = `mail.lotcurrent.com`. **[Claude]** then runs the **Manager view** workflow with **Check only** (from the default branch, once this setup is merged), which runs `npm run check-hosting` and says which of the records above it can see.
-8. Test: sign in from the manager view with two addresses at two different mail services (say Gmail and Outlook). Each email should arrive in the inbox, not spam, with the six-digit code and the link.
+8. Test: sign in with two addresses at two different mail services (say Gmail and Outlook). The manager view has no address until step 6, so either come back to this after step 6 and sign in there, or test now from the extension loaded from an up-to-date copy of the repository: **Settings**, **Account**, **Send me a sign-in code**. Each email should arrive in the inbox, not spam, with the six-digit code and the link (the link opens the manager view only once step 6 is done).
 
 ## Step 6. The manager view at app.lotcurrent.com [Owner, then Claude]
 
+Cloudflare's access logs see every manager's IP address and browser, so it is a processor: `legal/privacy-policy.md` and `docs/data-inventory.md` already name it as the manager view's host. Another host means changing both first, in the same commit.
+
 1. **[Owner]** Sign up at cloudflare.com (Free plan). You don't need to move lotcurrent.com's DNS to Cloudflare.
 2. **[Owner]** Your profile, **API Tokens, Create Token, Create Custom Token**: name `github-manager-deploy`, permission **Account, Cloudflare Pages, Edit**, your account only. Copy it. Also copy the **Account ID** (on the account's home page, right-hand column, or Workers & Pages overview).
-3. **[Owner]** In GitHub, **Settings, Environments, New environment** `manager-view`, deployment branches: the default branch only; its environment secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-4. **[Claude]** Run the **Manager view** workflow (`.github/workflows/manager.yml`). It refuses to upload a page that isn't set to the production project (`npm run set-project -- --check`), runs the page's tests, creates the Cloudflare project `lotcurrent-app` on the first run, uploads `manager/` without the local demo server, and ends by checking `https://lotcurrent-app.pages.dev/` from the outside (`npm run check-hosting`: the page, its security headers, the committed project in its `config.js`). It also runs by itself when a change to the page reaches the default branch. Before the Cloudflare secrets exist it says so and stops without failing.
+3. **[Owner]** In GitHub, **Settings, Environments, New environment** `manager-view`, deployment branches: the default branch only; its environment secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and the **Environment variable** `SUPABASE_PROJECT_REF`, the same project ref as on the `production` environment (step 2).
+4. **[Claude]** Run the **Manager view** workflow (`.github/workflows/manager.yml`). It refuses to upload a page whose `manager/config.js` names any project but the one in `SUPABASE_PROJECT_REF`, or that is not otherwise ready (`npm run set-project -- --check --project-ref`), runs every unit test (`npm test`, the suite CI's unit job runs), creates the Cloudflare project `lotcurrent-app` on the first run, uploads `manager/` without the local demo server, and ends by checking the project's `.pages.dev` address from the outside (`npm run check-hosting`: the page, its security headers, the committed project in its `config.js`, and the supabase-js copy that `config.js` names, served as JavaScript and byte for byte the committed one). It reads that address from the project in Cloudflare: usually `https://lotcurrent-app.pages.dev/`, but Cloudflare gives a suffixed one (say `lotcurrent-app-4xk.pages.dev`) when the name is already taken there, and the run log says which (`the project lotcurrent-app answers at ...`). It also runs by itself when a change to the page reaches the default branch, and that deploy waits for no one: the environment has no required reviewer, and the workflow does not wait for CI, so its own `npm test` is what stops a page that breaks a rule. Before the Cloudflare secrets exist it says so and stops without failing.
 5. **[Owner]** In Cloudflare, **Workers & Pages, lotcurrent-app, Custom domains, Set up a custom domain**: `app.lotcurrent.com`. Do this **before** the DNS record: Cloudflare's docs say a CNAME added first will not resolve.
-6. **[Owner]** In GoDaddy DNS, add **CNAME**, name `app`, value the `.pages.dev` address Cloudflare shows for the project (usually `lotcurrent-app.pages.dev`).
-7. **[Owner]** On the `manager-view` environment add the **Environment variable** `MANAGER_URL` = `https://app.lotcurrent.com/`.
-8. **[Claude]** Runs the workflow with **Check only**: `https://app.lotcurrent.com/` loads with its security headers (`manager/_headers`) and its CNAME points at `lotcurrent-app.pages.dev`. Every later deploy checks it too. Then a sign-in link should land back on it (step 7 below).
+6. **[Owner]** In GoDaddy DNS, add **CNAME**, name `app`, value the `.pages.dev` address Cloudflare shows for the project (usually `lotcurrent-app.pages.dev`; the one in the workflow's log line from 4 if it differs). Never point it at an address Cloudflare does not show for your project, whatever a check line says.
+7. **[Owner]** On the `manager-view` environment add the **Environment variable** `MANAGER_URL` = `https://app.lotcurrent.com/`, and the same variable on the `production` environment: the Supabase workflow's check then also tries the page's own call to the billing function, which works only once that origin is in the `ALLOWED_ORIGINS` function secret (`docs/stripe-setup.md`, step 5). Until that step, the check's line `billing: answers the manager view's CORS preflight` reads `FAIL` and every run of the Supabase workflow (step 3) ends red, **plan** and **database** included, so add the variable on `production` when you reach that step; on `manager-view` it can go now.
+8. **[Claude]** Runs the workflow with **Check only**: `https://app.lotcurrent.com/` loads with its security headers (`manager/_headers`) and its CNAME points at the project's `.pages.dev` address, the one the workflow read from Cloudflare. Every later deploy checks it too. Run by hand, `npm run check-hosting -- --app https://app.lotcurrent.com/ --pages-host <the address Cloudflare shows>` does the same. Then a sign-in link should land back on it (step 7 below).
 
 ## Step 7. The first dealership and the end-to-end check [Claude, then the owner]
 
-1. **[Claude]** Prepares the two SQL statements of `supabase/README.md` step 5 for the pilot dealership; **[Owner]** runs them in the Dashboard's SQL editor and keeps the manager invite code for the manager.
-2. **[Owner]** Signs in once in the manager view with a test address that belongs to no dealership; Claude says where to copy its access token from, and runs `check-deploy` with it (`LOTSYNC_TEST_TOKEN`). Done when no line reads `FAIL`.
-3. **[Owner]** On two computers, two test salespeople sign in and redeem invite codes; a car posted on one shows on the other after its next scan, and the manager view shows both. That is the launch checklist's "Supabase project live" and "The posted registry syncs".
+1. **[Claude]** Prepares the first SQL statement of `supabase/README.md` step 5 for the pilot dealership, the dealership alone, for the check in 3 (its manager's invite code and its pilot row come when 3 makes it again); **[Owner]** runs it in the Dashboard's SQL editor.
+2. **[Owner]** The signed-in checks, run in your own terminal so the token never goes into the chat. Sign in once in the manager view with a test address that belongs to no dealership. In the browser's developer tools (F12, **Application**, **Local storage**, the manager view's address) open the entry `sb-<project ref>-auth-token` and copy only the value of its `access_token` field (the long text starting `eyJ`), never the whole entry: it also holds the refresh token, which keeps that session open. It works for an hour. Then, in Windows PowerShell in the repository folder, run these three lines one at a time, and paste the token at the prompt the first one shows (it is not typed into a command, which keeps it out of the terminal's history file but shows it on screen, so do this where nobody can see your screen):
+
+   ```
+   $env:LOTSYNC_TEST_TOKEN = Read-Host 'access_token'
+   npm run check-deploy
+   Remove-Item Env:LOTSYNC_TEST_TOKEN
+   ```
+
+   (On macOS or Linux: `read -rs LOTSYNC_TEST_TOKEN`, paste the token and press Enter (nothing shows), then `export LOTSYNC_TEST_TOKEN`, `npm run check-deploy` and `unset LOTSYNC_TEST_TOKEN`.) Then click **Sign out** in the manager view, which ends that test session. Paste only the printed `ok`, `FAIL` and `note` lines into the thread for Claude to read; `check-deploy` never prints the token or a key. Done when no line reads `FAIL`.
+3. **[Owner]** On two computers, two test salespeople sign in and redeem invite codes; a car marked posted on one goes to the dealership's account at once (while signed in, **Mark posted** syncs right away), shows on the other computer after that computer's next scan or its **Sync now** (Settings, Account), and the manager view shows both salespeople. That is the launch checklist's "Supabase project live" and "The posted registry syncs". Run it with test addresses of your own, not step 2's, and codes made for the test with step 5's invite statement: two salesperson codes (`'salesperson'` in place of `'manager'`) and a manager code for the address you open the manager view with. The test's members, posts and scans land in the pilot dealership's Team card, seat count and numbers (a car recorded with **Mark posted** records no post timing), and a removed member's posts stay in the numbers. A browser's first sync to a dealership sends, under whichever account is signed in, the post timings, the to-do items and the posts not synced yet that it holds for that website, and a test browser keeps its copy of the test afterwards. So:
+   - **Run the check in a Chrome profile made for it** on each computer: add a Chrome profile without signing in to Chrome there, so Chrome sync stays off and a test name typed in Settings never reaches your synced profile, and load Lot Current into it as `README.md` says. Read the emailed sign-in codes on your phone, not in that profile: if Chrome offers to sign the profile in (it does when you sign in to a Google mailbox there), say no. Open the manager view for the check in one of those test profiles too, signed in with the manager code's test address, not in the browser profile you use every day. Never run the check in a browser that has used Lot Current on the store's website, such as your own at the store. The check would send that browser's real posts and post timings into the test dealership, to be deleted with it. And **Clear everything for this website** removes everything Lot Current holds for the website in that browser, the real posted list and Numbers included, after which nothing flags those listings when a car sells or its price changes. If the check already ran in such a browser, stop and ask Claude before clearing anything or deleting the dealership.
+   - **Record the test's car with Mark posted** (Ready to post tab), not by publishing it on Marketplace. If a test car was published, take that listing down on Facebook yourself before the profile goes: nothing will flag it afterwards.
+   - **When the check is done**, before the store's manager first signs in, **delete the Chrome profile made for the check on each test computer**. That removes everything Lot Current kept in it.
+   - **Delete the dealership** (`supabase/README.md`, "Delete": `select public.delete_dealership('<id>', '<its website_origin exactly as stored>');`) and make it again with step 5's three statements: the dealership, the manager's invite code, which you keep for the manager, and its pilot row with the signed agreement's start date and length. If the agreement is not signed yet, run the pilot row the day it is; until then the weekly list of dealerships with no plan (`supabase/README.md`, "Dealerships with no plan") shows the dealership.
 
 ---
 
@@ -121,9 +142,9 @@ In the Supabase Dashboard, **Authentication**:
 | File | What it does |
 |---|---|
 | `scripts/set-project.mjs` (`npm run set-project`) | Writes the project URL and publishable key into both config files; `--check` says whether the manager view may deploy |
-| `.github/workflows/supabase.yml` | The by-hand database and functions deploy, ending in `check-deploy` |
+| `.github/workflows/supabase.yml` | The by-hand database and functions deploy, and **verify**, the read-only comparison of production with the repository; every run ends in `check-deploy` |
 | `.github/workflows/manager.yml` | The manager view's deploy to Cloudflare Pages |
 | `manager/_headers` | The manager view's security headers on Cloudflare (the page's own policy plus "no site may frame this page") |
-| `scripts/check-hosting.mjs` (`npm run check-hosting`) | The outside check for the hosted manager view (address, headers, project, CNAME) and the sender's DNS records; the Manager view workflow runs it after every deploy, and on its own with **Check only** |
+| `scripts/check-hosting.mjs` (`npm run check-hosting`) | The outside check for the hosted manager view (address, headers, project, its supabase-js copy, CNAME) and the sender's DNS records; the Manager view workflow runs it after every deploy, and on its own with **Check only** |
 | `scripts/check-deploy.mjs` | The outside check; tells publishable, anon and secret keys apart and fails if a secret key is in a file browsers read |
 | `supabase/functions/_shared/auth.ts` | The functions prefer the new publishable and secret keys and fall back to the legacy ones |

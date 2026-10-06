@@ -1,8 +1,9 @@
--- Lot Current: two rules that only a test with sessions acting at the same
+-- Lot Current: three rules that only a test with sessions acting at the same
 -- moment can prove, each with real sessions through dblink:
 --
---   keep_a_manager (0002_rls.sql)       two managers acting at once cannot leave a dealership with none
---   create_dealership (0007_signup.sql)  calls from one account sent together get 5 lookups an hour, no more
+--   keep_a_manager (0002_rls.sql)                      two managers acting at once cannot leave a dealership with none
+--   create_dealership (0010_backend_review_fixes.sql)  calls from one account sent together get 5 lookups an hour, no more
+--   redeem_invite (0010_backend_review_fixes.sql)      invite codes tried together by one account get 10 lookups an hour, no more
 --
 -- keep_a_manager. rls.sql proves the rule inside one session: the last
 -- manager can neither step down nor leave. One session cannot prove it
@@ -40,6 +41,20 @@
 --   hold       commit
 --   check      five were answered P0009 and two P0005, and p has five attempts, not seven
 --
+-- The invite throttle. redeem_invite() counts the caller's misses in the
+-- past hour and writes a miss only after the lookup, so without a lock,
+-- codes from one account sent together would all pass the count before any
+-- of their misses was committed, and every one would be looked up: a burst
+-- of guesses, not 10 an hour. It takes a lock per account before the count.
+-- Here account r has 9 misses; one of its calls is in progress (its tenth
+-- miss written, its transaction open) while three more arrive:
+--
+--   hold       signed in as r: begin; a wrong code (the tenth miss); the transaction stays open
+--   r1 .. r3   signed in as r: a wrong code each, each call its own transaction, sent without waiting
+--   check      all three are waiting for the call in progress
+--   hold       commit
+--   check      all three were answered P0005, and r has 10 misses, not 13
+--
 -- Unlike the other test files, this one cannot run inside one rolled-back
 -- transaction, because the sessions only see each other's committed rows.
 -- So the fixture is committed, and sign-up is opened for the second case.
@@ -56,11 +71,13 @@
 --   m1    C           manager
 --   m2    C           manager
 --   p     (none)      signs up with C's website seven times at once
+--   r     (none)      tries four wrong invite codes at once, with nine misses already
 
 \set ON_ERROR_STOP on
 \set m1      '00000000-0000-4000-8000-000000cc00a1'
 \set m2      '00000000-0000-4000-8000-000000cc00a2'
 \set p       '00000000-0000-4000-8000-000000cc00a3'
+\set r       '00000000-0000-4000-8000-000000cc00a4'
 \set dealer  '00000000-0000-4000-8000-000000cc00d1'
 
 -- dblink, in a schema of its own when this file installs it (never in public, where the
@@ -95,12 +112,16 @@ $$;
 -- belongs nowhere; sign-up open, its switch kept to be set back at the end
 -- ---------------------------------------------------------------------------
 delete from public.dealerships where id = :'dealer';
-delete from auth.users where id in (:'m1', :'m2', :'p');
+delete from auth.users where id in (:'m1', :'m2', :'p', :'r');
+delete from public.invite_misses where user_id = :'r';
 
 insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', :'m1', 'authenticated', 'authenticated', 'm1@example.test', now(), now()),
   ('00000000-0000-0000-0000-000000000000', :'m2', 'authenticated', 'authenticated', 'm2@example.test', now(), now()),
-  ('00000000-0000-0000-0000-000000000000', :'p',  'authenticated', 'authenticated', 'p@example.test',  now(), now());
+  ('00000000-0000-0000-0000-000000000000', :'p',  'authenticated', 'authenticated', 'p@example.test',  now(), now()),
+  ('00000000-0000-0000-0000-000000000000', :'r',  'authenticated', 'authenticated', 'r@example.test',  now(), now());
+-- r's nine misses in the past hour (no API role writes them; the owner does here)
+insert into public.invite_misses (user_id, at) select :'r', now() - interval '5 minutes' from generate_series(1, 9);
 insert into public.dealerships (id, name, website_origin) values
   (:'dealer', 'Dealership C', 'https://www.dealership-c.test');
 insert into public.memberships (user_id, dealership_id, role, name) values
@@ -268,11 +289,90 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- The invite throttle: r's tenth miss is in progress while three more of
+-- r's calls arrive. A failed check is added to lotsync.concurrency_failure.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r uuid := '00000000-0000-4000-8000-000000cc00a4';
+  calls constant integer := 3;
+  conn text;
+  claims text := json_build_object('sub', r, 'role', 'authenticated')::text;
+  pids integer[] := '{}';
+  pid integer;
+  waiting integer := 0;
+  answer text;
+  answers text[] := '{}';
+  misses bigint;
+begin
+  conn := pg_temp.conninfo();
+  -- the call in progress: r's tenth wrong code, its transaction still open
+  perform dblink_connect('lotsync_rhold', conn);
+  perform dblink_exec('lotsync_rhold', 'begin');
+  perform dblink_exec('lotsync_rhold', format('set local request.jwt.claims = %L', claims));
+  perform dblink_exec('lotsync_rhold', 'set local role authenticated');
+  select a into answer from dblink('lotsync_rhold', 'select public.redeem_invite(''WRONGCODE000'', null) ->> ''code''') as t(a text);
+  if answer is distinct from 'P0002' then
+    raise exception 'r''s tenth wrong code was answered % (expected P0002)', answer;
+  end if;
+
+  -- three more of r's calls, each signed in the way PostgREST signs a request in; a lock wait gives up after 20 seconds
+  for i in 1..calls loop
+    perform dblink_connect('lotsync_r' || i, conn);
+    select q into pid from dblink('lotsync_r' || i, 'select pg_backend_pid()') as t(q integer);
+    pids := pids || pid;
+    perform dblink_exec('lotsync_r' || i, format('set request.jwt.claims = %L', claims));
+    perform dblink_exec('lotsync_r' || i, 'set role authenticated');
+    perform dblink_exec('lotsync_r' || i, 'set lock_timeout = ''20s''');
+    if dblink_send_query('lotsync_r' || i, format('select public.redeem_invite(%L, null)::text', 'WRONGCODE00' || i)) <> 1 then
+      raise exception 'call % could not be sent', i;
+    end if;
+  end loop;
+
+  -- up to 10 seconds for every call to wait for the one in progress, or to finish without waiting
+  for i in 1..200 loop
+    select count(*) into waiting from unnest(pids) x where cardinality(pg_blocking_pids(x)) > 0;
+    exit when waiting = calls;
+    exit when (select bool_and(dblink_is_busy('lotsync_r' || j) = 0) from generate_series(1, calls) j);
+    perform pg_sleep(0.05);
+  end loop;
+
+  perform dblink_exec('lotsync_rhold', 'commit');
+
+  -- each call's answer: the code it answered, or the error it raised
+  for i in 1..calls loop
+    begin
+      select coalesce(x::jsonb ->> 'code', 'a membership') into answer from dblink_get_result('lotsync_r' || i) as t(x text);
+    exception when others then
+      answer := sqlstate;
+    end;
+    perform * from dblink_get_result('lotsync_r' || i) as t(x text); -- the end of that call's results
+    answers := answers || answer;
+  end loop;
+  select count(*) into misses from public.invite_misses m where m.user_id = r;
+
+  if misses > 10 then
+    raise exception '% wrong invite codes from one account at once were looked up past the throttle: it has % misses in an hour, not 10 (answered %)', calls + 1, misses, answers;
+  end if;
+  if waiting <> calls then
+    raise exception 'only % of % invite calls waited for the one in progress (answered %)', waiting, calls, answers;
+  end if;
+  if answers is distinct from array['P0005', 'P0005', 'P0005'] or misses <> 10 then
+    raise exception 'three invite calls behind the tenth miss were answered % with % misses (expected three P0005 and 10 misses)', answers, misses;
+  end if;
+  raise notice 'ok: invite codes one account tries at once take turns at the throttle, and past 10 misses each gets P0005';
+exception when others then
+  perform set_config('lotsync.concurrency_failure', concat_ws(E'\n', nullif(current_setting('lotsync.concurrency_failure'), ''), sqlerrm), false);
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Clean-up, pass or fail: close every session (a call still running is
 -- cancelled first, and an open transaction is rolled back), then remove
 -- every row this file made and set sign-up's switch back. Deleting the
 -- dealership takes its memberships with it, as keep_a_manager allows, and
--- deleting p takes p's attempts.
+-- deleting p takes p's attempts; r's misses have no link to the account,
+-- so they are deleted by name.
 -- ---------------------------------------------------------------------------
 do $$
 declare
@@ -288,7 +388,8 @@ end;
 $$;
 
 delete from public.dealerships where id = :'dealer';
-delete from auth.users where id in (:'m1', :'m2', :'p');
+delete from auth.users where id in (:'m1', :'m2', :'p', :'r');
+delete from public.invite_misses where user_id = :'r';
 update public.signup_settings set open = :'signup_was_open';
 
 reset search_path;
@@ -301,8 +402,9 @@ do $$
 begin
   if exists (select 1 from public.dealerships where id = '00000000-0000-4000-8000-000000cc00d1')
      or exists (select 1 from public.memberships where user_id in ('00000000-0000-4000-8000-000000cc00a1', '00000000-0000-4000-8000-000000cc00a2'))
-     or exists (select 1 from auth.users where id in ('00000000-0000-4000-8000-000000cc00a1', '00000000-0000-4000-8000-000000cc00a2', '00000000-0000-4000-8000-000000cc00a3'))
-     or exists (select 1 from public.signup_attempts where user_id = '00000000-0000-4000-8000-000000cc00a3') then
+     or exists (select 1 from auth.users where id in ('00000000-0000-4000-8000-000000cc00a1', '00000000-0000-4000-8000-000000cc00a2', '00000000-0000-4000-8000-000000cc00a3', '00000000-0000-4000-8000-000000cc00a4'))
+     or exists (select 1 from public.signup_attempts where user_id = '00000000-0000-4000-8000-000000cc00a3')
+     or exists (select 1 from public.invite_misses where user_id = '00000000-0000-4000-8000-000000cc00a4') then
     raise exception 'concurrency.sql left rows behind';
   end if;
   if current_setting('lotsync.concurrency_failure') <> '' then

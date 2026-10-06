@@ -3,9 +3,17 @@ backend/.env
 backend/usage.json
 test/e2e/screenshots/
 .DS_Store
+._*
 Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+.directory
 *.zip
 dist/
 demo/screenshots/
 survey-out/
 store/screenshots/
+# the pilot numbers name a dealer's salespeople and results (pilot agreement
+# sections 3 and 4): the Numbers tab's and the manager view's CSVs stay out
+lot-current-pilot-*.csv
+lot-current-manager-*.csv

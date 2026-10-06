@@ -6,7 +6,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
-import { OVERDUE_HOURS, SCAN_STALE_HOURS } from '../manager/data.js';
+import { OVERDUE_HOURS, SCAN_STALE_HOURS, SCAN_STALE_WHY } from '../manager/data.js';
+import { copyProblems } from './copyGuards.js';
+import { honestyProblems, offPricing, TIME_PER_POST } from './honesty.js';
+import { stripComments } from './helpers.js';
+import { pricingUnconfirmed } from '../scripts/stripe-setup-lib.mjs';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
@@ -21,15 +25,58 @@ const AGREEMENTS = ['pilot-agreement.md', 'dealer-subscription-agreement.md'];
 const legal = (rel) => read('../legal/' + rel);
 // the pilot dealer is a fixture, not a default (the same words as test/anyDealer.test.js)
 const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
+const US_STATE = /\b(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/;
 const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// "hypothesis" stays true until a dealer agrees to a price in writing. Setting
+// it to false is docs/launch-checklist.md's "Pricing confirmed" step, and the
+// file then records when that happened ("confirmedOn", the agreement's date),
+// so npm test passes on the step the checklist and docs/stripe-setup.md
+// describe and fails on a bare flip with no record. A confirmed file must also
+// pass the check `npm run stripe-setup -- --live` makes (pricingUnconfirmed),
+// so npm test never passes a file that live mode refuses, such as a
+// "confirmedOn" after today.
+function pricingRecordRule(p, now = Date.now()) {
+  assert.equal(typeof p.hypothesis, 'boolean', '"hypothesis" is true or false');
+  if (p.hypothesis) {
+    assert.ok(!('confirmedOn' in p), 'a hypothesis carries no confirmation date');
+    return;
+  }
+  assert.match(String(p.confirmedOn), /^\d{4}-\d{2}-\d{2}$/, 'a confirmed price says when a dealer agreed to it in writing ("confirmedOn": "YYYY-MM-DD")');
+  const t = Date.parse(p.confirmedOn + 'T00:00:00Z');
+  assert.ok(Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === p.confirmedOn, 'confirmedOn is a real date');
+  assert.equal(pricingUnconfirmed(p, now), '', 'live mode would refuse this file');
+}
+
 test('the pricing hypothesis is one config with the fields the docs quote', () => {
-  assert.equal(pricing.hypothesis, true, 'it stays a hypothesis until a dealer pays');
+  pricingRecordRule(pricing);
   for (const k of ['perRooftopMonthly', 'includedSalespeople', 'extraSalespersonMonthly', 'pilotDays', 'foundingDealerMonthly', 'foundingDealerMonths', 'foundingDealerCount']) {
     assert.ok(Number.isInteger(pricing[k]) && pricing[k] > 0, `${k} is a whole number`);
   }
   assert.match(pricing.asOf, /^\d{4}-\d{2}-\d{2}$/);
   assert.ok(Array.isArray(pricing.wouldChangeIt) && pricing.wouldChangeIt.length >= 2, 'says what would change it');
+});
+
+test('pricing.json can be marked confirmed the way the launch checklist says, and only with the agreement\'s date', () => {
+  const { confirmedOn: _, ...numbers } = pricing;
+  const now = Date.parse('2026-12-15T12:00:00Z');
+  // the step docs/launch-checklist.md ("Pricing confirmed") and docs/stripe-setup.md describe passes, on the day or after
+  pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-01' }, now);
+  pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-15' }, now);
+  pricingRecordRule({ ...numbers, hypothesis: true }, now);
+  // an agreement dated after today fails here as it does in stripe-setup's live mode
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-16' }, now), /after today/);
+  // a bare flip, a date that does not exist, a hypothesis with a date, a string for the flag: each fails
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false }), /confirmedOn/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }), /real date/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: true, confirmedOn: '2026-12-01' }), /no confirmation date/);
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: 'false' }), /true or false/);
+  // and both documents name the date with the flag, and say npm test passes after it
+  const checklist = read('../docs/launch-checklist.md');
+  const item = checklist.slice(checklist.indexOf('**Pricing confirmed.**'));
+  assert.match(item.split('\n')[0], /"hypothesis": false`[^\n]*`"confirmedOn"[^\n]*`npm test` (still )?passes/, 'the checklist item names confirmedOn and npm test');
+  const stripe = read('../docs/stripe-setup.md');
+  for (const para of stripe.split('\n').filter((l) => l.includes('"hypothesis": false'))) assert.match(para, /"confirmedOn"/, `docs/stripe-setup.md: ${para.slice(0, 60)}`);
 });
 
 test('the sales sheet and the positioning quote the pricing config, not their own numbers', () => {
@@ -41,12 +88,10 @@ test('the sales sheet and the positioning quote the pricing config, not their ow
     assert.match(doc, new RegExp(`${pricing.pilotDays}[ -]day`), `${rel} quotes the pilot length`);
     assert.match(doc, new RegExp(`${pricing.includedSalespeople === 5 ? 'five' : pricing.includedSalespeople} salespeople included`), `${rel} quotes the included seats`);
   }
-  // no other dollar-per-month figure sneaks into customer-facing copy (the
+  // no other dollar figure sneaks into customer-facing copy, whatever words follow it (the
   // internal positioning may cite competitor ranges)
   for (const rel of CUSTOMER_FACING) {
-    const doc = read('../marketing/' + rel);
-    const allowed = new Set([pricing.perRooftopMonthly, pricing.extraSalespersonMonthly, pricing.foundingDealerMonthly].map(money));
-    for (const m of doc.matchAll(/(\$[\d,]+)\s*(?:a|per)\s*month/g)) assert.ok(allowed.has(m[1]), `${rel}: ${m[0]} is not from pricing.json`);
+    assert.deepEqual(offPricing(read('../marketing/' + rel), pricing), [], `marketing/${rel} quotes a price that is not from pricing.json`);
   }
 });
 
@@ -61,17 +106,17 @@ test('customer-facing copy says who publishes and that Lot Current is not affili
 });
 
 test('no claim we have not measured, and nothing that sounds like Meta approval', () => {
-  // what no document may say, internal ones included
-  const never = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /(customers|dealers|salespeople) (say|love|report)/i, /\b(five|5) stars?\b/i, /\d+\s*(%|percent|x|times) (faster|more|fewer)/i, /hours? (a|per) (day|week)/i, /industry[- ]leading/i, /best[- ]in[- ]class/i, /\b#1\b/];
-  // what customer-facing copy may not say either (the positioning names these so we know what to avoid)
-  const notToCustomers = [/testimonial/i, /never (be|get) restricted/i, /your account is (safe|protected)/i, /\brisk[- ]free\b/i, /\bno risk\b/i, /\bbots?\b/i];
+  // test/copyGuards.js and the shared lists (test/honesty.js): what no document may say, internal ones included, and
+  // what customer-facing copy may not say either (the positioning names some of these so we know what to avoid)
   for (const rel of ALL) {
     const doc = read('../marketing/' + rel);
-    // "not a guarantee" and its cousins are the honest line; anything else with "guarantee" is a promise we can't make
-    const rest = doc.replace(/(not|no|isn't|not be|without|never|can't|cannot|won't|doesn't|don't|no one can|no tool can)[a-z' ]{0,20}guarantee[ds]?/gi, '').replace(/a guarantee\b/gi, '');
-    assert.doesNotMatch(rest, /\bguarantee[ds]?\b/i, `${rel} makes a guarantee`);
-    for (const re of never) assert.doesNotMatch(doc, re, `${rel} matches ${re}`);
-    if (CUSTOMER_FACING.includes(rel)) for (const re of notToCustomers) assert.doesNotMatch(doc, re, `${rel} matches ${re}`);
+    assert.deepEqual(copyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], rel);
+    assert.deepEqual(honestyProblems(doc, { customerFacing: CUSTOMER_FACING.includes(rel) }), [], `marketing/${rel}`);
+    // the internal positioning too: its numbers are measured or labelled a guess, and no fill time has been measured
+    for (const re of TIME_PER_POST) {
+      const hit = doc.match(re);
+      assert.equal(hit, null, `marketing/${rel} gives a time per post nobody has measured: "${hit && hit[0]}" (legal/trademark-note.md, Marketing claims)`);
+    }
   }
 });
 
@@ -109,6 +154,27 @@ test('the emails are templates for any dealership: no pilot-dealer value, no "ou
   assert.match(offer, /\[dealership\]/, 'the pilot offer names the dealership as a bracket');
 });
 
+test('no marketing or Web Store document names the pilot dealer: every marketing file is sorted, and each is checked', () => {
+  // CLAUDE.md keeps the pilot dealer to test/fixtures/, marked worked examples and the pilot record
+  // (PILOT.md, CHANGELOG.md, legal/questions-for-attorney.md); the demo script, the sales sheet and the
+  // internal positioning are read before or at another dealership, so they name no pilot value either
+  const md = (dir) => readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.md')).sort();
+  assert.deepEqual(md('marketing'), [...ALL].sort(), 'a marketing document is not in CUSTOMER_FACING or ALL here: sort it, so the checks in this file read it');
+  for (const rel of [...ALL.map((f) => 'marketing/' + f), ...md('store').map((f) => 'store/' + f)]) {
+    const doc = read('../' + rel);
+    const line = doc.split('\n').findIndex((l) => PILOT.test(l));
+    assert.equal(line, -1, `${rel}:${line + 1} contains the pilot value "${line >= 0 && doc.split('\n')[line].match(PILOT)[0]}"`);
+    // region is data too (CLAUDE.md): the pilot's state, or any other, is not where Lot Current is sold
+    const region = doc.split('\n').findIndex((l) => US_STATE.test(l));
+    assert.equal(region, -1, `${rel}:${region + 1} names a state: "${region >= 0 && doc.split('\n')[region].match(US_STATE)[0]}"`);
+  }
+  // the positioning once said nothing is rescanned "while every Chrome at the store is closed", as if one open
+  // Chrome covered the store: each salesperson's listings are rescanned only in their own Chrome
+  const positioning = read('../marketing/positioning.md');
+  assert.doesNotMatch(positioning, /every Chrome at the store/);
+  assert.match(positioning, /Each salesperson installs Lot Current in their own Chrome/);
+});
+
 test('the store-install emails quote the pricing config and the code\'s numbers, and name the controls as the code labels them', () => {
   const store = read('../marketing/onboarding-store.md');
   for (const h of ['## To the manager', '## To each salesperson', '## Day 7, to the manager']) {
@@ -124,6 +190,17 @@ test('the store-install emails quote the pricing config and the code\'s numbers,
   // the day-7 numbers are read the way the manager view draws them
   assert.match(store, new RegExp(`more than ${OVERDUE_HOURS} hours`), 'the red threshold is OVERDUE_HOURS from manager/data.js');
   assert.match(store, new RegExp(`more than ${SCAN_STALE_HOURS} hours ago`), 'the stale-scan line is SCAN_STALE_HOURS from manager/data.js');
+  // the last-scan line shows the last trusted scan: one judged a website hiccup goes up marked withheld and is told
+  // beside it, never as it (extension/src/accountFlow.js scanFromStored, manager/data.js SCAN_STALE_WHY and
+  // summarize), so an old line is not only a closed Chrome
+  assert.match(SCAN_STALE_WHY, /held back as a likely website hiccup[^.]*never the last scan/, 'the manager view no longer says hiccup scans are held back: change onboarding-store.md and For managers with it');
+  const scanPara = store.split('\n').find((l) => /last-scan line/.test(l)) || '';
+  assert.match(scanPara, /last scan Lot Current trusted/, 'onboarding-store.md calls the line the last read of the website');
+  assert.match(scanPara, /website hiccup[^.]*is held back and never shown as the last scan: the line says how many later scans were held back beside the last trusted one\./, 'onboarding-store.md does not say a hiccup scan is held back and told beside the last trusted one');
+  assert.doesNotMatch(scanPara, /not recorded/, 'onboarding-store.md says a hiccup scan is not recorded, while it goes up marked held back');
+  assert.doesNotMatch(scanPara, /, nobody's Chrome had it on\./, 'onboarding-store.md blames a closed Chrome alone for an old line');
+  // a rescan reaches the dealership's account only while its salesperson is signed in (accountFlow.js syncNow)
+  assert.match(scanPara, /not signed in to their Lot Current accounts \(a scan reaches this view only while its salesperson is signed in\)/, 'onboarding-store.md leaves out that a signed-out salesperson\'s rescans never reach the view');
   // the three sentences that matter
   assert.match(store, /\*\*You click Publish\. Lot Current never does\.\*\*/);
   assert.match(store, /\*\*Keep prices honest\.\*\*/);
@@ -187,29 +264,151 @@ test('the two agreements are templates: no pilot-dealer value, every dollar amou
 
 // Chrome's permission prompt can come from three places now (round J added
 // the photo servers), and the demo script tells the presenter what each one
-// is. A new place the extension asks from fails here until it is added to
-// KNOWN and to the script.
+// is. Every prompt goes through askChrome (src/askChrome.js), the extension's
+// one call to chrome.permissions.request, which refuses Facebook's servers and
+// wildcard hosts whatever list it is handed (test/askChrome.test.js). So this
+// reads every use of chrome.permissions and of askChrome in the code: a
+// request made anywhere else, an alias, a renamed import or a computed name on
+// chrome fails; a new place to ask from fails until it is added to KNOWN and
+// to the script; and so does a second call with the same words as a known one.
 test('the demo script says what every Chrome permission prompt the extension raises is for', () => {
+  const GATE = 'src/askChrome.js';
+  // each askChrome call's argument, as written, in that file: [what it asks for, how many calls]
   const KNOWN = {
-    'wizard.js { origins }': 'rescan',
-    'popup.js { origins: rescanOrigins() }': 'rescan',
-    'sidepanel.js { origins: patterns }': 'photos',
-    'sidepanel.js { origins }': 'rescan', // the website itself, when posting or rescanning from the side panel's list
-    "sidepanel.js { origins: [NHTSA_ORIGIN + '/' + '*'] }": 'NHTSA',
+    'wizard.js origins': ['rescan', 1],
+    'popup.js rescanOrigins()': ['rescan', 2],
+    'sidepanel.js patterns': ['photos', 1],
+    'sidepanel.js origins': ['rescan', 1], // the website itself, when posting or rescanning from the side panel's list
+    "sidepanel.js [NHTSA_ORIGIN + '/' + '*']": ['NHTSA', 1],
   };
+  // what else the code may do with chrome.permissions (none of these prompts)
+  const QUIET = ['contains', 'getAll', 'onAdded', 'onRemoved'];
   const WORDS = { rescan: /automatic rescan/, photos: /download this car's photos/, NHTSA: /Check with NHTSA/ };
-  const kinds = new Set();
-  const files = readdirSync(new URL('../extension/', import.meta.url), { recursive: true }).filter((f) => f.endsWith('.js'));
-  assert.ok(files.includes('sidepanel.js') && files.includes('wizard.js'), 'the extension folder moved: fix this test');
-  for (const file of files) {
-    for (const m of read('../extension/' + file).matchAll(/chrome\.permissions\.request\((\{[^}]*\})\)/g)) {
-      const kind = KNOWN[`${file} ${m[1]}`];
-      assert.ok(kind, `extension/${file} asks Chrome for ${m[1]}: add it to KNOWN here and say what it is in the demo script`);
-      kinds.add(kind);
+  const argumentAt = (code, open) => {
+    let depth = 0;
+    for (let k = open; k < code.length; k += 1) {
+      if (code[k] === '(') depth += 1;
+      else if (code[k] === ')' && (depth -= 1) === 0) return code.slice(open + 1, k).trim();
     }
+    return null;
+  };
+  const kinds = new Set();
+  const calls = {};
+  const requests = [];
+  const files = readdirSync(new URL('../extension/', import.meta.url), { recursive: true }).filter((f) => f.endsWith('.js'));
+  assert.ok(files.includes('sidepanel.js') && files.includes('wizard.js') && files.includes(GATE), 'the extension folder moved: fix this test');
+  for (const file of files) {
+    let code = stripComments(read('../extension/' + file), { trailing: true });
+    assert.doesNotMatch(code, /\bchrome\s*(?:\?\.)?\s*\[/, `extension/${file} reads chrome by a computed name (chrome[...]): write chrome.<name>, so this inventory reads what it uses`);
+    for (const m of code.matchAll(/\bpermissions\b(\s*\??\.\s*([A-Za-z_$][\w$]*)(\s*\()?)?/g)) {
+      const [, , method, paren] = m;
+      if (QUIET.includes(method)) continue;
+      assert.ok(method === 'request' && paren, `extension/${file}: "permissions" appears as "${m[0]}". In code, use only chrome.permissions.${QUIET.join('/')}, and ask Chrome through askChrome(origins) (src/askChrome.js); in text a person reads, word it another way (this test reads strings as code)`);
+      requests.push(`${file} ${argumentAt(code, m.index + m[0].length - 1)}`);
+    }
+    if (file === GATE) continue;
+    // the one import form, on one line and under its own name, so every call below is read
+    code = code.replace(/^import \{([^}\n]*)\} from '\.\/src\/askChrome\.js';$/gm, (line, names) => {
+      assert.deepEqual(names.split(',').map((n) => n.trim()).filter(Boolean), ['askChrome'], `extension/${file}: import { askChrome } from './src/askChrome.js', nothing renamed and nothing else`);
+      return '';
+    });
+    for (const m of code.matchAll(/\baskChrome\b(\s*\()?/g)) {
+      assert.ok(m[1], `extension/${file}: askChrome appears as "${code.slice(m.index, m.index + 40).split('\n')[0]}"; import it as import { askChrome } from './src/askChrome.js' and call it as askChrome(origins), never under another name, so this inventory reads every request`);
+      const arg = argumentAt(code, m.index + m[0].length - 1);
+      const key = `${file} ${arg}`;
+      assert.ok(KNOWN[key], `extension/${file} asks Chrome for ${arg}: add it to KNOWN here and say what it is in the demo script`);
+      calls[key] = (calls[key] || 0) + 1;
+      kinds.add(KNOWN[key][0]);
+    }
+  }
+  assert.deepEqual(requests, [`${GATE} { origins: asked }`], 'Chrome is asked for a permission only inside askChrome (src/askChrome.js), which refuses Facebook\'s servers and wildcard hosts: call askChrome(origins) instead of chrome.permissions.request');
+  for (const [key, [, count]] of Object.entries(KNOWN)) {
+    assert.equal(calls[key] || 0, count, `extension/${key.replace(' ', ' asks Chrome for ')} in ${calls[key] || 0} places, not ${count}: a new place to ask from is added to KNOWN here and to the demo script; a removed one is taken out of both`);
   }
   assert.deepEqual([...kinds].sort(), Object.keys(WORDS).sort(), 'a permission request in KNOWN is gone from the code: take it out of here and the demo script');
   const line = read('../marketing/demo-script.md').split('\n').find((l) => l.startsWith('- **Chrome asks for a permission:**'));
   assert.ok(line, 'the demo script lost its "Chrome asks for a permission" line');
   for (const kind of kinds) assert.match(line, WORDS[kind], `the demo script does not say a prompt can be the ${kind} permission`);
+});
+
+// The dealer is told every salesperson ticks the posting rules before their
+// first post. Set-up can be skipped (Not now), so that holds only while the
+// side panel stops a post on a website whose settings have no tick and shows
+// the rules (test/panelFlow.test.js runs it).
+test('the store email says every salesperson ticks the posting rules before posting, and the side panel still makes it so', () => {
+  const store = read('../marketing/onboarding-store.md');
+  const sentence = store.split('\n').find((l) => l.startsWith('**5. The posting rules.**'));
+  assert.ok(sentence, 'onboarding-store.md has no posting-rules paragraph');
+  assert.match(sentence, /ticks that they will follow them before their first post: in set-up, or in the side panel if they skipped set-up/);
+  assert.doesNotMatch(sentence, /during set-up and ticks/, 'set-up can be skipped: say where else the tick is asked for');
+  const panel = read('../extension/sidepanel.js');
+  assert.match(panel, /if \(!state\.settings\.rulesReadAt\) \{[^}]*state\.step = 'rules';/, 'the side panel no longer stops a post until the posting rules are ticked: change the email');
+});
+
+// review: the manager was told "Nothing from the pilot is lost: each pilot salesperson's posted list and
+// numbers sync into the account the first time they sign in", while every salesperson was sent to the Web
+// Store. The manifest has no "key", so the store copy has its own extension id and its own storage: it
+// starts empty, and a pilot that ran without accounts left its listings only in the pilot copy.
+test('the store-install emails carry the pilot salespeople\'s listings across from the pilot copy, since the store copy starts empty', () => {
+  const manifest = JSON.parse(read('../extension/manifest.json'));
+  const store = read('../marketing/onboarding-store.md');
+  assert.doesNotMatch(store, /nothing (from the pilot )?is lost|sync into the account the first time they sign in/i, 'a promise the store install does not keep');
+  if (manifest.key) return; // a fixed id would share one storage between the zip and the store copy
+  const manager = store.split('\n').find((l) => l.startsWith('**1. The account.**'));
+  assert.ok(manager, 'the manager email has its account paragraph');
+  assert.match(manager, /starts empty/, 'the manager is told the store copy starts empty');
+  assert.match(manager, /before installing from the store, they sign in and join the account in the copy they used during the pilot/, 'and what each pilot salesperson does first');
+  const salesperson = store.slice(store.indexOf('## To each salesperson'), store.indexOf('## Day 7'));
+  const before = salesperson.split('\n').find((l) => /Only for a salesperson who was in the pilot/.test(l)) || '';
+  assert.ok(before && salesperson.indexOf(before) < salesperson.indexOf('**1. Install'), 'the salesperson email has the pilot step before the install step');
+  assert.match(before, /in that pilot copy[^.]*\*\*Settings\*\*[^.]*\*\*Account\*\* sign in and join/, 'the pilot step signs in and joins in the pilot copy');
+  assert.match(before, /Keep the pilot copy until \*\*My listings\*\* in the new copy shows your pilot cars/, 'and keeps it until the new copy shows them');
+  // the labels it names are the popup's
+  const popup = read('../extension/popup.js');
+  for (const label of ['My listings', 'Settings', 'Account']) assert.ok(popup.includes(label), `"${label}" is no longer a label in popup.js: update onboarding-store.md and this test together`);
+  assert.ok(read('../extension/src/accountFlow.js').includes('Accounts are not set up yet'), 'the pilot step quotes the Account section of a copy without accounts');
+});
+
+// review: the demo script had "a Facebook account signed in (yours, or the manager's salesperson's with their
+// OK)" on the presenter's laptop, and a branch where a salesperson clicks Publish there. Support never touches a
+// salesperson's Facebook account (docs/support.md) and the posting rules say each person posts from their own
+// account only. The demo runs on the presenter's own account, is never published, and a real listing is the
+// salesperson's own, on their own computer.
+test('the demo script signs in only the presenter\'s own Facebook account and never publishes', () => {
+  const demo = read('../marketing/demo-script.md');
+  const setup = demo.split('\n').find((l) => l.startsWith('For a used car manager'));
+  assert.ok(setup, 'the demo script lost its set-up line');
+  assert.match(setup, /your own Facebook account signed in/, 'the presenter signs in their own account');
+  assert.match(setup, /Never sign anyone else's Facebook account in on your laptop/, 'and never anyone else\'s');
+  assert.doesNotMatch(demo, /salesperson's with their OK|or the (manager's )?salesperson's\)|sign(ed|s)? in as (them|the salesperson|a salesperson)|their (Facebook )?(login|password)/i, 'someone else\'s account on the presenter\'s laptop');
+  assert.doesNotMatch(demo, /have the salesperson click Publish|unless they want real posts|whether the demo post gets published/i, 'a real listing during the demo');
+  assert.match(demo, /The demo post is never published/, 'the demo publishes nothing');
+  for (const line of demo.split('\n').filter((l) => /real listing/i.test(l))) {
+    assert.match(line, /their own computer/, `a real listing is made on the salesperson's own computer: ${line.slice(0, 80)}`);
+    assert.match(line, /their own (Facebook )?account/, `in their own Facebook account: ${line.slice(0, 80)}`);
+  }
+  // the support rule the script follows
+  assert.match(read('../docs/support.md'), /Never touch a salesperson's Facebook account/, 'docs/support.md no longer says support never touches a salesperson\'s account: check the demo script against it');
+});
+
+// review: the sales sheet said "no contract", while a subscription is the Dealer Subscription Agreement the
+// dealer signs (and the store email opens "Thanks for signing"). What is true is that it runs month to month
+// and either side can end it at the end of a paid month; the copy says that instead.
+test('no customer-facing text says "no contract" while the subscription is a signed agreement, and the sales sheet says month to month', () => {
+  const agreement = legal('dealer-subscription-agreement.md');
+  assert.match(agreement, /^# Dealer Subscription Agreement/m);
+  assert.match(agreement, /^Signed:/m, 'the subscription agreement is still signed: copy cannot say there is no contract');
+  const noContract = /\bno(?:-|\s+)contracts?\b|\bcontract-free\b|without (?:a|any) contract|nothing to sign/i;
+  const files = [
+    ...CUSTOMER_FACING.map((f) => `../marketing/${f}`),
+    ...readdirSync(new URL('../site-src/pages/', import.meta.url)).filter((f) => f.endsWith('.html') && f !== 'legal.html').map((f) => `../site-src/pages/${f}`),
+    ...readdirSync(new URL('../store/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => `../store/${f}`),
+  ];
+  for (const rel of files) {
+    const hit = read(rel).match(noContract);
+    assert.equal(hit, null, `${rel.slice(3)} says "${hit && hit[0]}", but a subscription is a signed agreement`);
+  }
+  // the term the agreement sets, in the sheet's own words
+  assert.match(agreement, /Month to month from the effective date\. Either party may terminate on notice effective at the end of the current paid month\./, 'the agreement\'s term changed: change the sales sheet with it');
+  assert.match(read('../marketing/sales-sheet.md'), /month to month: you can cancel at any time, effective at the end of the paid month\./);
 });

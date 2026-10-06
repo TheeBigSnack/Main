@@ -24,9 +24,15 @@ export function currentVin(queue) {
   return queue.index < queue.vins.length ? queue.vins[queue.index] : null;
 }
 
-export function advance(queue, outcome) {
+// Records the outcome for the car the queue is on and moves to the next.
+// `forVin`, when given, is the car the caller finished: the queue moves only
+// while it is still on that car, so a second confirm of the same car (a click
+// racing the listing watcher, a side panel in another window) never records
+// the next car, which was never posted, and never skips it.
+export function advance(queue, outcome, forVin = null) {
   const vin = currentVin(queue);
   if (!vin) return queue;
+  if (forVin && String(forVin).toUpperCase() !== vin) return queue;
   const results = { ...queue.results, [vin]: OUTCOMES.includes(outcome) ? outcome : 'skipped' };
   const index = queue.index + 1;
   return { ...queue, results, index, status: index >= queue.vins.length ? 'done' : queue.status };
