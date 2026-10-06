@@ -1346,6 +1346,12 @@ test('supabase/README.md says what the functions and the billing code do', () =>
   assert.match(syncComments, /\(`shows`\): for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up\./);
   assert.doesNotMatch(flat, /none of their rows for it up/, 'the late-sighting rule leaves out that a take-down needs rows of the caller\'s');
   assert.match(flat, /for a price change, they have a listed row for the VIN and every one is at the flag's new price; for a take-down, they have rows for it and none is up/);
+  // a closed flag with no row goes in as its own item, except in the two orders the function merges into a row it
+  // holds (review: an older "a closed flag with no row always goes in" came back in a merge and nothing failed)
+  assert.match(sync, /const later = next && next\.id && sameChange\(next, t\) \? next : null;/, 'the fix-after-a-later-sighting merge changed: check supabase/README.md');
+  assert.match(sync, /if \(newest && newest\.done_at && newest\.how !== 'cleared' && \(ms\(newest\.done_at\) \?\? 0\) <= flagged && sameChange\(newest, t\)/, 'the ticked-off-after-the-close merge changed: check supabase/README.md');
+  assert.doesNotMatch(flat, /closed flag with no row always goes in/, 'supabase/README.md says a closed flag with no row always goes in, while the function merges it in two orders');
+  assert.match(flat, /a closed flag with no row goes in as its own item \(a change flagged and fixed on one machine between two syncs\), except in two orders that make it the same item as a row the server holds: the fix reached the server after another machine sighted the same change[\s\S]{0,800}?, or a machine that rescanned on an old registry ticked the change off before its first sync, after the item was closed already/);
 
   const billing = read('../supabase/functions/_shared/billing.mjs');
   assert.match(billing, /an invoice being retried \(past_due\) or no longer retried\n\/\/ but still payable \(unpaid\)/, 'the billing code\'s account of unpaid changed: check supabase/README.md');
