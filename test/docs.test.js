@@ -1759,6 +1759,20 @@ test('the help says what a no to Chrome from the side panel\'s list does: nothin
   for (const line of help.split('\n').filter((l) => /Allow reading \[website\]/.test(l))) assert.match(line, /stopped at (the|its) re-check/, `help.md ties Allow reading to a stopped post: ${line.slice(0, 80)}`);
 });
 
+// review: the help said the record of listings taken off the posted list keeps
+// the VIN and times, while it keeps the car's name too (src/takenDown.js
+// noteTakenDown), which the listing reader's namesake check reads.
+test('the help says what the take-down record keeps, the car\'s name among it, and what each part is for', async () => {
+  const { noteTakenDown } = await import('../extension/src/takenDown.js');
+  const [kept] = noteTakenDown([], { vin: 'TESTVIN00000000T1', postedAt: '2026-11-16T09:00:00.000Z', stillListed: true, listedBefore: true, name: '2021 Make Model' }, '2026-11-16T12:00:00.000Z');
+  assert.deepEqual(Object.keys(kept).sort(), ['listedBefore', 'name', 'postedAt', 'stillListed', 'takenDownAt', 'vin'], 'the take-down record keeps something else now: update the help and this test');
+  assert.match(read('../extension/upkeep.js'), /for \(const t of takenDownList\(takenDown\)\) if \(!others\.get\(t\.vin\)\) others\.set\(t\.vin, t\.name/, 'the namesake check no longer reads the take-down record\'s names: the help can change');
+  const browser = doc('help.md').split('\n').find((l) => l.startsWith('**In this browser, per website:**'));
+  assert.ok(browser, 'the help no longer says what is kept in this browser');
+  assert.doesNotMatch(browser, /the VIN and times of each listing you took off/, 'the help leaves the car\'s name out of the take-down record');
+  assert.match(browser, /the VIN, the car's name and the times of each listing you took off your posted list in the last 30 days, with whether the website still listed the car then and whether you had marked it as gone up before that day \(for the re-post notice, so the daily cap counts a post taken down the same day, and so a listing of that car is not taken for another car with a name like it\)/);
+});
+
 test('the help says one post from a website goes at a time across Chrome windows, as the side panel holds it', () => {
   const panel = read('../extension/sidepanel.js');
   // startFlow checks the website's saved post for any car, and saves its own from the start of the check
