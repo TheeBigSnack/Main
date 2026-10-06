@@ -10,6 +10,7 @@ import { OVERDUE_HOURS, SCAN_STALE_HOURS, SCAN_STALE_WHY } from '../manager/data
 import { copyProblems } from './copyGuards.js';
 import { honestyProblems, offPricing, TIME_PER_POST } from './honesty.js';
 import { stripComments } from './helpers.js';
+import { pricingUnconfirmed } from '../scripts/stripe-setup-lib.mjs';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const pricing = JSON.parse(read('../marketing/pricing.json'));
@@ -31,8 +32,11 @@ const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // it to false is docs/launch-checklist.md's "Pricing confirmed" step, and the
 // file then records when that happened ("confirmedOn", the agreement's date),
 // so npm test passes on the step the checklist and docs/stripe-setup.md
-// describe and fails on a bare flip with no record.
-function pricingRecordRule(p) {
+// describe and fails on a bare flip with no record. A confirmed file must also
+// pass the check `npm run stripe-setup -- --live` makes (pricingUnconfirmed),
+// so npm test never passes a file that live mode refuses, such as a
+// "confirmedOn" after today.
+function pricingRecordRule(p, now = Date.now()) {
   assert.equal(typeof p.hypothesis, 'boolean', '"hypothesis" is true or false');
   if (p.hypothesis) {
     assert.ok(!('confirmedOn' in p), 'a hypothesis carries no confirmation date');
@@ -41,6 +45,7 @@ function pricingRecordRule(p) {
   assert.match(String(p.confirmedOn), /^\d{4}-\d{2}-\d{2}$/, 'a confirmed price says when a dealer agreed to it in writing ("confirmedOn": "YYYY-MM-DD")');
   const t = Date.parse(p.confirmedOn + 'T00:00:00Z');
   assert.ok(Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === p.confirmedOn, 'confirmedOn is a real date');
+  assert.equal(pricingUnconfirmed(p, now), '', 'live mode would refuse this file');
 }
 
 test('the pricing hypothesis is one config with the fields the docs quote', () => {
@@ -54,9 +59,13 @@ test('the pricing hypothesis is one config with the fields the docs quote', () =
 
 test('pricing.json can be marked confirmed the way the launch checklist says, and only with the agreement\'s date', () => {
   const { confirmedOn: _, ...numbers } = pricing;
-  // the step docs/launch-checklist.md ("Pricing confirmed") and docs/stripe-setup.md describe passes
-  pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-01' });
-  pricingRecordRule({ ...numbers, hypothesis: true });
+  const now = Date.parse('2026-12-15T12:00:00Z');
+  // the step docs/launch-checklist.md ("Pricing confirmed") and docs/stripe-setup.md describe passes, on the day or after
+  pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-01' }, now);
+  pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-15' }, now);
+  pricingRecordRule({ ...numbers, hypothesis: true }, now);
+  // an agreement dated after today fails here as it does in stripe-setup's live mode
+  assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-12-16' }, now), /after today/);
   // a bare flip, a date that does not exist, a hypothesis with a date, a string for the flag: each fails
   assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false }), /confirmedOn/);
   assert.throws(() => pricingRecordRule({ ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }), /real date/);
