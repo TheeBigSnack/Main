@@ -260,6 +260,16 @@ test('no docs/ file carries a pilot-dealer value or Meta-affiliation wording', (
     assert.deepEqual(copyProblems(text, { customerFacing: name === 'help.md' }), [], `docs/${name}`);
     assert.deepEqual(honestyProblems(text, { customerFacing: name === 'help.md' }), [], `docs/${name}`);
   }
+  // every guide under docs/, the owner's set-up guides too: region is data (CLAUDE.md), so none gives the pilot's
+  // state as the reason for a choice (review: the Supabase region was "the closest to Pennsylvania dealers")
+  const every = readdirSync(new URL('../docs/', import.meta.url)).filter((f) => f.endsWith('.md'));
+  assert.ok(every.includes('production-setup.md'));
+  for (const name of every) {
+    const hit = doc(name).match(new RegExp(`${PILOT.source}|Pennsylvania`, 'i'));
+    assert.equal(hit, null, `docs/${name} contains the pilot value "${hit && hit[0]}"`);
+  }
+  const region = doc('production-setup.md').split('\n').find((l) => /^\s*- Region:/.test(l));
+  assert.match(region, /the one closest to the dealerships Lot Current will serve/, 'the set-up guide does not say how to pick the Supabase region for any dealer');
 });
 
 test('support.md has the inbox, what to ask for, the one-business-day answer, the log, the severity words and what is never done', () => {
