@@ -1813,7 +1813,7 @@ test('the help says one post from a website goes at a time across Chrome windows
   assert.doesNotMatch(flowRow, /never replaces it/, 'the data inventory says a second window\'s copy never replaces the saved post, while it takes the post over once the first window\'s panel is closed with no form open');
   assert.doesNotMatch(flowRow, /\(in a queue, with whether its page was seen to show the car\)/, 'the data inventory says the listing page is read only in a queue, while it is read after every post');
   assert.match(flowRow, /the listing address detected, with whether its page was seen to show the car \(read after every post, in a queue or not\)/);
-  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written, the panel does not say so, and what was typed there is kept nowhere/);
+  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written: opening the form or starting a post there says that the post is under way in another window, while text typed or picks made there are dropped without a word/);
 });
 
 // The help said a price "with or without $" and a mileage "however it is
