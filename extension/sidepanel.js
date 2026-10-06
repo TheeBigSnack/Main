@@ -912,17 +912,30 @@ async function generate({ useClaude } = {}) {
   state.guardrails = r.guardrails;
 }
 
-function waitForTabLoad(tabId, timeoutMs = 60000) {
+// Resolves once the tab has finished loading. Chrome can leave out the
+// 'complete' update while chrome.tabs.get already says complete (seen in the
+// end-to-end flows: the form was there, the wait ran out), so the tab is also
+// asked every pollMs.
+function waitForTabLoad(tabId, timeoutMs = 60000, pollMs = 500) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { chrome.tabs.onUpdated.removeListener(onUpdated); reject(new Error('The Marketplace page took too long to load.')); }, timeoutMs);
-    function onUpdated(id, info) {
-      if (id !== tabId || info.status !== 'complete') return;
+    let done = false;
+    const finish = (error) => {
+      if (done) return;
+      done = true;
       clearTimeout(timer);
+      clearInterval(poll);
       chrome.tabs.onUpdated.removeListener(onUpdated);
-      resolve();
+      if (error) reject(error);
+      else resolve();
+    };
+    const ask = () => chrome.tabs.get(tabId).then((t) => { if (t && t.status === 'complete') finish(); }).catch(() => {});
+    const timer = setTimeout(() => finish(new Error('The Marketplace page took too long to load.')), timeoutMs);
+    const poll = setInterval(ask, pollMs);
+    function onUpdated(id, info) {
+      if (id === tabId && info.status === 'complete') finish();
     }
     chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.get(tabId).then((t) => { if (t && t.status === 'complete') onUpdated(tabId, { status: 'complete' }); }).catch(() => {});
+    ask();
   });
 }
 

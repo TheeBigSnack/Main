@@ -3475,3 +3475,53 @@ test('a price update reads the car on the website the way a post does, on the li
   // no price on the website now: upkeep.js says so (priceStop)
   assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v, price: null, priceLabel: 'Call for price' } } })).r, { ok: true, price: null });
 });
+
+test("the form's tab counts as loaded once Chrome says it is, even when Chrome's 'complete' update never comes", async () => {
+  const tabsSaying = (statuses) => {
+    const listeners = new Set();
+    const t = { listeners, asked: 0 };
+    t.chrome = {
+      tabs: {
+        onUpdated: { addListener: (f) => listeners.add(f), removeListener: (f) => listeners.delete(f) },
+        get: async (id) => {
+          t.asked += 1;
+          return { id, status: statuses[Math.min(t.asked - 1, statuses.length - 1)] };
+        },
+      },
+    };
+    t.send = (id, info) => [...listeners].forEach((f) => f(id, info));
+    return t;
+  };
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // the title's update arrives and the 'complete' one never does (seen in the end-to-end flows); the third ask says complete
+  const quiet = tabsSaying(['loading', 'loading', 'complete']);
+  const started = Date.now();
+  const waiting = compile('waitForTabLoad', { chrome: quiet.chrome })(7, 5000, 10);
+  quiet.send(7, { title: 'Create vehicle listing' });
+  await waiting;
+  assert.ok(Date.now() - started < 1000, 'the wait ends by asking the tab, long before its limit');
+  assert.equal(quiet.listeners.size, 0, 'the update listener is removed');
+  const asked = quiet.asked;
+  await pause(50);
+  assert.equal(quiet.asked, asked, 'and the tab is asked no more');
+
+  // the 'complete' update still ends the wait at once, but only this tab's
+  const updates = tabsSaying(['loading']);
+  let ended = false;
+  const viaUpdate = compile('waitForTabLoad', { chrome: updates.chrome })(7, 5000, 1000).then(() => { ended = true; });
+  updates.send(8, { status: 'complete' });
+  await pause(20);
+  assert.equal(ended, false, "another tab's update is not this one's");
+  updates.send(7, { status: 'complete' });
+  await viaUpdate;
+  assert.equal(updates.listeners.size, 0);
+
+  // a tab that never finishes still runs out, with the message the panel shows
+  const stuck = tabsSaying(['loading']);
+  await assert.rejects(compile('waitForTabLoad', { chrome: stuck.chrome })(7, 60, 10), /^Error: The Marketplace page took too long to load\.$/);
+  assert.equal(stuck.listeners.size, 0);
+  const n = stuck.asked;
+  await pause(40);
+  assert.equal(stuck.asked, n, 'and the tab is asked no more after the limit');
+});

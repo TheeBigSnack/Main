@@ -166,6 +166,9 @@ _Review round: tests_
 
 Fixed
 
+_Review round: posting and the side panel_
+- **The Marketplace form no longer "takes too long to load" when it has loaded** (`extension/sidepanel.js` `waitForTabLoad`): the side panel waited only for Chrome's update saying the form's tab had finished loading, and Chrome sometimes leaves that update out while its own record of the tab already says it finished. The post then stopped after 60 seconds with "The Marketplace page took too long to load." over a form that was there. The panel now also asks Chrome about the tab every half second. Found when the standard and queue browser flows failed with that message now and then; traced locally by logging the tab's updates, where the form's tab read complete and the update never came.
+
 _Review round: website reading_
 - **Sold and sale-pending cars stay on To do until handled** (`extension/src/rescan.js` `diffScans`): a posted car the website marks sold or sale-pending stays under Take down on every rescan until Taken down is clicked, and a posted car the pre-owned check now holds back stays under Needs a look (or, once the website calls it new, demo or loaner, under Take down, as Changed says). Before, both dropped off To do after one scan and the pilot numbers counted them as cleared. My listings says "Marked sold on the website", "Sale pending on the website", "Not pre-owned on the website", "Needs a look (see To do)" or "Website no longer shows a price", ahead of any price change.
 - **A bad answer marks nothing gone** (`extension/adapters/dealerInspire.js`): an inventory answer that is not a list of cars, or an empty list that doesn't say the lot is empty, stops the scan or the double-check instead of marking cars gone, on a lot of any size. The guard against more than half the lot vanishing at once applies from 10 cars, as now documented.
