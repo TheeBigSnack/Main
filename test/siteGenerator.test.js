@@ -637,6 +637,19 @@ test('referencedFiles reads src, href, every srcset candidate and CSS url(), as 
   assert.deepEqual(referencedFiles('site/site.css', css), ['site/img/bg.png', 'site/fonts/body.woff2']);
 });
 
+// review: the stray message, --help and docs/website.md still called a stray
+// file one "no page shows", while --check keeps any file a page or the
+// stylesheet points at (referencedFiles above), a plain link included.
+test('the stray message, --help and docs/website.md say a file is the site\'s when a page or stylesheet points at it with src, href, srcset or url()', () => {
+  const doc = read('docs/website.md').split('\n').find((l) => l.startsWith('Two generators write every page'));
+  assert.ok(doc, 'docs/website.md no longer explains the generators');
+  for (const [where, text] of [['strayAdvice', strayAdvice('site/x.png')], ['--help', USAGE.join(' ').replace(/\s+/g, ' ')], ['docs/website.md', doc]]) {
+    assert.doesNotMatch(text, /no page shows/, `${where} says a stray file is one no page shows, while --check counts every reference`);
+    assert.match(text, /no page or stylesheet points at/, `${where} does not say a page or stylesheet pointing at a file keeps it`);
+    for (const ref of ['src', 'href', 'srcset', 'url()']) assert.ok(text.includes(ref), `${where} does not name ${ref} among what --check counts`);
+  }
+});
+
 test('--check takes a file a page links to, a srcset size and a stylesheet image as the site\'s, and leaves out what an operating system writes', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-refs-'));
   try {
