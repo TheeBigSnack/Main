@@ -59,6 +59,48 @@ const AFFILIATION_CLAIMS = [
   'Our product was okayed by Facebook Marketplace.',
   'Sponsored by Facebook.',
   'Backed by Meta.',
+  // with a helper verb before the verb, in the -ing form, or two verbs in a row
+  'Meta will sponsor Lot Current.',
+  'Meta would sponsor Lot Current.',
+  'Meta is sponsoring Lot Current.',
+  'Meta has been sponsoring Lot Current.',
+  'Meta was funding Lot Current.',
+  'Meta does support Lot Current.',
+  'Facebook did approve the Lot Current extension.',
+  'Meta is now officially sponsoring the extension.',
+  'Facebook will be partnering with Lot Current.',
+  'Meta Platforms sponsors Lot Current.',
+  'Meta Platforms has been backing us since day one.',
+  'Meta supports and endorses Lot Current.',
+  // the passive after Lot Current or our product, whatever stands between
+  'The Lot Current extension is supported by Meta.',
+  'The Lot Current team is backed by Meta.',
+  'Lot Current, supported by Meta.',
+  'Lot Current is supported and allowed by Meta.',
+  'Our tool has been okayed by Facebook.',
+  'We got funded by Meta.',
+  // the strongest verbs anywhere, the milder ones as a slogan, and a hyphen
+  'Sponsored by Marketplace.',
+  'Not only backed by Meta, but loved by dealers.',
+  'Lot Current — backed by Facebook.',
+  'Supported by Meta.',
+  'Proudly supported by Facebook.',
+  'Officially supported by Facebook Marketplace.',
+  'Powered by Facebook.',
+  'Meta-backed listing tool.',
+  'A Facebook-sponsored tool.',
+  // as a noun
+  'Meta is a sponsor of Lot Current.',
+  'Facebook, an early backer of Lot Current.',
+  'Our sponsor, Meta.',
+  "Lot Current's backers include Facebook.",
+  "With Meta's backing.",
+  "Meta's sponsorship of Lot Current.",
+  "Meta's support for Lot Current.",
+  'With the blessing of Meta.',
+  // Meta letting our product do something is a claim of its permission, so "allows" counts with us as the object
+  'Marketplace allows the extension to fill the form.',
+  'Meta allows us to post for you.',
 ];
 
 // Promises and made-up numbers that customer-facing copy may not make.
@@ -174,7 +216,9 @@ const ONCE_CAUGHT = [
 ];
 
 // What Meta's products support, and plain denials of any backing: the backing verbs
-// count only with Lot Current, us or our product, and never after a negation.
+// count only with Lot Current, us or our product, and never after a negation. (A
+// denial with "endorsed by", "approved by" or "officially" in it is still caught,
+// and copy names it in honestyProblems' denials, as the last test below does.)
 const NOT_BACKING = [
   'Marketplace supports vehicle listings from personal profiles.',
   'Facebook supports drafts.',
@@ -186,6 +230,26 @@ const NOT_BACKING = [
   'Lot Current is not supported by Meta or Facebook.',
   "Lot Current isn't backed by Meta.",
   'Not sponsored by Facebook.',
+  'Lot Current is not sponsored or backed by Meta.',
+  'Neither sponsored nor backed by Meta.',
+  "Lot Current isn't sponsored, backed or funded by Meta.",
+  'Lot Current is in no way backed by Meta.',
+  "We aren't backed by Meta.",
+  'Never sponsored by Facebook.',
+  "Meta doesn't sponsor Lot Current.",
+  'Meta would never support Lot Current.',
+  'Meta hardly supports Lot Current.',
+  'Facebook is not a sponsor of Lot Current.',
+  // the same verbs and nouns about something else
+  'Facebook backed up the draft.',
+  "Facebook's backing up the draft as you type.",
+  "Facebook's support pages explain the vehicle form.",
+  'Our support team answers within a day.',
+  'The photos supported by Marketplace are JPEG and PNG.',
+  'Marketplace allows up to 20 photos.',
+  'Meta now allows vehicle listings from personal profiles.',
+  'Facebook is supporting more photo sizes now.',
+  'Meta is backing away from vehicle feeds.',
 ];
 
 test('every affiliation or approval claim fails, in any document', () => {
