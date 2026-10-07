@@ -754,10 +754,11 @@ function viewMine(l) {
       l.mine.map((p) => {
         // the line from the last scan (src/rescan.js listingLine): the website price on the basis this listing was
         // posted at, so a switch of Price to post is not shown (or recorded) as a change. An entry with none reads it
-        // off that scan only when it was taken once the listing had its price (scanCar), as the rescan does; on a scan
-        // from before, a price that differs is not named and waits for the next scan, so Updated never records it.
+        // off that scan only when it was taken once the listing had its price (scanCar), as the rescan does. A scan
+        // from before (`compared` false) names no website price, whatever it says about the car, and a price that
+        // differs waits for the next scan, so Updated never records it.
         // Sold, sale-pending or held back by the pre-owned check come before a price change (listingStatus).
-        const { now, basis: own, site, status } = listingLine(p, state.snapshot, p.vin, state.settings?.basis);
+        const { now, basis: own, compared, site, status } = listingLine(p, state.snapshot, p.vin, state.settings?.basis);
         const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
         const pill = `<span class="pill${status.tone ? ' ' + status.tone : ''}">${esc(status.text)}</span>`;
         const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
@@ -767,7 +768,7 @@ function viewMine(l) {
         return row(entry, {
           sub: `${pill} ${p.listedBefore ? `Listed before ${esc(day(p.postedAt))}` : `Posted ${esc(when(p.postedAt))}`}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
           line: refused ? `<span class="notShared" style="color: var(--bad)">${notSharedText(refused)}</span>` : '',
-          right: `Listed ${money(p.price)}${now && !status.waits && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
+          right: `Listed ${money(p.price)}${now && compared && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
       })

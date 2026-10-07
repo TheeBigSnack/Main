@@ -598,11 +598,21 @@ test('My listings\' line: a scan from before the listing\'s price names no price
   // the website's call for price on a scan from before is not "no longer shows a price" either
   const noPrice = repriced(before, VIN.ram, null, null);
   assert.deepEqual(parts(line(synced, noPrice, VIN.ram, 'website')), ['website', null, WAITS]);
-  // what the scan says about the car itself still shows
-  const pending = { ...before, vehicles: { ...before.vehicles, [VIN.ram]: { ...before.vehicles[VIN.ram], status: 'pend-sale' } } };
-  assert.equal(line(synced, pending, VIN.ram, 'website').status.text, 'Sale pending on the website');
-  const skipped = { ...before, vehicles: { ...before.vehicles, [VIN.ram]: { ...before.vehicles[VIN.ram], decision: 'skip' } } };
-  assert.equal(line(synced, skipped, VIN.ram, 'website').status.text, 'Not pre-owned on the website');
+  // what the scan says about the car itself still shows, and names no price of that scan's but the listing's own
+  // (on the lower second price, its pre-cut $27,173 is not the website's now)
+  const held = (snap, patch) => ({ ...snap, vehicles: { ...snap.vehicles, [VIN.ram]: { ...snap.vehicles[VIN.ram], ...patch } } });
+  const HELD = [[{ status: 'pend-sale' }, 'Sale pending on the website'], [{ decision: 'skip' }, 'Not pre-owned on the website'], [{ decision: 'review' }, 'Needs a look (see To do)']];
+  for (const [patch, text] of HELD) {
+    for (const basis of ['website', 'beforeFees']) {
+      const l = line(synced, held(before, patch), VIN.ram, basis);
+      assert.deepEqual([l.status.text, l.site, l.compared], [text, null, false], `${text}, ${basis}: no price of a scan from before`);
+    }
+    assert.deepEqual([line({ ...synced, price: 27663 }, held(before, patch), VIN.ram, 'website').site, line({ ...synced, price: 27663 }, held(before, patch), VIN.ram, 'website').status.text], [27663, text], 'the listing\'s own price on it');
+    // on a scan since, the website price is named as before
+    const l = line(synced, held(shows(3, 26663, 26173), patch), VIN.ram, 'beforeFees');
+    assert.deepEqual([l.status.text, l.site, l.compared], [text, 26173, true], `${text}: a scan since names it`);
+  }
+  assert.equal(line(synced, before, VIN.ram, 'website').compared, false);
   assert.deepEqual(parts(line(synced, snapshot([], MY_STORE, at(1)), VIN.ram, 'website')), ['website', null, { tone: 'bad', text: 'Not on the website at the last scan' }]);
   assert.equal(line(synced, null, VIN.ram, 'website').status.text, 'Not on the website at the last scan', 'no scan at all');
   // a scan with no time, for a listing that has one, is from before as far as anyone can tell
@@ -620,6 +630,8 @@ test('My listings\' line: a scan from before the listing\'s price names no price
   assert.deepEqual(parts(line({ name: 'Ram', price: 26673 }, gap, VIN.ram, 'website')), ['beforeFees', 26673, MATCHES]);
   // the website shows no price: said, as To do says it
   assert.deepEqual(parts(line(synced, repriced(since, VIN.ram, null, null), VIN.ram, 'website')), ['website', null, { tone: 'warn', text: 'Website no longer shows a price' }]);
+  assert.equal(line(synced, repriced(since, VIN.ram, null, null), VIN.ram, 'website').compared, true, 'a scan since: its missing price is the website\'s now');
+  assert.equal(line(synced, since, VIN.ram, 'website').compared, true);
   // and the line agrees with the rescan's price for the listing (listingWebsitePrice) wherever it names one
   for (const [entry, snap, basis] of [[{ ...synced, price: 26673 }, since, 'website'], [{ ...synced, price: 27663 }, since, 'beforeFees'], [{ ...synced, price: 27663 }, before, 'website']]) {
     assert.equal(line(entry, snap, VIN.ram, basis).site, listingWebsitePrice(entry, snap.vehicles[VIN.ram], basis, [rescan.scanCar(entry, snap, VIN.ram)]));

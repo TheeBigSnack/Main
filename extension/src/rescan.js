@@ -284,19 +284,25 @@ export function listingStatus(now, listedPrice, sitePrice, compared = true) {
 // basis the listing's price is on (postedBasis: the entry's own; for an entry
 // with none, read off the last scan only when it was taken once the listing
 // had its price, scanCar, as the rescan reads it; else the setting `basis`),
-// the website price on that basis (`site`) and the line (listingStatus). On
-// a scan from before the listing's price (posted or updated since, on this
-// computer or another), a website price that differs from the listing's is
-// not named (`site` null) and the line waits for the next scan, so Updated
-// never records a price from before the listing's own; one that equals it
-// still matches. What the scan says about the car itself shows either way.
+// whether that scan was taken once the listing had its price (`compared`),
+// the website price on that basis (`site`) and the line (listingStatus). A
+// scan from before the listing's price (posted or updated since, on this
+// computer or another) shows the website as it was then: a website price
+// there that differs from the listing's is never named (`site` null), in
+// whatever state the scan shows the car, and the price waits for the next
+// scan, so Updated never records a price from before the listing's own; one
+// that equals it still matches. What the scan says about the car itself
+// (gone, sold, sale-pending, held back by the pre-owned check) shows either
+// way.
 export function listingLine(entry, snap, vin, basis = 'website') {
   const now = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles[vin] || null : null;
   const since = scanCar(entry, snap, vin);
+  const listed = entry ? entry.price : undefined;
   const own = postedBasis(entry, basis, [since]);
   const site = now ? basisPrice(now, own) : null;
-  const status = listingStatus(now, entry ? entry.price : undefined, site, Boolean(since));
-  return { now, basis: own, site: status.waits ? null : site, status };
+  const compared = Boolean(since);
+  const status = listingStatus(now, listed, site, compared);
+  return { now, basis: own, compared, site: compared || site === listed ? site : null, status };
 }
 
 function whatGotReady(before, now) {

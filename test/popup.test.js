@@ -713,6 +713,35 @@ test('My listings names no website price for a listing with no basis priced afte
   assert.deepEqual(q.local[k.posted], cut);
 });
 
+// What a last scan from before the listing's price says about the car itself
+// (sale pending, needs a look, not pre-owned) still shows, but that scan's
+// price is the website as it was then: on the lower second price, its
+// pre-cut $27,173 would read as the website's price now.
+test('My listings shows a sale pending, needs a look or not pre-owned from a scan taken before the listing\'s price without naming that scan\'s price', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website, or $26,673 before the fee
+  const settings = { ...MY_STORE, basis: 'beforeFees' };
+  const posted = { [ram.vin]: { name: ram.name, price: 27163, postedAt: '2026-10-02T09:00:00.000Z' } }; // at the new main price, after the cut
+  for (const [patch, text] of [[{ status: 'pend-sale' }, 'Sale pending on the website'], [{ decision: 'review' }, 'Needs a look (see To do)'], [{ decision: 'skip' }, 'Not pre-owned on the website']]) {
+    const last = await lastScanOf(ram, settings, '2026-10-01T09:00:00.000Z', 27663, 27173); // before the cut
+    Object.assign(last.vehicles[ram.vin], patch);
+    const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.posted]: structuredClone(posted) } });
+    await p.tab('mine');
+    const mine = p.panel();
+    assert.ok(mine.includes(`">${text}</span>`), `${text} shows`);
+    assert.doesNotMatch(mine, /Website \$|Website —|\$27,173|\$27,663/, `${text}: no price of a scan from before the listing's price`);
+    assert.match(mine, /Listed \$27,163/);
+    assert.doesNotMatch(mine, /data-action="priceUpdated"/);
+    assert.deepEqual(p.local[k.posted], posted, 'nothing recorded');
+  }
+  // a scan taken since the listing's price names the website's price beside it, as before
+  const later = await lastScanOf(ram, settings, '2026-10-03T09:00:00.000Z', 26663, 26173);
+  later.vehicles[ram.vin].status = 'pend-sale';
+  const q = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: later, [k.posted]: structuredClone(posted) } });
+  await q.tab('mine');
+  assert.match(q.panel(), /Sale pending on the website/);
+  assert.match(q.panel(), /Listed \$27,163<br>Website \$26,173/);
+});
+
 // A listing with no basis whose price is older than the last scan is read as
 // before: the basis off that scan where only one of its prices is the
 // listing's, else the setting, and Updated records the website's price on it.
