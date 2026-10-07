@@ -216,16 +216,21 @@ const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|
 // numbers or a letter in brackets ("(1)", "[2]", "(1, 2)", "(a)", "(*)"), a
 // mark with a number ("*1", "*1,2") (LABEL_NOTE, shared with the
 // standard-data reader), inside an HTML tag ("<sup>*</sup>", "<sup>1</sup>",
-// "<sup>1,2</sup>", "<sup>a</sup>") or as an HTML entity ("&#42;",
-// "&trade;"): a superscript holding only a number, a list of numbers or a
-// letter is dropped, other tags too, and entities read as their characters
-// first, anywhere in the label ("Kelley Blue Book<sup>&reg;</sup> Value"
-// reads "Kelley Blue Book® Value"). A tag between two words keeps them
-// apart ("Internet<br>Price"), so a note is never glued onto the word
-// before it. A bare number or letter at the end is kept: nothing says it is
-// a footnote.
-const SUP_INNER = String.raw`\d{1,3}(?:\s*,\s*\d{1,3}){0,3}|[A-Za-z]`;
-const SUP_NOTE = new RegExp(String.raw`<sup\b[^<>]*>(?:\s|<[^<>]*>)*(?:\(\s*(?:${SUP_INNER})\s*\)|\[\s*(?:${SUP_INNER})\s*\]|${SUP_INNER})(?:\s|<[^<>]*>)*<\/sup\s*>`, 'gi');
+// "<sup>1,2</sup>", "<sup>1-2</sup>", "<sup>a</sup>", and at the label's
+// end in any tag: a link, a span, small, "<a href="#fn1">1</a>") or as an
+// HTML entity ("&#42;", "&trade;"): a superscript holding only a number, a
+// list or a range of numbers or a letter is dropped anywhere in the label,
+// such a note in any other tag at its end too, the remaining tags after
+// them, and entities read as their characters first ("Kelley Blue
+// Book<sup>&reg;</sup> Value" reads "Kelley Blue Book® Value"). A tag
+// between two words keeps them apart ("Internet<br>Price"), so a note is
+// never glued onto the word before it; a word or a model year in a tag is
+// never a note. A bare number or letter at the end is kept: nothing says
+// it is a footnote.
+const SUP_INNER = String.raw`\d{1,3}(?:\s*[,\-–]\s*\d{1,3}){0,3}|[A-Za-z]`;
+const NOTE_BODY = String.raw`\(\s*(?:${SUP_INNER})\s*\)|\[\s*(?:${SUP_INNER})\s*\]|${SUP_INNER}`;
+const SUP_NOTE = new RegExp(String.raw`<sup\b[^<>]*>(?:\s|<[^<>]*>)*(?:${NOTE_BODY})(?:\s|<[^<>]*>)*<\/sup\s*>`, 'gi');
+const TAG_NOTE = new RegExp(String.raw`(?:<[a-z][^<>]*>\s*)+(?:${NOTE_BODY})(?:\s|<\/[a-z][^<>]*>)*$`, 'i');
 const TAGS = /(?:<\/?[a-z][^<>]*>)+/gi;
 const untagged = (text) => text.replace(TAGS, (tags, at, all) => (/\w/.test(all[at - 1] || '') && /\w/.test(all[at + tags.length] || '') ? ' ' : ''));
 const ENTITY = /&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z][a-z0-9]{1,31}));/gi;
@@ -236,8 +241,11 @@ const entityText = (whole, dec, hex, name) => {
   return NAMED_ENTITY[name] ?? NAMED_ENTITY[name.toLowerCase()] ?? ' ';
 };
 const NOTE_END = new RegExp(String.raw`(?:${LABEL_NOTE}|[\s:.${LABEL_MARKS}])$`);
+// A label is a few words: only its first 300 characters are read, so the
+// tag patterns above never spend long on a page's worth of text.
+const LABEL_MAX = 300;
 export function labelWords(label) {
-  let text = untagged(String(label || '').replace(SUP_NOTE, '')).replace(ENTITY, entityText);
+  let text = untagged(String(label || '').slice(0, LABEL_MAX).replace(SUP_NOTE, '').replace(TAG_NOTE, '')).replace(ENTITY, entityText);
   for (;;) {
     // a footnote is short: only the label's last characters are read each time
     const note = NOTE_END.exec(text.slice(-12));

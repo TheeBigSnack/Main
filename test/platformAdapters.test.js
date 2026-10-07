@@ -1764,3 +1764,26 @@ test('Rule 4: a "price" inside a package, a warranty, an incentive or an accesso
   assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, pricing: { price: 'Call for Price' } })).priceLabel, why('Call for Price'));
   assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, prices: { price: 24500 } })), { price: 24500, priceLabel: 'price', priceBeforeFees: 24000 });
 });
+
+// R-8, repair cycle 3: a footnote was set aside only inside a superscript
+// tag. One in another inline tag at the label's end (a link, a span, small)
+// or a range in a superscript ("<sup>1-2</sup>") was split off by a space
+// and kept, so "Your Carvana Offer" plus such a note no longer ended in
+// "Offer", "your" made it a selling price again, and it was taken ahead of
+// a plain "Price".
+test('R-8: a footnote inside any tag at the label\'s end, or a range in a superscript, changes nothing', () => {
+  const P = (label) => choosePrices(labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label, value: '$19,000' }] } }), { dealer: 'Sample Chevrolet' });
+  for (const label of ['Your Carvana Offer<a href="#fn1">1</a>', 'Your Carvana Offer<span class="fn">1</span>', 'Your Carvana Offer<small>2</small>', 'Your Carvana Offer<sup>1-2</sup>', 'Your Carvana Offer<sup>1–3</sup>', 'Your Carvana Offer <a href="#notes"><span>a</span></a>', 'Your Carvana Offer<span>1, 2</span>']) {
+    assert.equal(labelWords(label), 'Your Carvana Offer', label);
+    assert.deepEqual(P(label), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" is never the price`);
+  }
+  // a word in a tag is never a footnote, nor a model year, nor a note before the label's end
+  assert.equal(labelWords('Internet <b>Price</b>'), 'Internet Price');
+  assert.equal(labelWords('Model Year <span>2024</span>'), 'Model Year 2024');
+  assert.equal(labelWords('Sample <span>1</span> Price'), 'Sample 1 Price');
+  // a page's worth of tags in a label is read at once, not in seconds
+  const started = Date.now();
+  labelWords(`${'<sup>'.repeat(20000)}1-2`);
+  labelWords(`Offer${'<a href="#n">'.repeat(20000)}1`);
+  assert.ok(Date.now() - started < 1000, `a 100,000-character label took ${Date.now() - started} ms`);
+});
