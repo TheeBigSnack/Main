@@ -21,9 +21,9 @@ import { updateKey, withLock } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData, listingChanges } from '../extension/src/listingData.js';
 import { recheck } from '../extension/src/vehicleDetails.js';
-import { basisPrice, snapshotEntry, listingWebsitePrice, pendingText, scanCar } from '../extension/src/rescan.js';
+import { basisPrice, snapshotEntry, postedBasis, pendingText, scanCar } from '../extension/src/rescan.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
-import { draftRecord, draftPill } from '../extension/src/drafts.js';
+import { draftRecord, draftPill, draftScanCar } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
 import { FORM_MAP, applyOverrides } from '../extension/facebook/formMap.js';
@@ -1496,7 +1496,7 @@ test('It\'s posted records the price the form was filled with on the basis it wa
 // drafts kept one. Run with sidepanel.js's own carCard and listRowHtml.
 test('the car card names the price basis the car was read on, and a draft\'s pill its own, whatever Settings says by then', () => {
   const car = { vin: 'AAA', name: 'Car A', price: 25000, priceBeforeFees: 24500, mileage: 1000 };
-  const scope = (state) => ({ state, esc: (t) => String(t ?? ''), money: (n) => '$' + n.toLocaleString('en-US'), miles: (n) => `${n} miles`, draftPill });
+  const scope = (state) => ({ state, esc: (t) => String(t ?? ''), money: (n) => '$' + n.toLocaleString('en-US'), miles: (n) => `${n} miles`, draftPill, draftScanCar });
   const card = (state) => /Posting at <b>([^<]*)<\/b> \(([^)]*)\)/.exec(compile('carCard', scope(state))()).slice(1).join(' · ');
   // read on the main price; the dealer then switched Settings to the lower second price
   assert.equal(card({ vehicle: car, price: 25000, priceBasis: 'website', noteApplies: true, settings: { basis: 'beforeFees' } }), '$25,000 · website\'s main price');
@@ -1506,12 +1506,41 @@ test('the car card names the price basis the car was read on, and a draft\'s pil
   assert.match(card({ vehicle: { ...car, priceBeforeFees: null }, price: 25000, priceBasis: 'beforeFees', noteApplies: false, settings: { basis: 'website' } }), /^\$25,000 · website's main price; this car shows no lower second price/);
   // a post saved before the basis was kept: the setting
   assert.equal(card({ vehicle: car, price: 24500, priceBasis: null, noteApplies: true, settings: { basis: 'beforeFees' } }), '$24,500 · the lower second price the website shows');
-  // the draft pill: the draft's own basis, the setting only when the draft kept none
-  const row = (draft, basis) => compile('listRowHtml', scope({ settings: { basis }, drafts: { AAA: draft } }))({ vin: 'AAA', name: 'Car A', entry: car, draft: true, price: 25000, line: '' });
+  // the draft pill: the draft's own basis, the setting only when the draft kept none (the last scan taken since the draft was filled)
+  const savedAt = new Date(Date.now() - 7200e3).toISOString();
+  const lastScan = { snapshotTakenAt: new Date(Date.now() - 3600e3).toISOString(), snapshotVehicles: { AAA: car } };
+  const row = (draft, basis) => compile('listRowHtml', scope({ settings: { basis }, drafts: { AAA: { ...draft, savedAt } }, ...lastScan }))({ vin: 'AAA', name: 'Car A', entry: car, draft: true, price: 25000, line: '' });
   const pill = (html) => /<span class="pill \w+" title="[^"]*">([^<]*)<\/span>/.exec(html)[1];
   assert.equal(pill(row({ name: 'Car A', price: 24500, basis: 'beforeFees' }, 'website')), 'Draft on Facebook at $24,500', 'filled at the lower second price: no gap after the switch');
   assert.equal(pill(row({ name: 'Car A', price: 25000, basis: 'website' }, 'beforeFees')), 'Draft on Facebook at $25,000');
   assert.equal(pill(row({ name: 'Car A', price: 25000 }, 'beforeFees')), 'Draft on Facebook at $25,000: the website now shows $24,500', 'a draft that kept no basis: the setting');
+});
+
+// The panel's Ready to post list compares a draft's price with the last
+// scan only when that scan was taken once the draft was filled (src/drafts.js
+// draftScanCar), as the popup's pill and Mark posted do: a scan from before
+// shows the website as it was before the draft got its price, so a price
+// there is not one to change the draft to. Run with sidepanel.js's own
+// listRowHtml.
+test('the side panel\'s draft pill names the website\'s price only from a scan taken since the draft was filled', () => {
+  const car = { vin: 'AAA', name: 'Car A', price: 25500, priceBeforeFees: 25000, mileage: 1000 };
+  const savedAt = new Date(Date.now() - 7200e3).toISOString(); // filled two hours ago, at $25,000
+  const draft = { name: 'Car A', price: 25000, basis: 'website', savedAt };
+  const scope = (state) => ({ state, esc: (t) => String(t ?? ''), money: (n) => '$' + n.toLocaleString('en-US'), miles: (n) => `${n} miles`, draftPill, draftScanCar });
+  const pill = (takenAt) => {
+    const html = compile('listRowHtml', scope({ settings: { basis: 'website' }, drafts: { AAA: draft }, snapshotTakenAt: takenAt, snapshotVehicles: { AAA: car } }))({ vin: 'AAA', name: 'Car A', entry: car, draft: true, price: 25500, line: '' });
+    return /<span class="pill (\w+)" title="([^"]*)">([^<]*)<\/span>/.exec(html).slice(1);
+  };
+  // the last scan, showing $25,500, was taken three hours ago: before the draft
+  assert.deepEqual(pill(new Date(Date.now() - 3 * 3600e3).toISOString()), ['warn', 'Saved as a draft on Facebook: publish it there, then mark it posted in the popup.', 'Draft on Facebook at $25,000']);
+  // a scan with no time says nothing about the price either
+  assert.equal(pill(null)[2], 'Draft on Facebook at $25,000');
+  // taken an hour ago, or the moment the draft was filled: the website's price since then, as before
+  for (const takenAt of [new Date(Date.now() - 3600e3).toISOString(), savedAt]) {
+    const [tone, title, text] = pill(takenAt);
+    assert.deepEqual([tone, text], ['bad', 'Draft on Facebook at $25,000: the website now shows $25,500'], takenAt);
+    assert.match(title, /^Change the price on the draft to \$25,500 before you publish it\./);
+  }
 });
 
 // Only a listing's own address is kept as the listing link. Your listings,
@@ -3612,18 +3641,18 @@ test('a price update reads the car on the website the way a post does, on the li
     const asked = [];
     const state = { siteInfo: { adapter: 'dealerInspire', service: {} }, snapshotVehicles: { [car.vin]: { url: 'https://www.example-motors.test/car/1', price: car.price, ...scanned } }, snapshotTakenAt: takenAt, posted: { [car.vin]: entry }, settings: { basis, myStores } };
     const upkeepPriceNow = compile('upkeepPriceNow', {
-      state, recheck, listingWebsitePrice, pendingText, scanCar, DECISION, hostOf: (o) => new URL(o).host,
+      state, recheck, basisPrice, postedBasis, pendingText, scanCar, DECISION, hostOf: (o) => new URL(o).host,
       readCarForPost: async (req) => { asked.push(req); return typeof read === 'function' ? read(req) : read; },
     });
     const r = await upkeepPriceNow({ origin: ORIGIN, vin: car.vin.toLowerCase(), kind: 'price', price: 27000, dealerTabId: 4 });
     return { r, asked };
   };
   const ok = await run({ read: { ok: true, vehicle: { ...v } } });
-  assert.deepEqual(ok.r, { ok: true, price: 27163 });
+  assert.deepEqual(ok.r, { ok: true, price: 27163, basis: 'website' }, 'with the basis the price is on, which the update records on a listing that carries none');
   assert.deepEqual(ok.asked, [{ tabId: 4, origin: ORIGIN, info: { adapter: 'dealerInspire', service: {} }, vin: v.vin, url: 'https://www.example-motors.test/car/1' }], 'through the To do item\'s dealer tab, as a post reads');
   // a listing posted on the before-fees basis: the website's before-fees price, whatever Settings says now
-  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'beforeFees' } })).r, { ok: true, price: 26673 });
-  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'website' }, basis: 'beforeFees' })).r, { ok: true, price: 27163 });
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'beforeFees' } })).r, { ok: true, price: 26673, basis: 'beforeFees' });
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'website' }, basis: 'beforeFees' })).r, { ok: true, price: 27163, basis: 'website' });
   // A listing with no basis recorded (brought by a sync) reads it off the last
   // scan only when that scan was taken once the listing had its price
   // (rescan.js scanCar), as the To do item's price was read (diffScans). The
@@ -3632,8 +3661,8 @@ test('a price update reads the car on the website the way a post does, on the li
   // price, $26,673, on Jan 3rd. The website now shows $26,500 / $26,010.
   const lastScan = { scanned: { price: 27163, priceBeforeFees: 26673 }, takenAt: '2026-01-02T12:00:00.000Z' };
   const moved = { ok: true, vehicle: { ...v, price: 26500, priceBeforeFees: 26010 } };
-  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-03T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26500 }, 'a scan from before the post never makes its second price the listing\'s basis');
-  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-01T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26010 }, 'posted before that scan: the scan shows the listing at its second price');
+  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-03T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26500, basis: 'website' }, 'a scan from before the post never makes its second price the listing\'s basis');
+  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-01T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26010, basis: 'beforeFees' }, 'posted before that scan: the scan shows the listing at its second price');
   // stops, each saying why
   const stops = [
     [{ ok: false, needsPermission: true, origins: [ORIGIN + '/*'], message: 'To re-check this car...' }, /^Lot Current reads this car on www\.example-motors\.test again before it fills a new price, and Chrome hasn't let it read www\.example-motors\.test from here\. Open www\.example-motors\.test's used inventory page, then click Open & update price in the popup there\.$/],
@@ -3660,9 +3689,9 @@ test('a price update reads the car on the website the way a post does, on the li
   // held back from a new post only: the listing is up, so its price follows the website
   const elsewhere = await run({ read: { ok: true, vehicle: { ...v, location: 'Another Store', photoCount: 0, inTransit: true } }, myStores: ['Our Store'] });
   assert.equal(recheck({ ...v, location: 'Another Store', photoCount: 0, inTransit: true }, { myStores: ['Our Store'] }).ok, false, 'a post would stop here');
-  assert.deepEqual(elsewhere.r, { ok: true, price: 27163 });
+  assert.deepEqual(elsewhere.r, { ok: true, price: 27163, basis: 'website' });
   // no price on the website now: upkeep.js says so (priceStop)
-  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v, price: null, priceLabel: 'Call for price' } } })).r, { ok: true, price: null });
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v, price: null, priceLabel: 'Call for price' } } })).r, { ok: true, price: null, basis: 'website' });
 });
 
 test("the form's tab counts as loaded once Chrome says it is, even when Chrome's 'complete' update never comes", async () => {

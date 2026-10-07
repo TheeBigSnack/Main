@@ -131,6 +131,14 @@ try {
   // it was marked after the last scan, which shows the website as it was before (src/rescan.js scanCar):
   // the switch leaves it for the next scan to read
   assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, undefined]], 'not stamped off a scan taken before it was posted');
+  // nor does My listings read one off it (src/rescan.js listingLine): on the new setting that scan's price
+  // is not the listing's, so it names no website price and offers no Updated until the next scan compares it
+  await tab(popup, 'mine').click();
+  const waiting = await popup.textContent('.panel');
+  assert.match(waiting, /Price compared at the next scan/);
+  assert.match(waiting, /Listed \$27,163/);
+  assert.doesNotMatch(waiting, /posted at the|Website \$/, 'no basis and no price read off a scan from before the post');
+  assert.equal(await popup.locator('button[data-action="priceUpdated"]').count(), 0, 'nothing for Updated to record');
   const scanned = () => popup.waitForFunction(() => document.querySelector('#settingsBtn').getAttribute('aria-pressed') === 'false' && document.querySelector('#panel .meta') && !document.querySelector('#scan').disabled);
   await popup.click('#scan');
   await scanned(); // the view turns to To do only once the scan is saved

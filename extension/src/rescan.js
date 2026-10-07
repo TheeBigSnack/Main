@@ -87,10 +87,13 @@ function msOf(x) {
 }
 
 // When a posted listing got the price it carries: its last price update
-// (updatedAt), else its post (postedAt); null when it carries neither.
+// (updatedAt), else, for a listing published from a Facebook draft, when the
+// draft was filled with that price (draftSavedAt, drafts.js markDraftPosted;
+// it stays in this browser), else its post (postedAt); null when it carries
+// none.
 function pricedAt(entry) {
   if (!entry || typeof entry !== 'object') return null;
-  return msOf(entry.updatedAt) ?? msOf(entry.postedAt);
+  return msOf(entry.updatedAt) ?? msOf(entry.draftSavedAt) ?? msOf(entry.postedAt);
 }
 
 // Whether a scan was taken before a listing got its price: false when
@@ -112,7 +115,8 @@ function scanBefore(entry, snap) {
 // time when the listing has one, and for a car the scan doesn't hold. A
 // listing that carries no time at all can be read off any scan. The side
 // panel's price update reads the last scan through it too (sidepanel.js
-// upkeepPriceNow), so it fills the price the To do item asked for.
+// upkeepPriceNow), so it fills the price the To do item asked for, and so
+// does My listings (listingLine).
 export function scanCar(entry, snap, vin) {
   const car = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles[vin] : null;
   if (!car) return null;
@@ -255,21 +259,67 @@ export function pendingText(e) {
 
 // A posted car's line on My listings, from the last scan's entry for it
 // (null when the scan did not have the car), the price on the listing and
-// the website price on the dealer's basis. The first that applies: not on
-// the website, sold or sale-pending, held back by the pre-owned check (the
-// website now calls it new, demo or loaner, or its details need a look),
-// a different price, else matching. The same states To do raises on every
-// scan while the listing is still marked posted (diffScans).
-export function listingStatus(now, listedPrice, sitePrice) {
+// the website price on the listing's basis (listingLine). The first that
+// applies: not on the website, sold or sale-pending, held back by the
+// pre-owned check (the website now calls it new, demo or loaner, or its
+// details need a look), a different price, else matching. The same states
+// To do raises on every scan while the listing is still marked posted
+// (diffScans). `compared` is false when the scan was taken before the
+// listing got its price (scanCar): a website price there that is not the
+// listing's (or none) is the website as it was before, not a change since,
+// so the price waits for the next scan (`waits`), and nothing is offered to
+// record.
+export function listingStatus(now, listedPrice, sitePrice, compared = true) {
   if (!now) return { tone: 'bad', text: 'Not on the website at the last scan' };
   const held = pendingText(now);
   if (held) return { tone: 'bad', text: held };
   if (now.decision === DECISION.SKIP) return { tone: 'bad', text: 'Not pre-owned on the website' };
   if (now.decision === DECISION.REVIEW) return { tone: 'warn', text: 'Needs a look (see To do)' };
+  if (!compared && sitePrice !== listedPrice) return { tone: '', text: 'Price compared at the next scan', waits: true };
   // as To do says it (diffScans): the listing has a price the website no longer shows
   if (listedPrice && !sitePrice) return { tone: 'warn', text: 'Website no longer shows a price' };
   if (sitePrice && sitePrice !== listedPrice) return { tone: 'warn', text: 'Website price changed', priceChanged: true };
   return { tone: 'good', text: 'Matches the website' };
+}
+
+// A posted listing's line on My listings, from the last scan (`snap`): the
+// car as that scan shows it (`now`, null when it does not hold the car), the
+// basis the listing's price is on (postedBasis: the entry's own; for an entry
+// with none, read off the last scan only when it was taken once the listing
+// had its price, scanCar, as the rescan reads it; else the setting `basis`),
+// whether that scan was taken once the listing had its price (`compared`),
+// the website price on that basis (`site`) and the line (listingStatus). A
+// scan from before the listing's price (posted or updated since, on this
+// computer or another) shows the website as it was then: a website price
+// there that differs from the listing's is never named (`site` null), in
+// whatever state the scan shows the car, and the price waits for the next
+// scan, so Updated never records a price from before the listing's own; one
+// that equals it still matches. What the scan says about the car itself
+// (gone, sold, sale-pending, held back by the pre-owned check) shows either
+// way.
+export function listingLine(entry, snap, vin, basis = 'website') {
+  const now = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles[vin] || null : null;
+  const since = scanCar(entry, snap, vin);
+  const listed = entry ? entry.price : undefined;
+  const own = postedBasis(entry, basis, [since]);
+  const site = now ? basisPrice(now, own) : null;
+  const compared = Boolean(since);
+  const status = listingStatus(now, listed, site, compared);
+  return { now, basis: own, compared, site: compared || site === listed ? site : null, status };
+}
+
+// Whether a price item on To do for one of your listings (`item`: a
+// diffScans item, or the one Mark posted adds for a draft, drafts.js
+// withPriceUpdate) was worked out on a scan (the diff's, `diff.takenAt`)
+// taken before the listing, as it is stored now (`entry`), got the price it
+// carries: updated or posted since, on another computer and brought by sync,
+// which settles no to-do list (settleDiff runs when a scan is saved). The
+// item's prices are then the listing's and the website's as they were before
+// that, so its price waits for the next scan, as My listings says
+// (listingLine), and nothing is offered to record or fill. The same rule as
+// scanCar (scanBefore): false when either time is unknown.
+export function priceItemWaits(item, entry, diff) {
+  return Boolean(item && item.yours && entry && typeof entry === 'object' && scanBefore(entry, diff));
 }
 
 function whatGotReady(before, now) {
@@ -353,8 +403,11 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     const mine = yours(vin);
     // a posted car on the basis its listing was posted at (postedBasis; an
     // entry with none reads it off the last scan, then this one, each only
-    // when taken once the listing had its price: scanCar)
-    const nowPrice = mine ? listingWebsitePrice(posted[vin], now, basis, [scanCar(posted[vin], prev, vin), scanCar(posted[vin], curr, vin)]) : basisPrice(now, basis);
+    // when taken once the listing had its price: scanCar). Its price item
+    // names that basis, so Updated records it on an entry that has none
+    // (markPriceUpdated).
+    const own = mine ? postedBasis(posted[vin], basis, [scanCar(posted[vin], prev, vin), scanCar(posted[vin], curr, vin)]) : null;
+    const nowPrice = mine ? basisPrice(now, own) : basisPrice(now, basis);
 
     // A posted car the website marks sold or sale-pending, or no longer
     // calls pre-owned, is raised on every scan while it is still marked
@@ -385,7 +438,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
       if (was && !nowPrice) {
         out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, text: `Website no longer shows a price (${now.priceLabel || 'call for price'})` });
       } else if (was && nowPrice && was !== nowPrice) {
-        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was });
+        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was, ...(mine ? { basis: own } : {}) });
       }
     }
 
@@ -515,9 +568,17 @@ export function markPosted(posted, entry, basis = 'website', now = new Date().to
 }
 
 // The listing's new price, on the basis it carries (the to-do item's `to`).
-export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {
+// `basis`: the basis that price was worked out on (My listings: listingLine;
+// To do: the item's, diffScans; the side panel's read of the car), recorded
+// on a listing that carries none (posted with an older version), so the
+// listing's price stays on it whatever Price to post says later: a switch
+// of the setting before the next scan is then no part of the next price
+// change (rule 4). A listing that carries a basis keeps it.
+export function markPriceUpdated(posted, vin, price, now = new Date().toISOString(), basis = null) {
   if (!posted[vin]) return posted;
-  return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now } };
+  const entry = posted[vin];
+  const keep = !PRICE_BASES.includes(entry && entry.basis) && PRICE_BASES.includes(basis) ? { basis } : {};
+  return { ...posted, [vin]: { ...entry, price, updatedAt: now, ...keep } };
 }
 
 // Needs a look, dismissed for a posted car (the To do item's Dismiss): the

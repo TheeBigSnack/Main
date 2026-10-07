@@ -6,7 +6,8 @@
 //
 // A price update reads the car on the website again first (ctx.priceNow, the
 // same read and check a post makes at post time) and fills the price the
-// website shows now, on the basis the listing was posted at; a car the read
+// website shows now, on the basis the listing was posted at (recorded with
+// the price on a listing that carries none); a car the read
 // can't find, one the website marks sold or sale-pending, no longer calls
 // pre-owned or whose details need a look, one with no price, or one whose
 // price is back to the listed one stops with the reason and nothing is filled.
@@ -45,6 +46,7 @@ export const up = {
   listingId: '', // the listing's id, from its saved link or from this car's own listing page once opened (onListing)
   tabId: null, status: 'idle', // idle | checking | stopped | opening | waiting | filled | done | gone
   scanPrice: null, // a price update: the price the last scan found, when the website shows another one now
+  basis: null, // a price update: the basis the read worked the price out on, kept on a listing that carries none (markPriceUpdated)
   note: '', filledShown: '', seen: null, error: '', fills: 0,
   names: null, // the last scan's cars by VIN, read once for a take-down recorded without its name (namesakesNow)
   baseline: null, // { url, sold, unavailable } from the first read of the current page
@@ -80,7 +82,7 @@ function stopPolling() {
 export async function startUpkeep(req, ctx) {
   stopPolling();
   const run = ++starts;
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, why: String(req.why || ''), price: req.price || null, scanPrice: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, why: String(req.why || ''), price: req.price || null, scanPrice: null, basis: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false });
   ctx.render();
   if (up.kind === 'price') {
     let now;
@@ -99,6 +101,7 @@ export async function startUpkeep(req, ctx) {
     }
     if (now.price !== up.price) up.scanPrice = up.price;
     up.price = now.price;
+    up.basis = now.basis || null;
     up.status = 'opening';
     ctx.render();
   }
@@ -309,7 +312,7 @@ async function finish(ctx, how) {
       const entry = ((await chrome.storage.local.get(k.posted))[k.posted] || {})[up.vin];
       if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true, name: entry.name }));
     }
-    await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price) : markTakenDown(posted || {}, up.vin)));
+    await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price, undefined, up.basis) : markTakenDown(posted || {}, up.vin)));
     // pilot numbers: how long the item stayed open, and whether Lot Current
     // saw the change itself; a take-down closes the car's price item too, as
     // it leaves the diff with it (the popup's Taken down does the same), so

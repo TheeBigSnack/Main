@@ -1,6 +1,6 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld } from './src/rescan.js';
-import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
+import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
@@ -411,14 +411,15 @@ function empty(text) {
 // "Post" opens the guided flow in the side panel (only for ready cars). "Mark
 // posted" is for a listing the salesperson made by hand, or published from a
 // draft: the draft's pill shows the price it was filled with, and says so
-// when the website's price moved or the car is not ready any more.
+// when the website's price moved (on a scan taken since the draft was
+// filled: src/drafts.js draftScanCar) or the car is not ready any more.
 function postButton(vin, { canPost = true } = {}) {
   const theirs = colleagueEntry(vin);
   if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
   if (state.markAsk === vin) return markChoice(vin);
   if (state.drafts[vin]) {
-    const pill = draftPill(state.drafts[vin], state.snapshot?.vehicles?.[vin], { basis: state.settings?.basis, ready: canPost });
+    const pill = draftPill(state.drafts[vin], draftScanCar(state.drafts[vin], state.snapshot, vin), { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
   const capReached = dailyCap().reached;
@@ -522,16 +523,22 @@ function viewTodo(l) {
   const updates = d?.priceUpdates || [];
   if (updates.length) {
     parts.push(
-      section('Update price', 'warn', updates.map((p) =>
-        row(p, {
-          sub: (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
-          right: `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
-          action: p.yours
-            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`
+      section('Update price', 'warn', updates.map((p) => {
+        // an item worked out on a scan taken before your listing got the price it carries (updated on another
+        // computer since and brought by sync: src/rescan.js priceItemWaits) is the listing and the website as they
+        // were then: as on My listings, its price waits for the next scan, with neither price of that scan named
+        // and nothing to record or fill
+        const entry = state.posted[p.vin];
+        const waits = priceItemWaits(p, entry, d);
+        return row(p, {
+          sub: (waits ? '<span class="pill">Price compared at the next scan</span> ' : '') + (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
+          right: waits ? `Listed ${money(entry.price)}` : `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
+          action: p.yours && !waits
+            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}"${p.basis ? ` data-basis="${esc(p.basis)}"` : ''}>Updated</button></span>`
             : '',
           muted: !p.yours,
-        })
-      ))
+        });
+      }))
     );
   }
   const now = Date.now();
@@ -752,23 +759,24 @@ function viewMine(l) {
     lead +
     rows(
       l.mine.map((p) => {
-        const now = p.now;
-        // the basis this listing was posted at (src/rescan.js postedBasis; an entry with none reads it off the last scan),
-        // so a switch of Price to post is not shown (or recorded) as a change
-        const own = postedBasis(p, state.settings?.basis, now ? [now] : []);
-        const site = now ? basisPrice(now, own) : null;
+        // the line from the last scan (src/rescan.js listingLine): the website price on the basis this listing was
+        // posted at, so a switch of Price to post is not shown (or recorded) as a change. An entry with none reads it
+        // off that scan only when it was taken once the listing had its price (scanCar), as the rescan does. A scan
+        // from before (`compared` false) names no website price, whatever it says about the car, and a price that
+        // differs waits for the next scan, so Updated never records it.
+        // Sold, sale-pending or held back by the pre-owned check come before a price change (listingStatus).
+        const { now, basis: own, compared, site, status } = listingLine(p, state.snapshot, p.vin, state.settings?.basis);
         const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
-        // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus)
-        const status = listingStatus(now, p.price, site);
-        const pill = `<span class="pill ${status.tone}">${esc(status.text)}</span>`;
-        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
+        const pill = `<span class="pill${status.tone ? ' ' + status.tone : ''}">${esc(status.text)}</span>`;
+        // Updated records the price with the basis it is on, kept on a listing that carries none (src/rescan.js markPriceUpdated)
+        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}" data-basis="${esc(own)}">Updated</button>` : '';
         const entry = { name: p.name, url: now?.url };
         const link = openListing(p.listingUrl);
         const refused = notShared(p);
         return row(entry, {
           sub: `${pill} ${p.listedBefore ? `Listed before ${esc(day(p.postedAt))}` : `Posted ${esc(when(p.postedAt))}`}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
           line: refused ? `<span class="notShared" style="color: var(--bad)">${notSharedText(refused)}</span>` : '',
-          right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
+          right: `Listed ${money(p.price)}${now && compared && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
       })
@@ -1261,7 +1269,9 @@ async function onPanelClick(ev) {
       if (btn.dataset.action === 'post') setStatus(`Recorded as posted today: Lot Current filled the form for ${entry.name || 'this car'} today or recorded it earlier today, so it counts toward today's posts.`);
       else if (before) setStatus(`Recorded as listed before today: rescans watch ${entry.name || 'it'}, and it doesn't count toward today's posts.`);
       if (draft) {
-        const gap = draftPriceUpdate(draft, entry, basis);
+        // compared with the last scan only when it was taken once the listing had its price (the draft filled: the entry's
+        // draftSavedAt, src/rescan.js scanCar), as My listings compares it: a scan from before names no price to update
+        const gap = draftPriceUpdate(draft, scanCar(state.posted[vin], state.snapshot, vin), basis);
         if (gap) {
           await update('diff', (d) => withPriceUpdate(d, gap)); // on To do now; every rescan lists it too until the listing is updated
           setStatus(`Recorded at ${money(gap.from)}, the price the draft was filled with. The website now shows ${money(gap.to)}: update the price on the listing (To do, Update price).`, 'error');
@@ -1452,7 +1462,8 @@ async function onPanelClick(ev) {
       break;
     }
     case 'priceUpdated':
-      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
+      // the price, and the basis it was worked out on for a listing that carries none (the item's, or My listings' line)
+      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price), undefined, btn.dataset.basis)))) break;
       if (!(await notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
       syncInBackground();

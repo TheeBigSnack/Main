@@ -11,9 +11,9 @@
 //
 // This file never clicks anything on the Facebook page.
 
-import { markPosted, basisPrice, listingWebsitePrice, pendingText, scanCar } from './src/rescan.js';
+import { markPosted, basisPrice, postedBasis, pendingText, scanCar } from './src/rescan.js';
 import { DECISION } from './src/classify.js';
-import { draftRecord, draftPill } from './src/drafts.js';
+import { draftRecord, draftPill, draftScanCar } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
@@ -1673,7 +1673,9 @@ function listRowHtml(r, { canPost = true } = {}) {
   const facts = [e.stock && 'Stock ' + esc(e.stock), typeof e.mileage === 'number' ? miles(e.mileage) : '', esc(e.locationShort || '')].filter(Boolean).join(' · ');
   let action = '';
   if (r.draft) {
-    const draft = draftPill(state.drafts[r.vin], e, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
+    // the draft's price is compared with the last scan only when it was taken once the draft was filled (src/drafts.js draftScanCar)
+    const seen = draftScanCar(state.drafts[r.vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, r.vin);
+    const draft = draftPill(state.drafts[r.vin], seen, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
     action = `<span class="pill ${draft.tone}" title="${esc(draft.title)}">${esc(draft.text)}</span>`;
   } else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
   return `<li class="row"><div class="main">${name}${pill}<div class="sub">${facts}</div><div class="when">${esc(r.line)}</div></div><div class="price">${money(r.price)}</div>${action}</li>`;
@@ -2196,11 +2198,12 @@ function renderList() {
 // need a look. Another store, no photos or not yet on the lot hold back a
 // new post but not this: the listing is up, and its price should match the
 // website. The price is the website's now, on the basis the listing was
-// posted at (listingWebsitePrice), as the To do item's was: a listing with
+// posted at (rescan.js postedBasis), as the To do item's was: a listing with
 // no basis recorded reads it off the last scan only when that scan was taken
 // once the listing had its price (rescan.js scanCar), then off this read.
-// Resolves { ok, price } or { ok: false, message }; upkeep.js fills nothing
-// on a stop or when there is no price.
+// Resolves { ok, price, basis } or { ok: false, message }; upkeep.js fills
+// nothing on a stop or when there is no price, and records the basis with
+// the price on a listing that carries none (rescan.js markPriceUpdated).
 async function upkeepPriceNow(req) {
   const vin = String(req.vin || '').toUpperCase();
   const host = hostOf(req.origin);
@@ -2219,7 +2222,8 @@ async function upkeepPriceNow(req) {
   if (held) return { ok: false, message: `${held}, so its price was not updated. Rescan the website: To do then lists it to take down.` };
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok && check.assessment.decision !== DECISION.NOT_READY) return { ok: false, message: `${check.message} Its price was not updated: rescan the website to see what to do with this listing.` };
-  return { ok: true, price: listingWebsitePrice(state.posted[vin], fresh.vehicle, state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]) };
+  const basis = postedBasis(state.posted[vin], state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]);
+  return { ok: true, price: basisPrice(fresh.vehicle, basis), basis };
 }
 
 const upkeepCtx = {
