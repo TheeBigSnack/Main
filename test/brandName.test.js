@@ -53,22 +53,33 @@ const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u1680\\u2000-\\u200d\\u2010-\\u2015\\
 // A line break, optionally followed by the comment or quote marker that
 // starts a wrapped comment or quote line (// # * -- > ; <!--).
 const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
-// "lot" where a word starts: not straight after a letter (after a digit it
-// starts one, as in "2026lotsync.csv"), a capital L after a small letter,
-// which starts the next word of a camelCase name ("initLotSync"), and "Lot"
-// after a capital, the next word after an acronym ("UILotSync"). A "lot"
-// glued after a letter of its own case, as in a domain, a hashtag, a file
-// name or a name in capitals ("getlotsync.com", "#trylotsync",
-// "MYLOTSYNC"), counts too, unless it ends one of the English words in
-// LOT_WORDS ("the pilot sync", "ballotSync", "slotsync" and "PILOTSYNC" are
-// other words). So a few glued spellings still pass: the old name straight
-// after one of those words' stems ("getslotsync", read as "get slot sync").
+// "lot" where a word starts, by what comes just before it:
+// - anything but a letter: any "lot" (after a digit it starts a word, as in
+//   "2026lotsync.csv");
+// - a small letter: a capital L, which starts the next word of a camelCase
+//   name ("initLotSync");
+// - a capital: "Lot", the next word after an acronym ("UILotSync").
+// Any other "lot" glued after a letter, in any case, as in a domain, a
+// hashtag, a file name, a name in capitals or after an acronym
+// ("getlotsync.com", "#trylotsync", "MYLOTSYNC", "GETlotsync.com",
+// "UIlotSync"), counts too, unless the letters before it are the stem of one
+// of the English words in LOT_WORDS ("the pilot sync", "ballotSync",
+// "slotsync" and "PILOTSYNC" are other words).
+// What that leaves out: those stems include the single letters s, p, b and c
+// (slot, plot, blot, clot) and "al" and "pi" (allot, pilot), so the old name
+// glued straight after any word that ends in s, p, b, c, "al" or "pi" is not
+// reported, plurals and domains included ("carslotsync", "weblotsync.com",
+// "applotsync", "finallotsync", "ITSLOTSYNC"), nor after a word that ends in
+// another listed stem ("zea" of zealot, "came" of Camelot). Written that way
+// it cannot be told apart from "slot", "plot", "blot", "clot", "allot" or
+// "pilot" ("timeslotsync" is a time slot). With a capital L, a separator or
+// nothing in front, it is still caught ("carsLotSync", "web lotsync").
 // The case is spelled out in the classes, so the expressions carry no i
 // flag, which would make that capital L match any l.
 const LOT_WORDS = ['pilot', 'ballot', 'allot', 'slot', 'plot', 'blot', 'clot', 'zealot', 'harlot', 'shallot', 'ocelot', 'camelot', 'matelot', 'cachalot', 'polyglot'];
 const anyCase = (s) => s.replace(/[a-z]/g, (c) => `[${c.toUpperCase()}${c}]`);
 const STEMS = LOT_WORDS.map((w) => anyCase(w.slice(0, -3))).join('|');
-const LOT = `(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])L[Oo][Tt]|(?<=[A-Z])Lot|(?<=[a-z])(?<!${STEMS})l[Oo][Tt]|(?<=[A-Z])(?<!${STEMS})LOT)`;
+const LOT = `(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])(?:L|(?<!${STEMS})l)[Oo][Tt]|(?<=[A-Z])(?:Lot|(?<!${STEMS})[Ll][Oo][Tt]))`;
 const SYNC = '[Ss][Yy][Nn][Cc]';
 const OLD_NAME = new RegExp(`${LOT}${SEP}${WRAP}${SYNC}`, 'g');
 const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
@@ -460,6 +471,13 @@ test('the scan catches the old name in every spelling, in any file that is not e
     // and the same in all capitals
     'GETLOTSYNC.COM',
     'const MYLOTSYNC = 1;',
+    // glued after a capital, with "lot" in small or mixed letters
+    'MYlotsync',
+    'GETlotsync.com',
+    'the UIlotSync panel',
+    'UILOtSync',
+    'IDlotsync',
+    'XlOTsync',
     // the spellings a careless edit is most likely to bring back
     'Lot-Sync',
     'lot_sync',
@@ -500,8 +518,18 @@ test('the scan catches the old name in every spelling, in any file that is not e
   // escape (read as Latin-1, its letters are no separator either)
   for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>', 'the pilot sync runs nightly', 'ballotSync()', 'a slot-sync job', 'PILOTSYNC', 'allot_sync', 'PilotSync',
     'autopilotsync', 'copilot-sync', 'timeslotsync', 'a subplot syncs', 'inkblot_sync', 'bloodclotSync', 'zealotsync', 'harlot sync', 'shallotsync', 'ocelotsync', 'Camelotsync', 'matelotsync', 'cachalotsync', 'polyglotSync', 'AUTOPILOTSYNC', 'TIMESLOTSYNC', 'BALLOT_SYNC',
+    'SlotSync', 'PlotSync', 'AUTOPIlotSync', 'TIMESlotsync', 'COPIlot-sync',
     'const n = lot+sync;', '?tags=lot+%26+sync', 'x &=lot+sync;', 'a ??=lot+sync', '?q=lot%2Bsync', 'a lot%E2%80sync']) {
     assert.deepEqual(hitsIn('docs/help.md', text), [], text);
+  }
+  // What the comment on LOT says is left out, so the comment cannot drift from the rule: the old
+  // name glued straight after a word that ends in a listed stem reads like "slot", "plot", "allot"
+  // or "pilot" and is not reported; with a capital L or a separator in front it is.
+  for (const text of ['carslotsync', 'weblotsync.com', 'applotsync', 'finallotsync', 'ITSLOTSYNC']) {
+    assert.deepEqual(hitsIn('docs/help.md', text), [], `${text}: the comment on LOT says this is not reported`);
+  }
+  for (const text of ['carsLotSync', 'web lotsync', 'APP-LOTSYNC']) {
+    assert.equal(hitsIn('docs/help.md', text).length, 1, text);
   }
 });
 
