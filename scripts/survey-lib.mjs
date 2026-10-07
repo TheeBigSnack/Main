@@ -543,10 +543,13 @@ export function recordsShape(json, href) {
       const key = scrub(e.key);
       const label = scrub(e.label);
       // a price the reader can't read as an amount ("Call for Price",
-      // "$40,590*") is marked, never shown: the reader then takes no price
+      // "$40,590*") is marked, never shown: the reader then takes no price;
+      // a figure from outside the record's price fields and lists (a
+      // package, a warranty) is marked too: the reader never takes it
       const unreadable = e.value === null;
-      const id = `${key}|${label}|${kind}|${e.final}|${unreadable}`;
-      if (!labels.has(id)) labels.set(id, { key, label, kind, final: e.final, ...(unreadable ? { unreadable: true } : {}), cars: 0 });
+      const aside = Boolean(e.aside);
+      const id = `${key}|${label}|${kind}|${e.final}|${unreadable}|${aside}`;
+      if (!labels.has(id)) labels.set(id, { key, label, kind, final: e.final, ...(unreadable ? { unreadable: true } : {}), ...(aside ? { aside: true } : {}), cars: 0 });
       labels.get(id).cars += 1;
     }
     const own = ownPriceLabel(card);
@@ -895,7 +898,7 @@ export function renderReportMd(r) {
         L.push(`    - car records at \`${esc(rs.listPath)}\`: ${rs.count} on this answer, total said ${rs.total ?? 'nowhere'}; conditions ${Object.entries(rs.conditions).map(([k, n]) => `${esc(k)} ${n}`).join(', ')}`);
         if (rs.conditionFields && Object.keys(rs.conditionFields).length) L.push(`    - condition fields: ${Object.entries(rs.conditionFields).map(([k, words]) => `\`${esc(k)}\` ${Object.entries(words).map(([w, n]) => `${esc(w)} ${n}`).join(', ')}`).join('; ')}`);
         L.push(`    - filled by the reader (of ${rs.count}): ${Object.entries(rs.filled).map(([k, n]) => `${k} ${n}`).join(', ')}`);
-        if (rs.priceLabels.length) L.push(`    - price labels: ${rs.priceLabels.map((p) => `"${esc(p.label)}" (\`${esc(p.key)}\`, ${p.kind}${p.final ? ', final' : ''}${p.unreadable ? ', not an amount the reader can read' : ''}, ${p.cars} cars)`).join('; ')}`);
+        if (rs.priceLabels.length) L.push(`    - price labels: ${rs.priceLabels.map((p) => `"${esc(p.label)}" (\`${esc(p.key)}\`, ${p.kind}${p.final ? ', final' : ''}${p.unreadable ? ', not an amount the reader can read' : ''}${p.aside ? ', outside the record\'s price fields: never the price' : ''}, ${p.cars} cars)`).join('; ')}`);
         else L.push('    - price labels: none the reader recognised');
         if (rs.ownLabels && rs.ownLabels.length) L.push(`    - the records' own label for their price: ${rs.ownLabels.map((p) => `"${esc(p.label)}" (\`${esc(p.key)}\`, ${p.notThePrice ? 'not the selling price: the reader takes no price' : 'the price beside it stands'}, ${p.cars} cars)`).join('; ')}`);
         else L.push("    - the records' own label for their price: no field of its own");

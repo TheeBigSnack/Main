@@ -395,7 +395,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
     list: { finalUrl: LIST, title: 'Used', platform: fingerprint({ url: LIST, html: '' }), server: pageAnatomy(DEALERCOM_LIKE, LIST, 200), rendered: pageAnatomy(DEALERON_LIKE, LIST, 200), pagination: { shapes: ['?pt='] } },
     carPages: [{ url: SITE + '/v/1', status: 200, jsonLd: jsonLdSummary(CAR_PAGE), microdata: {}, serverVins: 1, photoHosts: { 'photos.example-cdn.test': 1 } }],
     carPagesSummary: { read: 1, withVehicleJsonLd: 1, withVehicleMicrodata: 0 },
-    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }], ownLabels: [{ key: 'PriceLabel', label: 'Market Value', notThePrice: true, cars: 2 }], conditions: { '(none)': 2 }, conditionFields: { inventoryType: { used: 1 }, type: { Loaner: 1 } }, filled: { price: 2, mileage: 0 } } }],
+    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }, { key: 'packages.Tech Package', label: 'Tech Package', kind: 'other', final: false, aside: true, cars: 1 }], ownLabels: [{ key: 'PriceLabel', label: 'Market Value', notThePrice: true, cars: 2 }], conditions: { '(none)': 2 }, conditionFields: { inventoryType: { used: 1 }, type: { Loaner: 1 } }, filled: { price: 2, mileage: 0 } } }],
     excerpt: { from: SITE + '/v/1', text: jsonLdExcerpt(CAR_PAGE) },
     requests: { survey: 4, robots: 1, list: 1, listServerHtml: 1, carPages: 1, browserTotal: 9, blockedMedia: 3, lotSyncScan: 5 },
     bot: { signs: [] },
@@ -410,6 +410,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
   assert.match(md, /paging in the address: `page=1`/);
   assert.match(md, /car records at `vehicles`: 2 on this answer, total said nowhere/);
   assert.match(md, /filled by the reader \(of 2\): price 2, mileage 0/);
+  assert.match(md, /"Tech Package" \(`packages\.Tech Package`, other, outside the record's price fields: never the price, 1 cars\)/, 'a figure from a package is marked as never the price');
   assert.match(md, /condition fields: `inventoryType` used 1; `type` Loaner 1/);
   assert.match(md, /first record's fields: `vin: string`, `price: number`/);
   assert.match(md, /the records' own label for their price: "Market Value" \(`PriceLabel`, not the selling price: the reader takes no price, 2 cars\)/);
@@ -448,4 +449,16 @@ test('jsonEndpoint marks a final price the reader can\'t read as an amount, with
   assert.deepEqual(rs.priceLabels.find((p) => p.label === 'Sample Motors Price'), { key: 'dprice.finalPrice', label: 'Sample Motors Price', kind: 'selling', final: true, unreadable: true, cars: 1 });
   assert.equal(rs.filled.price, 0, 'the reader takes no price, never the $18,995 beside it');
   assert.ok(!JSON.stringify(rs).includes('Call for Price'), 'what the price says is not copied');
+});
+
+// SYNTHETIC: a Dealer.com-shaped record with a package priced beside the
+// car. The reader never takes a figure from outside the record's price
+// fields and lists (inventoryJson.js labeledPrices marks it aside), and the
+// survey says so beside its label, so the report never reads as if a
+// package's figure were a selling price.
+test('jsonEndpoint marks a figure from outside the record\'s price fields, such as a package, as never the price', () => {
+  const body = { inventory: [{ vin: VIN, year: 2019, make: 'Honda', model: 'Civic', odometer: 31207, inventoryType: 'used', link: '/used/Honda/2019-Honda-Civic-0123456789abcdef0123456789abcdef.htm', address: { accountName: 'Sample Motors' }, pricing: { dprice: [{ typeClass: 'retailPrice', label: 'Price', value: '$18,995' }] }, packages: [{ name: 'Dealer Protection Package', price: 1295 }] }] };
+  const rs = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0', status: 200, contentType: 'application/json', body: JSON.stringify(body) }).records;
+  assert.deepEqual(rs.priceLabels.find((p) => p.label === 'Dealer Protection Package'), { key: 'packages.Dealer Protection Package', label: 'Dealer Protection Package', kind: 'selling', final: false, aside: true, cars: 1 });
+  assert.equal(rs.filled.price, 1, 'the car keeps its own price');
 });
