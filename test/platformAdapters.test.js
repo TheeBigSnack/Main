@@ -821,6 +821,42 @@ test('a footer credit alone never makes a page DealerOn or Dealer.com', async ()
 
 // ---------- PR #9 on the reviewed code (2026-10-07) ----------
 
+// Loaner and demo types as a platform may write them in one word or with
+// underscores, as codes often are.
+const GLUED_UNIT_TYPES = ['SERVICE_LOANER', 'Service_Loaner', 'ServiceLoaner', 'SERVICELOANER', 'CourtesyVehicle', 'DEMO_UNIT', 'DemoUnit'];
+
+// R-3, the repair round: a loaner or demo type written in one word or with
+// underscores is the same word. Before, the reader saw no condition in
+// "SERVICE_LOANER" at all, the certified mark filled the empty type with
+// Certified Used, and the car reached Ready.
+test('R-3: a loaner or demo type written in one word or with underscores is still a loaner or demo on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 540 });
+  const car = { ...c, certified: true };
+  for (const [platform, origin, record] of [
+    ['DealerOn', DEALERON_ORIGIN, (word, certified) => ({ ...dealerOnCard({ ...car, certified }).VehicleCard, VehicleCondition: word })],
+    ['Dealer.com', DEALERCOM_ORIGIN, (word, certified) => ({ ...dealerComRecord({ ...car, certified }), inventoryType: word })],
+  ]) {
+    for (const word of GLUED_UNIT_TYPES) {
+      for (const certified of [true, false]) {
+        const v = normalizeInventoryRecord(record(word, certified), { origin });
+        const where = `${platform}, ${word}${certified ? ', certified' : ''}`;
+        assert.doesNotMatch(String(v.inventoryType), /certified used/i, `${where}: never read as Certified Used`);
+        assert.equal(v.isDemo || v.isLoaner, true, `${where}: flagged like the platform's own flag (type ${v.inventoryType})`);
+        assert.equal(v.isDemo, /demo/i.test(word), `${where}: a demo is a demo, a loaner a loaner`);
+        const decision = assessVehicle(v, withDefaults({})).decision;
+        assert.notEqual(decision, DECISION.READY, `${where}: never Ready`);
+        assert.equal(decision, DECISION.REVIEW, `${where}: the website also calls it pre-owned, so Needs a look`);
+      }
+    }
+  }
+  // the same spellings of a used or certified type still read as pre-owned
+  for (const word of ['PRE_OWNED', 'PreOwned', 'CERTIFIED_PRE_OWNED', 'USED_VEHICLE']) {
+    const v = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: false }), inventoryType: word }, { origin: DEALERCOM_ORIGIN });
+    assert.equal(checkPreOwned(v).checks.find((x) => x.key === 'type').says, 'pre-owned', word);
+    assert.deepEqual([v.isDemo, v.isLoaner], [false, false], word);
+  }
+});
+
 // R-3: a card typed Loaner, Demo or Courtesy and marked certified. Its
 // type and its certified mark disagree, so a person looks at it: Needs a
 // look, whatever the title and the address say, never Ready and never read
@@ -836,7 +872,7 @@ test('R-3: a certified card typed Loaner, Demo or Courtesy goes to Needs a look 
     ['Dealer.com', DEALERCOM_ORIGIN, (word, plain) => ({ ...dealerComRecord(car), inventoryType: word, ...(plain ? { link: bare } : {}) })],
   ];
   for (const [platform, origin, record] of shapes) {
-    for (const word of ['Loaner', 'Service Loaner', 'Demo', 'Demonstrator', 'Courtesy', 'Courtesy Vehicle', 'Certified Loaner']) {
+    for (const word of ['Loaner', 'Service Loaner', 'Demo', 'Demonstrator', 'Courtesy', 'Courtesy Vehicle', 'Certified Loaner', ...GLUED_UNIT_TYPES]) {
       for (const plain of [false, true]) {
         const v = normalizeInventoryRecord(record(word, plain), { origin });
         const where = `${platform}, ${word}${plain ? ', no other condition word' : ''}`;

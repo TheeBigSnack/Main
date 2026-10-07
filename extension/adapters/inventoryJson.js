@@ -412,13 +412,27 @@ const N = {
   carfax: ['carfaxurl', 'carfaxlink', 'historyreporturl', 'carfax'],
 };
 
+// A condition value in words, however the platform writes it: a code in
+// one word or with underscores ("SERVICE_LOANER", "ServiceLoaner",
+// "CERTIFIED_PRE_OWNED") reads as "SERVICE LOANER", "Service Loaner",
+// "CERTIFIED PRE OWNED".
+const conditionWords = (raw) => String(raw).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+// A demo or loaner in a condition value even when its words run together
+// with no case to split them by ("SERVICELOANER", "demounit"): read from its
+// letters alone, so such a unit is never taken for a plain used car.
+const DEMO_LETTERS = /demo/i;
+const LOANER_LETTERS = /loaner|courtesy/i;
+const lettersOf = (text) => String(text).replace(/[^a-z]/gi, '');
+
 // A condition word the gate can read, from a condition field; a field that
 // says nothing about new or used ("Car", "SUV") is not a condition.
 function conditionOf(card) {
   const raw = textOf(pick(card, N.condition));
   if (/^\s*u\s*$/i.test(raw)) return 'Used'; // a one-letter code, as some list data sends it
   if (/^\s*n\s*$/i.test(raw)) return 'New';
-  return /\b(?:new|used|pre-?\s?owned|certified|cpo|demo(?:nstrator)?|loaner|courtesy)\b/i.test(raw) ? raw : '';
+  const words = conditionWords(raw);
+  if (/\b(?:new|used|pre-?\s?owned|certified|cpo|demo(?:nstrator)?|loaner|courtesy)\b/i.test(words)) return words;
+  return DEMO_LETTERS.test(lettersOf(raw)) || LOANER_LETTERS.test(lettersOf(raw)) ? raw : '';
 }
 
 function carfaxOf(card, vin) {
@@ -520,8 +534,8 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   // it to Needs a look instead of Ready, or instead of skipping it as sold as
   // new without a word about the mark. A plain certified car gets no second
   // sign from its mark: its type already says Certified Used.
-  const demoWord = /\b(?:demo|demonstrator)\b/i.test(condition);
-  const loanerWord = /\b(?:loaner|courtesy)\b/i.test(condition);
+  const demoWord = DEMO_LETTERS.test(lettersOf(condition));
+  const loanerWord = LOANER_LETTERS.test(lettersOf(condition));
   const inventoryType = certified && !/\bnew\b/i.test(condition) && !demoWord && !loanerWord ? 'Certified Used' : condition || null;
   const readableType = certified && (demoWord || loanerWord) ? 'Certified' : null;
   const title = textOf(pick(card, N.title));

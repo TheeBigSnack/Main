@@ -548,7 +548,7 @@ test('no copy says only pre-owned cars get through as a plain fact, and no copy 
     title: 'Certified Pre-Owned 2024 Sample SUV Limited', year: 2024, make: 'Sample', model: 'SUV', mileage: 4200, price: 41000,
   }, { origin: 'https://dealer.example' })).verdict;
   assert.equal(verdict('Used'), 'pre-owned', 'a plain certified used card passes');
-  for (const condition of ['Loaner', 'Demo', 'Service Loaner', 'Demonstrator', 'Courtesy Vehicle']) {
+  for (const condition of ['Loaner', 'Demo', 'Service Loaner', 'Demonstrator', 'Courtesy Vehicle', 'SERVICE_LOANER', 'ServiceLoaner', 'CourtesyVehicle', 'DEMO_UNIT']) {
     assert.equal(verdict(condition), 'review', `a certified ${condition} card goes to Needs a look on DealerOn and Dealer.com`);
   }
   const GAP = /(?:known gap|DealerOn and Dealer\.com)[^.]*\bcertified\b[^.]*\b(?:demo|loaner)\b|\bcertified\b[^.]*\bread as certified used\b/i;
