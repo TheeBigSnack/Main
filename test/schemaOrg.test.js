@@ -555,7 +555,7 @@ test('price: when the page\'s only price carries a guide\'s or an old price\'s l
 // guide's or an old price's words in page text ("Market Value*: $24,995",
 // "MSRP† $24,995"). Before, the mark hid the words, so a page whose only
 // price was a guide's value or an offer had it taken as the car's price
-// (PR #9, second repair cycle).
+// (PR #9, repair round 3).
 test('price: a footnote or trademark mark after a guide\'s or an old price\'s words changes nothing', () => {
   const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
   const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });

@@ -981,7 +981,7 @@ test('R-8: a lone guide or offer label is quoted, never read as the price; a cas
   // beside the selling price, an offer is neither the price nor the lower price
   assert.deepEqual(choosePrices([e(21000, 'Internet Price'), e(19000, 'Instant Cash Offer')]), { price: 21000, priceLabel: 'Internet Price', priceBeforeFees: null });
   assert.deepEqual(choosePrices([e(21000, 'Price'), e(19000, 'Your Cash Offer')]), { price: 21000, priceLabel: 'Price', priceBeforeFees: null });
-  // marked final, an offer leaves the car with no price, quoted, never the base price beside it (second repair cycle)
+  // marked final, an offer leaves the car with no price, quoted, never the base price beside it (repair round 3)
   assert.deepEqual(choosePrices([e(21000, 'Retail Price'), e(21500, 'Our Instant Offer', { final: true })]), quoted('Our Instant Offer'));
   // other figures that are not the price keep the plain reason
   assert.deepEqual(choosePrices([e(30000, 'MSRP')]), { price: null, priceLabel: 'Call for price', priceBeforeFees: null });
@@ -1111,7 +1111,7 @@ test('R-8: a dealership whose name holds a guide or not-the-price word keeps its
     const record = dealerComRecord(car, { dealer });
     const dprice = record.pricing.dprice.map((e) => (e.isFinalPrice ? { ...e, label } : e));
     const v = normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice } }, { origin: DEALERCOM_ORIGIN });
-    // the guide's figure is not the price, and as the final price it leaves the car with none, quoted (second repair cycle; before, the base price was taken)
+    // the guide's figure is not the price, and as the final price it leaves the car with none, quoted (repair round 3; before, the base price was taken)
     assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, quoted(label), null], `Dealer.com, ${dealer}, "${label}": the guide's figure is not the price`);
   }
   // the words a dealer name explains are only that name's: "Kelley Price" is no dealer's own price at another store
@@ -1178,7 +1178,7 @@ test('R-8: an offer for the car written with a hyphen, or with no guide\'s word,
     const beside = labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label, value: '$19,000' }] } });
     assert.deepEqual(choosePrices(beside), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" beside a plain price`);
     const final = labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label, value: '$19,000', isFinalPrice: true }] } });
-    // marked final: no price, quoted, never the plain price beside it (second repair cycle)
+    // marked final: no price, quoted, never the plain price beside it (repair round 3)
     assert.deepEqual(choosePrices(final), { price: null, priceLabel: quoted(label), priceBeforeFees: null }, `"${label}" marked final`);
     assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'other', label);
     assert.deepEqual(choosePrices([{ value: 19000, label, key: '', final: false }]), { price: null, priceLabel: quoted(label), priceBeforeFees: null }, `"${label}" alone is quoted`);
@@ -1196,9 +1196,9 @@ test('R-8: an offer for the car written with a hyphen, or with no guide\'s word,
   assert.equal(priceKind({ label: 'Internet Offer', key: '', final: false, value: 1 }, 'Example Motors'), 'selling');
 });
 
-// ---------- PR #9, second repair cycle ----------
+// ---------- PR #9, repair round 3 ----------
 
-// R-8, second repair cycle: the entry the platform marks as the website's
+// R-8, repair round 3: the entry the platform marks as the website's
 // price (Dealer.com's isFinalPrice) set aside as not the price: an offer
 // ("Special Offer", "Today's Offer"), a guide's value ("Market Value",
 // "Kelley Blue Book Price") or an MSRP. Before, the reader dropped it and
@@ -1235,7 +1235,7 @@ test('R-8: a final price set aside as an offer or a guide\'s value leaves the ca
   assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Special Offer', value: '$22,000' }, { label: 'Sample Price', value: '$24,499', isFinalPrice: true }]), { price: 24499, priceLabel: 'Sample Price', priceBeforeFees: 24000 });
 });
 
-// R-8, second repair cycle: a footnote or trademark mark after a price's
+// R-8, repair round 3: a footnote or trademark mark after a price's
 // label ("Your Carvana Offer*", "Our Offer™", "Market Value†", "Sample
 // Price*"). Before, the label tests read the mark as part of the label, so
 // an offer with a mark after it was a selling price again ("your", "our"),
@@ -1280,7 +1280,7 @@ test('R-8: a footnote or trademark mark after a price\'s label changes nothing: 
   assert.deepEqual([named.price, named.priceLabel, named.priceBeforeFees], [car.base + car.fee, 'Sample Price*', car.base], 'Dealer.com: "Sample Price*" not marked final is still the dealer\'s own price');
 });
 
-// Rule 3, second repair cycle: a "new" word in any condition field. Before,
+// Rule 3, repair round 3: a "new" word in any condition field. Before,
 // only the first condition field present was read for it, so a record that
 // said "used" there and "New" in another field (newUsed, type, VehicleType)
 // was Ready, and with the certified flag it was even renamed Certified Used.
