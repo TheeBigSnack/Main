@@ -22,7 +22,7 @@
 
 import { toNumber, shortLocation, conditionWordFromPath } from '../src/normalize.js';
 import { parseVehiclePage } from './schemaOrgParse.js';
-import { normalizeVehicle as normalizeStandard } from './schemaOrgNormalize.js';
+import { normalizeVehicle as normalizeStandard, GUIDE_PRICE_WORDS } from './schemaOrgNormalize.js';
 
 const VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
 const MAX_DEPTH = 8;
@@ -195,7 +195,13 @@ export function totalCount(json) {
 // Words that make an amount something other than the price a buyer pays
 // today: a manufacturer's, earlier or book price, a payment, a fee or a
 // discount on its own, a price only some buyers get, an estimate.
-const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|^list|compare|strike|payment|per ?month|monthly|\bmo\b|lease|financ|rebate|incentive|saving|discount|conditional|\bfees?\b|docfee|\btax|invoice|trade|down ?payment|\bapr\b|cash ?back|bonus|wholesale|employee|supplier|military|loyalty|conquest|lowest|highest|market|book|kbb|kelley|edmunds|estimat|\bvalue\b(?<!retail value)/i;
+const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|^list|compare|strike|payment|per ?month|monthly|\bmo\b|lease|financ|rebate|incentive|saving|discount|conditional|\bfees?\b|docfee|\btax|invoice|trade|down ?payment|\bapr\b|cash ?back|bonus|wholesale|employee|supplier|military|loyalty|conquest|lowest|highest|market|book|estimat|\bvalue\b(?<!retail value)/i;
+// A guide's value, an estimate or an offer for the car ("KBB Value",
+// "Market Price", "Instant Cash Offer"): the standard-data reader's own list
+// (schemaOrgNormalize.js GUIDE_PRICE_WORDS), so the two readers never
+// drift. Never the price, whatever words sit beside it ("Your Cash Offer"),
+// and when the record has no other price the reason quotes the label.
+const GUIDE_PRICE = new RegExp(String.raw`\b(?:${GUIDE_PRICE_WORDS})\b`, 'i');
 // The base price a dealer's own price is built from on these platforms:
 // "Retail Price", "Retail Value", a "starting" price.
 const BASE_WORDS = /retail|\bbase\b|asking|starting/i;
@@ -268,7 +274,7 @@ const nameWords = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9 ]
  */
 export function priceKind(entry, dealer = '') {
   const words = `${entry.label} ${spaced(entry.key)}`;
-  if (NOT_THE_PRICE.test(words)) return 'other';
+  if (NOT_THE_PRICE.test(words) || GUIDE_PRICE.test(words)) return 'other';
   if (entry.final) return 'selling';
   if (BASE_WORDS.test(words)) return 'base';
   if (SELLING_WORDS.test(words)) return 'selling';
@@ -284,6 +290,17 @@ export function priceKind(entry, dealer = '') {
 
 const NO_PRICE = (label) => ({ price: null, priceLabel: label, priceBeforeFees: null });
 
+// The labels of a guide's or an offer's figures, quoted for a person to
+// check: some websites label their own selling price that way ("Market
+// Price"), and the price is still not taken.
+function guideLabelled(entries) {
+  const labels = [...new Set(entries.filter((e) => GUIDE_PRICE.test(`${e.label} ${spaced(e.key)}`)).map((e) => String(e.label || spaced(e.key)).slice(0, 60)))];
+  if (!labels.length) return null;
+  const quoted = labels.slice(0, 3).map((l) => `"${l}"`);
+  const list = quoted.length > 1 ? `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : quoted[0];
+  return `the list labels its ${quoted.length > 1 ? 'prices' : 'price'} ${list}, which Lot Current does not read as the selling price`;
+}
+
 /**
  * The website's price and, when it shows one, the lower base price.
  *   price           the selling price: one the platform marks as final, else
@@ -298,7 +315,9 @@ const NO_PRICE = (label) => ({ price: null, priceLabel: label, priceBeforeFees: 
  * waits on Not ready rather than going out at a price picked by chance: two
  * selling prices that disagree, or a "<Something> Price" the dealership's
  * name does not explain next to the plain or base price ("Two prices on
- * the website").
+ * the website"). A record whose only figures are a guide's or an offer's
+ * ("Market Price", "Instant Cash Offer") gets no price either, and the label
+ * quotes them (guideLabelled).
  * @param {{ value: number, label: string, key: string, final: boolean }[]} entries
  * @param {{ dealer?: string }} [context]
  */
@@ -326,7 +345,7 @@ export function choosePrices(entries, { dealer = '' } = {}) {
     if (differ(base)) return NO_PRICE(TWO);
     main = base[0];
   }
-  if (!main) return NO_PRICE('Call for price');
+  if (!main) return NO_PRICE(guideLabelled(kinds) || 'Call for price');
   const lower = [...base, ...plain].filter((e) => e !== main && e.value < main.value).map((e) => e.value);
   return { price: main.value, priceLabel: main.label || 'Price', priceBeforeFees: lower.length ? Math.max(...lower) : null };
 }

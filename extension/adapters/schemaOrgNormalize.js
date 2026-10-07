@@ -187,10 +187,16 @@ const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|
 // $24,995", "Kelley Blue Book® Fair Purchase Price", "Typical Listing
 // Price", "Book value", "Trade-in value", "Instant Cash Offer", "NADA
 // value", "J.D. Power value", "Black Book", "Edmunds", "Estimated value",
-// "Average market price"), the words inventoryJson.js also never takes for
-// the price. Always whole phrases: a bare "value" is no cue ("Value Price
-// $24,995" is a selling price).
-const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|market value|market price|fair market|fair purchase|typical listing|book value|trade[-\s]?in(?: value)?|kbb|kelley(?: blue book)?|blue book|black book|nada|j\.?\s?d\.?\s?power|cash offer|edmunds|estimated(?: value)?|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$/i;
+// "Average market price"). Always whole phrases: a bare "value" is no cue
+// ("Value Price $24,995" is a selling price).
+//
+// GUIDE_PRICE_WORDS, the guide's, estimate's and offer's words, are shared
+// with the inventory-data reader (inventoryJson.js priceKind and
+// choosePrices), so both readers quote the same labels and neither ever
+// takes such a figure, an instant or cash offer for the car included, for
+// the price. One list: add a word here, never in a copy.
+export const GUIDE_PRICE_WORDS = String.raw`market value|market price|fair market|fair purchase|typical listing|book value|trade[-\s]?in(?: value| offer)?|kbb|kelley(?: blue book)?|blue book|black book|nada|j\.?\s?d\.?\s?power|cash offer|instant offer|edmunds|estimated(?: value)?`;
+const REFERENCE_CUE = new RegExp(String.raw`\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|${GUIDE_PRICE_WORDS}|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$`, 'i');
 
 // Every dollar amount the page shows: its value, whether it is written with
 // a dollar sign, and whether the words before it make it a reference price

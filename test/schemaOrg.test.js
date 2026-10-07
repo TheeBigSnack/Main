@@ -529,6 +529,9 @@ test('price: when the page\'s only price carries a guide\'s or an old price\'s l
     ['Fair Market Price $24,995', 'Fair Market Price'],
     ['Dealer Cash Offer price $24,995', 'Cash Offer price'],
     ['Market Value $24,995 \u00b7 Market Value $24,995', 'Market Value'],
+    // an offer for the car, in the list shared with the inventory-data reader (GUIDE_PRICE_WORDS)
+    ['Instant Offer $24,995', 'Instant Offer'],
+    ['Your Trade-In Offer: $24,995', 'Trade-In Offer'],
   ]) assert.deepEqual(at(text), quoted(label), text);
   // the same label next to a current price is a stale or guide value, as before
   const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };

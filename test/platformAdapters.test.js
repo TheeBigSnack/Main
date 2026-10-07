@@ -871,3 +871,40 @@ test('R-3: a certified card typed Loaner, Demo or Courtesy goes to Needs a look 
     assert.doesNotMatch(String(run.vehicles.find((v) => v.vin === car.vin).inventoryType), /certified used/i, platform);
   }
 });
+
+// R-8: the only price a car has, labelled as a guide's value or an offer
+// for the car ("Market Price", "KBB Value", "Instant Cash Offer"). Some
+// websites label their own selling price that way, so, as the standard-data
+// reader does (schemaOrgNormalize.js priceFromOffers), the car gets no price
+// and the reason quotes the label for a person to check; a cash or trade-in
+// offer is never read as the price, whatever words sit beside it.
+test('R-8: a lone guide or offer label is quoted, never read as the price; a cash offer never is', () => {
+  const e = (value, label, extra = {}) => ({ value, label, key: '', final: false, ...extra });
+  const quoted = (label) => ({ price: null, priceLabel: `the list labels its price "${label}", which Lot Current does not read as the selling price`, priceBeforeFees: null });
+  for (const label of ['Market Price', 'Market Value', 'KBB Value', 'Kelley Blue Book Fair Purchase Price', 'Fair Market Value', 'Typical Listing Price', 'Book Value', 'Black Book Price', 'NADA Value', 'J.D. Power Value', 'Edmunds Price', 'Estimated Value', 'Trade-In Value', 'Trade-In Offer', 'Cash Offer', 'Instant Cash Offer', 'Your Cash Offer', 'Our Instant Offer']) {
+    assert.deepEqual(choosePrices([e(24995, label)], { dealer: 'Example Motors' }), quoted(label), label);
+    assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'other', `${label}: never a selling price, even marked final`);
+  }
+  // the key's own words count when the entry has no label of its own (a field named for the price)
+  assert.deepEqual(choosePrices(labeledPrices({ marketPrice: 24995 })), quoted('market Price'));
+  assert.deepEqual(choosePrices(labeledPrices({ pricing: [{ typeClass: 'cashOffer', value: '$19,500' }] })), quoted('cash Offer'));
+  // a payment beside it changes nothing; two such labels are both quoted
+  assert.deepEqual(choosePrices([e(24995, 'Market Price'), e(399, 'Est. Monthly Payment')]), quoted('Market Price'));
+  assert.deepEqual(choosePrices([e(24995, 'KBB Value'), e(25500, 'Market Value')]), { price: null, priceLabel: 'the list labels its prices "KBB Value" and "Market Value", which Lot Current does not read as the selling price', priceBeforeFees: null });
+  // beside the selling price, an offer is neither the price nor the lower price
+  assert.deepEqual(choosePrices([e(21000, 'Internet Price'), e(19000, 'Instant Cash Offer')]), { price: 21000, priceLabel: 'Internet Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([e(21000, 'Price'), e(19000, 'Your Cash Offer')]), { price: 21000, priceLabel: 'Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([e(21000, 'Retail Price'), e(21500, 'Our Instant Offer', { final: true })]), { price: 21000, priceLabel: 'Retail Price', priceBeforeFees: null });
+  // other figures that are not the price keep the plain reason
+  assert.deepEqual(choosePrices([e(30000, 'MSRP')]), { price: null, priceLabel: 'Call for price', priceBeforeFees: null });
+  // through both platforms' records: no price, the reason quoted on Not ready
+  const [c] = platformCars(1, { from: 560 });
+  const com = normalizeInventoryRecord({ ...dealerComRecord(c), pricing: { dprice: [{ typeClass: 'marketValue', label: 'Market Value', value: '$24,995', isFinalPrice: true }] } }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([com.price, com.priceBeforeFees], [null, null]);
+  assert.deepEqual(assessVehicle(com, withDefaults({})).blockers.map((b) => b.text), ['No price on the website (the list labels its price "Market Value", which Lot Current does not read as the selling price)']);
+  const { VehicleRetailPrice, VehicleInternetPrice, ...noPrices } = dealerOnCard(c).VehicleCard;
+  assert.ok(VehicleRetailPrice && VehicleInternetPrice);
+  const on = normalizeInventoryRecord({ ...noPrices, VehicleInstantCashOfferPrice: 19500 }, { origin: DEALERON_ORIGIN });
+  assert.equal(on.price, null, 'a cash offer is never the price');
+  assert.equal(on.priceLabel, 'the list labels its price "Instant Cash Offer Price", which Lot Current does not read as the selling price');
+});
