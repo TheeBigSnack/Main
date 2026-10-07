@@ -12,7 +12,12 @@
 // pilotAccountConfig() is a text edit of that one file, built in memory: the
 // committed file is never written. It knows exactly one shape (the frozen
 // ACCOUNT with url, anonKey and functionsUrl as plain strings, in that order,
-// and accountsConfigured) and refuses anything else rather than guess.
+// then the committed accountsConfigured line, word for word, with nothing
+// but // comments and blank lines around them) and refuses anything else
+// rather than guess. The check's body is pinned and no other code may sit
+// beside it because the pack loads the copy in Node, not in the extension: a
+// check that read the browser, or a helper that changed what it means,
+// could answer false here and true there.
 // accountsOffProblems() then loads the result as a module, from a data: URL,
 // and says what stops it from giving accounts off. scripts/pack.mjs and
 // scripts/store-check.mjs both use the two.
@@ -34,6 +39,12 @@ const BLOCK = new RegExp(
   'm',
 );
 const VALUE = new RegExp(`^( {2}(?:${FIELDS.join('|')}): )${STRING},`, 'gm');
+// The committed check, word for word: a change to its body is a shape change.
+export const CHECK_LINE = 'export const accountsConfigured = (config = ACCOUNT) => Boolean(config && config.url && config.anonKey);';
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const CHECK = new RegExp(`^${escapeRe(CHECK_LINE)}(?=\\r?$)`, 'm');
+// Every line ending JavaScript knows: a // comment stops at any of them.
+const LINE_END = /\r\n|[\n\r\u2028\u2029]/;
 
 function shapeProblems(text) {
   if (!text.trim()) return ['the file is empty'];
@@ -44,7 +55,11 @@ function shapeProblems(text) {
   const exports = [...text.matchAll(/^\s*export\s+(?:const|let|var|function|class|default|\{|\*)\s*(\w*)/gm)].map((m) => m[1] || '(another export)');
   if (exports.join() !== 'ACCOUNT,accountsConfigured') problems.push(`its exports are ${exports.join(', ') || 'none'}, not ACCOUNT then accountsConfigured`);
   if (!BLOCK.test(text)) problems.push(`ACCOUNT is not Object.freeze({ ${FIELDS.join(', ')} }) with one plain '...' string each, in that order`);
-  if (!/^export const accountsConfigured = /m.test(text)) problems.push('there is no "export const accountsConfigured = " line');
+  if (!CHECK.test(text)) problems.push(`its accountsConfigured line is not the committed one, "${CHECK_LINE}"`);
+  if (/\r(?!\n)|[\u2028\u2029]/.test(text)) problems.push('it has a line break other than \\n or \\r\\n (a lone carriage return or a Unicode line separator), which can end a comment early');
+  // around the two exports: // comments and blank lines only
+  const code = text.replace(BLOCK, '').replace(CHECK, '').split(LINE_END).filter((l) => l.trim() && !/^\s*\/\//.test(l));
+  if (code.length) problems.push(`it has something besides // comments, ACCOUNT and accountsConfigured (${JSON.stringify(code[0].trim().slice(0, 80))}${code.length > 1 ? ` and ${code.length - 1} more line${code.length > 2 ? 's' : ''}` : ''})`);
   return problems;
 }
 

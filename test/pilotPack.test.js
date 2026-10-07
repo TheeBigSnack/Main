@@ -140,6 +140,8 @@ test('the pilot pack refuses, writing no pilot zip, when the committed config no
     ['a fourth value', (t) => t.replace("  functionsUrl: '',\n", "  functionsUrl: '',\n  region: 'us-east-1',\n")],
     ['a value that is not a plain string', (t) => t.replace(/^ {2}anonKey: '[^']*',$/m, '  anonKey: globalThis.KEY,')],
     ['no Object.freeze', (t) => t.replace('Object.freeze({', '({')],
+    // a check that answers false in Node, where the pack loads it, and true in the extension
+    ['a check that reads the browser', (t) => t.replace(/^export const accountsConfigured = .*$/m, 'export const accountsConfigured = (config = ACCOUNT) => Boolean(globalThis.chrome && globalThis.chrome.runtime) || Boolean(config && config.url && config.anonKey);')],
   ];
   for (const [what, change] of changes) {
     const dir = copy();
@@ -250,6 +252,17 @@ test('the rewrite refuses a config whose shape it does not know, and says what c
     ['a second export', `${COMMITTED}export const EXTRA = 1;\n`],
     ['an import', `import { x } from './x.js';\n${COMMITTED}`],
     ['no accountsConfigured', COMMITTED.replace(/^export const accountsConfigured = .*$/m, '')],
+    // the check itself must be the committed line: a body that answers true,
+    // or one that answers differently in a browser than in Node (where the
+    // pack loads it), is a shape change like a change to ACCOUNT
+    ['a check that answers true', COMMITTED.replace(/^export const accountsConfigured = .*$/m, 'export const accountsConfigured = () => true;')],
+    ['a check that reads the browser', COMMITTED.replace(/^export const accountsConfigured = .*$/m, 'export const accountsConfigured = (config = ACCOUNT) => Boolean(globalThis.chrome && globalThis.chrome.runtime) || Boolean(config && config.url && config.anonKey);')],
+    // and nothing but comments around the two exports, so no helper can change what the check means
+    ['a helper the check would call', COMMITTED.replace(/^export const accountsConfigured = /m, 'function Boolean(x) { return globalThis.chrome ? true : !!x; }\nexport const accountsConfigured = ')],
+    ['a statement between the exports', COMMITTED.replace(/^export const accountsConfigured = /m, 'globalThis.LOT_CURRENT_ACCOUNTS = true;\nexport const accountsConfigured = ')],
+    ['code after a carriage return in a comment', `${COMMITTED}// a note\rfunction Boolean() { return true; }\n`],
+    ['code after a line separator in a comment', `${COMMITTED}// a note\u2028function Boolean() { return true; }\n`],
+    ['a block comment', `/* a note */\n${COMMITTED}`],
     ['a copy already packed for a pilot', `${PILOT_LINE}\n${COMMITTED}`],
     ['nothing', ''],
   ];
