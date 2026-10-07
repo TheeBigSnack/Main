@@ -195,6 +195,13 @@ export function totalCount(json) {
 // Words that make an amount something other than the price a buyer pays
 // today: a manufacturer's, earlier or book price, a payment, a fee or a
 // discount on its own, a price only some buyers get, an estimate.
+// Broader than the shared guide words below on purpose ("market", "book",
+// "estimat", "trade", a bare "value"): a labelled entry in a list of prices
+// that carries one is not taken, so a figure the reader can't place waits on
+// a person ("Value Price" alone is "Call for price" here). The standard-data
+// reader reads the words before an amount in running page text instead,
+// where "Value Price $24,995" is a selling price. The shared list decides
+// what is never the price whatever sits beside it, and what is quoted.
 const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|^list|compare|strike|payment|per ?month|monthly|\bmo\b|lease|financ|rebate|incentive|saving|discount|conditional|\bfees?\b|docfee|\btax|invoice|trade|down ?payment|\bapr\b|cash ?back|bonus|wholesale|employee|supplier|military|loyalty|conquest|lowest|highest|market|book|estimat|\bvalue\b(?<!retail value)/i;
 // A guide's value, an estimate or an offer for the car ("KBB Value",
 // "Market Price", "Instant Cash Offer"): the standard-data reader's own list
