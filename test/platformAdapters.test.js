@@ -1188,8 +1188,8 @@ test('R-8: an offer for the car written with a hyphen, or with no guide\'s word,
   const [c] = platformCars(1, { from: 590 });
   const on = normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified: false }).VehicleCard, VehiclePriceLabel: 'Your Cash-Offer' }, { origin: DEALERON_ORIGIN });
   assert.deepEqual([on.price, on.priceLabel], [null, quoted('Your Cash-Offer')]);
-  // an offer word that is not the last word of a price's label changes nothing,
-  // and the website's own selling words still make an offer its price, as before
+  // an offer word with "price" right after it changes nothing, and the
+  // website's own selling words still make an offer its price, as before
   for (const label of ['Offer Price', 'Internet Price', 'Special Offer Price', 'Internet Offer', 'Sale Offer']) {
     assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'selling', label);
   }
@@ -2035,4 +2035,187 @@ test('Rule 3: newOrUsed, saleClass, inventoryCondition, an isNew flag and a one-
     assert.deepEqual([v.inventoryType, v.readableType], ['Certified Used', null], JSON.stringify(patch));
     assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY, JSON.stringify(patch));
   }
+});
+
+// Rule 4, repair cycle 3 round 8 (the reviewer's records): a selling price
+// kept outside the record's price lists and fields held the car only when
+// its label named a price or the platform marked it final. One the platform
+// types as a selling price ("internetPrice", "salePrice") or labels with
+// nothing but the website's selling words ("Internet Deal", "Sale", "Your
+// Deal") was left out, so a retail-only car went out Ready at its retail
+// price. Beside the record's own selling price, such a figure that
+// disagreed with it, or could not be read, was left out too, where the
+// record's own would give two prices or no price.
+test('Rule 4: a selling price kept outside the price lists holds the car by its type or a label of selling words, and beside the record\'s own one gives two prices or no price, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 781 });
+  const car = { ...c, certified: false };
+  const { VehicleInternetPrice, VehiclePriceLabel, ...onCard } = dealerOnCard(car).VehicleCard;
+  assert.ok(VehicleInternetPrice && VehiclePriceLabel);
+  const comFull = dealerComRecord(car);
+  const comCard = { ...comFull, pricing: { ...comFull.pricing, dprice: comFull.pricing.dprice.slice(0, 2) } };
+  const both = (patch) => [
+    ['DealerOn', normalizeInventoryRecord({ ...onCard, ...patch }, { origin: DEALERON_ORIGIN })],
+    ['Dealer.com', normalizeInventoryRecord({ ...comCard, ...patch }, { origin: DEALERCOM_ORIGIN })],
+  ];
+  const held = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const cases = [
+    [{ details: [{ typeClass: 'internetPrice', label: 'Internet Deal', value: '$124,490' }] }, 'Internet Deal'],
+    [{ specials: [{ typeClass: 'internetPrice', label: 'Internet Deal', value: 'Call' }] }, 'Internet Deal'],
+    [{ callouts: [{ typeClass: 'salePrice', label: 'Sample Deal', value: '$124,490' }] }, 'Sample Deal'],
+    [{ vehicle: { typeClass: 'finalPrice', label: 'Sample Deal', value: '$124,490' } }, 'Sample Deal'],
+    [{ details: { label: 'Sale', value: '$124,490' } }, 'Sale'],
+    [{ details: { label: 'Your Deal', value: '$124,490' } }, 'Your Deal'],
+    [{ deal: { label: 'Now', value: '$124,490' } }, 'Now'],
+    [{ tracking: [{ label: 'Internet Deal', value: '$124,490' }] }, 'Internet Deal'],
+    [{ tracking: { label: 'Sale', value: 'Call' } }, 'Sale'],
+  ];
+  for (const [patch, label] of cases) {
+    for (const [what, v] of both(patch)) {
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, held(label), null], `${what} with ${JSON.stringify(patch)}`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY, `${what} with ${JSON.stringify(patch)}: Not ready, never Ready at the retail price`);
+    }
+  }
+  // beside DealerOn's own internet price (not marked final): one that disagrees gives two prices, one that can't be read gives no price, one that agrees changes nothing
+  const fullOn = (patch) => normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, ...patch }, { origin: DEALERON_ORIGIN });
+  const own = car.base + car.fee;
+  for (const patch of [{ details: { salePrice: 117000 } }, { details: [{ typeClass: 'internetPrice', label: 'Internet Deal', value: '$117,000' }] }, { details: { label: 'Sale', value: '$117,000' } }, { vehicle: { finalPrice: '$117,000' } }]) {
+    const v = fullOn(patch);
+    assert.deepEqual([v.price, v.priceLabel], [null, 'Two prices on the website'], `DealerOn with ${JSON.stringify(patch)}`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  for (const [patch, reason] of [[{ details: { salePrice: 'Call' } }, 'the list\'s "sale Price" reads "Call", which Lot Current does not read as an amount'], [{ details: [{ typeClass: 'internetPrice', label: 'Internet Deal', value: 'Call' }] }, 'the list\'s "Internet Deal" reads "Call", which Lot Current does not read as an amount']]) {
+    const v = fullOn(patch);
+    assert.deepEqual([v.price, v.priceLabel], [null, reason], `DealerOn with ${JSON.stringify(patch)}`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  for (const patch of [{ details: { salePrice: own } }, { packages: [{ name: 'Dealer Protection Package', price: 1295 }] }, { details: { label: 'Dealer Installed Accessories', value: '$995' } }]) {
+    const v = fullOn(patch);
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [own, 'Internet Price', car.base], `DealerOn with ${JSON.stringify(patch)}`);
+  }
+  // beside Dealer.com's own final price: only another final price that disagrees gives two prices, as in its own list
+  const fullCom = (patch) => normalizeInventoryRecord({ ...comFull, ...patch }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([fullCom({ vehicle: { finalPrice: '$117,000' } }).price, fullCom({ vehicle: { finalPrice: '$117,000' } }).priceLabel], [null, 'Two prices on the website']);
+  for (const patch of [{ details: { salePrice: 117000 } }, { details: { salePrice: 'Call' } }, { vehicle: { finalPrice: '$118,590' } }, { vehicle: { finalPrice: 'Call' } }]) {
+    const v = fullCom(patch);
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [own, 'Sample Price', car.base], `Dealer.com with ${JSON.stringify(patch)}`);
+  }
+});
+
+// Rule 4, repair cycle 3 round 8 (the reviewer's records): any price field
+// whose name opened with "is", "has", "show", "hide", "use", "enable",
+// "allow" or "include" counted as a flag whatever it held, so
+// "usedInternetPrice", "usedPricing", "UsedVehiclePricing", "showroomPrice"
+// and "includedPrice" were never read and the car went out Ready at its
+// retail price. Such a field is a flag only when it holds a yes or a no.
+test('Rule 4: "usedInternetPrice", "usedPricing", "showroomPrice" and "includedPrice" are read, and only a yes or a no makes a field a flag, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 781 });
+  const car = { ...c, certified: false };
+  const { VehicleInternetPrice, VehiclePriceLabel, ...onCard } = dealerOnCard(car).VehicleCard;
+  const comFull = dealerComRecord(car);
+  const comCard = { ...comFull, pricing: { ...comFull.pricing, dprice: comFull.pricing.dprice.slice(0, 2) } };
+  const both = (patch) => [
+    ['DealerOn', normalizeInventoryRecord({ ...onCard, ...patch }, { origin: DEALERON_ORIGIN })],
+    ['Dealer.com', normalizeInventoryRecord({ ...comCard, ...patch }, { origin: DEALERCOM_ORIGIN })],
+  ];
+  const cases = [
+    [{ usedInternetPrice: 124490 }, [124490, 'used Internet Price', car.base], DECISION.READY],
+    [{ usedPricing: { internetPrice: 124490 } }, [124490, 'internet Price', car.base], DECISION.READY],
+    [{ UsedVehiclePricing: { finalPrice: '$124,490' } }, [124490, 'final Price', car.base], DECISION.READY],
+    [{ usedPricing: { dprice: [{ typeClass: 'internetPrice', label: 'Internet Price', value: 'Call' }] } }, [null, 'the list\'s "Internet Price" reads "Call", which Lot Current does not read as an amount', null], DECISION.NOT_READY],
+    [{ usedPrice: 124490 }, [null, 'Two prices on the website', null], DECISION.NOT_READY],
+    [{ showroomPrice: 124490 }, [null, 'Two prices on the website', null], DECISION.NOT_READY],
+    [{ includedPrice: 124490 }, [null, 'Two prices on the website', null], DECISION.NOT_READY],
+  ];
+  for (const [patch, want, decision] of cases) {
+    for (const [what, v] of both(patch)) {
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], want, `${what} with ${JSON.stringify(patch)}`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, decision, `${what} with ${JSON.stringify(patch)}`);
+    }
+  }
+  // a yes or a no in such a field is still a flag, never a price or a hold
+  for (const patch of [{ showInternetPrice: 'Y', isFinalPrice: false, hideSalePrice: 1 }, { includePrice: 'yes', usePrice: 'N', hasSalePrice: 'true' }, { enableInternetPrice: 0, allowSalePrice: 'no', displayPrice: 'true' }]) {
+    for (const [what, v] of both(patch)) assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees, assessVehicle(v, withDefaults({})).decision], [car.base, what === 'DealerOn' ? 'Retail Price' : 'retail Price', null, DECISION.READY], `${what} with ${JSON.stringify(patch)}`);
+  }
+});
+
+// R-8, repair cycle 3 round 8 (the reviewer's labels): an offer for the
+// buyer's car counted only when "Offer" was the label's last word, so any
+// word after it ("Offer for Your Vehicle", "Your Offer Today", "Your Carvana
+// Offer - valid 7 days") or a footnote written another way ("^1", "✝",
+// "(see note)", a zero-width space) made "your" or "our" read it as the
+// selling price, taken ahead of a plain "Price". An offer word anywhere in
+// the label counts now, as a guide's words do, unless "price" follows it
+// ("Offer Price") or the website's own selling words stand beside it
+// ("Internet Offer", "Sale Offer").
+test('R-8: an offer for the car is never the price wherever "Offer" sits in its label, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 781 });
+  const car = { ...c, certified: false };
+  const comFull = dealerComRecord(car);
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const labels = ['Offer for Your Vehicle', 'Your Carvana Offer Amount', 'Carvana Offer for Your Car', 'Your Offer From Carvana', 'Your Offer Today', 'Our Offer to You', 'Your Carvana Offer - valid 7 days', 'Your Carvana Offer<sup>ii</sup>', 'Your Carvana Offer^1', 'Your Carvana Offer✝', 'Your Carvana Offer (see note)', 'Your Carvana Offer - see details', 'Your Carvana Offer​', 'Your Offers Today'];
+  for (const L of labels) {
+    assert.equal(choosePrices(labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label: L, value: '$19,000' }] } }), { dealer: 'Sample Chevrolet' }).price, 21000, `"${L}" beside a plain price`);
+    const com = normalizeInventoryRecord({ ...comFull, pricing: { dprice: [{ label: L, value: '$19,000' }] } }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([com.price, com.priceLabel], [null, quoted(L)], `Dealer.com, "${L}" the only price`);
+    assert.equal(assessVehicle(com, withDefaults({})).decision, DECISION.NOT_READY);
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: L }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceLabel], [null, quoted(L)], `DealerOn, VehiclePriceLabel "${L}"`);
+    assert.equal(assessVehicle(on, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  // "price" after the offer word, or the website's own selling words, still make it the website's price
+  for (const label of ['Offer Price', 'Special Offer Price', 'Your Offer Price', 'Internet Offer', 'Sale Offer', 'E-Price Offer', 'Final Offer Price']) {
+    assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'selling', label);
+  }
+});
+
+// Rule 4, repair cycle 3 round 8 (the reviewer's nits): in an "offers"
+// list, an incentive with a selling word in its name ("Dealer Cash") or a
+// sale with an unsigned amount was the car's price, so a retail-only car
+// went out Ready at $1,000 or $500. In such a list only an entry named for
+// a price, or the list's own "price" field, gives the price; anything else
+// there is kept aside like a figure in any other object. A selling price
+// field named with "Value" after "price" ("VehicleInternetPriceValue",
+// "salePriceValue") was never read, and a DealerOn price label that is only
+// the dealership's name ("Sample Motors") was not read as the dealer's own.
+test('Rule 4: an incentive in an offers list is never the price, a "...PriceValue" field is read, and a price label that is the dealership\'s name is its own, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 781 });
+  const car = { ...c, certified: false };
+  const { VehicleInternetPrice, VehiclePriceLabel, ...onCard } = dealerOnCard(car).VehicleCard;
+  const comFull = dealerComRecord(car);
+  const comCard = { ...comFull, pricing: { ...comFull.pricing, dprice: comFull.pricing.dprice.slice(0, 2) } };
+  const both = (patch) => [
+    ['DealerOn', normalizeInventoryRecord({ ...onCard, ...patch }, { origin: DEALERON_ORIGIN }), 'Retail Price'],
+    ['Dealer.com', normalizeInventoryRecord({ ...comCard, ...patch }, { origin: DEALERCOM_ORIGIN }), 'retail Price'],
+  ];
+  for (const patch of [{ offers: [{ name: 'Dealer Cash', value: 1000 }] }, { offers: [{ title: 'Customer Cash', amount: 500 }] }, { offers: [{ name: 'Dealer Cash', value: 1000 }, { title: 'Bonus', amount: 750 }] }]) {
+    for (const [what, v, retail] of both(patch)) {
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [car.base, retail, null], `${what} with ${JSON.stringify(patch)}: never the incentive`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY);
+    }
+  }
+  // a sale or a deal in an offers list holds the car, as one kept anywhere else does
+  for (const [what, v] of both({ offers: [{ title: 'Sale', amount: 500 }] })) {
+    assert.deepEqual([v.price, v.priceLabel], [null, 'the list labels its price "Sale", which Lot Current does not read as the selling price'], what);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  // an offers list's own price, and an entry there named for a price, are still the price
+  for (const patch of [{ offers: { price: 124490 } }, { offers: [{ price: 124490, priceCurrency: 'USD' }] }, { offers: [{ name: 'Internet Price', value: 124490 }] }]) {
+    for (const [what, v] of both(patch)) assert.deepEqual([v.price, v.priceBeforeFees], [124490, car.base], `${what} with ${JSON.stringify(patch)}`);
+  }
+  // a selling price field with "Value" after "price" is read, either way
+  for (const [patch, want] of [[{ VehicleInternetPriceValue: 124490 }, [124490, 'Internet Price Value', car.base]], [{ salePriceValue: '$124,490' }, [124490, 'sale Price Value', car.base]], [{ salePriceValue: 'Call' }, [null, 'the list\'s "sale Price Value" reads "Call", which Lot Current does not read as an amount', null]], [{ finalPriceValue: 124490 }, [124490, 'final Price Value', car.base]]]) {
+    for (const [what, v] of both(patch)) assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], want, `${what} with ${JSON.stringify(patch)}`);
+  }
+  // DealerOn's own label that is only the dealership's name, with no internet price that reads: no price, as "Sample Motors Price" gives
+  const full = dealerOnCard(car).VehicleCard;
+  for (const patch of [{ VehiclePriceLabel: 'Sample Motors' }, { VehiclePriceLabel: 'Sample Motors', VehicleInternetPrice: null }, { VehiclePriceLabel: 'Sample Motors Price' }]) {
+    const v = normalizeInventoryRecord({ ...onCard, ...patch }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([v.price, v.priceLabel], [null, `the list labels its price "${patch.VehiclePriceLabel}" but gives no amount Lot Current can read for it`], JSON.stringify(patch));
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  const named = normalizeInventoryRecord({ ...full, VehiclePriceLabel: 'Sample Motors' }, { origin: DEALERON_ORIGIN });
+  assert.deepEqual([named.price, named.priceBeforeFees], [car.base + car.fee, car.base], 'with its internet price, the dealership\'s name as the label changes nothing');
+  // at a dealership whose name holds a guide's word, its name alone is still its own label
+  const kelley = normalizeInventoryRecord({ ...full, VehiclePriceLabel: 'Kelley Chevrolet', DealerName: 'Kelley Chevrolet' }, { origin: DEALERON_ORIGIN });
+  assert.deepEqual([kelley.price, kelley.priceBeforeFees], [car.base + car.fee, car.base], 'the label "Kelley Chevrolet" at Kelley Chevrolet');
 });

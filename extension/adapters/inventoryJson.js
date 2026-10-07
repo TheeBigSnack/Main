@@ -202,16 +202,18 @@ export function totalCount(json) {
 // reader reads the words before an amount in running page text instead,
 // where "Value Price $24,995" is a selling price. The shared list decides
 // what is never the price whatever sits beside it, and what is quoted.
-const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|^list|compare|strike|payment|per ?month|monthly|\bmo\b|lease|financ|rebate|incentive|saving|discount|conditional|\bfees?\b|docfee|\btax|invoice|trade|down ?payment|\bapr\b|cash ?back|bonus|wholesale|employee|supplier|military|loyalty|conquest|lowest|highest|market|book|estimat|\bvalue\b(?<!retail value)/i;
+// "Value" right after "price" is how a field writes its amount
+// ("VehicleInternetPriceValue", "salePriceValue"), not a guide's value, as
+// "Retail Value" is the base price.
+const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|^list|compare|strike|payment|per ?month|monthly|\bmo\b|lease|financ|rebate|incentive|saving|discount|conditional|\bfees?\b|docfee|\btax|invoice|trade|down ?payment|\bapr\b|cash ?back|bonus|wholesale|employee|supplier|military|loyalty|conquest|lowest|highest|market|book|estimat|\bvalue\b(?<!retail value)(?<!price value)/i;
 // A label as every label test below reads it: without the footnote and
 // trademark marks a website puts after it ("Internet Price*", "Your Offer™",
 // "Market Value†", "Our Offer¹", "Best Offer!"), nor the spaces, colons and
 // full stops among them (the tests already allow one colon or full stop at
 // the end). The marks are the standard-data reader's own list
-// (schemaOrgNormalize.js LABEL_MARKS), so the two never drift. Before,
-// "Your Carvana Offer*" did not end in "Offer" for the offer test, so "your"
-// made it a selling price again. The label is still quoted as the website
-// writes it.
+// (schemaOrgNormalize.js LABEL_MARKS), so the two never drift. A dealer's
+// own "Sample Price¹" stays the dealer's price this way. The label is still
+// quoted as the website writes it.
 // A footnote is also read when it is written as a number, a short list of
 // numbers or a letter in brackets ("(1)", "[2]", "(1, 2)", "(a)", "(*)"), a
 // mark with a number ("*1", "*1,2") (LABEL_NOTE, shared with the
@@ -276,16 +278,32 @@ const BASE_WORDS = /retail|\bbase\b|asking|starting/i;
 // internet, sale or selling price ("Our Price", "Your Price" too).
 const SELLER_WORDS = /\bfinal|internet|\bdealer\b|\bsale\b|selling|e-?price|\bnow\b/i;
 const SELLING_WORDS = new RegExp(String.raw`${SELLER_WORDS.source}|\bour\b|\byour\b`, 'i');
-// A label that ends in "Offer" is an offer for the buyer's car ("Sell Us
-// Your Car Offer", "Your Carvana Offer", "Our Offer", "Best Offer"), never
-// the price, whatever else it says and even marked final; "your" and "our"
-// do not make it the website's price. Only the website's own selling words
-// do ("Internet Offer", "Sale Offer"), as before.
-const OFFER_END = /\boffers?\s*[:.]?\s*$/i;
-const isOfferForTheCar = (label) => OFFER_END.test(labelWords(label)) && !SELLER_WORDS.test(labelWords(label));
+// A label with the word "Offer" anywhere in it is an offer for the buyer's
+// car ("Sell Us Your Car Offer", "Your Carvana Offer", "Our Offer", "Best
+// Offer", "Offer for Your Vehicle", "Your Offer Today", "Your Carvana Offer
+// - valid 7 days"), never the price, whatever else it says, however a
+// footnote after it is written, and even marked final; "your" and "our" do
+// not make it the website's price. Only "price" right after the word ("Offer
+// Price", "Special Offer Price") or the website's own selling words beside
+// it ("Internet Offer", "Sale Offer") do, as before. The offer word is read
+// wherever it sits, as a guide's words are.
+const OFFER_WORD = /\boffers?\b(?![\s\-–—]*pric)/i;
+const isOfferForTheCar = (label) => OFFER_WORD.test(labelWords(label)) && !SELLER_WORDS.test(labelWords(label));
 const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
 // A name that says its figure is a price: "...Price", "Internet Special".
 const PRICE_NAME = /price|\bspecials?\b/i;
+// A label that is nothing but the website's own selling words, with at most
+// "deal" or "special" ("Sale", "Your Deal", "Internet Deal", "Now",
+// "Today's Deal"): a price's label wherever the record keeps it. A package's
+// or an incentive's name holds a word of its own ("Dealer Installed
+// Accessories", "Internet Bundle", "Dealer Cash").
+const SELLING_ONLY = /^(?:(?:the|our|your|final|internet|dealer|sale|selling|e-?price|now|today'?s|today|deals?|specials?)(?:[\s:.,!/&+\-–—]+|$))+$/i;
+const lastKeyPart = (key) => spaced(String(key || '').split('.').pop());
+// Whether an entry kept outside the record's price lists and fields names
+// the selling price, by its label ("Internet Price", "Sale"), by what the
+// platform types it as (a typeClass "internetPrice", a field "salePrice"), or
+// by the platform's final mark (labeledPrices, choosePrices).
+const namesSellingPrice = (e) => e.final || PRICE_NAME.test(labelWords(e.label)) || PRICE_NAME.test(lastKeyPart(e.key)) || SELLING_ONLY.test(labelWords(e.label).trim());
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 // In a list of prices, a line about a sale or the dealer that is not a
 // price ("Sale Event", "Sale ends Sunday", "Dealer Notes"; "Year End Sale"
@@ -338,11 +356,15 @@ export function priceKeyKind(key) {
   if (PRICE_ABOUT.test(rest) || PRICE_ABOUT.test(rest.replace(/^s/, ''))) return 'about';
   return (pricing && rest === '') || rest === 's' ? 'list' : 'field';
 }
-// A field that says something about a price ("isFinalPrice",
-// "showInternetPrice"), not one, and a yes or no in a field named
-// "display...": never an amount.
-const FLAG = /^(?:is|has|show|hide|use|enable|allow|include)[a-z]/;
-const isFlag = (name, v) => typeof v === 'boolean' || FLAG.test(name) || (/^display/.test(name) && /^(?:true|false|yes|no|y|n|0|1)$/i.test(String(v).trim()));
+// A field that says something about a price, not one: a true or false, or
+// a yes or no in a field named as a flag ("isFinalPrice", "showInternetPrice",
+// "hideSalePrice", "displayPrice"). Never an amount. A field whose name only
+// opens with such letters ("usedInternetPrice", "usedPricing",
+// "showroomPrice", "includedPrice") holding an amount, text or an object is
+// read as any other price field.
+const FLAG = /^(?:is|has|show|hide|use|enable|allow|include|display)[a-z]/;
+const YES_NO = /^(?:true|false|yes|no|y|n|0|1)$/i;
+const isFlag = (name, v) => typeof v === 'boolean' || (FLAG.test(name) && (typeof v === 'number' || typeof v === 'string') && YES_NO.test(String(v).trim()));
 // The platform's final price as a field ("finalPrice", "finalPriceText").
 const FINAL_FIELD = /^finalprice(?:formatted|text|displayed|display|value|amount|string|raw)?$/;
 
@@ -372,9 +394,12 @@ function amount(value) {
  * "prices", "dprice", "offers") and its fields named for a price give the
  * car's price. A figure inside anything else (a package, a warranty, an
  * accessory, an add-on, a protection plan, whatever it or what holds it is
- * named) is kept marked `aside`, and choosePrices never takes it as the
- * price; a field about a price but not its amount (a price history, a
- * label) is not read at all.
+ * named), and an entry of an "offers" list named for something other than
+ * a price (an incentive: "Dealer Cash"), is kept marked `aside`, and
+ * choosePrices never takes it as the price; one that names a selling price
+ * holds the car there instead (namesSellingPrice). A field about a price but
+ * not its amount (a price history, a label) is not read at all, nor a flag
+ * (a true or false, or a yes or no in a field named "is...", "show...").
  *
  * The website's own price is kept even when its value is not a plain amount
  * ("$40,590*", "Call for Price", "$24,499 + tax", nothing at all, an object
@@ -417,9 +442,11 @@ export function labeledPrices(record) {
     const kind = priceKind(entry);
     const named = PRICE_NAME.test(labelWords(entry.label));
     if (kind === 'selling') {
-      const typed = held || PRICE_NAME.test(spaced(String(entry.key).split('.').pop()));
+      const typed = held || PRICE_NAME.test(lastKeyPart(entry.key));
       const inList = listed && !isListNote(labelWords(entry.label)) && !SIGNED.test(entry.text);
-      if ((named || typed || inList) && (written || (labelled && (present || listed) && raw === undefined))) out.push(entry);
+      // kept outside the price lists, a label of selling words alone ("Sale")
+      const bare = Boolean(entry.aside) && SELLING_ONLY.test(labelWords(entry.label).trim());
+      if ((named || typed || inList || bare) && (written || (labelled && (present || listed) && raw === undefined))) out.push(entry);
       return;
     }
     if (!written || !entry.text || !named) return;
@@ -435,7 +462,6 @@ export function labeledPrices(record) {
       for (const el of x) visit(el, key, depth + 1, { markedFinal, outside, fieldName });
       return;
     }
-    const aside = outside ? { aside: true } : {};
     const label = textOf(x.label ?? x.title ?? x.displayName ?? '');
     const kind = textOf(x.typeClass ?? x.type ?? x.name ?? '');
     const raw = valueIn(x);
@@ -444,6 +470,13 @@ export function labeledPrices(record) {
     const value = amount(raw);
     const final = markedFinal || truthy(x.isFinalPrice) || truthy(x.isFinal);
     const name = label || spaced(kind) || fieldName;
+    // In an "offers" list, an entry named for something other than a price
+    // (an incentive or a rebate: "Dealer Cash", "Customer Cash", "Sale") is
+    // kept aside like a figure in any other object: only an entry named or
+    // typed for a price ("Internet Price"), one marked final, or the list's
+    // own "price" field gives the car's price there.
+    if (!outside && depth > 0 && name && !final && /^offers?$/.test(keyName(key)) && !PRICE_NAME.test(labelWords(name)) && !PRICE_NAME.test(spaced(kind))) outside = true;
+    const aside = outside ? { aside: true } : {};
     if (depth > 0 && value !== null && (name || final)) {
       out.push({ value, label: name, key: `${key}.${kind}`, final, ...aside });
       return;
@@ -627,17 +660,27 @@ export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(labelWords(label
  * @param {{ dealer?: string, label?: string|null }} [context]
  */
 export function choosePrices(entries, { dealer = '', label = null } = {}) {
-  if (label && labelIsNotThePrice(label) && !isDealerPrice(label, dealer)) return NO_PRICE(quoteLabels([label]));
+  // The record's own label that is the dealership's name alone ("Sample
+  // Motors" at Sample Motors) is its own price's label, as "Sample Motors
+  // Price" is.
+  const ownIsDealers = Boolean(label) && (isDealerPrice(label, dealer) || isDealerPrice(`${labelWords(label)} Price`, dealer));
+  if (label && labelIsNotThePrice(label) && !ownIsDealers) return NO_PRICE(quoteLabels([label]));
   const every = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
   const all = every.filter((e) => !e.aside);
   // A selling price the record keeps outside its price lists and fields
-  // (labeledPrices marks it aside: "Internet Price" in a details object, a
-  // final price in a nested vehicle object) is never taken. When no selling
-  // price of the record's own reads, it holds the car: the website may sell
-  // at it, so no retail, base or plain price is taken past it. A figure
-  // there that does not name a selling price (a package, a warranty, an
-  // add-on: "Dealer Installed Accessories", "Internet Bundle") is left out.
-  const elsewhere = every.filter((e) => e.aside && e.kind === 'selling' && (e.final || PRICE_NAME.test(labelWords(e.label))));
+  // (labeledPrices marks it aside: "Internet Price" or a typeClass
+  // "internetPrice" in a details object, "Sale" in a deal object, a final
+  // price in a nested vehicle object, a sale in an offers list) is never
+  // taken. When no selling price of the record's own reads, it holds the
+  // car: the website may sell at it, so no retail, base or plain price is
+  // taken past it. Beside the record's own selling price it counts as one of
+  // the record's own would: one that reads another amount gives two prices,
+  // and one that can't be read gives no price, unless a final price reads
+  // (then only another final price that disagrees counts). A figure there
+  // that does not name a selling price (a package, a warranty, an add-on, an
+  // incentive: "Dealer Installed Accessories", "Internet Bundle", "Dealer
+  // Cash") is left out (namesSellingPrice).
+  const elsewhere = every.filter((e) => e.aside && e.kind === 'selling' && namesSellingPrice(e));
   // The entry the platform marks as the website's price (Dealer.com's
   // isFinalPrice) set aside as not the price: an offer ("Special Offer"), a
   // guide's value ("Market Value"), an MSRP. The website's price is that
@@ -662,7 +705,7 @@ export function choosePrices(entries, { dealer = '', label = null } = {}) {
   // ("Sample Motors Price", "Internet Price"), and only a base amount reads
   // (DealerOn's internet price empty or missing beside its retail price): the
   // price it labels is not the retail or starting one, so that is not taken.
-  const ownKind = label ? priceKind({ label, key: '', final: false }, dealer) : null;
+  const ownKind = label ? (ownIsDealers ? 'selling' : priceKind({ label, key: '', final: false }, dealer)) : null;
   const ownIsSelling = ownKind === 'selling' || ownKind === 'named';
   const ownUnread = () => NO_PRICE(`the list labels its price "${String(label).slice(0, 60)}" but gives no amount Lot Current can read for it`);
   const unread = finalReads ? [] : all.filter((e) => (e.value === null || e.value === undefined) && (e.final || e.kind === 'selling' || (!sellingReads && (e.kind === 'plain' || e.kind === 'named'))));
@@ -672,6 +715,8 @@ export function choosePrices(entries, { dealer = '', label = null } = {}) {
     return !first.text && !first.final && ownIsSelling ? ownUnread() : NO_PRICE(unreadablePrice(first));
   }
   if (elsewhere.length && !sellingReads) return NO_PRICE(quoteLabels(elsewhere.map((e) => e.label || spaced(e.key))));
+  const asideUnread = finalReads ? [] : elsewhere.filter((e) => e.value === null || e.value === undefined);
+  if (asideUnread.length) return NO_PRICE(unreadablePrice(asideUnread.find((e) => e.final) || asideUnread[0]));
   const of = (kind) => kinds.filter((e) => e.kind === kind);
   const selling = of('selling');
   const plain = of('plain');
@@ -683,7 +728,8 @@ export function choosePrices(entries, { dealer = '', label = null } = {}) {
   const flagged = selling.filter((e) => e.final);
   const pool = flagged.length ? flagged : selling;
   if (pool.length) {
-    if (differ(pool)) return NO_PRICE(TWO);
+    const besides = elsewhere.filter((e) => e.value !== null && e.value !== undefined && (!flagged.length || e.final));
+    if (differ([...pool, ...besides])) return NO_PRICE(TWO);
     main = pool[0];
   } else if (named.length) {
     return NO_PRICE(TWO);
