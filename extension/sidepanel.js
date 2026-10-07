@@ -25,7 +25,7 @@ import { buildListingData, listingChanges, normalizeColor, COLORS } from './src/
 import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
-import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
+import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange, handleWizardInput } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, compareSummary, NHTSA_ORIGIN } from './src/vin.js';
 import { neededPatterns, patternCovers, patternHost, hostList, isFacebookServer } from './src/photoHosts.js';
@@ -2510,6 +2510,10 @@ async function onPickChange(target) {
 
 let inputTimer = null;
 function onInput(ev) {
+  if (state.step === 'wizard') {
+    handleWizardInput(ev.target); // set-up's warning under the name, role or dealership name follows the typing
+    return;
+  }
   if (ev.target.id === 'panelSearch') {
     state.listFilter = ev.target.value;
     renderList();

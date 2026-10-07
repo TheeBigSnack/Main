@@ -26,6 +26,7 @@ import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint } from './src/wizardSteps.js';
+import { settingNumberWarning } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
 // The Account step's own state: what was typed and answered, never a token.
@@ -59,6 +60,19 @@ async function loadAccount() {
 const knownStep = (step) => (step === 'account' && !steps().includes(step) ? 'address' : step);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// A number in the role or the name, or a dealership name that reads as a
+// price or a mileage, is in every description and keeps the Marketplace form
+// shut for nearly every car (src/rewriteTemplate.js settingNumberWarning).
+// The field says so under it, in a live region its input is described by:
+// drawn with the step, and brought up to date as the person types
+// (handleWizardInput). Settings says the same (popup.js).
+const WARNED_FIELDS = Object.freeze({ wizName: 'name', wizTitle: 'role', wizDealer: 'dealer' });
+function warningHtml(id, value) {
+  const text = settingNumberWarning(WARNED_FIELDS[id], value);
+  return text ? `<div class="banner warn">${esc(text)}</div>` : '';
+}
+const warningRegion = (id, value) => `<div id="${id}Warn" aria-live="polite">${warningHtml(id, value)}</div>`;
 const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
 const key = (origin) => siteKeys(origin).wizard; // the wizard's own persisted state
 // The Price step's model from the last read (showsLower, gap, example); empty for a read saved before the step existed.
@@ -262,8 +276,10 @@ export function wizardHtml() {
     }
     case 'you':
       return `${progress}<h3>You</h3>
-        <label class="block">Your name <input type="text" id="wizName" value="${esc(s.salesperson.name)}" placeholder="Your first name" /></label>
-        <label class="block">Your role <input type="text" id="wizTitle" value="${esc(s.salesperson.title)}" /></label>
+        <label class="block">Your name <input type="text" id="wizName" value="${esc(s.salesperson.name)}" placeholder="Your first name" aria-describedby="wizNameWarn" /></label>
+        ${warningRegion('wizName', s.salesperson.name)}
+        <label class="block">Your role <input type="text" id="wizTitle" value="${esc(s.salesperson.title)}" aria-describedby="wizTitleWarn" /></label>
+        ${warningRegion('wizTitle', s.salesperson.title)}
         <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
         ${nav()}`;
     case 'account': {
@@ -296,7 +312,8 @@ export function wizardHtml() {
       // a website that gives no dealership name: the step says so, and Next waits for one (every description names it)
       return `${progress}<h3>The store's address</h3>
         <p class="hint" id="wizAddressHint">${esc(addressHint(wiz.site && wiz.site.address))}</p>
-        <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" /></label>
+        <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" aria-describedby="wizDealerWarn" /></label>
+        ${warningRegion('wizDealer', s.dealer.name)}
         ${dealerNameMissing(s.dealer) ? `<div class="banner bad" id="wizNoDealer" role="alert">${esc(NO_DEALER_NAME)}</div>` : ''}
         <label class="block">City <input type="text" id="wizCity" value="${esc(s.dealer.city)}" /></label>
         <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="e.g. OH" /></label>
@@ -570,6 +587,14 @@ async function wizardClick(id, ctx) {
     default:
       return false;
   }
+}
+
+// Typing in the name, role or dealership name: the warning under it follows
+// what is typed (nothing is saved until Next, as before).
+export function handleWizardInput(target) {
+  if (!wiz.active || !target || !Object.hasOwn(WARNED_FIELDS, target.id)) return;
+  const region = document.getElementById(`${target.id}Warn`);
+  if (region) region.innerHTML = warningHtml(target.id, target.value);
 }
 
 export function handleWizardChange(target) {

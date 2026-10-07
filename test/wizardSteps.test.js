@@ -265,7 +265,7 @@ test('the address step says when no dealership name is set, and Next goes on onl
   const draw = (site) => {
     const wiz = { step: 'address', site, settings: null, scan: { siteName: site.name }, error: '' };
     const esc = (x) => String(x ?? '');
-    const html = wizardFn('wizardHtml', { wiz, withDefaults, esc, steps: () => list, stepIndex: () => list.indexOf(wiz.step), addressHint, nav: () => '<nav>', dealerNameMissing, NO_DEALER_NAME })();
+    const html = wizardFn('wizardHtml', { wiz, withDefaults, esc, steps: () => list, stepIndex: () => list.indexOf(wiz.step), addressHint, nav: () => '<nav>', dealerNameMissing, NO_DEALER_NAME, warningRegion: (id) => `<div id="${id}Warn"></div>` })(); // the warning under the name: its own test is test/settingNumbers.test.js
     return html;
   };
   assert.ok(draw(unnamed).includes(`<div class="banner bad" id="wizNoDealer" role="alert">${NO_DEALER_NAME}</div>`), 'the step says so');

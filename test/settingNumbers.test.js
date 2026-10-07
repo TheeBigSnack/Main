@@ -114,3 +114,85 @@ test('numbers as words: ordinals and small numbers, with a capital where the wor
   assert.equal(numbersAsWords('Route19'), '', 'a number inside a word: no example');
   assert.equal(numbersAsWords('sales consultant'), 'sales consultant');
 });
+
+// ---------- the warning in set-up and Settings ----------
+// Shown under the field as soon as it holds such a number: drawn with the
+// step or the form, and brought up to date as the person types. The field
+// is described by it (aria-describedby), and it sits in a live region, so a
+// screen reader hears it when it appears.
+import { wiz, wizardHtml, handleWizardInput } from '../extension/wizard.js';
+import { withDefaults } from '../extension/src/settings.js';
+import { loadPopup, POPUP_ORIGIN } from './popupHarness.js';
+import { siteKeys } from '../extension/src/storageKeys.js';
+import { MY_STORE } from './helpers.js';
+
+const unesc = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
+// the input with this attribute, and the live region the page draws for it
+const inputWith = (html, attr) => (new RegExp(`<input\\b[^>]*\\s${attr}[^>]*>`).exec(html) || [''])[0];
+const region = (html, id) => {
+  const m = new RegExp(`<div id="${id}" aria-live="polite">(.*?)</div>(?=\\s*(?:<|$))`, 's').exec(html);
+  return m ? unesc(m[1].replace(/<[^>]+>/g, '')) : null;
+};
+const ROLE_WARNING = settingNumberWarning('role', '2nd shift sales');
+const DEALER_WARNING = settingNumberWarning('dealer', '8 Mile Auto');
+
+test('set-up warns under the role, the name and the dealership name while they hold such a number, and as the person types', () => {
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => { if (!elements.has(id)) elements.set(id, { id, innerHTML: '' }); return elements.get(id); } };
+  wiz.active = true;
+  wiz.step = 'you';
+  wiz.settings = withDefaults({ salesperson: { name: 'Sam', title: '2nd shift sales' }, dealer: { name: '8 Mile Auto', city: 'Springfield', state: 'OH', zip: '43215' } });
+  let html = wizardHtml();
+  assert.match(inputWith(html, 'id="wizTitle"'), /aria-describedby="wizTitleWarn"/, 'the role field is described by its warning');
+  assert.match(inputWith(html, 'id="wizName"'), /aria-describedby="wizNameWarn"/);
+  assert.equal(region(html, 'wizTitleWarn'), ROLE_WARNING, 'a role with a number is warned about when the step opens');
+  assert.equal(region(html, 'wizNameWarn'), '', 'a name with no number is not');
+  wiz.step = 'address';
+  html = wizardHtml();
+  assert.match(inputWith(html, 'id="wizDealer"'), /aria-describedby="wizDealerWarn"/);
+  assert.equal(region(html, 'wizDealerWarn'), DEALER_WARNING);
+
+  // typing: the warning follows the field
+  handleWizardInput({ id: 'wizDealer', value: 'Route 19 Motors' });
+  assert.equal(elements.get('wizDealerWarn').innerHTML, '', 'a dealership name whose number reads as neither a price nor a mileage');
+  handleWizardInput({ id: 'wizTitle', value: 'sales consultant' });
+  assert.equal(elements.get('wizTitleWarn').innerHTML, '');
+  handleWizardInput({ id: 'wizTitle', value: '2nd shift sales' });
+  assert.match(elements.get('wizTitleWarn').innerHTML, /^<div class="banner warn">A number in your role \(&quot;2nd&quot;\) keeps the Marketplace form shut/);
+  handleWizardInput({ id: 'wizName', value: 'Sam 2' });
+  assert.equal(unesc(elements.get('wizNameWarn').innerHTML.replace(/<[^>]+>/g, '')), settingNumberWarning('name', 'Sam 2'));
+  handleWizardInput({ id: 'wizCity', value: '8 Mile' }); // another field: nothing to say
+  assert.ok(!elements.has('wizCityWarn'));
+
+  wiz.step = 'you';
+  wiz.settings = withDefaults({ salesperson: { name: 'Sam', title: 'Second shift sales' } });
+  assert.equal(region(wizardHtml(), 'wizTitleWarn'), '', 'no warning for a role with no number');
+  wiz.active = false;
+});
+
+test('Settings warns under Your role, Your name and Dealership name while they hold such a number, and as the person types', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const settings = { ...MY_STORE, salesperson: { name: 'Sam', title: '2nd shift sales' }, dealer: { name: '8 Mile Auto', city: 'Springfield', state: 'OH', zip: '43215' } };
+  const p = await loadPopup({ local: { [k.settings]: settings } });
+  await p.tab('settings');
+  const html = p.panel();
+  assert.match(inputWith(html, 'name="salespersonTitle"'), /aria-describedby="salespersonTitleWarn"/);
+  assert.match(inputWith(html, 'name="salespersonName"'), /aria-describedby="salespersonNameWarn"/);
+  assert.match(inputWith(html, 'name="dealerName"'), /aria-describedby="dealerNameWarn"/);
+  assert.equal(region(html, 'salespersonTitleWarn'), ROLE_WARNING);
+  assert.equal(region(html, 'salespersonNameWarn'), '');
+  assert.equal(region(html, 'dealerNameWarn'), DEALER_WARNING);
+
+  const type = (name, value) => p.el('panel').listeners.input({ target: { name, value } });
+  type('salespersonTitle', 'Second shift sales');
+  assert.equal(p.el('salespersonTitleWarn').innerHTML, '');
+  type('salespersonTitle', 'Team 3 sales');
+  assert.equal(unesc(p.el('salespersonTitleWarn').innerHTML.replace(/<[^>]+>/g, '')), settingNumberWarning('role', 'Team 3 sales'));
+  type('dealerName', 'Eight Mile Auto');
+  assert.equal(p.el('dealerNameWarn').innerHTML, '');
+
+  // the same settings with no such number: nothing to warn about
+  const q = await loadPopup({ local: { [k.settings]: { ...settings, salesperson: { name: 'Sam', title: 'sales consultant' }, dealer: { ...settings.dealer, name: 'Route 19 Motors' } } } });
+  await q.tab('settings');
+  for (const id of ['salespersonTitleWarn', 'salespersonNameWarn', 'dealerNameWarn']) assert.equal(region(q.panel(), id), '', id);
+});

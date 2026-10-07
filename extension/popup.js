@@ -8,7 +8,7 @@ import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile,
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
-import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
+import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS, settingNumberWarning } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { listingLink } from './facebook/detectPost.js';
@@ -850,6 +850,18 @@ function viewPilot() {
 
 const field = (label, name, value, attrs = 'type="text"') =>
   `<label class="field"><span class="k">${esc(label)}</span><input name="${name}" value="${esc(value)}" ${attrs} /></label>`;
+// A number in the role or the name, or a dealership name that reads as a
+// price or a mileage, is in every description and keeps the Marketplace form
+// shut for nearly every car (src/rewriteTemplate.js settingNumberWarning).
+// Settings says so under the field, in a live region the input is described
+// by, when the form is drawn and as the person types; Save still saves it.
+// Set-up's You and address steps say the same (wizard.js).
+const WARNED_FIELDS = Object.freeze({ salespersonName: 'name', salespersonTitle: 'role', dealerName: 'dealer' });
+function settingWarningHtml(name, value) {
+  const text = settingNumberWarning(WARNED_FIELDS[name], value);
+  return text ? `<div class="banner warn">${esc(text)}</div>` : '';
+}
+const settingWarning = (name, value) => `<div id="${name}Warn" aria-live="polite">${settingWarningHtml(name, value)}</div>`;
 const choices = (list, current) =>
   `<option value="" ${current === '' ? 'selected' : ''}>Leave blank</option>` + list.map((o) => `<option value="${esc(o)}" ${o === current ? 'selected' : ''}>${esc(o)}</option>`).join('');
 
@@ -965,8 +977,10 @@ function viewSettings() {
   return `<form id="settings" class="settings">
     ${versionHtml()}
     <fieldset><legend>You</legend>
-      ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name"')}
-      ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
+      ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name" aria-describedby="salespersonNameWarn"')}
+      ${settingWarning('salespersonName', s.salesperson.name)}
+      ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text" aria-describedby="salespersonTitleWarn"')}
+      ${settingWarning('salespersonTitle', s.salesperson.title)}
       <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
       ${field('Your closing line (optional)', 'closingLine', s.salesperson.closingLine, `type="text" maxlength="300" aria-describedby="closingLineHint" placeholder="e.g. Ask for me by name when you come in."`)}
       <p class="hint" id="closingLineHint">Added after that sign-off on every description, in place of "Message me to set up a test drive or ask a question." About you, not the car: no prices or numbers (a phone number is fine), up to ${CLOSING_LINE_MAX_WORDS} words. Follows you to any computer you sign in to Chrome on.</p>
@@ -980,7 +994,8 @@ function viewSettings() {
       <p class="hint">Counted from the in-stock date the website gives for the car, or else from the scan that first saw it. A car you have posted is never marked new. ${MIN_NEW_DAYS} to ${MAX_NEW_DAYS} days; kept for this website only, so it does not follow your profile to another website. The order of the Ready to post list is remembered the same way.</p>
     </fieldset>
     <fieldset><legend>Dealership, named on every listing</legend>
-      ${field('Dealership name', 'dealerName', s.dealer.name, state.snapshot ? undefined : 'type="text" placeholder="Filled in from the website at the first scan"')}
+      ${field('Dealership name', 'dealerName', s.dealer.name, `type="text"${state.snapshot ? '' : ' placeholder="Filled in from the website at the first scan"'} aria-describedby="dealerNameWarn"`)}
+      ${settingWarning('dealerName', s.dealer.name)}
       ${field('City', 'dealerCity', s.dealer.city)}
       ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="e.g. OH" maxlength="2"')}
       ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="e.g. 43215" inputmode="numeric"')}
@@ -1752,8 +1767,14 @@ async function init() {
     if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) onPickChange(ev.target);
     else if (ev.target.id === 'readySort') changeReadySort(ev.target.value);
   });
-  // the Ready tab's search box: filters as you type, Escape clears it
+  // the Ready tab's search box: filters as you type, Escape clears it; in
+  // Settings, the warning under the name, role or dealership name follows the typing
   $('panel').addEventListener('input', (ev) => {
+    if (Object.hasOwn(WARNED_FIELDS, ev.target.name)) {
+      const region = $(`${ev.target.name}Warn`);
+      if (region) region.innerHTML = settingWarningHtml(ev.target.name, ev.target.value);
+      return;
+    }
     if (ev.target.id !== 'readySearch') return;
     state.readyFilter = ev.target.value;
     renderReadyBody();
