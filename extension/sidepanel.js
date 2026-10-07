@@ -301,6 +301,9 @@ const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership
 // that breaks any other posting rule (rewriteTemplate.js ruleProblems): a
 // number, price, mileage or claim the website doesn't make, a banned phrase,
 // a missing role, VIN or price note. Length, capitals and emoji only warn.
+// When the only problems are numbers in Settings (a role such as "2nd shift
+// sales": rewriteTemplate.js settingNumberProblems), the fix is there, not in
+// the description: a Settings save writes the template again (reviewAfterSettings).
 function fillBlocker(description) {
   if (!dealerNamed()) return NO_DEALER_TEXT;
   const name = String(state.settings.dealer.name).trim();
@@ -309,7 +312,10 @@ function fillBlocker(description) {
   }
   const stops = ruleProblems(runGuardrails(description, ctx()));
   if (!stops.length) return '';
-  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. Fix the description (or use Reset to template) first.`;
+  const fix = stops.every((p) => p.code === 'setting-number')
+    ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.'
+    : 'Fix the description (or use Reset to template) first.';
+  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. ${fix}`;
 }
 
 // The description's checks, run again on the text that would be filled (the

@@ -2690,6 +2690,27 @@ test('the form is not filled with a description that fails a fact or identity ch
   }
 });
 
+// A number in the role (or the name, or a dealership name that reads as a
+// price or a mileage) is in every description the template writes, so the
+// form stays shut; the status line names the setting and its value, and says
+// the fix is in Settings, not in the description.
+test('a role with a number keeps the form shut, and the status line names the role and says to change it in Settings', () => {
+  const salesperson = { name: 'Sam', title: '2nd shift sales' };
+  const settings = { ...SETTINGS, salesperson };
+  const state = { settings, vehicle: CAR, price: 20986, noteApplies: true };
+  const text = template.buildTemplateDescription({ vehicle: CAR, dealer: settings.dealer, salesperson, priceNote: '' });
+  const fillBlocker = realBlocker(state);
+  assert.equal(fillBlocker(text), 'The description fails a check that must pass before the form is filled: Your role "2nd shift sales" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your role), for example to "Second shift sales". After you save Settings, the template writes the description again; if you edited it, click Reset to template.');
+  // with a problem of the description's own beside it, the description needs fixing too
+  const both = fillBlocker(text.replace('34,567 miles', '12,000 miles'));
+  assert.match(both, /^The description fails 3 checks that must pass before the form is filled: Your role "2nd shift sales" has a number in it/);
+  assert.match(both, /Fix the description \(or use Reset to template\) first\.$/);
+  // the role changed in Settings: the template written again passes
+  const fixed = { ...settings, salesperson: { name: 'Sam', title: 'Second shift sales' } };
+  const again = template.buildTemplateDescription({ vehicle: CAR, dealer: fixed.dealer, salesperson: fixed.salesperson, priceNote: '' });
+  assert.equal(realBlocker({ ...state, settings: fixed })(again), '');
+});
+
 test('the checks line says which problems stop the form and which only warn', () => {
   const checksHtml = new Function('esc', 'ruleProblems', 'noteFor', `${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => '');
   const stop = { code: 'unknown-number', text: '"12000" isn\'t in the website\'s data for this car' };
