@@ -209,6 +209,7 @@ _Review round: manager view and billing_
 
 _Review round: tests_
 - **The stack test's last-manager check** (`test/stack/03-last-manager.stack.mjs`): it looks for the Team card's error line as `onTeam` builds it now (the sentence is made once, then shown on the Team card or, when another dealership was picked meanwhile, in the status line). It still looked for the older single line, so CI's `stack` job failed on that one check while the page behaved as intended.
+- **The flows' storage waits wait** (`test/e2e/until.mjs`, `test/e2e/panel.e2e.mjs`, `test/e2e/popup.e2e.mjs`, `test/e2e/wizard.e2e.mjs`; `test/posting.test.js`): Playwright's `waitForFunction` does not await a check that returns a promise, so the flows' waits on a saved setting or the badge ended at once, and on a fast machine the popup flow could close the popup before the order it chose was saved. Those waits now ask the page again until the check holds and fail the flow when the time runs out, and a unit test refuses an async check passed to `waitForFunction` in any flow.
 
 Not proven until a real website is scanned
 - Which dealer platforms publish markup this reader can use, and whether their list pages link their cars without scripts. A list drawn by scripts shows Lot Current few or no cars.
