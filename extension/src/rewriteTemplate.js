@@ -35,8 +35,9 @@
 // in capitals and with write-ups it must not copy, and test/writeUpLine.test.js
 // checks over thousands of write-ups that it never copies one. What the tests
 // find can still fail it is the dealership's own Settings (no dealership
-// name, a price note for another fee, a name typed in capitals), and the
-// side panel says which.
+// name, a price note for another fee, a name typed in capitals, a number in
+// the role or the name, a dealership name that reads as a price or a
+// mileage), and the side panel says which.
 
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { carStore } from './listingData.js';
@@ -1198,8 +1199,8 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
 // identifiable); a number, price, mileage, price change, claim or one-owner
 // wording the website's data doesn't hold, the same from a number in the
 // role, the name or the dealership's name (setting-number), or a missing VIN
-// (facts only); a banned phrase (a claim the data can't support, posing as a private
-// seller, words about protected groups); the dealer's price note missing or
+// (facts only); a banned phrase (a claim the data can't support, posing as a
+// private seller, words about protected groups); the dealer's price note missing or
 // quoting the wrong fee (honest prices); and the same in the salesperson's
 // closing line. Every code runGuardrails and checkClosingLine give is one of
 // these or one of STYLE_PROBLEMS (test/rewriteTemplate.test.js checks it).

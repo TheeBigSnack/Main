@@ -13,6 +13,8 @@
 //     mileage must be the website's, and no price change is claimed
 //   - the VIN and the dealership's name must be present (and a name must be set)
 //   - the salesperson's role (their title, or the default one) must be present
+//   - a number problem that comes only from the role, the salesperson's name
+//     or the dealership's name is one problem naming that setting
 //   - banned phrases (claims the data can't support, posing as a private
 //     seller, protected characteristics), "one owner" only with the flag,
 //     no ALL CAPS shouting, no walls of emoji
